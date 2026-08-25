@@ -153,8 +153,15 @@ vi.mock('@/shared/api/client', () => ({
 // pre/post around the agent's slot; expose them so the flight tests can assert
 // they ride the same block instead of standalone log panes.
 vi.mock('@/shared/ui/AgentSessionView', () => ({
-  AgentSessionView: ({ source, systemRows }: { source?: { kind: string; stage?: string }; systemRows?: { pre: string[]; post: string[] } }) => (
+  AgentSessionView: ({ source, systemRows, externalSessions }: {
+    source?: { kind: string; stage?: string }
+    systemRows?: { pre: string[]; post: string[] }
+    externalSessions?: Array<{ message: string; status: string }>
+  }) => (
     <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage}>
+      {externalSessions?.map((session, index) => (
+        <div key={index} data-testid="external-session-activity" data-status={session.status}>{session.message}</div>
+      ))}
       {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}
       {systemRows?.post.map((l, i) => <div key={`post-${i}`} data-testid="system-post">{l}</div>)}
     </div>
@@ -387,7 +394,7 @@ describe('checkpoint display language (R71/W3)', () => {
     expect(mocks.respondFlightCheckpoint).toHaveBeenCalledWith('fl_1', { choice: 'revise', feedback: 'use env vars, not args' })
   })
 
-  it('an external-work hand-off keeps normal choices inert and offers a cooperative takeover', async () => {
+  it('an external-work hand-off is running Activity with takeover as its only header action', async () => {
     mocks.getFlight.mockResolvedValue(parkedOn('scout', {
       kind: 'external-work',
       message: 'Run this scout step in your own client, then respond with the result on `data`.',
@@ -395,27 +402,22 @@ describe('checkpoint display language (R71/W3)', () => {
       data: { stage: 'scout', prompt: 'scan the repo', handOffId: 'ab12cd34' },
     }, externallyDriven))
     await render('fl_1')
-    const card = container.querySelector<HTMLElement>('[data-testid="checkpoint-controls"]')
-    expect(card?.className).toContain('border-running/45')
-    expect(container.querySelector('[data-testid="checkpoint-title"]')?.textContent).toBe('Your agent is working on this step')
-    // The checkpoint's own message is addressed to the agent holding the step —
-    // it never reaches the person reading the web UI.
+    // A hand-off is work in progress, not a human checkpoint. Its protocol
+    // answers do not become disabled buttons or a second card in the page.
+    expect(container.querySelector('[data-testid="checkpoint-controls"]')).toBeNull()
+    expect(container.querySelector('[data-testid="checkpoint-choice-submit"]')).toBeNull()
+    expect(container.querySelector('[data-testid="checkpoint-choice-run-internally"]')).toBeNull()
+    expect(container.querySelector('[data-testid="flight-primary-respond"]')).toBeNull()
+    expect(container.querySelector('[data-testid="flight-pause"]')).toBeNull()
+    expect(container.querySelector('[data-testid="external-session-activity"]')?.textContent)
+      .toBe('Work is continuing in your external agent session.')
     expect(container.textContent).not.toContain('respond with the result on')
     expect(container.textContent).toContain('Canary handed this step to the agent that started the flight')
-    // Internal layout is canonical: both choices remain visible, disabled, and
-    // explain that the mutation belongs in the Claude/Codex session.
-    for (const id of ['checkpoint-choice-submit', 'checkpoint-choice-run-internally']) {
-      const button = container.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)
-      expect(button?.disabled).toBe(true)
-      expect(button?.title).toContain('from the Claude/Codex session')
-    }
-    expect(container.querySelector('[data-testid="checkpoint-recommended"]')).toBeNull()
-    expect(container.querySelector('[data-testid="checkpoint-read-only"]')).toBeNull()
 
-    // Takeover is the one enabled control: it first explains the handshake,
-    // then only records a request — Canary does not start local work yet.
+    // Takeover remains reachable in the header. It first explains the
+    // handshake, then records a request without starting local work.
     mocks.requestFlightTakeover.mockResolvedValue(manifest())
-    const request = container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-request-takeover"]')
+    const request = container.querySelector<HTMLButtonElement>('[data-testid="flight-request-takeover"]')
     expect(request?.disabled).toBe(false)
     await act(async () => { request?.click() })
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain('will not start local work until that agent acknowledges')
@@ -440,10 +442,10 @@ describe('checkpoint display language (R71/W3)', () => {
     mocks.forceFlightTakeover.mockResolvedValue(manifest())
     await render('fl_1')
 
-    expect(container.querySelector('[data-testid="checkpoint-takeover"]')?.textContent)
+    expect(container.querySelector('[data-testid="external-session-activity"]')?.textContent)
       .toContain('Waiting for your agent to release this step')
-    expect(container.querySelector('[data-testid="checkpoint-request-takeover"]')).toBeNull()
-    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-force-takeover"]')?.click() })
+    expect(container.querySelector('[data-testid="flight-request-takeover"]')).toBeNull()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-force-takeover"]')?.click() })
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain('same files may be changed concurrently')
     expect(mocks.forceFlightTakeover).not.toHaveBeenCalled()
     const confirm = [...container.querySelectorAll<HTMLButtonElement>('button')]
@@ -460,8 +462,9 @@ describe('checkpoint display language (R71/W3)', () => {
       data: { stage: 'scout', handOffId: 'ff00ff00', lastRejection: 'stale_submission' },
     }, externallyDriven))
     await render('fl_1')
-    expect(container.querySelector('[data-testid="checkpoint-stale-submission"]')?.textContent)
+    expect(container.querySelector('[data-testid="external-session-activity"]')?.textContent)
       .toBe('A late result from an earlier attempt was ignored. This step is still running in your agent.')
+    expect(container.querySelector('[data-testid="checkpoint-controls"]')).toBeNull()
   })
 
   it('R74: the requirements fork goes inert when the agent owns the answer', async () => {

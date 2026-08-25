@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { FlightEntryOptions, FlightIndexEntry, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
+import type { ExternalWorkCheckpointData, FlightEntryOptions, FlightIndexEntry, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
 import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
@@ -21,6 +21,7 @@ import {
 } from '../lib/derived-stages'
 import { DownloadEvaluationAction } from './CheckpointControls'
 import { ContinueMenu, FlightMenu } from './FlightControls'
+import { FlightTakeoverAction } from './FlightTakeoverAction'
 import { FlightDrillThroughs, FlightPage } from './FlightPage'
 import { FlightSummaryStrip } from './FlightSummaryStrip'
 import { StageDetail, truncate } from './StageDetail'
@@ -321,6 +322,14 @@ export function FlightDetail({
   // inside that agent and "Needs approval" is a lie either way. Only the
   // flight's own pauses fall through to their real labels.
   const agentHolding = externallyDriven && flight.status === 'waiting-for-approval'
+  const externalWorkCheckpoint = agentHolding
+    ? flight.stages.find((candidate) => (
+        candidate.status === 'waiting-for-approval'
+        && candidate.checkpoint?.kind === 'external-work'
+      ))?.checkpoint
+    : undefined
+  const takeoverRequested = externalWorkCheckpoint != null
+    && typeof (externalWorkCheckpoint.data as ExternalWorkCheckpointData | undefined)?.takeoverRequestedAt === 'string'
   const suiteActivityChip = externalSuiteWork && featureActivity ? ACTIVITY_CHIP[featureActivity.kind] : null
   const tone = agentHolding
     ? FLIGHT_STATUS_TONE['running']
@@ -383,13 +392,19 @@ export function FlightDetail({
               : capitalizeFirst(derivedFeature && flight.status !== 'done' ? 'idle' : flightStatusLabel(flight.status))}
           />
         </h1>
-        {/* The one primary: the state's obvious next action. Running has none —
-            nothing demands a click, so nothing shouts. */}
-        {/* The internal component tree is canonical. External ownership never
-            removes a mutation; it leaves it in place, inert, and says where to
-            perform it. That keeps the page spatially identical while Claude /
-            Codex owns the decision. */}
-        {flight.status === 'waiting-for-approval' && (
+        {/* The one primary: the state's obvious next action. Internal running
+            work has none. An external hand-off replaces the inapplicable
+            Respond/Pause pair with its one web-owned escape route. Genuine
+            questions on an externally driven flight still render their normal
+            control inert, because the owning agent answers those. */}
+        {externalWorkCheckpoint ? (
+          <FlightTakeoverAction
+            flightId={flightId}
+            requested={takeoverRequested}
+            onResponded={refetch}
+            onError={setActionError}
+          />
+        ) : flight.status === 'waiting-for-approval' && (
           <DisabledControlTooltip>
             <button
               type="button"
@@ -410,7 +425,7 @@ export function FlightDetail({
             Settled → ONE Continue menu absorbing resume / repeat-a-step /
             start-over: "Resume at <stage>" (paused) + "From a step…" (+ optional
             what-went-wrong note that reaches the agent's prompt). */}
-        {(flight.status === 'running' || flight.status === 'waiting-for-approval') && (
+        {(flight.status === 'running' || flight.status === 'waiting-for-approval') && !externalWorkCheckpoint && (
           <DisabledControlTooltip>
             <button
               type="button"
@@ -419,11 +434,11 @@ export function FlightDetail({
               // Nothing here can stop work running inside the user's own agent:
               // pausing from this side would park the flight while the agent kept
               // going, and its result would then be discarded as stale. Kept
-              // visible and disabled rather than removed — Pause is the control a
-              // user reaches for first, and a missing button reads as a bug — but
-              // the tooltip has to name where it moved, or "disabled" is a dead
-              // end. The safe ownership transfer lives on the external-work
-              // card; Pause itself never races that agent with a local one.
+              // visible and disabled for genuine external decisions so the
+              // tooltip names where it moved. During an external-work hand-off,
+              // the header's takeover action replaces Pause entirely: that is
+              // the only safe way to transfer ownership without discarding the
+              // external agent's eventual result.
               disabled={externalMutationOwner != null}
               className="cl-button px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
               title={externalMutationOwner

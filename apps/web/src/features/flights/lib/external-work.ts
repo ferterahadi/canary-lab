@@ -41,18 +41,16 @@ export const EXTERNAL_WORK_COPY = {
   /** Flight header chip — replaces "Needs approval" for this kind. */
   headerLabel: 'Running in your agent',
   headerTitle: 'Your agent is working on this step. Canary will continue when it finishes.',
-  /** Stage card heading + the "where are we" line under it. */
-  cardTitle: 'Your agent is working on this step',
+  /** The "where are we" line above the shared Activity rail. */
   stateLine: 'Canary handed this step to the agent that started the flight and is waiting for the result.',
   /** Shown when `rejectStaleSubmit` discarded a result answering a superseded
    *  hand-off — the re-park is otherwise indistinguishable from the first ask. */
   lateResultNote: 'A late result from an earlier attempt was ignored. This step is still running in your agent.',
   takeover: {
-    availableTitle: 'Want to continue this step in Canary Lab?',
     availableBody: 'Request a safe hand-off first. Canary will stay parked until your external agent releases the step.',
     requestedTitle: 'Waiting for your agent to release this step',
     requestedBody: 'Canary will start its local agent after the external agent acknowledges the hand-off.',
-    requestedLockTitle: 'Takeover requested — wait for your agent to release this step, or use Force takeover below.',
+    requestedLockTitle: 'Takeover requested — wait for your agent to release this step, or force takeover after you have stopped it.',
     requestLabel: 'Request takeover…',
     forceLabel: 'Force takeover…',
     requestDialogTitle: 'Take over this step in Canary Lab?',

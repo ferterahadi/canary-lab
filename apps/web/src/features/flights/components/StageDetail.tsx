@@ -1,4 +1,4 @@
-import type { FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
+import type { ExternalWorkCheckpointData, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
 import type { AgentSessionSource, ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
 import { clientLabel, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
@@ -11,7 +11,7 @@ import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
 import type { FlightDrillThroughs } from './FlightPage'
 import { StageErrorPanel, StagePausedPanel, pausedResumeKind } from './StageStatePanels'
-import { externalMutationTooltip, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
+import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
 import { ACTIVITY_STAGE, type ExternalWorkTrace, type FeatureActivity, type StageExternalHistory } from '../state/feature-activity'
 import { SkeletonPanel, awaitingFor } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
@@ -249,6 +249,15 @@ export function StageDetail({
     && stageRowKey(ACTIVITY_STAGE[activity.kind]) === stage.key
   const flightHandOff = isExternallyDriven(flight)
     && checkpointStage?.checkpoint?.kind === 'external-work'
+  const handOffData = flightHandOff
+    ? checkpointStage?.checkpoint?.data as ExternalWorkCheckpointData | undefined
+    : undefined
+  const takeoverRequested = typeof handOffData?.takeoverRequestedAt === 'string'
+  const handOffMessage = takeoverRequested
+    ? `${EXTERNAL_WORK_COPY.takeover.requestedTitle}. ${EXTERNAL_WORK_COPY.takeover.requestedBody}`
+    : handOffData?.lastRejection === 'stale_submission'
+      ? EXTERNAL_WORK_COPY.lateResultNote
+      : undefined
   const historicalExternalSessions = externalStage.traces.map(externalSessionActivity)
   // The live activity map can update before the durable resource list. Keep a
   // temporary row during that gap, but drop it once the persisted running trace
@@ -256,11 +265,23 @@ export function StageDetail({
   const liveExternalFallback: ExternalSessionActivity | undefined =
     (activityOnThisRow || flightHandOff)
       && !historicalExternalSessions.some((session) => session.status === 'running')
-      ? { clientKind: 'other', status: 'running', message: 'Work is continuing in your external agent session.' }
+      ? {
+          clientKind: 'other',
+          status: 'running',
+          message: handOffMessage ?? 'Work is continuing in your external agent session.',
+        }
       : undefined
-  const externalSessions = liveExternalFallback
+  const baseExternalSessions = liveExternalFallback
     ? [...historicalExternalSessions, liveExternalFallback]
     : historicalExternalSessions
+  // The durable trace can arrive before the takeover request. Override only
+  // its live row so the serialized hand-off state replaces the stale generic
+  // "work is continuing" copy without rewriting completed provenance.
+  const externalSessions = handOffMessage
+    ? baseExternalSessions.map((session) => session.status === 'running'
+      ? { ...session, message: handOffMessage }
+      : session)
+    : baseExternalSessions
 
   // R66: every stage's activity is the same rail. Resolve its one agent source
   // (if any): agent stages tail their flight session; the Evaluation Report
@@ -551,7 +572,8 @@ export function StageDetail({
           save. Gated on the flight being parked: responding to a paused/aborted
           record's stale checkpoint can only 409. */}
       {flight.status === 'waiting-for-approval' && checkpointStage?.checkpoint
-        && checkpointStage.checkpoint.kind !== 'prd-source' && (
+        && checkpointStage.checkpoint.kind !== 'prd-source'
+        && checkpointStage.checkpoint.kind !== 'external-work' && (
         <CheckpointControls flightId={flightId} flight={flight} checkpoint={checkpointStage.checkpoint} onResponded={onResponded} />
       )}
 

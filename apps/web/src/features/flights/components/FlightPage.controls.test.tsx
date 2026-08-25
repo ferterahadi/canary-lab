@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   getRunDetail: vi.fn(),
   listJournal: vi.fn(),
   respondFlightCheckpoint: vi.fn(),
+  requestFlightTakeover: vi.fn(),
+  forceFlightTakeover: vi.fn(),
   resumeFlight: vi.fn(),
   setFlightAutopilot: vi.fn(),
   abortFlight: vi.fn(),
@@ -56,6 +58,8 @@ vi.mock('@/shared/api/client', () => ({
   getRunDetail: mocks.getRunDetail,
   listJournal: mocks.listJournal,
   respondFlightCheckpoint: mocks.respondFlightCheckpoint,
+  requestFlightTakeover: mocks.requestFlightTakeover,
+  forceFlightTakeover: mocks.forceFlightTakeover,
   resumeFlight: mocks.resumeFlight,
   setFlightAutopilot: mocks.setFlightAutopilot,
   abortFlight: mocks.abortFlight,
@@ -355,7 +359,7 @@ describe('flight controls (R48/R71)', () => {
     expect(container.querySelector('[data-testid="requirements-fork"]')).toBeTruthy()
   })
 
-  it('an external-work hand-off reads as running work with the normal controls disabled', async () => {
+  it('an external-work hand-off reads as running work with takeover replacing Respond and Pause', async () => {
     // The step is being done inside the client that started the flight — there
     // is nothing here for this reader to answer, and nothing this side can stop.
     // A hand-off only ever parks on an EXTERNAL flight, so the fixture carries
@@ -376,14 +380,9 @@ describe('flight controls (R48/R71)', () => {
     const chip = container.querySelector<HTMLElement>('[data-testid="flight-status"]')
     expect(chip?.textContent).toContain('Running in your agent')
     expect(chip?.getAttribute('title')).toBe('Your agent is working on this step. Canary will continue when it finishes.')
-    const respond = container.querySelector<HTMLButtonElement>('[data-testid="flight-primary-respond"]')
-    expect(respond?.disabled).toBe(true)
-    expect(respond?.title).toContain('from the Claude/Codex session')
-    const pause = container.querySelector<HTMLButtonElement>('[data-testid="flight-pause"]')
-    expect(pause?.disabled).toBe(true)
-    expect(pause?.title).toBe('Your agent is driving this flight — pause this work from the Claude/Codex session doing the work.')
-    await act(async () => { pause?.click() })
-    expect(mocks.pauseFlight).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-testid="flight-primary-respond"]')).toBeNull()
+    expect(container.querySelector('[data-testid="flight-pause"]')).toBeNull()
+    expect(container.querySelector('[data-testid="flight-request-takeover"]')).toBeTruthy()
     const changeInputs = container.querySelector<HTMLButtonElement>('[data-testid="flight-inputs-change"]')
     const autopilot = container.querySelector<HTMLButtonElement>('[data-testid="flight-autopilot-toggle"]')
     expect(changeInputs?.disabled).toBe(true)

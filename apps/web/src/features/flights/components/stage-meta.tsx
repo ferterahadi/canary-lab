@@ -3,7 +3,6 @@ import type { FlightStage, FlightStageKey, FlightStageStatus, SpecsCoverageProgr
 import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
-import { EXTERNAL_WORK_COPY } from '../lib/external-work'
 
 export { evaluationTaskId, FactTile, FactsGrid, plural, stageFacts } from './StageFacts'
 export type { StageBandData, StageFact } from './StageFacts'
@@ -148,12 +147,10 @@ const CHECKPOINT_TITLE: Record<string, string> = {
   'portify-apply': 'Save these port changes?',
   'run-failed': 'The test run did not pass',
   'export-mode': 'How should the report be built?',
-  // Not a question with a safe default — this step was handed to the client that
-  // started the flight (stage_producer: "external"). The person reading the web
-  // UI is not that client, so the title says who is holding it. "Your agent"
-  // rather than "your MCP client": the record stores no client kind, so the copy
-  // has to fit Claude and Codex alike, and the protocol is not the point.
-  'external-work': EXTERNAL_WORK_COPY.cardTitle,
+  // StageDetail presents this protocol checkpoint as running Activity, not a
+  // decision card. Keep the wire vocabulary labelled for any consumer that
+  // still asks for a generic checkpoint title.
+  'external-work': 'External agent work',
 }
 
 const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
@@ -179,9 +176,9 @@ const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
     'accept-partial': 'Accept this coverage',
     'retry': 'Try another pass',
   },
-  // These remain visible but disabled while the external agent owns the
-  // flight, just like every other mutation. Human labels matter even for inert
-  // controls: raw protocol keys would make this card look unfinished.
+  // These protocol answers are sent by the agent that owns the hand-off. They
+  // stay labelled for display-vocabulary completeness, but Flight Page does
+  // not render them as buttons for the person monitoring the run.
   'external-work': {
     'submit': 'Submit the agent result',
     'run-internally': 'Run this step in Canary Lab',

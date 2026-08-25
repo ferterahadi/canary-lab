@@ -1,12 +1,11 @@
 import { useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { ExternalWorkCheckpointData, FlightCheckpoint, FlightManifest, FlightStage } from '@/shared/api/client'
+import type { FlightCheckpoint, FlightManifest, FlightStage } from '@/shared/api/client'
 import { evaluationArchiveFilename } from '@/shared/lib/format'
 import { DiffView } from '@/shared/ui/DiffView'
 import { useEvaluationExports } from '@/features/evaluation'
 import { checkpointOptionLabel, checkpointTitle, evaluationTaskId, STAGE_COLUMN } from './stage-meta'
-import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven } from '../lib/external-work'
-import { ConfirmModal, StatusDot } from '@/shared/ui/atoms'
+import { externalMutationTooltip, isExternallyDriven } from '../lib/external-work'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 
 /** Evaluation Report's explicit download (R15): as an `icon` on the at-a-glance
@@ -93,8 +92,6 @@ export function CheckpointControls({
   const [reviseOpen, setReviseOpen] = useState(false)
   const [reviseText, setReviseText] = useState('')
   const [failure, setFailure] = useState<string | null>(null)
-  const [requestTakeoverOpen, setRequestTakeoverOpen] = useState(false)
-  const [forceTakeoverOpen, setForceTakeoverOpen] = useState(false)
 
   const mutate = (call: () => Promise<unknown>): void => {
     setBusy(true)
@@ -109,37 +106,17 @@ export function CheckpointControls({
   }
 
   const data = (checkpoint.data ?? {}) as Record<string, unknown>
-  const externalData = data as ExternalWorkCheckpointData
   const missing = Array.isArray(data.missing) ? (data.missing as string[]) : []
   const diff = typeof data.diff === 'string' ? data.diff : null
   const configError = typeof data.error === 'string' ? data.error : null
 
-  // A hand-off to the client that started the flight: work in progress, not a
-  // question. It drops every "you are the blocker" cue — amber chrome, the
-  // pause glyph, the Recommended badge — because the expected next move is the
-  // agent finishing, not a click. Its choices remain visible below, disabled
-  // with the external-session destination like every other mutation.
-  const externalWork = checkpoint.kind === 'external-work'
-  const takeoverRequestedAt = typeof externalData.takeoverRequestedAt === 'string'
-    ? externalData.takeoverRequestedAt
-    : undefined
-  // Every answer on this card belongs to the MCP client driving the flight —
-  // including the hand-off's own two escape buttons, which were the last thing
-  // on the page still inviting the human to act on the agent's behalf. The
-  // question and its context stay visible (that is what a viewer wants); only
-  // the answering goes. An `external-work` checkpoint only ever occurs on an
-  // externally driven flight, so this one predicate covers both cases.
+  // A genuine question on an externally driven flight still belongs to the MCP
+  // client that started it. The external-work hand-off itself never reaches
+  // this component: running work lives in StageActivity, not in a decision card.
   const readOnly = isExternallyDriven(flight)
   const lockedTitle = readOnly
-    ? takeoverRequestedAt
-      ? EXTERNAL_WORK_COPY.takeover.requestedLockTitle
-      : externalMutationTooltip('flight', 'answer this checkpoint')
+    ? externalMutationTooltip('flight', 'answer this checkpoint')
     : undefined
-  // Identifies WHICH hand-off a submit answers. Without it the server's
-  // stale-submit gate rejects every check from this side and silently re-parks,
-  // so the button looked broken while doing nothing.
-  const handOffId = typeof data.handOffId === 'string' ? data.handOffId : undefined
-  const staleSubmission = data.lastRejection === 'stale_submission'
 
   // R71/W3: options render in outcome language (display map — the POSTed key
   // stays raw). The first option is the recommended default; past 3 options the
@@ -150,15 +127,12 @@ export function CheckpointControls({
   const visibleOptions = folded ? options.slice(0, 1) : options
 
   return (
-    <>
-      <section
+    <section
       data-testid="checkpoint-controls"
-      className={`flex flex-col gap-2.5 rounded-lg border bg-surface p-3 ${externalWork ? 'border-running/45' : 'border-warning/45'} ${STAGE_COLUMN}`}
+      className={`flex flex-col gap-2.5 rounded-lg border border-warning/45 bg-surface p-3 ${STAGE_COLUMN}`}
       >
       <div className="flex items-center gap-2">
-        {externalWork
-          ? <StatusDot state="running" className="shrink-0" />
-          : <span aria-hidden="true" className="text-warning">⏸</span>}
+        <span aria-hidden="true" className="text-warning">⏸</span>
         <span
           data-testid="checkpoint-title"
           className="text-[12.5px] font-semibold"
@@ -166,49 +140,9 @@ export function CheckpointControls({
           {checkpointTitle(checkpoint.kind)}
         </span>
       </div>
-      {/* The hand-off's `message` is written AT the agent holding the step
-          ("Run this scout step in your own client…") — the wrong reader. The
-          stage's own state line above already says what is happening here. */}
       <p className="text-[12px] text-secondary">
-        {externalWork ? EXTERNAL_WORK_COPY.stateLine : checkpoint.message}
+        {checkpoint.message}
       </p>
-      {staleSubmission && (
-        <p data-testid="checkpoint-stale-submission" className="text-[11px] text-warning">
-          {EXTERNAL_WORK_COPY.lateResultNote}
-        </p>
-      )}
-
-      {externalWork && readOnly && (
-        <div
-          data-testid="checkpoint-takeover"
-          className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-subtle px-2.5 py-2"
-        >
-          <div className="min-w-[220px] flex-1">
-            <div className="text-[11.5px] font-medium text-secondary">
-              {takeoverRequestedAt
-                ? EXTERNAL_WORK_COPY.takeover.requestedTitle
-                : EXTERNAL_WORK_COPY.takeover.availableTitle}
-            </div>
-            <div className="mt-0.5 text-[10.5px] leading-snug text-muted">
-              {takeoverRequestedAt
-                ? EXTERNAL_WORK_COPY.takeover.requestedBody
-                : EXTERNAL_WORK_COPY.takeover.availableBody}
-            </div>
-          </div>
-          <button
-            type="button"
-            data-testid={takeoverRequestedAt ? 'checkpoint-force-takeover' : 'checkpoint-request-takeover'}
-            disabled={busy}
-            onClick={() => takeoverRequestedAt ? setForceTakeoverOpen(true) : setRequestTakeoverOpen(true)}
-            className="cl-button shrink-0 px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
-            style={takeoverRequestedAt ? { color: 'var(--danger)' } : undefined}
-          >
-            {takeoverRequestedAt
-              ? EXTERNAL_WORK_COPY.takeover.forceLabel
-              : EXTERNAL_WORK_COPY.takeover.requestLabel}
-          </button>
-        </div>
-      )}
 
       {checkpoint.kind === 'config-approval' && configError && (
         <p data-testid="checkpoint-config-error" className="text-[11px] text-danger font-mono">
@@ -271,14 +205,14 @@ export function CheckpointControls({
               title={lockedTitle}
               onClick={() => (option === 'revise'
                 ? setReviseOpen((v) => !v)
-                : respond({ choice: option, ...(option === 'submit' && handOffId ? { token: handOffId } : {}) }))}
+                : respond({ choice: option }))}
               className="cl-button inline-flex items-center gap-1.5 px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
-              style={i === 0 && !externalWork
+              style={i === 0
                 ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' }
                 : undefined}
             >
               {checkpointOptionLabel(checkpoint.kind, option)}
-              {i === 0 && !externalWork && (
+              {i === 0 && (
                 /* R71/W3: the default is named, not color-only. */
                 <span
                   data-testid="checkpoint-recommended"
@@ -330,33 +264,6 @@ export function CheckpointControls({
       )}
 
       {failure && <div className="text-[11px] text-danger">{failure}</div>}
-      </section>
-
-      <ConfirmModal
-        open={requestTakeoverOpen}
-        title={EXTERNAL_WORK_COPY.takeover.requestDialogTitle}
-        message={EXTERNAL_WORK_COPY.takeover.requestDialogMessage}
-        confirmLabel="Request takeover"
-        onCancel={() => setRequestTakeoverOpen(false)}
-        onConfirm={() => {
-          setRequestTakeoverOpen(false)
-          mutate(() => api.requestFlightTakeover(flightId))
-        }}
-        busy={busy}
-      />
-      <ConfirmModal
-        open={forceTakeoverOpen}
-        title={EXTERNAL_WORK_COPY.takeover.forceDialogTitle}
-        message={EXTERNAL_WORK_COPY.takeover.forceDialogMessage}
-        confirmLabel="Force takeover"
-        variant="danger"
-        onCancel={() => setForceTakeoverOpen(false)}
-        onConfirm={() => {
-          setForceTakeoverOpen(false)
-          mutate(() => api.forceFlightTakeover(flightId))
-        }}
-        busy={busy}
-      />
-    </>
+    </section>
   )
 }
