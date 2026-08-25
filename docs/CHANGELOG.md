@@ -15,6 +15,12 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 2.0.1 — 2026-08-25
+
+- **[General]** **Getting started now begins in Claude or Codex.** The README leads with `/canary-lab` and keeps npm commands for one-time setup and terminal automation.
+
+---
+
 ## 2.0.0 — 2026-08-25
 
 > **Upgrading from 1.5.x:** install Node 22.12+, run `npm install --save-dev canary-lab@2 && npx canary-lab upgrade`, then restart Canary Lab and connected agent apps.
