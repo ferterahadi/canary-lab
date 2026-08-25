@@ -43,9 +43,9 @@ export async function versionRoutes(app: FastifyInstance, deps: VersionRouteDeps
     return deps.state.status(deps.updateStore)
   })
 
-  // Kick off `npm install <pkg>@latest` in the workspace. Non-blocking: returns
-  // 202 with the running manifest; the job streams into the store and flips to
-  // done/failed, broadcasting `version-changed` each time.
+  // Kick off the package install + explicit workspace migration. Non-blocking:
+  // returns 202 with the running manifest; the job streams into the store and
+  // flips to done/failed, broadcasting `version-changed` when it settles.
   app.post('/api/version/update', async (_req, reply) => {
     const target = deps.state.pendingTarget()
     if (!target) {

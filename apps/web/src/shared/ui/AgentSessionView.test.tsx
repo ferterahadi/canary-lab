@@ -382,4 +382,25 @@ describe('AgentSessionView external-session Activity row', () => {
     expect(rows[1]?.textContent).toContain('Second coverage pass completed.')
     expect([...rows].every((row) => row.textContent?.includes('External session'))).toBe(true)
   })
+
+  it('places the external row after the conductor lines that announced the hand-off', () => {
+    act(() => root.render(
+      <AgentSessionView
+        systemRows={{
+          pre: ['[autopilot] prd-source: answered "collect-repo-docs"'],
+          post: ['[docs] handed the collect repo docs step to the external client…'],
+        }}
+        externalSessions={[{
+          clientKind: 'other',
+          status: 'running',
+          message: 'Work is continuing in your external agent session.',
+          startedAt: '2026-08-25T00:00:00.000Z',
+        }]}
+      />,
+    ))
+
+    const rows = [...container.querySelectorAll('.agentts-rail > li')]
+    expect(rows.at(-1)?.getAttribute('data-testid')).toBe('external-session-activity')
+    expect(rows.at(-2)?.textContent).toContain('handed the collect repo docs step to the external client')
+  })
 })

@@ -59,7 +59,10 @@ interface Props {
   systemRows?: { pre: string[]; post: string[] }
   /** Tasks whose transcripts live in the user's own Claude/Codex window. Each
    *  occupies one real chronological row on this rail instead of a second
-   *  branded card; the dedicated task screens own their full monitors. */
+   *  branded card; the dedicated task screens own their full monitors. They
+   *  render at the TAIL of the rail: the hand-off is the newest thing that
+   *  happened, so it reads after the conductor lines that announced it — at the
+   *  head it claimed the work started before the log that led to it. */
   externalSessions?: ExternalSessionActivity[]
   /** Host-supplied copy for the "there is no session" state. A host usually
    *  knows WHY there's no transcript ("this run passed, so no repair agent was
@@ -377,12 +380,6 @@ export function AgentSessionView({ source, systemRows, externalSessions = [], em
           </div>
         )}
         <ol className="agentts-rail">
-          {externalSessions.map((session, index) => (
-            <ExternalSessionRow
-              key={`${session.startedAt ?? 'unknown'}:${session.endedAt ?? 'live'}:${session.clientKind}:${index}`}
-              session={session}
-            />
-          ))}
           {groupSystemLines(sys.pre).map((group, idx) => (
             <SystemRow key={`sys-pre-${idx}`} group={group} />
           ))}
@@ -391,6 +388,12 @@ export function AgentSessionView({ source, systemRows, externalSessions = [], em
           ))}
           {groupSystemLines(sys.post).map((group, idx) => (
             <SystemRow key={`sys-post-${idx}`} group={group} />
+          ))}
+          {externalSessions.map((session, index) => (
+            <ExternalSessionRow
+              key={`${session.startedAt ?? 'unknown'}:${session.endedAt ?? 'live'}:${session.clientKind}:${index}`}
+              session={session}
+            />
           ))}
           {live && <LiveTail {...pendingWork(state?.events ?? [])} />}
         </ol>

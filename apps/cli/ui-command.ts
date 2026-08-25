@@ -14,6 +14,8 @@ import { hydrateAgentConfigEnvFromShell } from '../web-server/src/features/agent
 import { stopAllAgentProcesses } from '../web-server/src/features/agent-sessions/logic/agent-process'
 import { refreshAgentIntegrationsQuietly } from './agent'
 import { refreshClaudeDesktopMcpQuietly } from './mcp-refresh'
+import { main as upgradeWorkspace } from './upgrade'
+import { checkUpgradeDrift, type DriftState } from '../../shared/runtime/upgrade-check'
 import type { DesktopRegistrationResult } from './desktop-registration'
 
 // Graceful-teardown ceiling. Long enough for an honest run abort + app.close,
@@ -38,6 +40,11 @@ export interface UiCommandOptions {
   // Brings the installed agent skill up to date with this package version.
   // Injected as a no-op / spy in tests so they never touch the real home dir.
   refreshAgents?: () => void
+  // Completes a workspace migration that an older UI updater could not run
+  // itself after swapping in this package. Injectable to keep startup tests
+  // isolated from the filesystem migration.
+  upgradeWorkspace?: (projectRoot: string) => Promise<void>
+  getUpgradeDrift?: (projectRoot: string) => DriftState
   // Re-points a Claude Desktop MCP entry that Desktop reverted to a pre-upgrade
   // path. Injected as a spy in tests; the default resolves its config path under
   // CANARY_LAB_AGENT_HOME, which the suite already points at a throwaway home.
@@ -49,6 +56,29 @@ export interface UiCommandOptions {
   // Kills every live agent CLI child on shutdown. Injected as a spy in tests so
   // they never signal real processes.
   stopAgents?: () => Promise<void>
+}
+
+interface WorkspaceUpgradeRecoveryOptions {
+  log: (message: string) => void
+  getUpgradeDrift?: (projectRoot: string) => DriftState
+  upgradeWorkspace?: (projectRoot: string) => Promise<void>
+}
+
+/** Complete a migration skipped by the updater from the previously installed
+ * version. Exported so the packaged smoke gate can exercise the real compiled
+ * recovery without starting a long-lived UI server. */
+export async function finishPendingWorkspaceUpgrade(
+  projectRoot: string,
+  opts: WorkspaceUpgradeRecoveryOptions,
+): Promise<boolean> {
+  const drift = (opts.getUpgradeDrift ?? checkUpgradeDrift)(projectRoot)
+  if (!drift.drift || drift.stamped === null) return false
+
+  opts.log(`Finishing the Canary Lab workspace upgrade from ${drift.stamped} to ${drift.installed}...`)
+  const finishUpgrade = opts.upgradeWorkspace
+    ?? ((root: string) => upgradeWorkspace(['--silent'], { projectRoot: root }))
+  await finishUpgrade(projectRoot)
+  return true
 }
 
 export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promise<void> {
@@ -88,6 +118,18 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   for (const [name, value] of Object.entries(hydrateAgentConfigEnvFromShell())) {
     log(`Detected ${name}=${value} from your shell config.`)
   }
+
+  // The updater that is running controls an upgrade. A 1.5.x server can install
+  // 2.0, but it cannot call logic that only exists inside 2.0; on npm versions
+  // that skip the root postinstall, the package changes while the workspace
+  // stamp stays old. Finish that migration before the first new server starts.
+  // A missing stamp is left alone because it may be an intentionally uninstalled
+  // scaffold; the explicit `upgrade` command remains the recovery path there.
+  await finishPendingWorkspaceUpgrade(projectRoot, {
+    log,
+    getUpgradeDrift: opts.getUpgradeDrift,
+    upgradeWorkspace: opts.upgradeWorkspace,
+  })
 
   const port = resolveProjectPort(loadProjectConfig(projectRoot))
   const recordActiveServer = opts.recordActiveServer

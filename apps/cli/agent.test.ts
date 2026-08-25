@@ -154,6 +154,17 @@ describe('canary-lab agent install', () => {
       expect(body).toContain('remaining-test mode')
       expect(body).toContain('failed tests first, then skipped tests, then pending/not-run tests')
       expect(body).toContain('do not tell the user no test filter exists')
+      expect(body).toContain('/canary-lab-export <runId>')
+      expect(body).toContain('Do not substitute `npx canary-lab export`')
+    }
+
+    // A run handoff names its exact run, while Getting Started may still name
+    // a feature. The export skill must resolve both without guessing a newer run.
+    for (const skillPath of mirrors('canary-lab-export')) {
+      const body = fs.readFileSync(skillPath, 'utf-8')
+      expect(body).toContain('/canary-lab-export <suite-or-run-id>')
+      expect(body).toContain('Try `get_run(argument)` first')
+      expect(body).toContain('Only a `run not found` result')
     }
 
     // Authoring rules live in canary-lab-author.

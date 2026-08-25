@@ -405,6 +405,59 @@ describe('runUi port resolution', () => {
     expect(refreshAgents).toHaveBeenCalledOnce()
   })
 
+  it('finishes a skipped 1.5.x workspace migration before starting the 2.0 server', async () => {
+    const projectRoot = mkProject()
+    fs.mkdirSync(path.join(projectRoot, 'logs'))
+    fs.writeFileSync(path.join(projectRoot, 'logs', '.canary-lab-version'), '1.5.1\n')
+    const events: string[] = []
+    const app = { listen: vi.fn(async () => {}), close: vi.fn(async () => {}) }
+    mocks.createServer.mockImplementation(async () => {
+      events.push('server')
+      return {
+        app,
+        registry: {},
+        revertAllEnvsets: vi.fn(),
+        runStore: { abortAllActiveOrStale: vi.fn() },
+        brokers: new Map(),
+        draftBrokers: new Map(),
+      }
+    })
+    const finishUpgrade = vi.fn(async () => { events.push('upgrade') })
+    const messages: string[] = []
+
+    await runUi(['--no-open'], {
+      projectRoot,
+      log: (message) => messages.push(message),
+      exit: vi.fn(),
+      getUpgradeDrift: () => ({ installed: '2.0.0', stamped: '1.5.1', drift: true }),
+      upgradeWorkspace: finishUpgrade,
+      ...noopActiveServer,
+    })
+
+    expect(finishUpgrade).toHaveBeenCalledExactlyOnceWith(projectRoot)
+    expect(events).toEqual(['upgrade', 'server'])
+    expect(messages.join('\n')).toContain('from 1.5.1 to 2.0.0')
+  })
+
+  it('does not start the server when the recovery migration fails', async () => {
+    const projectRoot = mkProject()
+    fs.mkdirSync(path.join(projectRoot, 'logs'))
+    fs.writeFileSync(path.join(projectRoot, 'logs', '.canary-lab-version'), '1.5.1\n')
+    const app = mockServer()
+    const failure = new Error('migration failed')
+
+    await expect(runUi(['--no-open'], {
+      projectRoot,
+      log: () => {},
+      exit: vi.fn(),
+      getUpgradeDrift: () => ({ installed: '2.0.0', stamped: '1.5.1', drift: true }),
+      upgradeWorkspace: async () => { throw failure },
+      ...noopActiveServer,
+    })).rejects.toThrow(failure)
+
+    expect(app.listen).not.toHaveBeenCalled()
+  })
+
   // Claude Desktop rewrites its own MCP config from a copy loaded at launch, so
   // it can restore a pre-upgrade cli.js path after `upgrade` healed it. Boot is
   // the touchpoint later than that revert — and a repair is inert until the user

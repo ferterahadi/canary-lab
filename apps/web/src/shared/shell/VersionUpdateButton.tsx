@@ -188,7 +188,7 @@ function VersionPopover({
           <VersionDelta current={current} latest={latest} />
           {view.mode === 'failed' && (
             <p className="text-[11px] leading-relaxed" style={{ color: 'var(--danger)' }}>
-              {error ?? 'The install failed.'}
+              {error ?? 'The update failed.'}
             </p>
           )}
           <button
@@ -199,7 +199,7 @@ function VersionPopover({
             {view.mode === 'failed' ? 'Retry update' : `Update to v${latest}`}
           </button>
           <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-            Runs <span style={{ fontFamily: 'var(--font-mono)' }}>npm install {status.packageName ?? 'canary-lab'}@latest</span> in your workspace.
+            Installs the package, then refreshes this workspace and its agent connections.
           </p>
         </>
       )}

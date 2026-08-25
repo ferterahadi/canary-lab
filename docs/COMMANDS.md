@@ -39,7 +39,25 @@ The web UI and MCP tools (`start_flight`, `get_flight`, and `respond_flight_chec
 - `boot` starts a feature's services without tests. It requires the UI server; `boot stop <runId>` ends the session.
 - `mcp` connects an AI client to the UI server. A bare command defaults to the direct `lifecycle` profile. Setup-installed clients use `compact`; focused profiles and `full` remain available for direct-tool debugging and rollback.
 - `new feature` creates a feature deterministically. `env` applies or restores an envset.
-- `upgrade` refreshes managed workspace files and skills. It does not upgrade the npm dependency.
+- `upgrade` refreshes managed workspace files, existing agent skills, and existing MCP connections. It also repairs the browser-install hook and downloads the matching browser when an older workspace needs it. It does not install a newer npm package by itself.
+
+### Upgrade from 1.5.x to 2.0.0
+
+Install Node 22.12 or newer first, then run:
+
+```bash
+npm install --save-dev canary-lab@2
+npx canary-lab upgrade
+```
+
+Restart `canary-lab ui` and connected agent apps afterwards. The 2.0 UI Update
+button runs both commands for you. When the 1.5.x Update button installs 2.0 but
+its older updater cannot run the new migration, the first 2.0 startup detects
+the 1.5.x workspace stamp and finishes that migration before serving the UI.
+Upgrade preserves existing feature folders, personal `CLAUDE.md` / `AGENTS.md`
+notes, custom skills, and unrelated `package.json` fields. The 2.0 demonstration
+apps ship only in newly initialized workspaces; upgrading an existing workspace
+does not add or replace samples.
 
 ## Compact MCP invocation
 

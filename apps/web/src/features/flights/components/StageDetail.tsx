@@ -25,6 +25,7 @@ import {
   OverlayPanel,
 } from './StageEvidencePanels'
 import { SpecsPassTimeline, StageActivity, truncate } from './StageActivity'
+import { presentedStageStatus } from './stage-metrics'
 
 export { AgentBlock, SpecsPassTimeline, StageActivity, specsPhaseSub, truncate } from './StageActivity'
 
@@ -449,7 +450,7 @@ export function StageDetail({
             approved={stage.status === 'done'}
             refreshKey={docsRefreshKey}
             listing={band.docsListing}
-            summaryStatus={companion?.status}
+            summaryStatus={companion ? presentedStageStatus(companion) : undefined}
             summaryStage={companion ?? undefined}
             requirementCount={
               typeof (companion?.evidence as Record<string, unknown> | undefined)?.requirementCount === 'number'

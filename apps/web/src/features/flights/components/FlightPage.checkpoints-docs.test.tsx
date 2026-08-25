@@ -411,6 +411,34 @@ describe('checkpoint display language (R71/W3)', () => {
     expect(container.querySelector('[data-testid="stage-drill-docs"]')).toBeNull()
   })
 
+  it('presents an externally driven summary hand-off as running, not approval', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' },
+      status: 'waiting-for-approval',
+      currentStage: 'prd-summary',
+      stages: FLIGHT_STAGE_KEYS.map((k) => ({
+        key: k,
+        status: k === 'prd-summary' ? ('waiting-for-approval' as const) : k === 'scout' || k === 'scaffold' || k === 'env-capture' || k === 'similarity' || k === 'docs' ? ('done' as const) : ('pending' as const),
+        ...(k === 'prd-summary'
+          ? { checkpoint: { kind: 'external-work' as const, message: 'Distill these docs.', options: ['submit'] } }
+          : {}),
+      })),
+    }))
+    mocks.listFeatureDocs.mockResolvedValue({
+      feature: 'checkout',
+      docs: [{ relPath: 'okr.md', absPath: '/ws/features/checkout/docs/okr.md', sizeBytes: 5100, generated: false }],
+      hasPrdSummary: false,
+      sourceDocCount: 1,
+      docsDrift: false,
+    })
+    await render('fl_1')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click() })
+
+    const summary = container.querySelector('[data-testid="docs-summary-chip"]')
+    expect(summary?.textContent).toContain('Running')
+    expect(summary?.textContent).not.toContain('Needs approval')
+  })
+
   it('once the agent is writing, the output card reports it and shows the words arriving', async () => {
     // The state the user shut their machine down in: the agent was two-thirds
     // through a 27k-character answer and the card said only "progress in

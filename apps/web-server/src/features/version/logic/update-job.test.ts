@@ -24,6 +24,18 @@ class FakeChild extends EventEmitter {
   stderr = new EventEmitter()
 }
 
+function writeInstalledCli(root: string, packageName = 'canary-lab'): string {
+  const packageRoot = path.join(root, 'node_modules', packageName)
+  const cliPath = path.join(packageRoot, 'dist', 'apps', 'cli', 'cli.js')
+  fs.mkdirSync(path.dirname(cliPath), { recursive: true })
+  fs.writeFileSync(cliPath, '')
+  fs.writeFileSync(
+    path.join(packageRoot, 'package.json'),
+    JSON.stringify({ name: packageName, bin: { 'canary-lab': 'dist/apps/cli/cli.js' } }),
+  )
+  return cliPath
+}
+
 let logsDir: string
 
 beforeEach(() => {
@@ -104,10 +116,12 @@ describe('startUpdateJob', () => {
 })
 
 describe('startUpdateJob default installer (real spawn path)', () => {
-  it('pipes stdout + stderr into the log and finishes done on close 0', async () => {
+  it('installs, runs the newly installed upgrade CLI, and finishes only after both succeed', async () => {
     const store = new UpdateJobStore(logsDir)
-    const child = new FakeChild()
-    spawnMock.mockReturnValue(child)
+    const cliPath = writeInstalledCli(logsDir)
+    const installChild = new FakeChild()
+    const upgradeChild = new FakeChild()
+    spawnMock.mockReturnValueOnce(installChild).mockReturnValueOnce(upgradeChild)
     const { completion } = startUpdateJob(
       { projectRoot: logsDir, packageName: 'canary-lab', targetVersion: '1.4.2' },
       { store }, // no `run` -> defaultInstall
@@ -116,14 +130,23 @@ describe('startUpdateJob default installer (real spawn path)', () => {
       cwd: logsDir,
       env: process.env,
     })
-    child.stdout.emit('data', Buffer.from('added 1 package\n'))
-    child.stderr.emit('data', Buffer.from('npm warn deprecated\n'))
-    child.emit('close', 0)
+    installChild.stdout.emit('data', Buffer.from('added 1 package\n'))
+    installChild.stderr.emit('data', Buffer.from('npm warn deprecated\n'))
+    installChild.emit('close', 0)
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2))
+    expect(spawnMock).toHaveBeenLastCalledWith(process.execPath, [cliPath, 'upgrade', '--silent'], {
+      cwd: logsDir,
+      env: process.env,
+    })
+    upgradeChild.stdout.emit('data', Buffer.from('workspace refreshed\n'))
+    upgradeChild.emit('close', 0)
     await completion
     const final = store.current()
     expect(final?.status).toBe('done')
     expect(final?.log).toContain('added 1 package')
     expect(final?.log).toContain('npm warn deprecated')
+    expect(final?.log).toContain('workspace refreshed')
+    expect(final?.log).toContain('[upgrade]')
   })
 
   it('fails with code 1 when the child closes with a null code', async () => {
@@ -138,6 +161,40 @@ describe('startUpdateJob default installer (real spawn path)', () => {
     await completion
     expect(store.current()?.status).toBe('failed')
     expect(store.current()?.error).toContain('code 1')
+  })
+
+  it('fails instead of claiming completion when the installed CLI cannot be resolved', async () => {
+    const store = new UpdateJobStore(logsDir)
+    const child = new FakeChild()
+    spawnMock.mockReturnValue(child)
+    const { completion } = startUpdateJob(
+      { projectRoot: logsDir, packageName: 'canary-lab', targetVersion: '1.4.2' },
+      { store },
+    )
+    child.emit('close', 0)
+    await completion
+    expect(store.current()?.status).toBe('failed')
+    expect(store.current()?.log).toContain('could not find the installed canary-lab CLI')
+  })
+
+  it('fails when workspace migration fails after a successful package install', async () => {
+    const store = new UpdateJobStore(logsDir)
+    writeInstalledCli(logsDir)
+    const installChild = new FakeChild()
+    const upgradeChild = new FakeChild()
+    spawnMock.mockReturnValueOnce(installChild).mockReturnValueOnce(upgradeChild)
+    const { completion } = startUpdateJob(
+      { projectRoot: logsDir, packageName: 'canary-lab', targetVersion: '1.4.2' },
+      { store },
+    )
+    installChild.emit('close', 0)
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2))
+    upgradeChild.stderr.emit('data', Buffer.from('migration failed\n'))
+    upgradeChild.emit('close', 2)
+    await completion
+    expect(store.current()?.status).toBe('failed')
+    expect(store.current()?.error).toContain('code 2')
+    expect(store.current()?.log).toContain('migration failed')
   })
 
   it('logs a spawn error and fails when the child emits error', async () => {

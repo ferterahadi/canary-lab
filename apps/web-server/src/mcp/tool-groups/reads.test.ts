@@ -176,6 +176,8 @@ describe('get_run', () => {
 
       // Reviewing the export IS the loop, so a terminal run says so — including
       // a failed one, which must be exportable as-is rather than healed first.
+      expect(String(out.next)).toContain('/canary-lab-export run-1')
+      expect(String(out.next)).not.toContain('npx canary-lab export run-1')
       expect(String(out.next)).toContain('start_external_evaluation_export')
       expect(String(out.next)).toContain(status)
     })
@@ -185,7 +187,7 @@ describe('get_run', () => {
     const { call } = harness({ store: { logsDir, list: () => [], get: () => runDetail({}, { status: 'passed' }) } })
 
     expect(String((await call('get_run', { runId: 'run-1', includeRaw: true })).next))
-      .toContain('start_external_evaluation_export')
+      .toContain('/canary-lab-export run-1')
   })
 })
 

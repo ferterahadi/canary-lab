@@ -60,7 +60,7 @@ export function registerReadTools(ctx: ToolGroupContext): void {
     // Eval-review-first: a terminal run's next stop is the evaluation export —
     // reviewing it (per-test reasoning + playback) IS the core canary loop.
     const next = isTerminalRunStatus(detail.manifest.status)
-      ? { next: `Run is terminal (${detail.manifest.status}) — the next step is the evaluation export: start_external_evaluation_export(runId) to produce it (status preserved, even for a failed run), then submit it and give the user the returned archivePath; evaluation.html is inside that existing zip.` }
+      ? { next: `Run is terminal (${detail.manifest.status}). The user-facing next step is /canary-lab-export ${runId}; do not replace it with an npx canary-lab export command. When continuing in this client instead of handing off, call start_external_evaluation_export(runId), submit it, and give the user the returned archivePath. Status is preserved even for a failed run, and evaluation.html is inside that existing zip.` }
       : {}
     if (includeRaw) return asJsonResult({ ...detail, ...next })
     const { lifecycleEvents: _lifecycleEvents, playwrightArtifacts: _playwrightArtifacts, playbackEvents: _playbackEvents, ...core } = detail

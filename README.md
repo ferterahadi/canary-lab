@@ -161,6 +161,21 @@ npm install          # postinstall also downloads the Playwright browser
 npx canary-lab ui
 ```
 
+Upgrading a 1.5.x workspace to 2.0.0 requires Node 22.12 or newer:
+
+```bash
+npm install --save-dev canary-lab@2
+npx canary-lab upgrade
+npx canary-lab ui
+```
+
+The 2.0 UI Update button performs the install and upgrade steps together. If you
+start from the 1.5.x Update button, restart with Node 22.12+ after it installs
+2.0; the first 2.0 startup detects the old workspace stamp and finishes the
+migration before serving the UI. Existing feature folders and personal agent
+files are preserved. Restart connected agent apps afterwards so they load the
+refreshed skills and connection path.
+
 The UI and MCP server share one port, `7421` by default. Choose another during setup with `npx canary-lab init my-lab --port 8200`, or change it later in Project Settings. The `ui --port` option is not supported.
 
 Restart your agent after setup so it discovers the always-loaded Canary Lab `exec` tool. Atomic operations are command values inside it, not separate public tools. If `exec` does not appear, run `npx canary-lab setup --force` and start a fresh session.

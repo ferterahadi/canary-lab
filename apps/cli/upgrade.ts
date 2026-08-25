@@ -159,6 +159,9 @@ export interface MainExtras {
   /** Injected browser step — see the postinstall-repair block in `main`. Exists
    *  so tests can assert the repair triggers it without downloading a browser. */
   installBrowsers?: (projectRoot: string) => Promise<void>
+  /** Explicit workspace root for callers such as `canary-lab ui`, which may be
+   *  launched with a project root that differs from the process cwd. */
+  projectRoot?: string
 }
 
 function log(msg: string, opts: UpgradeOptions): void {
@@ -204,7 +207,7 @@ export async function main(
 
   let projectRoot: string
   try {
-    projectRoot = getProjectRoot()
+    projectRoot = extras.projectRoot ?? getProjectRoot()
   } catch {
     log('  Could not find Canary Lab project root (no features/ directory found).', opts)
     return

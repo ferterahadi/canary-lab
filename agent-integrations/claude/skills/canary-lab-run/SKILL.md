@@ -113,6 +113,9 @@ off — opens a **draft pull request** from it. So on `passed`:
 - Do not call `abort_run` unless the user asks, and pass the required confirmation only for an explicit abort/kill/stop-everything request.
 - Prefer compact `get_heal_context` when you need to refresh failure artifacts outside the wait loop. Use `get_run_snapshot` only for verbose fallback/debugging context.
 - Read responses are slim by default to protect your context, but the full data is always one step away — pull it whenever a failure needs deeper detail (just never in a wait loop): `get_run` omits the raw `lifecycleEvents`/`playwrightArtifacts`/`playbackEvents` (call it again with `includeRaw:true` to inline them); `get_run_snapshot` returns the heal-index and journal as **paths** to `Read`; `list_runs` returns the newest 20 (raise `limit`).
-- On any terminal run, point the user at the evaluation export as the next step (the `canary-lab-export` skill / `export` profile produces it).
+- On any terminal run, recommend the exact next skill invocation
+  `/canary-lab-export <runId>`, replacing the placeholder with the terminal
+  run's returned ID. Do not substitute `npx canary-lab export`; the export skill
+  uses the connected MCP server and preserves the exact run selection.
 - Record concise, factual journal notes. Do not paste raw transcripts.
 - When the run is waiting for external heal, Canary Lab is the source of truth for status, artifacts, and rerun/restart signals.

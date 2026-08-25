@@ -11,9 +11,9 @@ export function getVersionStatus(opts?: ClientOptions): Promise<VersionStatus> {
   return request<VersionStatus>(`${baseUrl}/api/version`, { method: 'GET' }, fetchImpl)
 }
 
-// Start `npm install <pkg>@latest` in the workspace. Returns the running job
-// manifest (202). A 409 means there's nothing newer or an install is already
-// in flight — its `{ error }` surfaces as the thrown ApiError message.
+// Start the package install + workspace migration. Returns the running job
+// manifest (202). A 409 means there's nothing newer or an update is already in
+// flight — its `{ error }` surfaces as the thrown ApiError message.
 export function startVersionUpdate(opts?: ClientOptions): Promise<UpdateJobManifest> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   // No body — declaring application/json with an empty body makes Fastify

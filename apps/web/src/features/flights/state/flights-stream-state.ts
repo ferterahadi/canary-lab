@@ -50,6 +50,8 @@ export function flightIndexEntry(m: FlightManifest): FlightIndexEntry {
     group: m.opts.group,
     status: m.status,
     pauseReason: m.pauseReason,
+    checkpointKind: m.stages.find((s) => s.status === 'waiting-for-approval')?.checkpoint?.kind,
+    stageProducer: m.opts.stageProducer,
     currentStage: m.currentStage,
     stages: m.stages.map((s) => ({ key: s.key, status: s.status })),
     updatedAt: m.updatedAt,

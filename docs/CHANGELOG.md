@@ -17,7 +17,7 @@ Each entry is tagged with the area it touches:
 
 ## 2.0.0 — 2026-08-25
 
-> **Node 22.12+ is now required** — see Breaking changes at the end of this section.
+> **Upgrading from 1.5.x:** install Node 22.12+, run `npm install --save-dev canary-lab@2 && npx canary-lab upgrade`, then restart Canary Lab and connected agent apps.
 
 - **[General]** **Flight is now the main workflow.** It guides a repo through seven steps: scan, setup, requirements, test authoring and coverage, parallel readiness, test run, and evaluation report.
   - Start from the UI by choosing repos and describing what to test, or run `npx canary-lab flight <repo...> "<what to test>"`.
@@ -29,12 +29,6 @@ Each entry is tagged with the area it touches:
 - **[General]** **Agents can manage flights through MCP.** Connected clients can start a flight, read its state, answer checkpoints, and link local requirement documents.
 - **[Test Runner]** **Repairs no longer edit your checkout.** Each run uses a temporary Git worktree. Canary Lab saves the repair as a patch under `logs/runs/<runId>/fixes/`, then removes the temporary copy. Portified runs keep the worktree so you can review it from Cleanup.
 - **[Test Runner]** **Healing is safer when more than one Canary Lab process is open.** A second process no longer marks a live repair as aborted, and a repair stops cleanly if another process finishes the run.
-- **[General]** **Getting Started now shows all seven workflows in one chooser.** It can repair the sample suite, create a flight, measure coverage, author tests, prepare parallel runs, run and heal the workbench, or export that run as an evaluation. Status tooltips explain what is running or blocked, and demo flights use autopilot by default.
-- **[Test Runner]** **The workbench run keeps using its allocated port after Portify.** Its Playwright config now loads the applied feature environment before the tests read `WORKFLOW_URL`.
-- **[Test Runner]** **Claude healing starts without a per-run folder-trust pause.** Canary Lab trusts the exact generated run directory before opening the interactive repair agent; tool approvals are unchanged.
-- **[Export evaluation]** **Connected agents return the finished archive's exact local path.** When Canary Lab has already written `export.zip`, the agent points to that file instead of asking you to run a separate download command.
-- **[General]** **Onboarding is easier to control.** The chooser opens once for a new workspace and remains available from the top bar. You can hide it in Settings. Flight status now names the current step.
-- **[General]** **The sample suite is now named `storefront-journey`.** Existing workspaces can keep `storefront_journey`; both names remain supported.
 
 ### Breaking changes
 

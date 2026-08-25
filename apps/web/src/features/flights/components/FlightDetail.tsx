@@ -531,18 +531,26 @@ export function FlightDetail({
               auto-following, a "↺ Follow" resume button once a manual pick
               parks the selection. Enabled in both — clicking while already
               following is a harmless no-op. */}
-          <div className="flex h-6 items-center justify-between px-2">
+          {/* R85: the same rubric + dashed-rule header the run stage's bands use
+              (FailingTests, Previous runs), so the rail's label band reads as a
+              header ABOVE the list instead of the list's first row. The rule is
+              what does the separating — the strip no longer needs a fixed
+              height, so the pill sizes to its own content and stops filling the
+              band edge to edge. `mb-1.5` puts real air between label and list;
+              the old 2px flex gap glued the button to "Repo scan". */}
+          <div className="mb-1.5 flex items-center gap-2 px-2">
             {/* "Steps", not "Stages": every tooltip and card in the pane says
                 "step" — one word for one thing. */}
-            <span className="cl-rubric leading-none">
+            <span className="cl-rubric shrink-0">
               Steps
             </span>
+            <span className="h-px flex-1 border-t border-dashed border-line" />
             <button
               type="button"
               data-testid={selectedStage === null ? 'rail-following' : 'rail-resume-follow'}
               aria-pressed={selectedStage === null}
               onClick={() => setSelectedStage(null)}
-              className="cl-button flex min-h-6 items-center gap-1 px-1.5 py-0.5 text-[10px] leading-none"
+              className="cl-button flex shrink-0 items-center gap-1 px-1.5 py-1 text-[10px] leading-none"
               style={selectedStage === null
                 ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))', background: 'var(--bg-selected)' }
                 : undefined}

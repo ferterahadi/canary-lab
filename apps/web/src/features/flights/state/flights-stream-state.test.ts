@@ -116,19 +116,31 @@ describe('flightsStreamReducer', () => {
 
   it('rebuilds the row field for field, stage rail included', () => {
     const row = flightIndexEntry(manifest({
-      opts: { env: 'local', coverageTarget: 100, yolo: false, group: 'cns' },
+      opts: { env: 'local', coverageTarget: 100, yolo: false, group: 'cns', stageProducer: 'external' },
+      status: 'waiting-for-approval',
       pauseReason: 'user',
       endedAt: '2026-01-02T00:00:00Z',
-      stages: [{ key: 'scout', status: 'done' }, { key: 'run', status: 'pending' }],
+      stages: [
+        {
+          key: 'scout',
+          status: 'waiting-for-approval',
+          checkpoint: { kind: 'external-work', message: 'scan', options: ['submit'] },
+        },
+        { key: 'run', status: 'pending' },
+      ],
     } as Partial<FlightManifest>))
     expect(row.id).toBe('fl_1')
     expect(row.group).toBe('cns')
     expect(row.pauseReason).toBe('user')
     expect(row.endedAt).toBe('2026-01-02T00:00:00Z')
+    // These fields decide whether a parked flight is active external work or a
+    // question for the person in the UI. An update frame must preserve both.
+    expect(row.checkpointKind).toBe('external-work')
+    expect(row.stageProducer).toBe('external')
     // The pill's mini rail reads `stages`; a row rebuilt without it would blank
     // the rail between the push and the next full list read.
     expect(row.stages).toEqual([
-      { key: 'scout', status: 'done' },
+      { key: 'scout', status: 'waiting-for-approval' },
       { key: 'run', status: 'pending' },
     ])
   })
