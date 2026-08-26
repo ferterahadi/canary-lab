@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '@/shared/api/client'
+import { readableTest } from '@/shared/api/__fixtures__/readable-test'
 import type { CoverageLedger } from '@/shared/api/types'
 import { CoverageLedgerPage } from './CoverageLedgerPage'
 
@@ -104,7 +105,7 @@ beforeEach(() => {
   vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: true })
   vi.mocked(api.listCoverageJobs).mockResolvedValue([]) // no running job by default
   vi.mocked(api.getFeatureTests).mockResolvedValue([
-    { file: '/repo/features/checkout/e2e/cart.spec.ts', tests: [{ name: 'adds item', line: 10, bodySource: 'await page.goto("/cart")\nexpect(items).toHaveLength(1)', steps: [] }] },
+    { file: '/repo/features/checkout/e2e/cart.spec.ts', tests: [{ name: 'adds item', line: 10, bodySource: 'await page.goto("/cart")\nexpect(items).toHaveLength(1)', steps: [], readable: readableTest('adds item') }] },
   ])
   vi.mocked(api.openEditor).mockResolvedValue({ opened: true, editor: 'vscode' })
 })

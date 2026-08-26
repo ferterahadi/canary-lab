@@ -1,7 +1,7 @@
 # Canary Lab Product Requirements
 
 > **Status:** reverse-engineered from the README, changelog, user guide, and
-> current codebase (package version 2.0.0). This is the product-intent reference
+> current codebase (product scope through 2.1.0). This is the product-intent reference
 > for contributors and agents. Update it with every behavior change.
 
 ## Positioning
@@ -31,6 +31,12 @@ Failed tests normally scatter context across terminals and artifacts. Canary Lab
 keeps one run's results, logs, screenshots, traces, videos, services, applied
 environment, repair notes, and fixes under one run ID. The agent receives this
 evidence, fixes the app, and continues the same run.
+
+Reading what a test actually does should not require mentally executing
+Playwright JavaScript. Canary Lab derives a plain-English tree from the parsed
+test source and shows it by default in the Test and Coverage ledgers. The tree
+retains control flow and exact source ranges; syntax that cannot be described
+safely stays visible as source instead of receiving a guessed meaning.
 
 ## Users
 
@@ -81,6 +87,12 @@ cross-cutting.
   request; opt out with `autoProposePr`.
 - Boot-only sessions start services without tests.
 - Envsets switch between environments without hand-editing `.env`.
+- Tests open as deterministic plain-English actions, checks, authored steps,
+  branches, and loops. Code remains one click away, and selecting an English
+  node reveals the exact source range.
+- Readable Tests are generated from the current source during test extraction.
+  They do not call an LLM, persist a second translation file, or attach runner
+  status to static child steps.
 
 ### [Test Generation]
 
@@ -138,6 +150,9 @@ These expectations shape reviews; several are code invariants (see [ARCHITECTURE
    programmatically.
 4. **Result-driven guidance.** `initialize` instructions and tool results (`nextSteps`, `boot_session`, collision choices) must guide an agent without installed skills, including blocking on `wait_for_heal_task` instead of polling.
 5. **Narrow ownership.** New capabilities own run context—services, envs, artifacts, and signals—without taking over Playwright's role.
+6. **Readable without invention.** English test descriptions come only from
+   authored labels and deterministic syntax rules. Unsupported syntax remains
+   exact source, and every readable node links back to its source range.
 
 ## Glossary
 
@@ -154,3 +169,4 @@ These expectations shape reviews; several are code invariants (see [ARCHITECTURE
 | **Requirement coverage** | Claim-based mapping of requirements to tests, paths, and variants. Latest-run proof is a separate additive axis and does not change the semantic gap type. |
 | **Verification (Verify)** | Running a feature's tests against a deployed environment to confirm it works end-to-end — no local boot, no heal |
 | **Evaluation export** | A rendered archive of a terminal run. Wording may come directly from evidence, a local rewrite agent, or an external MCP client. |
+| **Readable Test** | A deterministic English tree derived from one Playwright test's source, with nested control flow, fidelity labels, and exact source ranges. |

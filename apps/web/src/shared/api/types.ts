@@ -27,6 +27,7 @@ import type {
   FlightStageKey,
   FlightStatus,
 } from '@shared/flights/types'
+import type { ReadableTest } from '@shared/readable-tests/types'
 import type { ExternalHealClientKind } from './types-runs'
 
 export type { CleanupListing, CleanupOrphan, CleanupRunEntry, CleanupWorktree, PortifyCleanupEntry, PortifyCleanupListing } from './types-cleanup'
@@ -62,6 +63,21 @@ export type {
   VerificationRunMetadata,
   VerificationTarget,
 } from '@shared/verification'
+
+export type {
+  ReadableBranchNode,
+  ReadableBranchPath,
+  ReadableCompleteness,
+  ReadableFidelity,
+  ReadableGroupNode,
+  ReadableLeafNode,
+  ReadableLeafRole,
+  ReadableLoopKind,
+  ReadableLoopNode,
+  ReadableNode,
+  ReadableSource,
+  ReadableTest,
+} from '@shared/readable-tests/types'
 
 export interface FeatureRepo {
   name: string
@@ -160,7 +176,10 @@ export interface ExtractedTest {
   name: string
   line: number
   bodySource: string
+  /** First source line represented by bodySource. Older payloads omit it. */
+  bodyLine?: number
   steps: ExtractedStep[]
+  readable: ReadableTest
   // Set when the test is defined in a helper file (e.g. a factory) rather
   // than the spec file that owns it. Click-throughs in the UI prefer this
   // path so the code viewer lands at the actual definition site.

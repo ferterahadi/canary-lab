@@ -24,6 +24,27 @@ the suite, repair failures, and export the evaluation. An external MCP client
 can instead author specs through `start_external_draft` →
 `update_external_draft_stage` → `apply_external_draft`.
 
+## Readable tests
+
+The Test Ledger and Coverage Ledger open each Playwright test in English by
+default. Choose **Code** to see the original source. Selecting an English node
+opens Code at that node's exact file and line range; helper steps can point to a
+different source file from the test that called them.
+
+Canary Lab builds this representation deterministically while it parses the
+current test source:
+
+- Playwright actions, assertions, and semantic locators use fixed syntax rules.
+- Literal `test.step` labels stay authored text. Helpers, branches, switch
+  paths, and all JavaScript loop forms stay nested instead of being flattened.
+- Every node records whether its wording is authored, rule-derived, or
+  unresolved. Unresolved syntax shows the exact source snippet immediately.
+- No LLM request is made, and no translation sidecar is stored. Existing tests
+  receive the English view automatically the next time the tests payload is
+  extracted; each screen only keeps its normal in-memory fetch cache.
+- Pass, fail, running, and changed-test states remain attached to the real test.
+  Static English child nodes never claim execution evidence they do not have.
+
 ## Folder layout
 
 ```text

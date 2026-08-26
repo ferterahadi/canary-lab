@@ -1,10 +1,14 @@
-import ts from 'typescript'
+import type { ReadableBranchPath, ReadableNode } from '../../../../../../../shared/readable-tests/types'
+import { translateReadableTest, type ReadableHelperInput } from '../../../../shared/readable-tests/translator'
 import { qualitySummary } from './assertions'
+import { sourceKey } from './ast'
 import { renderFlowchartSvg } from './flowchart-svg'
 import { deterministicEvaluationRewrite, normalizeEvaluationRewrite } from './rewrite'
 import { flattenHelpers } from './source-analysis'
-import { cleanSnippet, inline } from './text'
-import type { EvaluationRewrite, EvaluationRewriteFlowStep, FlowNode, HelperDefinition, TestFlowchart, TestReviewCase, TestReviewPacket } from './types'
+import { cleanSnippet } from './text'
+import type { EvaluationRewrite, EvaluationRewriteFlowStep, FlowNode, TestFlowchart, TestReviewCase, TestReviewPacket } from './types'
+
+export { calledNameFromText, isMeaningfulFlowStatement, setupLikeStatement } from '../../../../shared/readable-tests/language'
 
 export function createFlowcharts(packet: TestReviewPacket, rewrite: EvaluationRewrite): TestFlowchart[] {
   return packet.tests.map((test, idx) => {
@@ -46,7 +50,29 @@ export function flowNodesForTest(test: TestReviewCase): FlowNode[] {
       { kind: 'end', title: `Result: ${test.status}` },
     ]
   }
-  const allSteps = testBodyStatements(test).map((statement) => flowNodeForStatement(statement.text, test, statement.line))
+  const rootFile = sourceFileFor(test)
+  const readable = translateReadableTest({
+    file: rootFile,
+    title: test.title,
+    bodySource: test.testBody,
+    // Evaluation displays the callback body itself, including its opening brace,
+    // so body-relative lines keep flow-node clicks aligned with that code block.
+    startLine: 1,
+    helpers: readableHelpers(test),
+  })
+  const translatedSteps = readable.nodes.flatMap((node) => flowNodesForReadable(node, rootFile))
+  const allSteps = translatedSteps.length || /^\s*\{\s*\}\s*$/.test(test.testBody)
+    ? translatedSteps
+    : test.testBody
+        .split('\n')
+        .map((line, idx): FlowNode => ({
+          kind: 'action',
+          title: 'Review this source step',
+          detail: cleanSnippet(line),
+          codeLine: idx + 1,
+          readable: true,
+        }))
+        .filter((node) => node.detail)
   const stepNodes: FlowNode[] = allSteps.length > MAX_FLOW_STEPS
     ? [
         ...allSteps.slice(0, MAX_FLOW_STEPS),
@@ -60,94 +86,56 @@ export function flowNodesForTest(test: TestReviewCase): FlowNode[] {
   ]
 }
 
-// A leaf statement reads as a flow step when it DOES something — an `await` or a
-// call (awaited actions, helper calls, `expect(...)` assertions). Pure literal /
-// identifier declarations (`const url = '…'`) are flow noise and are dropped.
-export function isMeaningfulFlowStatement(node: ts.Node): boolean {
-  let found = false
-  const visit = (n: ts.Node): void => {
-    if (found) return
-    if (ts.isCallExpression(n) || ts.isAwaitExpression(n) || ts.isNewExpression(n)) { found = true; return }
-    n.forEachChild(visit)
-  }
-  visit(node)
-  return found
+function sourceFileFor(test: TestReviewCase): string {
+  const location = sourceKey(test.location ?? '')
+  const match = location.match(/^(.*):\d+$/)
+  return match?.[1] || 'evaluation.spec.ts'
 }
 
-export function testBodyStatements(test: TestReviewCase): Array<{ text: string; line: number }> {
-  const wrapped = `async function __canaryReviewBody() ${test.testBody}`
-  const src = ts.createSourceFile('assertion-flow.ts', wrapped, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
-  const fn = src.statements.find(ts.isFunctionDeclaration)
-  if (!fn?.body) {
-    return test.testBody
-      .split('\n')
-      .map((line, idx) => ({ text: cleanSnippet(line), line: idx + 1 }))
-      .filter((item) => item.text)
-  }
-  // Flatten control-flow containers so a test wrapped in `try {…}` (or if/loops)
-  // surfaces its real steps in source order instead of collapsing into one node.
-  // We descend into statement containers only — never into expressions / arrow
-  // callbacks — so a leaf stays one node.
-  const leaves: ts.Statement[] = []
-  const walk = (stmt: ts.Statement): void => {
-    if (ts.isBlock(stmt)) { stmt.statements.forEach(walk); return }
-    if (ts.isTryStatement(stmt)) {
-      walk(stmt.tryBlock)
-      if (stmt.catchClause) walk(stmt.catchClause.block)
-      if (stmt.finallyBlock) walk(stmt.finallyBlock)
-      return
-    }
-    if (ts.isIfStatement(stmt)) {
-      walk(stmt.thenStatement)
-      if (stmt.elseStatement) walk(stmt.elseStatement)
-      return
-    }
-    if (ts.isIterationStatement(stmt, false)) { walk(stmt.statement); return }
-    leaves.push(stmt)
-  }
-  fn.body.statements.forEach(walk)
-  return leaves
-    .filter(isMeaningfulFlowStatement)
-    .map((statement) => ({
-      text: cleanSnippet(statement.getText(src)),
-      line: src.getLineAndCharacterOfPosition(statement.getStart(src)).line + 1,
-    }))
+function readableHelpers(test: TestReviewCase): ReadableHelperInput[] {
+  return flattenHelpers(test.helperDefinitions).flatMap((helper) => helper.bodySource
+    ? [{
+        name: helper.name,
+        file: helper.file,
+        bodySource: helper.bodySource,
+        startLine: helper.startLine,
+      }]
+    : [])
 }
 
-export function flowNodeForStatement(statement: string, test: TestReviewCase, codeLine: number): FlowNode {
-  const assertion = test.assertions.find((item) => item.snippet === statement || statement.includes(item.snippet) || item.snippet.includes(statement))
-  if (assertion) {
-    return { kind: 'assertion', title: `${assertion.quality} assertion`, detail: inline(assertion.snippet), codeLine }
-  }
-  const helper = helperForStatement(statement, test)
-  if (helper) {
-    const nestedCount = helper.assertions.length + helper.dependencies.reduce((count, dep) => count + flattenHelpers([dep]).reduce((sum, item) => sum + item.assertions.length, 0), 0)
-    return {
-      kind: 'helper',
-      title: `Helper: ${helper.name}`,
-      detail: nestedCount ? `${nestedCount} nested assertion${nestedCount === 1 ? '' : 's'}` : inline(statement),
-      codeLine,
-    }
-  }
+function flowKind(node: ReadableNode): FlowNode['kind'] {
+  if (node.kind !== 'leaf') return node.kind === 'group' ? 'helper' : 'action'
+  if (node.role === 'check') return 'assertion'
+  if (node.role === 'setup') return 'setup'
+  if (node.role === 'helper') return 'helper'
+  return 'action'
+}
+
+function readableFlowNode(
+  node: ReadableNode | ReadableBranchPath,
+  rootFile: string,
+  kind: FlowNode['kind'],
+): FlowNode {
   return {
-    kind: setupLikeStatement(statement) ? 'setup' : 'action',
-    title: setupLikeStatement(statement) ? 'Setup' : 'Action',
-    detail: inline(statement),
-    codeLine,
+    kind,
+    title: node.text,
+    detail: node.source.snippet,
+    ...(node.source.file === rootFile ? { codeLine: node.source.startLine } : {}),
+    readable: true,
   }
 }
 
-export function helperForStatement(statement: string, test: TestReviewCase): HelperDefinition | undefined {
-  const helperName = calledNameFromText(statement)
-  if (!helperName) return undefined
-  return flattenHelpers(test.helperDefinitions).find((helper) => helper.name === helperName || statement.includes(helper.name))
-}
-
-export function calledNameFromText(statement: string): string | undefined {
-  const match = statement.match(/(?:await\s+|return\s+)?(?:\(?\s*)?([A-Za-z_$][\w$]*)\s*\(/)
-  return match?.[1]
-}
-
-export function setupLikeStatement(statement: string): boolean {
-  return /\b(route|mock|intercept|fixture|seed|login|storageState|setExtraHTTPHeaders|addInitScript)\b/i.test(statement)
+function flowNodesForReadable(node: ReadableNode, rootFile: string): FlowNode[] {
+  const current = readableFlowNode(node, rootFile, flowKind(node))
+  if (node.kind === 'leaf') return [current]
+  if (node.kind === 'group' || node.kind === 'loop') {
+    return [current, ...node.children.flatMap((child) => flowNodesForReadable(child, rootFile))]
+  }
+  return [
+    current,
+    ...node.paths.flatMap((path) => [
+      readableFlowNode(path, rootFile, 'setup'),
+      ...path.children.flatMap((child) => flowNodesForReadable(child, rootFile)),
+    ]),
+  ]
 }

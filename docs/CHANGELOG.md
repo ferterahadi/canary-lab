@@ -15,6 +15,14 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 2.1.0 — 2026-08-26
+
+- **[General]** **Playwright tests now open in plain English.** The Test Ledger renders authored steps, actions, checks, branches, helpers, and loops as a nested readable tree. Code remains one click away.
+- **[Coverage]** **Coverage uses the same readable test view.** Selecting any English node reveals its exact source file and line range without changing the ledger's requirement or latest-run evidence.
+- **[General]** **Readable Tests are fast and deterministic.** They are derived from the current JavaScript or TypeScript syntax without an LLM or stored translation. Existing tests gain the view automatically, and unsupported syntax stays visible as exact source instead of being guessed.
+
+---
+
 ## 2.0.1 — 2026-08-25
 
 - **[General]** **Getting started now begins in Claude or Codex.** The README leads with `/canary-lab` and keeps npm commands for one-time setup and terminal automation.

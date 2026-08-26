@@ -261,6 +261,7 @@ describe('test review export', () => {
     expect(__testReviewExportInternals.readableAction('await page.click()', packet.tests[0])).toBe('Click the relevant control')
     expect(__testReviewExportInternals.readableAction('await page.fill()', packet.tests[0])).toBe('Enter the required value')
     expect(__testReviewExportInternals.readableAction('await page.waitForURL(/done/)', packet.tests[0])).toBe('Wait for for url')
+    expect(__testReviewExportInternals.readableAction('test.skip()', packet.tests[0])).toBe('Skip if required test setup is missing')
     expect(__testReviewExportInternals.readableAction('route request', packet.tests[0])).toBe('Prepare test data or mocks')
     expect(__testReviewExportInternals.readableAction('void anything', packet.tests[0])).toBe('Passes checkout')
 

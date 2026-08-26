@@ -1,6 +1,6 @@
 import { type KeyboardEvent as ReactKeyboardEvent, useState } from 'react'
-import type { CoverageLedger, CoverageStatus, GapType, RequirementCoverage, TestCoverage, TestStrength } from '@/shared/api/types'
-import { ShikiCode } from '@/shared/ui/TestCodeBlock'
+import type { CoverageLedger, CoverageStatus, ExtractedTest, GapType, RequirementCoverage, TestCoverage, TestStrength } from '@/shared/api/types'
+import { TestPresentation } from '@/shared/ui/TestPresentation'
 import { TestIdBadge } from '@/shared/ui/TestIdBadge'
 import { stripLeadingTestOrdinal } from '@/shared/test-numbering'
 
@@ -319,7 +319,7 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
   dimmed: boolean
   onHover: (on: boolean) => void
   onExpand: () => void
-  source: { body: string; absFile: string; line: number } | null
+  source: { test: ExtractedTest; absFile: string } | null
   sourceLoading: boolean
   sourceError: string | null
   onOpenEditor: (absFile: string, line?: number) => void
@@ -410,15 +410,16 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
                   type="button"
                   className="clcov-source-open"
                   data-testid={`test-open-editor-${test.name}`}
-                  onClick={() => onOpenEditor(source.absFile, source.line)}
+                  onClick={() => onOpenEditor(source.absFile, source.test.line)}
                 >
                   Open in editor ↗
                 </button>
               </div>
-              {/* Same syntax-highlighted code block as the run/playback view
-                  (ShikiCode), but static: no activeLine / runningHighlight, so it
-                  never shows a "currently running" line — coverage isn't a run. */}
-              <ShikiCode source={source.body} />
+              <TestPresentation
+                test={source.test}
+                sourceFile={source.absFile}
+                showCodeOpenButton={false}
+              />
             </>
           ) : sourceLoading ? (
             <div className="clcov-source-note">Loading source…</div>

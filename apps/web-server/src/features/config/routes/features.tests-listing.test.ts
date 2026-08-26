@@ -117,8 +117,19 @@ describe('GET /api/features/:name/tests', () => {
     const app = await build({ spawner })
     const res = await app.inject({ method: 'GET', url: '/api/features/deepboth/tests' })
     expect(res.statusCode).toBe(200)
-    const body = res.json() as Array<{ tests: Array<{ name: string }>; parseError?: string }>
+    const body = res.json() as Array<{
+      tests: Array<{
+        name: string
+        readable: { title: string; completeness: string; nodes: unknown[] }
+      }>
+      parseError?: string
+    }>
     expect(body[0].tests[0].name).toBe('deep')
+    expect(body[0].tests[0].readable).toEqual(expect.objectContaining({
+      title: 'deep',
+      completeness: 'complete',
+      nodes: [],
+    }))
     expect(body[0].parseError).toBeTruthy()
   })
 
@@ -162,10 +173,12 @@ describe('GET /api/features/:name/tests', () => {
     const app = await build({ spawner })
     const res = await app.inject({ method: 'GET', url: '/api/features/sharedhelper/tests' })
     expect(res.statusCode).toBe(200)
-    const body = res.json() as Array<{ tests: Array<{ name: string; sourceFile?: string }> }>
+    const body = res.json() as Array<{ tests: Array<{ name: string; sourceFile?: string; readable: { title: string; nodes: unknown[] } }> }>
     expect(body[0].tests.map((t) => t.name)).toEqual(['first inner', 'second inner'])
     expect(body[0].tests[0].sourceFile).toBe(helperFile)
     expect(body[0].tests[1].sourceFile).toBe(helperFile)
+    expect(body[0].tests.map((test) => test.readable.title)).toEqual(['first inner', 'second inner'])
+    expect(body[0].tests.every((test) => test.readable.nodes.length === 0)).toBe(true)
   })
 
   it('returns an empty env (no envName) when the first feature env is undefined', async () => {

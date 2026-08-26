@@ -11,7 +11,8 @@ import {
   summaryEntryName,
 } from '@/features/runs'
 import type { RunSummary, RunSummaryRunningStep } from '../api/types'
-import { ShikiCode, StepStatusBadge, StepBlock } from '../ui/TestCodeBlock'
+import { StepStatusBadge } from '../ui/TestCodeBlock'
+import { TestPresentation } from '../ui/TestPresentation'
 import { TestIdBadge } from '../ui/TestIdBadge'
 import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
 import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
@@ -162,7 +163,6 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
                   summary: isRunActivelyTesting ? activeRunSummary : undefined,
                   sourceFile: t.sourceFile ?? spec.file,
                 })
-                const activeSourceLine = activeLine == null ? null : t.line + activeLine - 1
                 return (
                   <TestCard
                     key={key}
@@ -178,7 +178,6 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
                     isRunningTest={isRunningTest}
                     runningStep={runningTest?.step}
                     activeLine={activeLine}
-                    activeSourceLine={activeSourceLine}
                     expanded={isExpanded}
                     dirty={testDirty}
                     changedLines={changedLines}
@@ -236,7 +235,6 @@ function TestCard({
   isRunningTest,
   runningStep,
   activeLine,
-  activeSourceLine,
   expanded,
   dirty = false,
   changedLines,
@@ -250,7 +248,6 @@ function TestCard({
   isRunningTest: boolean
   runningStep?: RunSummaryRunningStep
   activeLine?: number | null
-  activeSourceLine?: number | null
   expanded: boolean
   dirty?: boolean
   /** Lines in `test.bodySource` that differ from the git HEAD version — see
@@ -321,45 +318,26 @@ function TestCard({
                 : `Running from ${shortLocation(runningLocation)}`}
             </div>
           )}
-          {test.steps.length > 0 ? (
-            <ul className="space-y-1.5 pl-3" style={{ borderLeft: '1px solid var(--border-default)' }}>
-              {test.steps.map((s, i) => (
-                <StepBlock
-                  key={`${s.line}:${i}`}
-                  step={s}
-                  status={status}
-                  depth={0}
-                  sourceFile={sourceFile}
-                  runningSourceLine={isRunningTest ? activeSourceLine : null}
-                />
-              ))}
-            </ul>
-          ) : test.bodySource ? (
-            <div
-              style={
-                isRunningTest && activeLine == null
-                  ? {
-                      borderRadius: 6,
-                      padding: 2,
-                      background: 'color-mix(in srgb, var(--warning) 12%, transparent)',
-                      boxShadow: 'inset 0 0 0 1px var(--warning), inset 3px 0 0 var(--warning)',
-                    }
-                  : undefined
-              }
-            >
-              <ShikiCode
-                source={test.bodySource}
-                activeLine={activeLine}
-                sourceLocation={{ file: sourceFile, startLine: test.line }}
-                runningHighlight={isRunningTest}
-                changedLines={changedLines}
-              />
-            </div>
-          ) : (
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              No test body available.
-            </div>
-          )}
+          <div
+            style={
+              isRunningTest && activeLine == null
+                ? {
+                    borderRadius: 6,
+                    padding: 2,
+                    background: 'color-mix(in srgb, var(--warning) 12%, transparent)',
+                    boxShadow: 'inset 0 0 0 1px var(--warning), inset 3px 0 0 var(--warning)',
+                  }
+                : undefined
+            }
+          >
+            <TestPresentation
+              test={test}
+              sourceFile={sourceFile}
+              activeLine={activeLine}
+              runningHighlight={isRunningTest}
+              changedLines={changedLines}
+            />
+          </div>
         </div>
       )}
     </div>

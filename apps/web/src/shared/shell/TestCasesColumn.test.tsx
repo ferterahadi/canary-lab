@@ -7,6 +7,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError, getFeatureDirtyDiff, getFeatureTests } from '../api/client'
+import { readableTest } from '../api/__fixtures__/readable-test'
 
 import type { FeatureTests } from '../api/types'
 
@@ -89,8 +90,21 @@ describe('TestCasesColumn', () => {
           {
             name: 'loads checkout',
             line: 3,
-            bodySource: '',
+            bodySource: "{\n  await page.goto('/checkout')\n}",
             steps: [],
+            readable: readableTest('loads checkout', [{
+              id: 'open-checkout',
+              kind: 'leaf',
+              role: 'action',
+              text: 'Open “/checkout”',
+              fidelity: 'derived',
+              source: {
+                file: '/tmp/features/alpha/e2e/a.spec.ts',
+                startLine: 4,
+                endLine: 4,
+                snippet: "await page.goto('/checkout')",
+              },
+            }]),
           },
         ],
       },
@@ -102,19 +116,25 @@ describe('TestCasesColumn', () => {
 
     expect(container.textContent).toContain('loads checkout')
     expect(container.textContent).not.toContain('Loading...')
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('loads checkout'))?.click()
+    })
+    expect(container.querySelector('[data-testid="test-presentation-english"]')).not.toBeNull()
+    expect(container.textContent).toContain('Open “/checkout”')
+    expect(container.querySelector('[data-testid="test-presentation-code"]')).toBeNull()
   })
 
   it('numbers tests by source order and strips a baked-in ordinal from the title', async () => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {
         file: '/tmp/features/alpha/e2e/b.spec.ts',
-        tests: [{ name: 'zeta runs last alphabetically', line: 1, bodySource: '', steps: [] }],
+        tests: [{ name: 'zeta runs last alphabetically', line: 1, bodySource: '', steps: [], readable: readableTest('zeta runs last alphabetically') }],
       },
       {
         file: '/tmp/features/alpha/e2e/a.spec.ts',
         tests: [
-          { name: '1. gateway is healthy', line: 30, bodySource: '', steps: [] },
-          { name: 'happy path', line: 5, bodySource: '', steps: [] },
+          { name: '1. gateway is healthy', line: 30, bodySource: '', steps: [], readable: readableTest('1. gateway is healthy') },
+          { name: 'happy path', line: 5, bodySource: '', steps: [], readable: readableTest('happy path') },
         ],
       },
     ])
@@ -143,12 +163,14 @@ describe('TestCasesColumn', () => {
             line: 3,
             bodySource: '',
             steps: [],
+            readable: readableTest('loads checkout'),
           },
           {
             name: 'submits payment',
             line: 12,
             bodySource: '',
             steps: [],
+            readable: readableTest('submits payment'),
           },
         ],
       },
@@ -174,6 +196,7 @@ describe('TestCasesColumn', () => {
             line: 3,
             bodySource: '',
             steps: [],
+            readable: readableTest('loads checkout'),
           },
         ],
       },
@@ -197,6 +220,7 @@ describe('TestCasesColumn', () => {
             line: 3,
             bodySource: '',
             steps: [],
+            readable: readableTest('loads checkout'),
           },
         ],
       },
@@ -236,12 +260,14 @@ describe('TestCasesColumn', () => {
             line: 3,
             bodySource: '',
             steps: [],
+            readable: readableTest('loads checkout'),
           },
           {
             name: 'submits payment',
             line: 12,
             bodySource: '',
             steps: [],
+            readable: readableTest('submits payment'),
           },
         ],
       },
@@ -282,7 +308,7 @@ describe('TestCasesColumn', () => {
     expect(container.querySelectorAll('.border-running\\/50')).toHaveLength(2)
   })
 
-  it('shows the amber running-line highlight inside an expanded step body', async () => {
+  it('shows the amber running-line highlight inside the expanded Code view', async () => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {
         file: '/tmp/features/alpha/e2e/a.spec.ts',
@@ -291,6 +317,7 @@ describe('TestCasesColumn', () => {
             name: 'sends message',
             line: 3,
             bodySource: "{\n  await test.step('send', async () => {\n    const payload = createPayload()\n    await send(payload)\n  })\n}",
+            readable: readableTest('sends message'),
             steps: [
               {
                 label: 'send',
@@ -334,9 +361,8 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       testButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
-    const stepButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '▸sendL4')
     await act(async () => {
-      stepButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
     })
     await waitFor(() => Boolean(container.querySelector('[data-active-line="true"]')))
 
@@ -350,8 +376,8 @@ describe('TestCasesColumn', () => {
       {
         file: '/tmp/features/alpha/e2e/a.spec.ts',
         tests: [
-          { name: 'a', line: 3, bodySource: '', steps: [] },
-          { name: 'b', line: 12, bodySource: '', steps: [] },
+          { name: 'a', line: 3, bodySource: '', steps: [], readable: readableTest('a') },
+          { name: 'b', line: 12, bodySource: '', steps: [], readable: readableTest('b') },
         ],
       },
     ])
@@ -380,7 +406,7 @@ describe('TestCasesColumn', () => {
       {
         file: '/tmp/features/alpha/e2e/a.spec.ts',
         tests: [
-          { name: 'a', line: 3, bodySource: '{\n  const x = 1\n  expect(x).toBe(2)\n}', steps: [] },
+          { name: 'a', line: 3, bodySource: '{\n  const x = 1\n  expect(x).toBe(2)\n}', steps: [], readable: readableTest('a') },
         ],
       },
     ])
@@ -401,6 +427,9 @@ describe('TestCasesColumn', () => {
 
     await act(async () => {
       container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await act(async () => {
+      ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
     })
     await waitFor(() => Boolean(container.querySelector('[data-changed-line="true"]')))
 
@@ -440,6 +469,7 @@ describe('TestCasesColumn', () => {
             line: 14,
             bodySource: "{\n  await page.goto('/checkout')\n  await expect(page).toHaveURL(/checkout/)\n}",
             steps: [],
+            readable: readableTest('validates checkout'),
           },
         ],
       },
@@ -472,6 +502,9 @@ describe('TestCasesColumn', () => {
 
     await act(async () => {
       container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await act(async () => {
+      ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
     })
 
     expect(container.textContent).toContain("page.goto('/checkout')")

@@ -4,6 +4,7 @@ import path from 'path'
 import { loadFeatures, listSpecFiles } from '../../../shared/feature-loader'
 import { extractTestsFromSource, type ExtractedTest } from '../../../shared/ast-extractor'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
+import { translateReadableTest } from '../../../shared/readable-tests/translator'
 import type { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
 import { diffChangedLines } from '../../runs/logic/dirty-specs/text-diff'
 import { listPlaywrightTests, type PlaywrightListSpawner } from '../../runs/logic/playwright-list'
@@ -290,7 +291,16 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
             name: entry.title,
             line: isHelperDefined ? entry.originLine : entry.line,
             bodySource: fromAst?.bodySource ?? '',
+            bodyLine: fromAst?.bodyLine ?? (isHelperDefined ? entry.originLine : entry.line),
             steps: fromAst?.steps ?? [],
+            readable: fromAst
+              ? { ...fromAst.readable, title: entry.title }
+              : translateReadableTest({
+                  file: isHelperDefined ? entry.originFile : file,
+                  title: entry.title,
+                  bodySource: '',
+                  startLine: isHelperDefined ? entry.originLine : entry.line,
+                }),
           }
           if (isHelperDefined) test.sourceFile = entry.originFile
           return test
