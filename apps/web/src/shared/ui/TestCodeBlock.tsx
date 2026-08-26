@@ -26,11 +26,15 @@ export function ShikiCode({
   sourceLocation,
   runningHighlight,
   changedLines,
+  showOpenButton = true,
+  selectedSourceRange,
 }: {
   source: string
   activeLine?: number | null
   sourceLocation?: SourceLocation
   runningHighlight?: boolean
+  showOpenButton?: boolean
+  selectedSourceRange?: { startLine: number; endLine: number }
   /** 1-indexed body-relative line numbers (same convention as `activeLine`) to
    *  tint as changed — the diff-against-HEAD cue for a dirty test's body. Takes
    *  visual precedence over `activeLine`; the two aren't expected to co-occur
@@ -66,7 +70,7 @@ export function ShikiCode({
 
   if (html === null) {
     return (
-      <CodeShell sourceLocation={sourceLocation} openError={openError} onOpenStart={() => openAt(sourceLocation?.startLine ?? 1)}>
+      <CodeShell sourceLocation={sourceLocation} openError={openError} onOpenStart={() => openAt(sourceLocation?.startLine ?? 1)} showOpenButton={showOpenButton}>
         <pre className="cl-code-shell overflow-hidden whitespace-pre-wrap break-words rounded-md p-2 text-[11px]" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
           <code>{source}</code>
         </pre>
@@ -75,7 +79,7 @@ export function ShikiCode({
   }
 
   return (
-    <CodeShell sourceLocation={sourceLocation} openError={openError} onOpenStart={() => openAt(sourceLocation?.startLine ?? 1)}>
+    <CodeShell sourceLocation={sourceLocation} openError={openError} onOpenStart={() => openAt(sourceLocation?.startLine ?? 1)} showOpenButton={showOpenButton}>
       <div
         className={`shiki-block cl-code-shell overflow-hidden rounded-md text-[11px] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-running/10' : ''}`}
         onClick={(e) => {
@@ -85,7 +89,7 @@ export function ShikiCode({
         // Shiki has already escaped the source it highlighted; decorateShikiLines
         // only wraps those tokens in spans.
         // eslint-disable-next-line no-restricted-syntax
-        dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, activeLine, sourceLocation?.startLine, runningHighlight, changedLines) }}
+        dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, activeLine, sourceLocation?.startLine, runningHighlight, changedLines, selectedSourceRange) }}
       />
     </CodeShell>
   )
@@ -96,30 +100,34 @@ function CodeShell({
   sourceLocation,
   openError,
   onOpenStart,
+  showOpenButton,
 }: {
   children: ReactNode
   sourceLocation?: SourceLocation
   openError: string | null
   onOpenStart: () => void
+  showOpenButton: boolean
 }) {
   if (!sourceLocation) return <>{children}</>
   return (
     <div className="space-y-1">
       <div className="relative">
-        <button
-          type="button"
-          title="Open in editor"
-          aria-label="Open in editor"
-          onClick={onOpenStart}
-          className="cl-icon-button absolute right-1 top-1 z-10 h-6 w-6 text-[12px]"
-          style={{
-            border: '1px solid var(--border-default)',
-            background: 'color-mix(in srgb, var(--bg-surface) 92%, transparent)',
-            boxShadow: 'var(--shadow-panel)',
-          }}
-        >
-          ↗
-        </button>
+        {showOpenButton && (
+          <button
+            type="button"
+            title="Open in editor"
+            aria-label="Open in editor"
+            onClick={onOpenStart}
+            className="cl-icon-button absolute right-1 top-1 z-10 h-6 w-6 text-[12px]"
+            style={{
+              border: '1px solid var(--border-default)',
+              background: 'color-mix(in srgb, var(--bg-surface) 92%, transparent)',
+              boxShadow: 'var(--shadow-panel)',
+            }}
+          >
+            ↗
+          </button>
+        )}
         {children}
       </div>
       {openError && (
@@ -137,6 +145,7 @@ function decorateShikiLines(
   startLine?: number,
   runningHighlight?: boolean,
   changedLines?: Set<number>,
+  selectedSourceRange?: { startLine: number; endLine: number },
 ): string {
   let lineNo = 0
   const bg = runningHighlight
@@ -145,12 +154,20 @@ function decorateShikiLines(
   const bar = runningHighlight ? 'var(--warning)' : 'var(--running)'
   return html.replace(/<span class="line"/g, (match) => {
     lineNo += 1
-    const attrs = startLine ? ` data-source-line="${sourceLineForBodyLine(startLine, lineNo)}"` : ''
+    const sourceLine = startLine ? sourceLineForBodyLine(startLine, lineNo) : null
+    const selected = sourceLine != null && selectedSourceRange != null &&
+      sourceLine >= selectedSourceRange.startLine && sourceLine <= selectedSourceRange.endLine
+    const attrs = `${sourceLine ? ` data-source-line="${sourceLine}"` : ''}${selected ? ' data-selected-line="true"' : ''}`
     if (changedLines?.has(lineNo)) {
       return `<span class="line"${attrs} data-changed-line="true" style="display:block;margin:0 -0.5rem;padding:0 0.5rem;background:color-mix(in srgb, var(--danger) 16%, transparent);box-shadow:inset 2px 0 0 var(--danger)"`
     }
-    if (lineNo !== activeLine) return `${match}${attrs}`
-    return `<span class="line"${attrs} data-active-line="true" style="display:block;margin:0 -0.5rem;padding:0 0.5rem;background:${bg};box-shadow:inset 2px 0 0 ${bar}"`
+    if (lineNo === activeLine) {
+      return `<span class="line"${attrs} data-active-line="true" style="display:block;margin:0 -0.5rem;padding:0 0.5rem;background:${bg};box-shadow:inset 2px 0 0 ${bar}"`
+    }
+    if (selected) {
+      return `<span class="line"${attrs} style="display:block;margin:0 -0.5rem;padding:0 0.5rem;background:color-mix(in srgb, var(--accent) 14%, transparent);box-shadow:inset 2px 0 0 var(--accent)"`
+    }
+    return `${match}${attrs}`
   })
 }
 

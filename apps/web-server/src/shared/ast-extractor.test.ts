@@ -33,6 +33,16 @@ describe('extractTestsFromSource', () => {
     expect(r.tests[0].name).toBe('hello world')
     expect(r.tests[0].steps).toEqual([])
     expect(r.tests[0].line).toBeGreaterThan(0)
+    expect(r.tests[0].readable).toEqual(expect.objectContaining({
+      version: 1,
+      title: 'hello world',
+      completeness: 'complete',
+      nodes: [expect.objectContaining({
+        kind: 'leaf',
+        role: 'check',
+        text: 'Check that 1 equals 1',
+      })],
+    }))
   })
 
   it('extracts flat test.step calls inside a test', () => {
@@ -76,9 +86,96 @@ describe('extractTestsFromSource', () => {
     expect(r.tests[0].bodySource).toContain('expect(x).toBe(1)')
   })
 
+  it('records the callback body line separately from a multiline test call', () => {
+    const src = [
+      'test(',
+      "  'multiline declaration',",
+      '  async () => {',
+      '    await page.reload()',
+      '  },',
+      ')',
+    ].join('\n')
+
+    const test = extractTestsFromSource('a.spec.ts', src).tests[0]
+    expect(test.line).toBe(1)
+    expect(test.bodyLine).toBe(3)
+    expect(test.readable.nodes[0].source.startLine).toBe(4)
+  })
+
+  it('translates from the existing AST and expands top-level local helpers', () => {
+    const src = [
+      'async function loginAs(page, email) {',
+      "  await page.getByLabel('Email').fill(email)",
+      '}',
+      '',
+      "test('logs in', async ({ page }) => {",
+      "  await loginAs(page, 'ada@example.com')",
+      "  await expect(page.getByText('Welcome')).toBeVisible()",
+      '})',
+    ].join('\n')
+    const readable = extractTestsFromSource('account.spec.ts', src).tests[0].readable
+
+    expect(readable.completeness).toBe('complete')
+    expect(readable.nodes).toEqual([
+      expect.objectContaining({
+        kind: 'group',
+        text: 'Login as',
+        source: expect.objectContaining({ file: 'account.spec.ts', startLine: 6 }),
+        children: [expect.objectContaining({
+          text: 'Enter email in the control labelled “Email”',
+          source: expect.objectContaining({ file: 'account.spec.ts', startLine: 2 }),
+        })],
+      }),
+      expect.objectContaining({
+        kind: 'leaf',
+        role: 'check',
+        text: 'Check that the text “Welcome” is visible',
+        source: expect.objectContaining({ file: 'account.spec.ts', startLine: 7 }),
+      }),
+    ])
+  })
+
+  it('collects top-level arrow and function-expression helpers once', () => {
+    const src = [
+      'declare function declaredOnly(): void',
+      'export default function () {}',
+      "async function duplicate(page) { await page.getByText('First').click() }",
+      "async function duplicate(page) { await page.getByText('Ignored').click() }",
+      "const arrowHelper = async (page) => { await page.getByLabel('Email').fill('ada@example.com') }",
+      "const functionHelper = async function (page) { await page.getByRole('button', { name: 'Save' }).click() }",
+      'const [ignoredHelper] = [async () => {}]',
+      'const notAHelper = 42',
+      '',
+      "test('uses local helpers', async ({ page }) => {",
+      '  await duplicate(page)',
+      '  await arrowHelper(page)',
+      '  await functionHelper(page)',
+      '})',
+    ].join('\n')
+
+    const readable = extractTestsFromSource('helpers.spec.ts', src).tests[0].readable
+    expect(readable.nodes).toEqual([
+      expect.objectContaining({
+        kind: 'group',
+        text: 'Duplicate',
+        children: [expect.objectContaining({ text: 'Click the text “First”' })],
+      }),
+      expect.objectContaining({
+        kind: 'group',
+        text: 'Arrow helper',
+        children: [expect.objectContaining({ text: 'Enter “ada@example.com” in the control labelled “Email”' })],
+      }),
+      expect.objectContaining({
+        kind: 'group',
+        text: 'Function helper',
+        children: [expect.objectContaining({ text: 'Click the “Save” button' })],
+      }),
+    ])
+  })
+
   it('keeps bodySource line-for-line with the source so highlights map 1:1', () => {
     // The live test view highlights the running line and resolves "open in
-    // editor" by adding a body-line offset to the test's start line, so body
+    // editor" by adding a body-line offset to the callback body's start line, so body
     // line N must correspond to source line N. A blank line between statements
     // must therefore be preserved — re-printing the AST would drop it and
     // shift every subsequent line.
@@ -163,6 +260,22 @@ describe('extractTestsFromSource', () => {
     expect(r.tests[0].name).toBe('plain title')
     expect(r.tests[0].bodySource).toBe('')
     expect(r.tests[0].steps).toEqual([])
+  })
+
+  it('translates an expression-bodied test callback from its exact source line', () => {
+    const r = extractTestsFromSource(
+      'a.spec.ts',
+      ["test('expression body',", "  async () => expect(1).toBe(1))"].join('\n'),
+    )
+
+    expect(r.tests[0].bodyLine).toBe(2)
+    expect(r.tests[0].bodySource).toBe('expect(1).toBe(1)')
+    expect(r.tests[0].readable.nodes[0]).toEqual(expect.objectContaining({
+      kind: 'leaf',
+      role: 'check',
+      text: 'Check that 1 equals 1',
+      source: expect.objectContaining({ startLine: 2, endLine: 2 }),
+    }))
   })
 
   it('stringifies a non-Error thrown during parsing', () => {

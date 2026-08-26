@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '@/shared/api/client'
+import { readableTest } from '@/shared/api/__fixtures__/readable-test'
 import { CoverageLedgerPage } from './CoverageLedgerPage'
 
 ;
@@ -61,7 +62,28 @@ beforeEach(() => {
   vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: true })
   vi.mocked(api.listCoverageJobs).mockResolvedValue([]) // no running job by default
   vi.mocked(api.getFeatureTests).mockResolvedValue([
-    { file: '/repo/features/checkout/e2e/cart.spec.ts', tests: [{ name: 'adds item', line: 10, bodySource: 'await page.goto("/cart")\nexpect(items).toHaveLength(1)', steps: [] }] },
+    {
+      file: '/repo/features/checkout/e2e/cart.spec.ts',
+      tests: [{
+        name: 'adds item',
+        line: 10,
+        bodySource: 'await page.goto("/cart")\nexpect(items).toHaveLength(1)',
+        steps: [],
+        readable: readableTest('adds item', [{
+          id: 'open-cart',
+          kind: 'leaf',
+          role: 'action',
+          text: 'Open “/cart”',
+          fidelity: 'derived',
+          source: {
+            file: '/repo/features/checkout/e2e/cart.spec.ts',
+            startLine: 10,
+            endLine: 10,
+            snippet: 'await page.goto("/cart")',
+          },
+        }]),
+      }],
+    },
   ])
   vi.mocked(api.openEditor).mockResolvedValue({ opened: true, editor: 'vscode' })
 })
@@ -411,7 +433,7 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="req-toggle-R3"]')).toBeNull()
   })
 
-  it('expands a test to fetch and render its source, lazily', async () => {
+  it('expands a test to fetch its shared English presentation lazily, with Code one action away', async () => {
     await mount()
     // Not fetched until first expand.
     expect(api.getFeatureTests).not.toHaveBeenCalled()
@@ -421,6 +443,13 @@ describe('CoverageLedgerPage', () => {
     })
     expect(api.getFeatureTests).toHaveBeenCalledWith('checkout')
     const src = container.querySelector('[data-testid="test-source-adds item"]')
+    expect(src?.querySelector('[data-testid="test-presentation-english"]')).not.toBeNull()
+    expect(src?.textContent).toContain('Open “/cart”')
+    expect(src?.querySelector('[data-testid="test-presentation-code"]')).toBeNull()
+    await act(async () => {
+      ;(src?.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
+      await Promise.resolve()
+    })
     expect(src?.textContent).toContain('await page.goto("/cart")')
     expect(src?.textContent).toContain('expect(items).toHaveLength(1)')
   })

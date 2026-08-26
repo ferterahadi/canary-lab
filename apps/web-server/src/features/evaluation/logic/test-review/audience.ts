@@ -1,9 +1,25 @@
-import path from 'path'
-import ts from 'typescript'
 import { sourceKey } from './ast'
-import { calledNameFromText } from './flowchart'
-import { displayWord, humanizeIdentifier, identifierWords, looksLikeIdentifier, readableHelperName, sentenceCase, splitAnnotations } from './text'
+import {
+  actionFromIdentifier,
+  assignedNameFromStatement,
+  calledNameFromText,
+  humanizeIdentifier,
+  looksLikeIdentifier,
+  readableActionName,
+  readableCreatedObject,
+  readableObject,
+  sentenceCase,
+} from '../../../../shared/readable-tests/language'
+import { splitAnnotations } from './text'
 import type { FlowNode, TestReviewCase } from './types'
+
+export {
+  actionFromIdentifier,
+  assignedNameFromStatement,
+  readableActionName,
+  readableCreatedObject,
+  readableObject,
+} from '../../../../shared/readable-tests/language'
 
 export function audienceTitle(title: string): string {
   const cleaned = title
@@ -21,6 +37,7 @@ export function audienceTitle(title: string): string {
 }
 
 export function audienceFlowTitle(node: FlowNode, test: TestReviewCase): string {
+  if (node.readable) return node.title
   if (node.kind === 'start') return 'Start the scenario'
   if (node.kind === 'end') return node.title.replace(/^Result:/, 'Run result:')
   if (node.kind === 'assertion') return 'Check the expected outcome'
@@ -62,56 +79,6 @@ export function readableAction(statement: string, test: TestReviewCase): string 
   if (/\bfill\b/i.test(statement)) return 'Enter the required value'
   if (/\bwaitForURL\b/i.test(statement)) return 'Wait for the expected page'
   return sentenceCase(audienceTitle(test.title))
-}
-
-export function readableActionName(name: string, statement: string): string {
-  if (/\bnew\s+Date\b/.test(statement)) return 'Record the start time'
-  const action = actionFromIdentifier(name, assignedNameFromStatement(statement))
-  return action ? sentenceCase(action) : 'Run the next step'
-}
-
-export function actionFromIdentifier(name: string, assignedName?: string): string {
-  const words = identifierWords(name)
-  if (!words.length) return ''
-  const first = words[0]
-  const rest = words.slice(1)
-  if (first === 'expect' || first === 'assert' || first === 'check') return `check ${readableObject(rest) || 'the expected outcome'}`
-  if (first === 'mock') return `prepare ${readableObject(rest) || 'test data'}`
-  if (first === 'create' || first === 'make' || first === 'build' || first === 'generate' || first === 'prepare') {
-    return `prepare ${readableCreatedObject(rest, assignedName)}`
-  }
-  if (first === 'send' || first === 'post' || first === 'submit' || first === 'publish') {
-    return `send ${readableObject(rest.filter((word) => word !== 'send' && word !== 'post')) || 'the request'}`
-  }
-  if (first === 'query' || first === 'read' || first === 'fetch' || first === 'get' || first === 'find') {
-    return `read ${readableObject(rest) || 'the saved record'}`
-  }
-  if (first === 'poll' || first === 'wait') return `wait for ${readableObject(rest) || 'the expected result'}`
-  if (first === 'toggle' || first === 'enable' || first === 'disable' || first === 'restore' || first === 'update' || first === 'upsert') {
-    return `${first} ${readableObject(rest) || 'test data'}`
-  }
-  if (first === 'with') return `check ${readableObject(rest) || 'the related records'}`
-  if (words.includes('click')) return 'click the relevant control'
-  if (words.includes('fill')) return 'enter the required value'
-  return readableObject(words)
-}
-
-export function readableCreatedObject(words: string[], assignedName?: string): string {
-  const targetWords = words.length ? words : identifierWords(assignedName ?? '')
-  if (targetWords.includes('id') || targetWords.includes('ids')) return 'unique identifiers'
-  return readableObject(targetWords) || 'test data'
-}
-
-export function readableObject(words: string[]): string {
-  return words
-    .filter((word) => word && word !== 'async')
-    .map(displayWord)
-    .join(' ')
-    .trim()
-}
-
-export function assignedNameFromStatement(statement: string): string | undefined {
-  return statement.match(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/)?.[1]
 }
 
 /** The headline a reader sees. Annotation tags are stripped (they render as tags),

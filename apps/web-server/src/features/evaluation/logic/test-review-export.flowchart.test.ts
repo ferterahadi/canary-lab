@@ -93,10 +93,9 @@ function expectOneNested(page) {
     expect(exported.assets).toEqual([])
     expect(html).toContain('pill-failed')
     expect(svg).toContain('stroke="var(--flow-fail-line)"')
-    expect(svg).toContain('Prepare the scenario')
+    expect(svg).toContain('Intercept requests matching')
     expect(svg).toContain('Open checkout')
-    expect(svg).toContain('1 check inside this shared step')
-    expect(svg).toContain('Check the expected outcome')
+    expect(svg).toContain('Check that the text')
     expect(svg).toContain('…')
   })
 
@@ -193,7 +192,7 @@ function unknownUtility(page) {
 
     expect(html).toContain('Auth api then warning including automatically resolved')
     expect(html).toContain('Skip if required test setup is missing')
-    expect(html).toContain('Prepare the scenario')
+    expect(html).toContain('Intercept requests matching')
     expect(html).toContain('Record the start time')
     expect(html).toContain('Prepare unique identifiers')
     expect(html).toContain('Prepare inventory')
@@ -250,8 +249,12 @@ test('wrapped in try', async ({ page }) => {
     expect(nodes[nodes.length - 1].kind).toBe('end')
     // Inner assertions inside the try are surfaced (≥2), not collapsed.
     expect(nodes.filter((n) => n.kind === 'assertion').length).toBeGreaterThanOrEqual(2)
-    // The literal-only declaration is not a flow step.
-    expect(nodes.some((n) => (n.detail ?? '').includes('literal only'))).toBe(false)
+    // Untranslated source remains visible rather than being silently dropped.
+    expect(nodes.some((node) => (
+      node.title === 'Review this source step'
+      && node.readable
+      && (node.detail ?? '').includes("const noise = 'literal only'")
+    ))).toBe(true)
   })
 
   it('soft-caps a very long flow with a "+N more steps" node', async () => {

@@ -1,6 +1,12 @@
 import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../shared/code-display-format'
 import type { PathType } from '../../../../shared/coverage/types'
+import type { ReadableTest } from '../../../../shared/readable-tests/types'
+import {
+  translateReadableTest,
+  translateReadableTestFromAst,
+  type ReadableHelperInput,
+} from './readable-tests/translator'
 
 // Parse Playwright spec source and return every `test('name', …)` call along
 // with the `test.step('label', …)` invocations nested inside (recursively).
@@ -21,7 +27,11 @@ export interface ExtractedTest {
   name: string
   line: number
   bodySource: string
+  /** First source line represented by bodySource. Distinct from the test call
+   *  line when a multiline declaration places its callback on a later line. */
+  bodyLine?: number
   steps: ExtractedStep[]
+  readable: ReadableTest
   // Present when the `test(...)` lives in a different file than the spec
   // that owns it (e.g. a factory helper). UI uses this to link the code
   // viewer at the real definition site instead of the importing spec.
@@ -270,6 +280,34 @@ function lineFor(node: ts.Node, src: ts.SourceFile): number {
   return line + 1
 }
 
+function topLevelReadableHelpers(file: string, src: ts.SourceFile): ReadableHelperInput[] {
+  const helpers = new Map<string, ReadableHelperInput>()
+  const add = (name: string | undefined, body: ts.ConciseBody | undefined): void => {
+    if (!name || !body || helpers.has(name)) return
+    helpers.set(name, {
+      name,
+      file,
+      bodySource: bodySourceFor(body, src),
+      startLine: lineFor(body, src),
+    })
+  }
+  for (const statement of src.statements) {
+    if (ts.isFunctionDeclaration(statement)) {
+      add(statement.name?.text, statement.body)
+      continue
+    }
+    if (!ts.isVariableStatement(statement)) continue
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name)) continue
+      const initializer = declaration.initializer
+      if (initializer && (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer))) {
+        add(declaration.name.text, initializer.body)
+      }
+    }
+  }
+  return [...helpers.values()]
+}
+
 // Calls whose presence in a body is itself a "check" of some stack layer —
 // navigation, network, DB, or file reads — even without an enclosing expect().
 const CHECK_METHOD_NAMES = new Set([
@@ -349,11 +387,13 @@ export function extractTestsFromSource(file: string, source: string): ExtractRes
   try {
     const src = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
     const tests: ExtractedTest[] = []
+    const readableHelpers = topLevelReadableHelpers(file, src)
     function visit(n: ts.Node): void {
       if (ts.isCallExpression(n) && isTestCall(n)) {
         const name = getStringArg(n, src)
         if (name !== null) {
           const body = getCallableBody(n)
+          const bodySource = body ? bodySourceFor(body, src) : ''
           // Playwright tags are primary (R1); comment annotations are the
           // migration fallback. Union both so a half-migrated spec still works.
           const annotations = mergeAnnotations(
@@ -361,11 +401,28 @@ export function extractTestsFromSource(file: string, source: string): ExtractRes
             parseTestAnnotations(leadingCommentText(n, src)),
           )
           const assertions = body ? collectAssertionSnippets(body, src) : []
+          const readable = body && ts.isBlock(body)
+            ? translateReadableTestFromAst({
+                file,
+                title: name,
+                sourceFile: src,
+                body,
+                helpers: readableHelpers,
+              })
+            : translateReadableTest({
+                file,
+                title: name,
+                bodySource,
+                startLine: body ? lineFor(body, src) : lineFor(n, src),
+                helpers: readableHelpers,
+              })
           tests.push({
             name,
             line: lineFor(n, src),
-            bodySource: body ? bodySourceFor(body, src) : '',
+            bodySource,
+            bodyLine: body ? lineFor(body, src) : lineFor(n, src),
             steps: body ? extractStepsFrom(body, src) : [],
+            readable,
             ...(annotations.requirements ? { requirements: annotations.requirements } : {}),
             ...(annotations.pathTypes ? { pathTypes: annotations.pathTypes } : {}),
             ...(annotations.variants ? { variants: annotations.variants } : {}),
