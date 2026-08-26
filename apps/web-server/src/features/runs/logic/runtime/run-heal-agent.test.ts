@@ -19,6 +19,7 @@ import {
   waitForHealSignal,
 } from './run-heal-agent'
 import { HEAL_AGENT_TAIL_BYTES } from './heal-agent-text'
+import { REPO_PATH_OVERRIDES_ENV } from '../../../../../../../shared/e2e-runner/repo-path-overrides'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
@@ -141,6 +142,14 @@ describe('agentPtyEnv', () => {
     expect(agentPtyEnv(claude).CLAUDE_CODE_NO_FLICKER).toBe('1')
     expect(agentPtyEnv(codex).CLAUDE_CODE_NO_FLICKER).toBeUndefined()
   })
+
+  it('passes the run worktree map to child tests started by the heal agent', () => {
+    const { ctx } = ctxFor({ repoPathOverrides: { app: '/runs/demo/worktrees/app' } })
+    const env = agentPtyEnv(ctx)
+
+    expect(env[REPO_PATH_OVERRIDES_ENV]).toBe(JSON.stringify({ app: '/runs/demo/worktrees/app' }))
+    expect(env.NODE_OPTIONS).toContain('repo-path-preload.js')
+  })
 })
 
 describe('spawnHealAgentRepl', () => {
@@ -181,6 +190,43 @@ describe('spawnHealAgentRepl', () => {
 
     expect(spawns[0].env?.CLAUDE_CODE_FORCE_SESSION_PERSISTENCE).toBe('1')
     expect(spawns[0].env?.CLAUDE_CODE_NO_FLICKER).toBe('1')
+  })
+
+  it('gives Claude only the worktree as writable and loads a source-deny settings file', () => {
+    const sourceRoot = path.join(tmpDir, 'source')
+    const worktreeRoot = path.join(tmpDir, 'worktree')
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(sourceRoot, { recursive: true })
+    fs.mkdirSync(worktreeRoot, { recursive: true })
+    fs.mkdirSync(featureDir, { recursive: true })
+    const buildSpawnCommand = vi.fn(() => 'claude')
+    const { factory } = fakePtyFactory()
+    const { ctx } = ctxFor({
+      feature: {
+        name: 'demo',
+        description: 'demo',
+        envs: ['local'],
+        featureDir,
+        repos: [{ name: 'api', localPath: sourceRoot, startCommands: [] }],
+      },
+      worktreeHandles: [{ repoName: 'api', sourceRoot, worktreeRoot, localPath: worktreeRoot }],
+      repoPathOverrides: { api: worktreeRoot },
+    }, {
+      ptyFactory: factory,
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand },
+    })
+
+    spawnHealAgentRepl(ctx)
+
+    expect(buildSpawnCommand).toHaveBeenCalledWith(expect.objectContaining({
+      writableDirs: [worktreeRoot],
+      readableDirs: [featureDir],
+      isolationSettingsFile: path.join(ctx.runDir, 'heal-agent-isolation.settings.json'),
+    }))
+    const settings = JSON.parse(fs.readFileSync(path.join(ctx.runDir, 'heal-agent-isolation.settings.json'), 'utf-8'))
+    expect(settings.sandbox.filesystem.allowWrite).toEqual([worktreeRoot])
+    expect(settings.sandbox.filesystem.denyWrite).toContain(sourceRoot)
+    expect(settings.sandbox.filesystem.denyWrite).toContain(featureDir)
   })
 
   it('clears the handle and reports the exit when its own REPL dies', () => {

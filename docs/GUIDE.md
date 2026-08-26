@@ -63,7 +63,7 @@ when that part of the lifecycle runs.
 artifacts by run ID. Canary Lab does not automatically prune run evidence;
 removal and artifact trimming are explicit actions under **Cleanup → Runs**.
 
-## Evaluation report
+## Report
 
 Export a terminal run from its **Overview** tab. The archive contains
 `evaluation.html` plus captured media, with each declared test's flow, source,
@@ -72,7 +72,7 @@ never-run cases keep those states; export never rounds them into passes.
 
 When the feature has a PRD summary, the report separates two questions:
 
-- **Claimed coverage:** tags map a test to every required path and variant.
+- **Mapped coverage:** tags map a test to every required path and variant.
 - **Proven in this run:** the mapped test passed in the exported run.
 
 Canary Lab never borrows a result from another run for an export.
@@ -86,7 +86,7 @@ Both modes preserve the same roster and verdicts. External MCP exports use
 client-supplied wording; Canary Lab validates, stores, and renders it without
 rewriting it again.
 
-![Evaluation Report sample](assets/assertion-review.png)
+![Report sample](assets/assertion-review.png)
 
 ## Requirement coverage
 
@@ -193,10 +193,15 @@ repositories through one server-owned pipeline:
 
 ```text
 similarity → scout → scaffold → env capture → docs → PRD summary
-→ test authoring and coverage → portify → run → heal → evaluation export
+→ Tests & coverage → Test run → Auto-repair → Report → Parallel setup
 ```
 
-The server owns stage order, persistence, and every verdict. Judgment work can
+The serial Test run and downloadable Report finish before Parallel setup, so a
+large app produces its evaluation without first waiting for port-injection
+work. Parallel setup remains a persisted final stage: it can finish, park, or be
+retried afterward without deleting the completed run or Report.
+
+The server owns stage priority, persistence, and every verdict. Judgment work can
 come from two producers:
 
 - **Internal** (default): Canary Lab spawns the selected local CLI for agentic
@@ -236,7 +241,7 @@ Autopilot answers seven routine decisions by default and logs each answer as
 | `config-approval` | Accept the on-disk `feature.config.cjs` or re-scan | `approve` |
 | `prd-source` | Continue with docs, collect repo docs, or infer from the branch diff | `continue` with docs; otherwise `collect-repo-docs` |
 | `coverage-stuck` | Accept partial coverage or retry | `accept-partial` |
-| `portify-gate` | Run or skip parallel-readiness work | `run` |
+| `portify-gate` | Run or skip Parallel setup | `run` |
 | `portify-apply` | Apply, revise, or cancel the verified overlay | `apply` |
 | `run-failed` | Rerun or export the terminal non-green result | `export-as-is` |
 | `export-mode` | Raw or localized evaluation wording | `raw` internally; `localized` externally |
@@ -258,8 +263,10 @@ One feature has one Flight record.
 - Recalling an active Flight follows it.
 - Recalling a paused Flight resumes its first open stage without deleting
   artifacts.
-- `from_stage` re-enters one stage after checking prerequisites and deletes that
-  stage's and every later stage's artifacts before rerunning them.
+- `from_stage` re-enters one stage after checking prerequisites. It normally
+  deletes that stage's and every later record stage's artifacts; re-entering
+  Parallel setup deletes only its own Portify attempt and preserves the run and
+  Report.
 - `redo: true` restarts from stage one and deletes all stage artifacts. A full
   redo may replace the stored repos and description; omit them to reuse the old
   values.

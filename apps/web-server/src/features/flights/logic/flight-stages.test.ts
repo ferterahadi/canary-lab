@@ -271,6 +271,30 @@ describe('restart wipe (R78)', () => {
     }
   })
 
+  it('jumping to independent Parallel setup resets only that stage', async () => {
+    const events: string[] = []
+    const d: FlightConductorDeps = { ...deps(recordingAdapters(events)), validateStageEntry: () => null }
+    const first = startFlight(args(), d)
+    await first.completion
+    const flightDir = store.flightDir(first.manifest.flightId)
+    for (const dir of ['portify', 'run', 'evaluation-export']) {
+      fs.mkdirSync(path.join(flightDir, dir), { recursive: true })
+      fs.writeFileSync(path.join(flightDir, dir, 'agent-session.json'), '{}')
+    }
+
+    events.length = 0
+    const jumped = startFlight({ ...args(), mode: 'jump' as const, fromStage: 'portify' as const }, d)
+    await jumped.completion
+
+    expect(events.filter((event) => event.startsWith('reset:'))).toEqual(['reset:portify'])
+    expect(fs.existsSync(path.join(flightDir, 'portify'))).toBe(false)
+    expect(fs.existsSync(path.join(flightDir, 'run'))).toBe(true)
+    expect(fs.existsSync(path.join(flightDir, 'evaluation-export'))).toBe(true)
+    for (const key of ['run', 'heal', 'evaluation-export'] as const) {
+      expect(store.get(jumped.manifest.flightId)!.stages.find((stage) => stage.key === key)?.status).toBe('done')
+    }
+  })
+
   it('a jump preserves the earlier stages\' evidence — not just their status', async () => {
     const adapters = allDone()
     adapters.similarity = { run: async () => ({ kind: 'done', evidence: { scanned: 2 } }) }

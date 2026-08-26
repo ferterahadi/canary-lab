@@ -1,6 +1,8 @@
 import type { FlightStageKey, FlightStageStatus, PrdSourceCheckpointData } from '@/shared/api/client'
 import { STAGE_LABEL, stageLabel } from './stage-meta'
 import { presentedStageStatus } from './stage-metrics'
+import { flightRailLabel } from '@shared/flights/stage-labels'
+import { FLIGHT_EXECUTION_ORDER } from '@shared/flights/types'
 
 // ─── Rail rows (R21/R22/R32/R33) ────────────────────────────────────────────
 // The rail is a lens for the USER, not a dump of the conductor's internals:
@@ -9,8 +11,8 @@ import { presentedStageStatus } from './stage-metrics'
 // - three stage PAIRS are one step in the user's mental model and merge into
 //   one row keyed by the pair's first stage; the companion's status folds in.
 //   Store/MCP/CLI keys are untouched:
-//     run + heal          → "Test Run"       (run my tests, repair what breaks)
-//     scaffold + env-capture → "Feature setup" (create it, prove it boots)
+//     run + heal          → "Test run"       (run my tests, repair what breaks)
+//     scaffold + env-capture → "Suite setup" (create it, prove it boots)
 //     docs + prd-summary  → "Requirements"   (collect docs, distill them)
 
 export interface StageRailRow {
@@ -45,13 +47,6 @@ export function stageRowKey(key: FlightStageKey): FlightStageKey {
 }
 
 export const FOLDED_KEYS = new Set<string>(Object.values(STAGE_COMPANION))
-
-/** Merged label where the pair reads as one outcome the individual stage
- *  labels don't cover (the stage-entry menu still names each stage alone). */
-export const MERGED_LABEL: Partial<Record<FlightStageKey, string>> = {
-  'scaffold': 'Suite setup',
-  'docs': 'Requirements',
-}
 
 export function mergedPairStatus(
   primary: { status: FlightStageStatus } | undefined,
@@ -91,7 +86,16 @@ export function stageRailRows(
   stages: Array<{ key: string; status: FlightStageStatus; evidence?: unknown; checkpoint?: { kind?: string; data?: unknown } }>,
 ): StageRailRow[] {
   const rows: StageRailRow[] = []
-  for (const raw of stages) {
+  const byKey = new Map(stages.map((stage) => [stage.key, stage]))
+  const knownKeys = new Set<string>(FLIGHT_EXECUTION_ORDER)
+  const orderedStages = FLIGHT_EXECUTION_ORDER
+    .map((key) => byKey.get(key))
+    .filter((stage): stage is (typeof stages)[number] => stage != null)
+  // Preserve forward compatibility with a newer server that sends an unknown
+  // stage: known rows follow Flight priority; unknown rows remain visible last.
+  orderedStages.push(...stages.filter((stage) => !knownKeys.has(stage.key)))
+
+  for (const raw of orderedStages) {
     // `presented`, not `settled`: a stage parked on a hand-off to the user's own
     // agent draws as running here, so the rail (and everything downstream of it
     // — the row icon, the auto-selected stage, the stage chip) never marks live
@@ -106,13 +110,13 @@ export function stageRailRows(
     if (FOLDED_KEYS.has(key)) continue // folded into its pair row
     const companionKey = STAGE_COMPANION[key]
     if (companionKey) {
-      const companionRaw = stages.find((x) => x.key === companionKey)
+      const companionRaw = byKey.get(companionKey)
       const companion = companionRaw ? { ...companionRaw, status: presentedStageStatus(companionRaw) } : undefined
       // `docs` reaches the rail through here, not the plain branch below — it
       // is the primary of the docs+prd-summary pair ("Requirements").
       rows.push({
         key,
-        label: MERGED_LABEL[key] ?? stageLabel(key),
+        label: flightRailLabel(key),
         status: mergedPairStatus(s, companion),
         note: stageRailNote(s),
       })

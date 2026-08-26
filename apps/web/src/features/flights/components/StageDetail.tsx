@@ -1,5 +1,5 @@
 import type { ExternalWorkCheckpointData, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
-import type { AgentSessionSource, ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
+import type { AgentSessionSegmentSource, AgentSessionSource, ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
 import { clientLabel, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
 import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel, RequirementsFork } from './FlightStagePanels'
@@ -298,14 +298,26 @@ export function StageDetail({
     : portifyId ? { kind: 'portify', workflowId: portifyId, live }
     : agentDir ? { kind: 'flight', flightId, stage: agentDir, live }
     : undefined
-  // External producers have no Canary-owned transcript. Suppress the local
-  // source entirely so its generic live tail cannot add a second spinner under
-  // the external-session row or replay an older internal session as current.
+  // External producers have no Canary-owned current transcript. Historical
+  // internal sessions stay on the rail, but none of them may present as live.
   const externalOwnsCurrent = externalTrace !== undefined || liveExternalFallback !== undefined
-  const activitySource = externalOwnsCurrent ? undefined : localActivitySource
-  const activityKey = externalOwnsCurrent
-    ? `external:${externalTrace?.resourceId ?? externalTrace?.sessionId ?? stage.key}`
-    : evalTaskId ? `evaluation:${evalTaskId}` : portifyId ? `portify:${portifyId}` : (agentDir ?? 'system-only')
+  const sessionSources: AgentSessionSegmentSource[] = (stage.agentSessions ?? []).map((session, index, sessions) => ({
+    label: session.label,
+    source: {
+      kind: 'flight',
+      flightId,
+      stage: session.sidecar,
+      live: live
+        && !externalOwnsCurrent
+        && index === sessions.length - 1
+        && loopProgress?.phase === session.phase
+        && loopProgress?.pass === session.pass,
+    },
+  }))
+  // Suppress the legacy local source entirely so its generic live tail cannot
+  // add a second spinner under the external-session row or replay an older
+  // internal session as current.
+  const activitySource = sessionSources.length > 0 || externalOwnsCurrent ? undefined : localActivitySource
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -588,7 +600,7 @@ export function StageDetail({
       {!runMerged && (
         <StageActivity
           source={activitySource}
-          sourceKey={activityKey}
+          sessionSources={sessionSources}
           live={live || externalSessions.some((session) => session.status === 'running')}
           settled={settled}
           log={combinedLog}

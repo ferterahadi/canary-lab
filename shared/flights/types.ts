@@ -3,7 +3,7 @@
 // A "flight" is the conducted onboarding pipeline behind `canary-lab flight`: one
 // background job that takes a bare product repo (or several) through
 // similarity → scout → scaffold → env-capture → docs → prd-summary →
-// specs-coverage → portify → run → heal → evaluation-export, pausing at typed
+// specs-coverage → run → heal → evaluation-export → portify, pausing at typed
 // human checkpoints. The conductor is a deterministic server-side stage
 // machine; agents are spawned per-stage for judgment work only, and every
 // stage verdict is computed by the harness (see docs/PRD.md's trust posture —
@@ -12,7 +12,9 @@
 // These types are consumed by the web-server (conductor + MCP) and the web UI
 // (Flights pill + flight detail view), so they live in `shared/`.
 
-/** Stage keys, in binding execution order. */
+/** Canonical stage-record order. This stays stable for persisted manifests and
+ *  restart/jump semantics; normal drive priority lives in
+ *  `FLIGHT_EXECUTION_ORDER` below. */
 export const FLIGHT_STAGE_KEYS = [
   'similarity',
   'scout',
@@ -28,6 +30,28 @@ export const FLIGHT_STAGE_KEYS = [
 ] as const
 
 export type FlightStageKey = (typeof FLIGHT_STAGE_KEYS)[number]
+
+/** Normal conductor priority once the current/re-entered stage has settled.
+ *
+ *  Parallel setup is independent of the serial Test run and the Report. The
+ *  report therefore becomes available first; a large app can finish or retry
+ *  its 30–60 minute port-injection pass afterward without discarding that
+ *  evidence. The stable record order above deliberately remains unchanged for
+ *  persisted manifests; the restart helpers give independent Parallel setup
+ *  its own artifact boundary. */
+export const FLIGHT_EXECUTION_ORDER = [
+  'similarity',
+  'scout',
+  'scaffold',
+  'env-capture',
+  'docs',
+  'prd-summary',
+  'specs-coverage',
+  'run',
+  'heal',
+  'evaluation-export',
+  'portify',
+] as const satisfies readonly FlightStageKey[]
 
 /** Which stages produce the artifacts a stage actually READS — the real
  *  dependency graph, not the list order.
@@ -80,7 +104,7 @@ export type FlightCheckpointKind =
   | 'missing-env'       // env capture found keys it cannot source (never skipped)
   | 'prd-source'        // docs stage: add/confirm requirement docs before the PRD summary
   | 'coverage-stuck'    // specs↔coverage loop hit its bound with gaps left
-  | 'portify-gate'      // before the portify agent starts: run parallel readiness, or skip (stay serial)
+  | 'portify-gate'      // before the portify agent starts: run Parallel setup, or skip (stay serial)
   | 'portify-apply'     // portify agent proposes edits; approve before apply
   | 'run-failed'        // run ended failed/aborted after heal → rerun or export as-is
   | 'export-mode'       // pick the evaluation flavor before exporting: raw | localized
@@ -233,6 +257,22 @@ export interface FlightStageRemedy {
   actions: Array<'stash' | 'commit'>
 }
 
+/** One immutable agent-session reference belonging to a Flight stage. The
+ *  ordered list on `FlightStage` is display provenance only: it records each
+ *  session the stage started without changing completion or verdict evidence.
+ *  `sidecar` names a per-flight directory containing that session's pinned
+ *  `agent-session.json`, so reload can resolve the same transcript after the
+ *  stage's mutable live sidecar moves on to a later pass. */
+export interface FlightStageAgentSession {
+  sidecar: string
+  label: string
+  startedAt: string
+  /** Specs-and-coverage provenance. Other multi-session stages may omit it. */
+  phase?: 'authoring' | 'mapping'
+  /** One-based specs-and-coverage pass. */
+  pass?: number
+}
+
 export interface FlightStage {
   key: FlightStageKey
   status: FlightStageStatus
@@ -272,6 +312,10 @@ export interface FlightStage {
    *  vice versa. Only meaningful while the stage runs — a settled stage's last
    *  snapshot would read as live work, so the UI gates on status. */
   agentActivity?: AgentActivity
+  /** Agent sessions in the order this stage started them. Each entry points to
+   *  an immutable sidecar ref; the latest matching entry may still be live,
+   *  while every earlier entry remains historical Activity. */
+  agentSessions?: FlightStageAgentSession[]
   /** Present while status is `waiting-for-approval`. */
   checkpoint?: FlightCheckpoint
   /** The response that released the checkpoint (kept for the audit trail). */

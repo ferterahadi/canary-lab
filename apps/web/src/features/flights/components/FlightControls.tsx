@@ -8,21 +8,29 @@ import { DeleteSuiteConfirm } from '@/features/config'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import { START_FRESH_BLURB, START_FRESH_LABEL } from './FlightStartDialog'
 import { STAGE_BLURB, STAGE_ICON, stageRowKey, stageStatusTone } from './stage-meta'
-import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import { FLIGHT_EXECUTION_ORDER } from '@shared/flights/types'
+import { flightRailLabel } from '@shared/flights/stage-labels'
 import { externalMutationTooltip, type ExternalMutationOwner } from '../lib/external-work'
 
 /** The stages Continue → "from a step…" offers — the user-facing rail rows
  *  (merged-pair primaries), labeled the way the rail labels them. The server
  *  validates prerequisites (checkStageEntry) and 400s an invalid target. */
-export const REDO_STAGES: Array<{ key: FlightStageKey; label: string }> = [
-  { key: 'scout', label: 'Repo scan' },
-  { key: 'scaffold', label: 'Suite setup' },
-  { key: 'docs', label: 'Requirements' },
-  { key: 'specs-coverage', label: 'Test authoring & coverage' },
-  { key: 'portify', label: 'Parallel readiness' },
-  { key: 'run', label: 'Test Run' },
-  { key: 'evaluation-export', label: 'Evaluation Report' },
-]
+const REDO_STAGE_KEY_SET = new Set<FlightStageKey>([
+  'scout',
+  'scaffold',
+  'docs',
+  'specs-coverage',
+  'run',
+  'portify',
+  'evaluation-export',
+])
+
+const REDO_STAGE_KEYS = FLIGHT_EXECUTION_ORDER.filter((key) => REDO_STAGE_KEY_SET.has(key))
+
+export const REDO_STAGES: Array<{ key: FlightStageKey; label: string }> = REDO_STAGE_KEYS.map((key) => ({
+  key,
+  label: flightRailLabel(key),
+}))
 
 /** R77/R78: the resume target — the rail ROW owning the first unsettled stage,
  *  which is where `resumeFlight` picks up (it flips a failed stage back to
@@ -33,9 +41,17 @@ export const REDO_STAGES: Array<{ key: FlightStageKey; label: string }> = [
  *  execution order instead, then fold the companion back onto its row. */
 export function resumeTargetLabel(flight: FlightManifest): string | null {
   const settled = new Set<FlightStageStatus>(['done', 'skipped'])
-  const open = FLIGHT_STAGE_KEYS.map((key) => flight.stages.find((s) => s.key === key)).find(
-    (stage) => stage != null && !settled.has(stage.status),
+  const unsettled = (stage: FlightManifest['stages'][number] | undefined): boolean =>
+    stage != null && !settled.has(stage.status)
+  const active = flight.stages.find((stage) =>
+    stage.status === 'running' || stage.status === 'waiting-for-approval',
   )
+  const current = flight.currentStage
+    ? flight.stages.find((stage) => stage.key === flight.currentStage && unsettled(stage))
+    : undefined
+  const open = active ?? current ?? FLIGHT_EXECUTION_ORDER
+    .map((key) => flight.stages.find((stage) => stage.key === key))
+    .find(unsettled)
   if (!open) return null
   const rowKey = stageRowKey(open.key)
   return REDO_STAGES.find(({ key }) => key === rowKey)?.label ?? null

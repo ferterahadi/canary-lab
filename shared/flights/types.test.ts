@@ -4,6 +4,7 @@ import {
   deriveFeatureSlug,
   isActiveFlightStatus,
   isTerminalFlightStatus,
+  FLIGHT_EXECUTION_ORDER,
   FLIGHT_STAGE_KEYS,
   STAGE_DEPENDS_ON,
 } from './types'
@@ -81,5 +82,12 @@ describe('STAGE_DEPENDS_ON — the real dependency graph', () => {
     // What IS genuine stays: coverage maps specs onto requirements.
     expect(STAGE_DEPENDS_ON['specs-coverage']).toContain('prd-summary')
     expect(STAGE_DEPENDS_ON['run']).toContain('specs-coverage')
+  })
+})
+
+describe('FLIGHT_EXECUTION_ORDER', () => {
+  it('publishes the Report before independent Parallel setup', () => {
+    expect(FLIGHT_EXECUTION_ORDER.indexOf('evaluation-export'))
+      .toBeLessThan(FLIGHT_EXECUTION_ORDER.indexOf('portify'))
   })
 })

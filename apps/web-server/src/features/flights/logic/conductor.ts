@@ -110,6 +110,7 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
     const nextRepoPaths = mode === 'redo' && wantsNewRepos ? args.repoPaths : existing.repoPaths
     const nextDescription = mode === 'redo' && wantsNewIntent ? trimmedDescription : existing.description
     const entryLinks = checkStageEntry({ ...args, repoPaths: nextRepoPaths }, deps, existing)
+    const preservesReport = mode === 'jump' && args.fromStage === 'portify'
     const manifest: FlightManifest = {
       ...existing,
       repoPaths: nextRepoPaths,
@@ -158,18 +159,20 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       startedAt: now(),
       endedAt: undefined,
       error: undefined,
-      runVerdict: undefined,
+      runVerdict: preservesReport ? existing.runVerdict : undefined,
       // A jump straight to evaluation-export was validated AGAINST the old
       // record's run — that runId is the stage's input, so it must survive
       // the reset (the deliverable links are dropped and regenerated).
       links:
-        mode === 'jump' && args.fromStage === 'evaluation-export'
+        preservesReport
+          ? existing.links
+          : mode === 'jump' && args.fromStage === 'evaluation-export'
           ? (existing.links?.runId ? { runId: existing.links.runId } : entryLinks)
           : undefined,
     }
     store.save(manifest)
-    // R78: an explicit restart wipes the entry stage's artifacts and every
-    // later stage's — BEFORE the drive re-runs anything, so no adapter can
+    // R78: an explicit restart wipes the entry stage's invalidation set —
+    // BEFORE the drive re-runs anything, so no adapter can
     // mistake a discarded attempt's leftovers for prior state. `existing` is
     // the pre-reset snapshot: resets read the old deliverable links from it.
     const entryStage = mode === 'jump' ? args.fromStage! : FLIGHT_STAGE_KEYS[0]

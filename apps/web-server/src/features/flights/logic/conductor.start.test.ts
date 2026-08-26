@@ -27,7 +27,7 @@ import {
   type StageOutcome,
 } from './conductor'
 
-import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from './types'
+import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from './types'
 
 let tmpDir: string
 
@@ -69,7 +69,7 @@ function args(repo = '/repo/a') {
 }
 
 describe('startFlight', () => {
-  it('advances every stage in order and settles done', async () => {
+  it('publishes the Report before Parallel setup and settles every stage', async () => {
     const calls: FlightStageKey[] = []
     const { manifest, completion } = startFlight(args(), deps(allDone(calls)))
     expect(manifest.status).toBe('running')
@@ -80,7 +80,58 @@ describe('startFlight', () => {
     expect(final.currentStage).toBeNull()
     expect(final.endedAt).toBe(now())
     expect(final.stages.every((s) => s.status === 'done')).toBe(true)
-    expect(calls).toEqual([...FLIGHT_STAGE_KEYS])
+    expect(calls).toEqual([...FLIGHT_EXECUTION_ORDER])
+    expect(calls.indexOf('run')).toBeLessThan(calls.indexOf('portify'))
+    expect(calls.indexOf('evaluation-export')).toBeLessThan(calls.indexOf('portify'))
+  })
+
+  it('honours an explicit Parallel-setup entry before normal drive priority', async () => {
+    const calls: FlightStageKey[] = []
+    const { completion } = startFlight({ ...args(), fromStage: 'portify' }, {
+      ...deps(allDone(calls)),
+      validateStageEntry: () => null,
+    })
+
+    await completion
+
+    expect(calls).toEqual(['portify', 'run', 'heal', 'evaluation-export'])
+  })
+
+  it('keeps the Report downloadable when final Parallel setup fails', async () => {
+    const adapters = allDone()
+    adapters.run = {
+      run: async (ctx) => {
+        ctx.patchFlight({ runVerdict: 'passed', links: { runId: 'run-42' } })
+        return { kind: 'done' }
+      },
+    }
+    adapters['evaluation-export'] = {
+      run: async (ctx) => {
+        ctx.patchFlight({
+          links: {
+            ...ctx.manifest().links,
+            evaluationTaskId: 'eval-42',
+            evaluationZip: '/tmp/eval-42.zip',
+          },
+        })
+        return { kind: 'done' }
+      },
+    }
+    adapters.portify = { run: async () => ({ kind: 'failed', error: 'dirty checkout' }) }
+
+    const { manifest, completion } = startFlight(args(), deps(adapters))
+    await completion
+
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('paused')
+    expect(final.runVerdict).toBe('passed')
+    expect(final.links).toEqual({
+      runId: 'run-42',
+      evaluationTaskId: 'eval-42',
+      evaluationZip: '/tmp/eval-42.zip',
+    })
+    expect(final.stages.find((stage) => stage.key === 'evaluation-export')?.status).toBe('done')
+    expect(final.stages.find((stage) => stage.key === 'portify')?.status).toBe('failed')
   })
 
   it('surfaces the flight group on the index entry (R69: ledger/pill group pre-scaffold)', async () => {
@@ -228,7 +279,7 @@ describe('startFlight', () => {
     expect(calls).toEqual(['run', 'heal', 'evaluation-export'])
   })
 
-  it('a jump to evaluation-export keeps the validated runId; other jumps reset links', async () => {
+  it('a jump to evaluation-export keeps the validated runId; report-changing jumps reset links', async () => {
     const adapters = allDone()
     adapters.run = { run: async (ctx) => { ctx.patchFlight({ links: { runId: 'run-42' } }); return { kind: 'done' } } }
     let exportSawRunId: string | undefined
@@ -257,6 +308,46 @@ describe('startFlight', () => {
     })
     expect(rerun.manifest.links).toBeUndefined()
     await rerun.completion
+  })
+
+  it('a jump to Parallel setup preserves the completed run and downloadable Report', async () => {
+    const adapters = allDone()
+    const first = startFlight(args(), deps(adapters))
+    await first.completion
+
+    const completed = store.get(first.manifest.flightId)!
+    store.save({
+      ...completed,
+      runVerdict: 'passed',
+      links: {
+        runId: 'run-42',
+        evaluationTaskId: 'eval-42',
+        evaluationZip: '/tmp/eval-42.zip',
+      },
+      stages: completed.stages.map((stage) => stage.key === 'evaluation-export'
+        ? { ...stage, evidence: { archive: '/tmp/eval-42.zip' }, log: 'report ready' }
+        : stage),
+    })
+
+    const jumped = startFlight({ ...args(), mode: 'jump' as const, fromStage: 'portify' as const }, {
+      ...deps(adapters),
+      validateStageEntry: () => null,
+    })
+
+    expect(jumped.manifest.runVerdict).toBe('passed')
+    expect(jumped.manifest.links).toEqual({
+      runId: 'run-42',
+      evaluationTaskId: 'eval-42',
+      evaluationZip: '/tmp/eval-42.zip',
+    })
+    const preservedReport = jumped.manifest.stages.find((stage) => stage.key === 'evaluation-export')!
+    expect(preservedReport.status).toBe('done')
+    expect(preservedReport.evidence).toEqual({ archive: '/tmp/eval-42.zip' })
+    expect(preservedReport.log).toBe('report ready')
+
+    await jumped.completion
+    expect(store.get(jumped.manifest.flightId)!.status).toBe('done')
+    expect(store.get(jumped.manifest.flightId)!.links?.evaluationZip).toBe('/tmp/eval-42.zip')
   })
 
   it('a jump to evaluation-export adopts a standalone run when the record has none', async () => {

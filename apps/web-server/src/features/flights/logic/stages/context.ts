@@ -47,6 +47,10 @@ export interface FlightAgentSpawnOpts {
   signal?: AbortSignal
   /** R79: which CLI to spawn (the flight's sticky opts.agent). Absent → claude. */
   agent?: 'claude' | 'codex'
+  /** Fired as soon as the CLI session is pinned, before the process starts
+   *  producing output. Multi-session stages use it to preserve an immutable
+   *  history ref while `stageDir` remains the mutable live/stop scope. */
+  onAgentSession?: (session: { agent: 'claude' | 'codex'; sessionId: string; spawnedAt: string }) => void
   /** Identifies the flight + stage this spawn belongs to, so the runner can write
    *  it a durable record. Absent → no record (the same forward-only rule as
    *  `signal` and `spawnScope`). */
@@ -103,12 +107,14 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
   if (opts.signal?.aborted) throw new StageCancelledError('agent spawn')
   const agent = opts.agent ?? 'claude'
   const sessionId = agent === 'claude' ? crypto.randomUUID() : undefined
+  const spawnedAt = new Date().toISOString()
   writeWorkflowAgentRef(opts.stageDir, {
     agent,
     cwd: opts.cwd,
-    spawnedAt: new Date().toISOString(),
+    spawnedAt,
     sessionId: sessionId ?? '',
   })
+  opts.onAgentSession?.({ agent, sessionId: sessionId ?? '', spawnedAt })
   const handle = runAgentProcess({
     command: agent,
     ...(opts.job

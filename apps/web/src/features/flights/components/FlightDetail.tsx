@@ -266,14 +266,27 @@ export function FlightDetail({
 
   // Default the selected stage to the one that needs eyes: waiting → running →
   // first failed → the row that resumes next → last done. The user's explicit
-  // pick wins. (R78: a paused flight whose current row is half-finished has no
-  // `done` row after it, so without the pending fallback the panel would open
-  // on "Pick a stage." instead of the step the user just paused.)
+  // pick wins. Parallel setup is the one background exception: once Report is
+  // ready, its ordinary pending/running/done states stay in the rail while the
+  // main panel keeps the deliverable in front. A checkpoint or failure still
+  // takes focus because it needs the user. (R78: a paused flight whose current
+  // row is half-finished has no `done` row after it, so without the pending
+  // fallback the panel would open on "Pick a stage." instead of the step the
+  // user just paused.)
   const autoStage = useMemo((): FlightStageKey | null => {
+    const report = railRows.find((stage) => stage.key === 'evaluation-export' && stage.status === 'done')
+    const parallelSetup = railRows.find((stage) => stage.key === 'portify')
+    const reportForeground = report && parallelSetup
+      && (parallelSetup.status === 'pending' || parallelSetup.status === 'running'
+        || parallelSetup.status === 'done' || parallelSetup.status === 'skipped')
+      ? report
+      : undefined
     const pick =
       railRows.find((s) => s.status === 'waiting-for-approval')
-      ?? railRows.find((s) => s.status === 'running')
+      ?? railRows.find((s) => s.status === 'running' && !(reportForeground && s.key === 'portify'))
       ?? railRows.find((s) => s.status === 'failed')
+      ?? reportForeground
+      ?? railRows.find((s) => s.status === 'running')
       ?? railRows.find((s) => s.status === 'pending')
       ?? [...railRows].reverse().find((s) => s.status === 'done')
     return pick?.key ?? null

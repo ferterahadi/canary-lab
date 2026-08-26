@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { SpecsCoverageProgress as SpecsCoverageProgressT } from '@/shared/api/client'
-import { AgentSessionView, type AgentSessionSource, type ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
+import { AgentSessionView, type AgentSessionSegmentSource, type AgentSessionSource, type ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
 import { StatusDot } from '@/shared/ui/atoms'
 import { useResizableHeight } from '@/shared/ui/use-resizable-height'
 import { PanelCard } from '@/shared/ui/PanelCard'
@@ -13,16 +13,15 @@ import { StageColumn } from './stage-meta'
  *  `systemRows`, styled apart from the agent's rows). Agent stages tail their
  *  flight session; the Evaluation Report tails its export task; an agentless
  *  stage passes no `source` and shows system rows alone.
- *  `stage.log` has no timestamps, so the split is positional: agent chunks are
- *  mirrored into the log untagged, so the first/last untagged line brackets the
- *  agent's slot (→ `pre` before it, `post` after); a settled log with no
- *  untagged lines splits after the last spawn announcement (a tagged line
- *  ending in `…`). Untagged middles never render as system rows — the timeline
- *  shows them richer. The band keeps a height the reader dragged, and folds to
- *  its label bar at the bottom of that same drag (R88). */
+ *  Agent chunks are mirrored into `stage.log` untagged and never render twice.
+ *  A legacy single session keeps the original first/last-chunk split. Ordered
+ *  stage sessions additionally keep tagged conductor rows between those chunks
+ *  so validation and pass-transition evidence stays between the session
+ *  segments that surround it. The band keeps a height the reader dragged, and
+ *  folds to its label bar at the bottom of that same drag (R88). */
 export function StageActivity({
   source,
-  sourceKey,
+  sessionSources,
   live,
   settled,
   log,
@@ -36,9 +35,9 @@ export function StageActivity({
    *  Evaluation Report's export task). Omitted for agentless stages — the rail
    *  then shows system rows alone. */
   source?: AgentSessionSource
-  /** Remount key — swaps the timeline when the specs loop flips authoring→map,
-   *  or between export tasks. */
-  sourceKey: string
+  /** Ordered sessions for a stage that spawns more than once. Each segment
+   *  keeps its own provenance and only the current entry tails live output. */
+  sessionSources?: AgentSessionSegmentSource[]
   live: boolean
   settled: boolean
   log: string
@@ -62,7 +61,8 @@ export function StageActivity({
   empty?: { title: string; body?: string }
 }) {
   const lines = log.split('\n').filter((l) => l.trim() !== '')
-  const hasSource = source !== undefined
+  const sessionCount = sessionSources?.length ?? 0
+  const hasSource = source !== undefined || sessionCount > 0
   // The Activity boundary is stable for the lifetime of a stage. Before the
   // first run it stays collapsed with an honest empty state; once work starts it
   // opens in place instead of appearing as a new piece of page chrome.
@@ -90,8 +90,14 @@ export function StageActivity({
   // is mirrored untagged, which is what this split is looking for.
   const isTagged = (l: string): boolean => /^\[[\w-]+(?:@[^\]]+)?\]/.test(l)
   let pre = lines
+  let between: string[][] | undefined
   let post: string[] = []
-  if (hasSource) {
+  if (sessionCount > 1) {
+    const split = splitMultiSessionSystemRows(lines, sessionCount, isTagged)
+    pre = split.pre
+    between = split.between
+    post = split.post
+  } else if (hasSource) {
     const firstUntagged = lines.findIndex((l) => !isTagged(l))
     if (firstUntagged >= 0) {
       let lastUntagged = firstUntagged
@@ -166,9 +172,9 @@ export function StageActivity({
               an agentless stage (no `source`) renders system rows alone. */}
           <AgentBlock>
             <AgentSessionView
-              key={sourceKey}
               source={source}
-              systemRows={{ pre: [...leadingSystemRows, ...pre], post }}
+              sessionSources={sessionSources}
+              systemRows={{ pre: [...leadingSystemRows, ...pre], between, post }}
               externalSessions={externalSessions}
               empty={resolvedEmpty}
             />
@@ -177,6 +183,35 @@ export function StageActivity({
       )}
     </section>
   )
+}
+
+/** Split a stage log around its ordered session slots. Maximal untagged runs
+ *  are the mirrored agent chunks; every tagged row after run N belongs between
+ *  session N and N+1, while rows after the final run stay at the tail. */
+function splitMultiSessionSystemRows(
+  lines: string[],
+  sessionCount: number,
+  isTagged: (line: string) => boolean,
+): { pre: string[]; between: string[][]; post: string[] } {
+  const pre: string[] = []
+  const between = Array.from({ length: sessionCount - 1 }, () => [] as string[])
+  const post: string[] = []
+  let outputRuns = 0
+  let inOutputRun = false
+
+  for (const line of lines) {
+    if (!isTagged(line)) {
+      if (!inOutputRun) outputRuns += 1
+      inOutputRun = true
+      continue
+    }
+    inOutputRun = false
+    if (outputRuns === 0) pre.push(line)
+    else if (outputRuns >= sessionCount) post.push(line)
+    else between[outputRuns - 1].push(line)
+  }
+
+  return { pre, between, post }
 }
 
 /** Frame for a stage's consolidated activity (R66): the conductor's system

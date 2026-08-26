@@ -112,6 +112,10 @@ function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightMa
       manifest: () => state.m,
       flightDir: path.join(logsDir, 'flights', state.m.flightId),
       setProgress: (progress) => { progressLog.push(progress) },
+      addAgentSession: (session) => {
+        const stage = state.m.stages.find((candidate) => candidate.key === 'specs-coverage')
+        setStage('specs-coverage', { agentSessions: [...(stage?.agentSessions ?? []), session] })
+      },
       patchFlight: (patch) => {
         state.m = {
           ...state.m,
@@ -153,11 +157,18 @@ describe('specs-coverage stage', () => {
   // The agent edits <featureDir>/e2e/*.spec.ts in place — the mock spawn
   // writes to disk like the real agent's Write tool would.
   function writingSpawnAgent(prompts: string[], content = SPEC): FlightStageDeps['spawnAgent'] {
+    let session = 0
     return async (opts) => {
       prompts.push(opts.prompt)
       const e2eDir = path.join(featuresDir, 'checkout', 'e2e')
       fs.mkdirSync(e2eDir, { recursive: true })
       fs.writeFileSync(path.join(e2eDir, 'checkout.spec.ts'), content)
+      session += 1
+      opts.onAgentSession?.({
+        agent: opts.agent ?? 'claude',
+        sessionId: `author-sess-${session}`,
+        spawnedAt: `2026-08-26T01:0${session}:00.000Z`,
+      })
       return { text: 'rewrote e2e/checkout.spec.ts' }
     }
   }
@@ -198,6 +209,9 @@ describe('specs-coverage stage', () => {
     expect(prompt).toContain('slot `checkout-service` is exposed as `CANARY_PORT_checkout_service`')
     expect(prompt).toContain('every local service URL must check its shell-safe `CANARY_PORT_<env-slot>` first')
     expect(prompt).toContain("const baseUrl = 'http://localhost:4300'")
+    expect(prompt).toContain('resolveRunRepoPath(repo.name, repo.localPath)')
+    expect(prompt).toContain('Never spawn from `repo.localPath` directly')
+    expect(prompt).toContain('first serial Test run and Report')
   })
 
   it('R27: publishes the loop shape — authoring/validating/mapping per pass, with the pass history', async () => {
@@ -326,16 +340,18 @@ describe('specs-coverage stage', () => {
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('no PRD summary') })
   })
 
-  it('pins the coverage-map agent-session ref via onAgentSession', async () => {
+  it('pins every authoring and mapping session in pass order', async () => {
     fs.mkdirSync(path.join(logsDir, 'flights', 'fl-test', 'coverage-map'), { recursive: true })
-    const ledgers = [ledger(0), ledger(100)]
+    const ledgers = [ledger(0), ledger(40), ledger(100)]
+    let mapSession = 0
     const d = deps({
       spawnAgent: writingSpawnAgent([]),
       validateSpecs: async () => ({ ok: true }),
       coverage: {
         compute: (() => ledgers.shift() ?? ledger(100)) as never,
         runEngine: (async (args: { onAgentSession?: (s: { agent: 'claude' | 'codex'; sessionId: string }) => void }) => {
-          args.onAgentSession?.({ agent: 'claude', sessionId: 'map-sess-1' })
+          mapSession += 1
+          args.onAgentSession?.({ agent: 'claude', sessionId: `map-sess-${mapSession}` })
           return {} as never
         }) as never,
       },
@@ -345,7 +361,41 @@ describe('specs-coverage stage', () => {
     expect(outcome).toMatchObject({ kind: 'done' })
     const refPath = path.join(logsDir, 'flights', current().flightId, 'coverage-map', 'agent-session.json')
     const ref = JSON.parse(fs.readFileSync(refPath, 'utf-8'))
-    expect(ref.sessions.claude.sessionId).toBe('map-sess-1')
+    expect(ref.sessions.claude.sessionId).toBe('map-sess-2')
+    expect(current().stages.find((stage) => stage.key === 'specs-coverage')?.agentSessions).toMatchObject([
+      {
+        sidecar: 'specs-coverage-session-001',
+        label: 'Pass 1 · Authoring',
+        phase: 'authoring',
+        pass: 1,
+      },
+      {
+        sidecar: 'specs-coverage-session-002',
+        label: 'Pass 1 · Mapping',
+        phase: 'mapping',
+        pass: 1,
+      },
+      {
+        sidecar: 'specs-coverage-session-003',
+        label: 'Pass 2 · Authoring',
+        phase: 'authoring',
+        pass: 2,
+      },
+      {
+        sidecar: 'specs-coverage-session-004',
+        label: 'Pass 2 · Mapping',
+        phase: 'mapping',
+        pass: 2,
+      },
+    ])
+    const authorRef = JSON.parse(fs.readFileSync(path.join(logsDir, 'flights', 'fl-test', 'specs-coverage-session-001', 'agent-session.json'), 'utf-8'))
+    const mapRef = JSON.parse(fs.readFileSync(path.join(logsDir, 'flights', 'fl-test', 'specs-coverage-session-002', 'agent-session.json'), 'utf-8'))
+    const laterAuthorRef = JSON.parse(fs.readFileSync(path.join(logsDir, 'flights', 'fl-test', 'specs-coverage-session-003', 'agent-session.json'), 'utf-8'))
+    const laterMapRef = JSON.parse(fs.readFileSync(path.join(logsDir, 'flights', 'fl-test', 'specs-coverage-session-004', 'agent-session.json'), 'utf-8'))
+    expect(authorRef.sessions.claude.sessionId).toBe('author-sess-1')
+    expect(mapRef.sessions.claude.sessionId).toBe('map-sess-1')
+    expect(laterAuthorRef.sessions.claude.sessionId).toBe('author-sess-2')
+    expect(laterMapRef.sessions.claude.sessionId).toBe('map-sess-2')
   })
 
   it('checkpoint response: retry re-enters the loop (not just accept-partial)', async () => {

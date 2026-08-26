@@ -222,6 +222,39 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     } satisfies SpecsCoverageProgress)
   }
 
+  /** Preserve one immutable ref before the loop's mutable author/map sidecar is
+   *  repinned by a later pass. The manifest array is the ordered Activity model;
+   *  each entry's directory keeps the existing REST + WebSocket session-tail
+   *  paths reusable without teaching either transport a second ref format. */
+  const recordAgentSession = (
+    ctx: StageContext,
+    state: PassState,
+    phase: 'authoring' | 'mapping',
+    session: { agent: 'claude' | 'codex'; sessionId: string },
+    spawnedAt: string,
+  ): void => {
+    const stage = ctx.manifest().stages.find((candidate) => candidate.key === 'specs-coverage')
+    const sequence = (stage?.agentSessions?.length ?? 0) + 1
+    const sidecar = `specs-coverage-session-${String(sequence).padStart(3, '0')}`
+    const sessionDir = path.join(ctx.flightDir, sidecar)
+    writeWorkflowAgentRef(sessionDir, {
+      agent: session.agent,
+      cwd: deps.projectRoot,
+      spawnedAt,
+      sessionId: session.sessionId,
+    })
+    // writeWorkflowAgentRef is deliberately best-effort. Do not persist a
+    // pointer the viewer can never resolve when that write failed.
+    if (!fs.existsSync(path.join(sessionDir, 'agent-session.json'))) return
+    ctx.addAgentSession({
+      sidecar,
+      label: `Pass ${state.iteration} · ${phase === 'authoring' ? 'Authoring' : 'Mapping'}`,
+      startedAt: spawnedAt,
+      phase,
+      pass: state.iteration,
+    })
+  }
+
   const bumpPass = (state: PassState, over: Partial<PassState>): PassState => ({
     iteration: state.iteration + 1,
     validationErrors: '',
@@ -273,12 +306,14 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       agentJob: { record: { jobId: `${m.flightId}:coverage-map`, flightId: m.flightId, feature: m.feature, stage: 'coverage-map', agent: m.opts.agent ?? 'claude' }, logsDir: deps.logsDir },
       onOutput: agentProgressSink(ctx),
       onAgentSession: (session) => {
+        const spawnedAt = new Date().toISOString()
         writeWorkflowAgentRef(path.join(ctx.flightDir, 'coverage-map'), {
           agent: session.agent,
           cwd: deps.projectRoot,
-          spawnedAt: new Date().toISOString(),
+          spawnedAt,
           sessionId: session.sessionId,
         })
+        recordAgentSession(ctx, state, 'mapping', session, spawnedAt)
       },
     })
     return settleMapped(ctx, prep, state)
@@ -424,6 +459,9 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       onChunk: agentProgressSink(ctx),
       signal: ctx.signal,
       agent: m.opts.agent,
+      onAgentSession: (session) => {
+        recordAgentSession(ctx, state, 'authoring', session, session.spawnedAt)
+      },
     })
     return afterAuthoring(ctx, prep, state, ledger, forceInternal)
   }

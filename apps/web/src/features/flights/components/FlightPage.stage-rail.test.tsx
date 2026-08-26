@@ -284,8 +284,8 @@ describe('trailer model (R14–R18)', () => {
 
   // A stage drill-through (coverage ledger, run detail) REPLACES the flight
   // view, so the way back remounts this page. With the pick local to the detail
-  // that remount re-ran the auto-pick and dropped the user on the last done
-  // stage — Evaluation Report — instead of the one they drilled from. App owns
+  // that remount re-ran the auto-pick and dropped the user on the foreground
+  // Report instead of the one they drilled from. App owns
   // the pick now and routes it (?stage=…); this pins both halves.
   it('the stage pick is owned above the page, so a drill-through round trip comes back to it', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
@@ -295,8 +295,13 @@ describe('trailer model (R14–R18)', () => {
     }))
     const onSelectStage = vi.fn()
     await render('fl_1', { stage: null, onSelectStage })
-    // Follow-mode: the auto-pick lands on the last done stage.
+    // Follow-mode: Report remains the foreground deliverable even though
+    // Parallel setup is the final persisted row.
     expect(container.querySelector('[data-testid="stage-rail-evaluation-export"]')?.getAttribute('aria-current')).toBe('true')
+    const railIds = [...container.querySelectorAll<HTMLElement>('[data-testid^="stage-rail-"]')]
+      .map((row) => row.dataset.testid)
+    expect(railIds.indexOf('stage-rail-evaluation-export'))
+      .toBeLessThan(railIds.indexOf('stage-rail-portify'))
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')?.click()
@@ -310,6 +315,22 @@ describe('trailer model (R14–R18)', () => {
     // The follow-mode reset must fire on a flight CHANGE, never on a mount —
     // clearing here is exactly what threw the pick away.
     expect(onSelectStage).not.toHaveBeenCalledWith(null)
+  })
+
+  it('keeps the completed Report in front while final Parallel setup runs in the rail', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      currentStage: 'portify',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'portify' ? ('running' as const) : ('done' as const),
+      })),
+    }))
+
+    await render('fl_1')
+
+    expect(container.querySelector('[data-testid="stage-rail-evaluation-export"]')?.getAttribute('aria-current')).toBe('true')
+    expect(container.querySelector('[data-testid="stage-rail-portify"]')?.textContent).toContain('Parallel setup')
   })
 
   it('keeps Parallel readiness Activity open after switching to another stage and back', async () => {

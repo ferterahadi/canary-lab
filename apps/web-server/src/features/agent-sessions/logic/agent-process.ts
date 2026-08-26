@@ -3,6 +3,7 @@ import { spawn as nodeSpawn, type ChildProcess } from 'child_process'
 import { modelArgs } from './agent-models'
 import { startIdleTimer, type IdleTimer } from './agent-idle-timer'
 import { resolveAgentBinary, isAgentKind, type HealAgent } from './agent-binary'
+import { internalAgentContextArgs } from './agent-context-policy'
 import { agentJobStore } from './agent-jobs/store'
 import type { AgentJobRecordRef, AgentJobStatus } from './agent-jobs/types'
 
@@ -226,11 +227,10 @@ export async function stopAllAgentProcesses(): Promise<void> {
 // each call site) makes it impossible to forget: any new agent feature inherits
 // the block for free. `CANARY_LAB_MCP_CLIENT_KIND` is read first by the MCP
 // bridge's `inferMcpClientKind`, so this wins over process-lineage sniffing.
-function runnerPtyClientKind(command: string): 'claude-pty' | 'codex-pty' | null {
-  const base = command.split('/').pop()!
-  if (/claude/i.test(base)) return 'claude-pty'
-  if (/codex/i.test(base)) return 'codex-pty'
-  return null
+function runnerAgentKind(requestedCommand: string, resolvedCommand: string): HealAgent | null {
+  if (isAgentKind(requestedCommand)) return requestedCommand
+  const base = resolvedCommand.split(/[\\/]/).pop()?.replace(/\.exe$/i, '').toLowerCase() ?? ''
+  return isAgentKind(base) ? base : null
 }
 
 export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
@@ -241,8 +241,13 @@ export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
   // Resolve a bare agent kind to an absolute path (bare fallback so a genuine
   // ENOENT still surfaces through the 'error' path); spawn anything else as-is.
   const command = isAgentKind(opts.command) ? (resolveBinary(opts.command) ?? opts.command) : opts.command
-  const ptyKind = runnerPtyClientKind(command)
-  const child = spawnImpl(command, opts.args, {
+  const agent = runnerAgentKind(opts.command, command)
+  const ptyKind = agent ? `${agent}-pty` as const : null
+  // This is the final common boundary for every non-interactive Canary-owned
+  // agent. Feature-specific builders cannot accidentally omit the context and
+  // auto-compaction policy, and arbitrary non-agent commands stay untouched.
+  const args = agent ? [...internalAgentContextArgs(agent), ...opts.args] : opts.args
+  const child = spawnImpl(command, args, {
     cwd: opts.cwd,
     stdio: [useStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     env: ptyKind

@@ -176,6 +176,97 @@ describe('AgentSessionView lifecycle presentation', () => {
     expect(mocks.connectAgentSessionStream).toHaveBeenCalledOnce()
   })
 
+  it('keeps ordered stage sessions across authoring, mapping, later passes, and remount', async () => {
+    const sessions = {
+      'specs-coverage-session-001': {
+        agent: 'claude' as const,
+        sessionId: 'authoring-session-1',
+        model: 'claude-opus',
+        events: [
+          { kind: 'assistant-message' as const, timestamp: '2026-08-26T01:00:00.000Z', text: 'Authored checkout tests' },
+          { kind: 'assistant-message' as const, timestamp: '2026-08-26T01:00:01.000Z', text: 'Validated the new spec' },
+        ],
+      },
+      'specs-coverage-session-002': {
+        agent: 'claude' as const,
+        sessionId: 'mapping-session-1',
+        model: 'claude-sonnet',
+        events: [
+          { kind: 'assistant-message' as const, timestamp: '2026-08-26T01:01:00.000Z', text: 'Mapped requirement R1' },
+        ],
+      },
+      'specs-coverage-session-003': {
+        agent: 'codex' as const,
+        sessionId: 'authoring-session-2',
+        model: 'gpt-5.6-sol',
+        events: [
+          { kind: 'assistant-message' as const, timestamp: '2026-08-26T01:02:00.000Z', text: 'Closed the remaining gap' },
+        ],
+      },
+    }
+    mocks.getFlightAgentSession.mockImplementation(async (_flightId: string, stage: keyof typeof sessions) => sessions[stage])
+
+    const source = (stage: keyof typeof sessions, live: boolean, label: string) => ({
+      label,
+      source: { kind: 'flight' as const, flightId: 'fl_1', stage, live },
+    })
+    const authoring = source('specs-coverage-session-001', true, 'Pass 1 · Authoring')
+    await act(async () => {
+      root.render(<AgentSessionView sessionSources={[authoring]} />)
+    })
+    expect(container.textContent).toContain('Authored checkout tests')
+
+    const mapping = source('specs-coverage-session-002', true, 'Pass 1 · Mapping')
+    await act(async () => {
+      root.render(<AgentSessionView sessionSources={[{ ...authoring, source: { ...authoring.source, live: false } }, mapping]} />)
+    })
+    let headers = [...container.querySelectorAll('[data-testid="agent-session-header"]')]
+    expect(container.textContent).toContain('Authored checkout tests')
+    expect(headers).toHaveLength(2)
+    expect(headers[0].querySelector('[data-testid="agent-session-mode"]')?.textContent).toBe('History')
+    expect(headers[1].querySelector('[data-testid="agent-session-label"]')?.textContent).toBe('Pass 1 · Mapping')
+    expect(headers[1].querySelector('[data-testid="agent-session-mode"]')?.textContent).toBe('Live')
+    expect(headers[1].querySelector('.agentts-count')?.textContent).toBe('1 event')
+    expect(headers[1].querySelector('.agentts-sid')?.getAttribute('title')).toBe('mapping-session-1')
+
+    const passTwo = source('specs-coverage-session-003', true, 'Pass 2 · Authoring')
+    const fullHistory = [
+      { ...authoring, source: { ...authoring.source, live: false } },
+      { ...mapping, source: { ...mapping.source, live: false } },
+      passTwo,
+    ]
+    await act(async () => {
+      root.render(<AgentSessionView sessionSources={fullHistory} />)
+    })
+    expect([...container.querySelectorAll('[data-testid="agent-session-label"]')].map((node) => node.textContent)).toEqual([
+      'Pass 1 · Authoring',
+      'Pass 1 · Mapping',
+      'Pass 2 · Authoring',
+    ])
+    expect(container.textContent).toContain('Authored checkout tests')
+    expect(container.textContent).toContain('Mapped requirement R1')
+    expect(container.textContent).toContain('Closed the remaining gap')
+
+    // A Flight reload recreates the viewer from the manifest's persisted refs.
+    // The same ordered sessions must rehydrate, with only the current tail live.
+    act(() => root.unmount())
+    root = createRoot(container)
+    await act(async () => {
+      root.render(<AgentSessionView sessionSources={fullHistory} />)
+    })
+    headers = [...container.querySelectorAll('[data-testid="agent-session-header"]')]
+    expect(headers.map((header) => header.querySelector('[data-testid="agent-session-label"]')?.textContent)).toEqual([
+      'Pass 1 · Authoring',
+      'Pass 1 · Mapping',
+      'Pass 2 · Authoring',
+    ])
+    expect(headers.map((header) => header.querySelector('[data-testid="agent-session-mode"]')?.textContent)).toEqual([
+      'History',
+      'History',
+      'Live',
+    ])
+  })
+
   describe('history snapshot retry', () => {
     // A run whose status has just gone terminal can beat the agent CLI's final
     // flush of the session log to disk. History mode has no WS to tail, so that

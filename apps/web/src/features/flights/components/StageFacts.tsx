@@ -182,7 +182,7 @@ const AWAITED_FACT_LABELS: Partial<Record<FlightStageKey, readonly string[]>> = 
   'env-capture': ['Env files', 'Boot check'],
   'docs': ['Source docs', 'Requirements inferred', 'Distilled to'],
   'prd-summary': ['Requirements'],
-  'specs-coverage': ['Claimed coverage', 'Requirements', 'Tests written'],
+  'specs-coverage': ['Mapped coverage', 'Requirements', 'Tests written'],
   'portify': ['Services injectable', 'Files edited', 'Instances proven'],
   'evaluation-export': ['Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven'],
 }
@@ -474,7 +474,7 @@ function measuredStageFacts(
         const testsWritten = band.ledger?.tests.length ?? num(ev, 'testsWritten')
         return [
           {
-            label: 'Claimed coverage',
+            label: 'Mapped coverage',
             value: 'Not mapped',
             sub: 'coverage mapping has not run',
           },
@@ -493,7 +493,7 @@ function measuredStageFacts(
       return [
         ...(pct != null && !unmeasured
           ? [{
-              label: 'Claimed coverage',
+              label: 'Mapped coverage',
               value: `${pct}%`,
               big: true as const,
               tone: pct >= target ? 'good' as const : 'warn' as const,
@@ -936,7 +936,7 @@ export const FACT_HELP: Record<string, string> = {
   'Requirements': 'One thing the app must do, small enough to test. Everything later is scored against these.',
   'Distilled to': 'The short summary agents read instead of the full files. Tokens are a rough estimate.',
   // Test authoring
-  'Claimed coverage': 'Counted from requirement labels in the test files. Nothing was run, so every test could still be failing.',
+  'Mapped coverage': 'Counted from requirement labels in the test files. Nothing was run, so every test could still be failing.',
   'Coverage gaps': 'Requirements with no test yet, or only part of one. The next pass goes after these.',
   'Tests written': 'All test cases found in the suite’s spec files. They can exist before coverage mapping links them to requirements.',
   // Parallel readiness
@@ -989,7 +989,7 @@ export const FACT_GLOSS: Record<string, string> = {
   'Distilled to': 'the short version agents read',
   'Test depth': 'how much each test checks',
   'Requirements': 'what the documents asked for',
-  'Claimed coverage': 'a test claims it — nothing has run yet',
+  'Mapped coverage': 'linked to a test — nothing has run yet',
   'Coverage gaps': 'no test covers these yet',
   'Tests written': 'found in the suite',
   'Services injectable': 'each gets its port from the run',

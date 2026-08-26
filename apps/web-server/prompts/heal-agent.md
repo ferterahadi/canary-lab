@@ -21,6 +21,7 @@ Useful only when needed:
 
 Rules:
 - {{testSpecRule}}
+- In service/app repair mode, edit only the effective repo paths listed by `heal-index.md`. The authored feature suite and each original source checkout are read-only; worktree paths are the repair target.
 - Prefer exact slice paths from `heal-index.md` before broad repo search.
 - When SEVERAL tests failed, fan out the diagnosis. Dispatch **one read-only
   sub-agent per failure in a single parallel round** (up to 5 at once), each

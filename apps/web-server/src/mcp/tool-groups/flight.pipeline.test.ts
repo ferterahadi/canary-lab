@@ -278,8 +278,10 @@ describe('start_flight — typed refusals', () => {
       type: 'flight_exists_requires_choice', feature: 'shop',
       existingFlightId: 'fl-old', existingStatus: 'done', options: ['redo', 'from_stage'],
     })
-    // The wipe has to be stated: it is the part a user would not expect.
-    expect(String(out.next)).toContain('WIPES')
+    // The destructive default and independent Portify exception both have to
+    // be stated: neither is safe for a caller to infer from positional order.
+    expect(String(out.next)).toContain('most stage jumps wipe')
+    expect(String(out.next)).toContain('from_stage:"portify" resets only Parallel setup')
   })
 
   it('reports a null feature on the exists-choice when the caller named none', async () => {
@@ -665,10 +667,32 @@ describe('get_flight — steering per checkpoint kind', () => {
     expect(next).toContain('no subagent primitive')
   })
 
+  it('surfaces the downloadable Report while final Parallel setup is still running', async () => {
+    const { call } = flightHarness({
+      reply: {
+        statusCode: 200,
+        body: {
+          flightId: 'fl-1',
+          feature: 'checkout',
+          status: 'running',
+          currentStage: 'portify',
+          links: { evaluationZip: '/runs/evaluation.zip' },
+          stages: [],
+        },
+      },
+    })
+
+    const next = String((await call('get_flight', { flightId: 'fl-1' })).next)
+
+    expect(next).toContain('Report is ready')
+    expect(next).toContain('/runs/evaluation.zip')
+    expect(next).toContain('Parallel setup is continuing in the background')
+  })
+
   for (const [kind, marker] of [
     ['config-approval', 'the REAL on-disk feature.config.cjs'],
     ['export-mode', 'raw = fast report straight from run evidence'],
-    ['portify-gate', 'UPFRONT parallel-readiness ask'],
+    ['portify-gate', 'final Parallel setup ask'],
     ['portify-apply', 'passed a concurrent double-boot'],
   ] as const) {
     it(`explains the ${kind} choice in its own terms`, async () => {

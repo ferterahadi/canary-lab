@@ -72,9 +72,11 @@ describe('context helpers', () => {
       process.env.CANARY_LAB_CLAUDE_BIN = fakeAgentScript('echo \'{"type":"result","result":"ok"}\'')
       const stageDir = path.join(tmpDir, 'stage-rec')
       fs.mkdirSync(stageDir, { recursive: true })
+      const onAgentSession = vi.fn()
       await defaultSpawnAgent({
         prompt: 'p', cwd: tmpDir, stageDir,
         job: { flightId: 'fl-1', feature: 'checkout', stage: 'scout', logsDir },
+        onAgentSession,
       })
       const rec = agentJobStore(logsDir).get('fl-1:scout')!
       expect(rec).toMatchObject({ status: 'done', flightId: 'fl-1', stage: 'scout', agent: 'claude' })
@@ -82,6 +84,11 @@ describe('context helpers', () => {
       // agent-session ref carries, so a row and its timeline agree.
       const ref = JSON.parse(fs.readFileSync(path.join(stageDir, 'agent-session.json'), 'utf-8'))
       expect(rec.sessionId).toBe(ref.sessions.claude.sessionId)
+      expect(onAgentSession).toHaveBeenCalledWith({
+        agent: 'claude',
+        sessionId: ref.sessions.claude.sessionId,
+        spawnedAt: expect.any(String),
+      })
     })
 
     it('records a codex spawn, which pins no session id', async () => {

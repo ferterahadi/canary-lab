@@ -272,6 +272,8 @@ describe('FlightPage', () => {
     expect(container.querySelector('[data-testid="flight-redo-scout"]')?.textContent).toContain('Repo scan')
     // Server-invalid step: disabled, with the validator's reason on the row.
     const runRow = container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-run"]')!
+    const parallelSetupRow = container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-portify"]')!
+    expectBefore(runRow, parallelSetupRow)
     expect(runRow.disabled).toBe(true)
     expect(runRow.textContent).toContain('no specs authored yet')
     // Nothing selected yet → the primary is disabled.

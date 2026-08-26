@@ -9,6 +9,7 @@ import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor } from './run-paths'
 import { readManifest } from './manifest'
 import { RunnerLog } from './runner-log'
+import { REPO_PATH_OVERRIDES_ENV } from '../../../../../../../shared/e2e-runner/repo-path-overrides'
 
 interface FakeProcess {
   pid: number
@@ -154,6 +155,34 @@ describe('RunOrchestrator.runPlaywright', () => {
       CANARY_PORT_checkout_service: '51997',
     })
     await orch.stop('passed')
+  })
+
+  it('forces config-loaded repo paths into the active run worktree', async () => {
+    const sourceRoot = path.join(tmpDir, 'source')
+    const worktreeRoot = path.join(tmpDir, 'worktree')
+    fs.mkdirSync(sourceRoot, { recursive: true })
+    fs.mkdirSync(worktreeRoot, { recursive: true })
+    const { factory, spawned } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature({
+        repos: [{ name: 'api', localPath: sourceRoot, startCommands: [] }],
+      }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      playwrightSpawner: () => ({ command: 'fake-pw', cwd: tmpDir }),
+      playwrightEnv: { NODE_OPTIONS: '--trace-warnings' },
+      worktrees: [{ repoName: 'api', sourceRoot, worktreeRoot, localPath: worktreeRoot }],
+    })
+
+    const exitPromise = orch.runPlaywright()
+    const pwPty = spawned.at(-1)!
+    pwPty.emitExit(0)
+    await exitPromise
+
+    expect(pwPty.options.env?.[REPO_PATH_OVERRIDES_ENV]).toBe(JSON.stringify({ api: worktreeRoot }))
+    expect(pwPty.options.env?.NODE_OPTIONS).toContain('--trace-warnings')
+    expect(pwPty.options.env?.NODE_OPTIONS).toContain('repo-path-preload.js')
   })
 
   it('marks targeted reruns so the summary reporter can merge previous statuses', async () => {

@@ -283,6 +283,7 @@ function verdictExitCode(m: FlightManifest): number {
  *  settles. Checkpoints prompt inline (TTY) or park with exit code 2. */
 async function watchFlight(base: string, flightId: string): Promise<number> {
   const printed = new Map<string, FlightStageStatus>()
+  let printedReport: string | undefined
   for (;;) {
     const { status, json } = await requestJson('GET', `${base}/api/flights/${encodeURIComponent(flightId)}`)
     if (status !== 200) {
@@ -302,6 +303,11 @@ async function watchFlight(base: string, flightId: string): Promise<number> {
         : stage.status === 'skipped' && stage.skipReason ? ` ${dim(`(${stage.skipReason})`)}`
         : ''
       console.log(`  ${icon} ${stage.key}${stage.status === 'running' ? dim(' …') : ''}${suffix}`)
+    }
+
+    if (manifest.status === 'running' && manifest.links?.evaluationZip && manifest.links.evaluationZip !== printedReport) {
+      printedReport = manifest.links.evaluationZip
+      info(`Report ready — review ${dim(printedReport)} now; Parallel setup continues in the background.`)
     }
 
     if (manifest.status === 'waiting-for-approval') {
@@ -348,7 +354,7 @@ function usage(): void {
   console.log(`  canary-lab flight <repo-path...> "<what to test>" ${dim('[--feature <name>] [--env <envset>]')}`)
   console.log(`                 ${dim('[--coverage-target <pct>] [--base <branch>] [--from-stage <key>] [--redo] [--yolo] [--fresh]')}`)
   line()
-  info('One command: repo → scaffold → env → PRD → specs↔coverage → portify → run → heal → evaluation export.')
+  info('One command: repo → scaffold → env → PRD → Tests & coverage → Test run → Auto-repair → Report → Parallel setup.')
   info('Re-running `flight` resumes an interrupted flight; `--redo` restarts the feature\'s flight from stage 1; `--from-stage <key>` starts at a chosen stage (prerequisites checked); `--fresh` is for a brand-new feature; `--yolo` skips all checkpoints except missing secrets.')
 }
 

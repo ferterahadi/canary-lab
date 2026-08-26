@@ -1,5 +1,7 @@
 export const TIMELINE_CSS = `
 .agentts-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:7px;padding:6px 11px;border-bottom:1px solid var(--border-default);background:color-mix(in srgb,var(--bg-base) 90%,transparent);backdrop-filter:blur(8px);font-size:10px}
+.agentts-head[data-sticky="false"]{position:static}
+.agentts-session-label{font-size:10px;font-weight:600;color:var(--text-primary);white-space:nowrap}
 .agentts-mode{display:inline-flex;align-items:center;gap:5px;min-height:18px;padding:1px 6px;border:1px solid var(--border-default);border-radius:var(--radius-sm);color:var(--text-muted);font-size:8.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;line-height:1}
 .agentts-mode[data-live="true"]{border-color:color-mix(in srgb,var(--running) 32%,var(--border-default));color:var(--running);background:color-mix(in srgb,var(--running) 7%,transparent)}
 .agentts-statusdot{width:5px;height:5px;border-radius:var(--radius-sm);background:var(--text-muted);flex:none}

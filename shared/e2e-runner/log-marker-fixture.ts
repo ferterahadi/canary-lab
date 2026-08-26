@@ -3,6 +3,8 @@ import fs from 'fs'
 import path from 'path'
 import { getProjectRoot } from '../runtime/project-root'
 
+export { resolveRunRepoPath } from './repo-path-overrides'
+
 // Resolved at module load — same shape as the (now-moved) constant the
 // web-server's runtime uses, just inlined here so this published fixture
 // has no dependency on apps/web-server/. The published file ships to user

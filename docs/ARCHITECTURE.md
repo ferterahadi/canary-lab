@@ -235,7 +235,8 @@ whole runs or trims Playwright artifacts while keeping the manifest and `runner.
 ## Flight Pipeline
 
 Flight is the server-owned onboarding pipeline behind the CLI, web UI, and MCP
-surface. `shared/flights/types.ts` defines the ordered stage keys and wire model;
+surface. `shared/flights/types.ts` defines the stable stage keys, normal execution
+priority, and wire model;
 `apps/web-server/src/features/flights/logic/conductor.ts` persists transitions;
 adapters under `apps/web-server/src/features/flights/logic/stages/` call the owning feature's routes rather than
 reimplementing coverage, Portify, runs, or export.
@@ -248,17 +249,22 @@ reimplementing coverage, Portify, runs, or export.
 | `env-capture` | Envset files and unresolved-key checkpoint |
 | `docs` | Requirement source collection |
 | `prd-summary` | Stable structured requirements and readable summary |
-| `specs-coverage` | Compiling Playwright specs plus deterministic coverage ledger |
-| `portify` | Saved overlay backed by concurrent double-boot verification |
+| `specs-coverage` | Compiled Playwright tests plus deterministic mapped-coverage ledger |
 | `run` | Terminal Playwright run manifest |
 | `heal` | Read-only mirror of the run manifest's heal mode and cycle count |
-| `evaluation-export` | Existing evaluation archive |
+| `evaluation-export` | Downloadable Report archive |
+| `portify` | Parallel setup overlay backed by concurrent double-boot verification |
 
 One feature has one Flight manifest. The conductor persists stage evidence and
-typed checkpoints, then resumes from the first unfinished stage. A plain resume
-preserves artifacts. A stage jump resets that stage and all later stages after
-checking declared prerequisites in `STAGE_DEPENDS_ON`; a full redo resets the
-entire pipeline.
+typed checkpoints. It always finishes the active or explicitly re-entered stage,
+then selects the first unfinished stage in `FLIGHT_EXECUTION_ORDER`. That priority
+runs the serial Test run, its repair mirror, and Report before independent
+Parallel setup, so a large Portify pass cannot delay either evidence surface.
+`FLIGHT_STAGE_KEYS` remains the stable persisted order for existing manifests.
+A plain resume preserves artifacts. Most stage jumps reset that stage and all
+later record stages after checking `STAGE_DEPENDS_ON`; a Parallel-setup jump
+resets only Portify because neither the run nor Report consumes its output. A
+full redo resets the entire pipeline.
 
 ### Stage producers
 

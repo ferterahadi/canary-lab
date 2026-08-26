@@ -127,6 +127,26 @@ describe('runAgentProcess', () => {
     expect(spawn.calls[0].command).toBe('claude')
   })
 
+  it('gives every claude child a 258K auto-compaction window', async () => {
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    runAgentProcess({ command: 'claude', args: ['-p', 'hi'], idleMs: 1000, spawnImpl: spawn.impl, resolveBinary: () => null })
+    child.close(0)
+    expect(spawn.calls[0].args).toEqual(['--autocompact', '258k', '-p', 'hi'])
+  })
+
+  it('gives every codex child a 258K window with auto-compaction enabled', async () => {
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    runAgentProcess({ command: 'codex', args: ['exec', '-'], idleMs: 1000, spawnImpl: spawn.impl, resolveBinary: () => null })
+    child.close(0)
+    expect(spawn.calls[0].args).toEqual([
+      '-c', 'model_context_window=258000',
+      '-c', 'model_auto_compact_token_limit=232200',
+      'exec', '-',
+    ])
+  })
+
   it('rejects on a spawn error', async () => {
     const child = new FakeChild()
     const spawn = fakeSpawn(child)
@@ -250,9 +270,10 @@ describe('runAgentProcess', () => {
   it('does not tag an unrelated command even if claude appears in the path prefix', async () => {
     const child = new FakeChild()
     const spawn = fakeSpawn(child)
-    runAgentProcess({ command: '/home/claude/bin/other-tool', args: [], idleMs: 1000, spawnImpl: spawn.impl })
+    runAgentProcess({ command: '/home/claude/bin/other-tool', args: ['--flag'], idleMs: 1000, spawnImpl: spawn.impl })
     child.close(0)
     expect((spawn.calls[0].opts as { env: NodeJS.ProcessEnv }).env).toBe(process.env)
+    expect(spawn.calls[0].args).toEqual(['--flag'])
   })
 
   it('uses nodeSpawn when spawnImpl is omitted (covers the ?? nodeSpawn branch)', async () => {
@@ -264,7 +285,7 @@ describe('runAgentProcess', () => {
     child.close(0)
     const res = await h.done
     expect(res.code).toBe(0)
-    expect(mockNodeSpawn).toHaveBeenCalledWith('claude', ['-p', 'hi'], expect.anything())
+    expect(mockNodeSpawn).toHaveBeenCalledWith('claude', ['--autocompact', '258k', '-p', 'hi'], expect.anything())
   })
 
   it('resolves a bare agent kind to the absolute path before spawning', async () => {
