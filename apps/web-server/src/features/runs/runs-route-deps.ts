@@ -180,16 +180,16 @@ export function buildRunsRouteDeps(
         runnerLog.info('Boot-only session: booting services and holding them — no tests, no heal.')
       } else if (externalOrigin && canClaim) {
         runnerLog.info(
-          `Auto-heal disabled: external client (${healAgentReq?.clientKind}, session ${healAgentReq?.sessionId.slice(0, 8)}) claimed and will drive the heal loop.`,
+          `Auto-heal disabled: external agent session (${healAgentReq?.clientKind}, session ${healAgentReq?.sessionId.slice(0, 8)}) claimed and will drive the heal loop.`,
         )
       } else if (externalOrigin) {
         runnerLog.info(
-          `Auto-heal disabled: run triggered by an external client (${healAgentReq?.clientKind}) that can't claim heal — waiting in external mode for a Desktop/UI drive.`,
+          `Auto-heal disabled: run triggered by an external agent session (${healAgentReq?.clientKind}) that can't claim heal — waiting in external mode for a Desktop/UI drive.`,
         )
       } else if (projectConfig.healAgent === 'manual') {
         runnerLog.info('Auto-heal disabled: project config is set to "manual" — the run will pause for hand-driven fixes.')
       } else if (projectConfig.healAgent === 'external') {
-        runnerLog.info('Auto-heal disabled: project config is set to "external" — the run will wait for an external client to claim heal.')
+        runnerLog.info('Auto-heal disabled: project config is set to "external" — the run will wait for an external agent session to claim heal.')
       }
       if (agentChoice) {
         // Resolve the absolute binary path once so the agent spawns even under

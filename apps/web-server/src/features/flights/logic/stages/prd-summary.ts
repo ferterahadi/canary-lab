@@ -104,7 +104,7 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
     }
     ctx.appendLog(lastRejection
       ? `[prd-summary] external summary rejected — ${lastRejection}\n`
-      : '[prd-summary] handed off to the external client\n')
+      : '[prd-summary] handed off to the external agent session\n')
     return externalWorkCheckpoint(ctx, 'prd-summary', built.context.prompt, {
       message: lastRejection
         ? `That summary was rejected: ${lastRejection}. Fix it and respond again with { requirements[] } on \`data\` — or answer "run-internally" to hand the step to Canary's own agent.`

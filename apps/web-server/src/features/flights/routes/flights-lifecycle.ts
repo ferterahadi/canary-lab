@@ -8,7 +8,7 @@ import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
 import { FlightNotParkedError, FlightStageEntryError, FlightTakeoverRequestedError, forceFlightTakeover, requestFlightTakeover, resumeFlight, setFlightAutopilot, respondToFlightCheckpoint, pauseFlight, redoFlight, deleteFlight } from '../logic/conductor'
 import { rejectForeignFlightDecision } from './flight-decision-origin'
-import { reclaimGettingStartedFlight } from './flight-route-support'
+import { parseFlightExternalAgentSession, reclaimGettingStartedFlight } from './flight-route-support'
 import { GettingStartedBusyError } from '../../config/logic/getting-started-session'
 import { type FlightCheckpointResponse, type FlightStageKey } from '../logic/types'
 
@@ -91,9 +91,14 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
     },
   )
 
-  app.post<{ Params: { id: string } }>('/api/flights/:id/resume', async (req, reply) => {
+  app.post<{ Params: { id: string }; Body: { externalAgentSession?: unknown } | undefined }>('/api/flights/:id/resume', async (req, reply) => {
     const foreign = rejectForeignFlightDecision(req, reply, () => store.get(req.params.id))
     if (foreign) return foreign
+    const externalAgentSession = parseFlightExternalAgentSession(req.body?.externalAgentSession)
+    if (externalAgentSession && 'error' in externalAgentSession) {
+      reply.code(400)
+      return { error: externalAgentSession.error }
+    }
     // Re-claim the Getting Started session (see reclaimGettingStartedFlight).
     // repoPaths ride along so a de-conflicted feature name (flight-app-2) still
     // matches on the repo basename.
@@ -106,7 +111,7 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
           { feature: record.feature, repoPaths: record.repoPaths }, req.params.id,
         )
       }
-      const { manifest } = resumeFlight(req.params.id, conductorDeps)
+      const { manifest } = resumeFlight(req.params.id, conductorDeps, externalAgentSession)
       if (gettingStartedSession) {
         deps.gettingStarted?.attach(gettingStartedSession, { kind: 'flight', id: manifest.flightId })
       }

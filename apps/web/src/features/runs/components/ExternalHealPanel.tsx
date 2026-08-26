@@ -56,7 +56,7 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
       clientKind={clientKind}
       brandElevated
       fill
-      eyebrow="External heal session"
+      eyebrow="External agent session"
       headline={headlineFor(clientKind, Boolean(session))}
       statusPill={
         displayedStatus && (
@@ -90,7 +90,7 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
           : isDisconnected
           ? `Lost connection to ${clientLabel(session.clientKind)}. The run is paused waiting for you to reconnect — Canary Lab keeps the claim, so the same session id can resume right where it left off.`
           : !session
-          ? 'No external client has claimed this run yet. Canary Lab is waiting for an AI Agent MCP session to claim the run and send a restart or rerun signal.'
+          ? 'No external agent session has claimed this run yet. Canary Lab is waiting for an AI Agent MCP session to claim the run and send a restart or rerun signal.'
           : `Agent output is streaming in your ${clientLabel(session.clientKind)} window. This panel tracks the run; open your conversation to follow the agent's reasoning.`
       }
     >
@@ -172,8 +172,8 @@ function terminalMessage(
 ): string {
   if (!hasSession) {
     return status === 'failed'
-      ? 'No external client is actively waiting for a signal.'
-      : 'No external client is active for this run.'
+      ? 'No external agent session is actively waiting for a signal.'
+      : 'No external agent session is active for this run.'
   }
   const agent = clientLabel(clientKind)
   return status === 'failed'
@@ -197,7 +197,7 @@ function ageColor(ageMs: number | null): string {
 }
 
 // This surface labels an unknown client "AI Agent" (not the shared default
-// "External Client") — keep that copy while reusing the shared switch.
+// "External agent") — keep that copy while reusing the shared switch.
 function clientLabel(kind: ExternalHealSession['clientKind']): string {
   return brandingClientLabel(kind, 'AI Agent')
 }

@@ -7,7 +7,7 @@ import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { featureDirFor, pollUntil, type FlightStageDeps } from './context'
 import { editFingerprint } from '../../../portify/logic/runtime/git-ops'
 import { portifyJob } from './stage-jobs'
-import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
+import { externalWorkCheckpoint, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../types'
 
 // Port-ification runs by default — every flight attempts to leave the feature
@@ -22,13 +22,10 @@ import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../types'
 // port-injectable service is the fast path through the stage (double-boot
 // passes with zero edits, no review needed), not a skip.
 //
-// Under an external stageProducer the stage starts an EXTERNAL workflow and
-// PARKS on one external-work checkpoint for the whole engagement — the client
-// drives the existing standalone loop (submit_external_portify / get_portify /
-// revise) against the workflowId, and the checkpoint submit means "check the
-// workflow now": consume re-reads its status and the overlay mark, re-parking
-// while it is still editing/verifying. No stage-side poll runs in that mode,
-// so no idle budget can starve a client mid-edit.
+// Parallel setup begins after the Report exists and always runs as Canary-owned
+// background work. The external checkpoint support below is retained only so a
+// Flight persisted before that ownership change can still be released, revised,
+// or settled without losing its verified workflow.
 
 const PORTIFY_TIMEOUT_MS = 30 * 60 * 1000
 
@@ -235,34 +232,10 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
       context: { workflowId, ...context },
     })
 
-  // External producer: start the workflow through the same route, producer
-  // 'external' — Canary sets up the scratch worktrees and parks at `editing`
-  // with no local agent. The stage then PARKS instead of polling.
-  const startExternal = async (ctx: StageContext): Promise<StageOutcome> => {
-    const m = ctx.manifest()
-    const started = await deps.inject({
-      method: 'POST',
-      url: '/api/portify',
-      payload: { feature: m.feature, producer: 'external', sessionId: `flight:${m.flightId}` },
-    })
-    const body = started.json() as { workflowId?: string; targets?: unknown; configPath?: string; instructions?: string; error?: string }
-    if (started.statusCode >= 300 || !body.workflowId) {
-      return { kind: 'failed', error: `portify start rejected (${started.statusCode}): ${body.error ?? 'unknown'}` }
-    }
-    const workflowId = body.workflowId
-    ctx.appendLog(`[portify] external workflow ${workflowId} started — handed to the client\n`)
-    // Same pin as the internal path: the drill-through and the teardown reach
-    // the workflow through this id while the stage is parked.
-    ctx.setProgress({ workflowId } satisfies PortifyStageProgress)
-    return parkExternal(ctx, workflowId, body.instructions ?? '', {
-      ...(body.targets === undefined ? {} : { targets: body.targets }),
-      ...(body.configPath === undefined ? {} : { configPath: body.configPath }),
-    })
-  }
-
-  /** Which producer runs the workflow once the gate said 'run'. */
-  const startWorkflow = (ctx: StageContext): Promise<StageOutcome> =>
-    handsOffToClient(ctx) ? startExternal(ctx) : startAndFollow(ctx)
+  /** Parallel setup is server-owned even when earlier thinking stages were
+   *  handed to the MCP client. This lets the client surface the Report and end
+   *  its turn while the existing persistent Portify workflow continues. */
+  const startWorkflow = (ctx: StageContext): Promise<StageOutcome> => startAndFollow(ctx)
 
   /** Re-park the SAME engagement with a status note — the ask (the workflowId
    *  and the task) has not changed, so the checkpoint is reused wholesale and
@@ -395,10 +368,10 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
         if (!feedback) {
           return applyCheckpoint(ctx.manifest().feature, workflowId, data.diff, 'Request changes needs feedback text — say what to change.')
         }
-        // Under an external producer the reopened editing window belongs to the
-        // client (reviseExternalPortify — same worktree, no local agent), so the
-        // stage re-parks the engagement instead of polling.
-        const external = handsOffToClient(ctx)
+        // New Flight-owned workflows are internal even when earlier thinking
+        // stages used an external producer. Read the workflow's persisted owner
+        // so pre-change external reviews still reopen in their original client.
+        const external = (await read(workflowId)).producer === 'external'
         const revised = await deps.inject({
           method: 'POST',
           url: `/api/portify/${encodeURIComponent(workflowId)}/revise`,

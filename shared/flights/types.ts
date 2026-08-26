@@ -12,6 +12,8 @@
 // These types are consumed by the web-server (conductor + MCP) and the web UI
 // (Flights pill + flight detail view), so they live in `shared/`.
 
+import type { ClientKind } from '../run-mode'
+
 /** Canonical stage-record order. This stays stable for persisted manifests and
  *  restart/jump semantics; normal drive priority lives in
  *  `FLIGHT_EXECUTION_ORDER` below. */
@@ -422,6 +424,18 @@ export interface FlightOptions {
   plannedSplit?: boolean
 }
 
+/** The interactive Claude/Codex session conducting an external Flight.
+ *  `sessionId` is optional only for manifests created by older MCP clients;
+ *  current clients send it so the Activity rail can show provenance. A URL is
+ *  stored only when it opens this exact conversation — app launch alone is not
+ *  represented as a session link. */
+export interface FlightExternalAgentSession {
+  clientKind: ClientKind
+  sessionId?: string
+  conversationName?: string
+  sessionUrl?: string
+}
+
 export interface FlightManifest {
   flightId: string
   /** Feature this flight targets (created by the flight, or matched by the
@@ -431,6 +445,8 @@ export interface FlightManifest {
   repoPaths: string[]
   description: string
   opts: FlightOptions
+  /** Present when an MCP client owns the Flight's hand-off-capable stages. */
+  externalAgentSession?: FlightExternalAgentSession
   status: FlightStatus
   /** Present while status is `paused` — see FlightPauseReason. */
   pauseReason?: FlightPauseReason

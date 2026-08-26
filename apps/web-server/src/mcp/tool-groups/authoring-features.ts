@@ -17,7 +17,7 @@ export function registerFeatureAuthoringTools(ctx: ToolGroupContext): void {
   // ─── external authoring and export control ───────────────────────────
 
   registerTool('create_feature', {
-    description: 'Create a Canary Lab feature skeleton for an external client to author tests. This never generates test cases or starts a local Claude/Codex agent.',
+    description: 'Create a Canary Lab feature skeleton for an external agent session to author tests. This never generates test cases or starts a local Claude/Codex agent.',
     inputSchema: {
       feature: z.string().describe('Feature name to create under features/<name>.'),
       description: z.string().optional(),

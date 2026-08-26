@@ -65,7 +65,7 @@ describe('ExternalDraftAgentPanel', () => {
   it.each([
     ['claude', 'Claude'],
     ['codex-pty', 'Codex (runner)'],
-    ['other', 'External Client'],
+    ['other', 'External agent'],
   ] as Array<[ExternalHealClientKind, string]>)('renders the %s client label', (kind, label) => {
     const html = renderToStaticMarkup(
       <ExternalDraftAgentPanel draft={draft({ externalClientKind: kind })} stageView="planning" />,

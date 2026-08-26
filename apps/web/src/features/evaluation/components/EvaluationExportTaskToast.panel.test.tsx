@@ -54,7 +54,7 @@ describe('ExternalEvaluationPanel', () => {
   it('renders the shared external-agent card (eyebrow + status) with an open-client CTA for a known client', () => {
     render(BASE_TASK)
     expect(container.querySelector('[data-testid="evaluation-external-monitor"]')).toBeTruthy()
-    expect(container.textContent).toContain('External evaluation export session')
+    expect(container.textContent).toContain('External agent session')
     expect(container.textContent).toContain('Exporting')
     // Known client → the "go check your Desktop agent" affordance.
     expect(container.textContent).toContain('Open Claude')

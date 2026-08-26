@@ -54,6 +54,7 @@ export const TIMELINE_CSS = `
 .agentts-extbody{display:flex;min-width:0;flex-direction:column;gap:3px}
 .agentts-exthead{display:flex;min-width:0;align-items:baseline;gap:7px;min-height:14px}
 .agentts-extlabel{font-family:var(--font-mono)}
+.agentts-extagent{flex:none;color:var(--text-secondary);font-size:9.5px;font-weight:600;white-space:nowrap}
 .agentts-extline{display:flex;min-width:0;align-items:baseline;gap:10px}
 .agentts-extmessage{min-width:0;flex:1;color:var(--text-secondary);font-size:12px;line-height:1.55;word-break:break-word}
 .agentts-extaction{flex:none;border:0;background:none;padding:0;color:var(--accent);cursor:pointer;font-family:var(--font-sans);font-size:10.5px;font-weight:500;white-space:nowrap}

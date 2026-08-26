@@ -119,7 +119,7 @@ describe('externalDraftView', () => {
   function draftRecord(over: Partial<DraftRecord> = {}): DraftRecord {
     return {
       draftId: 'draft-abc-123456',
-      prdText: 'External client is authoring tests for checkout.',
+      prdText: 'External agent session is authoring tests for checkout.',
       prdDocuments: [],
       repos: [],
       featureName: 'checkout',

@@ -3,8 +3,9 @@ import os from 'os'
 import path from 'path'
 import { type FlightStore } from '../logic/store'
 import { FlightConflictError, startFlight, enqueueFlight, type FlightConductorDeps } from '../logic/conductor'
-import { STAGE_DEPENDS_ON, type FlightManifest, type FlightOptions, type FlightStageKey } from '../logic/types'
+import { STAGE_DEPENDS_ON, type FlightExternalAgentSession, type FlightManifest, type FlightOptions, type FlightStageKey } from '../logic/types'
 import { type PlannedFeature } from '../../../../../../shared/flights/types'
+import { isClientKind } from '../../../../../../shared/run-mode'
 import { flightStageLabel } from '../../../../../../shared/flights/stage-labels'
 import { type PlanAutoLaunchOutcome } from '../logic/plan-features'
 import { findBootProof, hasAuthoredSpecs, hasCapturedEnvset, hasPrdSummary } from '../logic/stage-evidence'
@@ -146,6 +147,33 @@ export function buildStageEntryLinkResolver(logsDir?: string) {
  *  therefore the dialog's repo picker) may declare repos home-relative. */
 export function expandHome(p: string): string {
   return p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p
+}
+
+/** Validate the untrusted REST form of an MCP-owned Flight session. The ID is
+ *  optional only for older callers; retaining the detected client kind still
+ *  lets the UI identify Claude/Codex without inventing a resume-able ID. */
+export function parseFlightExternalAgentSession(
+  value: unknown,
+): FlightExternalAgentSession | { error: string } | undefined {
+  if (value === undefined) return undefined
+  if (value === null || typeof value !== 'object') {
+    return { error: 'externalAgentSession must be an object' }
+  }
+  const input = value as Record<string, unknown>
+  if (!isClientKind(input.clientKind)) {
+    return { error: 'externalAgentSession.clientKind is invalid' }
+  }
+  for (const key of ['sessionId', 'conversationName', 'sessionUrl'] as const) {
+    if (input[key] !== undefined && (typeof input[key] !== 'string' || input[key].trim() === '')) {
+      return { error: `externalAgentSession.${key} must be a non-empty string` }
+    }
+  }
+  return {
+    clientKind: input.clientKind,
+    ...(typeof input.sessionId === 'string' ? { sessionId: input.sessionId.trim() } : {}),
+    ...(typeof input.conversationName === 'string' ? { conversationName: input.conversationName.trim() } : {}),
+    ...(typeof input.sessionUrl === 'string' ? { sessionUrl: input.sessionUrl.trim() } : {}),
+  }
 }
 
 export interface PlannedLaunchDeps {

@@ -28,6 +28,7 @@ export type {
   FlightStageErrorDetail,
   FlightStatus,
   FlightOptions,
+  FlightExternalAgentSession,
   FlightManifest,
   FlightIndexEntry,
   FlightStageEntryOption,

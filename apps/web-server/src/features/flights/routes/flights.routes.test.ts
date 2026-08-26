@@ -123,10 +123,40 @@ describe('flights routes', () => {
       startBody({ feature: '' }),
       startBody({ coverageTarget: 200 }),
       startBody({ repoPaths: [path.join(tmpDir, 'nope')] }),
+      startBody({ stageProducer: 'external', externalAgentSession: 'claude' }),
+      startBody({ stageProducer: 'external', externalAgentSession: { clientKind: 'unknown' } }),
+      startBody({ stageProducer: 'external', externalAgentSession: { clientKind: 'claude', sessionId: ' ' } }),
     ]) {
       const resp = await app.inject({ method: 'POST', url: '/api/flights', body })
       expect(resp.statusCode).toBe(400)
     }
+  })
+
+  it('stores the external agent session on an MCP-driven Flight', async () => {
+    app = await buildApp(allDone())
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/flights',
+      body: startBody({
+        stageProducer: 'external',
+        externalAgentSession: {
+          clientKind: 'codex',
+          sessionId: 'codex-session-1',
+          conversationName: 'checkout flight',
+          sessionUrl: 'https://chatgpt.com/codex/tasks/1',
+        },
+      }),
+    })
+
+    expect(started.statusCode).toBe(201)
+    expect(started.json()).toMatchObject({
+      externalAgentSession: {
+        clientKind: 'codex',
+        sessionId: 'codex-session-1',
+        conversationName: 'checkout flight',
+        sessionUrl: 'https://chatgpt.com/codex/tasks/1',
+      },
+    })
   })
 
   it('starts a flight (201, non-blocking) and exposes it via list + get', async () => {

@@ -322,6 +322,7 @@ describe('AgentSessionView external-session Activity row', () => {
     act(() => root.render(
       <AgentSessionView externalSessions={[{
         clientKind: 'claude',
+        sessionId: '649945f5-79b7-43ae-81c9-be02b0911e88',
         status: 'running',
         message: 'Work is continuing in your Claude session.',
         startedAt: '2026-08-25T00:00:00.000Z',
@@ -329,17 +330,24 @@ describe('AgentSessionView external-session Activity row', () => {
     ))
 
     const row = container.querySelector('[data-testid="external-session-activity"]')
-    expect(row?.textContent).toContain('External session')
+    expect(row?.textContent).toContain('External agent session')
     expect(row?.textContent).not.toContain('External · Claude')
+    expect(container.querySelector('[data-testid="external-session-client"]')?.textContent).toBe('Claude')
+    expect(container.querySelector('[data-testid="external-session-id"]')?.textContent).toBe('649945f5')
+    expect(container.querySelector('[data-testid="external-session-id"]')?.getAttribute('title'))
+      .toBe('649945f5-79b7-43ae-81c9-be02b0911e88')
     expect(row?.textContent).toContain('Work is continuing in your Claude session.')
     expect(container.querySelector('[data-testid="external-session-elapsed"]')?.textContent).toBe('1m 42s')
     expect(container.querySelector('.agentts-worknode')).not.toBeNull()
+    expect(container.querySelector<HTMLButtonElement>('.agentts-extaction')?.textContent).toContain('Open Claude app')
+    expect(container.querySelector<HTMLButtonElement>('.agentts-extaction')?.title).toContain('No exact session link')
   })
 
   it('keeps completed external provenance compact and links back to the session', () => {
     act(() => root.render(
       <AgentSessionView externalSessions={[{
         clientKind: 'codex',
+        sessionId: 'codex-session-abc',
         status: 'done',
         message: 'Completed outside Canary Lab · 3 files applied.',
         startedAt: '2026-08-25T00:00:00.000Z',
@@ -349,10 +357,13 @@ describe('AgentSessionView external-session Activity row', () => {
     ))
 
     const row = container.querySelector('[data-testid="external-session-activity"]')
-    expect(row?.textContent).toContain('External session')
+    expect(row?.textContent).toContain('External agent session')
+    expect(container.querySelector('[data-testid="external-session-client"]')?.textContent).toBe('Codex')
+    expect(container.querySelector('[data-testid="external-session-id"]')?.getAttribute('title')).toBe('codex-session-abc')
     expect(row?.textContent).toContain('Completed outside Canary Lab · 3 files applied.')
     expect(container.querySelector('[data-testid="external-session-elapsed"]')?.textContent).toBe('5m 00s')
     expect(container.querySelector<HTMLAnchorElement>('.agentts-extaction')?.getAttribute('href')).toBe('codex://session/abc')
+    expect(container.querySelector<HTMLAnchorElement>('.agentts-extaction')?.textContent).toContain('Open Codex')
     expect(container.querySelector('.agentts-worknode')).toBeNull()
   })
 
@@ -380,7 +391,7 @@ describe('AgentSessionView external-session Activity row', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0]?.textContent).toContain('First coverage pass completed.')
     expect(rows[1]?.textContent).toContain('Second coverage pass completed.')
-    expect([...rows].every((row) => row.textContent?.includes('External session'))).toBe(true)
+    expect([...rows].every((row) => row.textContent?.includes('External agent session'))).toBe(true)
   })
 
   it('places the external row after the conductor lines that announced the hand-off', () => {
@@ -388,7 +399,7 @@ describe('AgentSessionView external-session Activity row', () => {
       <AgentSessionView
         systemRows={{
           pre: ['[autopilot] prd-source: answered "collect-repo-docs"'],
-          post: ['[docs] handed the collect repo docs step to the external client…'],
+          post: ['[docs] handed the collect repo docs step to the external agent session…'],
         }}
         externalSessions={[{
           clientKind: 'other',
@@ -401,6 +412,6 @@ describe('AgentSessionView external-session Activity row', () => {
 
     const rows = [...container.querySelectorAll('.agentts-rail > li')]
     expect(rows.at(-1)?.getAttribute('data-testid')).toBe('external-session-activity')
-    expect(rows.at(-2)?.textContent).toContain('handed the collect repo docs step to the external client')
+    expect(rows.at(-2)?.textContent).toContain('handed the collect repo docs step to the external agent session')
   })
 })

@@ -152,7 +152,7 @@ export function healAgentOverviewLabel(manifest: RunManifest): string | null {
   if (manifest.healAgent === 'claude') return 'Claude'
   if (manifest.healAgent === 'codex') return 'Codex'
   if (manifest.healMode === 'manual') return 'Manual'
-  if (manifest.healMode === 'external') return 'External client'
+  if (manifest.healMode === 'external') return 'External agent session'
   if (manifest.healMode === 'auto') return 'Auto'
   return null
 }
@@ -163,7 +163,7 @@ export function externalHealClientLabel(kind: NonNullable<RunManifest['externalH
     case 'codex': return 'Codex'
     case 'claude-pty': return 'Claude (runner)'
     case 'codex-pty': return 'Codex (runner)'
-    case 'other': return 'External client'
+    case 'other': return 'External agent session'
   }
 }
 

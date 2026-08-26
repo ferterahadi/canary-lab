@@ -12,9 +12,9 @@ export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
 // cancelling one, removing a portification, listing status. Those stay opt-in
 // via `--profile portify` (or `full`), keeping the common surface leaner.
 //
-// What lifecycle DOES carry is the portify hand-off trio (see FLIGHT_TOOLS),
-// because a flight's portify stage hands work to the client and every profile
-// that can start a flight must be able to answer it.
+// What lifecycle still carries is the legacy Portify hand-off trio (see
+// FLIGHT_TOOLS), so an older persisted external workflow remains recoverable.
+// New Flights keep final Parallel setup server-owned.
 export const DEFAULT_CANARY_LAB_MCP_PROFILE: CanaryLabMcpProfile = 'lifecycle'
 
 export type CanaryLabMcpToolName =
@@ -208,13 +208,10 @@ export const FLIGHT_TOOLS = [
   // Narrower than abort: stops the stage's agent and leaves the run/export up.
   'stop_flight_agent',
   'write_feature_doc',
-  // The portify hand-off. An EXTERNAL flight parks its portify stage on an
-  // `external-work` checkpoint and expects the client to drive the standalone
-  // loop — so the profile that can START a flight must be able to ANSWER the
-  // work that flight hands back. Without these three, that stage had no choice
-  // but `run-internally`: the flight silently stopped being external at stage 8
-  // of 11. Portify moved from "specialized, infrequent" to a mandatory stage of
-  // every flight, and this array is what had not caught up.
+  // Legacy compatibility: Flights persisted before final Parallel setup became
+  // server-owned may still hold an external Portify hand-off. Current clients
+  // release it with `run-internally`; keeping the read/submit/revise trio here
+  // also lets an older connected client settle that persisted engagement.
   //
   // Exactly three, and the omissions are deliberate: `start_external_portify` is
   // the flight's own job (the client is handed a live `workflowId`), and
@@ -266,7 +263,7 @@ export const FULL_ONLY_TOOLS = [
 
 // `lifecycle` is the end-to-end authoring → run → heal → verify → export surface
 // plus the flight pipeline — the everyday one-session profile. It reaches the
-// portify hand-off trio through FLIGHT_TOOLS; `full` adds the standalone portify
+// legacy Portify hand-off trio through FLIGHT_TOOLS; `full` adds the standalone portify
 // management tools on top. Both are deduplicated unions, so adding a tool to any workflow array
 // surfaces it automatically — no second edit, no drift, no duplicate entries.
 export const LIFECYCLE_TOOLS: readonly CanaryLabMcpToolName[] = Array.from(

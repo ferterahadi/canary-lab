@@ -19,8 +19,8 @@ import { CHECKPOINT_OPTIONS } from '../types'
 // tool that does exactly this — respond_flight_checkpoint. It is also the safer
 // mechanism: a parked checkpoint makes run() RETURN, so nothing polls and no idle
 // deadline can starve — the flaw that used to abandon a poll-driven external
-// portify mid-hand-off, and why the portify/run stages now PARK their external
-// engagements instead of polling them.
+// hand-off. Run/heal still parks for its client-owned engagement; Parallel setup
+// now stays server-owned after Report, while Portify only consumes legacy parks.
 //
 // What this deliberately does NOT do is make a stage runnable standalone outside a
 // flight. The five existing start/submit_external_* jobs are standalone on purpose
@@ -163,7 +163,7 @@ export function externalizable(
     async run(ctx) {
       if (!handsOffToClient(ctx)) return inner.run(ctx)
       const { prompt, context } = spec.handOff(ctx)
-      ctx.appendLog(`[${stageKey}] handed off to the external client\n`)
+      ctx.appendLog(`[${stageKey}] handed off to the external agent session\n`)
       return externalWorkCheckpoint(ctx, stageKey, prompt, {
         ...(spec.message === undefined ? {} : { message: spec.message }),
         ...(context === undefined ? {} : { context }),

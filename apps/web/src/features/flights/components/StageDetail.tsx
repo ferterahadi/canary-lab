@@ -53,8 +53,25 @@ const PORTIFY_NO_TRANSCRIPT = {
 
 /** A standalone external task has no Canary-owned transcript. Translate its
  *  durable producer record into one compact row on the shared Activity rail. */
-export function externalSessionActivity(trace: ExternalWorkTrace): ExternalSessionActivity {
-  const clientKind = externalClientKind(trace.clientKind)
+export function externalSessionActivity(
+  trace: ExternalWorkTrace,
+  flightSession?: FlightManifest['externalAgentSession'],
+): ExternalSessionActivity {
+  // Older Flight-owned jobs persisted `flight:<id>` instead of the caller's
+  // real session. Prefer the Flight-level identity for those legacy traces;
+  // keep an independently started task's own identity intact.
+  const legacyFlightId = trace.sessionId?.startsWith('flight:') === true
+  const inheritsFlightSession = trace.sessionId === undefined
+    || legacyFlightId
+    || trace.sessionId === flightSession?.sessionId
+  const clientKind = externalClientKind(
+    trace.clientKind === undefined || trace.clientKind === 'other'
+      ? inheritsFlightSession ? flightSession?.clientKind : trace.clientKind
+      : trace.clientKind,
+  )
+  const sessionId = legacyFlightId
+    ? flightSession?.sessionId
+    : trace.sessionId ?? flightSession?.sessionId
   const client = clientLabel(clientKind, 'external agent')
   const owner = clientKind === 'other' ? 'your external agent session' : `your ${client} session`
   const fileCount = trace.itemCount != null
@@ -74,12 +91,21 @@ export function externalSessionActivity(trace: ExternalWorkTrace): ExternalSessi
   }
   return {
     clientKind,
+    ...(sessionId ? { sessionId } : {}),
     status: trace.status,
     message,
     startedAt: trace.startedAt,
     ...(trace.status === 'running' ? {} : { endedAt: trace.updatedAt }),
-    ...(trace.conversationName ? { conversationName: trace.conversationName } : {}),
-    ...(trace.sessionUrl ? { sessionUrl: trace.sessionUrl } : {}),
+    ...(trace.conversationName
+      ? { conversationName: trace.conversationName }
+      : inheritsFlightSession && flightSession?.conversationName
+        ? { conversationName: flightSession.conversationName }
+        : {}),
+    ...(trace.sessionUrl
+      ? { sessionUrl: trace.sessionUrl }
+      : inheritsFlightSession && flightSession?.sessionUrl
+        ? { sessionUrl: flightSession.sessionUrl }
+        : {}),
   }
 }
 
@@ -258,7 +284,9 @@ export function StageDetail({
     : handOffData?.lastRejection === 'stale_submission'
       ? EXTERNAL_WORK_COPY.lateResultNote
       : undefined
-  const historicalExternalSessions = externalStage.traces.map(externalSessionActivity)
+  const historicalExternalSessions = externalStage.traces.map((trace) =>
+    externalSessionActivity(trace, flight.externalAgentSession),
+  )
   // The live activity map can update before the durable resource list. Keep a
   // temporary row during that gap, but drop it once the persisted running trace
   // arrives so one external task never appears twice.
@@ -266,9 +294,18 @@ export function StageDetail({
     (activityOnThisRow || flightHandOff)
       && !historicalExternalSessions.some((session) => session.status === 'running')
       ? {
-          clientKind: 'other',
+          clientKind: externalClientKind(flight.externalAgentSession?.clientKind),
+          ...(flight.externalAgentSession?.sessionId
+            ? { sessionId: flight.externalAgentSession.sessionId }
+            : {}),
           status: 'running',
           message: handOffMessage ?? 'Work is continuing in your external agent session.',
+          ...(flight.externalAgentSession?.conversationName
+            ? { conversationName: flight.externalAgentSession.conversationName }
+            : {}),
+          ...(flight.externalAgentSession?.sessionUrl
+            ? { sessionUrl: flight.externalAgentSession.sessionUrl }
+            : {}),
         }
       : undefined
   const baseExternalSessions = liveExternalFallback

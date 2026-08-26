@@ -121,8 +121,8 @@ export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportT
     <div data-testid="evaluation-external-monitor" className="min-h-0 flex-1 overflow-auto">
       <ExternalAgentCard
         clientKind={clientKind}
-        eyebrow="External evaluation export session"
-        headline={clientKind === 'other' ? 'External Client' : clientLabel(clientKind)}
+        eyebrow="External agent session"
+        headline={clientLabel(clientKind)}
         subtitle={task.conversationName}
         statusPill={<ExternalStatusPill label={label} palette={palette} />}
         meta={

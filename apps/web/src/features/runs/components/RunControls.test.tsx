@@ -421,7 +421,7 @@ describe('run overview', () => {
     })
 
     expect(container.textContent).toContain('AI Agent')
-    expect(container.textContent).toContain('No external client has claimed this run yet')
+    expect(container.textContent).toContain('No external agent session has claimed this run yet')
     expect(container.textContent).not.toContain('terminal')
   })
 

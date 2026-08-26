@@ -535,9 +535,43 @@ describe('startFlight — stageProducer stickiness', () => {
   })
 
   it('stores stageProducer on a fresh start', async () => {
-    const { manifest, completion } = startFlight(externalArgs(), deps(allDone()))
+    const { manifest, completion } = startFlight({
+      ...externalArgs(),
+      externalAgentSession: {
+        clientKind: 'claude',
+        sessionId: 'session-1',
+        conversationName: 'checkout flight',
+        sessionUrl: 'https://claude.ai/chat/1',
+      },
+    }, deps(allDone()))
     await completion
     expect(store.get(manifest.flightId)!.opts.stageProducer).toBe('external')
+    expect(store.get(manifest.flightId)!.externalAgentSession).toEqual({
+      clientKind: 'claude',
+      sessionId: 'session-1',
+      conversationName: 'checkout flight',
+      sessionUrl: 'https://claude.ai/chat/1',
+    })
+  })
+
+  it('refreshes the external agent session on resume', async () => {
+    const first = startFlight(externalArgs(), deps(allDone()))
+    await first.completion
+    const settled = store.get(first.manifest.flightId)!
+    store.save({ ...settled, status: 'paused', currentStage: 'run' })
+
+    const resumed = resumeFlight(first.manifest.flightId, deps(allDone()), {
+      clientKind: 'codex',
+      sessionId: 'session-2',
+      sessionUrl: 'https://chatgpt.com/codex/tasks/2',
+    })
+    await resumed.completion
+
+    expect(store.get(first.manifest.flightId)!.externalAgentSession).toEqual({
+      clientKind: 'codex',
+      sessionId: 'session-2',
+      sessionUrl: 'https://chatgpt.com/codex/tasks/2',
+    })
   })
 
   it('a jump KEEPS the stored producer even when the caller sends a different one', async () => {
@@ -562,6 +596,7 @@ describe('startFlight — stageProducer stickiness', () => {
     )
     await redone.completion
     expect(store.get(redone.manifest.flightId)!.opts.stageProducer).toBe('internal')
+    expect(store.get(redone.manifest.flightId)!.externalAgentSession).toBeUndefined()
   })
 
   it('a redo that OMITS the producer keeps the stored one', async () => {

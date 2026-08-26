@@ -37,6 +37,7 @@ export type AgentSessionSource =
 
 export interface ExternalSessionActivity {
   clientKind: ExternalClientKind
+  sessionId?: string
   status: 'running' | 'ready' | 'done' | 'failed' | 'aborted'
   message: string
   startedAt?: string
@@ -628,10 +629,13 @@ function ExternalSessionRow({ session }: { session: ExternalSessionActivity }) {
     : durationBetween(session.startedAt, session.endedAt)
   const elapsed = runningElapsed ?? fixedElapsed
   const agent = clientLabel(session.clientKind, 'External agent')
-  const label = 'External session'
+  const label = 'External agent session'
   const tone = externalSessionTone(session.status)
   const running = session.status === 'running'
   const actionLabel = `Open ${agent}`
+  const aria = [label, agent, session.sessionId ? `session ${session.sessionId}` : null, session.message, elapsed ? `${elapsed} elapsed` : null]
+    .filter(Boolean)
+    .join('. ')
 
   return (
     <li
@@ -639,7 +643,7 @@ function ExternalSessionRow({ session }: { session: ExternalSessionActivity }) {
       data-status={session.status}
       data-testid="external-session-activity"
       role={running ? 'status' : undefined}
-      aria-label={[label, session.message, elapsed ? `${elapsed} elapsed` : null].filter(Boolean).join('. ')}
+      aria-label={aria}
     >
       {running ? (
         <span className="agentts-worknode" aria-hidden="true" />
@@ -661,6 +665,12 @@ function ExternalSessionRow({ session }: { session: ExternalSessionActivity }) {
       <div className="agentts-extbody">
         <div className="agentts-exthead">
           <span className="agentts-label agentts-extlabel" style={{ color: tone }}>{label}</span>
+          <span className="agentts-extagent" data-testid="external-session-client">{agent}</span>
+          {session.sessionId && (
+            <span className="agentts-sid" data-testid="external-session-id" title={session.sessionId}>
+              {shortSession(session.sessionId)}
+            </span>
+          )}
           {elapsed && <span className="agentts-worktime" data-testid="external-session-elapsed">{elapsed}</span>}
         </div>
         <div className="agentts-extline">
@@ -671,6 +681,7 @@ function ExternalSessionRow({ session }: { session: ExternalSessionActivity }) {
               target="_blank"
               rel="noreferrer"
               className="agentts-extaction"
+              aria-label={`${actionLabel} session`}
             >
               {actionLabel} <span aria-hidden>→</span>
             </a>
@@ -678,10 +689,11 @@ function ExternalSessionRow({ session }: { session: ExternalSessionActivity }) {
             <button
               type="button"
               className="agentts-extaction"
+              title={`No exact session link was provided; opens the ${agent} app.`}
               disabled={opening !== null}
               onClick={() => open(desktopAgent)}
             >
-              {opening ? 'Opening…' : actionLabel} {!opening && <span aria-hidden>→</span>}
+              {opening ? 'Opening…' : `Open ${agent} app`} {!opening && <span aria-hidden>→</span>}
             </button>
           ) : null}
         </div>

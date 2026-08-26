@@ -449,7 +449,13 @@ describe('run — external producer (heal engagement hand-off)', () => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-ext' } }
       return undefined
     }, calls)
-    const { ctx, current } = ctxFor(externalManifest())
+    const { ctx, current } = ctxFor(externalManifest({
+      externalAgentSession: {
+        clientKind: 'claude',
+        sessionId: 'claude-session-1',
+        conversationName: 'heal checkout',
+      },
+    }))
     const cp = parkOf(await runStage(deps({ inject })).run(ctx))
     expect(cp.kind).toBe('external-work')
     expect(cp.data.stage).toBe('run')
@@ -460,7 +466,13 @@ describe('run — external producer (heal engagement hand-off)', () => {
     // claimable:false — a synthetic flight claim would block the real client's.
     const start = calls.find((c) => c.method === 'POST' && c.url === '/api/runs')
     expect(start?.payload).toMatchObject({
-      healAgent: { kind: 'external', sessionId: 'flight:fl-test', clientKind: 'other', claimable: false },
+      healAgent: {
+        kind: 'external',
+        sessionId: 'claude-session-1',
+        clientKind: 'claude',
+        conversationName: 'heal checkout',
+        claimable: false,
+      },
     })
     expect(current().links?.runId).toBe('run-ext')
     // Parked, not polled: the only calls are the start (plus none for wf status).

@@ -10,6 +10,7 @@ import { pollUntil, type FlightStageDeps } from './context'
 import { evaluationExportJob } from './stage-jobs'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { CHECKPOINT_OPTIONS } from '../types'
+import { externalAgentSessionForFlight } from '../external-agent-session'
 
 // Terminal stage: a flight isn't done at green — it ends by producing the
 // evaluation archive through the existing test-review-export engine, so the
@@ -69,10 +70,14 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
     if (task && (task.producer !== 'external' || task.status === 'failed' || task.error)) task = null
     if (task?.downloadReady) return settleTask(ctx, task.taskId, 'localized')
     if (!task) {
+      const session = externalAgentSessionForFlight(m)
       task = createExternalEvaluationExportTask({
         logsDir: deps.logsDir,
         detail,
-        sessionId: `flight:${m.flightId}`,
+        sessionId: session.sessionId,
+        clientKind: session.clientKind,
+        ...(session.conversationName ? { conversationName: session.conversationName } : {}),
+        ...(session.sessionUrl ? { sessionUrl: session.sessionUrl } : {}),
       })
       // Linked at CREATION, like the internal path — a pause/crash mid-hand-off
       // must leave the pointer behind for the re-adopt above.
@@ -84,7 +89,7 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
     const fallback = deterministicEvaluationRewrite(packet)
     ctx.appendLog(lastRejection
       ? `[export] external rewrite rejected — ${lastRejection}\n`
-      : '[export] localized rewrite handed off to the external client\n')
+      : '[export] localized rewrite handed off to the external agent session\n')
     return externalWorkCheckpoint(ctx, 'evaluation-export', buildEvaluationRewritePrompt(packet, fallback), {
       message: lastRejection
         ? `That rewrite was rejected: ${lastRejection}. Answer again with the shape the prompt asks for — or "run-internally" to hand the step to Canary's own agent.`

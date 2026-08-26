@@ -10,9 +10,9 @@ export type ExternalClientKind = ClientKind
 
 // The four named clients render identically everywhere; only the label for an
 // unknown ('other') client is surface-specific — the heal hero card says
-// "AI Agent", the run timeline says "External", the draft/portify cards say
-// "External Client" (the default). Callers pass `otherLabel` to keep their copy.
-export function clientLabel(kind: ExternalClientKind, otherLabel = 'External Client'): string {
+// "AI Agent", while other surfaces use "External agent" (the default).
+// Callers pass `otherLabel` to keep their copy.
+export function clientLabel(kind: ExternalClientKind, otherLabel = 'External agent'): string {
   switch (kind) {
     case 'claude': return 'Claude'
     case 'codex': return 'Codex'
@@ -85,7 +85,7 @@ export function BrandMark({
           : {}),
       }}
       role="img"
-      aria-label="External client"
+      aria-label="External agent session"
     >
       <svg viewBox="0 0 32 32" width="30" height="30" fill="none" aria-hidden="true" className="h-7 w-7 @[320px]:h-8 @[320px]:w-8">
         <rect x="6" y="8" width="20" height="14" rx="3" fill="currentColor" opacity="0.13" />

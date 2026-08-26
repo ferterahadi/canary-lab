@@ -113,9 +113,9 @@ const FLIGHT_TOOLS = uniqueSorted([
   'start_flight',
   'stop_flight_agent',
   'write_feature_doc',
-  // The portify hand-off trio — an external flight's portify stage parks for the
-  // client, so the flight profile must be able to answer it. NOT the standalone
-  // start/save/cancel/remove/list tools: those stay portify-only.
+  // Legacy compatibility for external Portify hand-offs persisted before final
+  // Parallel setup became server-owned. New Flights do not use these from the
+  // umbrella flow. NOT the standalone start/save/cancel/remove/list tools.
   'submit_external_portify',
   'revise_external_portify',
   'get_portify',

@@ -3,13 +3,10 @@ import fs from 'fs'
 import path from 'path'
 import { TOOLS_BY_PROFILE, type CanaryLabMcpToolName } from './tool-profiles'
 
-// The hole this closes: a flight started with `stage_producer: "external"` parks
-// seven stages on `external-work` checkpoints for the CLIENT to answer. Nothing
-// tied those hand-offs to the MCP profiles, so `portify` — a mandatory stage of
-// every flight — parked for a client whose profile did not carry
-// `submit_external_portify` or `get_portify`. The stage's only legal answer was
-// `run-internally`, and the flight silently stopped being external at stage 8 of
-// 11. Every gate passed; the loss was invisible except in the stage rail.
+// A flight started with `stage_producer: "external"` parks six thinking stages
+// on `external-work` checkpoints for the CLIENT to answer. Final Parallel setup
+// is deliberately absent: once the Report exists, Canary owns that persistent
+// background workflow so the client can release the foreground conversation.
 //
 // So: a profile that can START a flight must be able to ANSWER every hand-off
 // that flight can produce. This test enforces both halves of that.
@@ -18,15 +15,17 @@ const STAGES_DIR = path.resolve(__dirname, '../features/flights/logic/stages')
 
 /** Stage keys that hand work to the client, discovered from the source rather
  *  than listed here. A stage hands off iff it imports `./externalizable` — the
- *  one module that owns the checkpoint — which catches both spellings: a direct
- *  `handsOffToClient(ctx)` branch and the `externalizable()` wrapper scout uses.
+ *  one module that owns the checkpoint — and calls either the direct
+ *  `handsOffToClient(ctx)` branch or the `externalizable()` wrapper scout uses.
+ *  A mere import does not count: Portify imports legacy checkpoint helpers so it
+ *  can migrate already-persisted external workflows, but creates no new handoff.
  *  Discovery is the point: a NEW hand-off stage fails this file on the commit
  *  that adds it, instead of shipping a silent internal fallback. */
 function discoverHandOffStages(): string[] {
   return fs.readdirSync(STAGES_DIR)
     .filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))
     .filter((file) => file !== 'externalizable.ts')
-    .filter((file) => /from '\.\/externalizable'/.test(fs.readFileSync(path.join(STAGES_DIR, file), 'utf-8')))
+    .filter((file) => /\b(?:handsOffToClient|externalizable)\s*\(/.test(fs.readFileSync(path.join(STAGES_DIR, file), 'utf-8')))
     .map((file) => file.replace(/\.ts$/, ''))
     .sort()
 }
@@ -38,13 +37,12 @@ function discoverHandOffStages(): string[] {
  *  An empty list is a real answer, not a gap: `docs`, `prd-summary` and
  *  `specs-coverage` are answered with `write_feature_doc` / the checkpoint's own
  *  `data` payload, and `evaluation-export` returns its envelope inline. Only
- *  `run` and `portify` make the client drive a second, live server-side loop. */
+ *  `run` makes the client drive a second, live server-side loop. */
 const REQUIRED_TOOLS: Record<string, readonly CanaryLabMcpToolName[]> = {
   scout: [],
   docs: ['write_feature_doc'],
   'prd-summary': [],
   'specs-coverage': [],
-  portify: ['submit_external_portify', 'revise_external_portify', 'get_portify'],
   run: ['claim_heal', 'wait_for_heal_task', 'signal_run'],
   'evaluation-export': [],
 }

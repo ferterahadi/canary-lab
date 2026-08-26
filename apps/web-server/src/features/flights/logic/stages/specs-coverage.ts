@@ -336,7 +336,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     requirementIds: string[],
   ): StageOutcome => {
     const mappingContext = buildCoverageMappingContext({ featuresDir: deps.featuresDir, feature: ctx.manifest().feature, requirementIds })
-    ctx.appendLog(`[specs] pass ${state.iteration} mapping handed off to the external client\n`)
+    ctx.appendLog(`[specs] pass ${state.iteration} mapping handed off to the external agent session\n`)
     return externalWorkCheckpoint(ctx, 'specs-coverage', mappingContext.prompt, {
       message: `Map the tests onto the requirements in your own client (pass ${state.iteration}), then respond with { mappings[], unmappable[] } on \`data\` — every roster test must appear in one of them. Canary writes the tags itself and recomputes the ledger.`,
       context: { phase: 'mapping', pass: state, roster: mappingContext.tests.map((t) => t.testName), target: prep.target },
@@ -453,7 +453,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     })
 
     if (!forceInternal && handsOffToClient(ctx)) {
-      ctx.appendLog(`[specs] iteration ${state.iteration} handed off to the external client\n`)
+      ctx.appendLog(`[specs] iteration ${state.iteration} handed off to the external agent session\n`)
       return externalWorkCheckpoint(ctx, 'specs-coverage', prompt, {
         message: `Write the spec files for pass ${state.iteration} in your own client (under ${prep.featureDir}/e2e), then respond. Canary re-reads what landed on disk, compiles it, and recomputes the ledger.`,
         context: { phase: 'authoring', pass: state, featureDir: prep.featureDir, gaps: gapRows(ledger), target: prep.target },

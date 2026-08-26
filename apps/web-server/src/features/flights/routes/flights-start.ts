@@ -8,7 +8,7 @@ import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
 import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightStageEntryError, startFlight, type FlightEntryMode } from '../logic/conductor'
 import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from '../logic/types'
-import { expandHome, reclaimGettingStartedFlight } from './flight-route-support'
+import { expandHome, parseFlightExternalAgentSession, reclaimGettingStartedFlight } from './flight-route-support'
 import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedWorkflow } from '../../config/logic/getting-started-session'
 
 /** The author/portify/export demos launch a flight pinned to their stage, so
@@ -44,6 +44,8 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
            *  flight. Sticky per record. Absent → internal. A GUI start never
            *  sends it — there is no MCP client to hand work to. */
           stageProducer?: string
+          /** The Claude/Codex conversation driving an external Flight. */
+          externalAgentSession?: unknown
           /** continue | redo | jump — required when the feature already has a
            *  flight record (409 flight_exists_requires_choice otherwise). */
           mode?: string
@@ -103,6 +105,11 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
     if (typeof coverageTarget !== 'number' || coverageTarget < 0 || coverageTarget > 100) {
       reply.code(400)
       return { error: 'Coverage target must be a number between 0 and 100.' }
+    }
+    const externalAgentSession = parseFlightExternalAgentSession(body.externalAgentSession)
+    if (externalAgentSession && 'error' in externalAgentSession) {
+      reply.code(400)
+      return { error: externalAgentSession.error }
     }
 
     // Realpath the repo set: it is the single-flight key, so two spellings of
@@ -166,6 +173,7 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
           repoPaths: resolved,
           description,
           opts,
+          ...(externalAgentSession ? { externalAgentSession } : {}),
           ...(body.mode ? { mode: body.mode as FlightEntryMode } : {}),
           ...(body.fromStage ? { fromStage: body.fromStage as FlightStageKey } : {}),
           ...(body.feedback ? { feedback: body.feedback } : {}),

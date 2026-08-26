@@ -17,8 +17,8 @@ export function ExternalPortifyPanel({ m }: { m: PortifyManifest }) {
     <ExternalAgentCard
       clientKind={clientKind}
       fill
-      eyebrow="External port-ification session"
-      headline={clientKind === 'other' ? 'External Client' : clientLabel(clientKind)}
+      eyebrow="External agent session"
+      headline={clientLabel(clientKind)}
       subtitle={m.external?.conversationName}
       statusPill={<ExternalStatusPill label={statusLabel(m.status)} palette={statusPalette(m.status)} />}
       meta={

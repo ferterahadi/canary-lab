@@ -53,7 +53,7 @@ async function makeApp(deps: TestsDraftRouteDeps): Promise<ReturnType<typeof Fas
 function seedExternalDraft(id = 'd-1', patch: Partial<DraftRecord> = {}): DraftRecord {
   const record = createDraft(logsDir, {
     draftId: id,
-    prdText: 'External client is authoring tests for checkout.',
+    prdText: 'External agent session is authoring tests for checkout.',
     prdDocuments: [],
     repos: [{ name: 'app', localPath: '/tmp/app' }],
     featureName: 'checkout',

@@ -198,8 +198,10 @@ similarity → scout → scaffold → env capture → docs → PRD summary
 
 The serial Test run and downloadable Report finish before Parallel setup, so a
 large app produces its evaluation without first waiting for port-injection
-work. Parallel setup remains a persisted final stage: it can finish, park, or be
-retried afterward without deleting the completed run or Report.
+work. The Report is the end of the foreground journey: surface it as soon as it
+exists. Parallel setup remains a persisted, server-owned final stage that can
+finish, park, or be retried in the background without deleting the completed run
+or Report. The Flight page continues to show its live progress.
 
 The server owns stage priority, persistence, and every verdict. Judgment work can
 come from two producers:
@@ -208,12 +210,16 @@ come from two producers:
   stages.
 - **External** (MCP only): `start_flight(..., stage_producer: "external")`
   parks on `external-work` handoffs. The connected client performs scout, docs,
-  PRD summary, test authoring and mapping, Portify, the repair engagement, and a
-  localized export. Canary Lab still re-reads artifacts and computes the verdict.
+  PRD summary, test authoring and mapping, the repair engagement, and a localized
+  export. Canary Lab still re-reads artifacts and computes the verdict.
 
 Mechanical work—scaffold writes, env application, Playwright execution, and raw
-export—stays in Canary Lab in both modes. An external client can return one
-handoff to the internal agent with `choice: "run-internally"`.
+export—plus final Parallel setup stays in Canary Lab in both modes. Once
+`links.evaluationZip` appears, an external client reports that path and ends its
+turn; it does not keep polling while Parallel setup runs. An external client can
+return any earlier handoff to the internal agent with `choice: "run-internally"`.
+Flights persisted under the older client-owned Portify behavior use that same
+choice to migrate their final handoff back to Canary Lab.
 
 The Flight page remains live while an external client works. Its normal
 mutations are disabled, but an `external-work` card offers **Request takeover**.

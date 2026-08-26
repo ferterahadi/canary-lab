@@ -83,16 +83,30 @@ describe('start_flight — locating the record before starting one', () => {
   })
 
   it('locates a repo-less re-entry by feature name', async () => {
-    const { call } = flightHarness({
+    const { call, requests } = flightHarness({
       reply: startRoutes({
         flights: [{ flightId: 'fl-old', feature: 'checkout', status: 'paused', repoPaths: ['/repo/shop'] }],
         resume: { statusCode: 200, body: plainFlight('running') },
       }),
     })
 
-    const out = await call('start_flight', { feature: 'checkout' })
+    const out = await call('start_flight', {
+      feature: 'checkout',
+      session_id: 'session-resume',
+      client_kind: 'claude',
+      conversation_name: 'resume checkout',
+      external_session_url: 'https://claude.ai/chat/resume',
+    })
 
     expect(out.note).toBe('resumed the paused flight from its first open stage')
+    expect(requests.at(-1)?.payload).toEqual({
+      externalAgentSession: {
+        clientKind: 'claude',
+        sessionId: 'session-resume',
+        conversationName: 'resume checkout',
+        sessionUrl: 'https://claude.ai/chat/resume',
+      },
+    })
   })
 
   it('maps a resume refused by an active Getting Started demo to the typed busy result', async () => {
@@ -161,6 +175,7 @@ describe('start_flight — what it sends', () => {
       // thinking stages default to IT. Pinned here because the omission is what let two
       // real flights run internally while the user expected to be handed the work.
       stageProducer: 'external',
+      externalAgentSession: { clientKind: 'other' },
     })
   })
 
@@ -171,12 +186,18 @@ describe('start_flight — what it sends', () => {
       repoPaths: ['/repo/shop'], description: 'checkout', feature: 'shop',
       env: 'staging', coverage_target: 80, base: 'main', yolo: true,
       autopilot: false, agent: 'codex', stage_producer: 'external',
+      session_id: 'codex-session-1', client_kind: 'codex',
+      conversation_name: 'checkout flight', external_session_url: 'https://chatgpt.com/codex/tasks/1',
     })
 
     expect(requests.at(-1)?.payload).toEqual({
       repoPaths: ['/repo/shop'], description: 'checkout', feature: 'shop',
       env: 'staging', coverageTarget: 80, base: 'main', yolo: true,
       autopilot: false, agent: 'codex', stageProducer: 'external',
+      externalAgentSession: {
+        clientKind: 'codex', sessionId: 'codex-session-1',
+        conversationName: 'checkout flight', sessionUrl: 'https://chatgpt.com/codex/tasks/1',
+      },
     })
   })
 
@@ -187,7 +208,10 @@ describe('start_flight — what it sends', () => {
 
     // The producer still rides along; the conductor pins the STORED one on a jump, so
     // this cannot retro-switch a flight whose earlier stages ran internally.
-    expect(requests.at(-1)?.payload).toEqual({ feature: 'checkout', mode: 'jump', fromStage: 'run', stageProducer: 'external' })
+    expect(requests.at(-1)?.payload).toEqual({
+      feature: 'checkout', mode: 'jump', fromStage: 'run', stageProducer: 'external',
+      externalAgentSession: { clientKind: 'other' },
+    })
   })
 
   it('marks a redo as a redo, and carries no fromStage', async () => {
@@ -195,7 +219,10 @@ describe('start_flight — what it sends', () => {
 
     await call('start_flight', { feature: 'checkout', redo: true })
 
-    expect(requests.at(-1)?.payload).toEqual({ feature: 'checkout', mode: 'redo', stageProducer: 'external' })
+    expect(requests.at(-1)?.payload).toEqual({
+      feature: 'checkout', mode: 'redo', stageProducer: 'external',
+      externalAgentSession: { clientKind: 'other' },
+    })
   })
 
   // The web UI's Redo dialog has always been able to tell the entry stage what
@@ -686,7 +713,35 @@ describe('get_flight — steering per checkpoint kind', () => {
 
     expect(next).toContain('Report is ready')
     expect(next).toContain('/runs/evaluation.zip')
-    expect(next).toContain('Parallel setup is continuing in the background')
+    expect(next).toContain('Canary-owned persistent background work')
+    expect(next).toContain('Tell the user now, then end your turn')
+    expect(next).toContain('Do not keep polling')
+  })
+
+  it('migrates a legacy external Parallel setup hand-off back to Canary after Report', async () => {
+    const next = await nextFor({
+      ...parkedOn('external-work', {
+        stage: 'portify', prompt: 'drive Portify', handOffId: 'tok-1',
+      }, ['submit', 'run-internally']),
+      currentStage: 'portify',
+      links: { evaluationZip: '/runs/evaluation.zip' },
+    })
+
+    expect(next).toContain('Report is ready')
+    expect(next).toContain('legacy client-owned Parallel setup')
+    expect(next).toContain('choice:"run-internally"')
+    expect(next).toContain('end your turn')
+    expect(next).not.toContain('Do the work with your tools now')
+  })
+
+  it('keeps an exported Report usable when background Parallel setup pauses', async () => {
+    const next = await nextFor({
+      flightId: 'fl-1', feature: 'checkout', status: 'paused', pauseReason: 'stage-failed',
+      currentStage: 'portify', links: { evaluationZip: '/runs/evaluation.zip' }, stages: [],
+    })
+
+    expect(next).toContain('Report is ready')
+    expect(next).toContain('Parallel setup did not invalidate it')
   })
 
   for (const [kind, marker] of [

@@ -22,7 +22,7 @@ export function ExternalDraftAgentPanel({ draft, stageView }: Props) {
     <ExternalAgentCard
       clientKind={clientKind}
       fill
-      eyebrow="External authoring session"
+      eyebrow="External agent session"
       headline={headlineFor(clientKind)}
       subtitle={draft.externalConversationName ?? undefined}
       statusPill={<ExternalStatusPill label={stageLabel(stage)} palette={stagePalette(stage)} />}
@@ -105,5 +105,5 @@ function bodyCopy(
 }
 
 function headlineFor(kind: ExternalClientKind): string {
-  return kind === 'other' ? 'External Client' : clientLabel(kind)
+  return clientLabel(kind)
 }
