@@ -10,6 +10,7 @@ import {
   claudeSessionLogPath,
   writeWorkflowAgentRef,
 } from '../../../agent-sessions/logic/agent-session-log'
+import { loadFeatures } from '../../../../shared/feature-loader'
 import type { WorkspaceEventPublisher } from '../../../../shared/workspace-events'
 import type {
   computeFeatureCoverage,
@@ -288,7 +289,12 @@ export function stageJobRef(
 }
 
 export function featureDirFor(deps: FlightStageDeps, feature: string): string {
-  return path.join(deps.featuresDir, feature)
+  // A suite rename changes config.name but deliberately leaves its directory in
+  // place because persisted run/coverage/portify records hold absolute paths.
+  // Once a config exists, its featureDir is therefore the authority. The join
+  // remains the pre-scaffold fallback, where there is no config to resolve yet.
+  return loadFeatures(deps.featuresDir).find((candidate) => candidate.name === feature)?.featureDir
+    ?? path.join(deps.featuresDir, feature)
 }
 
 /** The user's re-entry feedback ("what went wrong last time"), if it targets

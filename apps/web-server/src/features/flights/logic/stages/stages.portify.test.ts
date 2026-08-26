@@ -129,10 +129,13 @@ describe('portify stage', () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
   })
 
-  function markPortified(): void {
-    const dir = path.join(featuresDir, 'checkout', 'portify')
+  function markPortified(
+    featureDir = path.join(featuresDir, 'checkout'),
+    featureName = 'checkout',
+  ): void {
+    const dir = path.join(featureDir, 'portify')
     fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ version: 1, featureName: 'checkout', agent: 'claude', repos: [{ name: 'app' }], capturedAt: 'x' }))
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ version: 1, featureName, agent: 'claude', repos: [{ name: 'app' }], capturedAt: 'x' }))
   }
 
   // Every non-yolo run() parks the upfront portify-gate first. Answer it
@@ -180,6 +183,30 @@ describe('portify stage', () => {
       return undefined
     })
     const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { workflowId: 'wf1', edits: false } })
+  })
+
+  it('verifies the saved mark in the config directory after a suite rename', async () => {
+    const featureDir = path.join(featuresDir, 'checkout')
+    const configPath = path.join(featureDir, 'feature.config.cjs')
+    const renamed = 'renamed-checkout'
+    fs.writeFileSync(
+      configPath,
+      fs.readFileSync(configPath, 'utf8').replace("name: 'checkout'", `name: '${renamed}'`),
+    )
+    let status = 'verifying'
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') { status = 'ready-to-save'; return { statusCode: 201, body: { workflowId: 'wf1' } } }
+      if (call.method === 'GET') return { statusCode: 200, body: { status, diff: '' } }
+      if (call.url.endsWith('/save')) { status = 'saved'; markPortified(featureDir, renamed); return { statusCode: 200, body: {} } }
+      return undefined
+    })
+
+    const outcome = await runPastGate(
+      portifyStage(deps({ inject })),
+      ctxFor(manifest({ feature: renamed })),
+    )
+
     expect(outcome).toMatchObject({ kind: 'done', evidence: { workflowId: 'wf1', edits: false } })
   })
 
@@ -851,4 +878,3 @@ describe('portify — external producer', () => {
     expect(cp.data.prompt).toBe('use env ports')
   })
 })
-
