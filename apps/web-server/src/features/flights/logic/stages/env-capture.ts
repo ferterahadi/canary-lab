@@ -47,6 +47,7 @@ async function bootVerify(
   | { ok: true; evidence: BootEvidence }
   | { ok: false; error: string; errorDetail?: FlightStageErrorDetail; evidence?: BootEvidence }
 > {
+  ctx.setTimingPhase?.('service-readiness')
   let resp = await deps.inject({ method: 'POST', url: '/api/runs', payload: { feature, env, mode: 'boot' } })
   let body = resp.json() as Record<string, unknown>
   if (resp.statusCode === 409 && body.type === 'repo_collision_requires_choice') {

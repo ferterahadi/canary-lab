@@ -174,20 +174,26 @@ describe('specs-coverage stage', () => {
   }
 
   it('loops author→map until the harness-computed ledger meets the target', async () => {
-    const ledgers = [ledger(0), ledger(100)]
+    const ledgers = [ledger(0), ledger(0), ledger(100)]
     let engineRuns = 0
+    let mappedRequirementIds: string[] | undefined
     const prompts: string[] = []
     const d = deps({
       spawnAgent: writingSpawnAgent(prompts),
       validateSpecs: async () => ({ ok: true }),
       coverage: {
         compute: (() => ledgers.shift() ?? ledger(100)) as never,
-        runEngine: (async () => { engineRuns += 1; return {} as never }) as never,
+        runEngine: (async (args: { requirementIds?: string[] }) => {
+          engineRuns += 1
+          mappedRequirementIds = args.requirementIds
+          return {} as never
+        }) as never,
       },
     })
     const outcome = await specsCoverageStage(d).run(ctxFor(manifest()).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { coveragePct: 100 } })
     expect(engineRuns).toBe(1)
+    expect(mappedRequirementIds).toEqual(['R1'])
     expect(fs.readFileSync(path.join(featuresDir, 'checkout', 'e2e', 'checkout.spec.ts'), 'utf-8')).toBe(SPEC)
     // Edit-in-place contract: absolute feature dir in the prompt, no inlined specs.
     expect(prompts[0]).toContain(path.join(featuresDir, 'checkout'))
@@ -215,7 +221,9 @@ describe('specs-coverage stage', () => {
   })
 
   it('R27: publishes the loop shape — authoring/validating/mapping per pass, with the pass history', async () => {
-    const ledgers = [ledger(0), ledger(40), ledger(100)]
+    // Each clean pass now has a pre-map recompute that scopes inference to the
+    // live gaps, followed by the post-map verdict recompute.
+    const ledgers = [ledger(0), ledger(0), ledger(40), ledger(40), ledger(100)]
     const d = deps({
       spawnAgent: writingSpawnAgent([]),
       validateSpecs: async () => ({ ok: true }),
@@ -342,7 +350,7 @@ describe('specs-coverage stage', () => {
 
   it('pins every authoring and mapping session in pass order', async () => {
     fs.mkdirSync(path.join(logsDir, 'flights', 'fl-test', 'coverage-map'), { recursive: true })
-    const ledgers = [ledger(0), ledger(40), ledger(100)]
+    const ledgers = [ledger(0), ledger(0), ledger(40), ledger(40), ledger(100)]
     let mapSession = 0
     const d = deps({
       spawnAgent: writingSpawnAgent([]),

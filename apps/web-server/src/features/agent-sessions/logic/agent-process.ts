@@ -47,7 +47,15 @@ export const CLAUDE_DENIED_TOOLS = ['WebFetch', 'WebSearch'] as const
 // rather than trusting it not to use them.
 export function buildClaudeAgenticArgs(
   prompt: string,
-  opts: { model?: string | null; sessionId?: string; resume?: boolean; readOnly?: boolean } = {},
+  opts: {
+    model?: string | null
+    sessionId?: string
+    resume?: boolean
+    /** Resume prior context into `sessionId` without appending this pass to the
+     * prior transcript, so each Activity entry keeps independent provenance. */
+    forkFromSessionId?: string
+    readOnly?: boolean
+  } = {},
 ): string[] {
   return [
     '-p', prompt,
@@ -67,7 +75,9 @@ export function buildClaudeAgenticArgs(
     '--include-partial-messages',
     '--verbose',
     ...modelArgs(opts.model ?? null),
-    ...(opts.sessionId
+    ...(opts.forkFromSessionId && opts.sessionId
+      ? ['--resume', opts.forkFromSessionId, '--fork-session', '--session-id', opts.sessionId]
+      : opts.sessionId
       ? (opts.resume ? ['--resume', opts.sessionId] : ['--session-id', opts.sessionId])
       : []),
   ]

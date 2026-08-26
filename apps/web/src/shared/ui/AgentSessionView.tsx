@@ -47,10 +47,13 @@ export interface ExternalSessionActivity {
 
 /** One independently fetched/tail-able session in a stage's ordered Activity
  *  history. `label` names why this session exists (for example, pass 2 mapping)
- *  while the session header keeps the actual agent/model/id provenance. */
+ *  while the session header keeps the actual agent/model/id provenance.
+ *  `startedAt` positions compact conductor rows around the sessions; agent
+ *  events themselves still come only from the CLI JSONL source. */
 export interface AgentSessionSegmentSource {
   source: AgentSessionSource
   label?: string
+  startedAt?: string
 }
 
 interface Props {
@@ -87,6 +90,12 @@ interface SingleSessionProps extends Omit<Props, 'sessionSources'> {
   embedded?: boolean
   segmentLabel?: string
   onTimelineChange?: () => void
+  /** A stack states its agent + model ONCE (see `AgentSessionHistoryView`).
+   *  Each segment reports the pair it actually loaded under `segmentKey`, so a
+   *  segment that diverges from the stack's first one can still show its own. */
+  segmentKey?: string
+  showProvenance?: boolean
+  onProvenance?: (key: string, fingerprint: string) => void
 }
 
 const NO_SYSTEM_ROWS = { pre: [] as string[], between: [] as string[][], post: [] as string[] }
@@ -164,6 +173,18 @@ function AgentSessionHistoryView({
   const sys = systemRows ?? NO_SYSTEM_ROWS
   const betweenRowCount = sys.between?.reduce((count, rows) => count + rows.length, 0) ?? 0
 
+  // Every pass of a stage is spawned by the same conductor with the same agent
+  // and model, so repeating that pair on each segment header states one fact N
+  // times — the noisiest thing in a three-segment stack. The first header states
+  // it; a later one restates it only when it genuinely differs. Segments report
+  // what they loaded rather than the parent guessing, so a divergent model can
+  // never be silently hidden.
+  const [provenance, setProvenance] = useState<Record<string, string>>({})
+  const reportProvenance = useCallback((key: string, fingerprint: string) => {
+    setProvenance((prev) => (prev[key] === fingerprint ? prev : { ...prev, [key]: fingerprint }))
+  }, [])
+  const baseline = provenance[sourceIdentityKey(sessionSources[0].source)]
+
   useEffect(() => {
     const el = scrollerRef.current
     if (el && followingLatestRef.current) el.scrollTop = el.scrollHeight
@@ -194,14 +215,24 @@ function AgentSessionHistoryView({
             {groupSystemLines(sys.pre).map((group, index) => <SystemRow key={`sys-pre-${index}`} group={group} />)}
           </ol>
         )}
-        {sessionSources.map(({ source, label }, sessionIndex) => (
-          <Fragment key={sourceIdentityKey(source)}>
+        {sessionSources.map(({ source, label }, sessionIndex) => {
+          const segmentKey = sourceIdentityKey(source)
+          const reported = provenance[segmentKey]
+          // Unknown stays hidden rather than shown-then-hidden: a segment still
+          // loading must not flash a model id that is about to be deduped away.
+          const showProvenance = sessionIndex === 0
+            || (baseline !== undefined && reported !== undefined && reported !== baseline)
+          return (
+          <Fragment key={segmentKey}>
             <SingleAgentSessionView
               source={source}
               segmentLabel={label}
               embedded
               empty={empty}
               onTimelineChange={onTimelineChange}
+              segmentKey={segmentKey}
+              showProvenance={showProvenance}
+              onProvenance={reportProvenance}
             />
             {(sys.between?.[sessionIndex]?.length ?? 0) > 0 && (
               <ol className="agentts-rail">
@@ -211,7 +242,8 @@ function AgentSessionHistoryView({
               </ol>
             )}
           </Fragment>
-        ))}
+          )
+        })}
         {(sys.post.length > 0 || externalSessions.length > 0) && (
           <ol className="agentts-rail">
             {groupSystemLines(sys.post).map((group, index) => <SystemRow key={`sys-post-${index}`} group={group} />)}
@@ -229,7 +261,7 @@ function AgentSessionHistoryView({
   )
 }
 
-function SingleAgentSessionView({ source, systemRows, externalSessions = [], empty, embedded = false, segmentLabel, onTimelineChange }: SingleSessionProps) {
+function SingleAgentSessionView({ source, systemRows, externalSessions = [], empty, embedded = false, segmentLabel, onTimelineChange, segmentKey, showProvenance = true, onProvenance }: SingleSessionProps) {
   const [state, setState] = useState<ViewState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -397,6 +429,16 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
     onTimelineChange?.()
   }, [error, loading, onTimelineChange, state?.events.length, state?.sessionId])
 
+  // Report the agent + model this segment actually loaded, so the stack that
+  // owns several segments can state the pair once and still surface a segment
+  // that diverges from it.
+  const provenanceFingerprint = state?.agent
+    ? `${state.agent}|${state.model ?? ''}|${state.effort ?? ''}`
+    : null
+  useEffect(() => {
+    if (segmentKey && provenanceFingerprint) onProvenance?.(segmentKey, provenanceFingerprint)
+  }, [onProvenance, provenanceFingerprint, segmentKey])
+
   const onScroll = (): void => {
     const el = scrollerRef.current
     if (!el) return
@@ -472,7 +514,7 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
   const timeline = (
     <>
       {state?.agent && state.sessionId && (
-        <SessionHeader state={state} live={live} label={segmentLabel} embedded={embedded} />
+        <SessionHeader state={state} live={live} label={segmentLabel} embedded={embedded} showProvenance={showProvenance} />
       )}
       <ol className="agentts-rail">
         {groupSystemLines(sys.pre).map((group, idx) => (
@@ -512,37 +554,43 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
   )
 }
 
-function SessionHeader({ state, live, label, embedded }: {
+/** A model id already names its vendor (`claude-opus-5`, `gpt-5-codex`), so
+ *  printing the agent beside it says the same word twice. Name the agent only
+ *  when the model can't stand in for it — or when there is no model to read. */
+function agentNeedsNaming(agent: string, model?: string): boolean {
+  if (!model) return true
+  return !model.toLowerCase().includes(agent.toLowerCase())
+}
+
+function SessionHeader({ state, live, label, embedded, showProvenance }: {
   state: ViewState
   live: boolean
   label?: string
   embedded: boolean
+  /** False for a later segment in a stack that already stated this agent and
+   *  model on its first header — see `AgentSessionHistoryView`. */
+  showProvenance: boolean
 }) {
   return (
     <div className="agentts-head" data-sticky={embedded ? 'false' : 'true'} data-testid="agent-session-header">
       {label && <span className="agentts-session-label" data-testid="agent-session-label">{label}</span>}
       <span className="agentts-mode" data-live={live ? 'true' : 'false'} data-testid="agent-session-mode">
-        <span className="agentts-statusdot" aria-hidden="true" />
-        {live ? 'Live' : 'History'}
+        {live
+          ? <><span className="agentts-statusdot" aria-hidden="true" />Live</>
+          : 'History'}
       </span>
-      <span className="agentts-agent">{state.agent}</span>
-      {/* No "session" caption — a short mono id sitting beside the agent name
-          is not something a user has to be told the name of. */}
-      <span className="agentts-sid" title={state.sessionId}>{shortSession(state.sessionId)}</span>
-      {state.model && (
-        <>
-          <span className="agentts-dot" aria-hidden="true">·</span>
-          <span className="agentts-model">{state.model}</span>
-        </>
-      )}
-      {state.effort && (
-        <>
-          <span className="agentts-dot" aria-hidden="true">·</span>
-          <span className="agentts-model">{state.effort}</span>
-        </>
-      )}
-      <span style={{ flex: '1 1 auto' }} />
-      <span className="agentts-count">{state.events.length} event{state.events.length === 1 ? '' : 's'}</span>
+      <span className="agentts-headrule" aria-hidden="true" />
+      <span className="agentts-provenance">
+        {showProvenance && state.agent && agentNeedsNaming(state.agent, state.model) && (
+          <span className="agentts-agent">{state.agent}</span>
+        )}
+        {showProvenance && state.model && <span className="agentts-model">{state.model}</span>}
+        {showProvenance && state.effort && <span className="agentts-model">{state.effort}</span>}
+        {/* No "session" caption — a short mono id is not something a user has
+            to be told the name of. */}
+        <span className="agentts-sid" title={state.sessionId}>{shortSession(state.sessionId)}</span>
+        <span className="agentts-count">{state.events.length} event{state.events.length === 1 ? '' : 's'}</span>
+      </span>
     </div>
   )
 }

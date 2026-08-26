@@ -267,6 +267,65 @@ describe('AgentSessionView lifecycle presentation', () => {
     ])
   })
 
+  // Three headers in one stack repeating "claude · claude-opus-5" stated one
+  // fact three times, which is what made the stack read as chip soup. The pair
+  // belongs to the stage, not the pass — so the stack states it once.
+  it('states an identical agent and model once per stack, and restates a divergent one', async () => {
+    const sameEngine = (sessionId: string, text: string) => ({
+      agent: 'claude' as const,
+      sessionId,
+      model: 'claude-opus-5',
+      events: [{ kind: 'assistant-message' as const, timestamp: '2026-08-26T01:00:00.000Z', text }],
+    })
+    const sessions = {
+      'specs-coverage-session-001': sameEngine('authoring-1', 'Authored'),
+      'specs-coverage-session-002': sameEngine('mapping-1', 'Mapped'),
+      // A pass that ran on a different engine must still say so — deduping is
+      // not allowed to hide a real difference in what produced the transcript.
+      'specs-coverage-session-003': {
+        agent: 'codex' as const,
+        sessionId: 'authoring-2',
+        model: 'gpt-5.6-sol',
+        events: [{ kind: 'assistant-message' as const, timestamp: '2026-08-26T01:02:00.000Z', text: 'Closed' }],
+      },
+    }
+    mocks.getFlightAgentSession.mockImplementation(async (_flightId: string, stage: keyof typeof sessions) => sessions[stage])
+    const source = (stage: keyof typeof sessions, label: string) => ({
+      label,
+      source: { kind: 'flight' as const, flightId: 'fl_1', stage, live: false },
+    })
+
+    await act(async () => {
+      root.render(<AgentSessionView sessionSources={[
+        source('specs-coverage-session-001', 'Pass 1 · Authoring'),
+        source('specs-coverage-session-002', 'Pass 1 · Mapping'),
+        source('specs-coverage-session-003', 'Pass 2 · Authoring'),
+      ]} />)
+    })
+
+    const models = [...container.querySelectorAll('[data-testid="agent-session-header"]')]
+      .map((header) => [...header.querySelectorAll('.agentts-model')].map((node) => node.textContent))
+    expect(models).toEqual([['claude-opus-5'], [], ['gpt-5.6-sol']])
+    // `claude-opus-5` already names the vendor; `gpt-5.6-sol` does not, so only
+    // the codex segment spells the agent out beside its model.
+    expect([...container.querySelectorAll('.agentts-agent')].map((node) => node.textContent)).toEqual(['codex'])
+    // Every segment keeps its own session handle and event count.
+    expect([...container.querySelectorAll('.agentts-sid')].map((node) => node.getAttribute('title')))
+      .toEqual(['authoring-1', 'mapping-1', 'authoring-2'])
+  })
+
+  it('names the agent when there is no model to stand in for it', async () => {
+    mocks.getAgentSession.mockResolvedValue({
+      agent: 'claude',
+      sessionId: 'session-no-model',
+      events: [{ kind: 'assistant-message', timestamp: '2026-08-05T08:00:00.000Z', text: 'Working' }],
+    })
+    await render(false)
+
+    expect(container.querySelector('.agentts-agent')?.textContent).toBe('claude')
+    expect(container.querySelector('.agentts-model')).toBeNull()
+  })
+
   describe('history snapshot retry', () => {
     // A run whose status has just gone terminal can beat the agent CLI's final
     // flush of the session log to disk. History mode has no WS to tail, so that

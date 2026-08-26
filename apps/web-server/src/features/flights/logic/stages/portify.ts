@@ -116,6 +116,9 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
         if (phase !== publishedPhase || (edits !== null && edits.digest !== publishedEdits)) {
           publishedPhase = phase
           publishedEdits = edits?.digest ?? ''
+          // Portify's `verifying` phase is its side-by-side service boot and
+          // readiness check; the workflow remains the source of the verdict.
+          ctx.setTimingPhase?.(v.status === 'verifying' ? 'service-readiness' : null)
           ctx.setProgress({
             workflowId,
             ...(v.status ? { status: v.status } : {}),

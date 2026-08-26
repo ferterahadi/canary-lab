@@ -1,8 +1,8 @@
-import { FLIGHT_STAGE_KEYS, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey } from './types'
+import { FLIGHT_STAGE_KEYS, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey, type FlightStageTimingKey } from './types'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { FlightConductorDeps, abortFlight, drainQueuedFlights, pauseFlight, resumeFlight } from './conductor'
 import { stampSystemLine } from './flight-errors'
-import { StageContext, StageOutcome, bankStageActivity, buildStageContext, driveControllers, firstOpenStageIndex } from './flight-stages'
+import { StageContext, StageOutcome, bankAllStageTimings, bankStageActivity, bankStageTiming, buildStageContext, driveControllers, firstOpenStageIndex, startStageTiming } from './flight-stages'
 
 /** R71/W4: checkpoint kind → its safe defaults, best first. The first entry
  *  that is actually among the checkpoint's options wins, so a kind whose option
@@ -79,7 +79,16 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
         // Any status patch that takes the stage out of `running` (settle,
         // checkpoint park) closes its live work segment — banked here so no
         // exit path can forget it. Progress-only patches leave the clock alone.
-        const base = patch.status && patch.status !== 'running' ? bankStageActivity(s, now()) : s
+        const at = now()
+        let base = patch.status && patch.status !== 'running' ? bankStageActivity(s, at) : s
+        if (patch.status && patch.status !== 'running') {
+          const externalPhase = patch.status === 'waiting-for-approval' && patch.checkpoint?.kind === 'external-work'
+            ? ((patch.checkpoint.data as { context?: { phase?: unknown } } | undefined)?.context?.phase)
+            : undefined
+          const preserve: FlightStageTimingKey[] = externalPhase === 'authoring' || externalPhase === 'mapping' ? [externalPhase] : []
+          base = bankAllStageTimings(base, at, preserve)
+          if (patch.status === 'waiting-for-approval') base = startStageTiming(base, 'checkpoint-wait', at)
+        }
         return { ...base, ...patch }
       }),
     }
@@ -134,7 +143,12 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
           // here with the clock still live, and re-stamping would drop the
           // pre-answer work from the stage's duration.
           i === idx
-            ? { ...s, status: 'running' as const, startedAt: s.startedAt ?? now(), activeSince: s.activeSince ?? now() }
+            ? {
+                ...bankStageTiming(s, 'checkpoint-wait', now()),
+                status: 'running' as const,
+                startedAt: s.startedAt ?? now(),
+                activeSince: s.activeSince ?? now(),
+              }
             : s,
         ),
       }
@@ -217,10 +231,11 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
           updatedAt: now(),
           stages: cur.stages.map((s, i) => {
             if (i === idx) {
+              const settledAt = now()
               return {
-                ...bankStageActivity(s, now()),
+                ...bankAllStageTimings(bankStageActivity(s, settledAt), settledAt),
                 status: 'done' as const,
-                endedAt: now(),
+                endedAt: settledAt,
                 ...(jump.evidence !== undefined ? { evidence: jump.evidence } : {}),
                 checkpoint: undefined,
               }

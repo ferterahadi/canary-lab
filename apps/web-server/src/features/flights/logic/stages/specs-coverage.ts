@@ -211,6 +211,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     state: PassState,
     phase: SpecsCoverageProgress['phase'],
   ): void => {
+    ctx.setTimingPhase?.(phase === 'validating' ? 'validation' : phase)
     ctx.setProgress({
       pass: state.iteration,
       maxPasses: MAX_ITERATIONS,
@@ -286,12 +287,14 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     ctx: StageContext,
     prep: Extract<Prep, { ok: true }>,
     state: PassState,
+    requirementIds: string[],
   ): Promise<StageOutcome> => {
     const m = ctx.manifest()
     await runEngine({
       featuresDir: deps.featuresDir,
       logsDir: deps.logsDir,
       feature: m.feature,
+      requirementIds,
       adapter: m.opts.agent,
       cwd: deps.projectRoot,
       // The mapping half spawns its OWN agent, so it needs the signal as much as
@@ -330,8 +333,9 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     ctx: StageContext,
     prep: Extract<Prep, { ok: true }>,
     state: PassState,
+    requirementIds: string[],
   ): StageOutcome => {
-    const mappingContext = buildCoverageMappingContext({ featuresDir: deps.featuresDir, feature: ctx.manifest().feature })
+    const mappingContext = buildCoverageMappingContext({ featuresDir: deps.featuresDir, feature: ctx.manifest().feature, requirementIds })
     ctx.appendLog(`[specs] pass ${state.iteration} mapping handed off to the external client\n`)
     return externalWorkCheckpoint(ctx, 'specs-coverage', mappingContext.prompt, {
       message: `Map the tests onto the requirements in your own client (pass ${state.iteration}), then respond with { mappings[], unmappable[] } on \`data\` — every roster test must appear in one of them. Canary writes the tags itself and recomputes the ledger.`,
@@ -390,12 +394,19 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       )
     }
 
-    publishProgress(ctx, ledger, prep.target, state, 'mapping')
+    // Authoring may have closed some gaps or exposed regressions by rewriting a
+    // previously mapped test. Recompute before inference so this pass maps only
+    // the requirements that are actually open now. Existing tags for covered
+    // requirements stay untouched; the mapper still accounts for every test it
+    // receives, and Canary still derives the verdict from the resulting tags.
+    const mappingLedger = compute(m.feature)
+    const requirementIds = gapRows(mappingLedger).map((gap) => gap.id)
+    publishProgress(ctx, mappingLedger, prep.target, state, 'mapping')
     // The mapping half is a DIFFERENT agent job with its own standalone twin
     // (start_external_coverage), so under an external producer it becomes the
     // stage's second sequential hand-off rather than a local spawn.
-    if (!forceInternalMap && handsOffToClient(ctx)) return mappingHandOff(ctx, prep, state)
-    return mapInternally(ctx, prep, state)
+    if (!forceInternalMap && handsOffToClient(ctx)) return mappingHandOff(ctx, prep, state, requirementIds)
+    return mapInternally(ctx, prep, state, requirementIds)
   }
 
   /** One authoring pass, then recurse. Expressed recursively rather than as a
@@ -493,7 +504,8 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
         if (handOff?.phase === 'mapping') {
           if (response.choice === 'run-internally') {
             ctx.appendLog(`[specs] client handed the pass ${state.iteration} mapping back — mapping here\n`)
-            return mapInternally(ctx, prep, state)
+            const ledger = compute(ctx.manifest().feature)
+            return mapInternally(ctx, prep, state, gapRows(ledger).map((gap) => gap.id))
           }
           const stale = rejectStaleSubmit(ctx, 'specs-coverage', response)
           if (stale) return stale

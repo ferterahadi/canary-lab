@@ -112,7 +112,16 @@ export class FlightRunStore implements FlightStore {
             // unknowable point, so `now - activeSince` would count the downtime
             // as stage work. Losing the pre-crash segment undercounts; banking
             // it here could overcount by hours. Undercounting never lies upward.
-            s.status === 'running' ? { ...s, status: 'pending' as const, activeSince: undefined } : s,
+            s.status === 'running'
+              ? {
+                  ...s,
+                  status: 'pending' as const,
+                  activeSince: undefined,
+                  timings: Object.fromEntries(
+                    Object.entries(s.timings ?? {}).map(([key, timer]) => [key, { elapsedMs: timer.elapsedMs }]),
+                  ),
+                }
+              : s,
           ),
           error: m.error ?? 'Interrupted by server restart — resume with `canary-lab flight`',
         }),
@@ -135,7 +144,15 @@ export class FlightRunStore implements FlightStore {
         repaired = true
         // Same no-banking rule as the restart reconcile above: whenever this
         // stage actually stopped, it wasn't now.
-        return { ...stage, status: 'pending' as const, checkpoint: undefined, activeSince: undefined }
+        return {
+          ...stage,
+          status: 'pending' as const,
+          checkpoint: undefined,
+          activeSince: undefined,
+          timings: Object.fromEntries(
+            Object.entries(stage.timings ?? {}).map(([key, timer]) => [key, { elapsedMs: timer.elapsedMs }]),
+          ),
+        }
       })
       if (repaired) this.store.save({ ...manifest, stages })
     }

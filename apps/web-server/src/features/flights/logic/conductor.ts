@@ -3,7 +3,7 @@ import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type ExternalWorkCheckpointDat
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { drive } from './flight-drive'
 import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightNotParkedError, FlightStageEntryError, FlightTakeoverRequestedError, stampSystemLine } from './flight-errors'
-import { FlightEntryMode, StageAdapters, bankStageActivity, checkStageEntry, defaultFlightId, driveControllers, firstOpenStageIndex, freshStages, interruptStage, resetStagesForRestart, sameRepoSet, stagesForJump } from './flight-stages'
+import { FlightEntryMode, StageAdapters, bankAllStageTimings, bankStageActivity, checkStageEntry, defaultFlightId, driveControllers, firstOpenStageIndex, freshStages, interruptStage, resetStagesForRestart, sameRepoSet, stagesForJump } from './flight-stages'
 
 export { abortFlight, deleteFlight, drainQueuedFlights, enqueueFlight, removeFlightRecordsForFeature } from './flight-queue'
 
@@ -294,11 +294,12 @@ export async function pauseFlight(flightId: string, deps: FlightConductorDeps): 
   const openStage = current.stages.find(
     (s) => s.status === 'running' || s.status === 'waiting-for-approval',
   )
+  const pausedAt = now()
   const manifest: FlightManifest = {
     ...current,
     status: 'paused',
     pauseReason: 'user',
-    updatedAt: now(),
+    updatedAt: pausedAt,
     stages: current.stages.map((s) =>
       s.key === openStage?.key
         ? {
@@ -306,7 +307,7 @@ export async function pauseFlight(flightId: string, deps: FlightConductorDeps): 
             // and the time parked must not count as stage work. A stage paused
             // while parked at a checkpoint was already banked at the park —
             // bankStageActivity is a no-op there.
-            ...bankStageActivity(s, now()),
+            ...bankAllStageTimings(bankStageActivity(s, pausedAt), pausedAt),
             status: 'pending' as const,
             checkpoint: undefined,
             // An answer the stage was EXECUTING when paused survives — resume

@@ -37,6 +37,10 @@ export interface RunCoverageEngineArgs {
    *  only requirements whose fingerprint changed since the last engine run — and
    *  no-ops entirely when nothing changed. Default 'full'. */
   mode?: 'full' | 'delta'
+  /** Restrict inference to these active requirement ids. Existing mappings for
+   *  every other requirement remain authoritative because tag writes are
+   *  additive. Used by the specs loop after it recomputes the live gaps. */
+  requirementIds?: string[]
   cwd?: string
   now?: string
   signal?: AbortSignal
@@ -135,12 +139,11 @@ export async function runCoverageEngine(
   const orphans = collected.filter((c) => !(c.input.requirements?.length))
   const orphanTestsBefore = orphans.map((c) => c.input.name).sort()
 
-  // Re-map EVERY test each run — not just the untagged orphans. The agent
-  // re-examines every requirement↔test pair so the mapping is genuinely
-  // re-derived (and the "Mapping coverage" phase is real, visible agent work,
-  // not an instant no-op when specs already carry tags). Tag-writes are
-  // idempotent + additive (tag-writer.ts), so a re-confirmed mapping doesn't
-  // churn the spec; only new/changed linkages produce a diff.
+  // Re-map EVERY test each run — not just the untagged orphans. By default the
+  // agent re-examines every requirement↔test pair; callers with a freshly
+  // computed gap ledger may narrow the requirement side below. Tag-writes are
+  // idempotent + additive (tag-writer.ts), so covered requirements omitted from
+  // that scope keep their existing evidence without churning the spec.
   const engineInputs = collected.map((c) => ({
     name: c.input.name,
     file: c.input.file,
@@ -151,7 +154,10 @@ export async function runCoverageEngine(
   // Reconcile-by-delta (R10): in delta mode, restrict the candidate requirements
   // to those whose fingerprint changed since the last engine run — unchanged reqs
   // keep their existing mappings, and an unchanged set is a no-op.
-  let candidateRequirements = requirements
+  const requestedIds = args.requirementIds ? new Set(args.requirementIds) : null
+  let candidateRequirements = requestedIds
+    ? requirements.filter((r) => requestedIds.has(r.id))
+    : requirements
   let reconciledRequirementIds: string[] | undefined
   if (args.mode === 'delta') {
     const prior = readCoverageRunState(featureDir)
@@ -163,7 +169,7 @@ export async function runCoverageEngine(
     }
     args.onOutput?.(`[delta] reconciling ${changedIds.length} changed requirement(s): ${changedIds.join(', ')}\n`)
     const changedSet = new Set(changedIds)
-    candidateRequirements = requirements.filter((r) => changedSet.has(r.id))
+    candidateRequirements = candidateRequirements.filter((r) => changedSet.has(r.id))
   }
 
   const proposals = await propose(
@@ -238,17 +244,18 @@ export function hasPrdSummary(featuresDir: string, feature: string): boolean {
 /** Assemble the read-only context an offloaded client needs to map tests →
  *  requirements. Throws FeatureNotFoundError for an unknown feature; the caller
  *  is responsible for checking hasPrdSummary first. */
-export function buildCoverageMappingContext(args: { featuresDir: string; feature: string }): CoverageMappingContext {
+export function buildCoverageMappingContext(args: { featuresDir: string; feature: string; requirementIds?: string[] }): CoverageMappingContext {
   const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
   const summary = readPrdSummary(featureDir)
-  const requirements = (summary?.requirements ?? []).filter((r) => !r.deprecated)
+  const requestedIds = args.requirementIds ? new Set(args.requirementIds) : null
+  const requirements = (summary?.requirements ?? []).filter((r) => !r.deprecated && (!requestedIds || requestedIds.has(r.id)))
   const { collected } = collectTests(featureDir)
   const engineInputs: AnnotateTestInput[] = collected.map((c) => ({
     name: c.input.name,
     file: c.input.file,
     assertions: [...c.assertions],
   }))
-  const prompt = buildAnnotatePrompt(summary?.requirements ?? [], engineInputs, featureDir, summary?.variantDimension)
+  const prompt = buildAnnotatePrompt(requirements, engineInputs, featureDir, summary?.variantDimension)
   return {
     feature: args.feature,
     requirements,

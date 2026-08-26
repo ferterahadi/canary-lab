@@ -1,7 +1,7 @@
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, type AgentActivity, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightStage, type FlightStageAgentSession, type FlightStageErrorDetail, type FlightStageKey } from './types'
+import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, type AgentActivity, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightStage, type FlightStageAgentSession, type FlightStageErrorDetail, type FlightStageKey, type FlightStageTimingKey } from './types'
 import { FlightConductorDeps, StartFlightArgs, redoFlight, startFlight } from './conductor'
 import { drive } from './flight-drive'
 import { FlightStageEntryError, stampSystemLine } from './flight-errors'
@@ -36,6 +36,10 @@ export interface StageContext {
    *  same channel as appendLog). The last snapshot survives settle as the
    *  audit trail — see FlightStage.progress. */
   setProgress(progress: unknown): void
+  /** Switch the stage's named wall-clock phase. Production contexts always
+   * provide this; optional keeps third-party/test StageContext adapters source
+   * compatible while they migrate. */
+  setTimingPhase?(phase: Exclude<FlightStageTimingKey, 'checkpoint-wait'> | null): void
   /** Publish what this stage's spawned agent is doing right now. A separate
    *  channel from `setProgress` on purpose: the two are written by different
    *  writers at very different rates (an agent streams; a stage transitions),
@@ -114,6 +118,49 @@ export function defaultFlightId(): string {
  *  cancel (store reconcile already parked the flight). */
 export const driveControllers = new Map<string, AbortController>()
 
+export function bankStageTiming(
+  stage: FlightStage,
+  key: FlightStageTimingKey,
+  nowIso: string,
+): FlightStage {
+  const timer = stage.timings?.[key]
+  if (!timer?.since) return stage
+  return {
+    ...stage,
+    timings: {
+      ...stage.timings,
+      [key]: {
+        elapsedMs: timer.elapsedMs + Math.max(0, Date.parse(nowIso) - Date.parse(timer.since)),
+      },
+    },
+  }
+}
+
+export function startStageTiming(
+  stage: FlightStage,
+  key: FlightStageTimingKey,
+  nowIso: string,
+): FlightStage {
+  if (stage.timings?.[key]?.since) return stage
+  return {
+    ...stage,
+    timings: {
+      ...stage.timings,
+      [key]: { elapsedMs: stage.timings?.[key]?.elapsedMs ?? 0, since: nowIso },
+    },
+  }
+}
+
+export function bankAllStageTimings(
+  stage: FlightStage,
+  nowIso: string,
+  preserve: readonly FlightStageTimingKey[] = [],
+): FlightStage {
+  return (Object.keys(stage.timings ?? {}) as FlightStageTimingKey[])
+    .filter((key) => !preserve.includes(key))
+    .reduce((current, key) => bankStageTiming(current, key, nowIso), stage)
+}
+
 /** The StageContext the drive hands an adapter, and the one `interruptStage`
  *  hands a teardown. Extracted so the two cannot drift: a teardown that could
  *  not write to the stage log was the reason a cancelled portify workflow
@@ -145,6 +192,16 @@ export function buildStageContext(
       stages: m.stages.map((s) => (s.key === stageKey ? { ...s, ...patch } : s)),
     })
   }
+  const switchTimingPhase = (
+    stage: FlightStage,
+    phase: Exclude<FlightStageTimingKey, 'checkpoint-wait'> | null,
+    at: string,
+  ): FlightStage => {
+    const closed = (['authoring', 'mapping', 'validation', 'service-readiness'] as const)
+      .filter((key) => key !== phase)
+      .reduce((current, key) => bankStageTiming(current, key, at), stage)
+    return phase ? startStageTiming(closed, phase, at) : closed
+  }
   return {
     manifest: read,
     flightDir: store.flightDir(flightId),
@@ -154,6 +211,15 @@ export function buildStageContext(
       patchStage({ log: (cur?.log ?? '') + stampSystemLine(chunk, now()) })
     },
     setProgress: (progress) => { patchStage({ progress }) },
+    setTimingPhase: (phase) => {
+      const m = read()
+      const at = now()
+      store.save({
+        ...m,
+        updatedAt: at,
+        stages: m.stages.map((stage) => stage.key === stageKey ? switchTimingPhase(stage, phase, at) : stage),
+      })
+    },
     setAgentActivity: (agentActivity) => { patchStage({ agentActivity }) },
     addAgentSession: (session) => {
       const stage = read().stages.find((candidate) => candidate.key === stageKey)

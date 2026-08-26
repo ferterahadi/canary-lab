@@ -8,6 +8,7 @@ import { recoverClaudeAssistantText } from '../../../agent-sessions/logic/agent-
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import {
   claudeSessionLogPath,
+  resolveWorkflowAgentRef,
   writeWorkflowAgentRef,
 } from '../../../agent-sessions/logic/agent-session-log'
 import { loadFeatures } from '../../../../shared/feature-loader'
@@ -98,6 +99,14 @@ export interface FlightStageDeps {
 
 export const FLIGHT_AGENT_IDLE_MS = 5 * 60 * 1000
 
+/** Read the last successfully completed Claude pass in this flight. The chain
+ * ref is separate from Activity sidecars because those are written at spawn
+ * time and can therefore point at a failed or cancelled partial session. */
+function latestFlightClaudeSession(stageDir: string): string | undefined {
+  const ref = resolveWorkflowAgentRef(path.join(path.dirname(stageDir), '.agent-context'))
+  return ref?.agent === 'claude' && ref.sessionId ? ref.sessionId : undefined
+}
+
 /** The one way a flight spawns judgment agents, via the shared runner.
  *  claude: session pinned so the JSONL both feeds the idle backstop and lets
  *  the UI attach an AgentSessionView to the stage. codex (R79, the flight's
@@ -107,6 +116,7 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
   if (opts.signal?.aborted) throw new StageCancelledError('agent spawn')
   const agent = opts.agent ?? 'claude'
   const sessionId = agent === 'claude' ? crypto.randomUUID() : undefined
+  const forkFromSessionId = agent === 'claude' ? latestFlightClaudeSession(opts.stageDir) : undefined
   const spawnedAt = new Date().toISOString()
   writeWorkflowAgentRef(opts.stageDir, {
     agent,
@@ -136,7 +146,7 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
       : {}),
     args:
       agent === 'claude'
-        ? buildClaudeAgenticArgs(opts.prompt, { sessionId })
+        ? buildClaudeAgenticArgs(opts.prompt, { sessionId, forkFromSessionId })
         : ['exec', '--full-auto', '--skip-git-repo-check', '-'],
     cwd: opts.cwd,
     stdin: agent === 'codex' ? opts.prompt : undefined,
@@ -183,6 +193,14 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
       // that is thrown above as a stop. The old `?? 'null'` fallback became
       // unreachable with it.
       throw new Error(`agent exited with code ${result.code}${result.stderr ? `: ${result.stderr.slice(-400)}` : ''}`)
+    }
+    if (agent === 'claude' && sessionId) {
+      writeWorkflowAgentRef(path.join(path.dirname(opts.stageDir), '.agent-context'), {
+        agent,
+        cwd: opts.cwd,
+        spawnedAt,
+        sessionId,
+      })
     }
     return { text }
   } finally {

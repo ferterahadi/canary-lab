@@ -90,6 +90,12 @@ describe('buildClaudeAgenticArgs', () => {
     expect(buildClaudeAgenticArgs('hi', { sessionId: 's1', resume: true }).slice(-2)).toEqual(['--resume', 's1'])
   })
 
+  it('forks prior context into a separately pinned session', () => {
+    expect(buildClaudeAgenticArgs('next', { sessionId: 'new', forkFromSessionId: 'prior' }).slice(-5)).toEqual([
+      '--resume', 'prior', '--fork-session', '--session-id', 'new',
+    ])
+  })
+
   it('includes --model flag when model is provided', () => {
     const args = buildClaudeAgenticArgs('hi', { model: 'claude-haiku-4-5' })
     expect(args).toContain('--model')

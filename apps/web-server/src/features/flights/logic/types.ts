@@ -23,6 +23,8 @@ export type {
   ExternalWorkCheckpointData,
   FlightStage,
   FlightStageAgentSession,
+  FlightStageTiming,
+  FlightStageTimingKey,
   FlightStageErrorDetail,
   FlightStatus,
   FlightOptions,

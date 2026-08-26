@@ -303,6 +303,7 @@ export function StageDetail({
   const externalOwnsCurrent = externalTrace !== undefined || liveExternalFallback !== undefined
   const sessionSources: AgentSessionSegmentSource[] = (stage.agentSessions ?? []).map((session, index, sessions) => ({
     label: session.label,
+    startedAt: session.startedAt,
     source: {
       kind: 'flight',
       flightId,

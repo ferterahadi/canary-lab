@@ -364,7 +364,8 @@ describe('specs-coverage stage', () => {
     })
     const outcome = await specsCoverageStage(d).run(ctxFor(manifest()).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { coveragePct: 100 } })
-    expect(calls).toBe(6)
+    // Entry + one live-gap scope and one post-map verdict per pass.
+    expect(calls).toBe(7)
   })
 
   it('buildSpecsPrompt renders the edit-in-place contract and caps injected validation errors', () => {

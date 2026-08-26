@@ -273,6 +273,22 @@ export interface FlightStageAgentSession {
   pass?: number
 }
 
+/** Durable wall-clock accounting inside a stage. Substages may overlap: an
+ * external authoring hand-off is both `authoring` and `checkpoint-wait`. */
+export type FlightStageTimingKey =
+  | 'authoring'
+  | 'mapping'
+  | 'validation'
+  | 'service-readiness'
+  | 'checkpoint-wait'
+
+export interface FlightStageTiming {
+  /** Wall time accumulated across completed segments, including retries. */
+  elapsedMs: number
+  /** Start of the one live segment, when this timer is currently accruing. */
+  since?: string
+}
+
 export interface FlightStage {
   key: FlightStageKey
   status: FlightStageStatus
@@ -292,6 +308,10 @@ export interface FlightStage {
    *  `running`, cleared whenever the segment is banked into `activeMs`. Its
    *  presence is what makes double-banking impossible. */
   activeSince?: string
+  /** Named wall-clock substages. Each timer is accumulated segment by segment,
+   * so pause/resume and process reload cannot count the same interval twice.
+   * Absent on older records; readers treat that as no substage detail. */
+  timings?: Partial<Record<FlightStageTimingKey, FlightStageTiming>>
   /** Harness-computed proof the stage settled on (boot summary, coverage
    *  ledger snapshot, archive path…) — never agent-asserted. */
   evidence?: unknown
