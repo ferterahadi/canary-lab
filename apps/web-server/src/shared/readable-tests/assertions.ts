@@ -132,7 +132,7 @@ const STATE_RULE: AssertionRule = {
 }
 
 const VALUE_RULE: AssertionRule = {
-  matchers: new Set(['toHaveText', 'toContainText', 'toHaveValue', 'toHaveURL', 'toHaveTitle', 'toHaveCount', 'toEqual', 'toStrictEqual', 'toBe', 'toContain', 'toMatch']),
+  matchers: new Set(['toHaveText', 'toContainText', 'toHaveValue', 'toHaveURL', 'toHaveTitle', 'toHaveCount', 'toHaveLength', 'toEqual', 'toStrictEqual', 'toBe', 'toContain', 'toContainEqual', 'toMatch', 'toMatchObject']),
   expectedArguments: 1,
   render(context) {
     if (context.matcher === 'toHaveURL') {
@@ -148,11 +148,14 @@ const VALUE_RULE: AssertionRule = {
       toContainText: ['contains text', 'does not contain text'],
       toHaveValue: ['has value', 'does not have value'],
       toHaveCount: ['has count', 'does not have count'],
+      toHaveLength: ['has length', 'does not have length'],
       toEqual: ['equals', 'does not equal'],
       toStrictEqual: ['exactly equals', 'does not exactly equal'],
       toBe: ['equals', 'does not equal'],
       toContain: ['contains', 'does not contain'],
+      toContainEqual: ['contains an item equal to', 'does not contain an item equal to'],
       toMatch: ['matches', 'does not match'],
+      toMatchObject: ['includes', 'does not include'],
     }
     const [positive, negative] = relations[context.matcher]
     return relation(context, positive, negative)
@@ -192,7 +195,18 @@ const COMPARISON_RULE: AssertionRule = {
   },
 }
 
-const ASSERTION_RULES = [STATE_RULE, VALUE_RULE, TRUTH_RULE, COMPARISON_RULE]
+const INSTANCE_RULE: AssertionRule = {
+  matchers: new Set(['toBeInstanceOf']),
+  expectedArguments: 1,
+  render(context) {
+    // A class name is a proper noun — keep `Date` as written, never "date".
+    const argument = context.matcherCall.arguments[0]
+    const name = ts.isIdentifier(argument) ? argument.text : context.expected?.text
+    return `${context.subject.text} ${context.negated ? 'is not an instance of' : 'is an instance of'} ${name}`
+  },
+}
+
+const ASSERTION_RULES = [STATE_RULE, VALUE_RULE, TRUTH_RULE, COMPARISON_RULE, INSTANCE_RULE]
 
 export function renderAssertionStatement(statement: ts.Statement, sourceFile: ts.SourceFile): RenderedAssertion | undefined {
   const call = unwrapCall(statement)

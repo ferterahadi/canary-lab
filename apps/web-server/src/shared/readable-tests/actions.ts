@@ -1,8 +1,9 @@
 import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../../shared/code-display-format'
 import type { ReadableFidelity, ReadableLeafRole } from '../../../../../shared/readable-tests/types'
-import { renderExpression, type RenderedExpression } from './expression'
+import { expressionPath, renderExpression, type RenderedExpression } from './expression'
 import { renderLocator } from './locator'
+import { humanizeIdentifier, sentenceCase } from './language'
 
 export interface RenderedAction {
   text: string
@@ -31,15 +32,6 @@ function sourceFallback(node: ts.Node, sourceFile: ts.SourceFile): RenderedActio
   }
 }
 
-function expressionPath(node: ts.Expression): string | undefined {
-  if (ts.isIdentifier(node)) return node.text
-  if (ts.isPropertyAccessExpression(node)) {
-    const owner = expressionPath(node.expression)
-    return owner ? `${owner}.${node.name.text}` : undefined
-  }
-  return undefined
-}
-
 function isPageReceiver(context: CallContext): boolean {
   return expressionPath(context.receiver)?.split('.').at(-1) === 'page'
 }
@@ -50,7 +42,7 @@ function isKeyboardReceiver(context: CallContext): boolean {
 
 function isRequestReceiver(context: CallContext): boolean {
   const receiver = expressionPath(context.receiver)?.split('.').at(-1)?.toLowerCase()
-  return receiver === 'request' || receiver === 'api' || receiver === 'apirequest' || receiver === 'requestcontext'
+  return receiver === 'request' || receiver === 'api' || receiver === 'apirequest' || receiver === 'requestcontext' || receiver === 'axios'
 }
 
 function safeExpression(node: ts.Expression | undefined, sourceFile: ts.SourceFile): RenderedExpression | undefined {
@@ -219,19 +211,93 @@ const SETUP_RULE: ActionRule = {
 }
 
 const TEST_CONTROL_RULE: ActionRule = {
-  methods: new Set(['skip', 'fixme', 'fail', 'slow', 'use']),
+  methods: new Set(['skip', 'fixme', 'fail', 'slow', 'setTimeout', 'use']),
   matches(context) {
     return expressionPath(context.receiver) === 'test'
   },
   render(context) {
-    if (context.method === 'skip') return setup('Skip if required test setup is missing')
+    if (context.method === 'skip') return renderSkipControl(context)
     if (context.method === 'fixme') return setup('Mark this scenario as needing repair')
     if (context.method === 'fail') return setup('Expect this scenario to fail')
     if (context.method === 'slow') return setup('Allow extra time for this scenario')
+    if (context.method === 'setTimeout') {
+      const [duration, ...extra] = context.call.arguments
+      if (!duration || extra.length) return sourceFallback(context.call, context.sourceFile)
+      const rendered = renderExpression(duration, context.sourceFile)
+      if (rendered.fidelity === 'unresolved') return sourceFallback(context.call, context.sourceFile)
+      // A bare number is unit-less on its own; a named expression carries its
+      // meaning already (`interactive timeout ms plus 60000`).
+      return setup(`Allow ${rendered.text}${ts.isNumericLiteral(duration) ? ' milliseconds' : ''} for this scenario`)
+    }
     const fixtures = safeExpression(context.call.arguments[0], context.sourceFile)
     return fixtures && fixtures.fidelity !== 'unresolved'
       ? setup(`Configure test fixtures using ${fixtures.text}`)
       : sourceFallback(context.call, context.sourceFile)
+  },
+}
+
+/** `test.skip(condition, reason)` guards a scenario on missing setup — name
+ *  the condition variable and keep the authored reason instead of a generic
+ *  "required test setup is missing" sentence that hides which variable it is. */
+function renderSkipControl(context: CallContext): RenderedAction {
+  const [condition, reason, ...extra] = context.call.arguments
+  if (extra.length) return sourceFallback(context.call, context.sourceFile)
+  if (!condition) return setup('Skip this scenario')
+  const conditionText = renderSkipCondition(condition, context.sourceFile)
+  if (!reason) {
+    return conditionText ? setup(`Skip this scenario when ${conditionText}`) : sourceFallback(context.call, context.sourceFile)
+  }
+  const reasonRendered = renderExpression(reason, context.sourceFile)
+  if (reasonRendered.fidelity === 'unresolved') return sourceFallback(context.call, context.sourceFile)
+  if (conditionText) return setup(`Skip this scenario when ${conditionText} — ${reasonRendered.text}`)
+  // The condition doesn't render (usually a call like `!isSyncSqlConfigured()`)
+  // but an authored reason string explains the skip in the writer's own words.
+  if (ts.isStringLiteralLike(reason)) return setup(`Skip this scenario — ${reasonRendered.text}`)
+  return sourceFallback(context.call, context.sourceFile)
+}
+
+function renderSkipCondition(condition: ts.Expression, sourceFile: ts.SourceFile): string | undefined {
+  // `test.skip(!token, …)` is the missing-setup idiom — say which variable is missing.
+  if (
+    ts.isPrefixUnaryExpression(condition)
+    && condition.operator === ts.SyntaxKind.ExclamationToken
+    && (ts.isIdentifier(condition.operand) || ts.isPropertyAccessExpression(condition.operand))
+  ) {
+    const subject = renderExpression(condition.operand, sourceFile)
+    if (subject.fidelity !== 'unresolved') return `${subject.text} is missing`
+  }
+  const rendered = renderExpression(condition, sourceFile)
+  return rendered.fidelity === 'unresolved' ? undefined : rendered.text
+}
+
+/** Zero-argument lifecycle calls — `await ctx.session.close()`,
+ *  `callbackServer.start()` — read as the capitalized verb applied to the
+ *  receiver's own name; the tail of a dotted path is the noun a reader knows
+ *  the object by. Calls with arguments stay as source: an argument changes
+ *  what the call does, and naming the verb alone would hide it. */
+const LIFECYCLE_RULE: ActionRule = {
+  methods: new Set(['start', 'stop', 'close', 'disconnect', 'dispose']),
+  matches(context) {
+    return context.call.arguments.length === 0
+  },
+  render(context) {
+    const path = expressionPath(context.receiver)
+    if (!path) return sourceFallback(context.call, context.sourceFile)
+    const noun = humanizeIdentifier(path.slice(path.lastIndexOf('.') + 1))
+    return action(`${sentenceCase(context.method)} the ${noun}`)
+  },
+}
+
+const CONSOLE_RULE: ActionRule = {
+  methods: new Set(['log', 'info', 'warn', 'error', 'debug']),
+  matches(context) {
+    return expressionPath(context.receiver) === 'console'
+  },
+  render(context) {
+    const rendered = context.call.arguments.map((argument) => renderExpression(argument, context.sourceFile))
+    if (rendered.some((argument) => argument.fidelity === 'unresolved')) return sourceFallback(context.call, context.sourceFile)
+    if (!rendered.length) return action('Log an empty line to the console')
+    return action(`Log ${rendered.map((argument) => argument.text).join(' and ')} to the console`)
   },
 }
 
@@ -242,7 +308,11 @@ const ACTION_RULES: ActionRule[] = [
   WAIT_RULE,
   REQUEST_RULE,
   TEST_CONTROL_RULE,
+  CONSOLE_RULE,
   SETUP_RULE,
+  // Last: any specific rule above owns its methods first (none overlap today,
+  // but a future `page.close(options)` variant must never be shadowed).
+  LIFECYCLE_RULE,
 ]
 
 function callFromExpression(expression: ts.Expression): ts.CallExpression | undefined {
@@ -261,6 +331,84 @@ function callFromStatement(statement: ts.Statement): ts.CallExpression | undefin
   return undefined
 }
 
+const CALL_FREE_ASSIGNMENT_TEXT = new Map<ts.SyntaxKind, string>([
+  [ts.SyntaxKind.EqualsToken, 'Set {target} to {value}'],
+  [ts.SyntaxKind.PlusEqualsToken, 'Increase {target} by {value}'],
+  [ts.SyntaxKind.MinusEqualsToken, 'Decrease {target} by {value}'],
+])
+
+/** `await new Promise((r) => setTimeout(r, 3000))` is the bare-sleep idiom —
+ *  worth naming because it reads as noise otherwise. Only the exact shape
+ *  qualifies: one arrow whose concise body resolves its own parameter after a
+ *  literal delay. Anything looser could be a real executor doing work. */
+function sleepDelayMs(expression: ts.Expression): string | undefined {
+  let node = expression
+  while (ts.isAwaitExpression(node) || ts.isParenthesizedExpression(node)) node = node.expression
+  if (!ts.isNewExpression(node) || !ts.isIdentifier(node.expression) || node.expression.text !== 'Promise') return undefined
+  const [executor, ...extraArgs] = node.arguments ?? []
+  if (!executor || extraArgs.length || !ts.isArrowFunction(executor)) return undefined
+  const parameter = executor.parameters.length === 1 ? executor.parameters[0].name : undefined
+  if (!parameter || !ts.isIdentifier(parameter) || ts.isBlock(executor.body)) return undefined
+  const body = executor.body
+  if (!ts.isCallExpression(body) || !ts.isIdentifier(body.expression) || body.expression.text !== 'setTimeout') return undefined
+  const [callback, delay, ...extra] = body.arguments
+  if (!delay || extra.length) return undefined
+  if (!ts.isIdentifier(callback) || callback.text !== parameter.text || !ts.isNumericLiteral(delay)) return undefined
+  return delay.text
+}
+
+/** Statements no method rule dispatched — plain declarations, assignments,
+ *  deletes, throws, and returns — still read as steps when both sides render. */
+function renderCallFreeStatement(statement: ts.Statement, sourceFile: ts.SourceFile): RenderedAction | undefined {
+  if (ts.isReturnStatement(statement)) {
+    if (!statement.expression) return undefined
+    const value = renderExpression(statement.expression, sourceFile)
+    if (value.fidelity === 'unresolved') return undefined
+    return action(`Return ${value.text}`)
+  }
+  if (ts.isThrowStatement(statement)) {
+    // `throw error` inside a catch is a rethrow; `throw new Error('…')` with an
+    // authored message keeps the writer's words. Computed messages stay source.
+    if (ts.isIdentifier(statement.expression)) return action(`Rethrow the ${humanizeIdentifier(statement.expression.text)}`)
+    if (
+      ts.isNewExpression(statement.expression)
+      && ts.isIdentifier(statement.expression.expression)
+      && statement.expression.expression.text === 'Error'
+    ) {
+      const [message, ...extra] = statement.expression.arguments ?? []
+      if (message && !extra.length && ts.isStringLiteralLike(message)) {
+        return action(`Fail with ${renderExpression(message, sourceFile).text}`)
+      }
+    }
+    return undefined
+  }
+  if (ts.isVariableStatement(statement) && statement.declarationList.declarations.length === 1) {
+    const declaration = statement.declarationList.declarations[0]
+    if (!ts.isIdentifier(declaration.name) || !declaration.initializer) return undefined
+    const value = renderExpression(declaration.initializer, sourceFile)
+    if (value.fidelity === 'unresolved') return undefined
+    return setup(`Set ${humanizeIdentifier(declaration.name.text)} to ${value.text}`)
+  }
+  if (!ts.isExpressionStatement(statement)) return undefined
+  const expression = statement.expression
+  const sleepMs = sleepDelayMs(expression)
+  if (sleepMs !== undefined) return action(`Wait for ${sleepMs} milliseconds`)
+  if (ts.isDeleteExpression(expression) && ts.isPropertyAccessExpression(expression.expression)) {
+    const owner = renderExpression(expression.expression.expression, sourceFile)
+    if (owner.fidelity === 'unresolved') return undefined
+    return action(`Remove “${expression.expression.name.text}” from ${owner.text}`)
+  }
+  if (ts.isBinaryExpression(expression)) {
+    const wording = CALL_FREE_ASSIGNMENT_TEXT.get(expression.operatorToken.kind)
+    if (!wording) return undefined
+    const target = renderExpression(expression.left, sourceFile)
+    const value = renderExpression(expression.right, sourceFile)
+    if (target.fidelity === 'unresolved' || value.fidelity === 'unresolved') return undefined
+    return action(wording.replace('{target}', target.text).replace('{value}', value.text))
+  }
+  return undefined
+}
+
 export function renderActionStatement(statement: ts.Statement, sourceFile: ts.SourceFile): RenderedAction | undefined {
   if (ts.isVariableStatement(statement) && statement.declarationList.declarations.length === 1) {
     let initializer = statement.declarationList.declarations[0].initializer
@@ -270,12 +418,14 @@ export function renderActionStatement(statement: ts.Statement, sourceFile: ts.So
       && ts.isNewExpression(initializer)
       && ts.isIdentifier(initializer.expression)
       && initializer.expression.text === 'Date'
+      && !(initializer.arguments ?? []).length
     ) {
       return action('Record the start time')
     }
   }
   const call = callFromStatement(statement)
-  if (!call || !ts.isPropertyAccessExpression(call.expression)) return undefined
+  if (!call) return renderCallFreeStatement(statement, sourceFile)
+  if (!ts.isPropertyAccessExpression(call.expression)) return undefined
   const context: CallContext = {
     call,
     method: call.expression.name.text,
@@ -283,5 +433,8 @@ export function renderActionStatement(statement: ts.Statement, sourceFile: ts.So
     sourceFile,
   }
   const rule = ACTION_RULES.find((candidate) => candidate.methods.has(context.method) && candidate.matches(context))
-  return rule?.render(context)
+  // A method call outside the rule tables can still be a readable declaration
+  // or return — `const body = await res.json()`, `return { res, elapsedMs }` —
+  // because the expression layer knows the call even though no action rule does.
+  return rule?.render(context) ?? renderCallFreeStatement(statement, sourceFile)
 }

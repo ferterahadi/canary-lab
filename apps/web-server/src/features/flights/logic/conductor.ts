@@ -249,7 +249,12 @@ export function resumeFlight(
   }
   const manifest: FlightManifest = {
     ...current,
-    ...(current.opts.stageProducer === 'external' && externalAgentSession
+    // `externalAgentSession` checked FIRST: it is absent on almost every
+    // resume (plain pause/resume, the remedy route, the queue drain), and
+    // short-circuiting there skips the `current.opts` read entirely for that
+    // common case instead of taking on a dependency, for this one branch,
+    // that a manifest's `opts` is always populated.
+    ...(externalAgentSession && current.opts.stageProducer === 'external'
       ? { externalAgentSession }
       : {}),
     status: 'running',

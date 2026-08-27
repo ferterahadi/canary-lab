@@ -33,12 +33,12 @@ describe('Playwright action edge cases', () => {
     }
 
     for (const source of [
-      'await page.reload(loadOptions())',
-      'await page.waitForLoadState(loadState())',
-      "await page.waitForLoadState('load', loadOptions())",
+      'await page.reload(computeOptions())',
+      'await page.waitForLoadState(computeState())',
+      "await page.waitForLoadState('load', computeOptions())",
       'await page.goto()',
-      'await page.goto(loadURL())',
-      "await page.goto('/checkout', loadOptions())",
+      'await page.goto(computeURL())',
+      "await page.goto('/checkout', computeOptions())",
     ]) unresolved(source)
   })
 
@@ -64,10 +64,10 @@ describe('Playwright action edge cases', () => {
 
     for (const source of [
       'await page.click()',
-      'await page.click(loadSelector())',
-      "await page.getByText('Pay').click(loadOptions())",
+      'await page.click(computeSelector())',
+      "await page.getByText('Pay').click(computeOptions())",
       "await page.getByLabel('Search').fill()",
-      "await page.getByLabel('Search').fill(loadValue())",
+      "await page.getByLabel('Search').fill(computeValue())",
     ]) unresolved(source)
   })
 
@@ -87,13 +87,13 @@ describe('Playwright action edge cases', () => {
 
     for (const source of [
       'await page.keyboard.press()',
-      'await page.keyboard.press(loadKey())',
-      "await page.keyboard.press('Enter', loadOptions())",
+      'await page.keyboard.press(computeKey())',
+      "await page.keyboard.press('Enter', computeOptions())",
       "await page.getByRole('button', { custom: true }).waitFor()",
-      "await page.getByText('Ready').waitFor(loadOptions())",
+      "await page.getByText('Ready').waitFor(computeOptions())",
       'await page.waitForTimeout()',
-      'await page.waitForResponse(loadMatcher())',
-      "await page.waitForResponse('/orders', loadOptions())",
+      'await page.waitForResponse(computeMatcher())',
+      "await page.waitForResponse('/orders', computeOptions())",
     ]) unresolved(source)
   })
 
@@ -118,9 +118,20 @@ describe('Playwright action edge cases', () => {
       ['await page.setViewportSize({ width: 800, height: 600 })', 'Set the browser viewport to an object with width set to 800, height set to 600'],
       ["await page.emulateMedia({ colorScheme: 'dark' })", 'Set browser media preferences to an object with color scheme set to “dark”'],
       ["await context.addCookies([{ name: 'session', value: 'abc' }])", 'Add cookies from a list containing an object with name set to “session”, value set to “abc”'],
+      // Skip guards name the variable they depend on, never a generic sentence.
+      ['test.skip()', 'Skip this scenario'],
+      ['test.skip(flag)', 'Skip this scenario when flag'],
+      ["test.skip(!token, 'LINE creds required')", 'Skip this scenario when token is missing — “LINE creds required”'],
+      ['test.skip(!account.token)', 'Skip this scenario when account token is missing'],
+      // Condition is a call, so only the authored reason can explain the skip.
+      ["test.skip(!isSyncSqlConfigured(), 'sync sql not configured')", 'Skip this scenario — “sync sql not configured”'],
       ["test.fixme(true, 'repair pending')", 'Mark this scenario as needing repair'],
       ["test.fail(true, 'known failure')", 'Expect this scenario to fail'],
       ['test.slow()', 'Allow extra time for this scenario'],
+      // A bare number gets its milliseconds unit; a named expression already
+      // carries its meaning.
+      ['test.setTimeout(300000)', 'Allow 300000 milliseconds for this scenario'],
+      ['test.setTimeout(INTERACTIVE_TIMEOUT_MS + 60_000)', 'Allow interactive timeout ms plus 60000 for this scenario'],
       ["test.use({ locale: 'en-SG' })", 'Configure test fixtures using an object with locale set to “en-SG”'],
     ]
     for (const [source, text] of setupCases) {
@@ -129,12 +140,144 @@ describe('Playwright action edge cases', () => {
 
     for (const source of [
       'await request.get()',
-      'await request.get(loadURL())',
-      "await request.get('/orders', loadOptions())",
-      'await page.route(loadPattern(), handler)',
-      'await page.setViewportSize(loadViewport())',
-      'test.use(loadFixtures())',
+      'await request.get(computeURL())',
+      "await request.get('/orders', computeOptions())",
+      'await page.route(computePattern(), handler)',
+      'await page.setViewportSize(computeViewport())',
+      'test.use(computeFixtures())',
+      'test.skip(computeCond())',
+      'test.skip(!computeAccount().token)',
+      'test.skip(flag, computeMsg())',
+      'test.skip(computeCond(), someVar)',
+      "test.skip(true, 'x', extra)",
+      'test.setTimeout()',
+      'test.setTimeout(300, extra)',
+      'test.setTimeout(computeMs())',
     ]) unresolved(source)
+  })
+
+  it('renders zero-argument lifecycle calls as the verb applied to the receiver', () => {
+    const cases: Array<[string, string]> = [
+      ['await ctx.session.close()', 'Close the session'],
+      ['callbackServer.start()', 'Start the callback server'],
+      ['await callbackServer.stop()', 'Stop the callback server'],
+      ['await client.disconnect()', 'Disconnect the client'],
+      ['sink.dispose()', 'Dispose the sink'],
+    ]
+    for (const [source, text] of cases) {
+      expect(actionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'action' })
+    }
+
+    // A computed receiver has no name to speak of.
+    unresolved('getSession().close()')
+    // An argument changes what the call does — naming just the verb would hide it.
+    expect(actionFrom('session.close(force)')).toBeUndefined()
+  })
+
+  it('renders the bare-sleep Promise idiom and nothing looser', () => {
+    expect(actionFrom('await new Promise((r) => setTimeout(r, 3000))'))
+      .toEqual({ text: 'Wait for 3000 milliseconds', fidelity: 'derived', role: 'action' })
+    expect(actionFrom('await new Promise((resolve) => setTimeout(resolve, 10_000))'))
+      .toEqual({ text: 'Wait for 10000 milliseconds', fidelity: 'derived', role: 'action' })
+
+    // Every guard in the shape check: a looser executor could be doing real work.
+    for (const source of [
+      'await new Promise',
+      'await new Promise()',
+      'await new Promise((r) => setTimeout(r, 100), extra)',
+      'await new Promise(executorFn)',
+      'await new Promise(() => setTimeout(done, 100))',
+      'await new Promise((res, rej) => setTimeout(res, 100))',
+      'await new Promise(({ resolve }) => setTimeout(resolve, 100))',
+      'await new Promise((r) => { setTimeout(r, 100) })',
+      'await new Promise((r) => r)',
+      'await new Promise((r) => window.setTimeout(r, 100))',
+      'await new Promise((r) => queueMicrotask(r))',
+      'await new Promise((r) => setTimeout(r))',
+      "await new Promise((r) => setTimeout(r, 100, 'x'))",
+      'await new Promise((r) => setTimeout(done, 100))',
+      'await new Promise((r) => setTimeout(r.bind(null), 100))',
+      'await new Promise((r) => setTimeout(r, delayMs))',
+      'await new lib.Promise((r) => setTimeout(r, 100))',
+      'await new Deferred((r) => setTimeout(r, 100))',
+    ]) expect(actionFrom(source)).toBeUndefined()
+  })
+
+  it('renders rethrows and authored error messages, leaving computed throws as source', () => {
+    expect(actionFrom('throw error')).toEqual({ text: 'Rethrow the error', fidelity: 'derived', role: 'action' })
+    expect(actionFrom("throw new Error('sync sql unreachable')"))
+      .toEqual({ text: 'Fail with “sync sql unreachable”', fidelity: 'derived', role: 'action' })
+
+    for (const source of [
+      'throw new Error(`took ${elapsed}ms`)',
+      'throw new Error',
+      'throw new Error()',
+      "throw new Error('a', { cause })",
+      "throw new TypeError('x')",
+      'throw makeError()',
+      'throw payload.error',
+    ]) expect(actionFrom(source)).toBeUndefined()
+  })
+
+  it('renders console output with every argument visible', () => {
+    const cases: Array<[string, string]> = [
+      ["console.log('sync complete')", 'Log “sync complete” to the console'],
+      ['console.log()', 'Log an empty line to the console'],
+      ["console.error('boom', code)", 'Log “boom” and code to the console'],
+      ['console.warn(count)', 'Log count to the console'],
+      ["console.info('ready')", 'Log “ready” to the console'],
+      ["console.debug('trace')", 'Log “trace” to the console'],
+    ]
+    for (const [source, text] of cases) {
+      expect(actionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'action' })
+    }
+
+    unresolved('console.log(computeValue())')
+    expect(actionFrom("logger.log('x')")).toBeUndefined()
+  })
+
+  it('renders call-free declarations, assignments, deletes, and returns when both sides are readable', () => {
+    const setupCases: Array<[string, string]> = [
+      ['const total = base + 1', 'Set total to base plus 1'],
+      ['const stamp = new Date(startedAt)', 'Set stamp to started at as a date'],
+      // Method calls outside the action-rule tables still read as declarations
+      // when the expression layer knows the call.
+      ['const startedAt = Date.now()', 'Set started at to the current time'],
+      ['const body = await res.json()', 'Set body to the JSON body of response'],
+      ['const keys = Object.keys(account)', 'Set keys to the keys of account'],
+    ]
+    for (const [source, text] of setupCases) {
+      expect(actionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'setup' })
+    }
+
+    const actionCases: Array<[string, string]> = [
+      ['state.messageId = messageId', 'Set state message identifier to message identifier'],
+      ['count += 1', 'Increase count by 1'],
+      ['count -= step', 'Decrease count by step'],
+      ['delete payload.from', 'Remove “from” from payload'],
+      // Zero-argument `new Date` (with or without parentheses) is the start-time idiom.
+      ['const t0 = new Date', 'Record the start time'],
+      ['return { res, elapsedMs }', 'Return an object with response, elapsed ms'],
+      ['return total', 'Return total'],
+      ['return res.text()', 'Return the text body of response'],
+    ]
+    for (const [source, text] of actionCases) {
+      expect(actionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'action' })
+    }
+
+    const undefinedCases = [
+      'const [first] = pair',
+      'const method = methods[index++]',
+      'delete payload[key]',
+      'delete computePayload().from',
+      'count *= 2',
+      'payload.from = computeSender()',
+      'computeTarget().enabled = true',
+      'total',
+      'return',
+      'return computeValue() + 1',
+    ]
+    for (const source of undefinedCases) expect(actionFrom(source)).toBeUndefined()
   })
 
   it('returns undefined for statements and receivers outside the rule table', () => {

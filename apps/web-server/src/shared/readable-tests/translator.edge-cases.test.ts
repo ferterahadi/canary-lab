@@ -58,7 +58,7 @@ describe('readable translator parsing edges', () => {
 
     const unresolvedSource = ts.createSourceFile(
       '/workspace/unresolved.ts',
-      'async function scenario() { await page[method](loadTarget()) }',
+      'async function scenario() { await page[method](computeTarget()) }',
       ts.ScriptTarget.Latest,
       true,
       ts.ScriptKind.TS,
@@ -176,10 +176,10 @@ describe('readable translator loop edges', () => {
   for (attempt; ready; attempt++) { await page.reload() }
   for (let attempt; ready; attempt++) { await page.reload() }
   for (let [attempt] = attempts; ready; attempt++) { await page.reload() }
-  for (let attempt = loadStart(); ready; updateAttempt()) { await page.reload() }
+  for (let attempt = computeStart(); ready; updateAttempt()) { await page.reload() }
   for (let attempt = 0; ready; !attempt) { await page.reload() }
-  for (let attempt = 0; ready; ++loadCounter()) { await page.reload() }
-  for (let attempt = 0; ready; attempt += loadStep()) { await page.reload() }
+  for (let attempt = 0; ready; ++computeCounter()) { await page.reload() }
+  for (let attempt = 0; ready; attempt += computeStep()) { await page.reload() }
   for (let attempt = 3; attempt > 0; --attempt) { await page.reload() }
   for (let attempt = 3; attempt > 0; attempt -= 2) { await page.reload() }
 }`)
@@ -190,10 +190,10 @@ describe('readable translator loop edges', () => {
       'For attempt; while ready; increase attempt by 1',
       'For use attempt; while ready; increase attempt by 1',
       'For [attempt] = attempts; while ready; increase attempt by 1',
-      'For attempt starts at loadStart(); while ready; updateAttempt()',
+      'For attempt starts at computeStart(); while ready; updateAttempt()',
       'For attempt starts at 0; while ready; not attempt',
-      'For attempt starts at 0; while ready; ++loadCounter()',
-      'For attempt starts at 0; while ready; attempt += loadStep()',
+      'For attempt starts at 0; while ready; ++computeCounter()',
+      'For attempt starts at 0; while ready; attempt += computeStep()',
       'Repeat 3 times',
       'Repeat 2 times',
     ])
@@ -213,15 +213,15 @@ describe('readable translator loop edges', () => {
     const result = translate(`{
   for (item of items) { await page.reload() }
   for (const [item] of items) { await page.reload() }
-  for (const item of loadItems()) { await page.reload() }
-  for (loadItem() of items) { await page.reload() }
+  for (const item of computeItems()) { await page.reload() }
+  for (computeItem() of items) { await page.reload() }
 }`)
 
     expect(result.nodes).toEqual([
       expect.objectContaining({ text: 'For each item in items', fidelity: 'derived' }),
       expect.objectContaining({ text: 'For each const [item] in items', fidelity: 'unresolved' }),
-      expect.objectContaining({ text: 'For each item in loadItems()', fidelity: 'unresolved' }),
-      expect.objectContaining({ text: 'For each loadItem() in items', fidelity: 'unresolved' }),
+      expect.objectContaining({ text: 'For each item in computeItems()', fidelity: 'unresolved' }),
+      expect.objectContaining({ text: 'For each computeItem() in items', fidelity: 'unresolved' }),
     ])
   })
 
@@ -283,8 +283,8 @@ describe('readable translator loop edges', () => {
   for (const item of items) {
     continue outer
   }
-  while (loadReady()) { await page.reload() }
-  do { await page.reload() } while (loadReady())
+  while (computeReady()) { await page.reload() }
+  do { await page.reload() } while (computeReady())
 }`)
 
     expect(result.completeness).toBe('partial')
@@ -302,10 +302,10 @@ describe('readable translator loop edges', () => {
 describe('readable translator branch and helper edges', () => {
   it('marks unresolved conditions, subjects, cases, and switch fallthrough', () => {
     const result = translate(`{
-  if (loadMode()) await page.reload()
-  switch (loadState()) {
+  if (computeMode()) await page.reload()
+  switch (computeState()) {
     default:
-    case loadCase():
+    case computeCase():
       await page.goBack()
     case 'returned':
       return finish()
@@ -326,7 +326,7 @@ describe('readable translator branch and helper edges', () => {
       fidelity: 'unresolved',
       paths: [
         expect.objectContaining({ text: 'Otherwise, then continue to the next case' }),
-        expect.objectContaining({ text: 'When loadCase(), then continue to the next case', fidelity: 'unresolved' }),
+        expect.objectContaining({ text: 'When computeCase(), then continue to the next case', fidelity: 'unresolved' }),
         expect.objectContaining({ text: 'When “returned”' }),
         expect.objectContaining({ text: 'When “thrown”' }),
         expect.objectContaining({ text: 'When “last”' }),
@@ -339,12 +339,12 @@ describe('readable translator branch and helper edges', () => {
       {
         name: 'onlyDynamicSource',
         file: '/workspace/helpers.ts',
-        bodySource: '{ await page[method](loadTarget()) }',
+        bodySource: '{ await page[method](computeTarget()) }',
       },
       {
         name: 'authoredGroup',
         file: '/workspace/helpers.ts',
-        bodySource: "{ await test.step('Authored meaning', async () => { await page[method](loadTarget()) }) }",
+        bodySource: "{ await test.step('Authored meaning', async () => { await page[method](computeTarget()) }) }",
       },
       {
         name: 'derivedGroup',
@@ -354,17 +354,17 @@ describe('readable translator branch and helper edges', () => {
       {
         name: 'translatedLoop',
         file: '/workspace/helpers.ts',
-        bodySource: '{ while (loadReady()) { await page.reload() } }',
+        bodySource: '{ while (computeReady()) { await page.reload() } }',
       },
       {
         name: 'unresolvedBranch',
         file: '/workspace/helpers.ts',
-        bodySource: '{ switch (loadState()) { case loadCase(): await page[method](loadTarget()) } }',
+        bodySource: '{ switch (computeState()) { case computeCase(): await page[method](computeTarget()) } }',
       },
       {
         name: 'derivedPath',
         file: '/workspace/helpers.ts',
-        bodySource: "{ switch (loadState()) { case 'known': await page[method](loadTarget()) } }",
+        bodySource: "{ switch (computeState()) { case 'known': await page[method](computeTarget()) } }",
       },
       {
         name: 'recursiveHelper',

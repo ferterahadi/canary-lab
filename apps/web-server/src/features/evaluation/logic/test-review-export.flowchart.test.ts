@@ -191,7 +191,8 @@ function unknownUtility(page) {
     }))
 
     expect(html).toContain('Auth api then warning including automatically resolved')
-    expect(html).toContain('Skip if required test setup is missing')
+    // The skip guard names the missing variable (`!process.env.E2E_USER`).
+    expect(html).toContain('Skip this scenario when process environment e2e user is missing — “missing user”')
     expect(html).toContain('Intercept requests matching')
     expect(html).toContain('Record the start time')
     expect(html).toContain('Prepare unique identifiers')
@@ -217,7 +218,7 @@ function unknownUtility(page) {
     expect(html).not.toContain('<code>expect(page.getByText(&#39;Success&#39;))</code>')
   })
 
-  it('descends into try/blocks, surfaces meaningful inner steps, drops literal-only decls', async () => {
+  it('descends into try/blocks, surfaces meaningful inner steps, translates literal-only decls', async () => {
     const featureDir = path.join(tmpDir, 'flow-descend')
     fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
     const spec = path.join(featureDir, 'e2e', 'flow.spec.ts')
@@ -249,9 +250,10 @@ test('wrapped in try', async ({ page }) => {
     expect(nodes[nodes.length - 1].kind).toBe('end')
     // Inner assertions inside the try are surfaced (≥2), not collapsed.
     expect(nodes.filter((n) => n.kind === 'assertion').length).toBeGreaterThanOrEqual(2)
-    // Untranslated source remains visible rather than being silently dropped.
+    // The literal-only declaration remains visible — now as a translated setup
+    // step rather than an unresolved "Review this source step" node.
     expect(nodes.some((node) => (
-      node.title === 'Review this source step'
+      node.title === 'Set noise to “literal only”'
       && node.readable
       && (node.detail ?? '').includes("const noise = 'literal only'")
     ))).toBe(true)

@@ -76,6 +76,15 @@
   --scrollbar-thumb-hover: color-mix(in srgb, var(--text-muted) 76%, transparent);
   --scrollbar-track: transparent;
 
+  /* English test mode's tie to the Shiki code themes: authored step wording is
+     a string literal in the source, so it keeps the one-light / one-dark-pro
+     string hue and an English line reads as part of the same document. Not a
+     status hue — it means "syntax", never run state. */
+  --code-string: #50a14f;
+  /* one-light's keyword purple: tints the leading verb of a derived English
+     step (Check, Send, Open…) the way Shiki tints `await`/`const` in Code. */
+  --code-keyword: #a626a4;
+
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --font-sans: 'Inter Tight', 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
@@ -111,6 +120,10 @@
   --text-primary: #fafafa;
   --text-secondary: #a3a3a3;
   --text-muted: #737373;
+
+  --code-string: #98c379;
+  /* one-dark-pro's keyword purple — see the light-theme twin for the rationale. */
+  --code-keyword: #c678dd;
 
   --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.02);
   --shadow-popover:
@@ -327,6 +340,29 @@ body {
 .shiki-block code {
   white-space: pre-wrap !important;
   word-break: break-word !important;
+}
+/* Every code line is a full-width block bleeding into the pre's inset, so
+   hover/selection washes stretch edge-to-edge instead of hugging the text.
+   Scoped to `pre`: the English pane's inline source tokens also carry
+   `span.line` and must stay inline. `min-height` keeps blank lines one row
+   tall — the newline text nodes between spans are stripped at decorate time
+   (as blocks, pre-wrap would otherwise render each one as an extra row). */
+.shiki-block pre span.line {
+  display: block;
+  margin: 0 -0.5rem;
+  padding: 0 0.5rem;
+  min-height: 1lh;
+}
+/* The English pane's canvas — `.shiki-block pre`'s twin (same frame, inset,
+   and wrapping; keep the two in step so mode toggling never shifts layout).
+   Horizontal inset lives on the rows so selection washes bleed edge-to-edge
+   the way Code mode's line highlights do. */
+.shiki-block .cl-readable-body {
+  padding: 0.5rem 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .vertical-resize-handle {
@@ -932,6 +968,56 @@ body {
   background: var(--bg-surface);
   color: var(--text-primary);
   box-shadow: var(--shadow-panel);
+}
+
+/* The English|Code language switch on test presentations: two equal segments
+   under a sliding thumb, mono micro-caps to match the code shell it drives.
+   The thumb is the only moving part — labels keep their position, so the
+   switch itself never shifts layout either. */
+.cl-lang-switch {
+  position: relative;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+}
+.cl-lang-switch-thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  border-radius: 5px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-panel);
+  transition: transform 140ms ease;
+  pointer-events: none;
+}
+.cl-lang-switch[data-mode="code"] .cl-lang-switch-thumb {
+  transform: translateX(100%);
+}
+/* Glyph tabs (`Aa` / `</>`): no uppercase transform — it would flatten `Aa`
+   into `AA` and erase the prose-vs-code contrast the glyph carries. */
+.cl-lang-switch-btn {
+  position: relative;
+  z-index: 1;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: color 120ms ease;
+}
+.cl-lang-switch-btn:hover {
+  color: var(--text-secondary);
+}
+.cl-lang-switch-btn[data-active="true"] {
+  color: var(--text-primary);
 }
 
 /* Hairline-separated rows. */

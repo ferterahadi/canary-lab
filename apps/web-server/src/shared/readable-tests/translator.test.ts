@@ -114,6 +114,9 @@ describe('translateReadableTest structure', () => {
         ],
       }),
     ])
+    // Authored `test.step` groups are not helper expansions — the UI keeps
+    // showing their children.
+    expect(translated.nodes[0]).not.toHaveProperty('origin')
   })
 
   it('expands supplied project-local helper bodies and humanizes unavailable helpers', () => {
@@ -138,6 +141,9 @@ describe('translateReadableTest structure', () => {
     expect(translated.nodes).toEqual([
       expect.objectContaining({
         kind: 'group',
+        // Marked so the web UI can show just the call as one line while the
+        // evaluation flowchart still descends into the children.
+        origin: 'helper',
         text: 'Login as',
         fidelity: 'derived',
         source: expect.objectContaining({ file: INPUT.file, startLine: 21 }),
@@ -366,7 +372,7 @@ describe('translateReadableTest structure', () => {
       title: 'uses runtime-selected behavior',
       startLine: 40,
       bodySource: `{
-  const method = process.env.ACTION
+  const method = methods[index++]
   await page[method](targetFromEnvironment())
   expect(order).toSatisfyBusinessRule(rule)
 }`,
@@ -379,7 +385,7 @@ describe('translateReadableTest structure', () => {
           file: '/workspace/features/dynamic/e2e/dynamic.spec.js',
           startLine: 41,
           endLine: 41,
-          snippet: 'const method = process.env.ACTION',
+          snippet: 'const method = methods[index++]',
         },
       }),
       expect.objectContaining({

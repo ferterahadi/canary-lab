@@ -21,7 +21,12 @@ export function humanizeIdentifier(value: string): string {
 
 export function identifierWords(value: string): string[] {
   return value
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    // A digit splits from a following camel word (`order2Confirm`) or acronym
+    // (`step2API`), but stays glued inside a digit-carrying acronym: `E2E_USER`
+    // must read "e2e user", never "e2 e user".
+    .replace(/([0-9])([A-Z][a-z])/g, '$1 $2')
+    .replace(/(?<![A-Z])([0-9])([A-Z])(?![a-z])/g, '$1 $2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .replace(/[_$.-]+/g, ' ')
     .trim()
@@ -33,6 +38,10 @@ export function identifierWords(value: string): string[] {
 export function displayWord(word: string): string {
   if (word === 'ids') return 'identifiers'
   if (word === 'id') return 'identifier'
+  if (word === 'res') return 'response'
+  if (word === 'req') return 'request'
+  if (word === 'env') return 'environment'
+  if (word === 'msg') return 'message'
   return word
 }
 

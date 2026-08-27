@@ -37,7 +37,7 @@ describe('Playwright action rendering', () => {
       role: 'setup',
     })
     expect(actionFrom("test.skip(!process.env.E2E_USER, 'missing user')")).toEqual({
-      text: 'Skip if required test setup is missing',
+      text: 'Skip this scenario when process environment e2e user is missing — “missing user”',
       fidelity: 'derived',
       role: 'setup',
     })

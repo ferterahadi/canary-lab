@@ -244,7 +244,7 @@ describe('test review export', () => {
     // ordinary words stay verbatim — splitting them produced titles like
     // "stops issuing ot ps" and "e g. English".
     expect(__testReviewExportInternals.audienceTitle('stops issuing OTPs, e.g. after a burst')).toBe('Stops issuing OTPs, e.g. after a burst')
-    expect(__testReviewExportInternals.audienceTitle('reads res.body and user_id')).toBe('Reads res body and user identifier')
+    expect(__testReviewExportInternals.audienceTitle('reads res.body and user_id')).toBe('Reads response body and user identifier')
     expect(__testReviewExportInternals.audienceFlowDetail('2 nested assertions')).toBe('2 checks inside this shared step')
     expect(__testReviewExportInternals.audienceFlowDetail('1 nested assertion')).toBe('1 check inside this shared step')
     expect(__testReviewExportInternals.audienceFlowDetail('strict unknown nested assertion')).toBe('exact not graded included checks')
@@ -261,7 +261,12 @@ describe('test review export', () => {
     expect(__testReviewExportInternals.readableAction('await page.click()', packet.tests[0])).toBe('Click the relevant control')
     expect(__testReviewExportInternals.readableAction('await page.fill()', packet.tests[0])).toBe('Enter the required value')
     expect(__testReviewExportInternals.readableAction('await page.waitForURL(/done/)', packet.tests[0])).toBe('Wait for for url')
-    expect(__testReviewExportInternals.readableAction('test.skip()', packet.tests[0])).toBe('Skip if required test setup is missing')
+    // Skip guards name the variable they depend on, never a generic sentence.
+    expect(__testReviewExportInternals.readableAction('test.skip()', packet.tests[0])).toBe('Skip this scenario')
+    expect(__testReviewExportInternals.readableAction('test.skip(!token)', packet.tests[0])).toBe('Skip this scenario when token is missing')
+    expect(__testReviewExportInternals.readableAction("test.skip(!process.env.E2E_USER, 'missing user')", packet.tests[0])).toBe('Skip this scenario when e2e user is missing — “missing user”')
+    // Condition is a call, so only the authored reason can explain the skip.
+    expect(__testReviewExportInternals.readableAction("test.skip(!isSyncSqlConfigured(), 'sync sql not configured')", packet.tests[0])).toBe('Skip this scenario — “sync sql not configured”')
     expect(__testReviewExportInternals.readableAction('route request', packet.tests[0])).toBe('Prepare test data or mocks')
     expect(__testReviewExportInternals.readableAction('void anything', packet.tests[0])).toBe('Passes checkout')
 

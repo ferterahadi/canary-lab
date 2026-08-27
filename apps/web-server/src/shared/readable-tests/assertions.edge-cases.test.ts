@@ -40,6 +40,25 @@ describe('Playwright assertion edge cases', () => {
     }
   })
 
+  it('renders shape, length, and instance matchers literally', () => {
+    const cases: Array<[string, string]> = [
+      ['expect(list).toHaveLength(3)', 'Check that list has length 3'],
+      ['expect(list).not.toHaveLength(3)', 'Check that list does not have length 3'],
+      ['expect(rows).toContainEqual(row)', 'Check that rows contains an item equal to row'],
+      ['expect(rows).not.toContainEqual(row)', 'Check that rows does not contain an item equal to row'],
+      ['expect(res.data).toMatchObject({ id: 1 })', 'Check that response data includes an object with identifier set to 1'],
+      ['expect(res.data).not.toMatchObject({ id: 1 })', 'Check that response data does not include an object with identifier set to 1'],
+      // The class argument keeps its authored casing — `Date`, never "date".
+      ['expect(row.deliveredAt).toBeInstanceOf(Date)', 'Check that row delivered at is an instance of Date'],
+      ['expect(value).not.toBeInstanceOf(Date)', 'Check that value is not an instance of Date'],
+      ['expect(value).toBeInstanceOf(errors.TimeoutError)', 'Check that value is an instance of errors timeout error'],
+    ]
+
+    for (const [source, text] of cases) {
+      expect(assertionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'check' })
+    }
+  })
+
   it('supports returned and parenthesized expectation calls', () => {
     expect(assertionFrom('return expect(total).toBe(2)')).toEqual({
       text: 'Check that total equals 2',
@@ -72,10 +91,10 @@ describe('Playwright assertion edge cases', () => {
     const sources = [
       'expect(order).toMatchRule(rule)',
       'expect(total).toBe()',
-      'expect(loadTotal()).toBe(2)',
-      'expect(total).toBe(loadExpected())',
-      'expect(total).toBe(2, loadOptions())',
-      "expect(total, loadMessage()).toBe(2)",
+      'expect(computeTotal()).toBe(2)',
+      'expect(total).toBe(computeExpected())',
+      'expect(total).toBe(2, computeOptions())',
+      "expect(total, computeMessage()).toBe(2)",
       'expect(response.status(1)).toBe(200)',
       'expect(response.headers()).toBeDefined()',
     ]

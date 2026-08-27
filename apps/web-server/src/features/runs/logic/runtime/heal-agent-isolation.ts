@@ -21,9 +21,13 @@ function canonicalLocalPath(handle: WorktreeHandle): string {
   return path.resolve(handle.sourceRoot, relative)
 }
 
+// Claude permission rules read a single leading slash as settings-file-relative;
+// the doubled slash marks a filesystem-absolute path. POSIX-only on purpose: the
+// sandbox block below sets failIfUnavailable, which Claude Code cannot satisfy on
+// Windows (sandboxing is macOS/Linux only), so heal isolation never runs there
+// and a drive-letter arm would be dead code no POSIX test can reach.
 function claudeAbsolutePermissionPath(candidate: string): string {
-  const absolute = path.resolve(candidate).replace(/\\/g, '/')
-  return absolute.startsWith('/') ? `/${absolute}` : absolute
+  return `/${path.resolve(candidate)}`
 }
 
 export interface HealAgentIsolationArgs {
@@ -39,12 +43,10 @@ export interface HealAgentIsolationArgs {
  * settings sources, so a broad personal allow rule cannot reopen these paths. */
 export function writeHealAgentIsolationSettings(args: HealAgentIsolationArgs): string {
   const writableDirs = uniqueResolved(args.writableDirs)
-  const protectedDirs = uniqueResolved([
-    ...(args.featureDirReadOnly ? [args.featureDir] : []),
-    ...args.worktrees.map(canonicalLocalPath),
-  ])
+  const featureDir = path.resolve(args.featureDir)
+  const worktreeProtectedDirs = uniqueResolved(args.worktrees.map(canonicalLocalPath))
 
-  for (const protectedDir of protectedDirs) {
+  for (const protectedDir of worktreeProtectedDirs) {
     const shadowed = writableDirs.find((writableDir) => isSameOrAncestor(protectedDir, writableDir))
     if (shadowed) {
       throw new Error(
@@ -52,6 +54,23 @@ export function writeHealAgentIsolationSettings(args: HealAgentIsolationArgs): s
       )
     }
   }
+
+  // A worktree's canonical source mirror must sit fully outside every writable
+  // dir (checked above): worktree isolation only works when the pristine
+  // checkout and its disposable copy are disjoint, so any overlap there is a
+  // setup bug and fails closed. The feature dir is different — with no
+  // worktree in play, its writable repo path can legitimately BE the feature
+  // dir, or live nested inside it (a service repo co-located in the suite's
+  // own tree; a feature whose single repo root doubles as the feature dir —
+  // see makeFeature() fixtures across the runtime test suite). Neither leaves
+  // a suite-only remainder to protect, so leave the feature dir writable
+  // rather than emit a deny entry that contradicts its own allow entry.
+  const featureDirIsDisjoint = !writableDirs.some((writableDir) => isSameOrAncestor(featureDir, writableDir))
+
+  const protectedDirs = uniqueResolved([
+    ...(args.featureDirReadOnly && featureDirIsDisjoint ? [featureDir] : []),
+    ...worktreeProtectedDirs,
+  ])
 
   const settingsPath = path.join(args.runDir, HEAL_AGENT_ISOLATION_SETTINGS)
   const settings = {

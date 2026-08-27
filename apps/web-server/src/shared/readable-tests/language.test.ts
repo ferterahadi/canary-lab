@@ -18,6 +18,15 @@ describe('readable test language', () => {
     expect(humanizeIdentifier('checkout.submitOrder')).toBe('checkout submit order')
   })
 
+  it('keeps digit-carrying acronyms whole while still splitting camel digits', () => {
+    expect(humanizeIdentifier('process.env.E2E_USER')).toBe('process environment e2e user')
+    expect(humanizeIdentifier('B2B')).toBe('b2b')
+    expect(humanizeIdentifier('apiV2Response')).toBe('api v2 response')
+    expect(humanizeIdentifier('order2Confirm')).toBe('order2 confirm')
+    expect(humanizeIdentifier('step2API')).toBe('step2 api')
+    expect(humanizeIdentifier('E2ESuite')).toBe('e2e suite')
+  })
+
   it('classifies calls and setup statements without executing source', () => {
     const source = ts.createSourceFile(
       'flow.ts',

@@ -1,7 +1,7 @@
 import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../../shared/code-display-format'
 import type { ReadableFidelity } from '../../../../../shared/readable-tests/types'
-import { humanizeIdentifier } from './language'
+import { humanizeIdentifier, identifierWords, readableObject } from './language'
 
 export interface RenderedExpression {
   text: string
@@ -11,6 +11,68 @@ export interface RenderedExpression {
 interface RenderedPart extends RenderedExpression {
   compound: boolean
 }
+
+/** Dotted call-target path (`expect.any`, `JSON.stringify`), or undefined for
+ *  anything dynamic. Raw identifier text, never humanized — it's a lookup key. */
+export function expressionPath(node: ts.Expression): string | undefined {
+  if (ts.isIdentifier(node)) return node.text
+  if (ts.isPropertyAccessExpression(node)) {
+    const owner = expressionPath(node.expression)
+    return owner ? `${owner}.${node.name.text}` : undefined
+  }
+  return undefined
+}
+
+// Calls whose result is a fresh value with a stable meaning. Describing the
+// value ("a new unique identifier") is faithful; naming the mechanism is not
+// what a reader needs.
+const VALUE_GENERATOR_CALLS = new Map<string, string>([
+  ['uuidv4', 'a new unique identifier'],
+  ['randomUUID', 'a new unique identifier'],
+  ['crypto.randomUUID', 'a new unique identifier'],
+  ['Date.now', 'the current time'],
+  ['Math.random', 'a random number'],
+])
+
+// Zero-argument methods that reshape their receiver without side effects.
+const CONVERSION_METHOD_TEXT = new Map<string, string>([
+  ['toLowerCase', '{owner} in lowercase'],
+  ['toUpperCase', '{owner} in uppercase'],
+  ['trim', '{owner} without surrounding spaces'],
+  ['getTime', '{owner} as a timestamp'],
+  ['toISOString', '{owner} as an ISO timestamp'],
+  ['toString', '{owner} as text'],
+  ['json', 'the JSON body of {owner}'],
+  ['text', 'the text body of {owner}'],
+])
+
+// One-argument membership/shape predicates common in test conditions.
+const RELATION_METHOD_TEXT = new Map<string, string>([
+  ['includes', '{owner} contains {value}'],
+  ['has', '{owner} contains {value}'],
+  ['startsWith', '{owner} starts with {value}'],
+  ['endsWith', '{owner} ends with {value}'],
+])
+
+// Asymmetric expect matchers used inside expected payloads.
+const EXPECT_MATCHER_TEXT = new Map<string, string>([
+  ['any', 'any {value}'],
+  ['anything', 'anything'],
+  ['stringContaining', 'text containing {value}'],
+  ['stringMatching', 'text matching {value}'],
+  ['objectContaining', 'an object containing {value}'],
+  ['arrayContaining', 'a list containing {value}'],
+])
+
+const OBJECT_INSPECTION_TEXT = new Map<string, string>([
+  ['Object.keys', 'the keys of {value}'],
+  ['Object.values', 'the values of {value}'],
+  ['Object.entries', 'the entries of {value}'],
+])
+
+// Read-style verbs whose call result is safely described as the thing read:
+// `getBaseUrl()` means "the base url" to a reader, not a procedure.
+const GETTER_VERBS = new Set(['get', 'read', 'fetch', 'load', 'query', 'find'])
 
 const BINARY_OPERATORS = new Map<ts.SyntaxKind, string>([
   [ts.SyntaxKind.EqualsEqualsToken, 'equals'],
@@ -83,7 +145,13 @@ function renderTemplate(node: ts.TemplateExpression, sourceFile: ts.SourceFile):
 
 function renderArray(node: ts.ArrayLiteralExpression, sourceFile: ts.SourceFile): RenderedPart {
   if (!node.elements.length) return { text: 'an empty list', fidelity: 'derived', compound: false }
-  const elements = node.elements.map((element) => renderPart(element, sourceFile))
+  const elements = node.elements.map((element) => {
+    if (!ts.isSpreadElement(element)) return renderPart(element, sourceFile)
+    const spread = renderPart(element.expression, sourceFile)
+    return spread.fidelity === 'unresolved'
+      ? spread
+      : { text: `all items of ${spread.text}`, fidelity: spread.fidelity, compound: false }
+  })
   if (elements.some((element) => element.fidelity === 'unresolved')) return unresolved(node, sourceFile)
   return {
     text: `a list containing ${elements.map((element) => element.text).join(', ')}`,
@@ -109,6 +177,12 @@ function renderObject(node: ts.ObjectLiteralExpression, sourceFile: ts.SourceFil
       properties.push({ text: humanizeIdentifier(property.name.text), fidelity: 'derived' })
       continue
     }
+    if (ts.isSpreadAssignment(property)) {
+      const spread = renderPart(property.expression, sourceFile)
+      if (spread.fidelity === 'unresolved') return unresolved(node, sourceFile)
+      properties.push({ text: `everything in ${spread.text}`, fidelity: spread.fidelity })
+      continue
+    }
     return unresolved(node, sourceFile)
   }
   if (properties.some((property) => property.fidelity === 'unresolved')) return unresolved(node, sourceFile)
@@ -117,6 +191,110 @@ function renderObject(node: ts.ObjectLiteralExpression, sourceFile: ts.SourceFil
     fidelity: 'derived',
     compound: false,
   }
+}
+
+function renderedArguments(
+  callArguments: readonly ts.Expression[],
+  sourceFile: ts.SourceFile,
+): RenderedPart[] | undefined {
+  const rendered = callArguments.map((argument) => renderPart(argument, sourceFile))
+  return rendered.some((argument) => argument.fidelity === 'unresolved') ? undefined : rendered
+}
+
+/** Calls whose *result* has a describable meaning render as that meaning;
+ *  everything else returns undefined and stays as source. */
+function renderCall(node: ts.CallExpression, sourceFile: ts.SourceFile): RenderedPart | undefined {
+  const path = expressionPath(node.expression)
+  if (path) {
+    const generated = VALUE_GENERATOR_CALLS.get(path)
+    if (generated && node.arguments.length === 0) return { text: generated, fidelity: 'derived', compound: false }
+
+    const matcher = path.startsWith('expect.') ? EXPECT_MATCHER_TEXT.get(path.slice('expect.'.length)) : undefined
+    if (matcher === 'anything' && node.arguments.length === 0) return { text: matcher, fidelity: 'derived', compound: false }
+    if (matcher && matcher !== 'anything' && node.arguments.length === 1) {
+      const value = renderPart(node.arguments[0], sourceFile)
+      if (value.fidelity !== 'unresolved') {
+        return { text: matcher.replace('{value}', value.text), fidelity: 'derived', compound: false }
+      }
+    }
+
+    if (path === 'JSON.parse' && node.arguments.length === 1) {
+      const value = renderPart(node.arguments[0], sourceFile)
+      if (value.fidelity !== 'unresolved') {
+        return { text: `${childText(value)} parsed as JSON`, fidelity: 'derived', compound: false }
+      }
+    }
+    if (path === 'JSON.stringify' && node.arguments.length >= 1) {
+      // A replacer argument changes what gets serialized; only formatting-only
+      // calls (no replacer, or an inert null/undefined one) are safe to reword.
+      const replacer = node.arguments[1]
+      const replacerIsInert = !replacer
+        || replacer.kind === ts.SyntaxKind.NullKeyword
+        || (ts.isIdentifier(replacer) && replacer.text === 'undefined')
+      if (replacerIsInert) {
+        const value = renderPart(node.arguments[0], sourceFile)
+        if (value.fidelity !== 'unresolved') {
+          return { text: `${childText(value)} as JSON text`, fidelity: 'derived', compound: false }
+        }
+      }
+    }
+
+    const inspection = OBJECT_INSPECTION_TEXT.get(path)
+    if (inspection && node.arguments.length === 1) {
+      const value = renderPart(node.arguments[0], sourceFile)
+      if (value.fidelity !== 'unresolved') {
+        return { text: inspection.replace('{value}', childText(value)), fidelity: 'derived', compound: false }
+      }
+    }
+  }
+
+  if (ts.isIdentifier(node.expression)) {
+    const words = identifierWords(node.expression.text)
+    if (words.length > 1 && GETTER_VERBS.has(words[0])) {
+      const object = readableObject(words.slice(1))
+      const callArguments = renderedArguments(node.arguments, sourceFile)
+      if (object && callArguments) {
+        const text = callArguments.length
+          ? `the ${object} for ${callArguments.map((argument) => argument.text).join(' and ')}`
+          : `the ${object}`
+        return { text, fidelity: 'derived', compound: false }
+      }
+    }
+  }
+
+  if (ts.isPropertyAccessExpression(node.expression)) {
+    const method = node.expression.name.text
+    const conversion = CONVERSION_METHOD_TEXT.get(method)
+    if (conversion && node.arguments.length === 0) {
+      const owner = renderPart(node.expression.expression, sourceFile)
+      if (owner.fidelity !== 'unresolved') {
+        return { text: conversion.replace('{owner}', childText(owner)), fidelity: 'derived', compound: false }
+      }
+    }
+    const relation = RELATION_METHOD_TEXT.get(method)
+    if (relation && node.arguments.length === 1) {
+      const owner = renderPart(node.expression.expression, sourceFile)
+      const value = renderPart(node.arguments[0], sourceFile)
+      if (owner.fidelity !== 'unresolved' && value.fidelity !== 'unresolved') {
+        return {
+          text: relation.replace('{owner}', childText(owner)).replace('{value}', childText(value)),
+          fidelity: 'derived',
+          compound: true,
+        }
+      }
+    }
+  }
+
+  return undefined
+}
+
+function renderNew(node: ts.NewExpression, sourceFile: ts.SourceFile): RenderedPart | undefined {
+  if (!ts.isIdentifier(node.expression) || node.expression.text !== 'Date') return undefined
+  const callArguments = renderedArguments(node.arguments ?? [], sourceFile)
+  if (!callArguments) return undefined
+  if (callArguments.length === 0) return { text: 'the current time', fidelity: 'derived', compound: false }
+  if (callArguments.length === 1) return { text: `${childText(callArguments[0])} as a date`, fidelity: 'derived', compound: false }
+  return undefined
 }
 
 function renderPart(node: ts.Expression, sourceFile: ts.SourceFile): RenderedPart {
@@ -148,6 +326,18 @@ function renderPart(node: ts.Expression, sourceFile: ts.SourceFile): RenderedPar
     const expression = renderPart(node.expression, sourceFile)
     return expression.fidelity === 'unresolved' ? unresolved(node, sourceFile) : expression
   }
+  if (ts.isCallExpression(node)) {
+    return renderCall(node, sourceFile) ?? unresolved(node, sourceFile)
+  }
+  if (ts.isNewExpression(node)) {
+    return renderNew(node, sourceFile) ?? unresolved(node, sourceFile)
+  }
+  if (ts.isArrowFunction(node) && node.parameters.length === 0 && !ts.isBlock(node.body)) {
+    const body = renderPart(node.body, sourceFile)
+    if (body.fidelity !== 'unresolved') {
+      return { text: `a function returning ${body.text}`, fidelity: 'derived', compound: false }
+    }
+  }
   if (ts.isPropertyAccessExpression(node)) {
     const owner = renderPart(node.expression, sourceFile)
     if (owner.fidelity === 'unresolved') return unresolved(node, sourceFile)
@@ -163,6 +353,16 @@ function renderPart(node: ts.Expression, sourceFile: ts.SourceFile): RenderedPar
     if (owner.fidelity === 'unresolved') return unresolved(node, sourceFile)
     return {
       text: `${owner.text} ${node.argumentExpression.text}${node.questionDotToken ? ', if available' : ''}`,
+      fidelity: 'derived',
+      compound: false,
+    }
+  }
+  if (ts.isElementAccessExpression(node)) {
+    const owner = renderPart(node.expression, sourceFile)
+    const key = renderPart(node.argumentExpression, sourceFile)
+    if (owner.fidelity === 'unresolved' || key.fidelity === 'unresolved') return unresolved(node, sourceFile)
+    return {
+      text: `${owner.text} at ${childText(key)}${node.questionDotToken ? ', if available' : ''}`,
       fidelity: 'derived',
       compound: false,
     }

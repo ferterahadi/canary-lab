@@ -30,32 +30,40 @@ export function TestPresentation({
   const showingFullTest = !selectedSource || sourceBelongsToTestBody(test, sourceFile, selectedSource.source)
   const code = codeSelection(test, sourceFile, selectedSource?.source)
   const visibleRange = selectedSource?.source ?? code
+  const fullTestRange = codeSelection(test, sourceFile, undefined)
 
   return (
     <div data-testid="test-presentation">
       <div className="mb-2 flex min-w-0 items-center gap-2 border-b pb-2" style={{ borderColor: 'var(--border-subtle)' }}>
-        <div className="cl-mode-toggle !m-0" role="tablist" aria-label="Test description format">
+        <div className="cl-lang-switch" role="tablist" aria-label="Test description format" data-mode={mode}>
+          <span className="cl-lang-switch-thumb" aria-hidden="true" />
+          {/* Glyphs, not words: `Aa` reads as prose, `</>` as code. The
+              accessible name stays the full word via aria-label/title. */}
           <button
             type="button"
             role="tab"
             aria-selected={mode === 'english'}
+            aria-label="English"
+            title="English"
             data-active={mode === 'english' ? 'true' : 'false'}
             data-testid="test-presentation-english-tab"
-            className="cl-mode-toggle-btn"
+            className="cl-lang-switch-btn"
             onClick={() => setMode('english')}
           >
-            English
+            Aa
           </button>
           <button
             type="button"
             role="tab"
             aria-selected={mode === 'code'}
+            aria-label="Code"
+            title="Code"
             data-active={mode === 'code' ? 'true' : 'false'}
             data-testid="test-presentation-code-tab"
-            className="cl-mode-toggle-btn"
+            className="cl-lang-switch-btn"
             onClick={() => setMode('code')}
           >
-            Code
+            {'</>'}
           </button>
         </div>
         {mode === 'english' && test.readable.completeness === 'partial' && (
@@ -63,26 +71,24 @@ export function TestPresentation({
             Some steps stay as source
           </span>
         )}
-        {mode === 'code' && (
-          <>
-            <span
-              className="min-w-0 flex-1 truncate text-right text-[10px]"
-              title={code.file}
-              style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
-            >
-              {shortSourceLabel(visibleRange.file, visibleRange.startLine, visibleRange.endLine)}
-            </span>
-            {selectedSource && (
-              <button
-                type="button"
-                className="shrink-0 text-[10px]"
-                style={{ color: 'var(--accent)' }}
-                onClick={() => setSelectedSource(null)}
-              >
-                Full test
-              </button>
-            )}
-          </>
+        <span
+          className="min-w-0 flex-1 truncate text-right text-[10px]"
+          title={mode === 'code' ? code.file : fullTestRange.file}
+          style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
+        >
+          {mode === 'code'
+            ? shortSourceLabel(visibleRange.file, visibleRange.startLine, visibleRange.endLine)
+            : shortSourceLabel(fullTestRange.file, fullTestRange.startLine, fullTestRange.endLine)}
+        </span>
+        {mode === 'code' && selectedSource && (
+          <button
+            type="button"
+            className="shrink-0 text-[10px]"
+            style={{ color: 'var(--accent)' }}
+            onClick={() => setSelectedSource(null)}
+          >
+            Full test
+          </button>
         )}
       </div>
 
@@ -90,6 +96,7 @@ export function TestPresentation({
         <div data-testid="test-presentation-english">
           <ReadableTestView
             test={test.readable}
+            sourceFile={sourceFile}
             selectedNodeId={selectedSource?.id}
             onSourceSelect={selectSource}
           />

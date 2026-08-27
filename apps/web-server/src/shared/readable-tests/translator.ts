@@ -673,6 +673,7 @@ function translateStatement(
         return {
           id: stableNodeId(source, path),
           kind: 'group',
+          origin: 'helper',
           text: readableHelperName(helperName),
           fidelity: 'derived',
           source,

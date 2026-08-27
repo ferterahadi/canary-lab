@@ -45,10 +45,10 @@ describe('Playwright locator edge cases', () => {
   it('keeps unsafe role options unresolved', () => {
     const sources = [
       'page.getByRole()',
-      'page.getByRole(loadRole())',
+      'page.getByRole(computeRole())',
       "page.getByRole('button', options)",
       "page.getByRole('button', { custom: true })",
-      "page.getByRole('button', { name: loadName() })",
+      "page.getByRole('button', { name: computeName() })",
       "page.getByRole('button', { exact: exactValue })",
       "page.getByRole('button', { checked: checkedValue })",
       "page.getByRole('heading', { level: headingLevel })",
@@ -71,7 +71,7 @@ describe('Playwright locator edge cases', () => {
 
     const sources = [
       'page.getByLabel()',
-      'page.getByText(loadText())',
+      'page.getByText(computeText())',
       "page.getByText('Pay', options)",
       "page.getByText('Pay', { custom: true })",
       "page.getByText('Pay', { exact: exactValue })",
@@ -102,7 +102,7 @@ describe('Playwright locator edge cases', () => {
       "page.getByText('Retry').first(1)",
       "page.getByText('Retry').last(1)",
       "page.getByText('Retry').nth()",
-      "page.getByText('Retry').nth(loadIndex())",
+      "page.getByText('Retry').nth(computeIndex())",
     ]
     for (const source of sources) {
       expect(rendered(source)).toEqual({ text: source, fidelity: 'unresolved' })

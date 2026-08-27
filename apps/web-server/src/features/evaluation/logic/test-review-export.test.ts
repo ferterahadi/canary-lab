@@ -311,7 +311,8 @@ test('A. WA metadata.url -> SMS', async () => {
     // Dotted identifiers are still humanised; bare acronyms are left alone
     // (lowercasing every capitalised run turned "OTPs" into "ot ps").
     expect(html).toContain('WA metadata url then SMS')
-    expect(html).toContain('Skip if required test setup is missing')
+    // The skip guard names the variable it depends on, not a generic sentence.
+    expect(html).toContain('Skip this scenario when override flag expected is missing')
     expect(html).toContain('Prepare unique identifiers')
     expect(html).toContain('Send message')
     expect(html).not.toContain('WhatsApp')

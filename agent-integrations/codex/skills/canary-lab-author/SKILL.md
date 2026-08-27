@@ -68,5 +68,11 @@ and never rename it to dodge a collision.
 ## Guardrails
 
 - Keep the same `session_id` for the whole conversation.
+- Test titles are read by non-engineers in the coverage ledger and exported
+  reports: write each as a plain-English sentence naming the user-visible
+  behavior — `user can reset their password after requesting a reset link`,
+  not `POST /reset-token returns 200`. Keep a technical term only when it is
+  the requirement's own vocabulary (an endpoint name in an API-contract
+  requirement stays technical).
 - Canary Lab never writes the test body for external authoring — this client does.
 - After authoring, the natural next steps live in sibling skills: map coverage (`canary-lab-coverage`), run + heal (`canary-lab-run`), export the evaluation (`canary-lab-export`). **Running the new test** needs `start_run`: on the setup/plugin `compact` connection, invoke it as the `exec` command and follow `canary-lab-run`. On an intentionally narrow direct `--profile author` connection it is unavailable; reconnect with `npx canary-lab mcp --profile compact` and then run.

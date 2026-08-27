@@ -26,6 +26,11 @@ export interface ReadableLeafNode extends ReadableNodeBase {
 
 export interface ReadableGroupNode extends ReadableNodeBase {
   kind: 'group'
+  // Present when the group is an expanded helper-call body rather than an
+  // authored `test.step` block. Consumers pick their altitude: the web UI
+  // shows only the call as a single line, while the evaluation flowchart
+  // keeps descending into the children.
+  origin?: 'helper'
   children: ReadableNode[]
 }
 

@@ -69,8 +69,21 @@ export function audienceFlowDetail(detail: string): string {
     .replace(/\bunknown\b/gi, 'not graded')
 }
 
+/** `test.skip(condition, reason)` from raw statement text (this layer has no
+ *  AST) — name the guarded variable and keep the authored reason rather than a
+ *  generic sentence that hides which variable the skip depends on. */
+function readableSkip(statement: string): string {
+  const reason = /test\.skip\([^,]*,\s*['"`]([^'"`]+)['"`]/.exec(statement)?.[1]
+  const negated = /test\.skip\(\s*!\s*([A-Za-z_$][\w.$]*)\s*[,)]/.exec(statement)?.[1]
+  const subject = negated ? `${humanizeIdentifier(negated.slice(negated.lastIndexOf('.') + 1))} is missing` : undefined
+  if (subject && reason) return `Skip this scenario when ${subject} — “${reason}”`
+  if (subject) return `Skip this scenario when ${subject}`
+  if (reason) return `Skip this scenario — “${reason}”`
+  return 'Skip this scenario'
+}
+
 export function readableAction(statement: string, test: TestReviewCase): string {
-  if (/\btest\.skip\b/.test(statement)) return 'Skip if required test setup is missing'
+  if (/\btest\.skip\b/.test(statement)) return readableSkip(statement)
   const called = calledNameFromText(statement)
   if (/\bexpect\b/.test(statement)) return 'Check the expected outcome'
   if (called) return readableActionName(called, statement)

@@ -152,20 +152,23 @@ function decorateShikiLines(
     ? 'color-mix(in srgb, var(--warning) 22%, transparent)'
     : 'color-mix(in srgb, var(--running) 18%, transparent)'
   const bar = runningHighlight ? 'var(--warning)' : 'var(--running)'
-  return html.replace(/<span class="line"/g, (match) => {
+  // Lines render as full-width blocks (`.shiki-block pre span.line`), so the
+  // newline text nodes Shiki leaves between them must go — under pre-wrap each
+  // would paint an extra blank row.
+  return html.replace(/\n(?=<span class="line")/g, '').replace(/<span class="line"/g, (match) => {
     lineNo += 1
     const sourceLine = startLine ? sourceLineForBodyLine(startLine, lineNo) : null
     const selected = sourceLine != null && selectedSourceRange != null &&
       sourceLine >= selectedSourceRange.startLine && sourceLine <= selectedSourceRange.endLine
     const attrs = `${sourceLine ? ` data-source-line="${sourceLine}"` : ''}${selected ? ' data-selected-line="true"' : ''}`
     if (changedLines?.has(lineNo)) {
-      return `<span class="line"${attrs} data-changed-line="true" style="display:block;margin:0 -0.5rem;padding:0 0.5rem;background:color-mix(in srgb, var(--danger) 16%, transparent);box-shadow:inset 2px 0 0 var(--danger)"`
+      return `<span class="line"${attrs} data-changed-line="true" style="background:color-mix(in srgb, var(--danger) 16%, transparent);box-shadow:inset 2px 0 0 var(--danger)"`
     }
     if (lineNo === activeLine) {
-      return `<span class="line"${attrs} data-active-line="true" style="display:block;margin:0 -0.5rem;padding:0 0.5rem;background:${bg};box-shadow:inset 2px 0 0 ${bar}"`
+      return `<span class="line"${attrs} data-active-line="true" style="background:${bg};box-shadow:inset 2px 0 0 ${bar}"`
     }
     if (selected) {
-      return `<span class="line"${attrs} style="display:block;margin:0 -0.5rem;padding:0 0.5rem;background:color-mix(in srgb, var(--accent) 14%, transparent);box-shadow:inset 2px 0 0 var(--accent)"`
+      return `<span class="line"${attrs} style="background:color-mix(in srgb, var(--accent) 14%, transparent);box-shadow:inset 2px 0 0 var(--accent)"`
     }
     return `${match}${attrs}`
   })
