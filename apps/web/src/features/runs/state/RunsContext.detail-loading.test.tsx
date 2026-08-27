@@ -39,6 +39,7 @@ vi.mock('@/shared/api/client', async () => {
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = []
+  readyState = 0
   onopen: (() => void) | null = null
   onmessage: ((event: { data: unknown }) => void) | null = null
   onerror: (() => void) | null = null
@@ -51,6 +52,7 @@ class FakeWebSocket {
 
   close(): void {
     this.closed = true
+    this.readyState = 3
     this.onclose?.()
   }
 }
@@ -318,7 +320,7 @@ describe('RunsProvider', () => {
     // No throw; onclose path remains the one to schedule reconnects.
   })
 
-  it('moves through reconnect state and exposes disconnected after max backoff', async () => {
+  it('retries every 500 ms and exposes disconnected after ten seconds of consecutive failures', () => {
     vi.useFakeTimers()
     const captured = renderProbe()
     const first = FakeWebSocket.instances[0]
@@ -328,17 +330,20 @@ describe('RunsProvider', () => {
     })
     expect(captured.runs?.connection).toBe('reconnecting')
 
-    for (const ms of [500, 1000, 2000, 4000, 8000, 10000]) {
+    for (let attempt = 2; attempt <= 20; attempt += 1) {
       act(() => {
-        vi.advanceTimersByTime(ms)
+        vi.advanceTimersByTime(500)
+        expect(FakeWebSocket.instances).toHaveLength(attempt)
+        FakeWebSocket.instances.at(-1)?.onclose?.()
       })
-      FakeWebSocket.instances.at(-1)?.onclose?.()
     }
+    expect(captured.runs?.connection).toBe('disconnected')
 
     act(() => {
-      vi.advanceTimersByTime(10000)
+      vi.advanceTimersByTime(500)
+      FakeWebSocket.instances.at(-1)?.onopen?.()
     })
-    expect(captured.runs?.connection).toBe('disconnected')
+    expect(captured.runs?.connection).toBe('live')
   })
 
   it('schedules reconnect when websocket construction fails and cancels cleanly on unmount', () => {

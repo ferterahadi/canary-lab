@@ -16,10 +16,6 @@ import * as astExtractor from '../../../../shared/ast-extractor'
 
 const EMPTY: DirtyBaseline = { lastGreenHashes: {}, runStartHashes: {}, approvedHashes: {} }
 
-function readable(title: string) {
-  return { version: 2 as const, title, completeness: 'complete' as const, nodes: [] }
-}
-
 let dir: string
 
 function git(args: string[]): void {
@@ -193,12 +189,12 @@ describe('computeDirty', () => {
 
     // Simulate a test that's declared (from the file-level listing) but whose
     // body hash never lands in `currentTests` — e.g. an extractor edge case.
-    // The first `extractTestsFromSource` call (inside `listFeatureSpecs`) is
+    // The first `extractTestMetadataFromSource` call (inside `listFeatureSpecs`) is
     // given an extra phantom test name; every other call (per-test hashing)
     // sees the real source unmodified.
-    const real = astExtractor.extractTestsFromSource
+    const real = astExtractor.extractTestMetadataFromSource
     let calls = 0
-    const spy = vi.spyOn(astExtractor, 'extractTestsFromSource').mockImplementation((file, source) => {
+    const spy = vi.spyOn(astExtractor, 'extractTestMetadataFromSource').mockImplementation((file, source) => {
       calls++
       const result = real(file, source)
       if (calls === 1) {
@@ -209,9 +205,8 @@ describe('computeDirty', () => {
             {
               name: 'phantom test',
               bodySource: 'unused',
+              bodyLine: 0,
               line: 0,
-              steps: [],
-              readable: readable('phantom test'),
             },
           ],
         }

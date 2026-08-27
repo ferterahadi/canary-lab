@@ -81,9 +81,15 @@
      string hue and an English line reads as part of the same document. Not a
      status hue — it means "syntax", never run state. */
   --code-string: #50a14f;
+  /* one-light's cyan family, used for setup grammar in English mode. */
+  --code-cyan: #0184bc;
   /* one-light's keyword purple: tints the leading verb of a derived English
      step (Check, Send, Open…) the way Shiki tints `await`/`const` in Code. */
   --code-keyword: #a626a4;
+  /* Controlled-English semantics. These are not run statuses: purple marks
+     error control flow; red marks assertions and proven external boundaries. */
+  --semantic-error-control-flow: var(--code-keyword);
+  --semantic-attention: #dc2626;
 
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --font-sans: 'Inter Tight', 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -122,8 +128,11 @@
   --text-muted: #737373;
 
   --code-string: #98c379;
+  --code-cyan: #56b6c2;
   /* one-dark-pro's keyword purple — see the light-theme twin for the rationale. */
   --code-keyword: #c678dd;
+  --semantic-error-control-flow: var(--code-keyword);
+  --semantic-attention: #ff7b72;
 
   --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.02);
   --shadow-popover:

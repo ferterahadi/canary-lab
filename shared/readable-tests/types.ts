@@ -5,6 +5,67 @@ export type ReadableCompleteness = 'complete' | 'partial'
 export type ReadableLeafRole = 'syntax' | 'setup' | 'action' | 'check' | 'helper' | 'unknown'
 export type ReadableLoopKind = 'for' | 'for-in' | 'for-of' | 'for-await-of' | 'while' | 'do-while'
 
+/** What a rendered span is in the source language. This stays independent
+ *  from semantic meaning so a theme can emphasize either layer. */
+export type ReadableSyntaxCategory =
+  | 'keyword'
+  | 'identifier'
+  | 'literal'
+  | 'operator'
+  | 'function'
+  | 'property'
+  | 'type'
+
+/** What a source construct is proven to do. Categories are evidence, not
+ *  colours: several categories may coexist on one span. */
+export type ReadableSemanticCategory =
+  | 'error-control-flow'
+  | 'assertion'
+  | 'external-api'
+  | 'database'
+  | 'branch'
+  | 'iteration'
+  | 'return'
+  | 'declaration'
+  | 'assignment'
+  | 'function-call'
+  | 'async'
+  | 'filesystem'
+  | 'logging'
+  | 'unknown'
+
+/** Extra module specifiers whose imported clients carry known semantics.
+ *  Matching a method name alone is never sufficient. */
+export interface ReadableSemanticRuleConfig {
+  apiClients?: readonly string[]
+  databaseClients?: readonly string[]
+}
+
+export interface ReadableSourceRange {
+  /** Zero-based offsets in the complete source file. */
+  start: number
+  end: number
+}
+
+export interface ReadableEnglishSpan {
+  text: string
+  kind?: 'code'
+  syntaxCategory?: ReadableSyntaxCategory
+  /** Ordered from most specific to least specific; no category is discarded. */
+  semanticCategories?: ReadableSemanticCategory[]
+  sourceRange?: ReadableSourceRange
+}
+
+/** Structured controlled English. `text` is the exact deterministic plain
+ *  rendering of `spans`; consumers that support highlighting render the spans. */
+export interface ReadableEnglishBlock {
+  kind: 'sentence' | 'control-flow'
+  text: string
+  spans: ReadableEnglishSpan[]
+  semanticCategories?: ReadableSemanticCategory[]
+  sourceRange?: ReadableSourceRange
+}
+
 export interface ReadableSource {
   file: string
   startLine: number
@@ -12,9 +73,36 @@ export interface ReadableSource {
   snippet: string
 }
 
+export type ReadableStoryRole = 'setup' | 'action' | 'check'
+
+export interface ReadableStorySpan {
+  text: string
+  kind?: 'variable'
+}
+
+/** One plain-language fact in the default test story. Unlike the exhaustive
+ * syntax tree below, story items never contain source-code fallbacks. */
+export interface ReadableStoryItem {
+  id: string
+  role: ReadableStoryRole
+  text: string
+  spans: ReadableStorySpan[]
+  fidelity: 'exact' | 'derived'
+  source: ReadableSource
+}
+
+/** The reader-first altitude in authored execution order. Each row carries its
+ * setup/action/check role instead of being moved into a role-based bucket. */
+export interface ReadableTestStory {
+  steps: ReadableStoryItem[]
+}
+
 interface ReadableNodeBase {
   id: string
+  /** Exhaustive syntax-level wording retained for version-2 clients. */
   text: string
+  /** Natural, structured wording used by current clients when present. */
+  english?: ReadableEnglishBlock
   fidelity: ReadableFidelity
   source: ReadableSource
 }
@@ -31,10 +119,13 @@ export interface ReadableGroupNode extends ReadableNodeBase {
   // shows only the call as a single line, while the evaluation flowchart
   // keeps descending into the children.
   origin?: 'helper'
+  /** Catch/finally headers align with their owning Try header in English. */
+  controlRole?: 'catch' | 'finally'
   children: ReadableNode[]
 }
 
 export interface ReadableBranchPath extends ReadableNodeBase {
+  role?: 'then' | 'otherwise' | 'case' | 'default'
   children: ReadableNode[]
 }
 
@@ -59,5 +150,7 @@ export interface ReadableTest {
   version: typeof READABLE_TEST_VERSION
   title: string
   completeness: ReadableCompleteness
+  /** Optional so version-2 payloads cached by an older server still render. */
+  story?: ReadableTestStory
   nodes: ReadableNode[]
 }

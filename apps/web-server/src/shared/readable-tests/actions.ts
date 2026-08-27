@@ -1,6 +1,6 @@
 import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../../shared/code-display-format'
-import type { ReadableFidelity, ReadableLeafRole } from '../../../../../shared/readable-tests/types'
+import type { ReadableFidelity } from '../../../../../shared/readable-tests/types'
 import { expressionPath, renderExpression, type RenderedExpression } from './expression'
 import { renderLocator } from './locator'
 import { humanizeIdentifier, sentenceCase } from './language'
@@ -8,7 +8,7 @@ import { humanizeIdentifier, sentenceCase } from './language'
 export interface RenderedAction {
   text: string
   fidelity: ReadableFidelity
-  role: ReadableLeafRole
+  role: 'setup' | 'action' | 'unknown'
 }
 
 interface CallContext {

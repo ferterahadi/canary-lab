@@ -9,7 +9,7 @@ import type {
 } from '@/shared/api/types'
 import { deriveDisplayStatus } from '../utils/run-actions'
 import { isActiveRunStatus } from '@shared/run-state'
-import { defaultWsBase } from '@/shared/api/reconnecting-socket'
+import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
 import {
   errorMessage,
   frameToAction,
@@ -63,8 +63,8 @@ const RunsContext = createContext<RunsContextValue | null>(null)
 
 // ─── Provider ────────────────────────────────────────────────────────────
 
-const RECONNECT_INITIAL_MS = 500
-const RECONNECT_MAX_MS = 10_000
+const RECONNECT_DELAY_MS = 500
+const DISCONNECTED_AFTER_ATTEMPTS = 20
 
 export interface RunsProviderProps {
   children: ReactNode
@@ -87,70 +87,36 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
   // ── WebSocket lifecycle ───────────────────────────────────────────
   useEffect(() => {
     const url = wsUrl ?? defaultWsUrl()
-    const Ctor = WebSocketImpl ?? WebSocket
-    let socket: WebSocket | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-    let backoff = RECONNECT_INITIAL_MS
-    let cancelled = false
-
-    // Never runs after teardown, so it needs no `cancelled` guard of its own:
-    // its only callers are the initial call below and the reconnect timer, and
-    // cleanup clears that timer before its callback can fire.
-    const connect = (): void => {
-      try {
-        socket = new Ctor(url)
-      } catch {
-        scheduleReconnect()
-        return
-      }
-      socket.onopen = () => {
-        backoff = RECONNECT_INITIAL_MS
+    const connection = connectReconnectingSocket({
+      url,
+      WebSocketImpl,
+      maxReconnects: Infinity,
+      // The global Live badge must recover promptly after the local server is
+      // rebuilt. A fixed delay bounds recovery at 500 ms instead of letting an
+      // already-open tab sleep in an 8–10 second exponential-backoff window.
+      reconnectDelayMs: RECONNECT_DELAY_MS,
+      onOpen: () => {
         dispatchRef.current({ type: 'connection', status: 'live' })
-      }
-      socket.onmessage = (e) => {
+      },
+      onReconnect: (attempt) => {
+        dispatchRef.current({
+          type: 'connection',
+          status: attempt >= DISCONNECTED_AFTER_ATTEMPTS ? 'disconnected' : 'reconnecting',
+        })
+      },
+      onMessage: (data) => {
         let frame: RunsStreamFrame
         try {
-          frame = JSON.parse(typeof e.data === 'string' ? e.data : String(e.data))
+          frame = JSON.parse(data)
         } catch {
           return
         }
         const action = frameToAction(frame)
         if (action) dispatchRef.current(action)
-      }
-      socket.onerror = () => {
-        // `onclose` will fire next; let the reconnect path live there to
-        // avoid double-scheduling.
-      }
-      socket.onclose = () => {
-        if (cancelled) return
-        dispatchRef.current({ type: 'connection', status: 'reconnecting' })
-        scheduleReconnect()
-      }
-    }
+      },
+    })
 
-    // Same reasoning: both callers have already ruled out teardown — the
-    // constructor's catch runs inside `connect`, and `onclose` checks
-    // `cancelled` before it gets here.
-    const scheduleReconnect = (): void => {
-      reconnectTimer = setTimeout(() => {
-        // After multiple rounds of growing backoff, surface the
-        // disconnect to the user. They can still click around the
-        // cached state; HTTP fallback covers actions.
-        if (backoff >= RECONNECT_MAX_MS) {
-          dispatchRef.current({ type: 'connection', status: 'disconnected' })
-        }
-        backoff = Math.min(backoff * 2, RECONNECT_MAX_MS)
-        connect()
-      }, backoff)
-    }
-
-    connect()
-
-    return () => {
-      cancelled = true
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      try { socket?.close() } catch { /* already closed */ }
-    }
+    return () => connection.close()
   }, [wsUrl, WebSocketImpl])
 
   // ── HTTP fallback ─────────────────────────────────────────────────

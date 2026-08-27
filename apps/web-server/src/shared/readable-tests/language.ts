@@ -40,6 +40,7 @@ export function displayWord(word: string): string {
   if (word === 'id') return 'identifier'
   if (word === 'res') return 'response'
   if (word === 'req') return 'request'
+  if (word === 'conn') return 'connection'
   if (word === 'env') return 'environment'
   if (word === 'msg') return 'message'
   return word

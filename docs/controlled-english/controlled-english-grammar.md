@@ -5,26 +5,43 @@ recursive English grammar that TypeScript source is compiled into. The compiler
 lives in `apps/web-server/src/shared/controlled-english/`; the per-construct wording is
 catalogued in [typescript-ast-vocabulary.md](typescript-ast-vocabulary.md).
 
-Design rule (spec final rule): **precision over natural English**. When a
-smoother sentence and an unambiguous one disagree, the unambiguous one wins.
+Design rule: **precision first, then the largest natural composition that keeps
+the same structure**. A common statement reads as one sentence; any construct
+that cannot be composed safely keeps the exhaustive syntax wording.
 
 ## Readable-test integration
 
-`ast-extractor.ts` parses a Playwright spec once and passes each test callback's
-AST to `readable-tests/translator.ts`. That adapter preserves the UI's source
-ranges, authored `test.step(...)` labels, helper groups, branches and loop
-hierarchy. Every derived description comes from this controlled-English engine;
-it never uses a second Playwright-specific wording path or displays the source
-snippet as if it were English.
+`ast-extractor.ts` compiles a Playwright spec once and passes each test callback's
+AST, TypeChecker and Symbols to `readable-tests/translator.ts`. That adapter
+preserves source ranges, authored `test.step(...)` labels, helper groups,
+branches and loop hierarchy. Every derived description comes from this
+controlled-English engine; it never displays a source snippet as if it were
+English.
 
 An unsupported syntax kind is a visible `UNSUPPORTED_SYNTAX_KIND: <kind>` row
 and makes the readable tree partial. The UI does not substitute raw source code
 for that row. Authored `test.step(...)` labels remain exact because they are
 literal source data, not inferred descriptions.
 
-## The document model
+## The two intermediate representations
 
-A translation is a tree of three node forms
+`canonical-ir.ts` first represents identifiers, literals, member/element
+accesses, calls, awaits, operators, arrow functions, declarations, returns and
+throws without wording. The semantic registry classifies that structure using
+compiler evidence. `structured-english.ts` then emits a natural block made of
+source-linked spans.
+
+Examples of complete compositions:
+
+```text
+Await `api.getUser(id)` and store the result in constant `user`.
+Check that `user.status` equals `"active"`.
+Set `state` to `nextState`.
+```
+
+The older exhaustive representation remains the total fallback.
+
+A fallback translation is a tree of three node forms
 (`apps/web-server/src/shared/controlled-english/ir.ts`):
 
 | Form | What it is | Example |
@@ -83,12 +100,12 @@ a `group of:` block otherwise. That keeps `(a + b) * c` and `a + b * c`
 visually distinct — Phase 8 requires that two different structures never read
 identically.
 
-## Names are names
+## Code-shaped expressions stay code-shaped
 
-Identifiers render as the bare name in backticks — `` `getUserData` ``, never
-"get the user data". Literals keep their type word: `string "on"`,
-`number 42`, `bigint 10n`, `regular expression /a+/g`. The translator states
-syntax facts; it never interprets what a name means.
+Recognizable expressions remain exact and backticked: `getUserData`,
+`user.profile.name`, `items[0]`, and `Promise<User>`. The natural layer does not
+turn them into guessed domain prose. The exhaustive fallback keeps its explicit
+literal type words (`string "on"`, `number 42`, `bigint 10n`).
 
 ## Comments
 
@@ -105,7 +122,8 @@ A file with no statements (or nothing at all) renders as `no statements`.
 
 Identical source text + identical TypeScript version (pinned:
 `CONTROLLED_ENGLISH_TYPESCRIPT_VERSION` in
-`apps/web-server/src/shared/controlled-english/compiler-context.ts`) always produces
-byte-identical English. There is no randomness, no heuristics, no fallback
-prose: a construct the vocabulary does not cover throws
+`apps/web-server/src/shared/controlled-english/compiler-context.ts`) + identical
+compiler options + semantic rules always produces byte-identical English and
+metadata. There is no randomness, model call, or fuzzy matching. A construct
+the exhaustive vocabulary does not cover throws
 `UNSUPPORTED_SYNTAX_KIND: <kind>` instead of rendering something approximate.

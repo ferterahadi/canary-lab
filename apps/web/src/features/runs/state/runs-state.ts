@@ -19,7 +19,7 @@ export type RunsStreamFrame =
 export type ConnectionState =
   | 'connecting'      // initial, before the first WS open
   | 'live'            // WS open, push frames flowing
-  | 'reconnecting'    // WS dropped after being live; backoff in progress
+  | 'reconnecting'    // WS dropped after being live; fixed-delay recovery is in progress
   | 'disconnected'    // gave up — surfaced to the user as a banner
 
 export interface RunsState {

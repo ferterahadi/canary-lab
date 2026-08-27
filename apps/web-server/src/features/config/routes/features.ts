@@ -153,7 +153,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       const abs = path.join(realDir, rel)
       let currentSource = ''
       try { currentSource = fs.readFileSync(abs, 'utf8') } catch { /* unreadable — no tests to diff */ }
-      const { tests: currentTests } = extractTestsFromSource(rel, currentSource)
+      const { tests: currentTests } = extractTestsFromSource(rel, currentSource, feature.semanticRules)
 
       const repoRel = path.relative(root, abs)
       const head = await runGit(root, ['show', `HEAD:${repoRel}`])
@@ -162,7 +162,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       // clean, not "everything changed"). A test missing from an otherwise
       // tracked file is a different case, handled per-test below.
       if (head.code !== 0) return { tests: [] }
-      const { tests: headTests } = extractTestsFromSource(rel, head.stdout)
+      const { tests: headTests } = extractTestsFromSource(rel, head.stdout, feature.semanticRules)
 
       const results = await Promise.all(currentTests.map(async (t) => {
         const headBody = headTests.find((h) => h.name === t.name)?.bodySource
@@ -213,7 +213,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     for (const file of specFiles) {
       let source = ''
       try { source = fs.readFileSync(file, 'utf-8') } catch { /* unreadable */ }
-      astByFile.set(file, extractTestsFromSource(file, source))
+      astByFile.set(file, extractTestsFromSource(file, source, feature.semanticRules))
     }
 
     // 2. Ask Playwright to enumerate the resolved test list (loops expanded,
@@ -256,7 +256,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       if (astByFile.has(entry.originFile) || originAstByFile.has(entry.originFile)) continue
       let source = ''
       try { source = fs.readFileSync(entry.originFile, 'utf-8') } catch { /* unreadable */ }
-      originAstByFile.set(entry.originFile, extractTestsFromSource(entry.originFile, source))
+      originAstByFile.set(entry.originFile, extractTestsFromSource(entry.originFile, source, feature.semanticRules))
     }
 
     function lookupAstByLine(file: string, line: number): ExtractedTest | undefined {

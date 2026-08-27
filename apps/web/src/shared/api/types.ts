@@ -68,6 +68,8 @@ export type {
   ReadableBranchNode,
   ReadableBranchPath,
   ReadableCompleteness,
+  ReadableEnglishBlock,
+  ReadableEnglishSpan,
   ReadableFidelity,
   ReadableGroupNode,
   ReadableLeafNode,
@@ -75,8 +77,16 @@ export type {
   ReadableLoopKind,
   ReadableLoopNode,
   ReadableNode,
+  ReadableSemanticCategory,
+  ReadableSemanticRuleConfig,
   ReadableSource,
+  ReadableSourceRange,
+  ReadableStoryItem,
+  ReadableStoryRole,
+  ReadableStorySpan,
+  ReadableSyntaxCategory,
   ReadableTest,
+  ReadableTestStory,
 } from '@shared/readable-tests/types'
 
 export interface FeatureRepo {

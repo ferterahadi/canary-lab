@@ -214,6 +214,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     // dirty flag (tests-dirty-changed above only tells you *that* it changed).
     onSpecFileChanged: (feature) => workspaceEvents.publish({ type: 'tests-changed', feature }),
   })
+  app.addHook('onListen', () => {
+    dirtySpecWatcher.startInitialScan().catch((err) => {
+      app.log.warn({ err }, 'initial dirty-spec scan failed')
+    })
+  })
   app.addHook('onClose', async () => {
     dirtySpecWatcher.close()
   })

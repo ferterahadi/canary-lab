@@ -17,6 +17,9 @@ export interface ReconnectingSocketOptions {
   // Raw string payloads only — non-string frames are dropped before this fires.
   onMessage: (data: string) => void
   onOpen?: () => void
+  // Fires when an unexpected close (or constructor failure) schedules another
+  // connection. `attempt` resets after a successful open.
+  onReconnect?: (attempt: number) => void
   // Low-level transport error (ws.onerror). Frame-level errors stay the caller's.
   onError?: (message: string) => void
   // Reconnect attempts after an unexpected close. Default 1 (per-task streams).
@@ -53,27 +56,42 @@ export function connectReconnectingSocket(opts: ReconnectingSocketOptions): Reco
   let closed = false
   let done = false
   let reconnectsLeft = maxReconnects
+  let consecutiveReconnects = 0
   let socket: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
+  const reconnect = (): void => {
+    socket = null
+    if (closed || done || reconnectsLeft <= 0) return
+    reconnectsLeft -= 1
+    consecutiveReconnects += 1
+    opts.onReconnect?.(consecutiveReconnects)
+    if (reconnectDelayMs > 0) {
+      reconnectTimer = setTimeout(() => { reconnectTimer = null; open() }, reconnectDelayMs)
+    } else {
+      open()
+    }
+  }
+
   const open = (): void => {
-    const ws = new WSImpl(opts.url)
+    let ws: WebSocket
+    try {
+      ws = new WSImpl(opts.url)
+    } catch {
+      opts.onError?.('socket error')
+      reconnect()
+      return
+    }
     socket = ws
     ws.onmessage = (ev: MessageEvent): void => {
       if (typeof ev.data === 'string') opts.onMessage(ev.data)
     }
-    ws.onopen = (): void => { opts.onOpen?.() }
+    ws.onopen = (): void => {
+      consecutiveReconnects = 0
+      opts.onOpen?.()
+    }
     ws.onclose = (): void => {
-      socket = null
-      if (closed || done) return
-      if (reconnectsLeft > 0) {
-        reconnectsLeft -= 1
-        if (reconnectDelayMs > 0) {
-          reconnectTimer = setTimeout(() => { reconnectTimer = null; open() }, reconnectDelayMs)
-        } else {
-          open()
-        }
-      }
+      reconnect()
     }
     ws.onerror = (): void => { opts.onError?.('socket error') }
   }

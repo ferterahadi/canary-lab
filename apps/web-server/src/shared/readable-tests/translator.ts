@@ -4,11 +4,14 @@ import { formatSourceSnippetForDisplay } from '../../../../../shared/code-displa
 import {
   READABLE_TEST_VERSION,
   type ReadableBranchPath,
+  type ReadableEnglishBlock,
   type ReadableLeafNode,
   type ReadableLoopKind,
   type ReadableNode,
+  type ReadableSemanticRuleConfig,
   type ReadableSource,
   type ReadableTest,
+  type ReadableTestStory,
 } from '../../../../../shared/readable-tests/types'
 import {
   UnsupportedSyntaxKindError,
@@ -19,8 +22,20 @@ import {
   statementHeaderEnglish,
   switchPathHeaderEnglish,
 } from '../controlled-english/ast-to-ir'
-import { parseSource } from '../controlled-english/compiler-context'
 import { renderEnglish } from '../controlled-english/english-renderer'
+import { compileSemanticSource, type SemanticContext } from '../controlled-english/semantic-context'
+import {
+  composeCatchHeader,
+  composeFinallyHeader,
+  composeIfHeader,
+  composeIfPath,
+  composeLoopHeader,
+  composeStatementEnglish,
+  composeSwitchHeader,
+  composeSwitchPath,
+  composeTryHeader,
+} from '../controlled-english/structured-english'
+import { storyCandidates } from './story'
 
 export interface ReadableHelperInput {
   name: string
@@ -37,6 +52,8 @@ export interface ReadableTestInput {
   // Line containing the callback body's opening brace in the original file.
   startLine?: number
   helpers?: ReadableHelperInput[]
+  semanticRules?: ReadableSemanticRuleConfig
+  compilerOptions?: ts.CompilerOptions
 }
 
 export interface ReadableTestAstInput {
@@ -45,14 +62,27 @@ export interface ReadableTestAstInput {
   sourceFile: ts.SourceFile
   body: ts.Block
   helpers?: ReadableHelperInput[]
+  semanticContext?: SemanticContext
+  semanticRules?: ReadableSemanticRuleConfig
+  compilerOptions?: ts.CompilerOptions
 }
 
 interface TranslationContext {
   file: string
   lineOffset: number
   sourceFile: ts.SourceFile
-  helpers: Map<string, ReadableHelperInput>
+  semanticContext: SemanticContext
+  compilerOptions?: ts.CompilerOptions
+  helpers: Map<string, ParsedHelper>
   activeHelpers: Set<string>
+}
+
+interface ParsedHelper {
+  input: ReadableHelperInput
+  body: ts.Block
+  sourceFile: ts.SourceFile
+  semanticContext: SemanticContext
+  lineOffset: number
 }
 
 function sourceFor(node: ts.Node, sourceFile: ts.SourceFile, file: string, lineOffset: number): ReadableSource {
@@ -141,17 +171,78 @@ function namedHelperCall(statement: ts.Statement): string | undefined {
   return call && ts.isIdentifier(call.expression) ? call.expression.text : undefined
 }
 
-function parseBody(input: ReadableTestInput): { body: ts.Block; sourceFile: ts.SourceFile; lineOffset: number } {
+function parseBody(input: ReadableTestInput): {
+  body: ts.Block
+  sourceFile: ts.SourceFile
+  semanticContext: SemanticContext
+  lineOffset: number
+} {
   const trimmedBody = input.bodySource.trim()
   const bodySource = trimmedBody.startsWith('{') ? input.bodySource : `{ ${input.bodySource} }`
   const wrapped = `async function __canaryReadableBody() ${bodySource}`
-  const { sourceFile } = parseSource(input.file, wrapped)
+  const semanticContext = compileSemanticSource(input.file, wrapped, {
+    semanticRules: input.semanticRules,
+    compilerOptions: input.compilerOptions,
+    absoluteSourceRanges: false,
+  })
+  const { sourceFile } = semanticContext
   return {
     sourceFile,
+    semanticContext,
     // The source string above always declares this function with a block body.
     body: (sourceFile.statements[0] as ts.FunctionDeclaration).body as ts.Block,
     lineOffset: input.startLine ?? 1,
   }
+}
+
+/** Compile all helpers from one authored file together. Besides preserving
+ *  cross-helper Symbols, this avoids rebuilding a TypeScript Program for every
+ *  expanded call in a large test. */
+function parseHelpers(
+  helpers: readonly ReadableHelperInput[],
+  semanticRules: ReadableSemanticRuleConfig | undefined,
+  compilerOptions: ts.CompilerOptions | undefined,
+): Map<string, ParsedHelper> {
+  const groups = new Map<string, Array<{ helper: ReadableHelperInput; index: number }>>()
+  helpers.forEach((helper, index) => {
+    const group = groups.get(helper.file) ?? []
+    group.push({ helper, index })
+    groups.set(helper.file, group)
+  })
+
+  const parsedByIndex: ParsedHelper[] = []
+  for (const [file, group] of groups) {
+    const wrapped = group.map(({ helper, index }) => {
+      const trimmedBody = helper.bodySource.trim()
+      const bodySource = trimmedBody.startsWith('{') ? helper.bodySource : `{ ${helper.bodySource} }`
+      return `async function __canaryReadableHelper_${index}() ${bodySource}`
+    }).join('\n')
+    const semanticContext = compileSemanticSource(file, wrapped, {
+      semanticRules,
+      compilerOptions,
+      absoluteSourceRanges: false,
+    })
+    const { sourceFile } = semanticContext
+
+    group.forEach(({ helper, index }, groupIndex) => {
+      // The source string above always declares these functions with block bodies.
+      const body = (sourceFile.statements[groupIndex] as ts.FunctionDeclaration).body as ts.Block
+      const syntheticOpeningLine = sourceFile.getLineAndCharacterOfPosition(body.getStart(sourceFile)).line
+      parsedByIndex[index] = {
+        input: helper,
+        body,
+        sourceFile,
+        semanticContext,
+        lineOffset: (helper.startLine ?? 1) - syntheticOpeningLine,
+      }
+    })
+  }
+
+  const parsed = new Map<string, ParsedHelper>()
+  helpers.forEach((helper, index) => {
+    parsed.set(helper.name, parsedByIndex[index])
+  })
+  return parsed
 }
 
 function nestedStatements(statement: ts.Statement): readonly ts.Statement[] {
@@ -160,6 +251,8 @@ function nestedStatements(statement: ts.Statement): readonly ts.Statement[] {
 
 function branchPath(
   text: string,
+  english: ReadableEnglishBlock,
+  role: NonNullable<ReadableBranchPath['role']>,
   node: ts.Node,
   statements: readonly ts.Statement[],
   path: number[],
@@ -169,6 +262,8 @@ function branchPath(
   return {
     id: stableNodeId(source, path),
     text,
+    english,
+    role,
     fidelity: 'derived',
     source,
     children: statements.map((statement, index) => translateStatement(statement, [...path, index], context)),
@@ -192,6 +287,7 @@ function translateLoopStatement(
     kind: 'loop',
     loopKind,
     text: renderEnglish(statementHeaderEnglish(statement)),
+    english: composeLoopHeader(statement, context.semanticContext),
     fidelity: 'derived',
     source,
     children: nestedStatements(statement.statement).map(
@@ -209,6 +305,8 @@ function translateIfStatement(
   const paths: ReadableBranchPath[] = [
     branchPath(
       renderEnglish(ifPathHeaderEnglish(statement, 'then')),
+      composeIfPath('then', statement.thenStatement, context.semanticContext),
+      'then',
       statement.thenStatement,
       nestedStatements(statement.thenStatement),
       [...path, 0],
@@ -218,6 +316,8 @@ function translateIfStatement(
   if (statement.elseStatement) {
     paths.push(branchPath(
       renderEnglish(ifPathHeaderEnglish(statement, 'otherwise')),
+      composeIfPath('otherwise', statement.elseStatement, context.semanticContext),
+      'otherwise',
       statement.elseStatement,
       nestedStatements(statement.elseStatement),
       [...path, 1],
@@ -228,6 +328,7 @@ function translateIfStatement(
     id: stableNodeId(source, path),
     kind: 'branch',
     text: renderEnglish(statementHeaderEnglish(statement)),
+    english: composeIfHeader(statement, context.semanticContext),
     fidelity: 'derived',
     source,
     paths,
@@ -242,6 +343,8 @@ function translateSwitchStatement(
   const source = sourceFor(statement, context.sourceFile, context.file, context.lineOffset)
   const paths = statement.caseBlock.clauses.map((caseClause, index) => branchPath(
     renderEnglish(switchPathHeaderEnglish(statement, index)),
+    composeSwitchPath(caseClause, context.semanticContext),
+    ts.isDefaultClause(caseClause) ? 'default' : 'case',
     caseClause,
     caseClause.statements,
     [...path, index],
@@ -251,6 +354,7 @@ function translateSwitchStatement(
     id: stableNodeId(source, path),
     kind: 'branch',
     text: renderEnglish(statementHeaderEnglish(statement)),
+    english: composeSwitchHeader(statement, context.semanticContext),
     fidelity: 'derived',
     source,
     paths,
@@ -259,6 +363,8 @@ function translateSwitchStatement(
 
 function translatedGroup(
   text: string,
+  english: ReadableEnglishBlock | undefined,
+  controlRole: 'catch' | 'finally' | undefined,
   node: ts.Node,
   statements: readonly ts.Statement[],
   path: number[],
@@ -269,6 +375,8 @@ function translatedGroup(
     id: stableNodeId(source, path),
     kind: 'group',
     text,
+    ...(english ? { english } : {}),
+    ...(controlRole ? { controlRole } : {}),
     fidelity: 'derived',
     source,
     children: statements.map((statement, index) => translateStatement(statement, [...path, index], context)),
@@ -288,6 +396,8 @@ function translateTryStatement(
   if (statement.catchClause) {
     children.push(translatedGroup(
       renderEnglish(catchHeaderEnglish(statement)),
+      composeCatchHeader(statement.catchClause, context.semanticContext),
+      'catch',
       statement.catchClause,
       statement.catchClause.block.statements,
       [...path, nextIndex],
@@ -298,6 +408,8 @@ function translateTryStatement(
   if (statement.finallyBlock) {
     children.push(translatedGroup(
       renderEnglish(finallyHeaderEnglish(statement)),
+      composeFinallyHeader(statement.finallyBlock, context.semanticContext),
+      'finally',
       statement.finallyBlock,
       statement.finallyBlock.statements,
       [...path, nextIndex],
@@ -308,6 +420,7 @@ function translateTryStatement(
     id: stableNodeId(source, path),
     kind: 'group',
     text: renderEnglish(statementHeaderEnglish(statement)),
+    english: composeTryHeader(statement, context.semanticContext),
     fidelity: 'derived',
     source,
     children,
@@ -329,12 +442,19 @@ function unsupportedLeaf(
   }
 }
 
-function controlledLeaf(statement: ts.Statement, source: ReadableSource, path: number[]): ReadableLeafNode {
+function controlledLeaf(
+  statement: ts.Statement,
+  source: ReadableSource,
+  path: number[],
+  context: TranslationContext,
+): ReadableLeafNode {
+  const english = composeStatementEnglish(statement, context.semanticContext)
   return {
     id: stableNodeId(source, path),
     kind: 'leaf',
     role: 'syntax',
     text: renderEnglish(statementEnglish(statement)),
+    ...(english ? { english } : {}),
     fidelity: 'derived',
     source,
   }
@@ -352,6 +472,8 @@ function translateSupportedStatement(
   if (ts.isBlock(statement)) {
     return translatedGroup(
       renderEnglish(statementHeaderEnglish(statement)),
+      undefined,
+      undefined,
       statement,
       statement.statements,
       path,
@@ -383,41 +505,38 @@ function translateSupportedStatement(
   }
 
   const helperName = namedHelperCall(statement)
-  if (helperName) {
+  const helper = helperName ? context.helpers.get(helperName) : undefined
+  if (helperName && helper && !context.activeHelpers.has(helperName)) {
     const text = renderEnglish(statementEnglish(statement))
-    const helper = context.helpers.get(helperName)
-    if (helper && !context.activeHelpers.has(helperName)) {
-      const helperInput: ReadableTestInput = {
-        file: helper.file,
-        title: helper.name,
-        bodySource: helper.bodySource,
-        startLine: helper.startLine,
-      }
-      const parsed = parseBody(helperInput)
-      const activeHelpers = new Set(context.activeHelpers)
-      activeHelpers.add(helperName)
-      const helperContext: TranslationContext = {
-        file: helperInput.file,
-        lineOffset: parsed.lineOffset,
-        sourceFile: parsed.sourceFile,
-        helpers: context.helpers,
-        activeHelpers,
-      }
-      return {
-        id: stableNodeId(source, path),
-        kind: 'group',
-        origin: 'helper',
-        text,
-        fidelity: 'derived',
-        source,
-        children: parsed.body.statements.map(
-          (child, index) => translateStatement(child, [...path, index], helperContext),
-        ),
-      }
+    // `namedHelperCall` only accepts statement shapes covered by the structured
+    // composer (expression, return, or single declaration).
+    const english = composeStatementEnglish(statement, context.semanticContext) as ReadableEnglishBlock
+    const activeHelpers = new Set(context.activeHelpers)
+    activeHelpers.add(helperName)
+    const helperContext: TranslationContext = {
+      file: helper.input.file,
+      lineOffset: helper.lineOffset,
+      sourceFile: helper.sourceFile,
+      semanticContext: helper.semanticContext,
+      compilerOptions: context.compilerOptions,
+      helpers: context.helpers,
+      activeHelpers,
+    }
+    return {
+      id: stableNodeId(source, path),
+      kind: 'group',
+      origin: 'helper',
+      text,
+      english,
+      fidelity: 'derived',
+      source,
+      children: helper.body.statements.map(
+        (child, index) => translateStatement(child, [...path, index], helperContext),
+      ),
     }
   }
 
-  return controlledLeaf(statement, source, path)
+  return controlledLeaf(statement, source, path, context)
 }
 
 function translateStatement(
@@ -434,40 +553,100 @@ function translateStatement(
   }
 }
 
-function translatedTest(title: string, nodes: ReadableNode[]): ReadableTest {
+function translateStory(
+  statements: readonly ts.Statement[],
+  context: TranslationContext,
+): ReadableTestStory | undefined {
+  const story: ReadableTestStory = { steps: [] }
+  for (const candidate of storyCandidates(statements, context.sourceFile)) {
+    const source = sourceFor(candidate.node, context.sourceFile, context.file, context.lineOffset)
+    story.steps.push({
+      id: stableNodeId(source, [-1, ...candidate.path]),
+      role: candidate.role,
+      text: candidate.text,
+      spans: candidate.spans,
+      fidelity: candidate.fidelity,
+      source,
+    })
+  }
+  return story.steps.length ? story : undefined
+}
+
+function translatedTest(
+  title: string,
+  nodes: ReadableNode[],
+  story: ReadableTestStory | undefined,
+): ReadableTest {
   return {
     version: READABLE_TEST_VERSION,
     title,
     completeness: nodes.some(containsIncomplete) ? 'partial' : 'complete',
+    ...(story ? { story } : {}),
     nodes,
   }
 }
 
 export function translateReadableTest(input: ReadableTestInput): ReadableTest {
-  const { body, sourceFile, lineOffset } = parseBody(input)
+  const { body, sourceFile, semanticContext, lineOffset } = parseBody(input)
   const context: TranslationContext = {
     file: input.file,
     lineOffset,
     sourceFile,
-    helpers: new Map((input.helpers ?? []).map((helper) => [helper.name, helper])),
+    semanticContext,
+    compilerOptions: input.compilerOptions,
+    helpers: parseHelpers(input.helpers ?? [], semanticContext.config, input.compilerOptions),
     activeHelpers: new Set(),
   }
   const nodes = body.statements.map((statement, index) => translateStatement(statement, [index], context))
-  return translatedTest(input.title, nodes)
+  return translatedTest(input.title, nodes, translateStory(body.statements, context))
 }
 
 /** Uses an already-parsed test callback so AST extraction and readable
  * translation share the same source tree and exact positions. */
 export function translateReadableTestFromAst(input: ReadableTestAstInput): ReadableTest {
+  const semanticContext = input.semanticContext ?? compileSemanticSource(
+    input.file,
+    input.sourceFile.getFullText(),
+    {
+      semanticRules: input.semanticRules,
+      compilerOptions: input.compilerOptions,
+      absoluteSourceRanges: true,
+    },
+  )
+  const bodyHasSourceRange = typeof input.body.pos === 'number' && typeof input.body.end === 'number'
+  const sourceFile = input.semanticContext || !bodyHasSourceRange
+    ? input.sourceFile
+    : semanticContext.sourceFile
+  const body = input.semanticContext || !bodyHasSourceRange
+    ? input.body
+    : findMatchingBlock(sourceFile, input.body)
   const context: TranslationContext = {
     file: input.file,
     // The supplied source file already carries absolute positions. Convert its
     // zero-based line indexes directly to one-based source lines.
     lineOffset: 1,
-    sourceFile: input.sourceFile,
-    helpers: new Map((input.helpers ?? []).map((helper) => [helper.name, helper])),
+    sourceFile,
+    semanticContext,
+    compilerOptions: input.compilerOptions,
+    helpers: parseHelpers(input.helpers ?? [], semanticContext.config, input.compilerOptions),
     activeHelpers: new Set(),
   }
-  const nodes = input.body.statements.map((statement, index) => translateStatement(statement, [index], context))
-  return translatedTest(input.title, nodes)
+  const nodes = body.statements.map((statement, index) => translateStatement(statement, [index], context))
+  return translatedTest(input.title, nodes, translateStory(body.statements, context))
+}
+
+function findMatchingBlock(sourceFile: ts.SourceFile, target: ts.Block): ts.Block {
+  let match: ts.Block | undefined
+  const visit = (node: ts.Node): void => {
+    if (match) return
+    if (ts.isBlock(node) && node.pos === target.pos && node.end === target.end) {
+      match = node
+      return
+    }
+    node.forEachChild(visit)
+  }
+  visit(sourceFile)
+  // Both source files are parsed from the same text, so the target block's
+  // positional twin necessarily exists in the checker-owned tree.
+  return match as ts.Block
 }

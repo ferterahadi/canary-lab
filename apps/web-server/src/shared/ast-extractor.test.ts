@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
 
-import { extractTestsFromSource, parseTestAnnotations, parseTestTagList } from './ast-extractor'
+import {
+  extractTestMetadataFromSource,
+  extractTestsFromSource,
+  parseTestAnnotations,
+  parseTestTagList,
+} from './ast-extractor'
 
 describe('extractTestsFromSource', () => {
   it('returns empty array when no tests are present', () => {
@@ -333,6 +338,50 @@ describe('extractTestsFromSource', () => {
     const r = extractTestsFromSource('bad.ts', undefined as unknown as string)
     expect(r.parseError).toBeTruthy()
     expect(r.tests).toEqual([])
+  })
+})
+
+describe('extractTestMetadataFromSource', () => {
+  it('returns only syntax-derived identity and body data for integrity checks', () => {
+    const source = [
+      "test('first', async () => { expect(1).toBe(1) })",
+      "test.skip('second', async () => { expect(2).toBe(2) })",
+    ].join('\n')
+
+    const result = extractTestMetadataFromSource('/workspace/e2e/example.spec.ts', source)
+
+    expect(result).toEqual({
+      file: '/workspace/e2e/example.spec.ts',
+      tests: [
+        {
+          name: 'first',
+          line: 1,
+          bodyLine: 1,
+          bodySource: '{ expect(1).toBe(1) }',
+        },
+        {
+          name: 'second',
+          line: 2,
+          bodyLine: 2,
+          bodySource: '{ expect(2).toBe(2) }',
+        },
+      ],
+    })
+    expect(result.tests.every((test) => !('readable' in test))).toBe(true)
+  })
+
+  it('keeps the extractor failure-safe without invoking the presentation path', () => {
+    const result = extractTestMetadataFromSource('bad.ts', undefined as unknown as string)
+    expect(result.tests).toEqual([])
+    expect(result.parseError).toBeTruthy()
+  })
+
+  it('stringifies a primitive syntax-parser failure', () => {
+    const hostile = { get length(): number { throw 'metadata parse failure' } }
+    const result = extractTestMetadataFromSource('bad.ts', hostile as unknown as string)
+
+    expect(result.tests).toEqual([])
+    expect(result.parseError).toBe('metadata parse failure')
   })
 })
 

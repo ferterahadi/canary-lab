@@ -32,6 +32,49 @@ const TEST: ExtractedTest = {
     version: 2,
     title: 'completes checkout',
     completeness: 'partial',
+    story: {
+      steps: [
+        {
+          id: 'checkout-step',
+          role: 'setup',
+          text: 'Prepare checkout',
+          spans: [{ text: 'Prepare checkout' }],
+          fidelity: 'derived',
+          source: {
+            file: '/repo/e2e/checkout.spec.ts',
+            startLine: 10,
+            endLine: 12,
+            snippet: "{\n  await page.goto('/checkout')\n}",
+          },
+        },
+        {
+          id: 'open-checkout',
+          role: 'action',
+          text: 'Open “/checkout”',
+          spans: [{ text: 'Open “/checkout”' }],
+          fidelity: 'derived',
+          source: {
+            file: '/repo/e2e/checkout.spec.ts',
+            startLine: 11,
+            endLine: 11,
+            snippet: "await page.goto('/checkout')",
+          },
+        },
+        {
+          id: 'helper-check',
+          role: 'check',
+          text: 'Check that account is active',
+          spans: [{ text: 'Check that ' }, { text: 'account', kind: 'variable' }, { text: ' is active' }],
+          fidelity: 'derived',
+          source: {
+            file: '/repo/e2e/helpers/account.ts',
+            startLine: 30,
+            endLine: 30,
+            snippet: 'expect(account.active).toBe(true)',
+          },
+        },
+      ],
+    },
     nodes: [
       {
         id: 'checkout-step',
@@ -117,7 +160,7 @@ describe('TestPresentation', () => {
     act(() => root.render(<TestPresentation test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" />))
 
     await act(async () => {
-      ;(container.querySelector('[data-testid="readable-node-helper-check"]') as HTMLButtonElement).click()
+      ;(container.querySelector('[data-testid="readable-story-item-helper-check"]') as HTMLButtonElement).click()
       await Promise.resolve()
     })
 
@@ -132,7 +175,7 @@ describe('TestPresentation', () => {
     act(() => root.render(<TestPresentation test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" />))
 
     await act(async () => {
-      ;(container.querySelector('[data-testid="readable-node-checkout-step"]') as HTMLButtonElement).click()
+      ;(container.querySelector('[data-testid="readable-story-item-checkout-step"]') as HTMLButtonElement).click()
       await Promise.resolve()
     })
 
@@ -146,6 +189,21 @@ describe('TestPresentation', () => {
       ...TEST,
       readable: {
         ...TEST.readable,
+        story: {
+          steps: [{
+            id: 'same-source-helper',
+            role: 'action',
+            text: 'Run matching helper',
+            spans: [{ text: 'Run matching helper' }],
+            fidelity: 'derived',
+            source: {
+              file: '/repo/e2e/helpers/matching.ts',
+              startLine: 30,
+              endLine: 32,
+              snippet: TEST.bodySource,
+            },
+          }],
+        },
         nodes: [{
           id: 'same-source-helper',
           kind: 'leaf',
@@ -172,7 +230,7 @@ describe('TestPresentation', () => {
     ))
 
     await act(async () => {
-      ;(container.querySelector('[data-testid="readable-node-same-source-helper"]') as HTMLButtonElement).click()
+      ;(container.querySelector('[data-testid="readable-story-item-same-source-helper"]') as HTMLButtonElement).click()
       await Promise.resolve()
     })
 

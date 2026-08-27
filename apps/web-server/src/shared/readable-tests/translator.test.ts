@@ -30,12 +30,46 @@ describe('translateReadableTest structure', () => {
       version: READABLE_TEST_VERSION,
       title: 'submits checkout',
       completeness: 'complete',
+      story: {
+        steps: [
+          {
+            id: expect.stringMatching(/^rt_[a-f0-9]{12}$/),
+            role: 'action',
+            text: 'Open “/checkout”',
+            spans: [{ text: 'Open “/checkout”' }],
+            fidelity: 'derived',
+            source: {
+              file: '/workspace/features/checkout/e2e/checkout.spec.ts',
+              startLine: 21,
+              endLine: 21,
+              snippet: "await page.goto('/checkout')",
+            },
+          },
+          {
+            id: expect.stringMatching(/^rt_[a-f0-9]{12}$/),
+            role: 'action',
+            text: 'Run selected action',
+            spans: [{ text: 'Run selected action' }],
+            fidelity: 'derived',
+            source: {
+              file: '/workspace/features/checkout/e2e/checkout.spec.ts',
+              startLine: 22,
+              endLine: 22,
+              snippet: 'await runSelectedAction(page)',
+            },
+          },
+        ],
+      },
       nodes: [
         {
           id: expect.stringMatching(/^rt_[a-f0-9]{12}$/),
           kind: 'leaf',
           role: 'syntax',
           text: 'await:\n    call property `goto` of `page`\n    with argument string "/checkout"',
+          english: expect.objectContaining({
+            text: "Await `page.goto('/checkout')`.",
+            semanticCategories: ['async', 'function-call'],
+          }),
           fidelity: 'derived',
           source: {
             file: '/workspace/features/checkout/e2e/checkout.spec.ts',
@@ -49,6 +83,10 @@ describe('translateReadableTest structure', () => {
           kind: 'leaf',
           role: 'syntax',
           text: 'await:\n    call `runSelectedAction`\n    with argument `page`',
+          english: expect.objectContaining({
+            text: 'Await `runSelectedAction(page)`.',
+            semanticCategories: ['async', 'function-call'],
+          }),
           fidelity: 'derived',
           source: {
             file: '/workspace/features/checkout/e2e/checkout.spec.ts',
@@ -171,6 +209,40 @@ describe('translateReadableTest structure', () => {
         fidelity: 'derived',
       }),
     ])
+  })
+
+  it('compiles same-file helper bodies together and preserves each source line', () => {
+    const helperFile = '/workspace/features/account/support/helpers.ts'
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: '{ await outer() }',
+      helpers: [
+        {
+          name: 'outer',
+          file: helperFile,
+          bodySource: 'await inner()',
+        },
+        {
+          name: 'inner',
+          file: helperFile,
+          startLine: 40,
+          bodySource: `{
+  return true
+}`,
+        },
+      ],
+    })
+
+    expect(translated.nodes[0]).toEqual(expect.objectContaining({
+      origin: 'helper',
+      children: [expect.objectContaining({
+        origin: 'helper',
+        source: expect.objectContaining({ file: helperFile, startLine: 1 }),
+        children: [expect.objectContaining({
+          source: expect.objectContaining({ file: helperFile, startLine: 41 }),
+        })],
+      })],
+    }))
   })
 
   it('translates computed calls structurally instead of falling back to source', () => {

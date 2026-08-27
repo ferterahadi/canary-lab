@@ -45,6 +45,7 @@ vi.mock('@/shared/api/client', async () => {
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = []
+  readyState = 0
   onopen: (() => void) | null = null
   onmessage: ((event: { data: unknown }) => void) | null = null
   onerror: (() => void) | null = null
@@ -57,6 +58,7 @@ class FakeWebSocket {
 
   close(): void {
     this.closed = true
+    this.readyState = 3
     this.onclose?.()
   }
 }

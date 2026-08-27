@@ -1,13 +1,14 @@
 import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../shared/code-display-format'
 import type { PathType } from '../../../../shared/coverage/types'
-import type { ReadableTest } from '../../../../shared/readable-tests/types'
+import type { ReadableSemanticRuleConfig, ReadableTest } from '../../../../shared/readable-tests/types'
 import {
   translateReadableTest,
   translateReadableTestFromAst,
   type ReadableHelperInput,
 } from './readable-tests/translator'
 import { parseSource } from './controlled-english/compiler-context'
+import { compileSemanticSource } from './controlled-english/semantic-context'
 
 // Parse Playwright spec source and return every `test('name', …)` call along
 // with the `test.step('label', …)` invocations nested inside (recursively).
@@ -57,6 +58,19 @@ export interface ExtractedTest {
 export interface ExtractResult {
   file: string
   tests: ExtractedTest[]
+  parseError?: string
+}
+
+export interface ExtractedTestMetadata {
+  name: string
+  line: number
+  bodySource: string
+  bodyLine: number
+}
+
+export interface ExtractMetadataResult {
+  file: string
+  tests: ExtractedTestMetadata[]
   parseError?: string
 }
 
@@ -399,59 +413,114 @@ function extractStepsFrom(node: ts.Node, src: ts.SourceFile): ExtractedStep[] {
   return out
 }
 
-export function extractTestsFromSource(file: string, source: string): ExtractResult {
+interface TestDeclaration {
+  call: ts.CallExpression
+  body: ts.Node | null
+  name: string
+  line: number
+  bodySource: string
+  bodyLine: number
+}
+
+function testDeclarationsFrom(src: ts.SourceFile): TestDeclaration[] {
+  const declarations: TestDeclaration[] = []
+  function visit(node: ts.Node): void {
+    if (ts.isCallExpression(node) && isTestCall(node)) {
+      const body = getCallableBody(node)
+      const name = getTestNameArg(node, src, body)
+      if (name !== null) {
+        declarations.push({
+          call: node,
+          body,
+          name,
+          line: lineFor(node, src),
+          bodySource: body ? bodySourceFor(body, src) : '',
+          bodyLine: body ? lineFor(body, src) : lineFor(node, src),
+        })
+        // A test callback cannot declare another suite-level test. Avoid walking
+        // its body again; test.step calls are handled by the full extractor.
+        return
+      }
+    }
+    node.forEachChild(visit)
+  }
+  visit(src)
+  return declarations
+}
+
+/** The integrity scanner needs only stable test names and callback bodies. Keep
+ * that evidence path syntax-only: rendering prose or building a TypeChecker
+ * cannot change a content hash and must not delay server readiness. */
+export function extractTestMetadataFromSource(file: string, source: string): ExtractMetadataResult {
   try {
-    const { sourceFile: src } = parseSource(file, source)
+    const { sourceFile } = parseSource(file, source)
+    return {
+      file,
+      tests: testDeclarationsFrom(sourceFile).map(({ name, line, bodySource, bodyLine }) => ({
+        name,
+        line,
+        bodySource,
+        bodyLine,
+      })),
+    }
+  } catch (err) {
+    return {
+      file,
+      tests: [],
+      parseError: err instanceof Error ? err.message : String(err),
+    }
+  }
+}
+
+export function extractTestsFromSource(
+  file: string,
+  source: string,
+  semanticRules?: ReadableSemanticRuleConfig,
+): ExtractResult {
+  try {
+    const semanticContext = compileSemanticSource(file, source, { semanticRules, absoluteSourceRanges: true })
+    const src = semanticContext.sourceFile
     const tests: ExtractedTest[] = []
     const readableHelpers = topLevelReadableHelpers(file, src)
-    function visit(n: ts.Node): void {
-      if (ts.isCallExpression(n) && isTestCall(n)) {
-        const body = getCallableBody(n)
-        const name = getTestNameArg(n, src, body)
-        if (name !== null) {
-          const bodySource = body ? bodySourceFor(body, src) : ''
-          // Playwright tags are primary (R1); comment annotations are the
-          // migration fallback. Union both so a half-migrated spec still works.
-          const annotations = mergeAnnotations(
-            parseTestTags(n),
-            parseTestAnnotations(leadingCommentText(n, src)),
-          )
-          const assertions = body ? collectAssertionSnippets(body, src) : []
-          const readable = body && ts.isBlock(body)
-            ? translateReadableTestFromAst({
-                file,
-                title: name,
-                sourceFile: src,
-                body,
-                helpers: readableHelpers,
-              })
-            : translateReadableTest({
-                file,
-                title: name,
-                bodySource,
-                startLine: body ? lineFor(body, src) : lineFor(n, src),
-                helpers: readableHelpers,
-              })
-          tests.push({
-            name,
-            line: lineFor(n, src),
-            bodySource,
-            bodyLine: body ? lineFor(body, src) : lineFor(n, src),
-            steps: body ? extractStepsFrom(body, src) : [],
-            readable,
-            ...(annotations.requirements ? { requirements: annotations.requirements } : {}),
-            ...(annotations.pathTypes ? { pathTypes: annotations.pathTypes } : {}),
-            ...(annotations.variants ? { variants: annotations.variants } : {}),
-            ...(assertions.length ? { assertions } : {}),
+    for (const declaration of testDeclarationsFrom(src)) {
+      const { call, body, name, line, bodySource, bodyLine } = declaration
+      // Playwright tags are primary (R1); comment annotations are the migration
+      // fallback. Union both so a half-migrated spec still works.
+      const annotations = mergeAnnotations(
+        parseTestTags(call),
+        parseTestAnnotations(leadingCommentText(call, src)),
+      )
+      const assertions = body ? collectAssertionSnippets(body, src) : []
+      const readable = body && ts.isBlock(body)
+        ? translateReadableTestFromAst({
+            file,
+            title: name,
+            sourceFile: src,
+            body,
+            helpers: readableHelpers,
+            semanticContext,
           })
-          // Don't double-recurse into the test body — its inner test.step
-          // calls are already collected via extractStepsFrom.
-          return
-        }
-      }
-      n.forEachChild(visit)
+        : translateReadableTest({
+            file,
+            title: name,
+            bodySource,
+            startLine: bodyLine,
+            helpers: readableHelpers,
+            semanticRules,
+          })
+      tests.push({
+        name,
+        line,
+        bodySource,
+        bodyLine,
+        steps: body ? extractStepsFrom(body, src) : [],
+        readable,
+        ...(annotations.requirements ? { requirements: annotations.requirements } : {}),
+        ...(annotations.pathTypes ? { pathTypes: annotations.pathTypes } : {}),
+        ...(annotations.variants ? { variants: annotations.variants } : {}),
+        ...(assertions.length ? { assertions } : {}),
+      })
     }
-    visit(src)
     return { file, tests }
   } catch (err) {
     return {

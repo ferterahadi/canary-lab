@@ -96,6 +96,45 @@ describe('GET /api/features/:name/tests', () => {
     return `test('deep', async () => { const a = ${open}x${close} })\n`
   }
 
+  it('applies feature semantic-rule configuration to the returned readable spans', async () => {
+    const dir = writeFeature('semantic-config', {
+      spec: `import api from '@company/api-client'
+import { test } from '@playwright/test'
+
+test('configured client', async () => {
+  await api.get('/health')
+  await unrelated.get('/health')
+})
+`,
+    })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: {
+        name: 'semantic-config',
+        description: 'desc',
+        envs: ['local'],
+        repos: [{ name: 'repo1', localPath: __dirname }],
+        semanticRules: { apiClients: ['@company/api-client'] },
+        featureDir: __dirname,
+      } }`,
+    )
+    const app = await build({ spawner: failingSpawner })
+    const res = await app.inject({ method: 'GET', url: '/api/features/semantic-config/tests' })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as Array<{
+      tests: Array<{
+        readable: {
+          nodes: Array<{ english?: { semanticCategories?: string[] } }>
+        }
+      }>
+    }>
+    expect(body[0].tests[0].readable.nodes.map((node) => node.english?.semanticCategories))
+      .toEqual([
+        ['external-api', 'async', 'function-call'],
+        ['async', 'function-call'],
+      ])
+  })
+
   it('surfaces parseError when Playwright returns no entries for the spec', async () => {
     writeFeature('deepnone', { spec: deepNestedSpec() })
     const spawner = jsonSpawner(() => ({ config: {}, suites: [] }))

@@ -20,7 +20,7 @@ so deprecated aliases can't hide a hole):
 
 ## Test proof (Phases 7–9)
 
-411 tests in `apps/web-server/src/shared/controlled-english/`, all exact-string goldens
+439 tests in `apps/web-server/src/shared/controlled-english/`, all exact-string goldens
 or structural assertions — no fuzzy matching:
 
 | Suite | Proves |
@@ -32,9 +32,11 @@ or structural assertions — no fuzzy matching:
 | `ast-to-ir.types.test.ts` | Type syntax (tuples, mapped, conditional, predicates, import types) and JSX |
 | `ast-to-ir.roundtrip.test.ts` | Phase 8: 14 look-alike pairs render differently; determinism; unsupported-kind errors; operator tables complete and pairwise distinct |
 | `english-renderer.test.ts`, `syntax-kinds.test.ts`, `compiler-context.test.ts` | Layout rules, kind-table integrity + version pin, script-kind resolution |
+| `canonical-ir.test.ts`, `semantic-context.test.ts` | Wording-independent IR, TypeChecker Symbols, import/alias/factory/fixture provenance, exact source offsets |
+| `semantic-rules.test.ts`, `structured-english.test.ts` | Independent categories, configured adapters, negative classifications, natural composition, nested spans, control flow and theme-independent metadata |
 
-Code coverage over the module: **100% statements (743/743), 100% branches
-(594/594), 100% functions (110/110), 100% lines (641/641)**. Reproduce it with:
+Code coverage over the module: **100% statements (1160/1160), 100% branches
+(1010/1010), 100% functions (186/186), 100% lines (1017/1017)**. Reproduce it with:
 
 ```sh
 npx vitest run apps/web-server/src/shared/controlled-english --coverage \
@@ -47,11 +49,11 @@ npx vitest run apps/web-server/src/shared/controlled-english --coverage \
 The whole engine ran end-to-end over real projects on 2026-08-27. Each file was
 parsed and translated twice from scratch, then the two outputs were compared:
 
-| Corpus | Result |
-| --- | --- |
-| This repository — JavaScript/TypeScript under `apps/` and `templates/` | 1,103 files → 772,027 English lines; all translated |
-| `canary-lab-workspace` — JavaScript/TypeScript under `features/` | 292 files → 82,346 English lines; all translated |
-| **Total** | **1,395 files → 854,373 English lines, 0 unsupported constructs, 0 crashes, 0 nondeterministic renders** |
+| Corpus | Syntax result | Structured semantic result |
+| --- | --- | --- |
+| This repository — JavaScript/TypeScript under `apps/` and `templates/` | 1,116 files → 781,786 English lines | 100,621 structured blocks |
+| `canary-lab-workspace` — JavaScript/TypeScript under `features/` | 292 files → 82,346 English lines | 11,010 structured blocks |
+| **Total** | **1,408 files → 864,132 English lines** | **111,631 blocks; 0 unsupported constructs, 0 crashes, 0 nondeterministic renders** |
 
 Reproduce the two rows with:
 
@@ -63,7 +65,8 @@ node --import tsx tools/check-controlled-english-corpus.ts \
 
 ## Known limits
 
-- The engine is parser-only by design — see
+- Semantic categories require compiler or registered evidence and deliberately
+  fall back to ordinary calls when that evidence is absent — see
   [semantic-boundaries.md](semantic-boundaries.md).
 - JSDoc comment *structure* is trivia; JSDoc text still surfaces verbatim
   through the ordinary `comment:` lines.

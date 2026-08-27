@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import type {
-  ReadableBranchPath,
-  ReadableFidelity,
-  ReadableNode,
   ReadableSource,
+  ReadableStoryItem,
+  ReadableStoryRole,
+  ReadableStorySpan,
   ReadableTest,
 } from '../api/types'
 import { useTheme } from '../lib/theme'
@@ -14,15 +14,9 @@ export interface ReadableSourceSelection {
   source: ReadableSource
 }
 
-// The English presentation is the Code view's document with the language
-// swapped: the same `cl-code-shell` block, the same Shiki theme canvas
-// (background + default text colour), the same 11px mono type, 0.5rem inset,
-// and `{ … }` body framing — so toggling modes changes the words, not the
-// surface. Translated statements render as plain English lines; a compiler
-// construct outside the pinned vocabulary renders its explicit
-// `UNSUPPORTED_SYNTAX_KIND` error instead of falling back to source.
-// Expanded helper bodies stay collapsed here: the call reads as one line
-// (for example, "call `publishSuccessfully`"), without expanding internals.
+// English mode is one source-ordered test story. The role label remains on
+// every line, so setup/action/check meaning stays visible without moving steps
+// away from their authored execution position.
 export function ReadableTestView({
   test,
   sourceFile,
@@ -30,60 +24,123 @@ export function ReadableTestView({
   onSourceSelect,
 }: {
   test: ReadableTest
-  /** The file the test itself is defined in. Rows translated from another file
-   *  (expanded helper bodies) carry a dim `// file.ts` comment-style suffix. */
   sourceFile?: string
   selectedNodeId?: string | null
   onSourceSelect?: (selection: ReadableSourceSelection) => void
 }) {
   const canvas = useCodeThemeColors()
-  if (test.nodes.length === 0) {
-    return (
-      <div className="shiki-block cl-code-shell overflow-hidden rounded-md text-[11px]">
-        <div className="cl-readable-body" style={{ backgroundColor: canvas.bg, color: canvas.fg }}>
-          <span data-testid="readable-test-empty" className="block px-2" style={{ color: 'var(--text-muted)' }}>
-            No executable steps found in this test body.
-          </span>
-        </div>
-      </div>
-    )
-  }
+  const steps = test.story?.steps ?? []
 
   return (
-    <div className="shiki-block cl-code-shell overflow-hidden rounded-md text-[11px]">
+    <div
+      data-testid="readable-test-story"
+      className="shiki-block cl-code-shell overflow-hidden rounded-md text-[11px]"
+    >
       <div className="cl-readable-body" style={{ backgroundColor: canvas.bg, color: canvas.fg }}>
-        <div aria-hidden="true" className="px-2">{'{'}</div>
-        <ol data-testid="readable-test-tree" className="m-0 flex list-none flex-col p-0">
-          {test.nodes.map((node) => (
-            <ReadableNodeRow
-              key={node.id}
-              node={node}
-              depth={1}
-              sourceFile={sourceFile}
-              selectedNodeId={selectedNodeId}
-              onSourceSelect={onSourceSelect}
-            />
-          ))}
-        </ol>
-        <div aria-hidden="true" className="px-2">{'}'}</div>
+        {steps.length ? (
+          <ol data-testid="readable-test-sequence" className="m-0 flex list-none flex-col p-0">
+            {steps.map((step, index) => (
+              <StoryRow
+                key={step.id}
+                step={step}
+                sequence={index + 1}
+                sourceFile={sourceFile}
+                selected={selectedNodeId === step.id}
+                onSourceSelect={onSourceSelect}
+              />
+            ))}
+          </ol>
+        ) : (
+          <span data-testid="readable-test-empty" className="block px-2" style={{ color: 'var(--text-muted)' }}>
+            No readable steps found in this test body.
+          </span>
+        )}
       </div>
     </div>
   )
 }
 
-/** The Shiki theme's own canvas colours — the exact background and default
- *  text colour the Code pane's <pre> paints — so both modes share one surface.
- *  Until the highlighter loads, the shell tokens stand in (the same fallback
- *  Code mode shows before its first highlight). */
+function StoryRow({
+  step,
+  sequence,
+  sourceFile,
+  selected,
+  onSourceSelect,
+}: {
+  step: ReadableStoryItem
+  sequence: number
+  sourceFile?: string
+  selected: boolean
+  onSourceSelect?: (selection: ReadableSourceSelection) => void
+}) {
+  const fileNote = sourceFile && step.source.file !== sourceFile ? fileName(step.source.file) : undefined
+  const sequenceLabel = String(sequence).padStart(2, '0')
+  return (
+    <li data-story-role={step.role} data-story-sequence={sequence}>
+      <button
+        type="button"
+        data-testid={`readable-story-item-${step.id}`}
+        data-fidelity={step.fidelity}
+        aria-pressed={selected}
+        aria-label={`${sequence}. ${roleLabel(step.role)}: ${step.text}. Show ${sourceLabel(step.source)}`}
+        title={`${sourceLabel(step.source)} — ${fidelityTitle(step.fidelity)}`}
+        onClick={() => onSourceSelect?.({ id: step.id, source: step.source })}
+        className="grid w-full grid-cols-[3ch_7ch_minmax(0,1fr)] items-start gap-x-2 px-2 py-0.5 text-left leading-[1.65] transition-colors hover:bg-running/10"
+        style={{
+          background: selected ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : undefined,
+          boxShadow: selected ? 'inset 2px 0 0 var(--accent)' : undefined,
+        }}
+      >
+        <span aria-hidden="true" style={{ color: 'var(--text-muted)' }}>{sequenceLabel}</span>
+        <span
+          data-testid={`readable-story-role-${step.id}`}
+          style={{ color: roleColor(step.role), fontWeight: 600 }}
+        >
+          {roleLabel(step.role)}
+        </span>
+        <span className="min-w-0 whitespace-pre-wrap break-words">
+          {step.spans.map((span, index) => <StorySpan key={index} span={span} />)}
+          {fileNote && <span style={{ color: 'var(--text-muted)' }}> {`// ${fileNote}`}</span>}
+        </span>
+      </button>
+    </li>
+  )
+}
+
+function StorySpan({ span }: { span: ReadableStorySpan }) {
+  return (
+    <span
+      data-story-span={span.kind ?? 'text'}
+      style={{ color: span.kind === 'variable' ? 'var(--code-string)' : undefined }}
+    >
+      {span.text}
+    </span>
+  )
+}
+
+function roleColor(role: ReadableStoryRole): string {
+  if (role === 'setup') return 'var(--code-cyan)'
+  if (role === 'action') return 'var(--code-keyword)'
+  return 'var(--semantic-attention)'
+}
+
+function roleLabel(role: ReadableStoryRole): 'SETUP' | 'ACTION' | 'CHECK' {
+  if (role === 'setup') return 'SETUP'
+  if (role === 'action') return 'ACTION'
+  return 'CHECK'
+}
+
+/** The Shiki theme's canvas colours, shared with Code mode. Until Shiki is
+ * ready, the same shell tokens provide the initial background and foreground. */
 function useCodeThemeColors(): { bg: string; fg: string } {
   const { resolved } = useTheme()
   const [canvas, setCanvas] = useState<{ bg: string; fg: string } | null>(null)
   useEffect(() => {
     let cancelled = false
     getCodeHighlighter()
-      .then((hl) => {
+      .then((highlighter) => {
         if (cancelled) return
-        const colors = hl.themeColors(codeThemeFor(resolved))
+        const colors = highlighter.themeColors(codeThemeFor(resolved))
         setCanvas({ bg: colors.bg ?? 'var(--bg-input)', fg: colors.fg ?? 'var(--text-primary)' })
       })
       .catch(() => { if (!cancelled) setCanvas(null) })
@@ -92,243 +149,13 @@ function useCodeThemeColors(): { bg: string; fg: string } {
   return canvas ?? { bg: 'var(--bg-input)', fg: 'var(--text-primary)' }
 }
 
-function ReadableNodeRow({
-  node,
-  depth,
-  sourceFile,
-  selectedNodeId,
-  onSourceSelect,
-}: {
-  node: ReadableNode
-  depth: number
-  sourceFile?: string
-  selectedNodeId?: string | null
-  onSourceSelect?: (selection: ReadableSourceSelection) => void
-}) {
-  // An expanded helper body stays one line here — the reader asked what the
-  // step does, not how the helper does it. The children still exist on the
-  // node for consumers that want them (the evaluation flowchart descends).
-  const collapsedHelper = node.kind === 'group' && node.origin === 'helper'
-  const children = !collapsedHelper && (node.kind === 'group' || node.kind === 'loop') ? node.children : []
-  return (
-    <li data-readable-kind={node.kind}>
-      <ReadableRow
-        id={node.id}
-        text={node.text}
-        fidelity={node.fidelity}
-        source={node.source}
-        depth={depth}
-        sourceFile={sourceFile}
-        selected={selectedNodeId === node.id}
-        onSourceSelect={onSourceSelect}
-      />
-      {node.kind === 'branch' ? (
-        <ol className="m-0 flex list-none flex-col p-0">
-          {node.paths.map((path) => (
-            <ReadablePathRow
-              key={path.id}
-              path={path}
-              depth={depth + 1}
-              sourceFile={sourceFile}
-              selectedNodeId={selectedNodeId}
-              onSourceSelect={onSourceSelect}
-            />
-          ))}
-        </ol>
-      ) : children.length > 0 ? (
-        <ol className="m-0 flex list-none flex-col p-0">
-          {children.map((child) => (
-            <ReadableNodeRow
-              key={child.id}
-              node={child}
-              depth={depth + 1}
-              sourceFile={sourceFile}
-              selectedNodeId={selectedNodeId}
-              onSourceSelect={onSourceSelect}
-            />
-          ))}
-        </ol>
-      ) : null}
-    </li>
-  )
-}
-
-function ReadablePathRow({
-  path,
-  depth,
-  sourceFile,
-  selectedNodeId,
-  onSourceSelect,
-}: {
-  path: ReadableBranchPath
-  depth: number
-  sourceFile?: string
-  selectedNodeId?: string | null
-  onSourceSelect?: (selection: ReadableSourceSelection) => void
-}) {
-  return (
-    <li data-readable-kind="path">
-      <ReadableRow
-        id={path.id}
-        text={path.text}
-        fidelity={path.fidelity}
-        source={path.source}
-        depth={depth}
-        sourceFile={sourceFile}
-        selected={selectedNodeId === path.id}
-        onSourceSelect={onSourceSelect}
-      />
-      {path.children.length > 0 && (
-        <ol className="m-0 flex list-none flex-col p-0">
-          {path.children.map((child) => (
-            <ReadableNodeRow
-              key={child.id}
-              node={child}
-              depth={depth + 1}
-              sourceFile={sourceFile}
-              selectedNodeId={selectedNodeId}
-              onSourceSelect={onSourceSelect}
-            />
-          ))}
-        </ol>
-      )}
-    </li>
-  )
-}
-
-function ReadableRow({
-  id,
-  text,
-  fidelity,
-  source,
-  depth,
-  sourceFile,
-  selected,
-  onSourceSelect,
-}: {
-  id: string
-  text: string
-  fidelity: ReadableFidelity
-  source: ReadableSource
-  depth: number
-  sourceFile?: string
-  selected: boolean
-  onSourceSelect?: (selection: ReadableSourceSelection) => void
-}) {
-  const fileNote = sourceFile && source.file !== sourceFile ? fileName(source.file) : undefined
-  return (
-    <button
-      type="button"
-      data-testid={`readable-node-${id}`}
-      data-fidelity={fidelity}
-      aria-pressed={selected}
-      aria-label={`Show source for ${text}, ${sourceLabel(source)}`}
-      title={`${sourceLabel(source)} — ${fidelityTitle(fidelity)}`}
-      onClick={() => onSourceSelect?.({ id, source })}
-      className="block w-full text-left transition-colors hover:bg-running/10"
-      style={{
-        // Nesting is literal indentation, the way the source itself indents.
-        paddingLeft: `calc(0.5rem + ${depth * 2}ch)`,
-        paddingRight: '0.5rem',
-        background: selected ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : undefined,
-        boxShadow: selected ? 'inset 2px 0 0 var(--accent)' : undefined,
-      }}
-    >
-      {fidelity === 'unresolved' ? (
-        <InlineSource id={id} snippet={source.snippet} />
-      ) : fidelity === 'unsupported' ? (
-        <span className="block whitespace-pre-wrap break-words" style={{ color: 'var(--danger)' }}>
-          {text}
-        </span>
-      ) : fidelity === 'exact' ? (
-        /* Authored wording is a string literal in the source, so it keeps the
-           code themes' string colour. */
-        <span style={{ color: 'var(--code-string)' }}>{text}</span>
-      ) : (
-        <DerivedText text={text} />
-      )}
-      {fileNote && <span style={{ color: 'var(--text-muted)' }}> {`// ${fileNote}`}</span>}
-    </button>
-  )
-}
-
-/** Each controlled-English line keeps the compiler renderer's whitespace.
- * Its leading grammar word is this language's keyword — tinted the way Shiki
- * tints `await`/`const` in Code mode. */
-function DerivedText({ text }: { text: string }) {
-  return (
-    <span data-controlled-english="true" className="block whitespace-pre-wrap break-words">
-      {text.split('\n').map((line, index) => {
-        const match = /^(\s*)([A-Za-z][A-Za-z-]*)(.*)$/.exec(line)
-        if (!match) return <span key={index} className="block">{line}</span>
-        return (
-          <span key={index} className="block">
-            {match[1]}
-            <span style={{ color: 'var(--code-keyword)' }}>{match[2]}</span>
-            {match[3]}
-          </span>
-        )
-      })}
-    </span>
-  )
-}
-
-/** Backward compatibility for version-1 readable payloads. The version-2
- * compiler never emits `unresolved`; unsupported syntax has its own explicit
- * error row above. */
-function InlineSource({ id, snippet }: { id: string; snippet: string }) {
-  const { resolved } = useTheme()
-  const [lines, setLines] = useState<string | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    getCodeHighlighter().then((hl) => {
-      if (cancelled) return
-      try {
-        const html = hl.codeToHtml(snippet, { lang: 'typescript', theme: codeThemeFor(resolved) })
-        // Keep only the token spans: the outer <pre> carries the Shiki theme's
-        // own background, and this line lives on the shared shell's background.
-        setLines(/<code[^>]*>([\s\S]*?)<\/code>/.exec(html)?.[1] ?? null)
-      } catch {
-        setLines(null)
-      }
-    }).catch(() => { if (!cancelled) setLines(null) })
-    return () => { cancelled = true }
-  }, [snippet, resolved])
-
-  if (lines === null) {
-    return (
-      <span
-        data-testid={`readable-source-${id}`}
-        className="block whitespace-pre-wrap break-words"
-      >
-        {snippet}
-      </span>
-    )
-  }
-  return (
-    <span
-      data-testid={`readable-source-${id}`}
-      className="block whitespace-pre-wrap break-words [&_span.line]:block"
-      // Shiki has already escaped the snippet it highlighted (the snippet comes
-      // from the feature's own spec files, not user input), and the regex above
-      // only unwraps Shiki's own <code> element.
-      // eslint-disable-next-line no-restricted-syntax
-      dangerouslySetInnerHTML={{ __html: lines }}
-    />
-  )
-}
-
-function fidelityTitle(fidelity: ReadableFidelity): string {
-  switch (fidelity) {
-    case 'exact': return 'Original wording written in the test'
-    case 'derived': return 'Deterministically described from source code'
-    case 'unsupported': return 'Compiler syntax is outside the pinned vocabulary'
-    case 'unresolved': return 'Not translated — the exact source line'
-  }
+function fidelityTitle(fidelity: ReadableStoryItem['fidelity']): string {
+  if (fidelity === 'exact') return 'Original wording written in the test'
+  return 'Deterministically described from source code'
 }
 
 function fileName(file: string): string {
-  return file.split(/[\\/]/).pop() ?? file
+  return file.replace(/^.*[\\/]/, '')
 }
 
 function sourceLabel(source: ReadableSource): string {

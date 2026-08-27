@@ -1,56 +1,81 @@
 # Semantic Boundaries
 
-What the controlled-English translator is allowed to know, and why it stops
-where it does.
+The readable-test compiler has two deterministic layers. The syntax layer is
+total. The semantic layer is conservative and may decline to classify a call.
 
 ## The three levels
 
-| Level | Facts | Example for `await getUser(id)` | Status |
+| Level | Facts | Example for `await getUser(id)` | Contract |
 | --- | --- | --- | --- |
-| **1 — Syntax** | What the parser alone can see: node kinds, names as written, literal values, structure, operators, modifiers | ``await:`` / ``    call `getUser` with argument `id` `` | **This is the engine.** Everything it emits is Level 1. |
-| **2 — Semantics** | What the binder/checker adds: resolved symbols, inferred types, which overload, where a name was declared | "calls the `getUser` declared in `api/users.ts`, returns `Promise<User>`" | Deliberately excluded. |
-| **3 — Interpretation** | What a human/domain layer adds: intent, domain meaning, library knowledge | "fetches the user record" | Deliberately excluded from this engine. |
+| **1 — syntax** | Parser facts: node kinds, names, literals, operators, nesting | `` await: call `getUser` with argument `id` `` | Exhaustive fallback for every supported TypeScript construct |
+| **2 — compiler semantics** | Binder/checker facts: Symbols, imports, local aliases, proven fixture origin | `getUser` resolves through an import from `@company/api-client` | Used as evidence by the classifier |
+| **3 — registered meaning** | Explicit library/project adapters | The imported client is an `external-api` boundary | Allowed only when a rule names the source of that meaning |
 
-## Why parser-only (Level 1)
+The source pipeline is:
 
-- **Determinism.** A parse depends on nothing but the source text and the
-  pinned TypeScript version. Binder and checker output depends on tsconfig,
-  installed dependencies, ambient types, and lib versions — the same file
-  would translate differently in different projects.
-- **Totality.** Every parseable file translates. A checker-based translation
-  fails or degrades on unresolvable imports; a Playwright spec must translate
-  even when its project has never run `npm install`.
-- **Honesty.** A Level-1 line can only be wrong if the parser is wrong. The
-  moment inferred meaning enters, the translation can assert things the code
-  does not say — the exact failure mode the rewrite removed.
+```text
+source → TypeScript AST + TypeChecker/Symbols → canonical IR
+       → English composition + semantic classifier
+       → structured spans → theme renderer
+```
 
-Concretely: `parseSource` (`apps/web-server/src/shared/controlled-english/compiler-context.ts`)
-calls `ts.createSourceFile` only. No `ts.createProgram`, no `getTypeChecker`.
+The exhaustive syntax compiler remains the fallback. A natural composition
+replaces its wording on current UI surfaces only when the canonical IR can
+preserve the complete statement. Unknown syntax never disappears and still
+surfaces as `UNSUPPORTED_SYNTAX_KIND: <kind>`.
 
-## What "names must remain names" rules out
+## Proof standard for semantic categories
 
-The previous translator rendered `expect(locator).toBeVisible()` as
-Playwright-flavoured prose ("check that … is visible"). That is Level-3
-interpretation: it requires knowing what `toBeVisible` means, which the syntax
-does not state. In controlled English the same code reads as the call it is —
-`` call method `toBeVisible` … `` — and is correct for any library, any
-misspelling, any user-defined function with the same name.
+Database and external API categories use evidence in this order:
 
-An interpretive layer may return later as a clearly separated, optional
-Level-3 annotation on top of the Level-1 rendering — never replacing it, and
-never presented as a fact of the code.
+1. an import declaration and its TypeChecker Symbol;
+2. a local alias or client construction resolved through that Symbol;
+3. a built-in adapter for a named library or a proven Playwright fixture;
+4. a module specifier registered in `feature.config.cjs` through
+   `semanticRules.apiClients` or `semanticRules.databaseClients`.
 
-## Level-1 subtleties the engine still states
+```js
+const config = {
+  // existing feature fields...
+  semanticRules: {
+    apiClients: ['@company/api-client', './src/api/client'],
+    databaseClients: ['@company/database'],
+  },
+}
+```
 
-Some facts feel semantic but are pure syntax, so they are in scope:
+A method name is not evidence. `foo.findMany()` is a normal function call;
+`prisma.user.findMany()` is a database call only when `prisma` resolves to a
+known database import. Likewise, returned data does not inherit the category of
+the call that produced it: `res.json()` remains ordinary after
+`res = await request.get(...)`.
 
-- `const` vs `let` vs `var` vs `using` (declaration flags).
-- `?.` vs `.` (distinct node kinds/tokens: "optional property" vs "property").
-- `a ?? b` vs `a || b` (distinct operator tokens).
-- Definite-assignment `!`, optional `?`, `readonly`, decorators, modifiers.
-- Comment text (verbatim, labelled `comment:` — stated but never interpreted).
+Assertions are an explicit API adapter. Known `expect(...).matcher(...)`
+matchers receive canonical wording. An unknown matcher keeps the exact call;
+the compiler never invents its meaning.
 
-What stays out even though it looks easy: whether `foo.bar` resolves, whether
-a call is sync or async apart from an explicit `await`, whether an import is
-type-only *at use sites* (only the written `type` keyword is stated), and any
-guess about what a template string evaluates to.
+## Structured output and overlap
+
+Each natural block contains ordered spans. Syntax categories (identifier,
+literal, operator, function, property, type) and semantic categories
+(assertion, database, external API, error control flow, and others) are separate
+fields. A span may retain several semantic categories, such as `async` plus
+`external-api` inside an assertion.
+
+Blocks and every span retain zero-based source offsets when translation uses a
+complete source file. Code spans use their precise expression range; prose
+spans use the owning block range. Synthetic body-only inputs omit offsets
+rather than publishing positions into their wrapper.
+
+## Determinism boundary
+
+Output is identical for identical source, TypeScript 5.9.3, compiler options,
+semantic-rule configuration, and theme. No LLM, randomness, fuzzy matching, or
+synonym selection participates.
+
+Changing a theme never changes semantic categories. The default UI maps error
+control flow to purple and assertions, external API calls, and database calls
+to red; those colours live only in the web theme.
+
+Semantic highlighting is static source analysis. It is not proof that a test
+ran or passed. Run verdicts still come only from Playwright execution evidence.
