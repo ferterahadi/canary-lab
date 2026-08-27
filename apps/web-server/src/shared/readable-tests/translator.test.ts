@@ -48,8 +48,8 @@ describe('translateReadableTest structure', () => {
           {
             id: expect.stringMatching(/^rt_[a-f0-9]{12}$/),
             role: 'action',
-            text: 'Run selected action',
-            spans: [{ text: 'Run selected action' }],
+            text: 'Run selected action using page',
+            spans: [{ text: 'Run selected action using ' }, { text: 'page', kind: 'variable' }],
             fidelity: 'derived',
             source: {
               file: '/workspace/features/checkout/e2e/checkout.spec.ts',

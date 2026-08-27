@@ -154,6 +154,10 @@ describe('TestPresentation', () => {
     expect(container.querySelector('[data-testid="test-presentation-code"]')).not.toBeNull()
     expect(container.textContent).toContain('e2e/checkout.spec.ts:L10–12')
     expect(container.textContent).toContain("await page.goto('/checkout')")
+    const displayedLines = container.querySelectorAll<HTMLElement>('[data-code-line]')
+    expect(displayedLines).toHaveLength(1)
+    expect(displayedLines[0].dataset.codeLine).toBe('01')
+    expect(displayedLines[0].textContent).toBe("await page.goto('/checkout')")
   })
 
   it('reveals a helper snippet in Code when its English node is selected', async () => {
@@ -180,7 +184,9 @@ describe('TestPresentation', () => {
     })
 
     expect(container.textContent).toContain('e2e/checkout.spec.ts:L10–12')
-    expect(container.querySelectorAll('[data-selected-line="true"]')).toHaveLength(3)
+    // Code mode omits the callback's standalone wrapper braces, leaving only
+    // the executable source row while its file label keeps the full L10–12 range.
+    expect(container.querySelectorAll('[data-selected-line="true"]')).toHaveLength(1)
     expect(container.textContent).toContain('Full test')
   })
 
@@ -237,7 +243,7 @@ describe('TestPresentation', () => {
     expect(container.textContent).toContain('helpers/matching.ts:L30–32')
     expect(container.querySelectorAll('[data-active-line="true"]')).toHaveLength(0)
     expect(container.querySelectorAll('[data-changed-line="true"]')).toHaveLength(0)
-    expect(container.querySelectorAll('[data-selected-line="true"]')).toHaveLength(3)
+    expect(container.querySelectorAll('[data-selected-line="true"]')).toHaveLength(1)
   })
 
   it('keeps the Code view synchronized with light and dark themes', async () => {

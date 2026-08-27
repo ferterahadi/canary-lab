@@ -71,8 +71,12 @@ export function ShikiCode({
   if (html === null) {
     return (
       <CodeShell sourceLocation={sourceLocation} openError={openError} onOpenStart={() => openAt(sourceLocation?.startLine ?? 1)} showOpenButton={showOpenButton}>
-        <pre className="cl-code-shell overflow-hidden whitespace-pre-wrap break-words rounded-md p-2 text-[11px]" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-          <code>{source}</code>
+        <pre className="cl-numbered-code cl-code-shell overflow-hidden whitespace-pre-wrap break-words rounded-md p-2 text-[11px] leading-[1.65]" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+          <code>
+            {source.split('\n').map((line, index) => (
+              <span key={index} className="line" data-code-line={String(index + 1).padStart(2, '0')}>{line}</span>
+            ))}
+          </code>
         </pre>
       </CodeShell>
     )
@@ -81,7 +85,7 @@ export function ShikiCode({
   return (
     <CodeShell sourceLocation={sourceLocation} openError={openError} onOpenStart={() => openAt(sourceLocation?.startLine ?? 1)} showOpenButton={showOpenButton}>
       <div
-        className={`shiki-block cl-code-shell overflow-hidden rounded-md text-[11px] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-running/10' : ''}`}
+        className={`shiki-block cl-numbered-code cl-code-shell overflow-hidden rounded-md text-[11px] leading-[1.65] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-running/10' : ''}`}
         onClick={(e) => {
           const line = (e.target as HTMLElement).closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine
           if (line) void openAt(Number(line))
@@ -160,7 +164,7 @@ function decorateShikiLines(
     const sourceLine = startLine ? sourceLineForBodyLine(startLine, lineNo) : null
     const selected = sourceLine != null && selectedSourceRange != null &&
       sourceLine >= selectedSourceRange.startLine && sourceLine <= selectedSourceRange.endLine
-    const attrs = `${sourceLine ? ` data-source-line="${sourceLine}"` : ''}${selected ? ' data-selected-line="true"' : ''}`
+    const attrs = ` data-code-line="${String(lineNo).padStart(2, '0')}"${sourceLine ? ` data-source-line="${sourceLine}"` : ''}${selected ? ' data-selected-line="true"' : ''}`
     if (changedLines?.has(lineNo)) {
       return `<span class="line"${attrs} data-changed-line="true" style="background:color-mix(in srgb, var(--danger) 16%, transparent);box-shadow:inset 2px 0 0 var(--danger)"`
     }

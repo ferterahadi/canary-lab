@@ -282,10 +282,11 @@ describe('runCoverageEngine — no PRD summary (summary null branch)', () => {
     // The run-state file is at <featureDir>/docs/_coverage-state.json.
     const runStateFile = path.join(dir, 'docs', '_coverage-state.json')
     expect(fs.existsSync(runStateFile)).toBe(true)
-    const runState = JSON.parse(fs.readFileSync(runStateFile, 'utf-8')) as { requirementsHash: string }
+    const runState = JSON.parse(fs.readFileSync(runStateFile, 'utf-8')) as { requirementsHash: string; coveragePct: number }
     // requirementsSetHash([]) produces a deterministic hash.
     expect(typeof runState.requirementsHash).toBe('string')
     expect(runState.requirementsHash.length).toBeGreaterThan(0)
+    expect(runState.coveragePct).toBe(res.ledger.coveragePct)
   })
 })
 

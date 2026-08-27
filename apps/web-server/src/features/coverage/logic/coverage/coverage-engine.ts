@@ -165,7 +165,9 @@ export async function runCoverageEngine(
     reconciledRequirementIds = changedIds
     if (changedIds.length === 0) {
       args.onOutput?.('[delta] requirements unchanged — nothing to reconcile\n')
-      return { feature: args.feature, applied: [], orphanTestsBefore, reconciledRequirementIds, ledger: computeFeatureCoverage(args) }
+      const ledger = computeFeatureCoverage(args)
+      if (prior) writeCoverageRunState(featureDir, { ...prior, coveragePct: ledger.coveragePct })
+      return { feature: args.feature, applied: [], orphanTestsBefore, reconciledRequirementIds, ledger }
     }
     args.onOutput?.(`[delta] reconciling ${changedIds.length} changed requirement(s): ${changedIds.join(', ')}\n`)
     const changedSet = new Set(changedIds)
@@ -197,13 +199,17 @@ export async function runCoverageEngine(
 
   // Record the requirements set the engine just ran against — coverage drops to
   // STALE when the set later moves (R3 signal; R10 turns it into a delta re-infer).
-  writeCoverageRunState(featureDir, {
+  const runState = {
     requirementsHash: summary?.requirementsHash ?? requirementsSetHash(requirements),
     requirementFingerprints: requirementFingerprintMap(requirements),
     ranAt: args.now ?? new Date().toISOString(),
-  })
+  }
+  // Write the completion marker before computing so a legitimate zero-link pass
+  // is distinguishable from "never run" inside computeFeatureCoverage.
+  writeCoverageRunState(featureDir, runState)
 
   const ledger = computeFeatureCoverage({ featuresDir: args.featuresDir, logsDir: args.logsDir, feature: args.feature })
+  writeCoverageRunState(featureDir, { ...runState, coveragePct: ledger.coveragePct })
   return { feature: args.feature, applied, orphanTestsBefore, reconciledRequirementIds, ledger }
 }
 
@@ -321,12 +327,14 @@ export function applyExternalCoverageMappings(args: ApplyExternalCoverageArgs): 
 
   // Mirror runCoverageEngine: record the requirements set this pass ran against,
   // so coverage drops to STALE when the set later moves.
-  writeCoverageRunState(featureDir, {
+  const runState = {
     requirementsHash: summary?.requirementsHash ?? requirementsSetHash(requirements),
     requirementFingerprints: requirementFingerprintMap(requirements),
     ranAt: args.now ?? new Date().toISOString(),
-  })
+  }
+  writeCoverageRunState(featureDir, runState)
 
   const ledger = computeFeatureCoverage({ featuresDir: args.featuresDir, logsDir: args.logsDir, feature: args.feature })
+  writeCoverageRunState(featureDir, { ...runState, coveragePct: ledger.coveragePct })
   return { feature: args.feature, applied, ledger }
 }

@@ -549,10 +549,9 @@ describe('FeaturesColumn in-flight row cue', () => {
 describe('FeaturesColumn coverage-headline fetching', () => {
   const feature = (name: string) => ({ name, repos: [], envs: [] })
 
-  // `/api/coverage/states` recomputes every feature's ledger server-side, so the
-  // column must ask once per feature set — not once per render. App passes
+  // The column must ask once per feature set — not once per render. App passes
   // `onOpenCoverage` as a fresh arrow every render; depending on it turned each
-  // re-render into a full workspace-wide recompute (38 requests on one page load).
+  // re-render into another workspace-wide status request.
   const renderWith = async (features: ReturnType<typeof feature>[]) => {
     await act(async () => {
       root.render(

@@ -76,9 +76,23 @@ export interface CoverageStateSummary {
   coveragePct: number | null
 }
 
+let coverageStatesInFlight: {
+  baseUrl: string
+  fetchImpl: typeof fetch
+  promise: Promise<CoverageStateSummary[]>
+} | null = null
+
 export function listCoverageStates(opts?: ClientOptions): Promise<CoverageStateSummary[]> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<CoverageStateSummary[]>(`${baseUrl}/api/coverage/states`, { method: 'GET' }, fetchImpl)
+  if (coverageStatesInFlight?.baseUrl === baseUrl && coverageStatesInFlight.fetchImpl === fetchImpl) {
+    return coverageStatesInFlight.promise
+  }
+  const promise = request<CoverageStateSummary[]>(`${baseUrl}/api/coverage/states`, { method: 'GET' }, fetchImpl)
+    .finally(() => {
+      if (coverageStatesInFlight?.promise === promise) coverageStatesInFlight = null
+    })
+  coverageStatesInFlight = { baseUrl, fetchImpl, promise }
+  return promise
 }
 
 export function regeneratePrdSummary(

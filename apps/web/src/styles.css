@@ -362,6 +362,20 @@ body {
   padding: 0 0.5rem;
   min-height: 1lh;
 }
+/* Code and English use the same three-character sequence gutter. The label is
+   metadata rather than source, so it cannot be selected or copied with code. */
+.cl-numbered-code span.line::before {
+  content: attr(data-code-line);
+  display: inline-block;
+  width: 3ch;
+  margin-right: 0.5rem;
+  color: var(--text-muted);
+  user-select: none;
+}
+.cl-numbered-code span.line {
+  display: block;
+  min-height: 1lh;
+}
 /* The English pane's canvas — `.shiki-block pre`'s twin (same frame, inset,
    and wrapping; keep the two in step so mode toggling never shifts layout).
    Horizontal inset lives on the rows so selection washes bleed edge-to-edge

@@ -37,13 +37,13 @@ describe('readable test story', () => {
 
     expect(textsFor(translated, 'setup')).toEqual([
       'Skip this scenario — “sync SQL not configured”',
-      'Prepare unique identifiers',
+      'Create variable ids using “fallback-A”',
       'Use sync SQL connection',
     ])
     expect(textsFor(translated, 'action')).toEqual([
-      'Send call',
-      'Wait for call row',
-      'Read WhatsApp outbound',
+      'Send call using ids, saving the result as res',
+      'Wait for callRow',
+      'Read WhatsApp outbound using conn and ids.messageId, saving the result as wa',
     ])
     expect(textsFor(translated, 'check')).toEqual([
       'Check that response status is less than 300',
@@ -52,13 +52,13 @@ describe('readable test story', () => {
     ])
     expect(translated.story?.steps.map((step) => `${step.role}: ${step.text}`)).toEqual([
       'setup: Skip this scenario — “sync SQL not configured”',
-      'setup: Prepare unique identifiers',
-      'action: Send call',
+      'setup: Create variable ids using “fallback-A”',
+      'action: Send call using ids, saving the result as res',
       'check: Check that response status is less than 300',
       'setup: Use sync SQL connection',
-      'action: Wait for call row',
+      'action: Wait for callRow',
       'check: Check that call row status, if available equals “COMPLETED”',
-      'action: Read WhatsApp outbound',
+      'action: Read WhatsApp outbound using conn and ids.messageId, saving the result as wa',
       'check: Check that WhatsApp outbound is null',
     ])
     const text = translated.story?.steps.map((item) => item.text).join('\n') ?? ''
@@ -66,7 +66,8 @@ describe('readable test story', () => {
     expect(translated.story?.steps.flatMap((step) => (
       step.spans.filter((span) => span.kind === 'variable').map((span) => span.text)
     ))).toEqual(expect.arrayContaining([
-      'identifiers',
+      'ids',
+      'res',
       'response',
       'connection',
       'call row',
@@ -138,7 +139,7 @@ describe('readable test story', () => {
 
     expect(textsFor(translated, 'setup')).toContain('Use the required test context')
     expect(textsFor(translated, 'action')).toEqual(expect.arrayContaining([
-      'Read the saved record',
+      'Read the saved record, saving the result as response',
       'Wait for the expected result',
     ]))
     expect(textsFor(translated, 'check')).toEqual([
@@ -162,10 +163,30 @@ describe('readable test story', () => {
     })
 
     expect(textsFor(translated, 'action')).toEqual([
-      'Step',
+      'Step using “Not an authored step”',
       'Confirm the order',
     ])
     expect(textsFor(translated, 'check')).toEqual(['Check order'])
+  })
+
+  it('declares shared inputs once and refers to their variable names in later actions', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  const txId = createTxId('tx-42')
+  const request = makeRequest(txId)
+  await sendBatch(request, txId, 5, 'internal label')
+}`,
+    })
+
+    expect(translated.story?.steps.map((step) => step.text)).toEqual([
+      'Create variable txId using “tx-42”',
+      'Create variable request using txId',
+      'Send batch using request and txId',
+    ])
+    expect(translated.story?.steps.flatMap((step) => (
+      step.spans.filter((span) => span.kind === 'variable').map((span) => span.text)
+    ))).toEqual(expect.arrayContaining(['txId', 'request']))
   })
 
   it('walks control-flow bodies while omitting nested declarations', () => {

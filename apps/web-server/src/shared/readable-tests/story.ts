@@ -2,6 +2,7 @@ import ts from 'typescript'
 import type { ReadableStoryItem, ReadableStorySpan } from '../../../../../shared/readable-tests/types'
 import { renderActionStatement } from './actions'
 import { renderAssertionStatement } from './assertions'
+import { expressionPath, renderExpression } from './expression'
 import {
   assignedNameFromStatement,
   humanizeIdentifier,
@@ -25,6 +26,21 @@ export interface StoryCandidate {
 
 interface WalkOptions {
   includeActions: boolean
+}
+
+const SETUP_CALL_VERBS = new Set(['build', 'configure', 'create', 'generate', 'make', 'mock', 'prepare', 'seed', 'setup'])
+const EXACT_IDENTIFIER_OPEN = '\uE000'
+const EXACT_IDENTIFIER_CLOSE = '\uE001'
+
+function exactIdentifierText(value: string): string {
+  const encoded = [...value].map((character) => character.codePointAt(0)?.toString(16) ?? '').join('_')
+  return `${EXACT_IDENTIFIER_OPEN}${encoded}${EXACT_IDENTIFIER_CLOSE}`
+}
+
+function restoreExactIdentifiers(text: string): string {
+  return text.replace(/\uE000([0-9a-f_]+)\uE001/gi, (_match, encoded: string) => (
+    encoded.split('_').map((part) => String.fromCodePoint(Number.parseInt(part, 16))).join('')
+  ))
 }
 
 function callFromStatement(statement: ts.Statement): ts.CallExpression | undefined {
@@ -71,48 +87,112 @@ function calledName(call: ts.CallExpression): string | undefined {
   return undefined
 }
 
+function assignedIdentifier(statement: ts.Statement): string | undefined {
+  if (!ts.isVariableStatement(statement) || statement.declarationList.declarations.length !== 1) return undefined
+  const name = statement.declarationList.declarations[0].name
+  return ts.isIdentifier(name) ? name.text : undefined
+}
+
+function readableList(items: readonly string[]): string {
+  if (items.length < 2) return items[0] ?? ''
+  if (items.length === 2) return `${items[0]} and ${items[1]}`
+  return `${items.slice(0, -1).join(', ')}, and ${items.at(-1)}`
+}
+
+/** Story mode names top-level inputs without recursively expanding every helper.
+ * `send(request, txId)` therefore keeps `request` and `txId`; a nested builder
+ * is named as its result, while its internals stay in the setup step that made it. */
+function storyArgument(
+  argument: ts.Expression,
+  sourceFile: ts.SourceFile,
+  referencesOnly: boolean,
+): string | undefined {
+  if (ts.isArrowFunction(argument) || ts.isFunctionExpression(argument)) return undefined
+  if (ts.isIdentifier(argument)) {
+    return /^(?:callback|handler|fn)$/i.test(argument.text) ? undefined : exactIdentifierText(argument.text)
+  }
+  const path = expressionPath(argument)
+  if (path) return exactIdentifierText(path)
+  let expression = argument
+  while (ts.isAwaitExpression(expression) || ts.isParenthesizedExpression(expression)) expression = expression.expression
+  if (ts.isCallExpression(expression)) {
+    const name = calledName(expression)
+    if (name) return `${humanizeIdentifier(name)} result`
+  }
+  if (referencesOnly) return undefined
+  const rendered = renderExpression(argument, sourceFile)
+  return rendered.fidelity === 'unresolved' ? undefined : rendered.text
+}
+
+function callArguments(
+  call: ts.CallExpression,
+  sourceFile: ts.SourceFile,
+  preferReferences: boolean,
+): string[] {
+  const render = (referencesOnly: boolean): string[] => call.arguments.flatMap((argument) => {
+    const rendered = storyArgument(argument, sourceFile, referencesOnly)
+    return rendered ? [rendered] : []
+  })
+  const references = render(true)
+  return preferReferences && references.length ? references : render(false)
+}
+
 function genericCallStory(
   statement: ts.Statement,
   sourceFile: ts.SourceFile,
 ): Pick<StoryCandidate, 'role' | 'text' | 'fidelity'> | undefined {
   const call = callFromStatement(statement)
-  const name = call ? calledName(call) : undefined
+  if (!call) return undefined
+  const name = calledName(call)
   if (!name) return undefined
   const words = identifierWords(name)
   const first = words[0]
   const rest = words.slice(1)
   if (!first) return undefined
+  const arguments_ = callArguments(call, sourceFile, true)
+  const using = arguments_.length ? ` using ${readableList(arguments_)}` : ''
+  const assigned = assignedIdentifier(statement)
 
   if (first === 'expect' || first === 'assert' || first === 'check' || first === 'verify' || first === 'ensure') {
     return {
       role: 'check',
-      text: sentenceCase(`check ${readableObject(rest) || 'the expected outcome'}`),
+      text: sentenceCase(`check ${readableObject(rest) || 'the expected outcome'}${using}`),
       fidelity: 'derived',
     }
   }
   if (first === 'with') {
     return {
       role: 'setup',
-      text: sentenceCase(`use ${readableObject(rest) || 'the required test context'}`),
+      text: sentenceCase(`use ${readableObject(rest) || 'the required test context'}${using}`),
       fidelity: 'derived',
     }
   }
 
   if ((first === 'poll' || first === 'wait') && rest.every((word) => word === 'for' || word === 'until')) {
-    const assignedName = assignedNameFromStatement(statement.getText(sourceFile))
+    const assignedName = assigned ?? assignedNameFromStatement(statement.getText(sourceFile))
     return {
       role: 'action',
-      text: `Wait for ${assignedName ? humanizeIdentifier(assignedName) : 'the expected result'}`,
+      text: `Wait for ${assignedName ? exactIdentifierText(assignedName) : 'the expected result'}${using}`,
       fidelity: 'derived',
     }
   }
 
   const sourceText = statement.getText(sourceFile)
   const setup = setupLikeStatement(sourceText)
-    || ['build', 'configure', 'create', 'generate', 'make', 'mock', 'prepare', 'seed', 'setup'].includes(first)
+    || SETUP_CALL_VERBS.has(first)
+  if (setup && assigned && SETUP_CALL_VERBS.has(first)) {
+    const creationInputs = callArguments(call, sourceFile, false)
+    const creationUsing = creationInputs.length ? ` using ${readableList(creationInputs)}` : ''
+    return {
+      role: 'setup',
+      text: `Create variable ${exactIdentifierText(assigned)}${creationUsing}`,
+      fidelity: 'derived',
+    }
+  }
+  const saveResult = assigned && !setup ? `, saving the result as ${exactIdentifierText(assigned)}` : ''
   return {
     role: setup ? 'setup' : 'action',
-    text: readableActionName(name, sourceText),
+    text: `${readableActionName(name, sourceText)}${using}${saveResult}`,
     fidelity: 'derived',
   }
 }
@@ -162,23 +242,26 @@ function isIdentifierName(node: ts.Identifier): boolean {
     : (ts.isFunctionDeclaration(parent) || ts.isClassDeclaration(parent)) && parent.name === node
 }
 
-function variablePhrases(
-  statement: ts.Statement,
-  text: string,
-  aliases: ReadonlyMap<string, string>,
-): string[] {
+function exactVariableNames(statement: ts.Statement): string[] {
   const names = new Set<string>()
   const visit = (node: ts.Node): void => {
     if (ts.isIdentifier(node) && !isIdentifierName(node)) names.add(node.text)
     node.forEachChild(visit)
   }
   visit(statement)
+  return [...names]
+}
 
+function variablePhrases(
+  statement: ts.Statement,
+  text: string,
+  aliases: ReadonlyMap<string, string>,
+): string[] {
   const lowerText = text.toLocaleLowerCase()
   const phrases = new Set<string>()
-  for (const name of names) {
+  for (const name of exactVariableNames(statement)) {
     const alias = aliases.get(name)
-    for (const phrase of [alias, humanizeIdentifier(name)]) {
+    for (const phrase of [name, alias, humanizeIdentifier(name)]) {
       if (phrase && lowerText.includes(phrase.toLocaleLowerCase())) phrases.add(phrase)
     }
   }
@@ -259,7 +342,7 @@ export function storyCandidates(
   ): void => {
     if (candidate.role === 'action' && !options.includeActions) return
     const aliased = candidate.role === 'check' ? applySubjectAlias(candidate.text, aliases) : candidate.text
-    const text = candidate.fidelity === 'derived' ? polishStoryText(aliased) : aliased
+    const text = restoreExactIdentifiers(candidate.fidelity === 'derived' ? polishStoryText(aliased) : aliased)
     candidates.push({
       ...candidate,
       text,
