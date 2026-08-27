@@ -25,7 +25,7 @@ describe('translateReadableTest structure', () => {
     ])
   })
 
-  it('returns exact source ranges with translated and explicit unresolved steps', () => {
+  it('returns exact source ranges with controlled-English statements', () => {
     expect(translateReadableTest(INPUT)).toEqual({
       version: READABLE_TEST_VERSION,
       title: 'submits checkout',
@@ -34,8 +34,8 @@ describe('translateReadableTest structure', () => {
         {
           id: expect.stringMatching(/^rt_[a-f0-9]{12}$/),
           kind: 'leaf',
-          role: 'action',
-          text: 'Open “/checkout”',
+          role: 'syntax',
+          text: 'await:\n    call property `goto` of `page`\n    with argument string "/checkout"',
           fidelity: 'derived',
           source: {
             file: '/workspace/features/checkout/e2e/checkout.spec.ts',
@@ -47,8 +47,8 @@ describe('translateReadableTest structure', () => {
         {
           id: expect.stringMatching(/^rt_[a-f0-9]{12}$/),
           kind: 'leaf',
-          role: 'helper',
-          text: 'Run selected action',
+          role: 'syntax',
+          text: 'await:\n    call `runSelectedAction`\n    with argument `page`',
           fidelity: 'derived',
           source: {
             file: '/workspace/features/checkout/e2e/checkout.spec.ts',
@@ -94,7 +94,8 @@ describe('translateReadableTest structure', () => {
         children: [
           expect.objectContaining({
             kind: 'leaf',
-            text: 'Enter “ada@example.com” in the control labelled “Email”',
+            text:
+              'await:\n    call:\n        property `fill`\n        of:\n            call property `getByLabel` of `page`\n            with argument string "Email"\n    with argument string "ada@example.com"',
             fidelity: 'derived',
             source: expect.objectContaining({ startLine: 12, endLine: 12 }),
           }),
@@ -106,7 +107,8 @@ describe('translateReadableTest structure', () => {
             children: [
               expect.objectContaining({
                 kind: 'leaf',
-                text: 'Click the “Sign in” button',
+                text:
+                  'await:\n    call:\n        property `click`\n        of:\n            call property `getByRole` of `page`\n            with arguments:\n                string "button"\n                an object literal with:\n                    property `name` set to string "Sign in"\n    with no arguments',
                 source: expect.objectContaining({ startLine: 14, endLine: 14 }),
               }),
             ],
@@ -119,7 +121,7 @@ describe('translateReadableTest structure', () => {
     expect(translated.nodes[0]).not.toHaveProperty('origin')
   })
 
-  it('expands supplied project-local helper bodies and humanizes unavailable helpers', () => {
+  it('expands supplied project-local helper bodies without interpreting helper names', () => {
     const translated = translateReadableTest({
       ...INPUT,
       bodySource: `{
@@ -144,42 +146,44 @@ describe('translateReadableTest structure', () => {
         // Marked so the web UI can show just the call as one line while the
         // evaluation flowchart still descends into the children.
         origin: 'helper',
-        text: 'Login as',
+        text: 'await:\n    call `loginAs`\n    with arguments:\n        `page`\n        `email`',
         fidelity: 'derived',
         source: expect.objectContaining({ file: INPUT.file, startLine: 21 }),
         children: [
           expect.objectContaining({
             kind: 'leaf',
-            text: 'Enter email in the control labelled “Email”',
+            text:
+              'await:\n    call:\n        property `fill`\n        of:\n            call property `getByLabel` of `page`\n            with argument string "Email"\n    with argument `email`',
             source: expect.objectContaining({ file: '/workspace/features/account/support/auth.ts', startLine: 9 }),
           }),
           expect.objectContaining({
             kind: 'leaf',
-            text: 'Check that the “Sign in” button is visible',
+            text:
+              'await:\n    call:\n        property `toBeVisible`\n        of:\n            call `expect`\n            with argument:\n                call property `getByRole` of `page`\n                with arguments:\n                    string "button"\n                    an object literal with:\n                        property `name` set to string "Sign in"\n    with no arguments',
             source: expect.objectContaining({ file: '/workspace/features/account/support/auth.ts', startLine: 10 }),
           }),
         ],
       }),
       expect.objectContaining({
         kind: 'leaf',
-        role: 'helper',
-        text: 'Seed account',
+        role: 'syntax',
+        text: 'await:\n    call `seedAccount`\n    with argument `email`',
         fidelity: 'derived',
       }),
     ])
   })
 
-  it('keeps computed calls unresolved because no stable helper name exists', () => {
+  it('translates computed calls structurally instead of falling back to source', () => {
     const translated = translateReadableTest({
       ...INPUT,
       bodySource: '{ await page[method](targetFromEnvironment()) }',
     })
-    expect(translated.completeness).toBe('partial')
+    expect(translated.completeness).toBe('complete')
     expect(translated.nodes[0]).toEqual(expect.objectContaining({
       kind: 'leaf',
-      role: 'unknown',
-      text: 'Review this source step',
-      fidelity: 'unresolved',
+      role: 'syntax',
+      text: 'await:\n    call element `method` of `page`\n    with argument:\n        call `targetFromEnvironment` with no arguments',
+      fidelity: 'derived',
     }))
   })
 
@@ -197,16 +201,16 @@ describe('translateReadableTest structure', () => {
     expect(translated.completeness).toBe('complete')
     expect(translated.nodes[0]).toEqual(expect.objectContaining({
       kind: 'branch',
-      text: 'If mode equals “manual”',
+      text: 'if `mode` is strictly equal to string "manual"',
       fidelity: 'derived',
       paths: [
         expect.objectContaining({
-          text: 'Then',
-          children: [expect.objectContaining({ text: 'Click the text “Continue”' })],
+          text: 'then',
+          children: [expect.objectContaining({ text: expect.stringContaining('string "Continue"') })],
         }),
         expect.objectContaining({
-          text: 'Otherwise',
-          children: [expect.objectContaining({ text: 'Click the text “Start”' })],
+          text: 'otherwise',
+          children: [expect.objectContaining({ text: expect.stringContaining('string "Start"') })],
         }),
       ],
     }))
@@ -227,18 +231,18 @@ describe('translateReadableTest structure', () => {
     })
     expect(translated.nodes[0]).toEqual(expect.objectContaining({
       kind: 'branch',
-      text: 'Choose based on state',
+      text: 'switch on `state`',
       paths: [
         expect.objectContaining({
-          text: 'When “ready”',
+          text: 'when case matches string "ready"',
           children: [
-            expect.objectContaining({ text: 'Click the “Run” button' }),
-            expect.objectContaining({ text: 'Leave this decision', fidelity: 'derived' }),
+            expect.objectContaining({ text: expect.stringContaining('string "Run"') }),
+            expect.objectContaining({ text: 'break', fidelity: 'derived' }),
           ],
         }),
         expect.objectContaining({
-          text: 'Otherwise',
-          children: [expect.objectContaining({ text: 'Reload the page' })],
+          text: 'the default case',
+          children: [expect.objectContaining({ text: 'await:\n    call property `reload` of `page` with no arguments' })],
         }),
       ],
     }))
@@ -253,6 +257,9 @@ describe('translateReadableTest structure', () => {
   }
   for (const item of items) {
     await page.getByText(item.label).click()
+  }
+  for (const key in record) {
+    visit(key)
   }
   for await (const event of stream) {
     await page.getByText(event.message).click()
@@ -271,37 +278,44 @@ describe('translateReadableTest structure', () => {
       expect.objectContaining({
         kind: 'loop',
         loopKind: 'for',
-        text: 'For attempt starts at 0; while attempt is less than limit; increase attempt by 1',
-        children: [expect.objectContaining({ text: 'Click the text “Retry”' })],
+        text:
+          'for loop\nsetup:\n    declare variable `attempt` and initialize it to number 0\ncontinue while `attempt` is less than `limit`\nafter each pass:\n    add and assign to `attempt` the value number 1',
+        children: [expect.objectContaining({ text: expect.stringContaining('string "Retry"') })],
       }),
       expect.objectContaining({
         kind: 'loop',
         loopKind: 'for-of',
-        text: 'For each item in items',
-        children: [expect.objectContaining({ text: 'Click the text item label' })],
+        text: 'for each constant `item`\nfrom iterable `items`',
+        children: [expect.objectContaining({ text: expect.stringContaining('property `label` of `item`') })],
+      }),
+      expect.objectContaining({
+        kind: 'loop',
+        loopKind: 'for-in',
+        text: 'for each constant `key`\nfrom the enumerable keys of `record`',
+        children: [expect.objectContaining({ text: 'call `visit`\nwith argument `key`' })],
       }),
       expect.objectContaining({
         kind: 'loop',
         loopKind: 'for-await-of',
-        text: 'For each event received from stream',
-        children: [expect.objectContaining({ text: 'Click the text event message' })],
+        text: 'for await each constant `event`\nfrom iterable `stream`',
+        children: [expect.objectContaining({ text: expect.stringContaining('property `message` of `event`') })],
       }),
       expect.objectContaining({
         kind: 'loop',
         loopKind: 'while',
-        text: 'While ready is true',
-        children: [expect.objectContaining({ text: 'Reload the page' })],
+        text: 'while `ready` is truthy',
+        children: [expect.objectContaining({ text: 'await:\n    call property `reload` of `page` with no arguments' })],
       }),
       expect.objectContaining({
         kind: 'loop',
         loopKind: 'do-while',
-        text: 'Run once, then repeat while stale is true',
-        children: [expect.objectContaining({ text: 'Click the text “Refresh”' })],
+        text: 'do\nthen repeat while `stale` is truthy',
+        children: [expect.objectContaining({ text: expect.stringContaining('string "Refresh"') })],
       }),
     ])
   })
 
-  it('derives loop counts only from statically safe integer bounds', () => {
+  it('preserves loop syntax instead of replacing it with an inferred count', () => {
     const translated = translateReadableTest({
       ...INPUT,
       bodySource: `{
@@ -320,15 +334,21 @@ describe('translateReadableTest structure', () => {
     expect(translated.nodes).toEqual([
       expect.objectContaining({
         kind: 'loop',
-        text: 'Repeat 3 times',
-        count: 3,
+        text:
+          'for loop\nsetup:\n    declare variable `attempt` and initialize it to number 0\ncontinue while `attempt` is less than number 3\nafter each pass:\n    add and assign to `attempt` the value number 1',
       }),
       expect.objectContaining({
         kind: 'loop',
-        text: 'For retry starts at start; while retry is less than limit; increase retry by step',
+        text:
+          'for loop\nsetup:\n    declare variable `retry` and initialize it to `start`\ncontinue while `retry` is less than `limit`\nafter each pass:\n    add and assign to `retry` the value `step`',
       }),
-      expect.not.objectContaining({ count: expect.anything() }),
+      expect.objectContaining({
+        kind: 'loop',
+        text:
+          'for loop\nsetup:\n    declare variable `guarded` and initialize it to number 0\ncontinue while `guarded` is less than number 3\nafter each pass:\n    add and assign to `guarded` the value number 1',
+      }),
     ])
+    expect(translated.nodes.every((node) => !('count' in node))).toBe(true)
   })
 
   it('renders break and continue according to their nearest control target', () => {
@@ -352,21 +372,21 @@ describe('translateReadableTest structure', () => {
       children: [
         expect.objectContaining({
           kind: 'branch',
-          paths: [expect.objectContaining({ children: [expect.objectContaining({ text: 'Skip to the next item' })] })],
+          paths: [expect.objectContaining({ children: [expect.objectContaining({ text: 'continue' })] })],
         }),
         expect.objectContaining({
           kind: 'branch',
-          paths: [expect.objectContaining({ children: [expect.objectContaining({ text: 'Stop repeating' })] })],
+          paths: [expect.objectContaining({ children: [expect.objectContaining({ text: 'break' })] })],
         }),
       ],
     }))
     expect(decision).toEqual(expect.objectContaining({
       kind: 'branch',
-      paths: [expect.objectContaining({ children: [expect.objectContaining({ text: 'Leave this decision' })] })],
+      paths: [expect.objectContaining({ children: [expect.objectContaining({ text: 'break' })] })],
     }))
   })
 
-  it('retains exact snippets and ranges for every unresolved source shape', () => {
+  it('translates dynamic source shapes without rendering their source as English', () => {
     const translated = translateReadableTest({
       file: '/workspace/features/dynamic/e2e/dynamic.spec.js',
       title: 'uses runtime-selected behavior',
@@ -377,10 +397,12 @@ describe('translateReadableTest structure', () => {
   expect(order).toSatisfyBusinessRule(rule)
 }`,
     })
-    expect(translated.completeness).toBe('partial')
+    expect(translated.completeness).toBe('complete')
     expect(translated.nodes).toEqual([
       expect.objectContaining({
-        fidelity: 'unresolved',
+        role: 'syntax',
+        fidelity: 'derived',
+        text: 'declare constant `method` and initialize it to element increment `index` and yield the previous value of `methods`',
         source: {
           file: '/workspace/features/dynamic/e2e/dynamic.spec.js',
           startLine: 41,
@@ -389,7 +411,9 @@ describe('translateReadableTest structure', () => {
         },
       }),
       expect.objectContaining({
-        fidelity: 'unresolved',
+        role: 'syntax',
+        fidelity: 'derived',
+        text: 'await:\n    call element `method` of `page`\n    with argument:\n        call `targetFromEnvironment` with no arguments',
         source: {
           file: '/workspace/features/dynamic/e2e/dynamic.spec.js',
           startLine: 42,
@@ -398,9 +422,9 @@ describe('translateReadableTest structure', () => {
         },
       }),
       expect.objectContaining({
-        role: 'check',
-        text: 'expect(order).toSatisfyBusinessRule(rule)',
-        fidelity: 'unresolved',
+        role: 'syntax',
+        text: 'call:\n    property `toSatisfyBusinessRule`\n    of:\n        call `expect`\n        with argument `order`\nwith argument `rule`',
+        fidelity: 'derived',
         source: {
           file: '/workspace/features/dynamic/e2e/dynamic.spec.js',
           startLine: 43,
@@ -409,5 +433,38 @@ describe('translateReadableTest structure', () => {
         },
       }),
     ])
+  })
+
+  it('translates the graceful-shutdown body without exposing source lines as English', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  const { exit, elapsedMs } = await consumer.sigterm()
+  expect(isCleanExit(exit)).toBe(true)
+  expect(consumer.logs()).toContain(DRAIN_COMPLETE_MARKER)
+}`,
+    })
+
+    expect(translated.completeness).toBe('complete')
+    expect(translated.nodes).toHaveLength(3)
+    expect(translated.nodes).toEqual([
+      expect.objectContaining({
+        text: expect.stringContaining('an object pattern binding'),
+        fidelity: 'derived',
+      }),
+      expect.objectContaining({
+        text: expect.stringContaining('property `toBe`'),
+        fidelity: 'derived',
+      }),
+      expect.objectContaining({
+        text: expect.stringContaining('property `toContain`'),
+        fidelity: 'derived',
+      }),
+    ])
+    for (const node of translated.nodes) {
+      expect(node.text).not.toBe(node.source.snippet)
+      expect(node.fidelity).not.toBe('unresolved')
+      expect(node.fidelity).not.toBe('unsupported')
+    }
   })
 })

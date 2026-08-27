@@ -35,7 +35,7 @@ function toolText(result: ToolCallResult): string {
   return first?.text ?? ''
 }
 
-async function connectClient(address: string, pathAndQuery = '/mcp'): Promise<Client> {
+async function connectClient(address: string, pathAndQuery = '/mcp?profile=lifecycle'): Promise<Client> {
   const client = new Client(
     { name: 'canary-lab-smoke', version: '0.0.1' },
     { capabilities: {} },
@@ -116,7 +116,7 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      const url = new URL('/mcp', address)
+      const url = new URL('/mcp?profile=lifecycle', address)
       client = new Client(
         { name: 'canary-lab-smoke', version: '0.0.1' },
         { capabilities: {} },

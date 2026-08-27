@@ -1,9 +1,9 @@
-export const READABLE_TEST_VERSION = 1 as const
+export const READABLE_TEST_VERSION = 2 as const
 
-export type ReadableFidelity = 'exact' | 'derived' | 'unresolved'
+export type ReadableFidelity = 'exact' | 'derived' | 'unsupported' | 'unresolved'
 export type ReadableCompleteness = 'complete' | 'partial'
-export type ReadableLeafRole = 'setup' | 'action' | 'check' | 'helper' | 'unknown'
-export type ReadableLoopKind = 'for' | 'for-of' | 'for-await-of' | 'while' | 'do-while'
+export type ReadableLeafRole = 'syntax' | 'setup' | 'action' | 'check' | 'helper' | 'unknown'
+export type ReadableLoopKind = 'for' | 'for-in' | 'for-of' | 'for-await-of' | 'while' | 'do-while'
 
 export interface ReadableSource {
   file: string
@@ -47,8 +47,6 @@ export interface ReadableLoopNode extends ReadableNodeBase {
   kind: 'loop'
   loopKind: ReadableLoopKind
   children: ReadableNode[]
-  // Present only when the source proves a finite iteration count.
-  count?: number
 }
 
 export type ReadableNode =

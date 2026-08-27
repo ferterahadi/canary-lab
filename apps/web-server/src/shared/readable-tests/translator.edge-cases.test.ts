@@ -24,7 +24,10 @@ describe('readable translator parsing edges', () => {
     for (const file of ['scenario.js', 'scenario.jsx', 'scenario.ts', 'scenario.tsx']) {
       expect(translate('await page.reload()', { file })).toEqual(expect.objectContaining({
         completeness: 'complete',
-        nodes: [expect.objectContaining({ text: 'Reload the page' })],
+        nodes: [expect.objectContaining({
+          role: 'syntax',
+          text: 'await:\n    call property `reload` of `page` with no arguments',
+        })],
       }))
     }
   })
@@ -51,29 +54,60 @@ describe('readable translator parsing edges', () => {
       title: 'from AST',
       completeness: 'complete',
       nodes: [expect.objectContaining({
-        text: 'Reload the page',
+        text: 'await:\n    call property `reload` of `page` with no arguments',
         source: expect.objectContaining({ startLine: 2, endLine: 2 }),
       })],
     }))
 
-    const unresolvedSource = ts.createSourceFile(
-      '/workspace/unresolved.ts',
+    const dynamicSource = ts.createSourceFile(
+      '/workspace/dynamic.ts',
       'async function scenario() { await page[method](computeTarget()) }',
       ts.ScriptTarget.Latest,
       true,
       ts.ScriptKind.TS,
     )
-    const unresolvedDeclaration = unresolvedSource.statements[0] as ts.FunctionDeclaration
+    const dynamicDeclaration = dynamicSource.statements[0] as ts.FunctionDeclaration
     expect(translateReadableTestFromAst({
-      file: unresolvedSource.fileName,
-      title: 'partial from AST',
-      sourceFile: unresolvedSource,
-      body: unresolvedDeclaration.body as ts.Block,
+      file: dynamicSource.fileName,
+      title: 'dynamic from AST',
+      sourceFile: dynamicSource,
+      body: dynamicDeclaration.body as ts.Block,
       helpers: [{ name: 'unused', file: '/workspace/helpers.ts', bodySource: '{}' }],
-    }).completeness).toBe('partial')
+    })).toEqual(expect.objectContaining({
+      completeness: 'complete',
+      nodes: [expect.objectContaining({
+        fidelity: 'derived',
+        text: 'await:\n    call element `method` of `page`\n    with argument:\n        call `computeTarget` with no arguments',
+      })],
+    }))
   })
 
-  it('recognizes expression, return, and variable helper calls but not malformed authored steps', () => {
+  it('rethrows unexpected compiler failures instead of disguising them as source text', () => {
+    const sourceFile = ts.createSourceFile(
+      '/workspace/broken.ts',
+      'x',
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    )
+    const malformedStatement = {
+      kind: ts.SyntaxKind.ExpressionStatement,
+      getStart: () => 0,
+      getEnd: () => 1,
+      getText: () => 'x',
+      expression: undefined,
+    } as unknown as ts.Statement
+    const body = { statements: [malformedStatement] } as unknown as ts.Block
+
+    expect(() => translateReadableTestFromAst({
+      file: sourceFile.fileName,
+      title: 'broken AST',
+      sourceFile,
+      body,
+    })).toThrow(TypeError)
+  })
+
+  it('translates expression, return, variable, and malformed step calls without name interpretation', () => {
     const result = translate(`{
   (await firstHelper())
   return secondHelper()
@@ -86,14 +120,16 @@ describe('readable translator parsing edges', () => {
 }`)
 
     expect(result.nodes.slice(0, 3)).toEqual([
-      expect.objectContaining({ role: 'helper', text: 'First helper' }),
-      expect.objectContaining({ role: 'helper', text: 'Second helper' }),
-      expect.objectContaining({ role: 'helper', text: 'Third helper' }),
+      expect.objectContaining({ role: 'syntax', text: 'group of:\n    await:\n        call `firstHelper` with no arguments' }),
+      expect.objectContaining({ role: 'syntax', text: 'return:\n    call `secondHelper` with no arguments' }),
+      expect.objectContaining({
+        role: 'syntax',
+        text: 'declare constant `result`\nand initialize it to:\n    call `thirdHelper` with no arguments',
+      }),
     ])
-    expect(result.nodes.slice(3)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ fidelity: 'unresolved' }),
-    ]))
-    expect(result.completeness).toBe('partial')
+    expect(result.nodes.slice(3).every((node) => node.fidelity === 'derived')).toBe(true)
+    expect(result.nodes.slice(3).map((node) => node.text).join('\n')).toContain('property `step`')
+    expect(result.completeness).toBe('complete')
   })
 
   it('accepts a function-expression test.step and retains standalone blocks', () => {
@@ -111,12 +147,12 @@ describe('readable translator parsing edges', () => {
         kind: 'group',
         text: 'Function callback',
         fidelity: 'exact',
-        children: [expect.objectContaining({ text: 'Reload the page' })],
+        children: [expect.objectContaining({ text: 'await:\n    call property `reload` of `page` with no arguments' })],
       }),
       expect.objectContaining({
         kind: 'group',
-        text: 'Grouped steps',
-        children: [expect.objectContaining({ text: 'Go back to the previous page' })],
+        text: 'block',
+        children: [expect.objectContaining({ text: 'await:\n    call property `goBack` of `page` with no arguments' })],
       }),
     ])
   })
@@ -144,25 +180,25 @@ describe('readable translator parsing edges', () => {
 
     expect(result.nodes[0]).toEqual(expect.objectContaining({
       kind: 'group',
-      text: 'Try these steps',
+      text: 'try',
       children: [
-        expect.objectContaining({ text: 'Reload the page' }),
-        expect.objectContaining({ kind: 'group', text: 'If an error occurs' }),
-        expect.objectContaining({ kind: 'group', text: 'Always afterward' }),
+        expect.objectContaining({ text: 'await:\n    call property `reload` of `page` with no arguments' }),
+        expect.objectContaining({ kind: 'group', text: 'on error caught as `error`' }),
+        expect.objectContaining({ kind: 'group', text: 'finally' }),
       ],
     }))
     expect(result.nodes[1]).toEqual(expect.objectContaining({
       kind: 'group',
       children: [
-        expect.objectContaining({ text: 'Go forward to the next page' }),
-        expect.objectContaining({ kind: 'group', text: 'Always afterward' }),
+        expect.objectContaining({ text: 'await:\n    call property `goForward` of `page` with no arguments' }),
+        expect.objectContaining({ kind: 'group', text: 'finally' }),
       ],
     }))
     expect(result.nodes[2]).toEqual(expect.objectContaining({
       kind: 'group',
       children: [
-        expect.objectContaining({ text: 'Click the text “Retry”' }),
-        expect.objectContaining({ kind: 'group', text: 'If an error occurs' }),
+        expect.objectContaining({ text: expect.stringContaining('string "Retry"') }),
+        expect.objectContaining({ kind: 'group', text: 'on error caught as `error`' }),
       ],
     }))
   })
@@ -185,31 +221,22 @@ describe('readable translator loop edges', () => {
 }`)
 
     expect(result.nodes.map((node) => node.text)).toEqual([
-      'For use no initializer; while no source condition; use no update',
-      'For attempt = 0; while attempt is less than 2; attempt plus 1',
-      'For attempt; while ready; increase attempt by 1',
-      'For use attempt; while ready; increase attempt by 1',
-      'For [attempt] = attempts; while ready; increase attempt by 1',
-      'For attempt starts at computeStart(); while ready; updateAttempt()',
-      'For attempt starts at 0; while ready; not attempt',
-      'For attempt starts at 0; while ready; ++computeCounter()',
-      'For attempt starts at 0; while ready; attempt += computeStep()',
-      'Repeat 3 times',
-      'Repeat 2 times',
+      'for loop',
+      'for loop\nsetup:\n    assign `attempt` the value number 0\ncontinue while `attempt` is less than number 2\nafter each pass `attempt` plus number 1',
+      'for loop\nsetup:\n    `attempt`\ncontinue while `ready` is truthy\nafter each pass:\n    increment `attempt` and yield the previous value',
+      'for loop\nsetup:\n    declare variable `attempt`\ncontinue while `ready` is truthy\nafter each pass:\n    increment `attempt` and yield the previous value',
+      'for loop\nsetup:\n    declare variable:\n        an array pattern binding:\n            bind element 0 to `attempt`\n    and initialize it to `attempts`\ncontinue while `ready` is truthy\nafter each pass:\n    increment `attempt` and yield the previous value',
+      'for loop\nsetup:\n    declare variable `attempt`\n    and initialize it to:\n        call `computeStart` with no arguments\ncontinue while `ready` is truthy\nafter each pass:\n    call `updateAttempt` with no arguments',
+      'for loop\nsetup:\n    declare variable `attempt` and initialize it to number 0\ncontinue while `ready` is truthy\nafter each pass not `attempt`',
+      'for loop\nsetup:\n    declare variable `attempt` and initialize it to number 0\ncontinue while `ready` is truthy\nafter each pass:\n    increment call `computeCounter` with no arguments and yield the new value',
+      'for loop\nsetup:\n    declare variable `attempt` and initialize it to number 0\ncontinue while `ready` is truthy\nafter each pass:\n    add and assign to `attempt`\n    the value:\n        call `computeStep` with no arguments',
+      'for loop\nsetup:\n    declare variable `attempt` and initialize it to number 3\ncontinue while `attempt` is greater than number 0\nafter each pass:\n    decrement `attempt` and yield the new value',
+      'for loop\nsetup:\n    declare variable `attempt` and initialize it to number 3\ncontinue while `attempt` is greater than number 0\nafter each pass:\n    subtract and assign to `attempt` the value number 2',
     ])
-    expect(result.nodes.slice(1, 9).map((node) => node.fidelity)).toEqual([
-      'unresolved',
-      'derived',
-      'derived',
-      'unresolved',
-      'unresolved',
-      'derived',
-      'unresolved',
-      'unresolved',
-    ])
+    expect(result.nodes.every((node) => node.fidelity === 'derived')).toBe(true)
   })
 
-  it('describes expression and destructured for-of variables conservatively', () => {
+  it('describes expression and destructured for-of targets structurally', () => {
     const result = translate(`{
   for (item of items) { await page.reload() }
   for (const [item] of items) { await page.reload() }
@@ -218,32 +245,45 @@ describe('readable translator loop edges', () => {
 }`)
 
     expect(result.nodes).toEqual([
-      expect.objectContaining({ text: 'For each item in items', fidelity: 'derived' }),
-      expect.objectContaining({ text: 'For each const [item] in items', fidelity: 'unresolved' }),
-      expect.objectContaining({ text: 'For each item in computeItems()', fidelity: 'unresolved' }),
-      expect.objectContaining({ text: 'For each computeItem() in items', fidelity: 'unresolved' }),
+      expect.objectContaining({ text: 'for each assigning to `item`\nfrom iterable `items`', fidelity: 'derived' }),
+      expect.objectContaining({
+        text: 'for each constant:\n    an array pattern binding:\n        bind element 0 to `item`\nfrom iterable `items`',
+        fidelity: 'derived',
+      }),
+      expect.objectContaining({
+        text: 'for each constant `item`\nfrom iterable call `computeItems` with no arguments',
+        fidelity: 'derived',
+      }),
+      expect.objectContaining({
+        text: 'for each assigning to call `computeItem` with no arguments\nfrom iterable `items`',
+        fidelity: 'derived',
+      }),
     ])
   })
 
-  it('derives zero, one, inclusive, descending, and stepped loop counts', () => {
-    const cases: Array<[string, number, string]> = [
-      ['for (let i = 0; i < 1; i++) { page.reload() }', 1, 'Repeat 1 time'],
-      ['for (let i = 2; i < 1; i++) { page.reload() }', 0, 'Repeat 0 times'],
-      ['for (let i = 0; i <= 2; i += 1) { page.reload() }', 3, 'Repeat 3 times'],
-      ['for (let i = 3; i <= 2; i++) { page.reload() }', 0, 'Repeat 0 times'],
-      ['for (let i = 3; i > 0; i--) { page.reload() }', 3, 'Repeat 3 times'],
-      ['for (let i = 0; i > 1; i--) { page.reload() }', 0, 'Repeat 0 times'],
-      ['for (let i = 3; i >= 0; i -= 2) { page.reload() }', 2, 'Repeat 2 times'],
-      ['for (let i = -1; i >= +1; i--) { page.reload() }', 0, 'Repeat 0 times'],
-      ['for (let i = -2; i < +2; i += 2) { page.reload() }', 2, 'Repeat 2 times'],
+  it('keeps zero, one, inclusive, descending, and stepped bounds as source structure', () => {
+    const sources = [
+      'for (let i = 0; i < 1; i++) { page.reload() }',
+      'for (let i = 2; i < 1; i++) { page.reload() }',
+      'for (let i = 0; i <= 2; i += 1) { page.reload() }',
+      'for (let i = 3; i <= 2; i++) { page.reload() }',
+      'for (let i = 3; i > 0; i--) { page.reload() }',
+      'for (let i = 0; i > 1; i--) { page.reload() }',
+      'for (let i = 3; i >= 0; i -= 2) { page.reload() }',
+      'for (let i = -1; i >= +1; i--) { page.reload() }',
+      'for (let i = -2; i < +2; i += 2) { page.reload() }',
     ]
 
-    for (const [source, count, text] of cases) {
-      expect(onlyNode(source)).toEqual(expect.objectContaining({ count, text }))
+    for (const source of sources) {
+      const node = onlyNode(source)
+      expect(node).toEqual(expect.objectContaining({ kind: 'loop', fidelity: 'derived' }))
+      expect(node).not.toHaveProperty('count')
+      expect(node.text).toContain('for loop')
+      expect(node.text).not.toContain('Repeat')
     }
   })
 
-  it('does not claim a count unless every counter assumption is statically safe', () => {
+  it('never exposes inferred count metadata for dynamic or control-mutating loops', () => {
     const sources = [
       'for (i = 0; i < 3; i++) { page.reload() }',
       'for (let i = 0, j = 0; i < 3; i++) { page.reload() }',
@@ -276,7 +316,7 @@ describe('readable translator loop edges', () => {
     }
   })
 
-  it('keeps unresolved loop controls and conditions visible', () => {
+  it('keeps loop controls and call conditions in canonical syntax', () => {
     const result = translate(`{
   break
   continue
@@ -287,20 +327,28 @@ describe('readable translator loop edges', () => {
   do { await page.reload() } while (computeReady())
 }`)
 
-    expect(result.completeness).toBe('partial')
-    expect(result.nodes[0]).toEqual(expect.objectContaining({ fidelity: 'unresolved' }))
-    expect(result.nodes[1]).toEqual(expect.objectContaining({ fidelity: 'unresolved' }))
+    expect(result.completeness).toBe('complete')
+    expect(result.nodes[0]).toEqual(expect.objectContaining({ fidelity: 'derived', text: 'break' }))
+    expect(result.nodes[1]).toEqual(expect.objectContaining({ fidelity: 'derived', text: 'continue' }))
     expect(result.nodes[2]).toEqual(expect.objectContaining({
       kind: 'loop',
-      children: [expect.objectContaining({ fidelity: 'unresolved' })],
+      children: [expect.objectContaining({ fidelity: 'derived', text: 'continue to label `outer`' })],
     }))
-    expect(result.nodes[3]).toEqual(expect.objectContaining({ kind: 'loop', fidelity: 'unresolved' }))
-    expect(result.nodes[4]).toEqual(expect.objectContaining({ kind: 'loop', fidelity: 'unresolved' }))
+    expect(result.nodes[3]).toEqual(expect.objectContaining({
+      kind: 'loop',
+      fidelity: 'derived',
+      text: 'while call `computeReady` with no arguments is truthy',
+    }))
+    expect(result.nodes[4]).toEqual(expect.objectContaining({
+      kind: 'loop',
+      fidelity: 'derived',
+      text: 'do\nthen repeat while call `computeReady` with no arguments is truthy',
+    }))
   })
 })
 
 describe('readable translator branch and helper edges', () => {
-  it('marks unresolved conditions, subjects, cases, and switch fallthrough', () => {
+  it('translates call conditions, subjects, cases, and explicit fallthrough structure', () => {
     const result = translate(`{
   if (computeMode()) await page.reload()
   switch (computeState()) {
@@ -318,23 +366,25 @@ describe('readable translator branch and helper edges', () => {
 
     expect(result.nodes[0]).toEqual(expect.objectContaining({
       kind: 'branch',
-      fidelity: 'unresolved',
-      paths: [expect.objectContaining({ text: 'Then' })],
+      fidelity: 'derived',
+      text: 'if call `computeMode` with no arguments is truthy',
+      paths: [expect.objectContaining({ text: 'then' })],
     }))
     expect(result.nodes[1]).toEqual(expect.objectContaining({
       kind: 'branch',
-      fidelity: 'unresolved',
+      fidelity: 'derived',
+      text: 'switch on call `computeState` with no arguments',
       paths: [
-        expect.objectContaining({ text: 'Otherwise, then continue to the next case' }),
-        expect.objectContaining({ text: 'When computeCase(), then continue to the next case', fidelity: 'unresolved' }),
-        expect.objectContaining({ text: 'When “returned”' }),
-        expect.objectContaining({ text: 'When “thrown”' }),
-        expect.objectContaining({ text: 'When “last”' }),
+        expect.objectContaining({ text: 'the default case' }),
+        expect.objectContaining({ text: 'when case matches call `computeCase` with no arguments', fidelity: 'derived' }),
+        expect.objectContaining({ text: 'when case matches string "returned"' }),
+        expect.objectContaining({ text: 'when case matches string "thrown"' }),
+        expect.objectContaining({ text: 'when case matches string "last"' }),
       ],
     }))
   })
 
-  it('expands only helpers with at least one meaningful translation and guards cycles', () => {
+  it('expands every available helper and guards recursive cycles', () => {
     const helpers: NonNullable<ReadableTestInput['helpers']> = [
       {
         name: 'onlyDynamicSource',
@@ -383,16 +433,20 @@ describe('readable translator branch and helper edges', () => {
 }`, { helpers })
 
     expect(result.nodes).toEqual([
-      expect.objectContaining({ kind: 'leaf', role: 'helper', text: 'Only dynamic source' }),
-      expect.objectContaining({ kind: 'group', text: 'Authored group' }),
-      expect.objectContaining({ kind: 'group', text: 'Derived group' }),
-      expect.objectContaining({ kind: 'group', text: 'Translated loop' }),
-      expect.objectContaining({ kind: 'leaf', role: 'helper', text: 'Unresolved branch' }),
-      expect.objectContaining({ kind: 'group', text: 'Derived path' }),
+      expect.objectContaining({ kind: 'group', text: 'await:\n    call `onlyDynamicSource` with no arguments' }),
+      expect.objectContaining({ kind: 'group', text: 'await:\n    call `authoredGroup` with no arguments' }),
+      expect.objectContaining({ kind: 'group', text: 'await:\n    call `derivedGroup` with no arguments' }),
+      expect.objectContaining({ kind: 'group', text: 'await:\n    call `translatedLoop` with no arguments' }),
+      expect.objectContaining({ kind: 'group', text: 'await:\n    call `unresolvedBranch` with no arguments' }),
+      expect.objectContaining({ kind: 'group', text: 'await:\n    call `derivedPath` with no arguments' }),
       expect.objectContaining({
         kind: 'group',
-        text: 'Recursive helper',
-        children: [expect.objectContaining({ kind: 'leaf', role: 'helper', text: 'Recursive helper' })],
+        text: 'await:\n    call `recursiveHelper` with no arguments',
+        children: [expect.objectContaining({
+          kind: 'leaf',
+          role: 'syntax',
+          text: 'await:\n    call `recursiveHelper` with no arguments',
+        })],
       }),
     ])
   })

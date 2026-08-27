@@ -30,7 +30,7 @@ const source = (startLine: number, snippet: string, file = '/repo/e2e/checkout.s
 })
 
 const READABLE: ReadableTest = {
-  version: 1,
+  version: 2,
   title: 'completes checkout',
   completeness: 'partial',
   nodes: [
@@ -53,8 +53,12 @@ const READABLE: ReadableTest = {
       id: 'loop-retry',
       kind: 'loop',
       loopKind: 'for',
-      count: 2,
-      text: 'Repeat 2 times',
+      text: `for loop
+setup:
+    declare variable \`attempt\` and initialize it to number 0
+continue while \`attempt\` is less than number 2
+after each pass:
+    add and assign to \`attempt\` the value number 1`,
       fidelity: 'derived',
       source: source(14, 'for (let attempt = 0; attempt < 2; attempt += 1) {}'),
       children: [
@@ -130,7 +134,7 @@ describe('ReadableTestView', () => {
     expect(container.querySelectorAll('[data-readable-kind="branch"]')).toHaveLength(1)
     expect(container.querySelectorAll('[data-readable-kind="path"]')).toHaveLength(1)
     expect(container.textContent).toContain('Sign in')
-    expect(container.textContent).toContain('Repeat 2 times')
+    expect(container.textContent).toContain('for loop')
     expect(container.textContent).toContain('For each item in items')
     expect(container.textContent).toContain('If checkout is ready')
     expect(container.querySelector('[data-testid="readable-node-branch-ready"]')?.getAttribute('aria-pressed')).toBe('true')
@@ -153,6 +157,41 @@ describe('ReadableTestView', () => {
     const derivedRow = container.querySelector('[data-testid="readable-node-action-email"]')
     expect(derivedRow?.getAttribute('data-fidelity')).toBe('derived')
     expect(derivedRow?.getAttribute('title')).toContain('Deterministically described from source code')
+  })
+
+  it('preserves controlled-English indentation and never substitutes source for an unsupported kind', async () => {
+    const controlled: ReadableTest = {
+      ...READABLE,
+      nodes: [
+        {
+          id: 'controlled-call',
+          kind: 'leaf',
+          role: 'syntax',
+          text: 'await:\n    call `load`\n    with argument `id`',
+          fidelity: 'derived',
+          source: source(20, 'await load(id)'),
+        },
+        {
+          id: 'unsupported-kind',
+          kind: 'leaf',
+          role: 'syntax',
+          text: 'UNSUPPORTED_SYNTAX_KIND: FutureNode',
+          fidelity: 'unsupported',
+          source: source(21, 'futureSyntax(secretValue)'),
+        },
+      ],
+    }
+    act(() => root.render(<ReadableTestView test={controlled} />))
+    await flushHighlighter()
+
+    const lines = Array.from(
+      container.querySelectorAll('[data-testid="readable-node-controlled-call"] [data-controlled-english="true"] > span'),
+    ).map((line) => line.textContent)
+    expect(lines).toEqual(['await:', '    call `load`', '    with argument `id`'])
+    const unsupported = container.querySelector('[data-testid="readable-node-unsupported-kind"]')
+    expect(unsupported?.textContent).toContain('UNSUPPORTED_SYNTAX_KIND: FutureNode')
+    expect(unsupported?.textContent).not.toContain('futureSyntax(secretValue)')
+    expect(unsupported?.getAttribute('title')).toContain('outside the pinned vocabulary')
   })
 
   it('frames the steps in braces and indents rows the way the source itself indents', async () => {

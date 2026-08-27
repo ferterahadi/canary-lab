@@ -34,13 +34,13 @@ describe('extractTestsFromSource', () => {
     expect(r.tests[0].steps).toEqual([])
     expect(r.tests[0].line).toBeGreaterThan(0)
     expect(r.tests[0].readable).toEqual(expect.objectContaining({
-      version: 1,
+      version: 2,
       title: 'hello world',
       completeness: 'complete',
       nodes: [expect.objectContaining({
         kind: 'leaf',
-        role: 'check',
-        text: 'Check that 1 equals 1',
+        role: 'syntax',
+        text: 'call:\n    property `toBe`\n    of:\n        call `expect`\n        with argument number 1\nwith argument number 1',
       })],
     }))
   })
@@ -119,17 +119,17 @@ describe('extractTestsFromSource', () => {
     expect(readable.nodes).toEqual([
       expect.objectContaining({
         kind: 'group',
-        text: 'Login as',
+        text: 'await:\n    call `loginAs`\n    with arguments:\n        `page`\n        string "ada@example.com"',
         source: expect.objectContaining({ file: 'account.spec.ts', startLine: 6 }),
         children: [expect.objectContaining({
-          text: 'Enter email in the control labelled “Email”',
+          text: expect.stringContaining('call property `getByLabel` of `page`'),
           source: expect.objectContaining({ file: 'account.spec.ts', startLine: 2 }),
         })],
       }),
       expect.objectContaining({
         kind: 'leaf',
-        role: 'check',
-        text: 'Check that the text “Welcome” is visible',
+        role: 'syntax',
+        text: expect.stringContaining('property `toBeVisible`'),
         source: expect.objectContaining({ file: 'account.spec.ts', startLine: 7 }),
       }),
     ])
@@ -157,26 +157,26 @@ describe('extractTestsFromSource', () => {
     expect(readable.nodes).toEqual([
       expect.objectContaining({
         kind: 'group',
-        text: 'Duplicate',
-        children: [expect.objectContaining({ text: 'Click the text “First”' })],
+        text: 'await:\n    call `duplicate`\n    with argument `page`',
+        children: [expect.objectContaining({ text: expect.stringContaining('string "First"') })],
       }),
       expect.objectContaining({
         kind: 'group',
-        text: 'Arrow helper',
-        children: [expect.objectContaining({ text: 'Enter “ada@example.com” in the control labelled “Email”' })],
+        text: 'await:\n    call `arrowHelper`\n    with argument `page`',
+        children: [expect.objectContaining({ text: expect.stringContaining('string "ada@example.com"') })],
       }),
       expect.objectContaining({
         kind: 'group',
-        text: 'Function helper',
-        children: [expect.objectContaining({ text: 'Click the “Save” button' })],
+        text: 'await:\n    call `functionHelper`\n    with argument `page`',
+        children: [expect.objectContaining({ text: expect.stringContaining('string "Save"') })],
       }),
     ])
   })
 
   it('keeps bodySource line-for-line with the source so highlights map 1:1', () => {
-    // The live test view highlights the running line and resolves "open in
-    // editor" by adding a body-line offset to the callback body's start line, so body
-    // line N must correspond to source line N. A blank line between statements
+    // The live test view maps the latest located Playwright step and resolves
+    // "open in editor" by adding a body-line offset to the callback body's start
+    // line, so body line N must correspond to source line N. A blank line between statements
     // must therefore be preserved — re-printing the AST would drop it and
     // shift every subsequent line.
     const src = [
@@ -222,10 +222,21 @@ describe('extractTestsFromSource', () => {
     expect(r.tests[0].steps[0].label).toBe('tpl step')
   })
 
-  it('skips test calls whose first arg is not a string literal', () => {
-    const src = `const NAME='dyn'; test(NAME, async () => {})`
+  it('keeps a dynamic title when an inline callback proves this is a test declaration', () => {
+    const src = [
+      "const variant = { desc: 'dynamic title' }",
+      "test.beforeEach('named setup', async () => {})",
+      'test.afterEach(async () => {})',
+      "test.skip(!enabled, 'conditional setup')",
+      'test(variant.desc, async () => { expect(1).toBe(1) })',
+    ].join('\n')
     const r = extractTestsFromSource('a.spec.ts', src)
-    expect(r.tests).toEqual([])
+
+    // The callback is load-bearing: it distinguishes a dynamically-named test
+    // from conditional modifiers such as test.skip(condition, description).
+    expect(r.tests).toHaveLength(1)
+    expect(r.tests[0].name).toBe('variant.desc')
+    expect(r.tests[0].bodySource).toContain('expect(1).toBe(1)')
   })
 
   it('skips test.step calls with non-string label; allows missing body', () => {
@@ -272,8 +283,8 @@ describe('extractTestsFromSource', () => {
     expect(r.tests[0].bodySource).toBe('expect(1).toBe(1)')
     expect(r.tests[0].readable.nodes[0]).toEqual(expect.objectContaining({
       kind: 'leaf',
-      role: 'check',
-      text: 'Check that 1 equals 1',
+      role: 'syntax',
+      text: 'call:\n    property `toBe`\n    of:\n        call `expect`\n        with argument number 1\nwith argument number 1',
       source: expect.objectContaining({ startLine: 2, endLine: 2 }),
     }))
   })

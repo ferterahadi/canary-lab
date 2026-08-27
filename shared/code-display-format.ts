@@ -16,11 +16,12 @@ export function formatCodeForDisplay(source: string): string {
 // Line-preserving formatter for already-well-formed source slices (e.g. an AST
 // node's body text). Unlike formatCodeForDisplay it never reflows code or drops
 // blank lines, so line N of the output always maps onto line N of the input.
-// The live test view depends on this: it highlights the currently-running line
-// and resolves "open in editor" by adding a body-line offset to the snippet's
-// start line, both of which assume a 1:1 line correspondence. Re-printing the
-// AST (as formatCodeForDisplay does) collapses blank lines and shifts every
-// subsequent line, so it must not be used where line mapping matters.
+// The live test view depends on this: it highlights the latest trustworthy
+// Playwright step call site and resolves "open in editor" by adding a body-line
+// offset to the snippet's start line, both of which assume a 1:1 line
+// correspondence. Re-printing the AST (as formatCodeForDisplay does) collapses
+// blank lines and shifts every subsequent line, so it must not be used where
+// line mapping matters.
 export function formatSourceSnippetForDisplay(source: string): string {
   const normalized = source.replace(/\r\n/g, '\n')
   const lines = normalized.split('\n')

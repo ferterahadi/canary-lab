@@ -55,10 +55,10 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  vi.mocked(api.getMcpHealth).mockImplementation(async (profile = 'repair') => {
-    const tools = profile === 'author'
-      ? ['list_features', 'write_feature_doc']
-      : ['start_run', 'wait_for_heal_task']
+  window.localStorage.removeItem('cl-mcp-connect-open')
+  vi.mocked(api.getMcpHealth).mockImplementation(async () => {
+    const profile = 'compact'
+    const tools = ['exec']
     return {
       ok: true,
       server: { name: 'canary-lab' },
@@ -261,7 +261,7 @@ describe('GlobalStatusBar', () => {
     expect(container.textContent).not.toContain('12 tools')
     expect(container.textContent).not.toContain('Check health')
     expect(container.textContent).not.toContain('Test MCP')
-    expect(api.getMcpHealth).toHaveBeenCalledWith('repair')
+    expect(api.getMcpHealth).toHaveBeenCalledWith()
 
     const indicator = [...container.querySelectorAll('button')]
       .find((button) => button.getAttribute('aria-label') === 'MCP connection details')
@@ -272,17 +272,14 @@ describe('GlobalStatusBar', () => {
     })
 
     const menu = document.body.querySelector('[data-mcp-health-menu]')
-    expect(menu?.textContent).not.toContain('MCP repair profile')
     expect(menu?.textContent).toContain('MCP endpoint')
-    expect(menu?.textContent).toContain('Ready for external repair agents')
-    expect(menu?.textContent).toContain('Repair')
-    expect(menu?.textContent).toContain('Profiles')
-    expect(menu?.textContent).toContain('Author')
-    expect(menu?.textContent).toContain('Full')
-    expect(menu?.textContent).toContain('Tools')
-    expect(menu?.textContent).toContain('2 tools')
-    expect(menu?.textContent).toContain('start_run')
-    expect(menu?.textContent).toContain('wait_for_heal_task')
+    expect(menu?.textContent).toContain('Compact profile for external agents')
+    expect(menu?.textContent).not.toContain('Profiles')
+    expect(menu?.textContent).not.toContain('Repair')
+    expect(menu?.textContent).not.toContain('Author')
+    expect(menu?.textContent).not.toContain('Full')
+    expect(menu?.querySelector('[aria-label="MCP tools"]')).toBeNull()
+    expect(menu?.textContent).not.toContain('1 tool')
     expect(menu?.textContent).toContain('Health OK at')
     expect(menu?.textContent).not.toContain('Check health')
     expect(menu?.textContent).not.toContain('Test MCP')
@@ -291,15 +288,19 @@ describe('GlobalStatusBar', () => {
       .find((button) => button.textContent?.trim() === 'Check health')
     expect(testButton).toBeFalsy()
 
-    const authorButton = [...document.body.querySelectorAll('button')]
-      .find((button) => button.textContent?.includes('Author'))
-    expect(authorButton).toBeTruthy()
+    const connectButton = [...document.body.querySelectorAll('button')]
+      .find((button) => button.textContent?.includes('Connect a client'))
+    expect(connectButton).toBeTruthy()
 
     await act(async () => {
-      authorButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      connectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
-    expect(api.getMcpHealth).toHaveBeenLastCalledWith('author')
-    expect(document.body.querySelector('[data-mcp-health-menu]')?.textContent).toContain('write_feature_doc')
+    const connectionValues = [...document.body.querySelectorAll('[data-mcp-health-menu] code')]
+      .map((value) => value.textContent)
+    expect(connectionValues).toContain('npx canary-lab setup --force')
+    expect(connectionValues.some((value) => value?.endsWith('/mcp?profile=compact'))).toBe(true)
+    expect(document.body.querySelector('[data-mcp-health-menu]')?.textContent)
+      .toContain('Registers only the compact MCP profile')
   })
 
   describe('the Getting started pill', () => {

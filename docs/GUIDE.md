@@ -293,11 +293,10 @@ queue. This planning surface is not available through the CLI or MCP.
 
 ## External authoring workflow
 
-The bare MCP server's default `lifecycle` profile combines six direct-tool
-workflows—repair, verify, author, coverage, export, and Flight—while leaving
-specialized Portify tools out. `setup` registers clients with `compact`: one
-always-loaded `exec` tool dispatches all 63 atomic commands, including Portify.
-Focused direct profiles and `full` remain available for debugging and rollback.
+The default MCP surface is `compact`: one always-loaded `exec` tool dispatches
+all 63 atomic commands, including Portify. Bare connections and `setup`-installed
+clients use the same profile. Focused direct profiles, `lifecycle`, and `full`
+remain opt-in surfaces for debugging and rollback.
 A client can use the following standalone flow without asking Canary Lab to
 author the content:
 
@@ -311,11 +310,10 @@ The names below are exact `command` values inside `exec.arguments`; for example,
 3. The client authors Playwright specs, then records and applies them through
    `start_external_draft` → `update_external_draft_stage` →
    `apply_external_draft`.
-4. Under the `coverage` profile, add source docs, submit structured requirements,
-   map the tests, and read Canary Lab's computed ledger.
-5. Run and repair locally with the `repair` profile, or execute an observational
-   deployed check with `verify`.
-6. Export a terminal run through `start_external_evaluation_export` and
+4. Call the coverage commands through `exec` to add source docs, submit structured
+   requirements, map the tests, and read Canary Lab's computed ledger.
+5. Run and repair locally through `exec`, or execute an observational deployed check.
+6. Export a terminal run through `exec` with `start_external_evaluation_export` and
    `submit_external_evaluation_export`; its `archivePath` is the exact local zip
    to hand to the user (`evaluation.html` is inside it).
 

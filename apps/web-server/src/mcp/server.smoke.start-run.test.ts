@@ -105,7 +105,7 @@ describe('MCP HTTP server (smoke)', () => {
         { name: 'canary-lab-smoke', version: '0.0.1' },
         { capabilities: {} },
       )
-      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp?profile=lifecycle', address)))
 
       runStore.bootstrap({
         runId: 'reuse-active',

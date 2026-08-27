@@ -2,7 +2,6 @@
 // attachment, and the external-heal restart that rebuilds an orchestrator for a
 // terminal run. Split out of index.ts, where both were closures inside
 // `register`; the server context now arrives as an argument.
-import path from 'path'
 import { isRestartableRunStatus } from '../../../../../shared/run-state'
 import type { ClientKind } from '../../../../../shared/run-mode'
 import { type OrchestratorLike } from './logic/run-store'
@@ -20,8 +19,12 @@ import {
 import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { ServerContext } from '../../server-context'
 import { settleOrchestratorRun } from './logic/settle-run'
+import { startSummaryChangeWatcher } from './logic/summary-change-watcher'
 
-export function makeAttachRunStreams(ctx: ServerContext) {
+export function makeAttachRunStreams(
+  ctx: ServerContext,
+  startSummaryWatcher: typeof startSummaryChangeWatcher = startSummaryChangeWatcher,
+) {
   const {
     projectRoot,
     featuresDir,
@@ -43,6 +46,12 @@ export function makeAttachRunStreams(ctx: ServerContext) {
   backups: BackupRecord[] | null,
 ): void => {
   const runId = orch.runId
+  let summaryWatcher: ReturnType<typeof startSummaryChangeWatcher> | null = null
+  const stopSummaryWatcher = (): void => {
+    summaryWatcher?.close()
+    summaryWatcher = null
+  }
+  orch.once('run-complete', stopSummaryWatcher)
   if (backups) {
     activeEnvsets.set(runId, backups)
     orch.once('run-complete', () => {
@@ -69,6 +78,12 @@ export function makeAttachRunStreams(ctx: ServerContext) {
     broker.markExit(`service:${service.safeName}`, exitCode)
   })
   orch.on('playwright-started', () => {
+    stopSummaryWatcher()
+    summaryWatcher = startSummaryWatcher({
+      summaryPath: buildRunPaths(runDirFor(logsDir, runId)).summaryPath,
+      onChange: () => runStore.notifySummaryChanged(runId),
+      onError: (error) => runnerLog.warn(`summary watcher failed: ${error.message}`),
+    })
     broker.resetPane('playwright')
   })
   orch.on('playwright-output', ({ chunk }) => {
@@ -76,6 +91,7 @@ export function makeAttachRunStreams(ctx: ServerContext) {
   })
   orch.on('playwright-exit', ({ exitCode }) => {
     broker.markExit('playwright', exitCode)
+    stopSummaryWatcher()
   })
   orch.on('agent-started', ({ redirect }) => {
     if (!redirect) broker.resetPane('agent')

@@ -68,7 +68,7 @@ export function TestPresentation({
         </div>
         {mode === 'english' && test.readable.completeness === 'partial' && (
           <span className="min-w-0 truncate text-[10px]" style={{ color: 'var(--text-muted)' }}>
-            Some steps stay as source
+            Some syntax could not be translated
           </span>
         )}
         <span

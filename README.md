@@ -23,7 +23,7 @@ Canary Lab requires Node.js 22.12 or newer and npm 9 or newer.
 npx canary-lab init my-lab
 ```
 
-`init` creates a Canary Lab workspace, installs its dependencies and Chromium, and registers the skills and MCP connection for supported Claude and Codex clients. Restart your agent once so it discovers them.
+`init` creates a Canary Lab workspace, installs its dependencies and Chromium, and registers the skills plus one compact MCP connection (`exec`) for supported Claude and Codex clients. Restart your agent once so it discovers them.
 
 The connection starts the local Canary Lab service when the skill needs it. To open the interface yourself:
 
@@ -91,6 +91,8 @@ npx canary-lab flight /absolute/path/to/your-app "checkout flow"
 Use the CLI for shell automation or when you want Canary Lab to conduct the Flight outside an existing agent conversation. Running the command again resumes existing work instead of creating a duplicate.
 
 The UI and MCP server share one configurable port, `7421` by default. Choose another during setup with `npx canary-lab init my-lab --port 8200`, or change it later in Project Settings. The `ui --port` option is not supported.
+
+Custom MCP clients should connect to `http://localhost:<port>/mcp?profile=compact`.
 
 ## Playwright Without a New Test Language
 

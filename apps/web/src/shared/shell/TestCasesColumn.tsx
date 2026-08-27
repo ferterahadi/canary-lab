@@ -5,9 +5,12 @@ import type { DirtySpecSummary, ExtractedTest, FeatureSpecFile, RunStatus } from
 import {
   activeBodyLineForTest,
   colorClassForStatus,
-  runningTestForSummaryName,
+  runningTestForTest,
+  sameSourceFile,
+  sourceLineForBodyLine,
   statusForTest,
   type StepStatus,
+  type TestStatusIdentity,
   summaryEntryName,
 } from '@/features/runs'
 import type { RunSummary, RunSummaryRunningStep } from '../api/types'
@@ -148,36 +151,44 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
                 // endpoint builds each entry from name/line/bodySource/steps and
                 // never sets an id, so the fallback was the only live arm — and
                 // the mirror declared a field the server does not send.
-                const key = `${spec.file}:${t.line}:${t.name}`
+                const sourceFile = t.sourceFile ?? spec.file
+                const key = `${sourceFile}:${t.line}:${t.name}`
                 const isExpanded = expandedTest === key
-                const entryName = summaryEntryName(t.name)
+                const testIdentity = summaryIdentityForWorkspaceTest(
+                  t.name,
+                  t.line,
+                  sourceFile,
+                  activeRunSummary,
+                )
                 const runningTest = isRunActivelyTesting && activeRunSummary
-                  ? runningTestForSummaryName(activeRunSummary, entryName)
+                  ? runningTestForTest(activeRunSummary, testIdentity)
                   : undefined
-                const runningLocation = runningTest?.location
-                const isRunningTest = Boolean(runningLocation)
+                const isRunningTest = Boolean(runningTest)
+                const bodyStartLine = t.bodyLine ?? t.line
                 const activeLine = activeBodyLineForTest({
                   testName: t.name,
+                  testId: testIdentity.id,
+                  allowNameFallback: testIdentity.allowNameFallback,
                   testLine: t.line,
+                  bodyLine: bodyStartLine,
                   bodySource: t.bodySource,
                   summary: isRunActivelyTesting ? activeRunSummary : undefined,
-                  sourceFile: t.sourceFile ?? spec.file,
+                  sourceFile,
                 })
+                const activeSourceLine = activeLine == null
+                  ? null
+                  : sourceLineForBodyLine(bodyStartLine, activeLine)
                 return (
                   <TestCard
                     key={key}
-                    sourceFile={t.sourceFile ?? spec.file}
-                    testNumber={testNumbering.get(testNumberKey(t.sourceFile ?? spec.file, t.line))}
+                    sourceFile={sourceFile}
+                    testNumber={testNumbering.get(testNumberKey(sourceFile, t.line))}
                     test={t}
-                    status={statusForTest(
-                      summaryIdentityForWorkspaceTest(t.name, t.line, t.sourceFile ?? spec.file, activeRunSummary),
-                      activeRunSummary,
-                      isRunActivelyTesting,
-                    )}
-                    runningLocation={runningLocation}
+                    status={statusForTest(testIdentity, activeRunSummary, isRunActivelyTesting)}
                     isRunningTest={isRunningTest}
                     runningStep={runningTest?.step}
                     activeLine={activeLine}
+                    activeSourceLine={activeSourceLine}
                     expanded={isExpanded}
                     dirty={testDirty}
                     changedLines={changedLines}
@@ -205,18 +216,18 @@ function summaryIdentityForWorkspaceTest(
   line: number,
   file: string,
   summary: RunSummary | undefined,
-): { name: string; id?: string } {
+): TestStatusIdentity {
   const matchesName = (known: NonNullable<RunSummary['knownTests']>[number]) => {
     return known.title === name || known.name === summaryEntryName(name)
   }
   const known = summary?.knownTests?.find((entry) => {
     const parsed = parseSummaryLocation(entry.location)
-    return parsed?.file === file && parsed.line === line && matchesName(entry)
-  }) ?? summary?.knownTests?.find((entry) => {
-    const parsed = parseSummaryLocation(entry.location)
-    return parsed?.file === file && parsed.line === line
+    return Boolean(parsed && sameSourceFile(parsed.file, file) && parsed.line === line && matchesName(entry))
   })
-  return known?.id ? { name, id: known.id } : { name }
+  if (known?.id) return { name, id: known.id }
+  return summary?.knownTests?.length
+    ? { name, allowNameFallback: false }
+    : { name }
 }
 
 function formatLoadError(err: unknown): string {
@@ -231,10 +242,10 @@ function TestCard({
   testNumber,
   test,
   status,
-  runningLocation,
   isRunningTest,
   runningStep,
   activeLine,
+  activeSourceLine,
   expanded,
   dirty = false,
   changedLines,
@@ -244,10 +255,10 @@ function TestCard({
   testNumber?: number
   test: ExtractedTest
   status: StepStatus
-  runningLocation?: string
   isRunningTest: boolean
   runningStep?: RunSummaryRunningStep
   activeLine?: number | null
+  activeSourceLine?: number | null
   expanded: boolean
   dirty?: boolean
   /** Lines in `test.bodySource` that differ from the git HEAD version — see
@@ -301,7 +312,7 @@ function TestCard({
       </button>
       {expanded && (
         <div className="space-y-2 px-3 pb-3">
-          {runningLocation && (
+          {isRunningTest && (
             <div
               className="rounded-md border px-2 py-1 text-[10px]"
               style={{
@@ -313,9 +324,11 @@ function TestCard({
                 fontFamily: 'var(--font-mono)',
               }}
             >
-              {runningStep?.location
-                ? `Running line ${lineLabel(runningStep.location)} · ${runningStep.category}`
-                : `Running from ${shortLocation(runningLocation)}`}
+              {activeSourceLine != null
+                ? `Latest Playwright step · line ${activeSourceLine}${runningStep?.category ? ` · ${runningStep.category}` : ''}`
+                : runningStep?.category
+                  ? `Latest Playwright step · ${runningStep.category} · source line unavailable`
+                  : 'Running test · source line unavailable'}
             </div>
           )}
           <div
@@ -342,16 +355,6 @@ function TestCard({
       )}
     </div>
   )
-}
-
-function lineLabel(location: string): string {
-  const match = location.match(/:(\d+)(?::\d+)?$/)
-  return match ? match[1] : shortLocation(location)
-}
-
-function shortLocation(location: string): string {
-  const parts = location.split('/')
-  return parts.slice(-2).join('/')
 }
 
 function TestsHeaderIndicator({

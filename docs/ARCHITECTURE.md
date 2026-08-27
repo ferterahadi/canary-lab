@@ -550,10 +550,10 @@ link, or the per-repo reason there is none.
 - **Profiles** pick the tool surface via `?profile=`. There are seven workflow profiles, two composed direct-tool profiles, and one compact dispatcher profile: `repair` (heal loop), `verify` (verification configs), `author`
   (feature/envset/draft authoring), `coverage` (docs → PRD summary → ledger), `export`
   (evaluation archives), `flight` (the conducted pipeline), `portify` (port-injection
-  workflow), then `lifecycle` (**the bare-server default**: repair + verify + author + coverage +
-  export + flight, no portify), `full` (lifecycle + portify), and `compact` (one
-  always-loaded `exec` tool dispatching all 63 atomic handlers). `setup` registers
-  clients with `compact`; `full` remains the direct-tool rollback/debug surface. `coverage`, `export`
+  workflow), then `lifecycle` (repair + verify + author + coverage + export + flight,
+  no portify), `full` (lifecycle + portify), and `compact` (**the bare-server and
+  setup-installed default**: one always-loaded `exec` tool dispatching all 63 atomic
+  handlers). `lifecycle` and `full` remain direct-tool rollback/debug surfaces. `coverage`, `export`
   and `flight` were carved out of what used to be one oversized `author` array; the
   composed unions absorbed the split, so nothing had to move twice. Optional
   `?client_kind=claude|codex|other|...` (the `*-pty` kinds are set by the runner, not passed by clients).

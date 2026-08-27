@@ -78,7 +78,8 @@ export function renameRunFeature(logsDir: string, from: string, to: string): num
 export interface RunStoreEvent {
   /** What kind of mutation happened. Subscribers can use this to decide
    *  whether to refetch a single run or the whole list:
-   *   - `bootstrap` / `changed` / `finalized` — single-run change
+   *   - `bootstrap` / `changed` / `finalized` — single-run change, including
+   *     reporter-owned summary updates
    *   - `removed` — single-run history removal
    *   - `index-changed` — list-level (e.g. reaper)
    *   - `journal-changed` — per-run diagnosis journal changed
@@ -180,6 +181,13 @@ export class RunStore extends EventEmitter implements RunStateSink {
 
   recordJournalChange(runId: string): void {
     this.emitEvent({ kind: 'journal-changed', runId })
+  }
+
+  /** The Playwright reporter owns e2e-summary.json because it runs in a child
+   *  process. Its directory watcher calls this after an atomic summary write
+   *  so run-detail subscribers can read and push the new step immediately. */
+  notifySummaryChanged(runId: string): void {
+    this.emitEvent({ kind: 'changed', runId })
   }
 
   setStatus(runId: string, status: RunManifest['status'], healCycles?: number): void {

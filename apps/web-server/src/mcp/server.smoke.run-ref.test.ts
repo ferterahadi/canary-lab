@@ -81,7 +81,7 @@ describe('MCP HTTP server (smoke)', () => {
         { name: 'canary-lab-smoke', version: '0.0.1' },
         { capabilities: {} },
       )
-      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp?profile=lifecycle', address)))
 
       for (const runId of ['2026-05-19T0841-7cvh', '2026-05-19T0941-17cvh']) {
         runStore.bootstrap({
@@ -143,7 +143,7 @@ describe('MCP HTTP server (smoke)', () => {
         { name: 'canary-lab-smoke', version: '0.0.1' },
         { capabilities: {} },
       )
-      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp?profile=lifecycle', address)))
 
       const result = await client.callTool({
         name: 'start_run',
@@ -186,7 +186,7 @@ describe('MCP HTTP server (smoke)', () => {
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
       client = new Client({ name: 'canary-lab-smoke', version: '0.0.1' }, { capabilities: {} })
-      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp?profile=lifecycle', address)))
 
       const result = await client.callTool({
         name: 'boot_services',

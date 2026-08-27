@@ -18,10 +18,11 @@ export interface ReadableSourceSelection {
 // swapped: the same `cl-code-shell` block, the same Shiki theme canvas
 // (background + default text colour), the same 11px mono type, 0.5rem inset,
 // and `{ … }` body framing — so toggling modes changes the words, not the
-// surface. Translated statements render as plain English lines; statements no
-// rule could translate stay as Shiki-highlighted source lines in place.
+// surface. Translated statements render as plain English lines; a compiler
+// construct outside the pinned vocabulary renders its explicit
+// `UNSUPPORTED_SYNTAX_KIND` error instead of falling back to source.
 // Expanded helper bodies stay collapsed here: the call reads as one line
-// ("Check successful publish"), the way the code names it.
+// (for example, "call `publishSuccessfully`"), without expanding internals.
 export function ReadableTestView({
   test,
   sourceFile,
@@ -235,6 +236,10 @@ function ReadableRow({
     >
       {fidelity === 'unresolved' ? (
         <InlineSource id={id} snippet={source.snippet} />
+      ) : fidelity === 'unsupported' ? (
+        <span className="block whitespace-pre-wrap break-words" style={{ color: 'var(--danger)' }}>
+          {text}
+        </span>
       ) : fidelity === 'exact' ? (
         /* Authored wording is a string literal in the source, so it keeps the
            code themes' string colour. */
@@ -247,23 +252,30 @@ function ReadableRow({
   )
 }
 
-/** Derived steps are imperative by construction, so the leading verb (Check,
- *  Send, Open…) is this language's keyword — tinted with the code themes'
- *  keyword purple the way Shiki tints `await`/`const` in Code mode. */
+/** Each controlled-English line keeps the compiler renderer's whitespace.
+ * Its leading grammar word is this language's keyword — tinted the way Shiki
+ * tints `await`/`const` in Code mode. */
 function DerivedText({ text }: { text: string }) {
-  const space = text.indexOf(' ')
-  if (space < 0) return <span style={{ color: 'var(--code-keyword)' }}>{text}</span>
   return (
-    <>
-      <span style={{ color: 'var(--code-keyword)' }}>{text.slice(0, space)}</span>
-      {text.slice(space)}
-    </>
+    <span data-controlled-english="true" className="block whitespace-pre-wrap break-words">
+      {text.split('\n').map((line, index) => {
+        const match = /^(\s*)([A-Za-z][A-Za-z-]*)(.*)$/.exec(line)
+        if (!match) return <span key={index} className="block">{line}</span>
+        return (
+          <span key={index} className="block">
+            {match[1]}
+            <span style={{ color: 'var(--code-keyword)' }}>{match[2]}</span>
+            {match[3]}
+          </span>
+        )
+      })}
+    </span>
   )
 }
 
-/** A statement no translation rule matched, kept as the source line it is —
- *  highlighted by the same shared Shiki instance Code mode uses, so it looks
- *  identical there and here. */
+/** Backward compatibility for version-1 readable payloads. The version-2
+ * compiler never emits `unresolved`; unsupported syntax has its own explicit
+ * error row above. */
 function InlineSource({ id, snippet }: { id: string; snippet: string }) {
   const { resolved } = useTheme()
   const [lines, setLines] = useState<string | null>(null)
@@ -310,6 +322,7 @@ function fidelityTitle(fidelity: ReadableFidelity): string {
   switch (fidelity) {
     case 'exact': return 'Original wording written in the test'
     case 'derived': return 'Deterministically described from source code'
+    case 'unsupported': return 'Compiler syntax is outside the pinned vocabulary'
     case 'unresolved': return 'Not translated — the exact source line'
   }
 }

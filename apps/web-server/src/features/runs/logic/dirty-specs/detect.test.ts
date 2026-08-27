@@ -16,6 +16,10 @@ import * as astExtractor from '../../../../shared/ast-extractor'
 
 const EMPTY: DirtyBaseline = { lastGreenHashes: {}, runStartHashes: {}, approvedHashes: {} }
 
+function readable(title: string) {
+  return { version: 2 as const, title, completeness: 'complete' as const, nodes: [] }
+}
+
 let dir: string
 
 function git(args: string[]): void {
@@ -202,7 +206,13 @@ describe('computeDirty', () => {
           ...result,
           tests: [
             ...result.tests,
-            { name: 'phantom test', bodySource: 'unused', line: 0, steps: [] } as (typeof result.tests)[number],
+            {
+              name: 'phantom test',
+              bodySource: 'unused',
+              line: 0,
+              steps: [],
+              readable: readable('phantom test'),
+            },
           ],
         }
       }

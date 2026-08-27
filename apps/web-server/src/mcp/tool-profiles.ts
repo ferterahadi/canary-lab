@@ -6,16 +6,14 @@ export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
 
 // The default profile when a client connects without an explicit one (bare
 // `canary-lab mcp` or a profile-less /mcp request). Setup-installed Desktop/CLI
-// clients explicitly request `compact`; `lifecycle` is the lean end-to-end surface (repair +
-// verify + author + coverage + export + flight) minus the STANDALONE portify
-// management tools — starting a portify workflow from scratch, saving or
-// cancelling one, removing a portification, listing status. Those stay opt-in
-// via `--profile portify` (or `full`), keeping the common surface leaner.
+// clients also request `compact` explicitly, so every normal connection exposes
+// the same one-tool dispatcher. `lifecycle` remains an opt-in direct-tool surface
+// for debugging and rollback.
 //
 // What lifecycle still carries is the legacy Portify hand-off trio (see
 // FLIGHT_TOOLS), so an older persisted external workflow remains recoverable.
 // New Flights keep final Parallel setup server-owned.
-export const DEFAULT_CANARY_LAB_MCP_PROFILE: CanaryLabMcpProfile = 'lifecycle'
+export const DEFAULT_CANARY_LAB_MCP_PROFILE: CanaryLabMcpProfile = 'compact'
 
 export type CanaryLabMcpToolName =
   | 'list_features'

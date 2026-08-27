@@ -93,13 +93,13 @@ function expectOneNested(page) {
     expect(exported.assets).toEqual([])
     expect(html).toContain('pill-failed')
     expect(svg).toContain('stroke="var(--flow-fail-line)"')
-    expect(svg).toContain('Intercept requests matching')
-    expect(svg).toContain('Open checkout')
-    expect(svg).toContain('Check that the text')
+    expect(svg).toContain('call property `route` of `page`')
+    expect(svg).toContain('call `openCheckout`')
+    expect(svg).toContain('property `toBeVisible`')
     expect(svg).toContain('…')
   })
 
-  it('renders readable action labels for the major statement families', async () => {
+  it('renders controlled-English labels for the major statement families', async () => {
     const featureDir = path.join(tmpDir, 'action-label-feature')
     const e2eDir = path.join(featureDir, 'e2e')
     fs.mkdirSync(e2eDir, { recursive: true })
@@ -191,20 +191,28 @@ function unknownUtility(page) {
     }))
 
     expect(html).toContain('Auth api then warning including automatically resolved')
-    // The skip guard names the missing variable (`!process.env.E2E_USER`).
-    expect(html).toContain('Skip this scenario when process environment e2e user is missing — “missing user”')
-    expect(html).toContain('Intercept requests matching')
-    expect(html).toContain('Record the start time')
-    expect(html).toContain('Prepare unique identifiers')
-    expect(html).toContain('Prepare inventory')
-    expect(html).toContain('Prepare cart')
-    expect(html).toContain('Send checkout request')
-    expect(html).toContain('Read saved order')
-    expect(html).toContain('Wait for for receipt')
-    expect(html).toContain('Toggle voucher')
-    expect(html).toContain('Check linked records')
-    expect(html).toContain('Click the relevant control')
-    expect(html).toContain('Enter the required value')
+    // Flow labels keep names and source structure instead of interpreting
+    // their domain meaning.
+    expect(html).toContain('call property `skip` of `test`')
+    expect(html).toContain('call property `route` of `page`')
+    expect(html).toContain('construct a new `Date` with no arguments')
+    for (const helper of [
+      'makeIds',
+      'mockInventory',
+      'createCart',
+      'sendCheckoutRequest',
+      'fetchSavedOrder',
+      'waitForReceipt',
+      'toggleVoucher',
+      'withLinkedRecords',
+      'clickRelevantControl',
+      'fillRequiredValue',
+    ]) {
+      expect(html).toContain(`call \`${helper}\``)
+    }
+    expect(html).toContain('property `click`')
+    expect(html).toContain('property `fill`')
+    expect(html).toContain('property `waitForURL`')
     // expectUnknownOutcome resolves to a nested toBeTruthy (surface-level), so it
     // is graded; only expectFromLib is genuinely unresolvable and not graded. The
     // built-in `expect(...)` receiver of each real assertion must NOT be counted
@@ -253,7 +261,7 @@ test('wrapped in try', async ({ page }) => {
     // The literal-only declaration remains visible — now as a translated setup
     // step rather than an unresolved "Review this source step" node.
     expect(nodes.some((node) => (
-      node.title === 'Set noise to “literal only”'
+      node.title === 'declare constant `noise` and initialize it to string "literal only"'
       && node.readable
       && (node.detail ?? '').includes("const noise = 'literal only'")
     ))).toBe(true)

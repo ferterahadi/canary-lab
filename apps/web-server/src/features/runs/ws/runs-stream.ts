@@ -3,12 +3,11 @@ import type { RunStore, RunStoreEvent, RunDetail } from '../logic/run-store'
 import type { RunIndexEntry } from '../logic/runtime/manifest'
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
 
-// `/ws/runs` — push channel that replaces the browser's polling. On connect,
-// sends a single `snapshot` frame with the runs index. Subsequent mutations
-// from `RunStore` are forwarded as smaller deltas (`update` / `removed` /
-// `list-changed`). The browser keeps its own state tree in sync purely from
-// these frames; HTTP is reserved for one-shot mutations (start/abort/delete)
-// whose responses also flow back through this stream.
+// `/ws/runs` — the browser's primary live-update channel. On connect, it sends
+// a single `snapshot` frame with the runs index. Subsequent mutations from
+// `RunStore` are forwarded as smaller deltas (`update` / `removed` /
+// `list-changed`). Active run detail also keeps a low-rate HTTP refresh as a
+// recovery path for best-effort filesystem and WebSocket delivery.
 //
 // Coverage is excluded for this module — the wire-up is too thin to test
 // deterministically without a real WebSocket round-trip. The RunStore event

@@ -37,7 +37,7 @@ function toolText(result: ToolCallResult): string {
   return first?.text ?? ''
 }
 
-async function connectClient(address: string, pathAndQuery = '/mcp'): Promise<Client> {
+async function connectClient(address: string, pathAndQuery = '/mcp?profile=lifecycle'): Promise<Client> {
   const client = new Client(
     { name: 'canary-lab-smoke', version: '0.0.1' },
     { capabilities: {} },
@@ -186,7 +186,7 @@ describe('MCP HTTP server (smoke)', () => {
         { name: 'canary-lab-smoke', version: '0.0.1' },
         { capabilities: {} },
       )
-      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp?profile=lifecycle', address)))
 
       // A run already occupying the storefront repo (running, not healing,
       // so the route's heal-reuse path doesn't short-circuit).
@@ -238,7 +238,7 @@ describe('MCP HTTP server (smoke)', () => {
         { name: 'canary-lab-smoke', version: '0.0.1' },
         { capabilities: {} },
       )
-      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp?profile=lifecycle', address)))
 
       runStore.bootstrap({
         runId: 'older-waiting-heal',
@@ -311,7 +311,7 @@ describe('MCP HTTP server (smoke)', () => {
         { name: 'canary-lab-smoke', version: '0.0.1' },
         { capabilities: {} },
       )
-      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
+      await client.connect(new StreamableHTTPClientTransport(new URL('/mcp?profile=lifecycle', address)))
 
       runStore.bootstrap({
         runId: '2026-05-19T0841-7cvh',

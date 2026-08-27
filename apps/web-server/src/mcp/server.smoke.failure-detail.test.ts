@@ -34,7 +34,7 @@ function toolText(result: ToolCallResult): string {
   return first?.text ?? ''
 }
 
-async function connectClient(address: string, pathAndQuery = '/mcp'): Promise<Client> {
+async function connectClient(address: string, pathAndQuery = '/mcp?profile=lifecycle'): Promise<Client> {
   const client = new Client(
     { name: 'canary-lab-smoke', version: '0.0.1' },
     { capabilities: {} },

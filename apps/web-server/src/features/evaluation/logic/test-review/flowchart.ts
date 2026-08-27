@@ -1,4 +1,6 @@
 import type { ReadableBranchPath, ReadableNode } from '../../../../../../../shared/readable-tests/types'
+import { parseSource } from '../../../../shared/controlled-english/compiler-context'
+import { isMeaningfulFlowStatement } from '../../../../shared/readable-tests/language'
 import { translateReadableTest, type ReadableHelperInput } from '../../../../shared/readable-tests/translator'
 import { qualitySummary } from './assertions'
 import { sourceKey } from './ast'
@@ -8,7 +10,8 @@ import { flattenHelpers } from './source-analysis'
 import { cleanSnippet } from './text'
 import type { EvaluationRewrite, EvaluationRewriteFlowStep, FlowNode, TestFlowchart, TestReviewCase, TestReviewPacket } from './types'
 
-export { calledNameFromText, isMeaningfulFlowStatement, setupLikeStatement } from '../../../../shared/readable-tests/language'
+export { calledNameFromText, setupLikeStatement } from '../../../../shared/readable-tests/language'
+export { isMeaningfulFlowStatement }
 
 export function createFlowcharts(packet: TestReviewPacket, rewrite: EvaluationRewrite): TestFlowchart[] {
   return packet.tests.map((test, idx) => {
@@ -60,7 +63,8 @@ export function flowNodesForTest(test: TestReviewCase): FlowNode[] {
     startLine: 1,
     helpers: readableHelpers(test),
   })
-  const translatedSteps = readable.nodes.flatMap((node) => flowNodesForReadable(node, rootFile))
+  const assertionSources = assertionSourcesFor(test, rootFile)
+  const translatedSteps = readable.nodes.flatMap((node) => flowNodesForReadable(node, rootFile, assertionSources))
   const allSteps = translatedSteps.length || /^\s*\{\s*\}\s*$/.test(test.testBody)
     ? translatedSteps
     : test.testBody
@@ -103,11 +107,32 @@ function readableHelpers(test: TestReviewCase): ReadableHelperInput[] {
     : [])
 }
 
-function flowKind(node: ReadableNode): FlowNode['kind'] {
+interface AssertionSource {
+  file: string
+  snippet: string
+}
+
+function assertionSourcesFor(test: TestReviewCase, rootFile: string): readonly AssertionSource[] {
+  const sources: AssertionSource[] = []
+  const add = (file: string, snippet: string): void => {
+    const cleaned = cleanSnippet(snippet)
+    // An unknown-assertion placeholder deliberately carries an empty snippet.
+    // Treating it as a substring would classify every statement as a check.
+    if (cleaned) sources.push({ file, snippet: cleaned })
+  }
+  for (const assertion of test.assertions) add(rootFile, assertion.snippet)
+  for (const helper of flattenHelpers(test.helperDefinitions)) {
+    for (const assertion of helper.assertions) add(helper.file, assertion.snippet)
+  }
+  return sources
+}
+
+function flowKind(node: ReadableNode, assertionSources: readonly AssertionSource[]): FlowNode['kind'] {
   if (node.kind !== 'leaf') return node.kind === 'group' ? 'helper' : 'action'
-  if (node.role === 'check') return 'assertion'
-  if (node.role === 'setup') return 'setup'
-  if (node.role === 'helper') return 'helper'
+  const sourceSnippet = cleanSnippet(node.source.snippet)
+  if (assertionSources.some((source) => (
+    source.file === node.source.file && sourceSnippet.includes(source.snippet)
+  ))) return 'assertion'
   return 'action'
 }
 
@@ -125,17 +150,32 @@ function readableFlowNode(
   }
 }
 
-function flowNodesForReadable(node: ReadableNode, rootFile: string): FlowNode[] {
-  const current = readableFlowNode(node, rootFile, flowKind(node))
+function helperChildCarriesFlow(node: ReadableNode): boolean {
+  const { sourceFile } = parseSource(node.source.file, node.source.snippet)
+  return sourceFile.statements.some(isMeaningfulFlowStatement)
+}
+
+function flowNodesForReadable(
+  node: ReadableNode,
+  rootFile: string,
+  assertionSources: readonly AssertionSource[],
+): FlowNode[] {
+  const current = readableFlowNode(node, rootFile, flowKind(node, assertionSources))
   if (node.kind === 'leaf') return [current]
   if (node.kind === 'group' || node.kind === 'loop') {
-    return [current, ...node.children.flatMap((child) => flowNodesForReadable(child, rootFile))]
+    const children = node.kind === 'group' && node.origin === 'helper'
+      ? node.children.filter(helperChildCarriesFlow)
+      : node.children
+    return [
+      current,
+      ...children.flatMap((child) => flowNodesForReadable(child, rootFile, assertionSources)),
+    ]
   }
   return [
     current,
     ...node.paths.flatMap((path) => [
       readableFlowNode(path, rootFile, 'setup'),
-      ...path.children.flatMap((child) => flowNodesForReadable(child, rootFile)),
+      ...path.children.flatMap((child) => flowNodesForReadable(child, rootFile, assertionSources)),
     ]),
   ]
 }

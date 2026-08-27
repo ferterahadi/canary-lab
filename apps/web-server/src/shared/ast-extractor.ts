@@ -7,6 +7,7 @@ import {
   translateReadableTestFromAst,
   type ReadableHelperInput,
 } from './readable-tests/translator'
+import { parseSource } from './controlled-english/compiler-context'
 
 // Parse Playwright spec source and return every `test('name', …)` call along
 // with the `test.step('label', …)` invocations nested inside (recursively).
@@ -91,15 +92,17 @@ function getCalleeChain(expr: ts.Expression): string[] {
   return []
 }
 
+const TEST_DECLARATION_MODIFIERS = new Set(['only', 'skip', 'fixme', 'fail'])
+
 function isTestCall(call: ts.CallExpression): boolean {
-  // Match `test(...)`, `test.only(...)`, `test.skip(...)` — but NOT `test.step(...)`
-  // (those are inner steps) and NOT `test.describe(...)` (those are grouping
-  // wrappers, not tests themselves).
+  // Match Playwright's test declaration forms, but not hooks/configuration
+  // methods such as test.beforeEach(), test.use(), or test.setTimeout(). A
+  // titled hook also carries a string + callback, so argument shape alone
+  // cannot distinguish it from a test.
   const chain = getCalleeChain(call.expression)
   if (chain.length === 0 || chain[0] !== 'test') return false
   if (chain.length === 1) return true
-  if (chain[1] === 'step' || chain[1] === 'describe') return false
-  return true
+  return chain.length === 2 && TEST_DECLARATION_MODIFIERS.has(chain[1])
 }
 
 function isTestStepCall(call: ts.CallExpression): boolean {
@@ -122,6 +125,19 @@ function getCallableBody(call: ts.CallExpression): ts.Node | null {
     if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) return arg.body
   }
   return null
+}
+
+function getTestNameArg(call: ts.CallExpression, src: ts.SourceFile, body: ts.Node | null): string | null {
+  const staticName = getStringArg(call, src)
+  if (staticName !== null) return staticName
+  const arg = call.arguments[0]
+  if (!arg || !body) return null
+  // For an allowed declaration callee, an inline callback distinguishes a
+  // dynamic title from a conditional modifier such as
+  // `test.skip(condition, description)`. Keep the expression as a
+  // location-bearing placeholder; Playwright replaces it with each resolved
+  // title while reusing this call site's body and readable tree.
+  return arg.getText(src)
 }
 
 const PATH_TYPE_VALUES: PathType[] = ['happy', 'sad', 'edge']
@@ -385,14 +401,14 @@ function extractStepsFrom(node: ts.Node, src: ts.SourceFile): ExtractedStep[] {
 
 export function extractTestsFromSource(file: string, source: string): ExtractResult {
   try {
-    const src = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    const { sourceFile: src } = parseSource(file, source)
     const tests: ExtractedTest[] = []
     const readableHelpers = topLevelReadableHelpers(file, src)
     function visit(n: ts.Node): void {
       if (ts.isCallExpression(n) && isTestCall(n)) {
-        const name = getStringArg(n, src)
+        const body = getCallableBody(n)
+        const name = getTestNameArg(n, src, body)
         if (name !== null) {
-          const body = getCallableBody(n)
           const bodySource = body ? bodySourceFor(body, src) : ''
           // Playwright tags are primary (R1); comment annotations are the
           // migration fallback. Union both so a half-migrated spec still works.

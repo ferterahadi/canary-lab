@@ -255,10 +255,10 @@ describe('MCP HTTP server (smoke)', () => {
       const branded = await app.inject({ method: 'GET', url: '/mcp/health?client_kind=codex' })
       expect(branded.statusCode).toBe(200)
       expect((branded.json() as { clientKind: string }).clientKind).toBe('codex')
-      // No-param default is `lifecycle` (everyday surface, no portify).
-      expect(body.profile).toBe('lifecycle')
-      expect(body.toolCount).toBe(LIFECYCLE_TOOLS.length)
-      expect([...body.tools].sort()).toEqual(LIFECYCLE_TOOLS)
+      // No-param connections use the same one-tool surface setup installs.
+      expect(body.profile).toBe('compact')
+      expect(body.toolCount).toBe(1)
+      expect(body.tools).toEqual(['exec'])
 
       const full = await app.inject({ method: 'GET', url: '/mcp/health?profile=full' })
       expect(full.statusCode).toBe(200)
@@ -373,7 +373,7 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
-  it('answers tools/list with the default lifecycle profile and tools/call over the streamable HTTP transport', async () => {
+  it('defaults to compact and dispatches commands over the streamable HTTP transport', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -383,11 +383,14 @@ describe('MCP HTTP server (smoke)', () => {
 
       const tools = await client.listTools()
       const names = tools.tools.map((t) => t.name).sort()
-      expect(names).toEqual(LIFECYCLE_TOOLS)
+      expect(names).toEqual(['exec'])
 
       // A new scaffold ships the two Getting Started suites: storefront for the
       // core Run demo and workflow-workbench for the smaller workflow demos.
-      const result = await client.callTool({ name: 'list_features', arguments: {} })
+      const result = await client.callTool({
+        name: 'exec',
+        arguments: { command: 'list_features', arguments: {} },
+      })
       const text = toolText(result)
       const features = decode(text) as Array<{ name: string }>
       expect(features.map((f) => f.name)).toEqual(['storefront-journey', 'workflow-workbench'])

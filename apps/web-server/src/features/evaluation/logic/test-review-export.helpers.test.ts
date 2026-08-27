@@ -81,10 +81,10 @@ function stepTwo(page) {
     const nodes = __testReviewExportInternals.flowNodesForTest(packet.tests[0])
     const titles = nodes.map((node) => node.title)
 
-    expect(titles).toContain('Step zero')
-    expect(titles).toContain('Open “/noop”')
-    expect(titles).toContain('Step one')
-    expect(titles).toContain('Step two')
+    expect(titles).toContain('await:\n    call `stepZero`\n    with argument `page`')
+    expect(titles.some((title) => title.includes('property `goto`'))).toBe(true)
+    expect(titles).toContain('await:\n    call `stepOne`\n    with argument `page`')
+    expect(titles).toContain('await:\n    call `stepTwo`\n    with argument `page`')
     expect(nodes.filter((node) => node.kind === 'assertion')).toHaveLength(4)
   })
 
@@ -164,10 +164,18 @@ test('nested helper assertions', async ({ page }) => {
     expect(outerDef?.assertions).toEqual([])
     expect(outerDef?.dependencies.map((dep) => dep.name)).toEqual(['inner'])
     const helperNodes = __testReviewExportInternals.flowNodesForTest(packet.tests[0])
-    expect(helperNodes).toContainEqual(expect.objectContaining({ title: 'Outer', kind: 'helper', readable: true }))
-    expect(helperNodes).toContainEqual(expect.objectContaining({ title: 'Inner', kind: 'helper', readable: true }))
     expect(helperNodes).toContainEqual(expect.objectContaining({
-      title: 'Check that the element matching “.done” has text “Done”',
+      title: 'call `outer`\nwith argument `page`',
+      kind: 'helper',
+      readable: true,
+    }))
+    expect(helperNodes).toContainEqual(expect.objectContaining({
+      title: 'return:\n    call `inner`\n    with argument `page`',
+      kind: 'helper',
+      readable: true,
+    }))
+    expect(helperNodes).toContainEqual(expect.objectContaining({
+      title: expect.stringContaining('property `toHaveText`'),
       kind: 'assertion',
       readable: true,
     }))

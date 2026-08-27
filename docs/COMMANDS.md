@@ -33,11 +33,11 @@ The web UI and MCP tools (`start_flight`, `get_flight`, and `respond_flight_chec
 
 ### Other commands
 
-- `init` creates the workspace, installs dependencies and Chromium, and registers agent tools. Use `--no-install` for CI or offline setup.
+- `init` creates the workspace, installs dependencies and Chromium, and registers agent skills plus the compact MCP profile. Use `--no-install` for CI or offline setup.
 - `ui` starts the main human interface. Its port comes from `canary-lab.config.json`; change it in Project Settings, not with `ui --port`.
-- `setup` refreshes agent registration with the `compact` profile. It exposes one always-loaded `exec` tool that dispatches every installed skill, including Portify. `--force` replaces existing entries, `--dry-run` previews changes, and `--agent` limits the target.
+- `setup` refreshes agent skills and registers only the `compact` MCP profile. It exposes one always-loaded `exec` tool that dispatches every Canary Lab command, including Portify. `--force` replaces existing entries, `--dry-run` previews changes, and `--agent` limits the target.
 - `boot` starts a feature's services without tests. It requires the UI server; `boot stop <runId>` ends the session.
-- `mcp` connects an AI client to the UI server. A bare command defaults to the direct `lifecycle` profile. Setup-installed clients use `compact`; focused profiles and `full` remain available for direct-tool debugging and rollback.
+- `mcp` connects an AI client to the UI server. A bare command and setup-installed clients both default to `compact`; focused profiles, `lifecycle`, and `full` remain opt-in direct-tool surfaces for debugging and rollback.
 - `new feature` creates a feature deterministically. `env` applies or restores an envset.
 - `upgrade` refreshes managed workspace files, existing agent skills, and existing MCP connections. It also repairs the browser-install hook and downloads the matching browser when an older workspace needs it. It does not install a newer npm package by itself.
 

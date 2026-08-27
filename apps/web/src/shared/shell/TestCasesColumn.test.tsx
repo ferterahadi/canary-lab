@@ -316,6 +316,7 @@ describe('TestCasesColumn', () => {
           {
             name: 'sends message',
             line: 3,
+            bodyLine: 5,
             bodySource: "{\n  await test.step('send', async () => {\n    const payload = createPayload()\n    await send(payload)\n  })\n}",
             readable: readableTest('sends message'),
             steps: [
@@ -348,7 +349,7 @@ describe('TestCasesColumn', () => {
               step: {
                 title: 'send payload',
                 category: 'test.step',
-                location: '/tmp/features/alpha/e2e/a.spec.ts:6:5',
+                location: '/tmp/features/alpha/e2e/a.spec.ts:8:5',
               },
             },
           }}
@@ -369,6 +370,35 @@ describe('TestCasesColumn', () => {
     const activeLine = container.querySelector<HTMLElement>('[data-active-line="true"]')
     expect(activeLine?.textContent).toContain('await send(payload)')
     expect(activeLine?.getAttribute('style')).toContain('var(--warning)')
+    expect(container.textContent).toContain('Latest Playwright step · line 8 · test.step')
+
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          activeRunStatus="running"
+          activeRunSummary={{
+            complete: false,
+            total: 1,
+            passed: 0,
+            passedNames: [],
+            failed: [],
+            running: {
+              name: 'test-case-sends-message',
+              location: '/tmp/features/alpha/e2e/a.spec.ts:3:1',
+              step: {
+                title: 'send request',
+                category: 'pw:api',
+                location: '/tmp/features/alpha/helpers/send.ts:8:5',
+              },
+            },
+          }}
+        />,
+      )
+    })
+    await waitFor(() => container.querySelector('[data-active-line="true"]') === null)
+    expect(container.textContent).toContain('Latest Playwright step · pw:api · source line unavailable')
+    expect(container.textContent).not.toContain('Latest Playwright step · line 8')
   })
 
   it('rings only the test named in affectedTests, not every card in the spec', async () => {

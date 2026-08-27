@@ -29,7 +29,7 @@ const TEST: ExtractedTest = {
   bodySource: "{\n  await page.goto('/checkout')\n}",
   steps: [],
   readable: {
-    version: 1,
+    version: 2,
     title: 'completes checkout',
     completeness: 'partial',
     nodes: [
@@ -97,7 +97,7 @@ describe('TestPresentation', () => {
 
     expect(container.querySelector('[data-testid="test-presentation-english"]')).not.toBeNull()
     expect(container.textContent).toContain('Open “/checkout”')
-    expect(container.textContent).toContain('Some steps stay as source')
+    expect(container.textContent).toContain('Some syntax could not be translated')
     // The header names the same file:range in both modes, so switching feels
     // like changing the representation, not the component.
     expect(container.textContent).toContain('e2e/checkout.spec.ts:L10–12')

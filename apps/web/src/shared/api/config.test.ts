@@ -67,21 +67,21 @@ describe('config api', () => {
     })
   })
 
-  it('getMcpHealth checks the MCP health endpoint with the selected profile', async () => {
+  it('getMcpHealth checks the compact MCP health endpoint', async () => {
     const health = {
       ok: true,
       server: { name: 'canary-lab' },
-      profile: 'full',
+      profile: 'compact',
       clientKind: 'other',
-      toolCount: 42,
-      tools: ['start_run', 'wait_for_heal_task'],
+      toolCount: 1,
+      tools: ['exec'],
       activeSessions: 0,
       projectRoot: '/workspace',
     }
     const fetchImpl = vi.fn().mockResolvedValue(ok(health))
 
-    await expect(getMcpHealth('full', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(health)
-    expect(fetchImpl).toHaveBeenCalledWith('http://x/mcp/health?profile=full', { method: 'GET' })
+    await expect(getMcpHealth({ baseUrl: 'http://x', fetchImpl })).resolves.toEqual(health)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/mcp/health?profile=compact', { method: 'GET' })
   })
 
   it('getFeatureConfig returns the raw config doc', async () => {

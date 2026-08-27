@@ -395,6 +395,52 @@ describe('GET /api/features/:name/tests', () => {
     expect(tests[3].steps).toEqual([])
   })
 
+  it('attaches one shared body to loop titles resolved from an object property', async () => {
+    const dir = writeFeature('property-titles', {
+      spec: [
+        'const variants = [',
+        "  { desc: 'first inner' },",
+        "  { desc: 'second inner' },",
+        ']',
+        'for (const variant of variants) {',
+        '  test(',
+        '    variant.desc,',
+        '    async () => {',
+        "      await test.step('inner', async () => {})",
+        '    },',
+        '  )',
+        '}',
+      ].join('\n'),
+    })
+    const specFile = path.join(dir, 'e2e', 'a.spec.ts')
+    const spawner = jsonSpawner(() => ({
+      config: { rootDir: dir },
+      suites: [{
+        file: specFile,
+        specs: [
+          { title: 'first inner', file: specFile, line: 6 },
+          { title: 'second inner', file: specFile, line: 6 },
+        ],
+      }],
+    }))
+    const app = await build({ spawner })
+    const res = await app.inject({ method: 'GET', url: '/api/features/property-titles/tests' })
+    expect(res.statusCode).toBe(200)
+    const tests = res.json()[0].tests as Array<{
+      name: string
+      bodyLine: number
+      bodySource: string
+      steps: { label: string }[]
+      readable: { title: string; nodes: unknown[] }
+    }>
+
+    expect(tests.map((test) => test.name)).toEqual(['first inner', 'second inner'])
+    expect(tests.every((test) => test.bodyLine === 8)).toBe(true)
+    expect(tests.every((test) => test.bodySource.includes("test.step('inner'"))).toBe(true)
+    expect(tests.every((test) => test.steps[0]?.label === 'inner')).toBe(true)
+    expect(tests.every((test) => test.readable.nodes.length > 0)).toBe(true)
+  })
+
   it('falls back to AST output (raw template text) when Playwright --list fails', async () => {
     writeFeature('alpha', {
       spec: [

@@ -32,10 +32,9 @@ const SERVER_NAME = 'Canary_Lab'
 // the publishable package name, not the display key.
 const PACKAGE_NAME = 'canary-lab'
 
-/** `setup` installs every focused skill, so it registers the one-tool compact
- *  surface whose `exec` dispatcher can reach every atomic workflow. Keep this
- *  separate from the bare MCP server's direct `lifecycle` default: manual
- *  clients can still select focused or full debugging surfaces. */
+/** `setup` installs every focused skill, then registers only the one-tool compact
+ *  MCP surface whose `exec` dispatcher can reach every atomic workflow. Manual
+ *  clients can still opt into focused or full direct-tool debugging surfaces. */
 export const REGISTERED_CANARY_LAB_MCP_PROFILE: CanaryLabMcpProfile = 'compact'
 
 // Older builds registered the server under this key. `setup`/`upgrade` migrate

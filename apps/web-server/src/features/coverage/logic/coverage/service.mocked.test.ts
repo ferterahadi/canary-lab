@@ -23,6 +23,10 @@ import { extractTestsFromSource } from '../../../../shared/ast-extractor'
 
 import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
 
+function readable(title: string) {
+  return { version: 2 as const, title, completeness: 'complete' as const, nodes: [] }
+}
+
 // Coverage generation is LLM-only; inject the fake agent via the dep seams.
 const regeneratePrdSummary = (args: Parameters<typeof regeneratePrdSummaryReal>[0]) =>
   regeneratePrdSummaryReal(args, { summarize: fakeSummarize })
@@ -122,6 +126,7 @@ describe('collectTests — sourceFile override (service.ts line 86)', () => {
           line: 1,
           bodySource: 'async () => {}',
           steps: [],
+          readable: readable('shared'),
           sourceFile: helperFile, // points to a different file than the spec
           requirements: ['R1'],
         },
@@ -165,6 +170,7 @@ describe('buildCoverageMappingContext — null PRD summary branches', () => {
         line: 1,
         bodySource: 'async () => {}',
         steps: [],
+        readable: readable('shared'),
         sourceFile: dir, // sourceFile === featureDir → relative path = ''
       }],
     })
@@ -334,11 +340,11 @@ describe('collectTests — duplicate name merge (service.ts unionList)', () => {
     vi.mocked(extractTestsFromSource)
       .mockReturnValueOnce({
         file: path.join(dir, 'e2e', 'a.spec.ts'),
-        tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], requirements: ['R1'], pathTypes: ['happy'] }],
+        tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], readable: readable('shared'), requirements: ['R1'], pathTypes: ['happy'] }],
       })
       .mockReturnValueOnce({
         file: specB,
-        tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [] }],
+        tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], readable: readable('shared') }],
       })
 
     const result = await runCoverageEngine({ featuresDir, feature: 'checkout', logsDir, now: '2026-01-01T00:00:00Z' })
@@ -356,11 +362,11 @@ describe('collectTests — duplicate name merge (service.ts unionList)', () => {
     vi.mocked(extractTestsFromSource)
       .mockReturnValueOnce({
         file: specA,
-        tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], requirements: ['R1'], pathTypes: ['happy'] }],
+        tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], readable: readable('shared'), requirements: ['R1'], pathTypes: ['happy'] }],
       })
       .mockReturnValueOnce({
         file: specB,
-        tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], requirements: ['R2'], pathTypes: ['sad'] }],
+        tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], readable: readable('shared'), requirements: ['R2'], pathTypes: ['sad'] }],
       })
 
     await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })

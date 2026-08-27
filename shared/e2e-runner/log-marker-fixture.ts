@@ -219,9 +219,10 @@ function isThenable(value: unknown): value is Promise<unknown> {
 
 // Wrap a Page or Locator with a Proxy that, on every async method invocation,
 // captures the first stack frame inside `testFile` and emits a `test.step` at
-// that location. Playwright then sees the pw:api step it would already emit
-// as a *child* of our step, so walking `step.parent` in the summary reporter
-// surfaces the call site in the user's spec.
+// that location. Playwright starts its native pw:api step inside this proxy,
+// then our overlapping located step becomes the reporter's latest active step
+// for the lifetime of the returned promise. That gives the summary a trusted
+// call site in the user's spec instead of the proxy's own line.
 export function wrapWithCallSite<T extends object>(
   target: T,
   testFile: string,
@@ -264,7 +265,9 @@ export function wrapWithCallSite<T extends object>(
  * The `page` fixture is also wrapped with a call-site-capturing Proxy so the
  * summary reporter's running-step `locations` chain reaches back into the
  * test body even when user helpers aren't wrapped in `test.step(...)`. This
- * is what powers per-line "currently executing" highlighting in the UI.
+ * powers the UI's source-line highlight for the latest Playwright-reported
+ * Page or Locator call. Code with no trustworthy spec call site stays at the
+ * test-level running state instead of claiming an exact line.
  *
  * https://playwright.dev/docs/extensibility
  */

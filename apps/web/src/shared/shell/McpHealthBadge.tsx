@@ -5,25 +5,15 @@ import * as api from '../api/client'
 import { capitalizeFirst } from '@/shared/lib/format'
 import { CopyField, StatusDot, ChevronRightIcon, type StatusDotState } from '@/shared/ui/atoms'
 
-const MCP_PROFILES = [
-  { id: 'repair', label: 'Repair', detail: 'Run healing' },
-  { id: 'verify', label: 'Verify', detail: 'Run checks' },
-  { id: 'author', label: 'Author', detail: 'Feature setup' },
-  { id: 'lifecycle', label: 'Lifecycle', detail: 'End-to-end, no portify' },
-  { id: 'portify', label: 'Portify', detail: 'Make ports injectable' },
-  { id: 'full', label: 'Full', detail: 'All tools' },
-] as const
-
-type McpProfile = typeof MCP_PROFILES[number]['id']
+const MCP_PROFILE = 'compact'
 
 type McpHealthState =
-  | { state: 'checking'; toolCount?: number; tools?: string[]; projectRoot?: string; activeSessions?: number; error?: string }
-  | { state: 'ready'; toolCount: number; tools: string[]; projectRoot: string; activeSessions: number; error?: string }
-  | { state: 'failed'; toolCount?: number; tools?: string[]; projectRoot?: string; activeSessions?: number; error: string }
+  | { state: 'checking'; projectRoot?: string; error?: string }
+  | { state: 'ready'; projectRoot: string; error?: string }
+  | { state: 'failed'; projectRoot?: string; error: string }
 
 export function McpHealthBadge() {
   const [health, setHealth] = useState<McpHealthState>({ state: 'checking' })
-  const [selectedProfile, setSelectedProfile] = useState<McpProfile>('repair')
   const [lastCheckedLabel, setLastCheckedLabel] = useState<string | null>(null)
   const [checkMessage, setCheckMessage] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
@@ -31,24 +21,18 @@ export function McpHealthBadge() {
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
-  const testConnection = useCallback(async (profile: McpProfile): Promise<void> => {
+  const testConnection = useCallback(async (): Promise<void> => {
     setHealth((current) => ({
       state: 'checking',
-      toolCount: current.toolCount,
-      tools: current.tools,
       projectRoot: current.projectRoot,
-      activeSessions: current.activeSessions,
     }))
     setCheckMessage(null)
     try {
-      const result = await api.getMcpHealth(profile)
+      const result = await api.getMcpHealth()
       const checkedAt = formatCheckedAt(new Date())
       setHealth({
         state: 'ready',
-        toolCount: result.toolCount,
-        tools: result.tools ?? [],
         projectRoot: result.projectRoot,
-        activeSessions: result.activeSessions,
       })
       setLastCheckedLabel(checkedAt)
       setCheckMessage(`Health OK at ${checkedAt}`)
@@ -63,8 +47,8 @@ export function McpHealthBadge() {
   }, [])
 
   useEffect(() => {
-    void testConnection(selectedProfile)
-  }, [selectedProfile, testConnection])
+    void testConnection()
+  }, [testConnection])
 
   const updateMenuPosition = useCallback((): void => {
     const rect = buttonRef.current?.getBoundingClientRect()
@@ -140,10 +124,8 @@ export function McpHealthBadge() {
           ref={menuRef}
           health={health}
           position={menuPosition}
-          selectedProfile={selectedProfile}
           lastCheckedLabel={lastCheckedLabel}
           checkMessage={checkMessage}
-          onSelectProfile={setSelectedProfile}
         />,
         document.body,
       )}
@@ -154,119 +136,42 @@ export function McpHealthBadge() {
 const McpHealthMenu = forwardRef<HTMLDivElement, {
   health: McpHealthState
   position: { top: number; left: number; width: number }
-  selectedProfile: McpProfile
   lastCheckedLabel: string | null
   checkMessage: string | null
-  onSelectProfile: (profile: McpProfile) => void
 }>(function McpHealthMenu({
   health,
   position,
-  selectedProfile,
   lastCheckedLabel,
   checkMessage,
-  onSelectProfile,
 }, ref) {
-  const tools = health.tools ?? []
   return (
     <div
       ref={ref}
       data-mcp-health-menu
       role="dialog"
-      aria-label="MCP connection tools"
+      aria-label="MCP connection details"
       className="cl-popover fixed z-[80] flex flex-col overflow-hidden"
       style={{
         top: position.top,
         left: position.left,
         width: position.width,
-        maxHeight: 'min(440px, calc(100vh - 64px))',
         color: 'var(--text-primary)',
       }}
     >
       <div className="shrink-0 border-b px-3 py-2.5" style={{ borderColor: 'var(--border-default)' }}>
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-              MCP endpoint
-            </div>
-            <div className="mt-0.5 truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
-              {health.state === 'failed' ? health.error : 'Ready for external repair agents'}
-            </div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+            MCP endpoint
           </div>
-          <div
-            className="shrink-0 rounded px-2 py-1 text-[11px]"
-            style={{
-              background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
-              color: 'var(--text-secondary)',
-            }}
-          >
-            {health.toolCount ?? tools.length} tools
+          <div className="mt-0.5 truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            {health.state === 'failed' ? health.error : 'Compact profile for external agents'}
           </div>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="border-b px-2 py-2" style={{ borderColor: 'var(--border-default)' }}>
-          <div className="mb-1 px-1 text-[10px] uppercase" style={{ color: 'var(--text-muted)', letterSpacing: 0 }}>
-            Profiles
-          </div>
-          <div className="grid grid-cols-3 gap-1">
-            {MCP_PROFILES.map((candidate) => {
-              const selected = candidate.id === selectedProfile
-              return (
-                <button
-                  key={candidate.id}
-                  type="button"
-                  onClick={() => onSelectProfile(candidate.id)}
-                  className="min-w-0 rounded border px-2 py-1 text-center text-[11px]"
-                  aria-pressed={selected}
-                  title={candidate.detail}
-                  style={{
-                    borderColor: selected ? 'color-mix(in srgb, var(--accent) 58%, var(--border-default))' : 'var(--border-default)',
-                    background: selected
-                      ? 'color-mix(in srgb, var(--accent) 13%, transparent)'
-                      : 'color-mix(in srgb, var(--bg-elevated) 26%, transparent)',
-                  }}
-                >
-                  <span className="block truncate" style={{ color: 'var(--text-primary)' }}>{candidate.label}</span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-        <McpConnectGuide profile={selectedProfile} healthy={health.state === 'ready'} />
-        <div className="border-b px-3 py-1.5" style={{ borderColor: 'var(--border-default)' }}>
-          <div className="flex items-center justify-between gap-2 text-[10px] uppercase" style={{ color: 'var(--text-muted)', letterSpacing: 0 }}>
-            <span>Tools</span>
-            <span>{tools.length} shown</span>
-          </div>
-        </div>
-        <div className="px-2 py-1.5">
-          {tools.length > 0 ? (
-            <ul className="grid grid-cols-1 gap-1" aria-label="MCP tools">
-              {tools.map((tool) => (
-                <li
-                  key={tool}
-                  className="truncate rounded px-2 py-0.5 text-[11px]"
-                  title={tool}
-                  style={{
-                    background: 'color-mix(in srgb, var(--bg-elevated) 52%, transparent)',
-                    color: 'var(--text-secondary)',
-                    fontFamily: 'var(--font-mono)',
-                  }}
-                >
-                  {tool}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="px-2 py-5 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-              Tool names are unavailable from this server.
-            </div>
-          )}
-        </div>
-      </div>
+      <McpConnectGuide healthy={health.state === 'ready'} />
       <div className="shrink-0 border-t px-3 py-1.5" style={{ borderColor: 'var(--border-default)' }}>
         <div className="flex items-center justify-between gap-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-          <span className="truncate">{checkMessage ?? 'Checks the selected profile health endpoint'}</span>
+          <span className="truncate">{checkMessage ?? 'Checks the compact profile health endpoint'}</span>
           {lastCheckedLabel && <span className="shrink-0">{lastCheckedLabel}</span>}
         </div>
       </div>
@@ -275,11 +180,10 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
 })
 
 // Disclosure that rehearses the README "how to connect" steps without making
-// the user leave the UI. Collapsed by default so the tools list keeps its
-// real estate; the open/closed choice persists across opens. The endpoint URL
-// is derived from the live origin (UI + MCP share localhost:7421) and reflects
-// the currently-selected profile so a copied URL is ready to paste verbatim.
-function McpConnectGuide({ profile, healthy }: { profile: McpProfile; healthy: boolean }) {
+// the user leave the UI. The open/closed choice persists across opens. The
+// endpoint derives from the live origin (UI + MCP share one configured port)
+// and keeps compact explicit so the copied URL documents the intended surface.
+function McpConnectGuide({ healthy }: { healthy: boolean }) {
   const [open, setOpen] = useState<boolean>(() => {
     try {
       return localStorage.getItem('cl-mcp-connect-open') === 'true'
@@ -287,7 +191,7 @@ function McpConnectGuide({ profile, healthy }: { profile: McpProfile; healthy: b
       return false
     }
   })
-  const endpoint = `${window.location.origin}/mcp?profile=${profile}`
+  const endpoint = `${window.location.origin}/mcp?profile=${MCP_PROFILE}`
   const toggle = (): void => {
     setOpen((current) => {
       const next = !current
@@ -300,7 +204,7 @@ function McpConnectGuide({ profile, healthy }: { profile: McpProfile; healthy: b
     })
   }
   return (
-    <div className="shrink-0 border-b" style={{ borderColor: 'var(--border-default)' }}>
+    <div className="shrink-0">
       <button
         type="button"
         onClick={toggle}
@@ -327,14 +231,14 @@ function McpConnectGuide({ profile, healthy }: { profile: McpProfile; healthy: b
           <ConnectStep n={1} title="Run setup in your workspace">
             <CopyField value="npx canary-lab setup --force" label="setup command" />
             <p className="mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-              Registers the Canary Lab tools with supported AI agents.
+              Registers only the compact MCP profile with supported AI agents.
             </p>
           </ConnectStep>
-          <ConnectStep n={2} title="Or point a custom client here">
+          <ConnectStep n={2} title="Or point a custom client to compact">
             <CopyField value={endpoint} label="MCP endpoint URL" />
             <p className="mt-1 text-[10px]" style={{ color: healthy ? 'var(--text-muted)' : 'var(--warning, var(--text-muted))' }}>
               {healthy
-                ? 'Streamable HTTP. Switch the profile above to change the tool set.'
+                ? 'Streamable HTTP using profile=compact.'
                 : 'Endpoint is offline — start the UI server, then re-check.'}
             </p>
           </ConnectStep>
