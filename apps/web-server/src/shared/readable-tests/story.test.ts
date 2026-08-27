@@ -200,6 +200,34 @@ describe('readable test story', () => {
     ))).toEqual(expect.arrayContaining(['txId', 'request']))
   })
 
+  it('highlights generic English grammar without product-specific vocabulary', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  const request = buildInvoiceRequest(customerId)
+  const response = await submitInvoice(request)
+  expect(response.status).toBeGreaterThanOrEqual(200)
+  expect(response.state).toBe('PAID')
+  await page.waitForTimeout(10_000)
+}`,
+    })
+
+    const items = storyItems(translated)
+    const highlighted = new Set(items.flatMap((item) => item.spans.flatMap((span) => span.kind ?? [])))
+    expect(highlighted).toEqual(new Set(['verb', 'variable', 'keyword', 'operator', 'number', 'literal']))
+    expect(items.find((item) => item.text.includes('at least'))?.spans).toEqual(expect.arrayContaining([
+      { text: 'response', kind: 'variable' },
+      { text: 'is at least', kind: 'operator' },
+      { text: '200', kind: 'number' },
+    ]))
+    expect(items.find((item) => item.text.includes('“PAID”'))?.spans).toEqual(expect.arrayContaining([
+      { text: 'equals', kind: 'operator' },
+      { text: '“PAID”', kind: 'literal' },
+    ]))
+    expect(items.find((item) => item.text.includes('10000'))?.spans)
+      .toContainEqual({ text: '10000 milliseconds', kind: 'number' })
+  })
+
   it('keeps mapping, callback, loop, and retry execution nested in the concise story', () => {
     const translated = translateReadableTest({
       ...INPUT,

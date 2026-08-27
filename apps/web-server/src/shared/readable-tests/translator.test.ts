@@ -36,7 +36,11 @@ describe('translateReadableTest structure', () => {
             id: expect.stringMatching(/^rt_[a-f0-9]{12}$/),
             role: 'action',
             text: 'Open “/checkout”',
-            spans: [{ text: 'Open “/checkout”' }],
+            spans: [
+              { text: 'Open', kind: 'verb' },
+              { text: ' ' },
+              { text: '“/checkout”', kind: 'literal' },
+            ],
             fidelity: 'derived',
             source: {
               file: '/workspace/features/checkout/e2e/checkout.spec.ts',
@@ -49,7 +53,13 @@ describe('translateReadableTest structure', () => {
             id: expect.stringMatching(/^rt_[a-f0-9]{12}$/),
             role: 'action',
             text: 'Run selected action using page',
-            spans: [{ text: 'Run selected action using ' }, { text: 'page', kind: 'variable' }],
+            spans: [
+              { text: 'Run', kind: 'verb' },
+              { text: ' selected action ' },
+              { text: 'using', kind: 'keyword' },
+              { text: ' ' },
+              { text: 'page', kind: 'variable' },
+            ],
             fidelity: 'derived',
             source: {
               file: '/workspace/features/checkout/e2e/checkout.spec.ts',

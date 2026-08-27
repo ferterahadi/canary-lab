@@ -305,10 +305,49 @@ function isWordCharacter(value: string | undefined): boolean {
   return value !== undefined && /[A-Za-z0-9]/.test(value)
 }
 
-function variableSpans(text: string, phrases: readonly string[]): ReadableStorySpan[] {
+type StorySpanKind = NonNullable<ReadableStorySpan['kind']>
+
+const STORY_LITERAL_PATTERN = /“[^”]*”|\b(?:true|false|null|undefined|NaN)\b/gi
+const STORY_NUMBER_PATTERN = /\b\d+(?:[.,]\d+)?(?:\s+(?:milliseconds?|seconds?|minutes?|hours?))?\b/gi
+const STORY_OPERATOR_PATTERN = /\b(?:does not contain an item equal to|contains an item equal to|does not exactly equal|is not an instance of|is an instance of|does not contain text|does not have length|does not have count|does not have value|does not have text|is not greater than|is not less than|does not contain|does not include|does not match|does not equal|exactly equals|is greater than|is less than|is at least|is at most|contains text|has length|has count|has value|has text|starts with|ends with|contains|includes|matches|equals|is not|is)\b/gi
+const STORY_KEYWORD_PATTERN = /\b(?:after each pass|for up to|for each|if available|when available|when missing|with message|asynchronously|sequentially|otherwise|retrying|saving|until|using|whether|while|when|then|once|if)\b/gi
+const STORY_LEADING_VERB_PATTERN = /^[A-Za-z]+(?:-[A-Za-z]+)?/
+
+function markSpan(
+  kinds: Array<StorySpanKind | undefined>,
+  start: number,
+  end: number,
+  kind: StorySpanKind,
+): void {
+  for (let index = start; index < end; index += 1) kinds[index] = kind
+}
+
+function markPattern(
+  text: string,
+  kinds: Array<StorySpanKind | undefined>,
+  pattern: RegExp,
+  kind: StorySpanKind,
+): void {
+  pattern.lastIndex = 0
+  for (const match of text.matchAll(pattern)) {
+    markSpan(kinds, match.index, match.index + match[0].length, kind)
+  }
+}
+
+function storySpans(
+  text: string,
+  phrases: readonly string[],
+  highlightLeadingVerb: boolean,
+): ReadableStorySpan[] {
   const lowerText = text.toLocaleLowerCase()
-  const occupied = new Array<boolean>(text.length).fill(false)
-  const ranges: Array<{ start: number; end: number }> = []
+  const kinds = new Array<StorySpanKind | undefined>(text.length)
+
+  const leadingVerb = highlightLeadingVerb ? STORY_LEADING_VERB_PATTERN.exec(text) : null
+  if (leadingVerb) markSpan(kinds, leadingVerb.index, leadingVerb[0].length, 'verb')
+  markPattern(text, kinds, STORY_KEYWORD_PATTERN, 'keyword')
+  markPattern(text, kinds, STORY_OPERATOR_PATTERN, 'operator')
+  markPattern(text, kinds, STORY_LITERAL_PATTERN, 'literal')
+  markPattern(text, kinds, STORY_NUMBER_PATTERN, 'number')
 
   for (const phrase of phrases) {
     const lowerPhrase = phrase.toLocaleLowerCase()
@@ -318,25 +357,19 @@ function variableSpans(text: string, phrases: readonly string[]): ReadableStoryS
       if (start < 0) break
       const end = start + phrase.length
       const bounded = !isWordCharacter(text[start - 1]) && !isWordCharacter(text[end])
-      const free = occupied.slice(start, end).every((value) => !value)
-      if (bounded && free) {
-        ranges.push({ start, end })
-        for (let index = start; index < end; index += 1) occupied[index] = true
-      }
+      if (bounded) markSpan(kinds, start, end, 'variable')
       from = Math.max(end, start + 1)
     }
   }
 
-  if (!ranges.length) return [{ text }]
-  ranges.sort((a, b) => a.start - b.start)
   const spans: ReadableStorySpan[] = []
-  let cursor = 0
-  for (const range of ranges) {
-    if (range.start > cursor) spans.push({ text: text.slice(cursor, range.start) })
-    spans.push({ text: text.slice(range.start, range.end), kind: 'variable' })
-    cursor = range.end
+  for (let start = 0; start < text.length;) {
+    const kind = kinds[start]
+    let end = start + 1
+    while (end < text.length && kinds[end] === kind) end += 1
+    spans.push({ text: text.slice(start, end), ...(kind ? { kind } : {}) })
+    start = end
   }
-  if (cursor < text.length) spans.push({ text: text.slice(cursor) })
   return spans
 }
 
@@ -558,7 +591,7 @@ export function storyCandidates(
     return {
       ...candidate,
       text,
-      spans: variableSpans(text, variablePhrases(node, text, aliases)),
+      spans: storySpans(text, variablePhrases(node, text, aliases), candidate.fidelity === 'derived'),
       node,
       path,
     }

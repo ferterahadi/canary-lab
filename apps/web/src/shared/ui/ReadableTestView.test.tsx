@@ -124,12 +124,60 @@ describe('ReadableTestView', () => {
     expect(Array.from(container.querySelectorAll('[data-story-span="variable"]')).map((span) => span.textContent))
       .toEqual(['identifiers', 'order'])
     expect((container.querySelector('[data-story-span="variable"]') as HTMLElement).style.color)
-      .toBe('var(--code-string)')
+      .toBe('var(--code-variable)')
     expect(container.textContent).not.toContain('Details')
     expect(container.textContent).not.toContain('Full deterministic mapping')
     expect(container.querySelector('[data-testid="readable-test-tree"]')).toBeNull()
     expect(container.querySelector('[data-testid="readable-story-item-setup-identifiers"]')?.getAttribute('title'))
       .toContain('checkout.spec.ts:L10–11')
+  })
+
+  it('maps generic English grammar tokens to distinct code-theme colours', () => {
+    const highlighted: ReadableTest = {
+      ...STORY,
+      story: {
+        steps: [{
+          id: 'highlighted-check',
+          role: 'check',
+          text: 'Check that response status is at least 200 using request, then equals “PAID”',
+          spans: [
+            { text: 'Check', kind: 'verb' },
+            { text: ' that ' },
+            { text: 'response', kind: 'variable' },
+            { text: ' status ' },
+            { text: 'is at least', kind: 'operator' },
+            { text: ' ' },
+            { text: '200', kind: 'number' },
+            { text: ' ' },
+            { text: 'using', kind: 'keyword' },
+            { text: ' ' },
+            { text: 'request', kind: 'variable' },
+            { text: ', ' },
+            { text: 'then', kind: 'keyword' },
+            { text: ' ' },
+            { text: 'equals', kind: 'operator' },
+            { text: ' ' },
+            { text: '“PAID”', kind: 'literal' },
+          ],
+          fidelity: 'derived',
+          source: source(10, "expect(response.status).toBe('PAID')"),
+        }],
+      },
+    }
+
+    act(() => root.render(<ReadableTestView test={highlighted} />))
+
+    const colors = {
+      verb: 'var(--code-function)',
+      variable: 'var(--code-variable)',
+      operator: 'var(--code-operator)',
+      number: 'var(--code-number)',
+      keyword: 'var(--code-keyword)',
+      literal: 'var(--code-literal)',
+    }
+    for (const [kind, color] of Object.entries(colors)) {
+      expect((container.querySelector(`[data-story-span="${kind}"]`) as HTMLElement).style.color).toBe(color)
+    }
   })
 
   it('renders nested callbacks, loops, retries, and error paths with hierarchical numbering', () => {
@@ -241,6 +289,17 @@ describe('ReadableTestView', () => {
       '02.2',
       '02.2.1',
     ])
+    expect(rows.map((row) => row.querySelector('[data-story-local-sequence]')?.textContent?.trim())).toEqual([
+      '01',
+      '1',
+      '1',
+      '1',
+      '02',
+      '1',
+      '1',
+      '2',
+      '1',
+    ])
     expect(rows.map((row) => row.querySelector('[data-testid^="readable-story-role-"]')?.textContent))
       .toEqual(['SETUP', 'REPEAT', 'RETRY', 'ACTION', 'TRY', 'ON ERROR', 'ACTION', 'ALWAYS', 'ACTION'])
     expect(container.querySelector('[data-story-flow="loop"]')?.textContent).toContain('for each ids in attempts')
@@ -248,6 +307,8 @@ describe('ReadableTestView', () => {
       .toBe('var(--semantic-attention)')
     expect(container.querySelector('[data-testid="readable-story-item-query-call"]')?.getAttribute('aria-label'))
       .toContain('01.1.1.1. ACTION')
+    expect(container.querySelector('[data-testid="readable-story-item-query-call"]')?.getAttribute('title'))
+      .toContain('Step 01.1.1.1')
   })
 
   it('opens the exact source for an ordered row and shows selection state', () => {

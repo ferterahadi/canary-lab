@@ -107,6 +107,7 @@ function StoryRow({
 }) {
   const fileNote = sourceFile && step.source.file !== sourceFile ? fileName(step.source.file) : undefined
   const sequenceLabel = storySequenceLabel(sequence)
+  const localSequenceLabel = storyLocalSequenceLabel(sequence)
   const keyword = storyKeyword(step)
   const selected = selectedNodeId === step.id
   return (
@@ -122,15 +123,22 @@ function StoryRow({
         data-fidelity={step.fidelity}
         aria-pressed={selected}
         aria-label={`${sequenceLabel}. ${keyword}: ${step.text}. Show ${sourceLabel(step.source)}`}
-        title={`${sourceLabel(step.source)} — ${fidelityTitle(step.fidelity)}`}
+        title={`Step ${sequenceLabel} — ${sourceLabel(step.source)} — ${fidelityTitle(step.fidelity)}`}
         onClick={() => onSourceSelect?.({ id: step.id, source: step.source })}
-        className="grid w-full grid-cols-[max-content_8ch_minmax(0,1fr)] items-start gap-x-2 px-2 py-0.5 text-left leading-[1.65] transition-colors hover:bg-running/10"
+        className="grid w-full grid-cols-[2ch_8ch_minmax(0,1fr)] items-start gap-x-2 px-2 py-0 text-left leading-[1.65] transition-colors hover:bg-running/10"
         style={{
           background: selected ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : undefined,
           boxShadow: selected ? 'inset 2px 0 0 var(--accent)' : undefined,
         }}
       >
-        <span aria-hidden="true" style={{ color: 'var(--text-muted)' }}>{sequenceLabel}</span>
+        <span
+          aria-hidden="true"
+          data-story-local-sequence={localSequenceLabel}
+          className="text-right tabular-nums"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          {localSequenceLabel}
+        </span>
         <span
           data-testid={`readable-story-role-${step.id}`}
           style={{ color: storyKeywordColor(step), fontWeight: 600 }}
@@ -159,11 +167,24 @@ function StorySpan({ span }: { span: ReadableStorySpan }) {
   return (
     <span
       data-story-span={span.kind ?? 'text'}
-      style={{ color: span.kind === 'variable' ? 'var(--code-string)' : undefined }}
+      style={{ color: storySpanColor(span.kind) }}
     >
       {span.text}
     </span>
   )
+}
+
+const STORY_SPAN_COLORS: Record<NonNullable<ReadableStorySpan['kind']>, string> = {
+  variable: 'var(--code-variable)',
+  literal: 'var(--code-literal)',
+  number: 'var(--code-number)',
+  operator: 'var(--code-operator)',
+  keyword: 'var(--code-keyword)',
+  verb: 'var(--code-function)',
+}
+
+function storySpanColor(kind: ReadableStorySpan['kind']): string | undefined {
+  return kind ? STORY_SPAN_COLORS[kind] : undefined
 }
 
 function roleColor(role: ReadableStoryRole): string {
@@ -198,6 +219,11 @@ function storyKeyword(step: ReadableStoryItem): string {
 
 function storySequenceLabel(sequence: readonly number[]): string {
   return sequence.map((part, index) => index === 0 ? String(part).padStart(2, '0') : String(part)).join('.')
+}
+
+function storyLocalSequenceLabel(sequence: readonly number[]): string {
+  const local = String(sequence.at(-1)!)
+  return sequence.length === 1 ? local.padStart(2, '0') : local
 }
 
 function roleLabel(role: ReadableStoryRole): 'SETUP' | 'ACTION' | 'CHECK' {

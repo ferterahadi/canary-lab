@@ -90,7 +90,7 @@ export type ReadableStoryFlowKind =
 
 export interface ReadableStorySpan {
   text: string
-  kind?: 'variable'
+  kind?: 'variable' | 'literal' | 'number' | 'operator' | 'keyword' | 'verb'
 }
 
 interface ReadableStoryItemBase {

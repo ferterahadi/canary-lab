@@ -76,15 +76,18 @@
   --scrollbar-thumb-hover: color-mix(in srgb, var(--text-muted) 76%, transparent);
   --scrollbar-track: transparent;
 
-  /* English test mode's tie to the Shiki code themes: authored step wording is
-     a string literal in the source, so it keeps the one-light / one-dark-pro
-     string hue and an English line reads as part of the same document. Not a
-     status hue — it means "syntax", never run state. */
+  /* English test mode uses the same syntax families as Shiki's one-light and
+     one-dark-pro themes. These mean grammar, never run status. */
   --code-string: #50a14f;
+  --code-variable: var(--code-string);
+  --code-literal: #c18401;
+  --code-number: #986801;
   /* one-light's cyan family, used for setup grammar in English mode. */
   --code-cyan: #0184bc;
-  /* one-light's keyword purple: tints the leading verb of a derived English
-     step (Check, Send, Open…) the way Shiki tints `await`/`const` in Code. */
+  --code-operator: var(--code-cyan);
+  --code-function: #4078f2;
+  /* one-light's keyword purple marks English control grammar such as `if`,
+     `until`, `using`, and `saving`, parallel to `await`/`const` in Code. */
   --code-keyword: #a626a4;
   /* Controlled-English semantics. These are not run statuses: purple marks
      error control flow; red marks assertions and proven external boundaries. */
@@ -128,7 +131,12 @@
   --text-muted: #737373;
 
   --code-string: #98c379;
+  --code-variable: var(--code-string);
+  --code-literal: #e5c07b;
+  --code-number: #d19a66;
   --code-cyan: #56b6c2;
+  --code-operator: var(--code-cyan);
+  --code-function: #61afef;
   /* one-dark-pro's keyword purple — see the light-theme twin for the rationale. */
   --code-keyword: #c678dd;
   --semantic-error-control-flow: var(--code-keyword);
@@ -379,7 +387,8 @@ body {
 /* The English pane's canvas — `.shiki-block pre`'s twin (same frame, inset,
    and wrapping; keep the two in step so mode toggling never shifts layout).
    Horizontal inset lives on the rows so selection washes bleed edge-to-edge
-   the way Code mode's line highlights do. */
+   the way Code mode's line highlights do. English rows intentionally have no
+   block padding: one story row and one code line share the same `1lh` box. */
 .shiki-block .cl-readable-body {
   padding: 0.5rem 0;
   border-radius: var(--radius-md);
