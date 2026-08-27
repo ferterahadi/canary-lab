@@ -454,14 +454,46 @@ describe('CoverageLedgerPage', () => {
     expect(src?.textContent).toContain('expect(items).toHaveLength(1)')
   })
 
-  it('opens the test in the editor at its source location', async () => {
+  it('places the shared editor action inside both presentation modes and opens the source location', async () => {
     await mount()
     await act(async () => {
       container.querySelector<HTMLElement>('[data-testid="test-toggle-adds item"]')?.click()
       await Promise.resolve()
     })
-    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="test-open-editor-adds item"]')?.click() })
-    expect(api.openEditor).toHaveBeenCalledWith({ file: '/repo/features/checkout/e2e/cart.spec.ts', line: 10 })
+    const source = container.querySelector('[data-testid="test-source-adds item"]')
+    const english = source?.querySelector('[data-testid="test-presentation-english"]')
+    const englishOpenButton = english?.querySelector<HTMLButtonElement>('button[aria-label="Open in editor"]')
+    expect(englishOpenButton).not.toBeNull()
+    expect(englishOpenButton?.parentElement?.querySelector('.cl-code-shell')).not.toBeNull()
+    await act(async () => {
+      englishOpenButton?.click()
+      await Promise.resolve()
+    })
+    expect(api.openEditor).toHaveBeenCalledWith({
+      file: '/repo/features/checkout/e2e/cart.spec.ts',
+      line: 10,
+      column: 1,
+    })
+    vi.mocked(api.openEditor).mockClear()
+
+    await act(async () => {
+      ;(source?.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
+      await Promise.resolve()
+    })
+
+    const code = source?.querySelector('[data-testid="test-presentation-code"]')
+    const openButton = code?.querySelector<HTMLButtonElement>('button[aria-label="Open in editor"]')
+    expect(openButton).not.toBeNull()
+    expect(openButton?.parentElement?.querySelector('.cl-code-shell')).not.toBeNull()
+    await act(async () => {
+      openButton?.click()
+      await Promise.resolve()
+    })
+    expect(api.openEditor).toHaveBeenCalledWith({
+      file: '/repo/features/checkout/e2e/cart.spec.ts',
+      line: 10,
+      column: 1,
+    })
   })
 
   it('shows a not-found note when a test has no extractable source', async () => {

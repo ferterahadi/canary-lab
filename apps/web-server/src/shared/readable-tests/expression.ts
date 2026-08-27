@@ -72,6 +72,7 @@ const OBJECT_INSPECTION_TEXT = new Map<string, string>([
   ['Object.keys', 'the keys of {value}'],
   ['Object.values', 'the values of {value}'],
   ['Object.entries', 'the entries of {value}'],
+  ['Array.isArray', '{value} is a list'],
 ])
 
 // Read-style verbs whose call result is safely described as the thing read:
@@ -218,25 +219,77 @@ function renderedArguments(
   return rendered.some((argument) => argument.fidelity === 'unresolved') ? undefined : rendered
 }
 
-function predicateBody(callback: ts.Expression): { parameter: string; body: ts.Expression } | undefined {
+interface SafeCallbackExpression {
+  parameters: string[]
+  body: ts.Expression
+}
+
+function safeCallbackExpression(
+  callback: ts.Expression,
+  parameterCount: number | readonly [minimum: number, maximum: number],
+): SafeCallbackExpression | undefined {
   let expression = callback
   while (ts.isParenthesizedExpression(expression)) expression = expression.expression
   if (!ts.isArrowFunction(expression) && !ts.isFunctionExpression(expression)) return undefined
   if (expression.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)) return undefined
   if (ts.isFunctionExpression(expression) && expression.asteriskToken) return undefined
-  if (expression.parameters.length !== 1) return undefined
-  const [parameter] = expression.parameters
-  if (!ts.isIdentifier(parameter.name) || parameter.initializer || parameter.dotDotDotToken) return undefined
-  if (!ts.isBlock(expression.body)) return { parameter: parameter.name.text, body: expression.body }
+  const minimum = typeof parameterCount === 'number' ? parameterCount : parameterCount[0]
+  const maximum = typeof parameterCount === 'number' ? parameterCount : parameterCount[1]
+  if (expression.parameters.length < minimum || expression.parameters.length > maximum) return undefined
+  const parameters = expression.parameters.flatMap((parameter) => (
+    ts.isIdentifier(parameter.name) && !parameter.initializer && !parameter.dotDotDotToken
+      ? [parameter.name.text]
+      : []
+  ))
+  if (parameters.length !== expression.parameters.length) return undefined
+  if (!ts.isBlock(expression.body)) return { parameters, body: expression.body }
   if (expression.body.statements.length !== 1) return undefined
   const [statement] = expression.body.statements
   if (!ts.isReturnStatement(statement) || !statement.expression) return undefined
-  return { parameter: parameter.name.text, body: statement.expression }
+  return { parameters, body: statement.expression }
 }
 
 function preservePredicateIdentifierNames(node: ts.Node, bindings: Map<string, string>): void {
   if (ts.isIdentifier(node) && !bindings.has(node.text)) bindings.set(node.text, node.text)
   ts.forEachChild(node, (child) => preservePredicateIdentifierNames(child, bindings))
+}
+
+function renderCallbackExpression(
+  callback: SafeCallbackExpression,
+  parameterLabels: readonly string[],
+  sourceFile: ts.SourceFile,
+  bindings: ExpressionBindings,
+): RenderedPart | undefined {
+  const callbackBindings = new Map(bindings)
+  // Keep free variables recognizable (`txId`, `EXPECTED_STATUS`) while giving
+  // callback-local parameters generic, project-independent names.
+  preservePredicateIdentifierNames(callback.body, callbackBindings)
+  callback.parameters.forEach((parameter, index) => callbackBindings.set(parameter, parameterLabels[index]))
+  const rendered = renderPart(callback.body, sourceFile, callbackBindings)
+  return rendered.fidelity === 'unresolved' ? undefined : rendered
+}
+
+function renderZeroBasedSum(
+  callback: SafeCallbackExpression,
+  owner: RenderedPart,
+  sourceFile: ts.SourceFile,
+  bindings: ExpressionBindings,
+): string | undefined {
+  if (!ts.isBinaryExpression(callback.body)
+    || callback.body.operatorToken.kind !== ts.SyntaxKind.PlusToken
+    || !ts.isIdentifier(callback.body.left)
+    || callback.body.left.text !== callback.parameters[0]) return undefined
+
+  const contribution = ts.isIdentifier(callback.body.right)
+    && callback.body.right.text === callback.parameters[1]
+    ? { text: 'each item' }
+    : renderCallbackExpression(
+        { ...callback, body: callback.body.right },
+        ['the running value', "each item's", "each item's index", "the collection's"],
+        sourceFile,
+        bindings,
+      )
+  return contribution ? `the sum of ${contribution.text} in ${childText(owner)}` : undefined
 }
 
 function renderCollectionPredicate(
@@ -246,24 +299,151 @@ function renderCollectionPredicate(
   sourceFile: ts.SourceFile,
   bindings: ExpressionBindings,
 ): RenderedPart | undefined {
-  if ((method !== 'every' && method !== 'some') || node.arguments.length !== 1) return undefined
-  const callback = predicateBody(node.arguments[0])
+  if ((method !== 'every' && method !== 'some' && method !== 'find') || node.arguments.length !== 1) return undefined
+  const callback = safeCallbackExpression(node.arguments[0], [1, 3])
   if (!callback) return undefined
   const owner = renderPart(ownerExpression, sourceFile, bindings)
   if (owner.fidelity === 'unresolved') return undefined
-  const callbackBindings = new Map(bindings)
-  // Keep free variables recognizable (`txId`, `EXPECTED_STATUS`) while giving
-  // the callback's local parameter a generic, project-independent name.
-  preservePredicateIdentifierNames(callback.body, callbackBindings)
-  callbackBindings.set(callback.parameter, 'item')
-  const predicate = renderPart(callback.body, sourceFile, callbackBindings)
-  if (predicate.fidelity === 'unresolved') return undefined
+  const predicate = renderCallbackExpression(callback, ['item', 'item index', 'collection'], sourceFile, bindings)
+  if (!predicate) return undefined
+  if (method === 'find') {
+    return {
+      text: `the first item in ${childText(owner)} where ${predicate.text}`,
+      fidelity: 'derived',
+      compound: false,
+    }
+  }
   const quantifier = method === 'every' ? 'every' : 'at least one'
   return {
     text: `for ${quantifier} item in ${childText(owner)}, ${predicate.text}`,
     fidelity: 'derived',
     compound: true,
   }
+}
+
+function renderCollectionTransform(
+  node: ts.CallExpression,
+  method: string,
+  ownerExpression: ts.Expression,
+  sourceFile: ts.SourceFile,
+  bindings: ExpressionBindings,
+): RenderedPart | undefined {
+  const owner = renderPart(ownerExpression, sourceFile, bindings)
+  if (owner.fidelity === 'unresolved') return undefined
+
+  if (method === 'map' || method === 'flatMap' || method === 'filter' || method === 'findIndex') {
+    if (node.arguments.length !== 1) return undefined
+    const callback = safeCallbackExpression(node.arguments[0], [1, 3])
+    const result = callback && renderCallbackExpression(
+      callback,
+      ['item', 'item index', 'collection'],
+      sourceFile,
+      bindings,
+    )
+    if (!result) return undefined
+    const text = method === 'map'
+      ? `${childText(owner)} transformed so each item becomes ${result.text}`
+      : method === 'flatMap'
+        ? `${childText(owner)} transformed and flattened so each item becomes ${result.text}`
+        : method === 'filter'
+          ? `${childText(owner)} filtered to keep each item where ${result.text}`
+          : `the index of the first item in ${childText(owner)} where ${result.text}`
+    return { text, fidelity: 'derived', compound: false }
+  }
+
+  if (method === 'reduce') {
+    if (node.arguments.length < 1 || node.arguments.length > 2) return undefined
+    const callback = safeCallbackExpression(node.arguments[0], [2, 4])
+    if (!callback) return undefined
+    const initialExpression = node.arguments[1]
+    const naturalSum = initialExpression
+      && ts.isNumericLiteral(initialExpression)
+      && initialExpression.text === '0'
+      && renderZeroBasedSum(callback, owner, sourceFile, bindings)
+    if (naturalSum) return { text: naturalSum, fidelity: 'derived', compound: false }
+    const result = renderCallbackExpression(
+      callback,
+      ['the running value', "that item's", "that item's index", "the collection's"],
+      sourceFile,
+      bindings,
+    )
+    if (!result) return undefined
+    const initial = initialExpression && renderPart(initialExpression, sourceFile, bindings)
+    if (initial?.fidelity === 'unresolved') return undefined
+    return {
+      text: initial
+        ? `the result of combining ${childText(owner)}, starting with ${childText(initial)} and updating the running value for each item to ${result.text}`
+        : `the result of combining ${childText(owner)}, starting with the first item and updating the running value for each remaining item to ${result.text}`,
+      fidelity: 'derived',
+      compound: false,
+    }
+  }
+
+  if (method === 'sort' || method === 'toSorted') {
+    if (node.arguments.length > 1) return undefined
+    if (!node.arguments.length) {
+      return { text: `${childText(owner)} sorted using default ordering`, fidelity: 'derived', compound: false }
+    }
+    const callback = safeCallbackExpression(node.arguments[0], 2)
+    const comparison = callback && renderCallbackExpression(
+      callback,
+      ['left item', 'right item'],
+      sourceFile,
+      bindings,
+    )
+    return comparison
+      ? { text: `${childText(owner)} sorted by comparing ${comparison.text}`, fidelity: 'derived', compound: false }
+      : undefined
+  }
+
+  if (method === 'join') {
+    if (node.arguments.length > 1) return undefined
+    const separator = node.arguments[0]
+      ? renderPart(node.arguments[0], sourceFile, bindings)
+      : { text: quoteReadableText(','), fidelity: 'exact' as const, compound: false }
+    return separator.fidelity === 'unresolved'
+      ? undefined
+      : { text: `${childText(owner)} joined with ${separator.text}`, fidelity: 'derived', compound: false }
+  }
+
+  if (method === 'split') {
+    if (node.arguments.length > 2) return undefined
+    if (!node.arguments.length) {
+      return { text: `${childText(owner)} placed in a one-item list`, fidelity: 'derived', compound: false }
+    }
+    const parts = renderedArguments(node.arguments, sourceFile, bindings)
+    if (!parts) return undefined
+    return {
+      text: `${childText(owner)} split using ${parts[0].text}${parts[1] ? `, limited to ${parts[1].text} items` : ''}`,
+      fidelity: 'derived',
+      compound: false,
+    }
+  }
+
+  if (method === 'replace' || method === 'replaceAll') {
+    if (node.arguments.length !== 2) return undefined
+    const parts = renderedArguments(node.arguments, sourceFile, bindings)
+    if (!parts) return undefined
+    return {
+      text: `${childText(owner)} with ${method === 'replaceAll' ? 'every match for' : 'the first match for'} ${parts[0].text} replaced by ${parts[1].text}`,
+      fidelity: 'derived',
+      compound: false,
+    }
+  }
+
+  if (method === 'concat') {
+    if (!node.arguments.length) return undefined
+    const parts = renderedArguments(node.arguments, sourceFile, bindings)
+    return parts
+      ? {
+          text: `${childText(owner)} combined with ${parts.map((part) => part.text).join(' and ')}`,
+          fidelity: 'derived',
+          compound: false,
+        }
+      : undefined
+  }
+
+  return undefined
 }
 
 /** Calls whose *result* has a describable meaning render as that meaning;
@@ -341,6 +521,14 @@ function renderCall(
       bindings,
     )
     if (collectionPredicate) return collectionPredicate
+    const collectionTransform = renderCollectionTransform(
+      node,
+      method,
+      node.expression.expression,
+      sourceFile,
+      bindings,
+    )
+    if (collectionTransform) return collectionTransform
     if (method === 'toString' && node.arguments.length === 1) {
       const owner = renderPart(node.expression.expression, sourceFile, bindings)
       const radix = renderPart(node.arguments[0], sourceFile, bindings)

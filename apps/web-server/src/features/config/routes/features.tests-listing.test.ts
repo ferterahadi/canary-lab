@@ -96,6 +96,30 @@ describe('GET /api/features/:name/tests', () => {
     return `test('deep', async () => { const a = ${open}x${close} })\n`
   }
 
+  it('returns display-only formatted code with absolute source rows without mutating the spec', async () => {
+    const source = "test('formatted', async () => { const payload={kind:'retry',attempt:2}; /* keep this reason */ await send(payload) })\n"
+    const dir = writeFeature('formatted-code', { spec: source })
+    const specFile = path.join(dir, 'e2e', 'a.spec.ts')
+    const app = await build({ spawner: failingSpawner })
+
+    const res = await app.inject({ method: 'GET', url: '/api/features/formatted-code/tests' })
+
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as Array<{
+      tests: Array<{
+        codeDisplay: { code: string; lineMap: Array<{ sourceLine: number; sourceLines: number[] }> }
+      }>
+    }>
+    const display = body[0].tests[0].codeDisplay
+    expect(display.code).toContain("const payload = { kind: 'retry', attempt: 2 };")
+    expect(display.code).toContain('/* keep this reason */')
+    expect(display.code).toContain('await send(payload);')
+    expect(display.code.split('\n').length).toBeGreaterThan(1)
+    expect(display.lineMap).toHaveLength(display.code.split('\n').length)
+    expect(display.lineMap.every((line) => line.sourceLine === 1)).toBe(true)
+    expect(fs.readFileSync(specFile, 'utf8')).toBe(source)
+  })
+
   it('applies feature semantic-rule configuration to the returned readable spans', async () => {
     const dir = writeFeature('semantic-config', {
       spec: `import api from '@company/api-client'

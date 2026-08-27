@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import path from 'path'
+import { formatCodeForDisplayWithLineMap } from '../../../../../../shared/code-display-format'
 import { loadFeatures, listSpecFiles } from '../../../shared/feature-loader'
 import { extractTestsFromSource, type ExtractedTest } from '../../../shared/ast-extractor'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
@@ -205,6 +206,18 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       reply.code(404)
       return { error: 'feature not found' }
     }
+    const codeDisplayCache = new Map<string, ReturnType<typeof formatCodeForDisplayWithLineMap>>()
+    const withCodeDisplay = (test: ExtractedTest): ExtractedTest => {
+      if (!test.bodySource) return test
+      const sourceStartLine = test.bodyLine ?? test.line
+      const key = `${sourceStartLine}\0${test.bodySource}`
+      let codeDisplay = codeDisplayCache.get(key)
+      if (!codeDisplay) {
+        codeDisplay = formatCodeForDisplayWithLineMap(test.bodySource, sourceStartLine)
+        codeDisplayCache.set(key, codeDisplay)
+      }
+      return { ...test, codeDisplay }
+    }
     const specFiles = listSpecFiles(feature.featureDir)
 
     // 1. Run AST over each spec to gather (line -> { bodySource, steps }) for
@@ -231,7 +244,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
         const result = astByFile.get(file)!
         return {
           file,
-          tests: result.tests,
+          tests: result.tests.map(withCodeDisplay),
           ...(result.parseError ? { parseError: result.parseError } : {}),
         }
       })
@@ -274,7 +287,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       if (!pwEntries || pwEntries.length === 0) {
         return {
           file,
-          tests: ast.tests,
+          tests: ast.tests.map(withCodeDisplay),
           ...(ast.parseError ? { parseError: ast.parseError } : {}),
         }
       }
@@ -303,7 +316,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
                 }),
           }
           if (isHelperDefined) test.sourceFile = entry.originFile
-          return test
+          return withCodeDisplay(test)
         })
       return {
         file,

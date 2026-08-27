@@ -1,12 +1,19 @@
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
-import { renderActionStatement } from './actions'
+import { renderActionExpression, renderActionStatement } from './actions'
 
 function actionFrom(source: string) {
   const sourceFile = ts.createSourceFile('actions.ts', `async function scenario() { ${source} }`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const declaration = sourceFile.statements[0]
   if (!ts.isFunctionDeclaration(declaration) || !declaration.body) throw new Error('Expected a function body')
   return renderActionStatement(declaration.body.statements[0], sourceFile)
+}
+
+function expressionActionFrom(source: string) {
+  const sourceFile = ts.createSourceFile('actions.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const statement = sourceFile.statements[0]
+  if (!ts.isExpressionStatement(statement)) throw new Error('Expected an expression statement')
+  return renderActionExpression(statement.expression, sourceFile)
 }
 
 function unresolved(source: string) {
@@ -176,9 +183,9 @@ describe('Playwright action edge cases', () => {
 
   it('renders the bare-sleep Promise idiom and nothing looser', () => {
     expect(actionFrom('await new Promise((r) => setTimeout(r, 3000))'))
-      .toEqual({ text: 'Wait for 3000 milliseconds', fidelity: 'derived', role: 'action' })
+      .toEqual({ text: 'Delay for 3000 ms', fidelity: 'derived', role: 'action' })
     expect(actionFrom('await new Promise((resolve) => setTimeout(resolve, 10_000))'))
-      .toEqual({ text: 'Wait for 10000 milliseconds', fidelity: 'derived', role: 'action' })
+      .toEqual({ text: 'Delay for 10000 ms', fidelity: 'derived', role: 'action' })
 
     // Every guard in the shape check: a looser executor could be doing real work.
     for (const source of [
@@ -254,7 +261,23 @@ describe('Playwright action edge cases', () => {
       ['state.messageId = messageId', 'Set state message identifier to message identifier'],
       ['count += 1', 'Increase count by 1'],
       ['count -= step', 'Decrease count by step'],
+      ['count *= 2', 'Multiply count by 2'],
+      ['count /= divisor', 'Divide count by divisor'],
+      ['count %= divisor', 'Set count to its remainder after division by divisor'],
+      ['count **= exponent', 'Raise count to the power of exponent'],
+      ['flags &= mask', 'Apply bitwise AND to flags using mask'],
+      ['flags |= mask', 'Apply bitwise OR to flags using mask'],
+      ['flags ^= mask', 'Apply bitwise XOR to flags using mask'],
+      ['flags <<= bits', 'Shift flags left by bits'],
+      ['flags >>= bits', 'Shift flags right by bits'],
+      ['flags >>>= bits', 'Unsigned-shift flags right by bits'],
+      ['result &&= fallback', 'Conditionally set result to fallback when its current value is true'],
+      ['result ||= fallback', 'Conditionally set result to fallback when its current value is false'],
+      ['result ??= fallback', 'Conditionally set result to fallback when its current value is null or undefined'],
+      ['count++', 'Increase count by 1'],
+      ['--count', 'Decrease count by 1'],
       ['delete payload.from', 'Remove “from” from payload'],
+      ['delete payload[key]', 'Remove the property at key from payload'],
       // Zero-argument `new Date` (with or without parentheses) is the start-time idiom.
       ['const t0 = new Date', 'Record the start time'],
       ['return { res, elapsedMs }', 'Return an object with response, elapsed ms'],
@@ -268,9 +291,10 @@ describe('Playwright action edge cases', () => {
     const undefinedCases = [
       'const [first] = pair',
       'const method = methods[index++]',
-      'delete payload[key]',
       'delete computePayload().from',
-      'count *= 2',
+      'delete payload[computeKey()]',
+      'delete value',
+      '+count',
       'payload.from = computeSender()',
       'computeTarget().enabled = true',
       'total',
@@ -298,5 +322,15 @@ describe('Playwright action edge cases', () => {
       fidelity: 'derived',
       role: 'action',
     })
+  })
+
+  it('renders standalone action expressions for nested story branches', () => {
+    expect(expressionActionFrom("page.goto('/orders')")).toEqual({
+      text: 'Open “/orders”',
+      fidelity: 'derived',
+      role: 'action',
+    })
+    expect(expressionActionFrom('computeTarget().value++')).toBeUndefined()
+    expect(expressionActionFrom('ready && submit()')).toBeUndefined()
   })
 })

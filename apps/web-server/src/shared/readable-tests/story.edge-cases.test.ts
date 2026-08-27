@@ -20,6 +20,20 @@ function storyItems(items: ReadableStoryItem[] | undefined): ReadableStoryItem[]
 }
 
 describe('readable test story flow edge cases', () => {
+  it('keeps a bare Promise sleep as a numbered action at its authored source line', () => {
+    const translated = translate(`{
+  const before = readBefore()
+  await new Promise((r) => setTimeout(r, 10_000))
+  const after = readAfter()
+}`)
+
+    const delay = storyItems(translated.story?.steps).find((item) => item.text === 'Delay for 10000 ms')
+    expect(delay).toMatchObject({
+      role: 'action',
+      source: { startLine: 12, endLine: 12 },
+    })
+  })
+
   it('names map, forEach, function callbacks, and their nested work by purpose', () => {
     const translated = translate(`{
   const mapped = values.map((value) => {
@@ -46,8 +60,11 @@ describe('readable test story flow edge cases', () => {
   const missingSource = page[method]().map((value) => value)
   values.map((value) => sendMapped(value))
   const noParameter = values.map(() => makeValue())
+  const fallbackValues = [1, 2].map((value) => compute(value))
+  const fallbackSpread = [...values].map((value) => compute(value))
+  const unresolvedValues = [compute()].map((value) => compute(value))
   await test.step('Keep only the authored step', async () => {
-    for (;;) { submitHiddenAction(); break; continue }
+    for (;;) { submitHiddenAction(); Promise.all([submitHiddenPromise()]); break; continue }
   })
 }`)
 
@@ -61,6 +78,8 @@ describe('readable test story flow edge cases', () => {
         'loop: While ctx ready is true; this may run zero times',
       ]))
     expect(items.map((item) => item.text)).toEqual(expect.arrayContaining([
+      'Create fallbackValues by transforming each value in the values 1 and 2',
+      'Create fallbackSpread by transforming each value in a list containing all items of values',
       'Create variable request using value',
       'Return request',
       'Send item using item',
@@ -148,6 +167,7 @@ describe('readable test story flow edge cases', () => {
   do { continue } while (ready)
   if (ignored) { debugger }
   switch (ignoredMode) { case 'ignored': debugger }
+  outer: while (ready) { if (done) break outer; continue outer }
 }`)
 
     const items = storyItems(translated.story?.steps)
@@ -174,10 +194,119 @@ describe('readable test story flow edge cases', () => {
     ]))
     expect(items.map((item) => item.text)).toEqual(expect.arrayContaining([
       'Stop this loop',
+      'Leave this switch',
       'Skip to the next iteration',
       'Log error using error',
       'Close connection',
+      'Leave outer',
+      'Continue with the next iteration of outer',
     ]))
     expect(items.map((item) => item.text).join('\n')).not.toContain('`')
+  })
+
+  it('covers mutation variants and conservative destructuring fallbacks', () => {
+    const translated = translate(`{
+  const tail = rows.pop()
+  rows.pop()
+  const head = rows.shift()
+  rows.shift()
+  const length = rows.unshift(first, second)
+  rows.unshift(first)
+  const reversed = rows.reverse()
+  rows.splice(1)
+  rows.splice(1, 0, replacement)
+  const sorted = rows.sort()
+  rows.sort((left, right) => left.rank - right.rank)
+  rows.push()
+  rows.sort(compare)
+  page[method]().push(row)
+  rows.push(() => row)
+  const { data } = await request.get('/orders')
+  const {} = response
+  const { [computeKey()]: computed } = response
+  const { nested: [] } = response
+  const [[]] = rows
+  const { value = page[method]() } = response
+  const { missing } = page[method]()
+  const unresolved = page[method]() ? value : other
+}`)
+
+    const texts = storyItems(translated.story?.steps).map((item) => item.text)
+    expect(texts).toEqual(expect.arrayContaining([
+      'Remove the last item from rows, saving the removed item as tail',
+      'Remove the last item from rows',
+      'Remove the first item from rows, saving the removed item as head',
+      'Remove the first item from rows',
+      'Prepend first and second to rows, saving the new length as length',
+      'Prepend first to rows',
+      'Reverse rows, saving the result as reversed',
+      'Modify rows starting at index 1',
+      'Modify rows starting at index 1, removing 0 items, inserting replacement',
+      'Sort rows using default ordering, saving the result as sorted',
+      'Sort rows by comparing left item rank minus right item rank',
+      'Send a GET request to “/orders”, extracting properties data',
+    ]))
+    expect(texts.join('\n')).not.toMatch(/compute key|nested|push|compare/)
+  })
+
+  it('covers Promise and shorthand-control variants without hiding sequence', () => {
+    const translated = translate(`{
+  Promise.all([singleTask()])
+  Promise.all([])
+  Promise.allSettled([taskPromise])
+  const raced = await Promise.race([readPrimary(), readSecondary()])
+  const accepted = await Promise.any([readFirst(), readSecond()])
+  Promise.all([taskPromise, 42, ...extraTasks])
+  Promise.all([taskPromise, ...page[method](), page[method](), service[method](() => submitNested())])
+  Promise.all(tasks, options)
+  Promise.all(() => taskPromise)
+  ready && value
+  computeReady() && recoverComputed()
+  ready && ((recoverSatisfied()) satisfies Promise<void>)
+  ready && items.forEach((item) => submitItem(item))
+  computeReady() || recover()
+  record.ready || recoverRecord()
+  const selected = ready ? 'primary' : fallback
+  const response = ready ? request.get('/primary') : request.get('/fallback')
+  const configured = ready ? page.setViewportSize(primarySize) : page.setViewportSize(fallbackSize)
+  const optionalResult = handler?.()
+  ready ? page.goto('/ready') : count++
+  ready ? withContext(async () => submitInside()) : submitOutside()
+}`)
+
+    const texts = storyItems(translated.story?.steps).map((item) => item.text)
+    expect(texts).toEqual(expect.arrayContaining([
+      'Start 1 operation together and combine their completion',
+      'Start 0 operations together and combine their completion',
+      'Start 1 operation together and collect every outcome',
+      'Run 2 operations together and use the first one to settle, saving the result as raced',
+      'Run 2 operations together and use the first successful result, saving the result as accepted',
+      'Start these operations together and combine their completion',
+      'Use taskPromise',
+      'Use 42',
+      'Include every operation in extraTasks',
+      'Send nested',
+      'If the left condition is true',
+      'Recover computed',
+      'Recover satisfied',
+      'For each item in items',
+      'Send item using item',
+      'If it is false that the left condition',
+      'Recover',
+      'If record ready is false',
+      'Recover record',
+      'Use “primary” as selected',
+      'Use fallback as selected',
+      'Send a GET request to “/primary”, saving the result as response',
+      'Send a GET request to “/fallback”, saving the result as response',
+      'Set the browser viewport to primary size',
+      'Set the browser viewport to fallback size',
+      'Call handler when available, saving the result as optionalResult',
+      'Open “/ready”',
+      'Increase count by 1',
+      'Using context',
+      'Send inside',
+      'Send outside',
+    ]))
   })
 })

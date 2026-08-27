@@ -116,12 +116,68 @@ describe('TestCasesColumn', () => {
 
     expect(container.textContent).toContain('loads checkout')
     expect(container.textContent).not.toContain('Loading...')
-    await act(async () => {
-      Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('loads checkout'))?.click()
-    })
     expect(container.querySelector('[data-testid="test-presentation-english"]')).not.toBeNull()
     expect(container.textContent).toContain('Open “/checkout”')
     expect(container.querySelector('[data-testid="test-presentation-code"]')).toBeNull()
+  })
+
+  it('expands the first test whenever a different suite is selected', async () => {
+    vi.mocked(getFeatureTests).mockImplementation(async (feature) => [{
+      file: `/tmp/features/${feature}/e2e/a.spec.ts`,
+      tests: [
+        {
+          name: `${feature} first test`,
+          line: 3,
+          bodySource: '',
+          steps: [],
+          readable: readableTest(`${feature} first test`, [{
+            id: `${feature}-first-step`,
+            kind: 'leaf',
+            role: 'action',
+            text: `Run ${feature} first step`,
+            fidelity: 'derived',
+            source: {
+              file: `/tmp/features/${feature}/e2e/a.spec.ts`,
+              startLine: 4,
+              endLine: 4,
+              snippet: `run${feature}FirstStep()`,
+            },
+          }]),
+        },
+        {
+          name: `${feature} second test`,
+          line: 10,
+          bodySource: '',
+          steps: [],
+          readable: readableTest(`${feature} second test`),
+        },
+      ],
+    }])
+
+    await act(async () => {
+      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+    })
+
+    expect(container.textContent).toContain('Run alpha first step')
+    expect(container.querySelectorAll('[data-testid="test-presentation-english"]')).toHaveLength(1)
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('alpha first test'))?.click()
+    })
+    expect(container.querySelector('[data-testid="test-presentation-english"]')).toBeNull()
+
+    await act(async () => {
+      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+    })
+    expect(container.querySelector('[data-testid="test-presentation-english"]')).toBeNull()
+
+    await act(async () => {
+      root.render(<TestCasesColumn feature="beta" activeRunSummary={undefined} activeRunStatus={undefined} />)
+    })
+
+    expect(container.textContent).toContain('Run beta first step')
+    expect(container.querySelectorAll('[data-testid="test-presentation-english"]')).toHaveLength(1)
+    expect(container.textContent).not.toContain('Run alpha first step')
   })
 
   it('numbers tests by source order and strips a baked-in ordinal from the title', async () => {
@@ -357,11 +413,6 @@ describe('TestCasesColumn', () => {
       )
     })
 
-    const buttons = Array.from(container.querySelectorAll('button'))
-    const testButton = buttons.find((button) => button.textContent?.includes('sends message'))
-    await act(async () => {
-      testButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
     await act(async () => {
       ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
     })
@@ -456,9 +507,6 @@ describe('TestCasesColumn', () => {
     })
 
     await act(async () => {
-      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-    await act(async () => {
       ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
     })
     await waitFor(() => Boolean(container.querySelector('[data-changed-line="true"]')))
@@ -530,9 +578,6 @@ describe('TestCasesColumn', () => {
       )
     })
 
-    await act(async () => {
-      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
     await act(async () => {
       ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
     })

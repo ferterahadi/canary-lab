@@ -40,9 +40,13 @@ function isKeyboardReceiver(context: CallContext): boolean {
   return expressionPath(context.receiver)?.endsWith('.keyboard') ?? false
 }
 
-function isRequestReceiver(context: CallContext): boolean {
-  const receiver = expressionPath(context.receiver)?.split('.').at(-1)?.toLowerCase()
+function isRequestReceiverExpression(expression: ts.Expression): boolean {
+  const receiver = expressionPath(expression)?.split('.').at(-1)?.toLowerCase()
   return receiver === 'request' || receiver === 'api' || receiver === 'apirequest' || receiver === 'requestcontext' || receiver === 'axios'
+}
+
+function isRequestReceiver(context: CallContext): boolean {
+  return isRequestReceiverExpression(context.receiver)
 }
 
 function safeExpression(node: ts.Expression | undefined, sourceFile: ts.SourceFile): RenderedExpression | undefined {
@@ -179,8 +183,18 @@ const WAIT_RULE: ActionRule = {
   },
 }
 
+const REQUEST_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'fetch'])
+
+export function requestMethodForCall(call: ts.CallExpression): string | undefined {
+  if (!ts.isPropertyAccessExpression(call.expression)) return undefined
+  const method = call.expression.name.text
+  return REQUEST_METHODS.has(method) && isRequestReceiverExpression(call.expression.expression)
+    ? method
+    : undefined
+}
+
 const REQUEST_RULE: ActionRule = {
-  methods: new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'fetch']),
+  methods: REQUEST_METHODS,
   matches: isRequestReceiver,
   render(context) {
     const url = safeExpression(context.call.arguments[0], context.sourceFile)
@@ -335,6 +349,19 @@ const CALL_FREE_ASSIGNMENT_TEXT = new Map<ts.SyntaxKind, string>([
   [ts.SyntaxKind.EqualsToken, 'Set {target} to {value}'],
   [ts.SyntaxKind.PlusEqualsToken, 'Increase {target} by {value}'],
   [ts.SyntaxKind.MinusEqualsToken, 'Decrease {target} by {value}'],
+  [ts.SyntaxKind.AsteriskEqualsToken, 'Multiply {target} by {value}'],
+  [ts.SyntaxKind.SlashEqualsToken, 'Divide {target} by {value}'],
+  [ts.SyntaxKind.PercentEqualsToken, 'Set {target} to its remainder after division by {value}'],
+  [ts.SyntaxKind.AsteriskAsteriskEqualsToken, 'Raise {target} to the power of {value}'],
+  [ts.SyntaxKind.AmpersandEqualsToken, 'Apply bitwise AND to {target} using {value}'],
+  [ts.SyntaxKind.BarEqualsToken, 'Apply bitwise OR to {target} using {value}'],
+  [ts.SyntaxKind.CaretEqualsToken, 'Apply bitwise XOR to {target} using {value}'],
+  [ts.SyntaxKind.LessThanLessThanEqualsToken, 'Shift {target} left by {value}'],
+  [ts.SyntaxKind.GreaterThanGreaterThanEqualsToken, 'Shift {target} right by {value}'],
+  [ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken, 'Unsigned-shift {target} right by {value}'],
+  [ts.SyntaxKind.AmpersandAmpersandEqualsToken, 'Conditionally set {target} to {value} when its current value is true'],
+  [ts.SyntaxKind.BarBarEqualsToken, 'Conditionally set {target} to {value} when its current value is false'],
+  [ts.SyntaxKind.QuestionQuestionEqualsToken, 'Conditionally set {target} to {value} when its current value is null or undefined'],
 ])
 
 /** `await new Promise((r) => setTimeout(r, 3000))` is the bare-sleep idiom —
@@ -359,6 +386,46 @@ function sleepDelayMs(expression: ts.Expression): string | undefined {
 
 /** Statements no method rule dispatched — plain declarations, assignments,
  *  deletes, throws, and returns — still read as steps when both sides render. */
+export function renderActionExpression(expression: ts.Expression, sourceFile: ts.SourceFile): RenderedAction | undefined {
+  const call = callFromExpression(expression)
+  if (call) {
+    const renderedCall = renderActionCall(call, sourceFile)
+    if (renderedCall) return renderedCall
+  }
+  const sleepMs = sleepDelayMs(expression)
+  if (sleepMs !== undefined) return action(`Delay for ${sleepMs} ms`)
+  if (ts.isDeleteExpression(expression)) {
+    if (ts.isPropertyAccessExpression(expression.expression)) {
+      const owner = renderExpression(expression.expression.expression, sourceFile)
+      if (owner.fidelity === 'unresolved') return undefined
+      return action(`Remove “${expression.expression.name.text}” from ${owner.text}`)
+    }
+    if (ts.isElementAccessExpression(expression.expression)) {
+      const owner = renderExpression(expression.expression.expression, sourceFile)
+      const key = renderExpression(expression.expression.argumentExpression, sourceFile)
+      if (owner.fidelity === 'unresolved' || key.fidelity === 'unresolved') return undefined
+      return action(`Remove the property at ${key.text} from ${owner.text}`)
+    }
+  }
+  if (ts.isPrefixUnaryExpression(expression) || ts.isPostfixUnaryExpression(expression)) {
+    if (expression.operator !== ts.SyntaxKind.PlusPlusToken && expression.operator !== ts.SyntaxKind.MinusMinusToken) {
+      return undefined
+    }
+    const target = renderExpression(expression.operand, sourceFile)
+    if (target.fidelity === 'unresolved') return undefined
+    return action(`${expression.operator === ts.SyntaxKind.PlusPlusToken ? 'Increase' : 'Decrease'} ${target.text} by 1`)
+  }
+  if (ts.isBinaryExpression(expression)) {
+    const wording = CALL_FREE_ASSIGNMENT_TEXT.get(expression.operatorToken.kind)
+    if (!wording) return undefined
+    const target = renderExpression(expression.left, sourceFile)
+    const value = renderExpression(expression.right, sourceFile)
+    if (target.fidelity === 'unresolved' || value.fidelity === 'unresolved') return undefined
+    return action(wording.replace('{target}', target.text).replace('{value}', value.text))
+  }
+  return undefined
+}
+
 function renderCallFreeStatement(statement: ts.Statement, sourceFile: ts.SourceFile): RenderedAction | undefined {
   if (ts.isReturnStatement(statement)) {
     if (!statement.expression) return undefined
@@ -389,24 +456,21 @@ function renderCallFreeStatement(statement: ts.Statement, sourceFile: ts.SourceF
     if (value.fidelity === 'unresolved') return undefined
     return setup(`Set ${humanizeIdentifier(declaration.name.text)} to ${value.text}`)
   }
-  if (!ts.isExpressionStatement(statement)) return undefined
-  const expression = statement.expression
-  const sleepMs = sleepDelayMs(expression)
-  if (sleepMs !== undefined) return action(`Wait for ${sleepMs} milliseconds`)
-  if (ts.isDeleteExpression(expression) && ts.isPropertyAccessExpression(expression.expression)) {
-    const owner = renderExpression(expression.expression.expression, sourceFile)
-    if (owner.fidelity === 'unresolved') return undefined
-    return action(`Remove “${expression.expression.name.text}” from ${owner.text}`)
+  return ts.isExpressionStatement(statement)
+    ? renderActionExpression(statement.expression, sourceFile)
+    : undefined
+}
+
+export function renderActionCall(call: ts.CallExpression, sourceFile: ts.SourceFile): RenderedAction | undefined {
+  if (!ts.isPropertyAccessExpression(call.expression)) return undefined
+  const context: CallContext = {
+    call,
+    method: call.expression.name.text,
+    receiver: call.expression.expression,
+    sourceFile,
   }
-  if (ts.isBinaryExpression(expression)) {
-    const wording = CALL_FREE_ASSIGNMENT_TEXT.get(expression.operatorToken.kind)
-    if (!wording) return undefined
-    const target = renderExpression(expression.left, sourceFile)
-    const value = renderExpression(expression.right, sourceFile)
-    if (target.fidelity === 'unresolved' || value.fidelity === 'unresolved') return undefined
-    return action(wording.replace('{target}', target.text).replace('{value}', value.text))
-  }
-  return undefined
+  const rule = ACTION_RULES.find((candidate) => candidate.methods.has(context.method) && candidate.matches(context))
+  return rule?.render(context)
 }
 
 export function renderActionStatement(statement: ts.Statement, sourceFile: ts.SourceFile): RenderedAction | undefined {
@@ -425,16 +489,11 @@ export function renderActionStatement(statement: ts.Statement, sourceFile: ts.So
   }
   const call = callFromStatement(statement)
   if (!call) return renderCallFreeStatement(statement, sourceFile)
+  // Story mode owns plain helper names such as `queryRow()`. Keep this boundary
+  // so their variable declarations do not become duplicate setup sentences.
   if (!ts.isPropertyAccessExpression(call.expression)) return undefined
-  const context: CallContext = {
-    call,
-    method: call.expression.name.text,
-    receiver: call.expression.expression,
-    sourceFile,
-  }
-  const rule = ACTION_RULES.find((candidate) => candidate.methods.has(context.method) && candidate.matches(context))
   // A method call outside the rule tables can still be a readable declaration
   // or return — `const body = await res.json()`, `return { res, elapsedMs }` —
   // because the expression layer knows the call even though no action rule does.
-  return rule?.render(context) ?? renderCallFreeStatement(statement, sourceFile)
+  return renderActionCall(call, sourceFile) ?? renderCallFreeStatement(statement, sourceFile)
 }

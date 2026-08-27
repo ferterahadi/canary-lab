@@ -264,10 +264,6 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
     [sourceByTest],
   )
 
-  const openTestInEditor = useCallback((absFile: string, line?: number) => {
-    api.openEditor({ file: absFile, line }).catch(() => {})
-  }, [])
-
   // The two-way highlight relation: a hovered test lights its requirements; a
   // hovered requirement lights its tests.
   const { activeReqIds, activeTestNames } = useMemo(() => {
@@ -369,7 +365,6 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
               source={lookupSource(t)}
               sourceLoading={specSourceLoading}
               sourceError={specSourceError}
-              onOpenEditor={openTestInEditor}
               onReqClick={focusRequirement}
             />
           ))}

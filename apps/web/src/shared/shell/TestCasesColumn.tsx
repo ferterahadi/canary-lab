@@ -22,6 +22,12 @@ import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
 
 type DirtyDiff = { name: string; changedLines: number[] }[]
 
+interface ExpandedTestSelection {
+  feature: string
+  key: string | null
+  autoExpandPending: boolean
+}
+
 interface Props {
   feature: string | null
   activeRunSummary: RunSummary | undefined
@@ -38,7 +44,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
   const refreshKey = useInvalidationKey('tests')
   const [specs, setSpecs] = useState<FeatureSpecFile[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [expandedTest, setExpandedTest] = useState<string | null>(null)
+  const [expandedTest, setExpandedTest] = useState<ExpandedTestSelection | null>(null)
   // Per-test changed-line numbers for each dirty spec file (diffed against git
   // HEAD server-side), keyed by that file's path. Fetched lazily, once per file.
   const [dirtyDiffs, setDirtyDiffs] = useState<Record<string, DirtyDiff>>({})
@@ -47,17 +53,36 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
     if (!feature) {
       setSpecs(null)
       setLoadError(null)
+      setExpandedTest(null)
       return
     }
     let cancelled = false
+    setExpandedTest((current) => current?.feature === feature
+      ? current
+      : { feature, key: null, autoExpandPending: true })
     setSpecs(null)
     setLoadError(null)
-    setExpandedTest(null)
     setDirtyDiffs({})
     api.getFeatureTests(feature)
       .then((data) => {
         if (cancelled) return
+        const availableKeys = new Set(
+          data.flatMap((spec) => spec.tests.map((test) => workspaceTestKey(spec.file, test))),
+        )
         setSpecs(data)
+        setExpandedTest((current) => {
+          if (current?.feature !== feature || current.autoExpandPending) {
+            return {
+              feature,
+              key: availableKeys.values().next().value ?? null,
+              autoExpandPending: false,
+            }
+          }
+          if (current.key !== null && !availableKeys.has(current.key)) {
+            return { feature, key: null, autoExpandPending: false }
+          }
+          return current
+        })
       })
       .catch((err) => {
         if (cancelled) return
@@ -152,8 +177,8 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
                 // never sets an id, so the fallback was the only live arm — and
                 // the mirror declared a field the server does not send.
                 const sourceFile = t.sourceFile ?? spec.file
-                const key = `${sourceFile}:${t.line}:${t.name}`
-                const isExpanded = expandedTest === key
+                const key = workspaceTestKey(spec.file, t)
+                const isExpanded = expandedTest?.feature === feature && expandedTest.key === key
                 const testIdentity = summaryIdentityForWorkspaceTest(
                   t.name,
                   t.line,
@@ -192,7 +217,11 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
                     expanded={isExpanded}
                     dirty={testDirty}
                     changedLines={changedLines}
-                    onToggle={() => setExpandedTest(isExpanded ? null : key)}
+                    onToggle={() => setExpandedTest({
+                      feature,
+                      key: isExpanded ? null : key,
+                      autoExpandPending: false,
+                    })}
                   />
                 )
               })
@@ -202,6 +231,10 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
       </div>
     </div>
   )
+}
+
+function workspaceTestKey(specFile: string, test: ExtractedTest): string {
+  return `${test.sourceFile ?? specFile}:${test.line}:${test.name}`
 }
 
 function parseSummaryLocation(location: string | undefined): { file: string; line: number } | null {

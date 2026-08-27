@@ -236,6 +236,7 @@ describe('readable test story', () => {
   expect(
     msgs.every((m) => (m as TriggerBatchMessage).data.emailInfo.transactionId === txId),
   ).toBe(true)
+  expect(Array.isArray(payload.redirect_uris)).toBe(true)
 }`,
     })
 
@@ -243,6 +244,71 @@ describe('readable test story', () => {
       'Check that msgs has length 2',
       'Check that for every item in msgs, item pattern equals “TRIGGER_EMAIL_BATCH”',
       'Check that for every item in msgs, item data email info transaction identifier equals txId',
+      'Check that payload redirect uris is a list',
+    ])
+  })
+
+  it('keeps nested helper arguments in a saved HTTP request action', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  const direct = await request.get('/health')
+  const res = await request.get(v4Read(OWNED_TXN), { headers: headers(AUTH_A) })
+  expect(res.status(), await res.text()).toBe(200)
+}`,
+    })
+
+    expect(storyItems(translated).map((step) => step.text)).toEqual([
+      'Send a GET request to “/health”, saving the result as direct',
+      'Send a GET request to v4 read result using OWNED_TXN with an object with headers set to headers result using AUTH_A, saving the result as res',
+      'Check that response status equals 200',
+    ])
+  })
+
+  it('preserves safe nested request options and omits unsupported object forms', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  const response = await request.post(buildUrl(ENTITY_ID), {
+    headers: buildHeaders(AUTH_TOKEN),
+    'x-header': buildHeader(AUTH_TOKEN),
+    retryCount,
+    ...extraOptions,
+  })
+  await request.get(buildUrl(ENTITY_ID), { headers: () => submit() })
+  await request.get(buildUrl(ENTITY_ID), { [headerName]: headerValue })
+  await request.get(buildUrl(ENTITY_ID), { ...page[method]() })
+  await request.get(buildUrl(ENTITY_ID), { configure() {} })
+}`,
+    })
+
+    expect(storyItems(translated).map((step) => step.text)).toEqual([
+      'Send a POST request to build URL result using ENTITY_ID with an object with headers set to build headers result using AUTH_TOKEN, x-header set to build header result using AUTH_TOKEN, retryCount, and everything in extraOptions, saving the result as response',
+    ])
+  })
+
+  it('keeps typed collection lookups that feed later checks', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  const sendMultiple = msgs.find((m) => m.pattern === 'SEND_MULTIPLE_EMAIL') as
+    | SendMultipleMessage
+    | undefined
+  const triggerBatch = msgs.find((m) => m.pattern === 'TRIGGER_EMAIL_BATCH') as
+    | TriggerBatchMessage
+    | undefined
+  const unsafe = msgs.find(predicate) as Message | undefined
+  msgs.find((m) => m.ready)
+  expect(sendMultiple).toBeDefined()
+  expect(triggerBatch).toBeDefined()
+}`,
+    })
+
+    expect(storyItems(translated).map((step) => step.text)).toEqual([
+      'Find the first item in msgs where item pattern equals “SEND_MULTIPLE_EMAIL”, saving the result as sendMultiple',
+      'Find the first item in msgs where item pattern equals “TRIGGER_EMAIL_BATCH”, saving the result as triggerBatch',
+      'Check that send multiple is defined',
+      'Check that trigger batch is defined',
     ])
   })
 
@@ -295,7 +361,7 @@ describe('readable test story', () => {
 
     expect(translated.story?.steps[0]).toEqual(expect.objectContaining({
       role: 'setup',
-      text: 'Create attempts by transforming each suf in the values “a” and “b”',
+      text: 'Create attempts as a list containing “a”, “b” transformed so each item becomes an object with message identifier set to item, transaction identifier set to sharedTxn',
     }))
     const scope = translated.story?.steps[1]
     expect(scope).toEqual(expect.objectContaining({
@@ -390,12 +456,13 @@ describe('readable test story', () => {
     })
 
     expect(storyItems(translated).map((step) => step.text)).toEqual(expect.arrayContaining([
-      'Read the saved record',
+      'Read the saved record, extracting properties destructured',
       'Use context',
       'Send only then',
       'order is submitted',
       'Check that line entity identifier equals identifiers entity identifier',
       'Check that foo equals bar',
+      'Check that result passes the “unknown matcher” check',
     ]))
     const comparison = storyItems(translated).find((step) => step.text.includes('line entity'))
     expect(comparison?.spans.filter((span) => span.kind === 'variable').map((span) => span.text))
@@ -403,5 +470,140 @@ describe('readable test story', () => {
     expect(storyItems(translated).find((step) => step.text === 'order is submitted')?.spans[0])
       .toEqual({ text: 'order', kind: 'variable' })
     expect(storyItems(translated).some((step) => step.text.includes('UnknownMatcher'))).toBe(false)
+  })
+
+  it('keeps property and thrown-error assertions in the concise story', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  expect(account).toHaveProperty('id')
+  expect(() => parse(payload)).toThrow(TypeError)
+}`,
+    })
+
+    expect(textsFor(translated, 'check')).toEqual([
+      'Check that account has property “id”',
+      'Check that calling parse using payload throws an error of type TypeError',
+    ])
+  })
+
+  it('describes receiver-aware collection and string operations', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  const ready = rows.filter((row) => row.enabled)
+  const totalCount = records.reduce((s, r) => s + r.count, 0)
+  const ordered = rows.toSorted((left, right) => left.rank - right.rank)
+  const label = names.join(', ')
+  const pieces = label.split(':', 2)
+  const normalized = label.replaceAll('-', '_')
+  const length = rows.push(nextRow)
+  const removed = rows.splice(1, 2, replacement)
+  rows.reverse()
+}`,
+    })
+
+    expect(storyItems(translated).map((step) => step.text)).toEqual([
+      'Set ready to rows filtered to keep each item where item enabled',
+      "Set total count to the sum of each item's count in records",
+      'Set ordered to rows sorted by comparing left item rank minus right item rank',
+      'Set label to names joined with “, ”',
+      'Set pieces to label split using “:”, limited to 2 items',
+      'Set normalized to label with every match for “-” replaced by “_”',
+      'Append nextRow to rows, saving the new length as length',
+      'Modify rows starting at index 1, removing 2 items, inserting replacement, saving the removed items as removed',
+      'Reverse rows',
+    ])
+  })
+
+  it('preserves object and array destructuring details', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  const { status: state = 'PENDING', meta: { id }, ...rest } = response
+  const [, second = fallback, ...remaining] = values
+  const { body, headers: responseHeaders } = await readResponse(request)
+}`,
+    })
+
+    expect(storyItems(translated).map((step) => step.text)).toEqual([
+      'Extract properties status as state, defaulting to “PENDING”, meta as a nested value with properties id, and remaining properties as rest from response',
+      'Extract item 2 as second, defaulting to fallback and remaining items as remaining from values',
+      'Read response using request, extracting properties body and headers as responseHeaders',
+    ])
+  })
+
+  it('models each Promise combinator and keeps its operations nested', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  const all = await Promise.all([loadPrimary(), loadFallback()])
+  const outcomes = await Promise.allSettled(tasks)
+  Promise.race([readCache(), readNetwork()])
+  const first = Promise.any([readReplica(), ...extraReads])
+}`,
+    })
+
+    const items = storyItems(translated)
+    expect(items.map((step) => step.text)).toEqual(expect.arrayContaining([
+      'Run 2 operations together and wait for every one to finish, saving the result as all',
+      'Load primary',
+      'Load fallback',
+      'Run the operations in tasks together and wait for every outcome, saving the result as outcomes',
+      'Start 2 operations together and use the first one to settle',
+      'Read cache',
+      'Read network',
+      'Start these operations together and use the first successful result, saving the combined promise as first',
+      'Read replica',
+      'Include every operation in extraReads',
+    ]))
+    expect(translated.story?.steps.map((step) => step.kind === 'flow' ? step.flowKind : 'step'))
+      .toEqual(['scope', 'step', 'scope', 'scope'])
+  })
+
+  it('explains shorthand control and mutation without leaking operators', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  ready && submitReady()
+  cached || loadFallback()
+  value ?? loadDefault()
+  const selected = primary ? readPrimary() : readFallback()
+  ready ? submitPreferred() : submitAlternate()
+  handler?.()
+  service?.flush(batch)
+  count++
+  --remaining
+  retries *= 2
+  result ??= fallback
+  delete payload[key]
+}`,
+    })
+
+    expect(storyItems(translated).map((step) => step.text)).toEqual([
+      'If ready is true',
+      'Send ready',
+      'If cached is false',
+      'Load fallback',
+      'If value is null or undefined',
+      'Load default',
+      'If primary is true',
+      'When the condition is true',
+      'Read primary, saving the result as selected',
+      'When the condition is false',
+      'Read fallback, saving the result as selected',
+      'If ready is true',
+      'When the condition is true',
+      'Send preferred',
+      'When the condition is false',
+      'Send alternate',
+      'Call handler when available',
+      'Flush on service using batch when available',
+      'Increase count by 1',
+      'Decrease remaining by 1',
+      'Multiply retries by 2',
+      'Conditionally set result to fallback when its current value is null or undefined',
+      'Remove the property at key from payload',
+    ])
   })
 })

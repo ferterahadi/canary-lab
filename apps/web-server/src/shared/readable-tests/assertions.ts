@@ -1,7 +1,8 @@
 import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../../shared/code-display-format'
 import type { ReadableFidelity } from '../../../../../shared/readable-tests/types'
-import { renderExpression, type RenderedExpression } from './expression'
+import { quoteReadableText, renderExpression, type RenderedExpression } from './expression'
+import { humanizeIdentifier } from './language'
 import { renderLocator } from './locator'
 
 export interface RenderedAssertion {
@@ -16,6 +17,7 @@ interface Expectation {
   actual: ts.Expression
   negated: boolean
   soft: boolean
+  settlement?: 'resolves' | 'rejects'
   message?: ts.Expression
 }
 
@@ -57,9 +59,31 @@ function parseExpectation(call: ts.CallExpression): Expectation | undefined {
   const matcher = call.expression.name.text
   let receiver: ts.Expression = call.expression.expression
   let negated = false
+  let settlement: Expectation['settlement']
+  while (ts.isPropertyAccessExpression(receiver)) {
+    const modifier = receiver.name.text
+    if (modifier === 'not' && !negated) {
+      negated = true
+      receiver = receiver.expression
+      continue
+    }
+    if ((modifier === 'resolves' || modifier === 'rejects') && !settlement) {
+      settlement = modifier
+      receiver = receiver.expression
+      continue
+    }
+    break
+  }
   if (ts.isPropertyAccessExpression(receiver) && receiver.name.text === 'not') {
-    negated = true
-    receiver = receiver.expression
+    // A duplicate modifier is not a standard expectation chain.
+    return undefined
+  }
+  if (
+    ts.isPropertyAccessExpression(receiver)
+    && (receiver.name.text === 'resolves' || receiver.name.text === 'rejects')
+  ) {
+    // Likewise, do not reinterpret contradictory settlement modifiers.
+    return undefined
   }
   if (!ts.isCallExpression(receiver)) return undefined
 
@@ -84,6 +108,7 @@ function parseExpectation(call: ts.CallExpression): Expectation | undefined {
     actual,
     negated,
     soft,
+    ...(settlement ? { settlement } : {}),
     message: receiver.arguments[1],
   }
 }
@@ -104,12 +129,186 @@ function renderSubject(actual: ts.Expression, sourceFile: ts.SourceFile): Render
   return renderExpression(actual, sourceFile)
 }
 
+function renderExpectationSubject(expectation: Expectation, sourceFile: ts.SourceFile): RenderedExpression {
+  const subject = renderSubject(expectation.actual, sourceFile)
+  if (subject.fidelity === 'unresolved' || !expectation.settlement) return subject
+  return {
+    text: expectation.settlement === 'resolves'
+      ? `the resolved value of ${subject.text}`
+      : `the rejection from ${subject.text}`,
+    fidelity: 'derived',
+  }
+}
+
 function state(context: AssertionContext, positive: string, negative = `not ${positive}`): string {
   return `${context.subject.text} is ${context.negated ? negative : positive}`
 }
 
 function relation(context: AssertionContext, positive: string, negative: string): string {
   return `${context.subject.text} ${context.negated ? negative : positive} ${context.expected?.text}`
+}
+
+function assertionPrefix(expectation: Expectation): string {
+  return expectation.soft ? 'Soft-check that' : 'Check that'
+}
+
+function assertionMessage(expectation: Expectation): string {
+  if (!expectation.message) return ''
+  // Diagnostic context is not part of what the assertion proves. Preserve
+  // authored text, but do not promote a readable computation to a requirement.
+  if (!ts.isStringLiteralLike(expectation.message)) return ''
+  return ` with message ${quoteReadableText(expectation.message.text)}`
+}
+
+function renderPropertyExpectation(
+  expectation: Expectation,
+  sourceFile: ts.SourceFile,
+): RenderedAssertion | undefined {
+  if (expectation.matcher !== 'toHaveProperty') return undefined
+  if (expectation.matcherCall.arguments.length < 1 || expectation.matcherCall.arguments.length > 2) {
+    return fallback(expectation.matcherCall, sourceFile)
+  }
+  const subject = renderExpectationSubject(expectation, sourceFile)
+  const property = renderExpression(expectation.matcherCall.arguments[0], sourceFile)
+  const expectedNode = expectation.matcherCall.arguments[1]
+  const expected = expectedNode && renderExpression(expectedNode, sourceFile)
+  if (subject.fidelity === 'unresolved' || property.fidelity === 'unresolved' || expected?.fidelity === 'unresolved') {
+    return fallback(expectation.matcherCall, sourceFile)
+  }
+  const relation = expected
+    ? `${expectation.negated ? 'does not have' : 'has'} property ${property.text} equal to ${expected.text}`
+    : `${expectation.negated ? 'does not have' : 'has'} property ${property.text}`
+  return {
+    text: `${assertionPrefix(expectation)} ${subject.text} ${relation}${assertionMessage(expectation)}`,
+    fidelity: 'derived',
+    role: 'check',
+  }
+}
+
+function callDescription(call: ts.CallExpression, sourceFile: ts.SourceFile): string | undefined {
+  let name: string | undefined
+  let receiver: RenderedExpression | undefined
+  if (ts.isIdentifier(call.expression)) {
+    name = humanizeIdentifier(call.expression.text)
+  } else if (ts.isPropertyAccessExpression(call.expression)) {
+    name = humanizeIdentifier(call.expression.name.text)
+    receiver = renderExpression(call.expression.expression, sourceFile)
+    if (receiver.fidelity === 'unresolved') return undefined
+  }
+  if (!name) return undefined
+  const arguments_ = call.arguments.map((argument) => renderExpression(argument, sourceFile))
+  if (arguments_.some((argument) => argument.fidelity === 'unresolved')) return undefined
+  return [
+    `calling ${name}`,
+    receiver ? `on ${receiver.text}` : undefined,
+    arguments_.length ? `using ${arguments_.map((argument) => argument.text).join(' and ')}` : undefined,
+  ].filter((part): part is string => Boolean(part)).join(' ')
+}
+
+function thrownOperation(actual: ts.Expression, sourceFile: ts.SourceFile): string | undefined {
+  let expression = actual
+  while (
+    ts.isParenthesizedExpression(expression)
+    || ts.isAsExpression(expression)
+    || ts.isTypeAssertionExpression(expression)
+    || ts.isNonNullExpression(expression)
+    || ts.isSatisfiesExpression(expression)
+  ) expression = expression.expression
+  if (ts.isIdentifier(expression)) return humanizeIdentifier(expression.text)
+  if (!ts.isArrowFunction(expression) && !ts.isFunctionExpression(expression)) return undefined
+  let body: ts.Expression | undefined
+  if (!ts.isBlock(expression.body)) {
+    body = expression.body
+  } else if (expression.body.statements.length === 1) {
+    const [statement] = expression.body.statements
+    body = ts.isExpressionStatement(statement)
+      ? statement.expression
+      : ts.isReturnStatement(statement)
+        ? statement.expression
+        : undefined
+  }
+  while (body && (ts.isAwaitExpression(body) || ts.isParenthesizedExpression(body))) body = body.expression
+  return body && ts.isCallExpression(body)
+    ? callDescription(body, sourceFile)
+    : 'the provided operation'
+}
+
+function renderThrowExpectation(
+  expectation: Expectation,
+  sourceFile: ts.SourceFile,
+): RenderedAssertion | undefined {
+  if (expectation.matcher !== 'toThrow' && expectation.matcher !== 'toThrowError') return undefined
+  if (expectation.matcherCall.arguments.length > 1) return fallback(expectation.matcherCall, sourceFile)
+  const expectedNode = expectation.matcherCall.arguments[0]
+  const expected = expectedNode && renderExpression(expectedNode, sourceFile)
+  if (expected?.fidelity === 'unresolved') return fallback(expectation.matcherCall, sourceFile)
+  const expectedText = expectedNode && ts.isIdentifier(expectedNode)
+    ? ` of type ${expectedNode.text}`
+    : expected
+      ? ` matching ${expected.text}`
+      : ''
+  if (expectation.settlement === 'rejects') {
+    const subject = renderExpectationSubject(expectation, sourceFile)
+    if (subject.fidelity === 'unresolved') return fallback(expectation.matcherCall, sourceFile)
+    return {
+      text: `${assertionPrefix(expectation)} ${subject.text} ${expectation.negated ? 'is not' : 'is'} an error${expectedText}${assertionMessage(expectation)}`,
+      fidelity: 'derived',
+      role: 'check',
+    }
+  }
+  if (expectation.settlement === 'resolves') {
+    const subject = renderExpectationSubject(expectation, sourceFile)
+    if (subject.fidelity === 'unresolved') return fallback(expectation.matcherCall, sourceFile)
+    return {
+      text: `${assertionPrefix(expectation)} ${subject.text} ${expectation.negated ? 'does not throw' : 'throws'} an error${expectedText}${assertionMessage(expectation)}`,
+      fidelity: 'derived',
+      role: 'check',
+    }
+  }
+  const operation = thrownOperation(expectation.actual, sourceFile)
+  if (!operation) return fallback(expectation.matcherCall, sourceFile)
+  return {
+    text: `${assertionPrefix(expectation)} ${operation} ${expectation.negated ? 'does not throw' : 'throws'} an error${expectedText}${assertionMessage(expectation)}`,
+    fidelity: 'derived',
+    role: 'check',
+  }
+}
+
+function renderGenericExpectation(
+  expectation: Expectation,
+  sourceFile: ts.SourceFile,
+): RenderedAssertion {
+  const subject = renderExpectationSubject(expectation, sourceFile)
+  const arguments_ = expectation.matcherCall.arguments.map((argument) => renderExpression(argument, sourceFile))
+  if (subject.fidelity === 'unresolved' || arguments_.some((argument) => argument.fidelity === 'unresolved')) {
+    return fallback(expectation.matcherCall, sourceFile)
+  }
+  const check = humanizeIdentifier(expectation.matcher).replace(/^to /, '')
+  const using = arguments_.length ? ` using ${arguments_.map((argument) => argument.text).join(' and ')}` : ''
+  return {
+    text: `${assertionPrefix(expectation)} ${subject.text} ${expectation.negated ? 'does not pass' : 'passes'} the “${check}” check${using}${assertionMessage(expectation)}`,
+    fidelity: 'derived',
+    role: 'check',
+  }
+}
+
+/** Story mode may name a safe custom matcher without claiming to understand
+ * its domain semantics. The exhaustive renderer still keeps exact source. */
+export function renderGenericAssertionStatement(
+  statement: ts.Statement,
+  sourceFile: ts.SourceFile,
+): RenderedAssertion | undefined {
+  const call = unwrapCall(statement)
+  if (!call) return undefined
+  const expectation = parseExpectation(call)
+  if (!expectation) return undefined
+  if (
+    expectation.matcher === 'toHaveProperty'
+    || expectation.matcher === 'toThrow'
+    || expectation.matcher === 'toThrowError'
+    || ASSERTION_RULES.some((rule) => rule.matchers.has(expectation.matcher))
+  ) return undefined
+  return renderGenericExpectation(expectation, sourceFile)
 }
 
 function isCollectionPredicate(expression: ts.Expression): boolean {
@@ -125,7 +324,15 @@ function isCollectionPredicate(expression: ts.Expression): boolean {
   }
   return ts.isCallExpression(current)
     && ts.isPropertyAccessExpression(current.expression)
-    && (current.expression.name.text === 'every' || current.expression.name.text === 'some')
+    && (
+      current.expression.name.text === 'every'
+      || current.expression.name.text === 'some'
+      || (
+        current.expression.name.text === 'isArray'
+        && ts.isIdentifier(current.expression.expression)
+        && current.expression.expression.text === 'Array'
+      )
+    )
 }
 
 function collectionPredicateState(context: AssertionContext, asserted: boolean): string | undefined {
@@ -251,15 +458,17 @@ export function renderAssertionStatement(statement: ts.Statement, sourceFile: ts
   if (!call) return undefined
   const expectation = parseExpectation(call)
   if (!expectation) return undefined
+  const special = renderPropertyExpectation(expectation, sourceFile)
+    ?? renderThrowExpectation(expectation, sourceFile)
+  if (special) return special
   const rule = ASSERTION_RULES.find((candidate) => candidate.matchers.has(expectation.matcher))
   if (!rule) return fallback(call, sourceFile)
   if (call.arguments.length < rule.expectedArguments) return fallback(call, sourceFile)
 
-  const subject = renderSubject(expectation.actual, sourceFile)
+  const subject = renderExpectationSubject(expectation, sourceFile)
   const expected = rule.expectedArguments === 1 ? renderExpression(call.arguments[0], sourceFile) : undefined
   const optionStart = rule.expectedArguments
   const options = call.arguments.slice(optionStart).map((argument) => renderExpression(argument, sourceFile))
-  const message = expectation.message ? renderExpression(expectation.message, sourceFile) : undefined
   if (
     subject.fidelity === 'unresolved'
     || expected?.fidelity === 'unresolved'
@@ -275,12 +484,12 @@ export function renderAssertionStatement(statement: ts.Statement, sourceFile: ts
     options,
     sourceFile,
   }
-  const prefix = expectation.soft ? 'Soft-check that' : 'Check that'
+  const prefix = assertionPrefix(expectation)
   const optionsText = options.length ? ` using ${options.map((option) => option.text).join(' and ')}` : ''
   // A diagnostic message does not change what the assertion proves. Keep the
   // check when that optional context is dynamic instead of hiding the entire
   // requirement behind a source fallback.
-  const messageText = message && message.fidelity !== 'unresolved' ? ` with message ${message.text}` : ''
+  const messageText = assertionMessage(expectation)
   return {
     text: `${prefix} ${rule.render(context)}${optionsText}${messageText}`,
     fidelity: 'derived',

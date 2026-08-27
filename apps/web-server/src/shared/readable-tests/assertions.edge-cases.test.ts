@@ -1,12 +1,19 @@
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
-import { renderAssertionStatement } from './assertions'
+import { renderAssertionStatement, renderGenericAssertionStatement } from './assertions'
 
 function assertionFrom(source: string) {
   const sourceFile = ts.createSourceFile('assertions.ts', `async function scenario() { ${source} }`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const declaration = sourceFile.statements[0]
   if (!ts.isFunctionDeclaration(declaration) || !declaration.body) throw new Error('Expected a function body')
   return renderAssertionStatement(declaration.body.statements[0], sourceFile)
+}
+
+function genericAssertionFrom(source: string) {
+  const sourceFile = ts.createSourceFile('assertions.ts', `async function scenario() { ${source} }`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const declaration = sourceFile.statements[0]
+  if (!ts.isFunctionDeclaration(declaration) || !declaration.body) throw new Error('Expected a function body')
+  return renderGenericAssertionStatement(declaration.body.statements[0], sourceFile)
 }
 
 describe('Playwright assertion edge cases', () => {
@@ -89,7 +96,6 @@ describe('Playwright assertion edge cases', () => {
 
   it('uses exact source for unsupported or unsafe expectation semantics', () => {
     const sources = [
-      'expect(order).toMatchRule(rule)',
       'expect(total).toBe()',
       'expect(computeTotal()).toBe(2)',
       'expect(total).toBe(computeExpected())',
@@ -101,6 +107,84 @@ describe('Playwright assertion edge cases', () => {
     for (const source of sources) {
       expect(assertionFrom(source)).toEqual({ text: source, fidelity: 'unresolved', role: 'check' })
     }
+  })
+
+  it('keeps safe custom and asynchronous expectation chains visible', () => {
+    const customCases: Array<[string, string]> = [
+      ['expect(order).toMatchRule(rule)', 'Check that order passes the “match rule” check using rule'],
+      ["expect.soft(order, 'business rule').not.toMatchRule(rule)", 'Soft-check that order does not pass the “match rule” check using rule with message “business rule”'],
+    ]
+    for (const [source, text] of customCases) {
+      expect(genericAssertionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'check' })
+    }
+
+    const asynchronousCases: Array<[string, string]> = [
+      ["await expect(requestPromise).resolves.toBe('READY')", 'Check that the resolved value of request promise equals “READY”'],
+      ['await expect(requestPromise).resolves.not.toBeNull()', 'Check that the resolved value of request promise is not null'],
+      ['expect(requestPromise).rejects.toThrow(TypeError)', 'Check that the rejection from request promise is an error of type TypeError'],
+      ['expect(callbackPromise).resolves.toThrow(TypeError)', 'Check that the resolved value of callback promise throws an error of type TypeError'],
+      ['expect(callbackPromise).resolves.not.toThrow()', 'Check that the resolved value of callback promise does not throw an error'],
+    ]
+
+    for (const [source, text] of asynchronousCases) {
+      expect(assertionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'check' })
+    }
+
+    expect(genericAssertionFrom('expect(order).toMatchRule(computeRule())')).toEqual({
+      text: 'expect(order).toMatchRule(computeRule())',
+      fidelity: 'unresolved',
+      role: 'check',
+    })
+  })
+
+  it('rejects malformed chains and unsafe thrown-operation descriptions', () => {
+    for (const source of [
+      'expect(value).matcher.toBe(1)',
+      'expect(value).not.not.toBe(1)',
+      'expect(value).resolves.rejects.toBe(1)',
+    ]) {
+      expect(assertionFrom(source)).toBeUndefined()
+    }
+
+    for (const source of [
+      'expect(() => computeService().run()).toThrow()',
+      'expect(() => run(computeArgument())).toThrow()',
+      'expect(() => service[method]()).toThrow()',
+      'expect(computePromise()).rejects.toThrow()',
+      'expect(computePromise()).resolves.toThrow()',
+    ]) {
+      expect(assertionFrom(source)).toEqual({ text: source, fidelity: 'unresolved', role: 'check' })
+    }
+
+    expect(assertionFrom('expect(((() => run()) as Callback)!).toThrow()')).toEqual({
+      text: 'Check that calling run throws an error',
+      fidelity: 'derived',
+      role: 'check',
+    })
+    expect(assertionFrom('expect(() => { return (run()) }).toThrow()')).toEqual({
+      text: 'Check that calling run throws an error',
+      fidelity: 'derived',
+      role: 'check',
+    })
+    expect(assertionFrom('expect(() => { return }).toThrow()')).toEqual({
+      text: 'Check that the provided operation throws an error',
+      fidelity: 'derived',
+      role: 'check',
+    })
+    expect(assertionFrom('expect(() => { throw failure }).toThrow()')).toEqual({
+      text: 'Check that the provided operation throws an error',
+      fidelity: 'derived',
+      role: 'check',
+    })
+    expect(assertionFrom('expect(requestPromise).rejects.not.toThrow()')).toEqual({
+      text: 'Check that the rejection from request promise is not an error',
+      fidelity: 'derived',
+      role: 'check',
+    })
+
+    expect(genericAssertionFrom('const value = 1')).toBeUndefined()
+    expect(genericAssertionFrom('verify(value)')).toBeUndefined()
+    expect(genericAssertionFrom('expect(value).toBe(1)')).toBeUndefined()
   })
 
   it('keeps a proven assertion when only its diagnostic message is dynamic', () => {
@@ -134,10 +218,49 @@ describe('Playwright assertion edge cases', () => {
         'expect((rows.every((row) => row.ready)) as boolean).not.toEqual(false)',
         'Check that for every item in rows, item ready',
       ],
+      [
+        'expect(Array.isArray(payload.redirect_uris)).toBe(true)',
+        'Check that payload redirect uris is a list',
+      ],
+      [
+        'expect(Array.isArray(payload.contacts)).toBe(false)',
+        'Check that it is false that payload contacts is a list',
+      ],
     ]
 
     for (const [source, text] of cases) {
       expect(assertionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'check' })
+    }
+  })
+
+  it('renders property and thrown-error checks instead of dropping them from the story', () => {
+    const cases: Array<[string, string]> = [
+      ["expect(account).toHaveProperty('id')", 'Check that account has property “id”'],
+      ["expect(account).not.toHaveProperty('id')", 'Check that account does not have property “id”'],
+      ["expect(account).toHaveProperty('status', 'READY')", 'Check that account has property “status” equal to “READY”'],
+      ["expect.soft(account, 'account shape').not.toHaveProperty(['private', 'token'], secret)", 'Soft-check that account does not have property a list containing “private”, “token” equal to secret with message “account shape”'],
+      ['expect(() => run()).toThrow()', 'Check that calling run throws an error'],
+      ["expect(() => parse(value)).not.toThrow('invalid')", 'Check that calling parse using value does not throw an error matching “invalid”'],
+      ['expect(() => service.load(value)).toThrow(TypeError)', 'Check that calling load on service using value throws an error of type TypeError'],
+      ['expect(function () { run() }).toThrowError(/boom/i)', 'Check that calling run throws an error matching /boom/i'],
+      ['expect(callback).toThrow()', 'Check that callback throws an error'],
+      ['expect(() => { prepare(); run() }).toThrow()', 'Check that the provided operation throws an error'],
+    ]
+
+    for (const [source, text] of cases) {
+      expect(assertionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'check' })
+    }
+
+    for (const source of [
+      'expect(account).toHaveProperty()',
+      "expect(account).toHaveProperty('id', value, extra)",
+      'expect(computeAccount()).toHaveProperty(\'id\')',
+      'expect(account).toHaveProperty(computePath())',
+      'expect(() => computeCall()).toThrow(computeExpected())',
+      'expect(value.property).toThrow()',
+      'expect(() => run()).toThrow(a, b)',
+    ]) {
+      expect(assertionFrom(source)).toEqual({ text: source, fidelity: 'unresolved', role: 'check' })
     }
   })
 })

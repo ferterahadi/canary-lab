@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
+import type { FormattedCodeDisplay, FormattedDisplayLine } from '@shared/code-display-format'
 import type { ExtractedTest, ReadableSource } from '../api/types'
 import { ReadableTestView, type ReadableSourceSelection } from './ReadableTestView'
-import { ShikiCode } from './TestCodeBlock'
+import { ShikiCode, SourceOpenShell } from './TestCodeBlock'
 import { storyCodeLineNumbers } from './readable-story-sequence'
 
 type PresentationMode = 'english' | 'code'
@@ -12,14 +13,14 @@ export function TestPresentation({
   activeLine,
   runningHighlight,
   changedLines,
-  showCodeOpenButton = true,
+  showOpenButton = true,
 }: {
   test: ExtractedTest
   sourceFile: string
   activeLine?: number | null
   runningHighlight?: boolean
   changedLines?: Set<number>
-  showCodeOpenButton?: boolean
+  showOpenButton?: boolean
 }) {
   const [mode, setMode] = useState<PresentationMode>('english')
   const [selectedSource, setSelectedSource] = useState<ReadableSourceSelection | null>(null)
@@ -32,23 +33,22 @@ export function TestPresentation({
   const code = codeSelection(test, sourceFile, selectedSource?.source)
   const visibleRange = selectedSource?.source ?? code
   const fullTestRange = codeSelection(test, sourceFile, undefined)
-  const displayedActiveLine = showingFullTest
-    ? shiftBodyLine(activeLine, code.hiddenLeadingLines)
+  const displayedActiveLines = showingFullTest
+    ? displayLinesForBodyLines(test, activeLine == null ? undefined : new Set([activeLine]), code.lineMap)
     : undefined
   const displayedChangedLines = showingFullTest
-    ? shiftBodyLines(changedLines, code.hiddenLeadingLines)
+    ? displayLinesForBodyLines(test, changedLines, code.lineMap)
     : undefined
   const storyLineNumbers = useMemo(() => {
     const steps = test.readable.story?.steps
     if (!steps) return undefined
-    const visibleLineCount = code.source ? code.source.split('\n').length : 0
     return storyCodeLineNumbers(
       steps,
       code.file,
-      code.displayStartLine,
-      code.displayStartLine + Math.max(visibleLineCount - 1, 0),
+      code.startLine,
+      code.endLine,
     )
-  }, [code.displayStartLine, code.file, code.source, test.readable.story?.steps])
+  }, [code.endLine, code.file, code.startLine, test.readable.story?.steps])
 
   return (
     <div data-testid="test-presentation">
@@ -112,23 +112,32 @@ export function TestPresentation({
 
       {mode === 'english' ? (
         <div data-testid="test-presentation-english">
-          <ReadableTestView
-            test={test.readable}
-            sourceFile={sourceFile}
-            selectedNodeId={selectedSource?.id}
-            onSourceSelect={selectSource}
-          />
+          <SourceOpenShell
+            sourceLocation={{
+              file: fullTestRange.file,
+              startLine: firstMappedSourceLine(fullTestRange.lineMap) ?? fullTestRange.startLine,
+            }}
+            showOpenButton={showOpenButton}
+          >
+            <ReadableTestView
+              test={test.readable}
+              sourceFile={sourceFile}
+              selectedNodeId={selectedSource?.id}
+              onSourceSelect={selectSource}
+            />
+          </SourceOpenShell>
         </div>
       ) : (
         <div data-testid="test-presentation-code">
           {code.source ? (
             <ShikiCode
               source={code.source}
-              activeLine={displayedActiveLine}
-              sourceLocation={{ file: code.file, startLine: code.displayStartLine }}
+              activeLines={displayedActiveLines}
+              sourceLocation={{ file: code.file, startLine: firstMappedSourceLine(code.lineMap) ?? code.startLine }}
+              sourceLineMap={code.lineMap}
               runningHighlight={showingFullTest ? runningHighlight : false}
               changedLines={displayedChangedLines}
-              showOpenButton={showCodeOpenButton}
+              showOpenButton={showOpenButton}
               selectedSourceRange={selectedSource?.source}
               storyLineNumbers={storyLineNumbers}
             />
@@ -152,8 +161,7 @@ function codeSelection(
   file: string
   startLine: number
   endLine: number
-  displayStartLine: number
-  hiddenLeadingLines: number
+  lineMap: FormattedDisplayLine[]
 } {
   if (selectedSource && !sourceBelongsToTestBody(test, sourceFile, selectedSource)) {
     const display = displayCodeSource(selectedSource.snippet, selectedSource.startLine)
@@ -162,19 +170,17 @@ function codeSelection(
       file: selectedSource.file,
       startLine: selectedSource.startLine,
       endLine: selectedSource.endLine,
-      displayStartLine: display.startLine,
-      hiddenLeadingLines: display.hiddenLeadingLines,
+      lineMap: display.lineMap,
     }
   }
   const startLine = testBodyLine(test)
-  const display = displayCodeSource(test.bodySource, startLine)
+  const display = displayCodeSource(test.bodySource, startLine, test.codeDisplay)
   return {
     source: display.source,
     file: sourceFile,
     startLine,
     endLine: startLine + Math.max(test.bodySource.split('\n').length - 1, 0),
-    displayStartLine: display.startLine,
-    hiddenLeadingLines: display.hiddenLeadingLines,
+    lineMap: display.lineMap,
   }
 }
 
@@ -185,10 +191,23 @@ function codeSelection(
 function displayCodeSource(
   source: string,
   startLine: number,
-): { source: string; startLine: number; hiddenLeadingLines: number } {
-  const lines = source.split('\n')
+  formatted?: FormattedCodeDisplay,
+): { source: string; lineMap: FormattedDisplayLine[] } {
+  const usableDisplay = formatted && formatted.lineMap.length === formatted.code.split('\n').length
+    ? formatted
+    : {
+        code: source,
+        lineMap: source.split('\n').map((_, index) => ({
+          sourceLine: startLine + index,
+          sourceLines: [startLine + index],
+        })),
+      }
+  const lines = usableDisplay.code.split('\n')
+  if (lines.length === 1 && /^\{\s*\}$/.test(lines[0])) {
+    return { source: '', lineMap: [] }
+  }
   if (lines.length < 2 || lines[0].trim() !== '{' || lines.at(-1)?.trim() !== '}') {
-    return { source, startLine, hiddenLeadingLines: 0 }
+    return { source: usableDisplay.code, lineMap: usableDisplay.lineMap }
   }
   const inner = lines.slice(1, -1)
   const indentation = inner
@@ -197,18 +216,26 @@ function displayCodeSource(
   const dedented = Number.isFinite(indentation)
     ? inner.map((line) => line.slice(Math.min(indentation, line.length)))
     : inner
-  return { source: dedented.join('\n'), startLine: startLine + 1, hiddenLeadingLines: 1 }
+  return { source: dedented.join('\n'), lineMap: usableDisplay.lineMap.slice(1, -1) }
 }
 
-function shiftBodyLine(line: number | null | undefined, hiddenLeadingLines: number): number | undefined {
-  if (line == null) return undefined
-  const shifted = line - hiddenLeadingLines
-  return shifted > 0 ? shifted : undefined
+function displayLinesForBodyLines(
+  test: ExtractedTest,
+  bodyLines: ReadonlySet<number> | undefined,
+  lineMap: readonly FormattedDisplayLine[],
+): Set<number> | undefined {
+  if (!bodyLines?.size) return undefined
+  const bodyStartLine = testBodyLine(test)
+  const sourceLines = new Set([...bodyLines].map((line) => bodyStartLine + line - 1))
+  const displayLines = new Set<number>()
+  lineMap.forEach((mapping, index) => {
+    if (mapping.sourceLines.some((line) => sourceLines.has(line))) displayLines.add(index + 1)
+  })
+  return displayLines.size ? displayLines : undefined
 }
 
-function shiftBodyLines(lines: Set<number> | undefined, hiddenLeadingLines: number): Set<number> | undefined {
-  if (!lines || hiddenLeadingLines === 0) return lines
-  return new Set([...lines].map((line) => line - hiddenLeadingLines).filter((line) => line > 0))
+function firstMappedSourceLine(lineMap: readonly FormattedDisplayLine[]): number | null {
+  return lineMap[0]?.sourceLine ?? null
 }
 
 function sourceBelongsToTestBody(test: ExtractedTest, sourceFile: string, source: ReadableSource): boolean {

@@ -28,6 +28,7 @@ import type {
   FlightStatus,
 } from '@shared/flights/types'
 import type { ReadableTest } from '@shared/readable-tests/types'
+import type { FormattedCodeDisplay } from '@shared/code-display-format'
 import type { ExternalHealClientKind } from './types-runs'
 
 export type { CleanupListing, CleanupOrphan, CleanupRunEntry, CleanupWorktree, PortifyCleanupEntry, PortifyCleanupListing } from './types-cleanup'
@@ -193,6 +194,9 @@ export interface ExtractedTest {
   bodyLine?: number
   steps: ExtractedStep[]
   readable: ReadableTest
+  /** Server-formatted display code with absolute source rows. Optional for
+   *  compatibility with cached payloads from older Canary Lab versions. */
+  codeDisplay?: FormattedCodeDisplay
   // Set when the test is defined in a helper file (e.g. a factory) rather
   // than the spec file that owns it. Click-throughs in the UI prefer this
   // path so the code viewer lands at the actual definition site.

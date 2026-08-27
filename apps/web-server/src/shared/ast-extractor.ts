@@ -1,5 +1,8 @@
 import ts from 'typescript'
-import { formatSourceSnippetForDisplay } from '../../../../shared/code-display-format'
+import {
+  formatSourceSnippetForDisplay,
+  type FormattedCodeDisplay,
+} from '../../../../shared/code-display-format'
 import type { PathType } from '../../../../shared/coverage/types'
 import type { ReadableSemanticRuleConfig, ReadableTest } from '../../../../shared/readable-tests/types'
 import {
@@ -34,6 +37,9 @@ export interface ExtractedTest {
   bodyLine?: number
   steps: ExtractedStep[]
   readable: ReadableTest
+  /** In-memory, display-only rendering added by the tests route. The extractor
+   *  leaves it absent so coverage and rerun callers do no formatting work. */
+  codeDisplay?: FormattedCodeDisplay
   // Present when the `test(...)` lives in a different file than the spec
   // that owns it (e.g. a factory helper). UI uses this to link the code
   // viewer at the real definition site instead of the importing spec.

@@ -3,7 +3,9 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ExtractedTest } from '../api/types'
+import { formatCodeForDisplayWithLineMap } from '@shared/code-display-format'
+import type { ExtractedTest, ReadableStoryItem } from '../api/types'
+import { openEditor } from '../api/client'
 import { applyTheme } from '../lib/theme'
 import { TestPresentation } from './TestPresentation'
 
@@ -21,6 +23,7 @@ vi.mock('shiki/langs/typescript.mjs', () => ({ default: {} }))
 vi.mock('shiki/themes/one-dark-pro.mjs', () => ({ default: {} }))
 vi.mock('shiki/themes/one-light.mjs', () => ({ default: {} }))
 vi.mock('shiki/wasm', () => ({ default: {} }))
+vi.mock('../api/client', () => ({ openEditor: vi.fn() }))
 
 const TEST: ExtractedTest = {
   name: 'completes checkout',
@@ -122,6 +125,7 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
+  vi.mocked(openEditor).mockReset()
   localStorage.clear()
   document.documentElement.classList.remove('dark')
   container = document.createElement('div')
@@ -145,6 +149,20 @@ describe('TestPresentation', () => {
     // like changing the representation, not the component.
     expect(container.textContent).toContain('e2e/checkout.spec.ts:L10–12')
     expect(container.querySelector('[data-testid="test-presentation-code"]')).toBeNull()
+    const english = container.querySelector('[data-testid="test-presentation-english"]')
+    const englishOpenButton = english?.querySelector<HTMLButtonElement>('button[aria-label="Open in editor"]')
+    expect(englishOpenButton).not.toBeNull()
+    expect(englishOpenButton?.parentElement?.querySelector('.cl-code-shell')).not.toBeNull()
+    await act(async () => {
+      englishOpenButton?.click()
+      await Promise.resolve()
+    })
+    expect(openEditor).toHaveBeenCalledWith({
+      file: '/repo/e2e/checkout.spec.ts',
+      line: 11,
+      column: 1,
+    })
+    vi.mocked(openEditor).mockClear()
 
     await act(async () => {
       ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
@@ -161,6 +179,7 @@ describe('TestPresentation', () => {
     expect(displayedLines[0].dataset.codeSequenceLabel).toBe('02')
     expect(displayedLines[0].title).toBe('English step 02')
     expect(displayedLines[0].textContent).toBe("await page.goto('/checkout')")
+    expect(container.querySelector('[data-testid="test-presentation-code"] button[aria-label="Open in editor"]')).not.toBeNull()
     const codeScroller = container.querySelector<HTMLElement>('.cl-numbered-code')
     expect(codeScroller?.classList.contains('overflow-x-auto')).toBe(true)
     expect(codeScroller?.classList.contains('overflow-y-hidden')).toBe(true)
@@ -277,6 +296,178 @@ describe('TestPresentation', () => {
       '',
     ])
     expect(lines.map((line) => line.dataset.codeSequenceLabel)).toEqual(['01', '1', '1', '2', '', ''])
+  })
+
+  it('uses the server-formatted line map for numbering, highlights, selection, and editor navigation', async () => {
+    const formatted: ExtractedTest = {
+      ...TEST,
+      bodyLine: 40,
+      bodySource: `{
+  const message = msgs.find((item) => item.kind === 'SEND') as
+    | SendMessage
+    | undefined
+  await send({id: message?.id,retries:2})
+}`,
+      codeDisplay: {
+        code: `{
+    const message = msgs.find((item) => item.kind === 'SEND') as SendMessage | undefined;
+    await send({ id: message?.id, retries: 2 });
+}`,
+        lineMap: [
+          { sourceLine: 40, sourceLines: [40] },
+          { sourceLine: 41, sourceLines: [41, 42, 43] },
+          { sourceLine: 44, sourceLines: [44] },
+          { sourceLine: 45, sourceLines: [45] },
+        ],
+      },
+      readable: {
+        ...TEST.readable,
+        story: {
+          steps: [
+            {
+              id: 'find-message',
+              role: 'setup',
+              text: 'Find the matching message',
+              spans: [{ text: 'Find the matching message' }],
+              fidelity: 'derived',
+              source: {
+                file: '/repo/e2e/checkout.spec.ts',
+                startLine: 42,
+                endLine: 43,
+                snippet: "msgs.find((item) => item.kind === 'SEND')",
+              },
+            },
+            {
+              id: 'send-message',
+              role: 'action',
+              text: 'Send the message',
+              spans: [{ text: 'Send the message' }],
+              fidelity: 'derived',
+              source: {
+                file: '/repo/e2e/checkout.spec.ts',
+                startLine: 44,
+                endLine: 44,
+                snippet: 'await send({id: message?.id,retries:2})',
+              },
+            },
+          ],
+        },
+      },
+    }
+    act(() => root.render(
+      <TestPresentation
+        test={formatted}
+        sourceFile="/repo/e2e/checkout.spec.ts"
+        activeLine={3}
+        runningHighlight
+        changedLines={new Set([5])}
+      />,
+    ))
+
+    await act(async () => {
+      ;(container.querySelector('[data-testid="readable-story-item-find-message"]') as HTMLButtonElement).click()
+      await Promise.resolve()
+    })
+
+    const lines = Array.from(container.querySelectorAll<HTMLElement>('[data-code-line]'))
+    expect(lines).toHaveLength(2)
+    expect(lines.map((line) => line.textContent)).toEqual([
+      "const message = msgs.find((item) => item.kind === 'SEND') as SendMessage | undefined;",
+      'await send({ id: message?.id, retries: 2 });',
+    ])
+    expect(lines.map((line) => line.dataset.codeSequence)).toEqual(['01', '02'])
+    expect(lines.map((line) => line.dataset.sourceLine)).toEqual(['41', '44'])
+    expect(lines[0].dataset.activeLine).toBe('true')
+    expect(lines[0].dataset.selectedLine).toBe('true')
+    expect(lines[1].dataset.changedLine).toBe('true')
+
+    await act(async () => {
+      lines[1].click()
+      await Promise.resolve()
+    })
+    expect(openEditor).toHaveBeenCalledWith({
+      file: '/repo/e2e/checkout.spec.ts',
+      line: 44,
+      column: 1,
+    })
+  })
+
+  it('keeps every English step number after a formatted template literal', async () => {
+    const sourceFile = '/repo/e2e/email-batching.spec.ts'
+    const bodySource = [
+      '{',
+      '  const txId = `batch_17_${nowId()}`',
+      '',
+      '  // 3 + 5 + 9 = 17 emails, all < 50 per call → batch-processor.',
+      '  // Delay queue (x-max-length=1) accepts the first trigger; subsequent ones are rejected.',
+      '  // After 20s TTL the single TRIGGER_EMAIL_BATCH dead-letters to NOTIFIER_QUEUE.',
+      "  await sendSeparateCalls(request, txId, [3, 5, 9], 'batch-17')",
+      '',
+      '  const msgs = await drainNotifierQueue(txId, 1, 60_000)',
+      '',
+      '  expect(msgs).toHaveLength(1)',
+      "  expect(msgs[0].pattern).toBe('TRIGGER_EMAIL_BATCH')",
+      '  expect((msgs[0] as TriggerBatchMessage).data.emailInfo.transactionId).toBe(txId)',
+      '}',
+    ].join('\n')
+    const storyStep = (
+      id: string,
+      role: 'setup' | 'action' | 'check',
+      line: number,
+    ): ReadableStoryItem => ({
+      id,
+      role,
+      text: id,
+      spans: [{ text: id }],
+      fidelity: 'derived',
+      source: { file: sourceFile, startLine: line, endLine: line, snippet: id },
+    })
+    const formatted: ExtractedTest = {
+      ...TEST,
+      bodyLine: 22,
+      bodySource,
+      codeDisplay: formatCodeForDisplayWithLineMap(bodySource, 22),
+      readable: {
+        ...TEST.readable,
+        story: {
+          steps: [
+            storyStep('set transaction identifier', 'setup', 23),
+            storyStep('send separate calls', 'action', 28),
+            storyStep('drain notifier queue', 'action', 30),
+            storyStep('check message count', 'check', 32),
+            storyStep('check message pattern', 'check', 33),
+            storyStep('check transaction identifier', 'check', 34),
+          ],
+        },
+      },
+    }
+    act(() => root.render(<TestPresentation test={formatted} sourceFile={sourceFile} />))
+
+    await act(async () => {
+      ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
+      await Promise.resolve()
+    })
+
+    const lines = Array.from(container.querySelectorAll<HTMLElement>('[data-code-line]'))
+    expect(lines.map((line) => line.dataset.codeSequence)).toEqual([
+      '01',
+      '',
+      '',
+      '',
+      '02',
+      '03',
+      '04',
+      '05',
+      '06',
+    ])
+    expect(lines.map((line) => line.dataset.codeSequenceLabel).filter(Boolean)).toEqual([
+      '01',
+      '02',
+      '03',
+      '04',
+      '05',
+      '06',
+    ])
   })
 
   it('keeps physical Code numbering when an older readable payload has no story', async () => {

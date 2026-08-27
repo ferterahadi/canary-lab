@@ -82,10 +82,6 @@ export const COVERAGE_CSS = `
 .clcov-caret{flex:none;width:10px;font-size:10px;line-height:1;color:var(--text-muted)}
 /* Test source disclosure. */
 .clcov-source{margin-top:9px;border-top:1px solid var(--border-default);padding-top:9px}
-.clcov-source-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-.clcov-source-path{font-family:var(--font-mono);font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.clcov-source-open{margin-left:auto;flex:none;appearance:none;cursor:pointer;font-size:10px;font-weight:500;color:var(--text-secondary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:2px 8px;transition:background .12s,color .12s,border-color .12s}
-.clcov-source-open:hover{color:var(--text-primary);background:var(--bg-hover);border-color:var(--border-strong)}
 /* The shared ShikiCode block frames itself (.shiki-block pre); just cap its height so a long body scrolls in place. */
 .clcov-source .shiki-block pre{max-height:360px;overflow:auto}
 .clcov-source-note{font-size:11.5px;color:var(--text-muted)}
