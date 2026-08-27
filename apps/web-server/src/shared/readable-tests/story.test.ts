@@ -50,7 +50,7 @@ describe('readable test story', () => {
       'Using sync SQL connection as conn',
     ])
     expect(textsFor(translated, 'action')).toEqual([
-      'Send call using ids, saving the result as res',
+      'Send call using ids and an object with call status override set to “COMPLETED”, saving the result as res',
       'Until the result status equals “COMPLETED” when available, saving the matching result as callRow',
       'Read call outbound using conn and ids.messageId',
       'Read WhatsApp outbound using conn and ids.messageId, saving the result as wa',
@@ -63,7 +63,7 @@ describe('readable test story', () => {
     expect(storyItems(translated).map((step) => `${step.role}: ${step.text}`)).toEqual([
       'setup: Skip this scenario — “sync SQL not configured”',
       'setup: Create variable ids using “fallback-A”',
-      'action: Send call using ids, saving the result as res',
+      'action: Send call using ids and an object with call status override set to “COMPLETED”, saving the result as res',
       'check: Check that response status is less than 300',
       'setup: Using sync SQL connection as conn',
       'action: Until the result status equals “COMPLETED” when available, saving the matching result as callRow',
@@ -180,7 +180,7 @@ describe('readable test story', () => {
     expect(textsFor(translated, 'check')).toEqual(['Check order'])
   })
 
-  it('declares shared inputs once and refers to their variable names in later actions', () => {
+  it('declares shared inputs once and keeps every safe argument in later actions', () => {
     const translated = translateReadableTest({
       ...INPUT,
       bodySource: `{
@@ -193,11 +193,57 @@ describe('readable test story', () => {
     expect(storyItems(translated).map((step) => step.text)).toEqual([
       'Create variable txId using “tx-42”',
       'Create variable request using txId',
-      'Send batch using request and txId',
+      'Send batch using request, txId, 5, and “internal label”',
     ])
     expect(storyItems(translated).flatMap((step) => (
       step.spans.filter((span) => span.kind === 'variable').map((span) => span.text)
     ))).toEqual(expect.arrayContaining(['txId', 'request']))
+  })
+
+  it('keeps partially renderable template declarations as explicit setup', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  const txId = \`bypass_multi_\${nowId()}\`
+  const sharedTxn = \`eo-B-txn-\${Date.now()}-\${Math.random().toString(16).slice(2, 8)}\`
+  const current = (\`\${now()}\`)
+  const unsupported = \`\${() => { submit() }}\`
+  await sendSeparateCalls(request, txId, [51, 52], 'bypass-multi')
+  const res = await postSendCall(ids, {
+    callStatusOverride: 'REJECTED',
+    whatsappStatusOverride: 'FAILED',
+  })
+}`,
+    })
+
+    expect(storyItems(translated).map((step) => step.text)).toEqual([
+      'Set txId to text made from “bypass_multi_” and the current-time identifier',
+      'Set sharedTxn to text made from “eo-B-txn-”, the current time, “-”, and a random number as base 16 text sliced from 2 to 8',
+      'Set current to text made from the current time',
+      'Send separate calls using request, txId, a list containing 51, 52, and “bypass-multi”',
+      'Send call using ids and an object with call status override set to “REJECTED”, WhatsApp status override set to “FAILED”, saving the result as res',
+    ])
+    expect(storyItems(translated).some((step) => step.text.includes('unsupported'))).toBe(false)
+  })
+
+  it('keeps every collection predicate assertion in the concise story', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  const msgs = await drainQueue(txId)
+  expect(msgs).toHaveLength(2)
+  expect(msgs.every((m) => m.pattern === 'TRIGGER_EMAIL_BATCH')).toBe(true)
+  expect(
+    msgs.every((m) => (m as TriggerBatchMessage).data.emailInfo.transactionId === txId),
+  ).toBe(true)
+}`,
+    })
+
+    expect(textsFor(translated, 'check')).toEqual([
+      'Check that msgs has length 2',
+      'Check that for every item in msgs, item pattern equals “TRIGGER_EMAIL_BATCH”',
+      'Check that for every item in msgs, item data email info transaction identifier equals txId',
+    ])
   })
 
   it('highlights generic English grammar without product-specific vocabulary', () => {

@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ExtractedTest, ReadableSource } from '../api/types'
 import { ReadableTestView, type ReadableSourceSelection } from './ReadableTestView'
 import { ShikiCode } from './TestCodeBlock'
+import { storyCodeLineNumbers } from './readable-story-sequence'
 
 type PresentationMode = 'english' | 'code'
 
@@ -37,6 +38,17 @@ export function TestPresentation({
   const displayedChangedLines = showingFullTest
     ? shiftBodyLines(changedLines, code.hiddenLeadingLines)
     : undefined
+  const storyLineNumbers = useMemo(() => {
+    const steps = test.readable.story?.steps
+    if (!steps) return undefined
+    const visibleLineCount = code.source ? code.source.split('\n').length : 0
+    return storyCodeLineNumbers(
+      steps,
+      code.file,
+      code.displayStartLine,
+      code.displayStartLine + Math.max(visibleLineCount - 1, 0),
+    )
+  }, [code.displayStartLine, code.file, code.source, test.readable.story?.steps])
 
   return (
     <div data-testid="test-presentation">
@@ -118,6 +130,7 @@ export function TestPresentation({
               changedLines={displayedChangedLines}
               showOpenButton={showCodeOpenButton}
               selectedSourceRange={selectedSource?.source}
+              storyLineNumbers={storyLineNumbers}
             />
           ) : (
             <div className="rounded-md border px-3 py-2 text-xs" style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}>

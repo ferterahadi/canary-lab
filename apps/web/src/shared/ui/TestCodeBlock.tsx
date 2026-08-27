@@ -4,6 +4,7 @@ import { useTheme } from '../lib/theme'
 import type { ExtractedStep } from '../api/types'
 import * as api from '../api/client'
 import { getCodeHighlighter, codeThemeFor } from './code-highlighter'
+import type { StoryCodeLineNumber } from './readable-story-sequence'
 import {
   colorClassForStatus,
   sourceLineForBodyLine,
@@ -28,6 +29,7 @@ export function ShikiCode({
   changedLines,
   showOpenButton = true,
   selectedSourceRange,
+  storyLineNumbers,
 }: {
   source: string
   activeLine?: number | null
@@ -35,6 +37,9 @@ export function ShikiCode({
   runningHighlight?: boolean
   showOpenButton?: boolean
   selectedSourceRange?: { startLine: number; endLine: number }
+  /** Absolute source line to the corresponding English story number. When
+   * present, continuation and structural source rows intentionally stay blank. */
+  storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>
   /** 1-indexed body-relative line numbers (same convention as `activeLine`) to
    *  tint as changed — the diff-against-HEAD cue for a dirty test's body. Takes
    *  visual precedence over `activeLine`; the two aren't expected to co-occur
@@ -71,10 +76,16 @@ export function ShikiCode({
   if (html === null) {
     return (
       <CodeShell sourceLocation={sourceLocation} openError={openError} onOpenStart={() => openAt(sourceLocation?.startLine ?? 1)} showOpenButton={showOpenButton}>
-        <pre className="cl-numbered-code cl-code-shell overflow-hidden whitespace-pre-wrap break-words rounded-md p-2 text-[11px] leading-[1.65]" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+        <pre className="cl-numbered-code cl-code-shell overflow-x-auto overflow-y-hidden whitespace-pre break-normal rounded-md p-2 text-[11px] leading-[1.65]" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
           <code>
             {source.split('\n').map((line, index) => (
-              <span key={index} className="line" data-code-line={String(index + 1).padStart(2, '0')}>{line}</span>
+              <FallbackCodeLine
+                key={index}
+                line={line}
+                lineNumber={index + 1}
+                startLine={sourceLocation?.startLine}
+                storyLineNumbers={storyLineNumbers}
+              />
             ))}
           </code>
         </pre>
@@ -85,7 +96,7 @@ export function ShikiCode({
   return (
     <CodeShell sourceLocation={sourceLocation} openError={openError} onOpenStart={() => openAt(sourceLocation?.startLine ?? 1)} showOpenButton={showOpenButton}>
       <div
-        className={`shiki-block cl-numbered-code cl-code-shell overflow-hidden rounded-md text-[11px] leading-[1.65] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-running/10' : ''}`}
+        className={`shiki-block cl-numbered-code cl-code-shell overflow-x-auto overflow-y-hidden rounded-md text-[11px] leading-[1.65] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-running/10' : ''}`}
         onClick={(e) => {
           const line = (e.target as HTMLElement).closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine
           if (line) void openAt(Number(line))
@@ -93,9 +104,34 @@ export function ShikiCode({
         // Shiki has already escaped the source it highlighted; decorateShikiLines
         // only wraps those tokens in spans.
         // eslint-disable-next-line no-restricted-syntax
-        dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, activeLine, sourceLocation?.startLine, runningHighlight, changedLines, selectedSourceRange) }}
+        dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, activeLine, sourceLocation?.startLine, runningHighlight, changedLines, selectedSourceRange, storyLineNumbers) }}
       />
     </CodeShell>
+  )
+}
+
+function FallbackCodeLine({
+  line,
+  lineNumber,
+  startLine,
+  storyLineNumbers,
+}: {
+  line: string
+  lineNumber: number
+  startLine?: number
+  storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>
+}) {
+  const number = codeLineNumber(lineNumber, startLine, storyLineNumbers)
+  return (
+    <span
+      className="line"
+      data-code-line={number.physical}
+      data-code-sequence={number.sequence}
+      data-code-sequence-label={number.label}
+      title={number.title}
+    >
+      {line}
+    </span>
   )
 }
 
@@ -150,6 +186,7 @@ function decorateShikiLines(
   runningHighlight?: boolean,
   changedLines?: Set<number>,
   selectedSourceRange?: { startLine: number; endLine: number },
+  storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>,
 ): string {
   let lineNo = 0
   const bg = runningHighlight
@@ -162,9 +199,10 @@ function decorateShikiLines(
   return html.replace(/\n(?=<span class="line")/g, '').replace(/<span class="line"/g, (match) => {
     lineNo += 1
     const sourceLine = startLine ? sourceLineForBodyLine(startLine, lineNo) : null
+    const number = codeLineNumber(lineNo, startLine, storyLineNumbers)
     const selected = sourceLine != null && selectedSourceRange != null &&
       sourceLine >= selectedSourceRange.startLine && sourceLine <= selectedSourceRange.endLine
-    const attrs = ` data-code-line="${String(lineNo).padStart(2, '0')}"${sourceLine ? ` data-source-line="${sourceLine}"` : ''}${selected ? ' data-selected-line="true"' : ''}`
+    const attrs = ` data-code-line="${number.physical}" data-code-sequence="${number.sequence}" data-code-sequence-label="${number.label}"${number.title ? ` title="${number.title}"` : ''}${sourceLine ? ` data-source-line="${sourceLine}"` : ''}${selected ? ' data-selected-line="true"' : ''}`
     if (changedLines?.has(lineNo)) {
       return `<span class="line"${attrs} data-changed-line="true" style="background:color-mix(in srgb, var(--danger) 16%, transparent);box-shadow:inset 2px 0 0 var(--danger)"`
     }
@@ -176,6 +214,27 @@ function decorateShikiLines(
     }
     return `${match}${attrs}`
   })
+}
+
+function codeLineNumber(
+  lineNumber: number,
+  startLine?: number,
+  storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>,
+): {
+  physical: string
+  sequence: string
+  label: string
+  title?: string
+} {
+  const physical = String(lineNumber).padStart(2, '0')
+  if (!storyLineNumbers || startLine === undefined) {
+    return { physical, sequence: physical, label: physical }
+  }
+  const sourceLine = sourceLineForBodyLine(startLine, lineNumber)
+  const story = storyLineNumbers.get(sourceLine)
+  return story
+    ? { physical, sequence: story.sequence, label: story.label, title: `English step ${story.sequence}` }
+    : { physical, sequence: '', label: '' }
 }
 
 export function StepStatusBadge({ status }: { status: StepStatus }) {

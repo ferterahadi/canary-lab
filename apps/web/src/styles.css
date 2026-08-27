@@ -358,6 +358,19 @@ body {
   white-space: pre-wrap !important;
   word-break: break-word !important;
 }
+/* Numbered Code Mode preserves the source's authored rows. Wrapping code as
+   prose makes continuations restart at the gutter and look unformatted; a
+   horizontal scroller keeps syntax, semantic numbering, and source navigation
+   on the same physical line without touching the workspace file. */
+.shiki-block.cl-numbered-code pre,
+.shiki-block.cl-numbered-code code {
+  white-space: pre !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+}
+.cl-numbered-code {
+  scrollbar-gutter: stable;
+}
 /* Every code line is a full-width block bleeding into the pre's inset, so
    hover/selection washes stretch edge-to-edge instead of hugging the text.
    Scoped to `pre`: the English pane's inline source tokens also carry
@@ -370,25 +383,30 @@ body {
   padding: 0 0.5rem;
   min-height: 1lh;
 }
-/* Code and English use the same three-character sequence gutter. The label is
-   metadata rather than source, so it cannot be selected or copied with code. */
+/* Code and English use the same compact semantic sequence gutter. Code lines
+   without an English story row (continuations and structural braces) retain
+   the gutter but leave it blank. The label is metadata rather than source, so
+   it cannot be selected or copied with code. Other code viewers fall back to
+   their physical line index. */
 .cl-numbered-code span.line::before {
-  content: attr(data-code-line);
+  content: attr(data-code-sequence-label);
   display: inline-block;
-  width: 3ch;
+  width: 2ch;
   margin-right: 0.5rem;
   color: var(--text-muted);
+  text-align: right;
   user-select: none;
 }
 .cl-numbered-code span.line {
   display: block;
   min-height: 1lh;
 }
-/* The English pane's canvas — `.shiki-block pre`'s twin (same frame, inset,
-   and wrapping; keep the two in step so mode toggling never shifts layout).
-   Horizontal inset lives on the rows so selection washes bleed edge-to-edge
-   the way Code mode's line highlights do. English rows intentionally have no
-   block padding: one story row and one code line share the same `1lh` box. */
+/* The English pane's canvas — `.shiki-block pre`'s twin for frame, inset, and
+   typography. English remains prose-wrapped; numbered Code Mode preserves
+   authored source rows and scrolls long lines. Horizontal inset lives on the
+   rows so selection washes bleed edge-to-edge the way Code mode's line
+   highlights do. English rows intentionally have no block padding: one story
+   row and one code line share the same `1lh` box. */
 .shiki-block .cl-readable-body {
   padding: 0.5rem 0;
   border-radius: var(--radius-md);

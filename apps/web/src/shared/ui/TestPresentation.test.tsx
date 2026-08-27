@@ -157,7 +157,14 @@ describe('TestPresentation', () => {
     const displayedLines = container.querySelectorAll<HTMLElement>('[data-code-line]')
     expect(displayedLines).toHaveLength(1)
     expect(displayedLines[0].dataset.codeLine).toBe('01')
+    expect(displayedLines[0].dataset.codeSequence).toBe('02')
+    expect(displayedLines[0].dataset.codeSequenceLabel).toBe('02')
+    expect(displayedLines[0].title).toBe('English step 02')
     expect(displayedLines[0].textContent).toBe("await page.goto('/checkout')")
+    const codeScroller = container.querySelector<HTMLElement>('.cl-numbered-code')
+    expect(codeScroller?.classList.contains('overflow-x-auto')).toBe(true)
+    expect(codeScroller?.classList.contains('overflow-y-hidden')).toBe(true)
+    expect(codeScroller?.classList.contains('overflow-hidden')).toBe(false)
   })
 
   it('reveals a helper snippet in Code when its English node is selected', async () => {
@@ -173,6 +180,120 @@ describe('TestPresentation', () => {
     expect(container.textContent).toContain('expect(account.active).toBe(true)')
     expect(container.textContent).toContain('Full test')
     expect(container.querySelectorAll('[data-selected-line="true"]')).toHaveLength(1)
+    expect(container.querySelector<HTMLElement>('[data-code-line]')?.dataset.codeSequence).toBe('03')
+  })
+
+  it('uses the matching nested English numbers and leaves structural Code rows blank', async () => {
+    const nested: ExtractedTest = {
+      ...TEST,
+      bodyLine: 20,
+      bodySource: `{
+  await withConnection(async (connection) => {
+    for (const item of items) {
+      await send(item)
+      expect(result).toBe(true)
+    }
+  })
+}`,
+      readable: {
+        ...TEST.readable,
+        story: {
+          steps: [{
+            id: 'connection-flow',
+            kind: 'flow',
+            flowKind: 'scope',
+            role: 'setup',
+            text: 'Using connection',
+            spans: [{ text: 'Using connection' }],
+            fidelity: 'derived',
+            source: {
+              file: '/repo/e2e/checkout.spec.ts',
+              startLine: 21,
+              endLine: 26,
+              snippet: 'await withConnection(async (connection) => {})',
+            },
+            children: [{
+              id: 'item-loop',
+              kind: 'flow',
+              flowKind: 'loop',
+              role: 'action',
+              text: 'For each item in items',
+              spans: [{ text: 'For each item in items' }],
+              fidelity: 'derived',
+              source: {
+                file: '/repo/e2e/checkout.spec.ts',
+                startLine: 22,
+                endLine: 25,
+                snippet: 'for (const item of items) {}',
+              },
+              children: [
+                {
+                  id: 'send-item',
+                  role: 'action',
+                  text: 'Send item',
+                  spans: [{ text: 'Send item' }],
+                  fidelity: 'derived',
+                  source: {
+                    file: '/repo/e2e/checkout.spec.ts',
+                    startLine: 23,
+                    endLine: 23,
+                    snippet: 'await send(item)',
+                  },
+                },
+                {
+                  id: 'check-result',
+                  role: 'check',
+                  text: 'Check that result equals true',
+                  spans: [{ text: 'Check that result equals true' }],
+                  fidelity: 'derived',
+                  source: {
+                    file: '/repo/e2e/checkout.spec.ts',
+                    startLine: 24,
+                    endLine: 24,
+                    snippet: 'expect(result).toBe(true)',
+                  },
+                },
+              ],
+            }],
+          }],
+        },
+      },
+    }
+    act(() => root.render(<TestPresentation test={nested} sourceFile="/repo/e2e/checkout.spec.ts" />))
+
+    await act(async () => {
+      ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
+      await Promise.resolve()
+    })
+
+    const lines = Array.from(container.querySelectorAll<HTMLElement>('[data-code-line]'))
+    expect(lines.map((line) => line.dataset.codeLine)).toEqual(['01', '02', '03', '04', '05', '06'])
+    expect(lines.map((line) => line.dataset.codeSequence)).toEqual([
+      '01',
+      '01.1',
+      '01.1.1',
+      '01.1.2',
+      '',
+      '',
+    ])
+    expect(lines.map((line) => line.dataset.codeSequenceLabel)).toEqual(['01', '1', '1', '2', '', ''])
+  })
+
+  it('keeps physical Code numbering when an older readable payload has no story', async () => {
+    const withoutStory: ExtractedTest = {
+      ...TEST,
+      readable: { ...TEST.readable, story: undefined },
+    }
+    act(() => root.render(<TestPresentation test={withoutStory} sourceFile="/repo/e2e/checkout.spec.ts" />))
+
+    await act(async () => {
+      ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
+      await Promise.resolve()
+    })
+
+    const line = container.querySelector<HTMLElement>('[data-code-line]')
+    expect(line?.dataset.codeSequence).toBe('01')
+    expect(line?.dataset.codeSequenceLabel).toBe('01')
   })
 
   it('highlights every line in an exact same-file source range', async () => {

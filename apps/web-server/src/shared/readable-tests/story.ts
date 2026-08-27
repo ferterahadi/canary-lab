@@ -6,7 +6,7 @@ import type {
 } from '../../../../../shared/readable-tests/types'
 import { renderActionStatement } from './actions'
 import { renderAssertionStatement } from './assertions'
-import { expressionPath, renderExpression } from './expression'
+import { expressionPath, quoteReadableText, renderExpression } from './expression'
 import {
   assignedNameFromStatement,
   humanizeIdentifier,
@@ -121,12 +121,11 @@ function readableList(items: readonly string[]): string {
 }
 
 /** Story mode names top-level inputs without recursively expanding every helper.
- * `send(request, txId)` therefore keeps `request` and `txId`; a nested builder
- * is named as its result, while its internals stay in the setup step that made it. */
+ * References keep their exact names; safe values keep their value; a nested
+ * builder is named as its result rather than expanded into source. */
 function storyArgument(
   argument: ts.Expression,
   sourceFile: ts.SourceFile,
-  referencesOnly: boolean,
 ): string | undefined {
   if (ts.isArrowFunction(argument) || ts.isFunctionExpression(argument)) return undefined
   if (ts.isIdentifier(argument)) {
@@ -137,10 +136,18 @@ function storyArgument(
   let expression = argument
   while (ts.isAwaitExpression(expression) || ts.isParenthesizedExpression(expression)) expression = expression.expression
   if (ts.isCallExpression(expression)) {
+    const rendered = renderExpression(expression, sourceFile)
+    if (rendered.fidelity !== 'unresolved') return rendered.text
     const name = calledName(expression)
-    if (name) return `${humanizeIdentifier(name)} result`
+    if (name) {
+      const [first, ...rest] = identifierWords(name)
+      if (first === 'now') {
+        const noun = readableObject(rest)
+        return noun ? `the current-time ${noun}` : 'the current time'
+      }
+      return `${humanizeIdentifier(name)} result`
+    }
   }
-  if (referencesOnly) return undefined
   const rendered = renderExpression(argument, sourceFile)
   return rendered.fidelity === 'unresolved' ? undefined : rendered.text
 }
@@ -148,14 +155,41 @@ function storyArgument(
 function callArguments(
   call: ts.CallExpression,
   sourceFile: ts.SourceFile,
-  preferReferences: boolean,
 ): string[] {
-  const render = (referencesOnly: boolean): string[] => call.arguments.flatMap((argument) => {
-    const rendered = storyArgument(argument, sourceFile, referencesOnly)
+  return call.arguments.flatMap((argument) => {
+    const rendered = storyArgument(argument, sourceFile)
     return rendered ? [rendered] : []
   })
-  const references = render(true)
-  return preferReferences && references.length ? references : render(false)
+}
+
+/** A template remains useful setup evidence even when one interpolation is a
+ * project helper whose implementation is outside the current source. Preserve
+ * every safe literal/value and name the helper result instead of dropping the
+ * whole declaration or leaking raw code. */
+function variableTemplateDescription(
+  statement: ts.Statement,
+  sourceFile: ts.SourceFile,
+): StoryDescription | undefined {
+  if (!ts.isVariableStatement(statement) || statement.declarationList.declarations.length !== 1) return undefined
+  const declaration = statement.declarationList.declarations[0]
+  if (!ts.isIdentifier(declaration.name) || !declaration.initializer) return undefined
+  let initializer = declaration.initializer
+  while (ts.isParenthesizedExpression(initializer)) initializer = initializer.expression
+  if (!ts.isTemplateExpression(initializer)) return undefined
+
+  const parts: string[] = []
+  if (initializer.head.text) parts.push(quoteReadableText(initializer.head.text))
+  for (const span of initializer.templateSpans) {
+    const value = storyArgument(span.expression, sourceFile)
+    if (!value) return undefined
+    parts.push(value)
+    if (span.literal.text) parts.push(quoteReadableText(span.literal.text))
+  }
+  return {
+    role: 'setup',
+    text: `Set ${exactIdentifierText(declaration.name.text)} to text made from ${readableList(parts)}`,
+    fidelity: 'derived',
+  }
 }
 
 function genericCallDescription(
@@ -170,7 +204,7 @@ function genericCallDescription(
   const first = words[0]
   const rest = words.slice(1)
   if (!first) return undefined
-  const arguments_ = callArguments(call, sourceFile, true)
+  const arguments_ = callArguments(call, sourceFile)
   const using = arguments_.length ? ` using ${readableList(arguments_)}` : ''
 
   if (first === 'expect' || first === 'assert' || first === 'check' || first === 'verify' || first === 'ensure') {
@@ -200,7 +234,7 @@ function genericCallDescription(
   const setup = setupLikeStatement(sourceText)
     || SETUP_CALL_VERBS.has(first)
   if (setup && assigned && SETUP_CALL_VERBS.has(first)) {
-    const creationInputs = callArguments(call, sourceFile, false)
+    const creationInputs = callArguments(call, sourceFile)
     const creationUsing = creationInputs.length ? ` using ${readableList(creationInputs)}` : ''
     return {
       role: 'setup',
@@ -245,7 +279,7 @@ function variableAlias(statement: ts.Statement): { name: string; text: string } 
 
 function polishStoryText(text: string): string {
   return text
-    .replace(/\bwhats app\b/gi, 'WhatsApp')
+    .replace(/\bwhats ?app\b/gi, 'WhatsApp')
     .replace(/\bsql\b/gi, 'SQL')
     .replace(/\bsms\b/gi, 'SMS')
     .replace(/\bjson\b/gi, 'JSON')
@@ -462,7 +496,7 @@ function loopStoryText(
 ): string {
   if (ts.isForOfStatement(statement) || ts.isForInStatement(statement)) {
     const binding = statement.initializer.getText(sourceFile).replace(/^(?:const|let|var)\s+/, '')
-    const source = storyArgument(statement.expression, sourceFile, false)
+    const source = storyArgument(statement.expression, sourceFile)
       ?? 'the available values'
     if (ts.isForInStatement(statement)) {
       return `Sequentially, for each property ${exactIdentifierText(binding)} in ${source}`
@@ -546,7 +580,7 @@ function mappingDescription(
     && arrayValues.length === receiver.elements.length
     && arrayValues.length > 0
     ? `the values ${readableList(arrayValues)}`
-    : storyArgument(receiver, sourceFile, false)
+    : storyArgument(receiver, sourceFile)
   if (!source) return undefined
   return {
     role: 'setup',
@@ -562,7 +596,7 @@ function loopCallbackDescription(
 ): StoryDescription | undefined {
   if (!ts.isPropertyAccessExpression(call.expression) || call.expression.name.text !== 'forEach') return undefined
   const parameter = callbackParameter(callback)
-  const source = storyArgument(call.expression.expression, sourceFile, false)
+  const source = storyArgument(call.expression.expression, sourceFile)
   if (!parameter || !source) return undefined
   const asynchronous = callback.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)
   return {
@@ -855,7 +889,8 @@ export function storyCandidates(
       : undefined
     const genericDescription = !renderedAction ? genericCallStory(statement, sourceFile) : undefined
     const mapping = call && mappingDescription(statement, call, sourceFile)
-    const description = mapping ?? renderedDescription ?? genericDescription
+    const templateDescription = variableTemplateDescription(statement, sourceFile)
+    const description = mapping ?? templateDescription ?? renderedDescription ?? genericDescription
 
     if (call) {
       const callbacks = callbackArgumentsFor(call)

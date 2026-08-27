@@ -115,4 +115,29 @@ describe('Playwright assertion edge cases', () => {
       role: 'check',
     })
   })
+
+  it('renders collection predicate checks without dropping their callback condition', () => {
+    const cases: Array<[string, string]> = [
+      [
+        "expect(msgs.every((m) => m.pattern === 'TRIGGER_EMAIL_BATCH')).toBe(true)",
+        'Check that for every item in msgs, item pattern equals “TRIGGER_EMAIL_BATCH”',
+      ],
+      [
+        'expect(msgs.every((m) => (m as TriggerBatchMessage).data.emailInfo.transactionId === txId)).toBe(true)',
+        'Check that for every item in msgs, item data email info transaction identifier equals txId',
+      ],
+      [
+        "expect(rows.some((row) => row.status === 'FAILED')).toBeFalsy()",
+        'Check that it is false that for at least one item in rows, item status equals “FAILED”',
+      ],
+      [
+        'expect((rows.every((row) => row.ready)) as boolean).not.toEqual(false)',
+        'Check that for every item in rows, item ready',
+      ],
+    ]
+
+    for (const [source, text] of cases) {
+      expect(assertionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'check' })
+    }
+  })
 })

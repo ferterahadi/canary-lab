@@ -9,6 +9,7 @@ import type {
 } from '../api/types'
 import { useTheme } from '../lib/theme'
 import { codeThemeFor, getCodeHighlighter } from './code-highlighter'
+import { storyLocalSequenceLabel, storySequenceLabel } from './readable-story-sequence'
 
 export interface ReadableSourceSelection {
   id: string
@@ -215,15 +216,6 @@ function storyKeyword(step: ReadableStoryItem): string {
     finally: 'ALWAYS',
   }
   return keywords[step.flowKind]
-}
-
-function storySequenceLabel(sequence: readonly number[]): string {
-  return sequence.map((part, index) => index === 0 ? String(part).padStart(2, '0') : String(part)).join('.')
-}
-
-function storyLocalSequenceLabel(sequence: readonly number[]): string {
-  const local = String(sequence.at(-1)!)
-  return sequence.length === 1 ? local.padStart(2, '0') : local
 }
 
 function roleLabel(role: ReadableStoryRole): 'SETUP' | 'ACTION' | 'CHECK' {

@@ -112,6 +112,27 @@ function relation(context: AssertionContext, positive: string, negative: string)
   return `${context.subject.text} ${context.negated ? negative : positive} ${context.expected?.text}`
 }
 
+function isCollectionPredicate(expression: ts.Expression): boolean {
+  let current = expression
+  while (
+    ts.isParenthesizedExpression(current)
+    || ts.isAsExpression(current)
+    || ts.isTypeAssertionExpression(current)
+    || ts.isNonNullExpression(current)
+    || ts.isSatisfiesExpression(current)
+  ) {
+    current = current.expression
+  }
+  return ts.isCallExpression(current)
+    && ts.isPropertyAccessExpression(current.expression)
+    && (current.expression.name.text === 'every' || current.expression.name.text === 'some')
+}
+
+function collectionPredicateState(context: AssertionContext, asserted: boolean): string | undefined {
+  if (!isCollectionPredicate(context.actual)) return undefined
+  return asserted ? context.subject.text : `it is false that ${context.subject.text}`
+}
+
 const STATE_RULE: AssertionRule = {
   matchers: new Set(['toBeVisible', 'toBeHidden', 'toBeEnabled', 'toBeDisabled', 'toBeChecked', 'toBeEditable', 'toBeEmpty', 'toBeFocused', 'toBeAttached']),
   expectedArguments: 0,
@@ -135,6 +156,18 @@ const VALUE_RULE: AssertionRule = {
   matchers: new Set(['toHaveText', 'toContainText', 'toHaveValue', 'toHaveURL', 'toHaveTitle', 'toHaveCount', 'toHaveLength', 'toEqual', 'toStrictEqual', 'toBe', 'toContain', 'toContainEqual', 'toMatch', 'toMatchObject']),
   expectedArguments: 1,
   render(context) {
+    if (
+      context.matcher === 'toBe'
+      || context.matcher === 'toEqual'
+      || context.matcher === 'toStrictEqual'
+    ) {
+      const expected = context.matcherCall.arguments[0]
+      if (expected.kind === ts.SyntaxKind.TrueKeyword || expected.kind === ts.SyntaxKind.FalseKeyword) {
+        const expectedValue = expected.kind === ts.SyntaxKind.TrueKeyword
+        const collectionState = collectionPredicateState(context, expectedValue !== context.negated)
+        if (collectionState) return collectionState
+      }
+    }
     if (context.matcher === 'toHaveURL') {
       const subject = context.subject.text === 'the page' ? 'the page URL' : `${context.subject.text} URL`
       return `${subject} ${context.negated ? 'does not equal' : 'equals'} ${context.expected?.text}`
@@ -166,6 +199,11 @@ const TRUTH_RULE: AssertionRule = {
   matchers: new Set(['toBeTruthy', 'toBeFalsy', 'toBeDefined', 'toBeUndefined', 'toBeNull', 'toBeNaN', 'toBeOK']),
   expectedArguments: 0,
   render(context) {
+    if (context.matcher === 'toBeTruthy' || context.matcher === 'toBeFalsy') {
+      const expectedValue = context.matcher === 'toBeTruthy'
+      const collectionState = collectionPredicateState(context, expectedValue !== context.negated)
+      if (collectionState) return collectionState
+    }
     const states: Record<string, [string, string]> = {
       toBeTruthy: ['true', 'false'],
       toBeFalsy: ['false', 'true'],
