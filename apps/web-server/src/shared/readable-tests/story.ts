@@ -517,6 +517,8 @@ function polishStoryText(text: string): string {
     .replace(/\bhttp\b/gi, 'HTTP')
     .replace(/\bapi\b/gi, 'API')
     .replace(/\burl\b/gi, 'URL')
+    .replace(/\buri\b/gi, 'URI')
+    .replace(/\bui\b/gi, 'UI')
 }
 
 function applySubjectAlias(text: string, aliases: ReadonlyMap<string, string>): string {

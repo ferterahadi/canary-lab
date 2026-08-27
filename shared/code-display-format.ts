@@ -168,39 +168,94 @@ function lineAtOffset(lineStarts: number[], offset: number): number {
   return low + 1
 }
 
-/** The TypeScript printer preserves semantic tokens and their order. Automatic
- * semicolons are excluded by `scanTokens`, so matching the nth occurrence of a
- * token remains exact while keeping formatting linear in the snippet size. */
+/** Align in source order so a token removed or inserted by the printer only
+ * affects its local edit. Independent occurrence matching is unsafe here: one
+ * removed trailing comma would make every later printed comma point at the
+ * preceding source occurrence. */
 function alignTokens(
   sourceTokens: ScannedToken[],
   displayTokens: ScannedToken[],
 ): Array<[displayTokenIndex: number, sourceTokenIndex: number]> {
-  const sourceIndexesByToken = new Map<string, number[]>()
-  sourceTokens.forEach((token, index) => {
-    const key = tokenKey(token)
-    const indexes = sourceIndexesByToken.get(key) ?? []
-    indexes.push(index)
-    sourceIndexesByToken.set(key, indexes)
-  })
-
-  const occurrences = new Map<string, number>()
+  const sourceIndexesByToken = indexesByToken(sourceTokens)
+  const displayIndexesByToken = indexesByToken(displayTokens)
   const matches: Array<[number, number]> = []
-  displayTokens.forEach((token, displayIndex) => {
-    const key = tokenKey(token)
-    const occurrence = occurrences.get(key) ?? 0
-    const sourceIndex = sourceIndexesByToken.get(key)?.[occurrence]
-    // A malformed, partially typed snippet can make the recovery printer add a
-    // token. Keep the surrounding mapped rows useful instead of failing the
-    // entire tests response while a developer is editing the spec.
-    if (sourceIndex === undefined) return
-    matches.push([displayIndex, sourceIndex])
-    occurrences.set(key, occurrence + 1)
-  })
+  let sourceIndex = 0
+  let displayIndex = 0
+  while (sourceIndex < sourceTokens.length && displayIndex < displayTokens.length) {
+    const sourceToken = sourceTokens[sourceIndex]
+    const displayToken = displayTokens[displayIndex]
+    const sourceKey = tokenKey(sourceToken)
+    const displayKey = tokenKey(displayToken)
+    if (sourceKey === displayKey) {
+      matches.push([displayIndex, sourceIndex])
+      sourceIndex += 1
+      displayIndex += 1
+      continue
+    }
+
+    const nextSourceIndex = nextTokenIndex(sourceIndexesByToken.get(displayKey), sourceIndex)
+    const nextDisplayIndex = nextTokenIndex(displayIndexesByToken.get(sourceKey), displayIndex)
+    const sourceDistance = nextSourceIndex === undefined ? Infinity : nextSourceIndex - sourceIndex
+    const displayDistance = nextDisplayIndex === undefined ? Infinity : nextDisplayIndex - displayIndex
+
+    if (
+      nextSourceIndex !== undefined
+      && (
+        sourceDistance < displayDistance
+        || (sourceDistance === displayDistance && isPunctuation(sourceToken) && !isPunctuation(displayToken))
+      )
+    ) {
+      sourceIndex = nextSourceIndex
+    } else if (
+      nextDisplayIndex !== undefined
+      && (
+        displayDistance < sourceDistance
+        || (displayDistance === sourceDistance && isPunctuation(displayToken) && !isPunctuation(sourceToken))
+      )
+    ) {
+      displayIndex = nextDisplayIndex
+    } else {
+      // The recovery printer can replace a malformed token. Neither side is a
+      // trustworthy anchor, so consume the local pair and resume in order.
+      sourceIndex += 1
+      displayIndex += 1
+    }
+  }
   return matches
 }
 
 function tokenKey(token: ScannedToken): string {
-  return `${token.kind}\0${token.text}`
+  const text = token.kind === ts.SyntaxKind.NumericLiteral || token.kind === ts.SyntaxKind.BigIntLiteral
+    ? token.text.replaceAll('_', '')
+    : token.text
+  return `${token.kind}\0${text}`
+}
+
+function indexesByToken(tokens: ScannedToken[]): Map<string, number[]> {
+  const indexesByToken = new Map<string, number[]>()
+  tokens.forEach((token, index) => {
+    const key = tokenKey(token)
+    const indexes = indexesByToken.get(key) ?? []
+    indexes.push(index)
+    indexesByToken.set(key, indexes)
+  })
+  return indexesByToken
+}
+
+function nextTokenIndex(indexes: number[] | undefined, currentIndex: number): number | undefined {
+  if (!indexes) return undefined
+  let low = 0
+  let high = indexes.length
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+    if (indexes[middle] <= currentIndex) low = middle + 1
+    else high = middle
+  }
+  return indexes[low]
+}
+
+function isPunctuation(token: ScannedToken): boolean {
+  return token.kind >= ts.SyntaxKind.FirstPunctuation && token.kind <= ts.SyntaxKind.LastPunctuation
 }
 
 // Line-preserving formatter for already-well-formed source slices (e.g. an AST

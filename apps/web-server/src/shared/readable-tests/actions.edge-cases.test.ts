@@ -33,6 +33,17 @@ describe('Playwright action edge cases', () => {
       ['await page.waitForLoadState()', 'Wait for the page to finish loading'],
       ["await page.waitForLoadState('networkidle', { timeout: 500 })", 'Wait for the page to reach “networkidle” using an object with timeout set to 500'],
       ["await page.goto('/checkout', { waitUntil: 'domcontentloaded' })", 'Open “/checkout” using an object with wait until set to “domcontentloaded”'],
+      [
+        `await page.goto(buildAuthorizeUrl({
+          client,
+          state,
+          codeChallenge: challenge,
+          redirectUri: callbackServer.redirectUri,
+          resource: resourceUri,
+        }))`,
+        'Open build authorize url result using an object with client, state, code challenge set to challenge, redirect uri set to callback server redirect uri, resource set to resource uri',
+      ],
+      ['await page.goto(builder.makeUrl(id))', 'Open make url result from builder using identifier'],
       ["await page.waitForURL('/orders', { timeout: 500 })", 'Wait for the page URL to match “/orders” using an object with timeout set to 500'],
     ]
     for (const [source, text] of cases) {
@@ -45,6 +56,10 @@ describe('Playwright action edge cases', () => {
       "await page.waitForLoadState('load', computeOptions())",
       'await page.goto()',
       'await page.goto(computeURL())',
+      'await page.goto(factory()(id))',
+      'await page.goto(buildUrl?.(id))',
+      'await page.goto(buildUrl(computePart()))',
+      'await page.goto(factory().makeUrl(id))',
       "await page.goto('/checkout', computeOptions())",
     ]) unresolved(source)
   })

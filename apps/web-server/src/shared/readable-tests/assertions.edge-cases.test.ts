@@ -24,6 +24,7 @@ describe('Playwright assertion edge cases', () => {
       ['expect(value).toBeTruthy()', 'Check that value is true'],
       ['expect(value).not.toBeTruthy()', 'Check that value is false'],
       ["expect(items).not.toContain('archived')", 'Check that items does not contain “archived”'],
+      ['expect([401, 403]).not.toContain(res.status())', 'Check that a list containing 401, 403 does not contain response status'],
       ['expect(total).toBeGreaterThan(2)', 'Check that total is greater than 2'],
       ['expect(total).not.toBeGreaterThan(2)', 'Check that total is not greater than 2'],
     ]
@@ -44,6 +45,29 @@ describe('Playwright assertion edge cases', () => {
 
     for (const [source, text] of cases) {
       expect(assertionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'check' })
+    }
+  })
+
+  it('keeps safely named call results as assertion subjects', () => {
+    const cases: Array<[string, string]> = [
+      ['expect(isCleanExit(exit)).toBe(true)', 'Check that is clean exit result using exit equals true'],
+      ['expect(consumer.logs()).toContain(DRAIN_COMPLETE_MARKER)', 'Check that logs result from consumer contains drain complete marker'],
+      ['expect(response.headers()).toBeDefined()', 'Check that headers result from response is defined'],
+      ['expect(service.read(id)).toBeDefined()', 'Check that read result from service using identifier is defined'],
+      ['expect(response.status(1)).toBe(200)', 'Check that status result from response using 1 equals 200'],
+    ]
+
+    for (const [source, text] of cases) {
+      expect(assertionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'check' })
+    }
+
+    for (const source of [
+      'expect(computeTotal()).toBe(2)',
+      'expect(factory().logs()).toBeDefined()',
+      'expect(service.read(computeId())).toBeDefined()',
+      'expect(service?.read(id)).toBeDefined()',
+    ]) {
+      expect(assertionFrom(source)).toEqual({ text: source, fidelity: 'unresolved', role: 'check' })
     }
   })
 
@@ -100,8 +124,6 @@ describe('Playwright assertion edge cases', () => {
       'expect(computeTotal()).toBe(2)',
       'expect(total).toBe(computeExpected())',
       'expect(total).toBe(2, computeOptions())',
-      'expect(response.status(1)).toBe(200)',
-      'expect(response.headers()).toBeDefined()',
     ]
 
     for (const source of sources) {

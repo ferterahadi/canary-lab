@@ -1,7 +1,12 @@
 import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../../shared/code-display-format'
 import type { ReadableFidelity } from '../../../../../shared/readable-tests/types'
-import { quoteReadableText, renderExpression, type RenderedExpression } from './expression'
+import {
+  quoteReadableText,
+  renderExpression,
+  renderNamedCallResult,
+  type RenderedExpression,
+} from './expression'
 import { humanizeIdentifier } from './language'
 import { renderLocator } from './locator'
 
@@ -117,16 +122,9 @@ function renderSubject(actual: ts.Expression, sourceFile: ts.SourceFile): Render
   const locator = renderLocator(actual, sourceFile)
   if (locator) return locator
   if (ts.isIdentifier(actual) && actual.text === 'page') return { text: 'the page', fidelity: 'derived' }
-  if (ts.isCallExpression(actual) && ts.isPropertyAccessExpression(actual.expression)) {
-    const method = actual.expression.name.text
-    const receiver = renderExpression(actual.expression.expression, sourceFile)
-    if (receiver.fidelity !== 'unresolved' && actual.arguments.length === 0) {
-      if (method === 'status') return { text: `${receiver.text} status`, fidelity: 'derived' }
-      if (method === 'url') return { text: `${receiver.text} URL`, fidelity: 'derived' }
-      if (method === 'ok') return { text: `whether ${receiver.text} is successful`, fidelity: 'derived' }
-    }
-  }
-  return renderExpression(actual, sourceFile)
+  const rendered = renderExpression(actual, sourceFile)
+  if (rendered.fidelity !== 'unresolved' || !ts.isCallExpression(actual)) return rendered
+  return renderNamedCallResult(actual, sourceFile) ?? rendered
 }
 
 function renderExpectationSubject(expectation: Expectation, sourceFile: ts.SourceFile): RenderedExpression {

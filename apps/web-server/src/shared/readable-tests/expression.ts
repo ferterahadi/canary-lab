@@ -38,8 +38,8 @@ const VALUE_GENERATOR_CALLS = new Map<string, string>([
   ['Math.random', 'a random number'],
 ])
 
-// Zero-argument methods that reshape their receiver without side effects.
-const CONVERSION_METHOD_TEXT = new Map<string, string>([
+// Zero-argument methods whose result has one stable, side-effect-free meaning.
+const ZERO_ARGUMENT_METHOD_TEXT = new Map<string, string>([
   ['toLowerCase', '{owner} in lowercase'],
   ['toUpperCase', '{owner} in uppercase'],
   ['trim', '{owner} without surrounding spaces'],
@@ -48,6 +48,9 @@ const CONVERSION_METHOD_TEXT = new Map<string, string>([
   ['toString', '{owner} as text'],
   ['json', 'the JSON body of {owner}'],
   ['text', 'the text body of {owner}'],
+  ['status', '{owner} status'],
+  ['url', '{owner} URL'],
+  ['ok', 'whether {owner} is successful'],
 ])
 
 // One-argument membership/shape predicates common in test conditions.
@@ -73,6 +76,16 @@ const OBJECT_INSPECTION_TEXT = new Map<string, string>([
   ['Object.values', 'the values of {value}'],
   ['Object.entries', 'the entries of {value}'],
   ['Array.isArray', '{value} is a list'],
+])
+
+// Standard URI codecs have deterministic value semantics. Supporting them in
+// the shared expression renderer also keeps calls nested inside URL templates
+// readable, instead of dropping the whole HTTP action from the concise story.
+const URI_CODEC_TEXT = new Map<string, string>([
+  ['encodeURI', '{value} encoded for a URL'],
+  ['decodeURI', '{value} decoded from a URL'],
+  ['encodeURIComponent', '{value} encoded for a URL component'],
+  ['decodeURIComponent', '{value} decoded from a URL component'],
 ])
 
 // Read-style verbs whose call result is safely described as the thing read:
@@ -495,6 +508,14 @@ function renderCall(
         return { text: inspection.replace('{value}', childText(value)), fidelity: 'derived', compound: false }
       }
     }
+
+    const uriCodec = URI_CODEC_TEXT.get(path)
+    if (uriCodec && node.arguments.length === 1) {
+      const value = renderPart(node.arguments[0], sourceFile, bindings)
+      if (value.fidelity !== 'unresolved') {
+        return { text: uriCodec.replace('{value}', childText(value)), fidelity: 'derived', compound: false }
+      }
+    }
   }
 
   if (ts.isIdentifier(node.expression)) {
@@ -551,7 +572,7 @@ function renderCall(
         }
       }
     }
-    const conversion = CONVERSION_METHOD_TEXT.get(method)
+    const conversion = ZERO_ARGUMENT_METHOD_TEXT.get(method)
     if (conversion && node.arguments.length === 0) {
       const owner = renderPart(node.expression.expression, sourceFile, bindings)
       if (owner.fidelity !== 'unresolved') {
@@ -715,6 +736,39 @@ function renderPart(
 export function renderExpression(node: ts.Expression, sourceFile: ts.SourceFile): RenderedExpression {
   const { compound: _compound, ...rendered } = renderPart(node, sourceFile)
   return rendered
+}
+
+/** Names a statically-known helper call without claiming to understand what
+ * the helper does. This is intentionally separate from `renderExpression`:
+ * callers opt in only when "the named call result" is useful context. */
+export function renderNamedCallResult(
+  call: ts.CallExpression,
+  sourceFile: ts.SourceFile,
+): RenderedExpression | undefined {
+  if (call.questionDotToken) return undefined
+  const arguments_ = call.arguments.map((argument) => renderExpression(argument, sourceFile))
+  if (arguments_.some((argument) => argument.fidelity === 'unresolved')) return undefined
+  const using = arguments_.length
+    ? ` using ${arguments_.map((argument) => argument.text).join(' and ')}`
+    : ''
+
+  if (ts.isIdentifier(call.expression)) {
+    // A bare zero-argument call carries no inputs that explain its result.
+    // Keep it as source instead of turning `computeURL()` into vague prose.
+    if (!arguments_.length) return undefined
+    return {
+      text: `${humanizeIdentifier(call.expression.text)} result${using}`,
+      fidelity: 'derived',
+    }
+  }
+
+  if (!ts.isPropertyAccessExpression(call.expression) || call.expression.questionDotToken) return undefined
+  const owner = renderExpression(call.expression.expression, sourceFile)
+  if (owner.fidelity === 'unresolved') return undefined
+  return {
+    text: `${humanizeIdentifier(call.expression.name.text)} result from ${owner.text}${using}`,
+    fidelity: 'derived',
+  }
 }
 
 export function renderCondition(node: ts.Expression, sourceFile: ts.SourceFile): RenderedExpression {

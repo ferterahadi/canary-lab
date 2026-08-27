@@ -115,6 +115,16 @@ describe('readable test story', () => {
     expect(translated.nodes).toHaveLength(1)
   })
 
+  it('keeps an unsafe standard assertion out of the story', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: '{ expect(computeTotal()).toBe(2) }',
+    })
+
+    expect(translated.story).toBeUndefined()
+    expect(translated.nodes).toHaveLength(1)
+  })
+
   it('keeps proven checks inside an unproven callback wrapper', () => {
     const translated = translateReadableTest({
       ...INPUT,
@@ -248,6 +258,37 @@ describe('readable test story', () => {
     ])
   })
 
+  it('keeps named helper and receiver-call assertions in the concise story', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  expect(isCleanExit(exit)).toBe(true)
+  expect(consumer.logs()).toContain(DRAIN_COMPLETE_MARKER)
+}`,
+    })
+
+    expect(textsFor(translated, 'check')).toEqual([
+      'Check that is clean exit result using exit equals true',
+      'Check that logs result from consumer contains drain complete marker',
+    ])
+  })
+
+  it('keeps a list-membership check whose expected value is a call result', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  expect([401, 403]).not.toContain(res.status())
+}`,
+    })
+
+    expect(textsFor(translated, 'check')).toEqual([
+      'Check that a list containing 401, 403 does not contain response status',
+    ])
+    expect(storyItems(translated)[0].source).toEqual(
+      expect.objectContaining({ startLine: 51, endLine: 51 }),
+    )
+  })
+
   it('keeps nested helper arguments in a saved HTTP request action', () => {
     const translated = translateReadableTest({
       ...INPUT,
@@ -262,6 +303,56 @@ describe('readable test story', () => {
       'Send a GET request to “/health”, saving the result as direct',
       'Send a GET request to v4 read result using OWNED_TXN with an object with headers set to headers result using AUTH_A, saving the result as res',
       'Check that response status equals 200',
+    ])
+  })
+
+  it('keeps URI-encoded template values inside a saved HTTP request action', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  const res = await request.get(
+    \`\${GATEWAY_URL}/v2/senders/\${encodeURIComponent(OWNED_SENDER)}\`,
+    { headers: headers(AUTH_B) },
+  )
+  expect(res.status(), await res.text()).toBe(200)
+}`,
+    })
+
+    expect(storyItems(translated).map((step) => step.text)).toEqual([
+      'Send a GET request to “{gateway URL}/v2/senders/{owned sender encoded for a URL component}” with an object with headers set to headers result using AUTH_B, saving the result as res',
+      'Check that response status equals 200',
+    ])
+    expect(storyItems(translated).map((step) => step.source)).toEqual([
+      expect.objectContaining({ startLine: 51, endLine: 54 }),
+      expect.objectContaining({ startLine: 55, endLine: 55 }),
+    ])
+  })
+
+  it('keeps a nested URL builder and the following UI helper in authored order', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  await page.goto(
+    buildAuthorizeUrl({
+      client,
+      state,
+      codeChallenge: challenge,
+      redirectUri: callbackServer.redirectUri,
+      resource: resourceUri,
+    }),
+  )
+  await loginViaDashboardUi(page, client)
+}`,
+    })
+    const steps = storyItems(translated)
+
+    expect(steps.map((step) => step.text)).toEqual([
+      'Open build authorize URL result using an object with client, state, code challenge set to challenge, redirect URI set to callback server redirect URI, resource set to resource URI',
+      'Login via dashboard UI using page and client',
+    ])
+    expect(steps.map((step) => step.source)).toEqual([
+      expect.objectContaining({ startLine: 51, endLine: 59 }),
+      expect.objectContaining({ startLine: 60, endLine: 60 }),
     ])
   })
 

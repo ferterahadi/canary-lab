@@ -1,7 +1,12 @@
 import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../../shared/code-display-format'
 import type { ReadableFidelity } from '../../../../../shared/readable-tests/types'
-import { expressionPath, renderExpression, type RenderedExpression } from './expression'
+import {
+  expressionPath,
+  renderExpression,
+  renderNamedCallResult,
+  type RenderedExpression,
+} from './expression'
 import { renderLocator } from './locator'
 import { humanizeIdentifier, sentenceCase } from './language'
 
@@ -51,7 +56,9 @@ function isRequestReceiver(context: CallContext): boolean {
 
 function safeExpression(node: ts.Expression | undefined, sourceFile: ts.SourceFile): RenderedExpression | undefined {
   if (!node) return undefined
-  return renderExpression(node, sourceFile)
+  const rendered = renderExpression(node, sourceFile)
+  if (rendered.fidelity !== 'unresolved' || !ts.isCallExpression(node)) return rendered
+  return renderNamedCallResult(node, sourceFile) ?? rendered
 }
 
 function safeOptions(call: ts.CallExpression, start: number, sourceFile: ts.SourceFile): string | null {

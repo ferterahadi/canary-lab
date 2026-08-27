@@ -131,6 +131,81 @@ test('x', async ({ page }) => { await page.goto('/'); });`)
     expect(display.lineMap.map((line) => line.sourceLine)).toEqual([50, 51, 53, 54])
   })
 
+  it('does not let a removed trailing comma contaminate later repeated tokens', () => {
+    const display = formatCodeForDisplayWithLineMap([
+      '{',
+      '  const result = await pollUntil(',
+      '    () => readRow(connection, request.id),',
+      '    {',
+      "      predicate: (row) => row?.status === 'READY',",
+      '      timeoutMs: 60_000,',
+      '    },',
+      '  )',
+      "  expect(result, 'result never arrived').not.toBeNull()",
+      '  await new Promise((resolve) => setTimeout(resolve, 10_000))',
+      '  const all = await readAll(connection, request.id)',
+      '  expect(all.map((item) => item.id)).toHaveLength(1)',
+      '}',
+    ].join('\n'), 100)
+    const mappingFor = (source: string) => {
+      const displayLine = display.code.split('\n').findIndex((line) => line.includes(source))
+      return display.lineMap[displayLine]
+    }
+
+    expect(mappingFor("expect(result, 'result never arrived')")).toEqual({
+      sourceLine: 108,
+      sourceLines: [108],
+    })
+    expect(mappingFor('await new Promise')).toEqual({
+      sourceLine: 109,
+      sourceLines: [109],
+    })
+    expect(mappingFor('const all = await readAll')).toEqual({
+      sourceLine: 110,
+      sourceLines: [110],
+    })
+    expect(mappingFor('expect(all.map')).toEqual({
+      sourceLine: 111,
+      sourceLines: [111],
+    })
+  })
+
+  it('resumes ordered mapping after a recovery token inserted by the printer', () => {
+    const display = formatCodeForDisplayWithLineMap([
+      '{',
+      '  if (ready {',
+      '    run()',
+      '  }',
+      '  const afterRecovery = readResult()',
+      '}',
+    ].join('\n'), 200)
+    const line = display.code.split('\n').findIndex((row) => row.includes('const afterRecovery'))
+
+    expect(display.lineMap[line]).toEqual({
+      sourceLine: 204,
+      sourceLines: [204],
+    })
+
+    const replacedToken = formatCodeForDisplayWithLineMap(
+      'const legacyOctal = 09;\nconst afterReplacement = readResult()',
+      300,
+    )
+    expect(replacedToken.lineMap).toEqual([
+      { sourceLine: 300, sourceLines: [300] },
+      { sourceLine: 301, sourceLines: [301] },
+    ])
+
+    const tiedInsertion = formatCodeForDisplayWithLineMap(
+      'const values = [1 2, 3]\nconst afterTie = readResult()',
+      400,
+    )
+    expect(tiedInsertion.code).toContain('const values = [1, 2, 3];')
+    expect(tiedInsertion.lineMap).toEqual([
+      { sourceLine: 400, sourceLines: [400] },
+      { sourceLine: 401, sourceLines: [401] },
+    ])
+  })
+
   it('gives token-free and recovered syntax a stable original source row', () => {
     const followingStatement = formatCodeForDisplayWithLineMap('const ready=true;\n;', 20)
     const onlyStatement = formatCodeForDisplayWithLineMap(';', 30)
