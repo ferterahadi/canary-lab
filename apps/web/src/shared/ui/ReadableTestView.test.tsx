@@ -132,6 +132,124 @@ describe('ReadableTestView', () => {
       .toContain('checkout.spec.ts:L10–11')
   })
 
+  it('renders nested callbacks, loops, retries, and error paths with hierarchical numbering', () => {
+    const nested: ReadableTest = {
+      ...STORY,
+      story: {
+        steps: [
+          {
+            id: 'connection-scope',
+            kind: 'flow',
+            flowKind: 'scope',
+            role: 'setup',
+            text: 'Using sync SQL connection as conn',
+            spans: [{ text: 'Using sync SQL connection as ' }, { text: 'conn', kind: 'variable' }],
+            fidelity: 'derived',
+            source: source(20, 'withSyncSqlConnection(async (conn) => {})'),
+            children: [{
+              id: 'attempt-loop',
+              kind: 'flow',
+              flowKind: 'loop',
+              role: 'action',
+              text: 'Sequentially, for each ids in attempts',
+              spans: [{ text: 'Sequentially, for each ' }, { text: 'ids', kind: 'variable' }, { text: ' in attempts' }],
+              fidelity: 'derived',
+              source: source(21, 'for (const ids of attempts) {}'),
+              children: [{
+                id: 'retry-call',
+                kind: 'flow',
+                flowKind: 'retry',
+                role: 'action',
+                text: 'For up to 60 seconds, until the result status equals “REJECTED”',
+                spans: [{ text: 'For up to 60 seconds, until the result status equals “REJECTED”' }],
+                fidelity: 'derived',
+                source: source(22, 'pollUntil(() => queryCallOutbound())'),
+                children: [{
+                  id: 'query-call',
+                  role: 'action',
+                  text: 'Read call outbound using conn',
+                  spans: [{ text: 'Read call outbound using ' }, { text: 'conn', kind: 'variable' }],
+                  fidelity: 'derived',
+                  source: source(23, 'queryCallOutbound(conn)'),
+                }],
+              }],
+            }],
+          },
+          {
+            id: 'try-flow',
+            kind: 'flow',
+            flowKind: 'try',
+            role: 'action',
+            text: 'Attempt these steps',
+            spans: [{ text: 'Attempt these steps' }],
+            fidelity: 'derived',
+            source: source(30, 'try {} catch { /* fixture deliberately empty */ } finally {}'),
+            children: [
+              {
+                id: 'catch-flow',
+                kind: 'flow',
+                flowKind: 'catch',
+                role: 'action',
+                text: 'If the attempt fails',
+                spans: [{ text: 'If the attempt fails' }],
+                fidelity: 'derived',
+                source: source(31, 'catch { /* fixture deliberately empty */ }'),
+                children: [{
+                  id: 'log-error',
+                  role: 'action',
+                  text: 'Log the error',
+                  spans: [{ text: 'Log the error' }],
+                  fidelity: 'derived',
+                  source: source(31, 'logError(error)'),
+                }],
+              },
+              {
+                id: 'finally-flow',
+                kind: 'flow',
+                flowKind: 'finally',
+                role: 'action',
+                text: 'Whether the attempt succeeds or fails',
+                spans: [{ text: 'Whether the attempt succeeds or fails' }],
+                fidelity: 'derived',
+                source: source(32, 'finally {}'),
+                children: [{
+                  id: 'close-connection',
+                  role: 'action',
+                  text: 'Close the connection',
+                  spans: [{ text: 'Close the connection' }],
+                  fidelity: 'derived',
+                  source: source(32, 'closeConnection()'),
+                }],
+              },
+            ],
+          },
+        ],
+      },
+    }
+
+    act(() => root.render(<ReadableTestView test={nested} sourceFile="/repo/e2e/checkout.spec.ts" />))
+
+    const rows = Array.from(container.querySelectorAll('[data-story-sequence]'))
+    expect(rows.map((row) => row.getAttribute('data-story-sequence'))).toEqual([
+      '01',
+      '01.1',
+      '01.1.1',
+      '01.1.1.1',
+      '02',
+      '02.1',
+      '02.1.1',
+      '02.2',
+      '02.2.1',
+    ])
+    expect(rows.map((row) => row.querySelector('[data-testid^="readable-story-role-"]')?.textContent))
+      .toEqual(['SETUP', 'REPEAT', 'RETRY', 'ACTION', 'TRY', 'ON ERROR', 'ACTION', 'ALWAYS', 'ACTION'])
+    expect(container.querySelector('[data-story-flow="loop"]')?.textContent).toContain('for each ids in attempts')
+    expect((container.querySelector('[data-testid="readable-story-role-catch-flow"]') as HTMLElement).style.color)
+      .toBe('var(--semantic-attention)')
+    expect(container.querySelector('[data-testid="readable-story-item-query-call"]')?.getAttribute('aria-label'))
+      .toContain('01.1.1.1. ACTION')
+  })
+
   it('opens the exact source for an ordered row and shows selection state', () => {
     const onSourceSelect = vi.fn()
     act(() => root.render(

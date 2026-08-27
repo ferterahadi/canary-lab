@@ -75,21 +75,49 @@ export interface ReadableSource {
 
 export type ReadableStoryRole = 'setup' | 'action' | 'check'
 
+export type ReadableStoryFlowKind =
+  | 'scope'
+  | 'condition'
+  | 'then'
+  | 'otherwise'
+  | 'switch'
+  | 'case'
+  | 'loop'
+  | 'retry'
+  | 'try'
+  | 'catch'
+  | 'finally'
+
 export interface ReadableStorySpan {
   text: string
   kind?: 'variable'
 }
 
-/** One plain-language fact in the default test story. Unlike the exhaustive
- * syntax tree below, story items never contain source-code fallbacks. */
-export interface ReadableStoryItem {
+interface ReadableStoryItemBase {
   id: string
-  role: ReadableStoryRole
   text: string
   spans: ReadableStorySpan[]
   fidelity: 'exact' | 'derived'
   source: ReadableSource
 }
+
+/** One plain-language fact in the default test story. `kind` is optional so
+ * cached version-2 payloads written before nested flows remain valid. */
+export interface ReadableStoryStep extends ReadableStoryItemBase {
+  kind?: 'step'
+  role: ReadableStoryRole
+}
+
+/** A source-authored execution boundary. Children stay in authored order, so
+ * a callback, loop, branch, or retry never reads as if it ran only once. */
+export interface ReadableStoryFlow extends ReadableStoryItemBase {
+  kind: 'flow'
+  role: ReadableStoryRole
+  flowKind: ReadableStoryFlowKind
+  children: ReadableStoryItem[]
+}
+
+export type ReadableStoryItem = ReadableStoryStep | ReadableStoryFlow
 
 /** The reader-first altitude in authored execution order. Each row carries its
  * setup/action/check role instead of being moved into a role-based bucket. */

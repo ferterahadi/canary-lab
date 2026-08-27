@@ -1,5 +1,9 @@
 import ts from 'typescript'
-import type { ReadableStoryItem, ReadableStorySpan } from '../../../../../shared/readable-tests/types'
+import type {
+  ReadableStoryFlowKind,
+  ReadableStoryItem,
+  ReadableStorySpan,
+} from '../../../../../shared/readable-tests/types'
 import { renderActionStatement } from './actions'
 import { renderAssertionStatement } from './assertions'
 import { expressionPath, renderExpression } from './expression'
@@ -15,7 +19,7 @@ import {
 
 export type StoryRole = 'setup' | 'action' | 'check'
 
-export interface StoryCandidate {
+interface StoryCandidateBase {
   node: ts.Node
   role: StoryRole
   text: string
@@ -23,6 +27,20 @@ export interface StoryCandidate {
   fidelity: ReadableStoryItem['fidelity']
   path: number[]
 }
+
+export interface StoryStepCandidate extends StoryCandidateBase {
+  kind: 'step'
+}
+
+export interface StoryFlowCandidate extends StoryCandidateBase {
+  kind: 'flow'
+  flowKind: ReadableStoryFlowKind
+  children: StoryCandidate[]
+}
+
+export type StoryCandidate = StoryStepCandidate | StoryFlowCandidate
+
+type StoryDescription = Pick<StoryCandidateBase, 'role' | 'text' | 'fidelity'>
 
 interface WalkOptions {
   includeActions: boolean
@@ -33,7 +51,9 @@ const EXACT_IDENTIFIER_OPEN = '\uE000'
 const EXACT_IDENTIFIER_CLOSE = '\uE001'
 
 function exactIdentifierText(value: string): string {
-  const encoded = [...value].map((character) => character.codePointAt(0)?.toString(16) ?? '').join('_')
+  // Iterating a string yields complete Unicode code points, so every entry has
+  // a code point at offset zero.
+  const encoded = [...value].map((character) => character.codePointAt(0)!.toString(16)).join('_')
   return `${EXACT_IDENTIFIER_OPEN}${encoded}${EXACT_IDENTIFIER_CLOSE}`
 }
 
@@ -94,7 +114,8 @@ function assignedIdentifier(statement: ts.Statement): string | undefined {
 }
 
 function readableList(items: readonly string[]): string {
-  if (items.length < 2) return items[0] ?? ''
+  // Every caller checks for an empty collection before asking for prose.
+  if (items.length < 2) return items[0]!
   if (items.length === 2) return `${items[0]} and ${items[1]}`
   return `${items.slice(0, -1).join(', ')}, and ${items.at(-1)}`
 }
@@ -137,12 +158,12 @@ function callArguments(
   return preferReferences && references.length ? references : render(false)
 }
 
-function genericCallStory(
-  statement: ts.Statement,
+function genericCallDescription(
+  call: ts.CallExpression,
   sourceFile: ts.SourceFile,
-): Pick<StoryCandidate, 'role' | 'text' | 'fidelity'> | undefined {
-  const call = callFromStatement(statement)
-  if (!call) return undefined
+  sourceText: string,
+  assigned: string | undefined,
+): StoryDescription | undefined {
   const name = calledName(call)
   if (!name) return undefined
   const words = identifierWords(name)
@@ -151,7 +172,6 @@ function genericCallStory(
   if (!first) return undefined
   const arguments_ = callArguments(call, sourceFile, true)
   const using = arguments_.length ? ` using ${readableList(arguments_)}` : ''
-  const assigned = assignedIdentifier(statement)
 
   if (first === 'expect' || first === 'assert' || first === 'check' || first === 'verify' || first === 'ensure') {
     return {
@@ -169,7 +189,7 @@ function genericCallStory(
   }
 
   if ((first === 'poll' || first === 'wait') && rest.every((word) => word === 'for' || word === 'until')) {
-    const assignedName = assigned ?? assignedNameFromStatement(statement.getText(sourceFile))
+    const assignedName = assigned ?? assignedNameFromStatement(sourceText)
     return {
       role: 'action',
       text: `Wait for ${assignedName ? exactIdentifierText(assignedName) : 'the expected result'}${using}`,
@@ -177,7 +197,6 @@ function genericCallStory(
     }
   }
 
-  const sourceText = statement.getText(sourceFile)
   const setup = setupLikeStatement(sourceText)
     || SETUP_CALL_VERBS.has(first)
   if (setup && assigned && SETUP_CALL_VERBS.has(first)) {
@@ -195,6 +214,20 @@ function genericCallStory(
     text: `${readableActionName(name, sourceText)}${using}${saveResult}`,
     fidelity: 'derived',
   }
+}
+
+function genericCallStory(
+  statement: ts.Statement,
+  sourceFile: ts.SourceFile,
+): StoryDescription | undefined {
+  const call = callFromStatement(statement)
+  if (!call) return undefined
+  return genericCallDescription(
+    call,
+    sourceFile,
+    statement.getText(sourceFile),
+    assignedIdentifier(statement),
+  )
 }
 
 function variableAlias(statement: ts.Statement): { name: string; text: string } | undefined {
@@ -242,24 +275,24 @@ function isIdentifierName(node: ts.Identifier): boolean {
     : (ts.isFunctionDeclaration(parent) || ts.isClassDeclaration(parent)) && parent.name === node
 }
 
-function exactVariableNames(statement: ts.Statement): string[] {
+function exactVariableNames(node: ts.Node): string[] {
   const names = new Set<string>()
-  const visit = (node: ts.Node): void => {
-    if (ts.isIdentifier(node) && !isIdentifierName(node)) names.add(node.text)
-    node.forEachChild(visit)
+  const visit = (child: ts.Node): void => {
+    if (ts.isIdentifier(child) && !isIdentifierName(child)) names.add(child.text)
+    child.forEachChild(visit)
   }
-  visit(statement)
+  visit(node)
   return [...names]
 }
 
 function variablePhrases(
-  statement: ts.Statement,
+  node: ts.Node,
   text: string,
   aliases: ReadonlyMap<string, string>,
 ): string[] {
   const lowerText = text.toLocaleLowerCase()
   const phrases = new Set<string>()
-  for (const name of exactVariableNames(statement)) {
+  for (const name of exactVariableNames(node)) {
     const alias = aliases.get(name)
     for (const phrase of [name, alias, humanizeIdentifier(name)]) {
       if (phrase && lowerText.includes(phrase.toLocaleLowerCase())) phrases.add(phrase)
@@ -307,13 +340,203 @@ function variableSpans(text: string, phrases: readonly string[]): ReadableStoryS
   return spans
 }
 
-function callbackBlocks(call: ts.CallExpression | undefined): ts.Block[] {
-  if (!call) return []
-  return call.arguments.flatMap((argument) => (
-    (ts.isArrowFunction(argument) || ts.isFunctionExpression(argument)) && ts.isBlock(argument.body)
-      ? [argument.body]
+type StoryCallback = ts.ArrowFunction | ts.FunctionExpression
+
+interface CallbackArgument {
+  argumentIndex: number
+  callback: StoryCallback
+}
+
+function callbackArgumentsFor(call: ts.CallExpression): CallbackArgument[] {
+  return call.arguments.flatMap((argument, argumentIndex) => (
+    ts.isArrowFunction(argument) || ts.isFunctionExpression(argument)
+      ? [{ argumentIndex, callback: argument }]
       : []
   ))
+}
+
+function callbackExpression(callback: StoryCallback): ts.Expression | undefined {
+  if (!ts.isBlock(callback.body)) return callback.body
+  if (callback.body.statements.length !== 1) return undefined
+  const [statement] = callback.body.statements
+  return ts.isReturnStatement(statement) ? statement.expression : undefined
+}
+
+function callbackParameter(callback: StoryCallback): string | undefined {
+  const [parameter, ...extra] = callback.parameters
+  return parameter && !extra.length && ts.isIdentifier(parameter.name)
+    ? parameter.name.text
+    : undefined
+}
+
+function propertyName(node: ts.PropertyName): string | undefined {
+  if (ts.isIdentifier(node) || ts.isStringLiteralLike(node) || ts.isNumericLiteral(node)) return node.text
+  return undefined
+}
+
+function objectProperty(object: ts.ObjectLiteralExpression, name: string): ts.Expression | undefined {
+  for (const property of object.properties) {
+    if (ts.isPropertyAssignment(property) && propertyName(property.name) === name) return property.initializer
+    if (ts.isShorthandPropertyAssignment(property) && property.name.text === name) return property.name
+  }
+  return undefined
+}
+
+function callOptions(call: ts.CallExpression): ts.ObjectLiteralExpression | undefined {
+  return call.arguments.find(ts.isObjectLiteralExpression)
+}
+
+function durationText(expression: ts.Expression, sourceFile: ts.SourceFile): string | undefined {
+  if (ts.isNumericLiteral(expression)) {
+    const milliseconds = Number(expression.text)
+    if (milliseconds >= 1000 && milliseconds % 1000 === 0) {
+      const seconds = milliseconds / 1000
+      return `${seconds} ${seconds === 1 ? 'second' : 'seconds'}`
+    }
+    return `${expression.text} milliseconds`
+  }
+  const rendered = renderExpression(expression, sourceFile)
+  return rendered.fidelity === 'unresolved' ? undefined : rendered.text
+}
+
+function lowerInitial(text: string): string {
+  return `${text[0].toLocaleLowerCase()}${text.slice(1)}`
+}
+
+function conditionStoryText(expression: ts.Expression, sourceFile: ts.SourceFile): string | undefined {
+  const rendered = renderExpression(expression, sourceFile)
+  if (rendered.fidelity === 'unresolved') return undefined
+  return ts.isIdentifier(expression)
+    || ts.isPropertyAccessExpression(expression)
+    || ts.isElementAccessExpression(expression)
+    ? `${rendered.text} is true`
+    : rendered.text
+}
+
+function isLoopStatement(statement: ts.Statement): statement is (
+  ts.ForStatement | ts.ForInStatement | ts.ForOfStatement | ts.WhileStatement | ts.DoStatement
+) {
+  return ts.isForStatement(statement)
+    || ts.isForInStatement(statement)
+    || ts.isForOfStatement(statement)
+    || ts.isWhileStatement(statement)
+    || ts.isDoStatement(statement)
+}
+
+function loopStoryText(
+  statement: ts.ForStatement | ts.ForInStatement | ts.ForOfStatement | ts.WhileStatement | ts.DoStatement,
+  sourceFile: ts.SourceFile,
+): string {
+  if (ts.isForOfStatement(statement) || ts.isForInStatement(statement)) {
+    const binding = statement.initializer.getText(sourceFile).replace(/^(?:const|let|var)\s+/, '')
+    const source = storyArgument(statement.expression, sourceFile, false)
+      ?? 'the available values'
+    if (ts.isForInStatement(statement)) {
+      return `Sequentially, for each property ${exactIdentifierText(binding)} in ${source}`
+    }
+    const qualifier = statement.awaitModifier ? 'asynchronously ' : ''
+    return `Sequentially, ${qualifier}for each ${exactIdentifierText(binding)} in ${source}`
+  }
+  if (ts.isWhileStatement(statement)) {
+    const condition = conditionStoryText(statement.expression, sourceFile) ?? 'the condition is true'
+    return `While ${condition}; this may run zero times`
+  }
+  if (ts.isDoStatement(statement)) {
+    const condition = conditionStoryText(statement.expression, sourceFile) ?? 'the condition is true'
+    return `Run once, then repeat while ${condition}`
+  }
+  const parts = ['Repeat']
+  if (statement.initializer) {
+    if (ts.isVariableDeclarationList(statement.initializer)) {
+      const starts = statement.initializer.declarations.flatMap((declaration) => {
+        if (!ts.isIdentifier(declaration.name)) return []
+        const initial = declaration.initializer && renderExpression(declaration.initializer, sourceFile)
+        return [initial && initial.fidelity !== 'unresolved'
+          ? `${exactIdentifierText(declaration.name.text)} starts at ${initial.text}`
+          : `start ${exactIdentifierText(declaration.name.text)}`]
+      })
+      parts.push(starts.length ? `with ${readableList(starts)}` : 'with the loop starting values')
+    } else {
+      const initial = renderExpression(statement.initializer, sourceFile)
+      parts.push(initial.fidelity === 'unresolved'
+        ? 'with the loop starting assignment'
+        : `starting with ${initial.text}`)
+    }
+  }
+  const condition = statement.condition && conditionStoryText(statement.condition, sourceFile)
+  parts.push(condition ? `while ${condition}` : 'until a step stops the loop')
+  if (statement.incrementor) {
+    const increment = renderExpression(statement.incrementor, sourceFile)
+    parts.push(increment.fidelity === 'unresolved'
+      ? 'updating the loop value after each pass'
+      : `${lowerInitial(increment.text)} after each pass`)
+  }
+  return parts.join(', ')
+}
+
+function callbackScopeText(
+  description: StoryDescription,
+  callback: StoryCallback,
+): StoryDescription {
+  const parameter = callbackParameter(callback)
+  const text = description.text.replace(/^Use\b/, 'Using')
+  const parameterText = parameter && !description.text.includes(exactIdentifierText(parameter))
+    ? ` as ${exactIdentifierText(parameter)}`
+    : ''
+  return {
+    ...description,
+    text: `${text}${parameterText}`,
+  }
+}
+
+function mappingDescription(
+  statement: ts.Statement,
+  call: ts.CallExpression,
+  sourceFile: ts.SourceFile,
+): StoryDescription | undefined {
+  if (!ts.isPropertyAccessExpression(call.expression)) return undefined
+  if (call.expression.name.text !== 'map' && call.expression.name.text !== 'flatMap') return undefined
+  const assigned = assignedIdentifier(statement)
+  const callback = callbackArgumentsFor(call)[0]?.callback
+  const parameter = callback && callbackParameter(callback)
+  if (!assigned || !parameter) return undefined
+  const receiver = call.expression.expression
+  const arrayValues = ts.isArrayLiteralExpression(receiver)
+    ? receiver.elements.flatMap((element) => {
+        if (ts.isSpreadElement(element)) return []
+        const rendered = renderExpression(element, sourceFile)
+        return rendered.fidelity === 'unresolved' ? [] : [rendered.text]
+      })
+    : undefined
+  const source = ts.isArrayLiteralExpression(receiver)
+    && arrayValues
+    && arrayValues.length === receiver.elements.length
+    && arrayValues.length > 0
+    ? `the values ${readableList(arrayValues)}`
+    : storyArgument(receiver, sourceFile, false)
+  if (!source) return undefined
+  return {
+    role: 'setup',
+    text: `Create ${exactIdentifierText(assigned)} by transforming each ${exactIdentifierText(parameter)} in ${source}`,
+    fidelity: 'derived',
+  }
+}
+
+function loopCallbackDescription(
+  call: ts.CallExpression,
+  callback: StoryCallback,
+  sourceFile: ts.SourceFile,
+): StoryDescription | undefined {
+  if (!ts.isPropertyAccessExpression(call.expression) || call.expression.name.text !== 'forEach') return undefined
+  const parameter = callbackParameter(callback)
+  const source = storyArgument(call.expression.expression, sourceFile, false)
+  if (!parameter || !source) return undefined
+  const asynchronous = callback.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)
+  return {
+    role: 'action',
+    text: `For each ${exactIdentifierText(parameter)} in ${source}${asynchronous ? '; asynchronous work may overlap' : ''}`,
+    fidelity: 'derived',
+  }
 }
 
 /** Build the reader-first story from syntax already parsed for the exhaustive
@@ -323,115 +546,306 @@ export function storyCandidates(
   statements: readonly ts.Statement[],
   sourceFile: ts.SourceFile,
 ): StoryCandidate[] {
-  const candidates: StoryCandidate[] = []
   const aliases = new Map<string, string>()
 
-  const walkStatements = (
+  const decorate = (
+    node: ts.Node,
+    path: number[],
+    candidate: StoryDescription,
+  ): StoryCandidateBase => {
+    const aliased = candidate.role === 'check' ? applySubjectAlias(candidate.text, aliases) : candidate.text
+    const text = restoreExactIdentifiers(candidate.fidelity === 'derived' ? polishStoryText(aliased) : aliased)
+    return {
+      ...candidate,
+      text,
+      spans: variableSpans(text, variablePhrases(node, text, aliases)),
+      node,
+      path,
+    }
+  }
+
+  const stepCandidate = (
+    node: ts.Node,
+    path: number[],
+    candidate: StoryDescription,
+    options: WalkOptions,
+  ): StoryStepCandidate | undefined => {
+    if (candidate.role === 'action' && !options.includeActions) return undefined
+    return { kind: 'step', ...decorate(node, path, candidate) }
+  }
+
+  const populatedFlowCandidate = (
+    node: ts.Node,
+    path: number[],
+    flowKind: ReadableStoryFlowKind,
+    candidate: StoryDescription,
+    children: StoryCandidate[],
+  ): StoryFlowCandidate => ({
+    kind: 'flow',
+    flowKind,
+    ...decorate(node, path, candidate),
+    children,
+  })
+
+  const flowCandidate = (
+    node: ts.Node,
+    path: number[],
+    flowKind: ReadableStoryFlowKind,
+    candidate: StoryDescription,
+    children: StoryCandidate[],
+  ): StoryFlowCandidate | undefined => children.length
+    ? populatedFlowCandidate(node, path, flowKind, candidate, children)
+    : undefined
+
+  function walkStatements(
     nested: readonly ts.Statement[],
     basePath: number[],
     options: WalkOptions,
-  ): void => {
-    nested.forEach((statement, index) => walkStatement(statement, [...basePath, index], options))
+  ): StoryCandidate[] {
+    return nested.flatMap((statement, index) => walkStatement(statement, [...basePath, index], options))
   }
 
-  const add = (
+  function callbackCandidates(
+    callback: StoryCallback,
+    path: number[],
+    options: WalkOptions,
+  ): StoryCandidate[] {
+    if (ts.isBlock(callback.body)) return walkStatements(callback.body.statements, path, options)
+    let expression = callback.body
+    while (ts.isAwaitExpression(expression) || ts.isParenthesizedExpression(expression)) expression = expression.expression
+    if (!ts.isCallExpression(expression)) return []
+    const description = genericCallDescription(expression, sourceFile, expression.getText(sourceFile), undefined)
+    const candidate = description ? stepCandidate(expression, path, description, options) : undefined
+    return candidate ? [candidate] : []
+  }
+
+  function retryFlow(
     statement: ts.Statement,
     path: number[],
-    candidate: Pick<StoryCandidate, 'role' | 'text' | 'fidelity'>,
+    call: ts.CallExpression,
     options: WalkOptions,
-  ): void => {
-    if (candidate.role === 'action' && !options.includeActions) return
-    const aliased = candidate.role === 'check' ? applySubjectAlias(candidate.text, aliases) : candidate.text
-    const text = restoreExactIdentifiers(candidate.fidelity === 'derived' ? polishStoryText(aliased) : aliased)
-    candidates.push({
-      ...candidate,
+  ): StoryFlowCandidate | undefined {
+    const name = calledName(call)
+    const words = name ? identifierWords(name) : []
+    if (!words.length || !['poll', 'wait'].includes(words[0]) || !words.includes('until')) return undefined
+    const callbacks = callbackArgumentsFor(call)
+    const operation = callbacks[0]
+    if (!operation) return undefined
+    const children = callbackCandidates(operation.callback, [...path, operation.argumentIndex], options)
+    if (!children.length) return undefined
+
+    const optionsObject = callOptions(call)
+    const timeout = optionsObject && objectProperty(optionsObject, 'timeoutMs')
+    const interval = optionsObject && objectProperty(optionsObject, 'pollMs')
+    const predicateNode = optionsObject && objectProperty(optionsObject, 'predicate')
+    const predicate = predicateNode && (ts.isArrowFunction(predicateNode) || ts.isFunctionExpression(predicateNode))
+      ? predicateNode
+      : undefined
+    const predicateExpression = predicate && callbackExpression(predicate)
+    const renderedPredicate = predicateExpression && renderExpression(predicateExpression, sourceFile)
+    const predicateParameter = predicate && callbackParameter(predicate)
+    let condition = renderedPredicate && renderedPredicate.fidelity !== 'unresolved'
+      ? renderedPredicate.text
+      : 'the expected result is ready'
+    if (predicateParameter) {
+      const parameter = humanizeIdentifier(predicateParameter)
+      condition = condition.replace(new RegExp(`^${parameter}(?=\\b| )`, 'i'), 'the result')
+    }
+    condition = condition.replace(
+      /^the result (.+?), if available (.+)$/,
+      'the result $1 $2 when available',
+    )
+
+    const assigned = assignedIdentifier(statement)
+    const timeoutText = timeout && durationText(timeout, sourceFile)
+    const intervalText = interval && durationText(interval, sourceFile)
+    const text = [
+      timeoutText ? `For up to ${timeoutText}, until ${condition}` : `Until ${condition}`,
+      intervalText ? `retrying every ${intervalText}` : undefined,
+      assigned ? `saving the matching result as ${exactIdentifierText(assigned)}` : undefined,
+    ].filter((part): part is string => Boolean(part)).join(', ')
+    return flowCandidate(statement, path, 'retry', {
+      role: 'action',
       text,
-      spans: variableSpans(text, variablePhrases(statement, text, aliases)),
-      node: statement,
-      path,
-    })
+      fidelity: 'derived',
+    }, children)
   }
 
-  const walkStatement = (statement: ts.Statement, path: number[], options: WalkOptions): void => {
-    if (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) return
+  function walkStatement(statement: ts.Statement, path: number[], options: WalkOptions): StoryCandidate[] {
+    if (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) return []
     if (ts.isBlock(statement)) {
-      walkStatements(statement.statements, path, options)
-      return
+      return walkStatements(statement.statements, path, options)
     }
     if (ts.isIfStatement(statement)) {
-      walkStatement(statement.thenStatement, [...path, 0], options)
-      if (statement.elseStatement) walkStatement(statement.elseStatement, [...path, 1], options)
-      return
+      const paths = [
+        flowCandidate(statement.thenStatement, [...path, 0], 'then', {
+          role: 'action',
+          text: 'When the condition is true',
+          fidelity: 'derived',
+        }, walkStatement(statement.thenStatement, [...path, 0], options)),
+        statement.elseStatement
+          ? flowCandidate(statement.elseStatement, [...path, 1], 'otherwise', {
+              role: 'action',
+              text: 'When the condition is false',
+              fidelity: 'derived',
+            }, walkStatement(statement.elseStatement, [...path, 1], options))
+          : undefined,
+      ].filter((candidate): candidate is StoryFlowCandidate => Boolean(candidate))
+      const condition = conditionStoryText(statement.expression, sourceFile) ?? 'the condition is true'
+      const flow = flowCandidate(statement, path, 'condition', {
+        role: 'action',
+        text: `If ${condition}`,
+        fidelity: 'derived',
+      }, paths)
+      return flow ? [flow] : []
     }
     if (ts.isSwitchStatement(statement)) {
-      statement.caseBlock.clauses.forEach((clause, index) => {
-        walkStatements(clause.statements, [...path, index], options)
+      const cases = statement.caseBlock.clauses.flatMap((clause, index) => {
+        const children = walkStatements(clause.statements, [...path, index], options)
+        const value = ts.isDefaultClause(clause)
+          ? undefined
+          : renderExpression(clause.expression, sourceFile)
+        const text = !value || value.fidelity === 'unresolved'
+          ? 'When no earlier value matches'
+          : `When ${value.text} matches`
+        const flow = flowCandidate(clause, [...path, index], ts.isDefaultClause(clause) ? 'otherwise' : 'case', {
+          role: 'action',
+          text,
+          fidelity: 'derived',
+        }, children)
+        return flow ? [flow] : []
       })
-      return
+      const subject = renderExpression(statement.expression, sourceFile)
+      const flow = flowCandidate(statement, path, 'switch', {
+        role: 'action',
+        text: subject.fidelity === 'unresolved'
+          ? 'Choose the first matching path'
+          : `Choose a path based on ${subject.text}`,
+        fidelity: 'derived',
+      }, cases)
+      return flow ? [flow] : []
     }
     if (ts.isTryStatement(statement)) {
-      walkStatements(statement.tryBlock.statements, [...path, 0], options)
-      if (statement.catchClause) walkStatements(statement.catchClause.block.statements, [...path, 1], options)
-      if (statement.finallyBlock) walkStatements(statement.finallyBlock.statements, [...path, 2], options)
-      return
+      const children = walkStatements(statement.tryBlock.statements, [...path, 0], options)
+      if (statement.catchClause) {
+        const errorName = statement.catchClause.variableDeclaration?.name
+        const error = errorName && ts.isIdentifier(errorName) ? exactIdentifierText(errorName.text) : undefined
+        const caught = flowCandidate(statement.catchClause, [...path, 1], 'catch', {
+          role: 'action',
+          text: `If the attempt fails${error ? `, save the error as ${error}` : ''}`,
+          fidelity: 'derived',
+        }, walkStatements(statement.catchClause.block.statements, [...path, 1], options))
+        if (caught) children.push(caught)
+      }
+      if (statement.finallyBlock) {
+        const finalized = flowCandidate(statement.finallyBlock, [...path, 2], 'finally', {
+          role: 'action',
+          text: 'Whether the attempt succeeds or fails',
+          fidelity: 'derived',
+        }, walkStatements(statement.finallyBlock.statements, [...path, 2], options))
+        if (finalized) children.push(finalized)
+      }
+      const flow = flowCandidate(statement, path, 'try', {
+        role: 'action',
+        text: 'Attempt these steps',
+        fidelity: 'derived',
+      }, children)
+      return flow ? [flow] : []
     }
-    if (
-      ts.isForStatement(statement)
-      || ts.isForInStatement(statement)
-      || ts.isForOfStatement(statement)
-      || ts.isWhileStatement(statement)
-      || ts.isDoStatement(statement)
-    ) {
-      walkStatement(statement.statement, [...path, 0], options)
-      return
+    if (isLoopStatement(statement)) {
+      const children = walkStatement(statement.statement, [...path, 0], options)
+      const flow = flowCandidate(statement, path, 'loop', {
+        role: 'action',
+        text: loopStoryText(statement, sourceFile),
+        fidelity: 'derived',
+      }, children)
+      return flow ? [flow] : []
     }
 
     const step = authoredStep(statement)
     if (step) {
-      add(statement, path, { role: 'action', text: step.label, fidelity: 'exact' }, options)
       // The authored label is the concise action. Keep nested setup and checks,
       // but do not repeat every implementation action underneath it.
-      walkStatements(step.body.statements, [...path, 0], { includeActions: false })
-      return
+      const children = walkStatements(step.body.statements, [...path, 0], { includeActions: false })
+      const description: StoryDescription = { role: 'action', text: step.label, fidelity: 'exact' }
+      const flow = flowCandidate(statement, path, 'scope', description, children)
+      const candidate = flow ?? stepCandidate(statement, path, description, options)
+      return candidate ? [candidate] : []
     }
 
     const assertion = renderAssertionStatement(statement, sourceFile)
     if (assertion) {
       if (assertion.fidelity === 'exact' || assertion.fidelity === 'derived') {
-        add(statement, path, { ...assertion, fidelity: assertion.fidelity }, options)
+        return [{
+          kind: 'step',
+          ...decorate(statement, path, { ...assertion, fidelity: assertion.fidelity }),
+        }]
       }
-      return
+      return []
+    }
+
+    if (ts.isBreakStatement(statement)) {
+      const candidate = stepCandidate(statement, path, {
+        role: 'action',
+        text: 'Stop this loop',
+        fidelity: 'derived',
+      }, options)
+      return candidate ? [candidate] : []
+    }
+    if (ts.isContinueStatement(statement)) {
+      const candidate = stepCandidate(statement, path, {
+        role: 'action',
+        text: 'Skip to the next iteration',
+        fidelity: 'derived',
+      }, options)
+      return candidate ? [candidate] : []
     }
 
     const alias = variableAlias(statement)
     if (alias) aliases.set(alias.name, polishStoryText(alias.text))
 
+    const call = callFromStatement(statement)
+    if (call) {
+      const retry = retryFlow(statement, path, call, options)
+      if (retry) return [retry]
+    }
+
     const renderedAction = renderActionStatement(statement, sourceFile)
-    if (
-      renderedAction
+    const renderedDescription = renderedAction
       && (renderedAction.fidelity === 'exact' || renderedAction.fidelity === 'derived')
       && (renderedAction.role === 'setup' || renderedAction.role === 'action')
-    ) {
-      add(statement, path, {
-        text: renderedAction.text,
-        role: renderedAction.role,
-        fidelity: renderedAction.fidelity,
-      }, options)
+      ? {
+          text: renderedAction.text,
+          role: renderedAction.role,
+          fidelity: renderedAction.fidelity,
+        } satisfies StoryDescription
+      : undefined
+    const genericDescription = !renderedAction ? genericCallStory(statement, sourceFile) : undefined
+    const mapping = call && mappingDescription(statement, call, sourceFile)
+    const description = mapping ?? renderedDescription ?? genericDescription
+
+    if (call) {
+      const callbacks = callbackArgumentsFor(call)
+      const callbackChildren = callbacks.flatMap(({ argumentIndex, callback }) => (
+        callbackCandidates(callback, [...path, argumentIndex], options)
+      ))
+      if (description && callbackChildren.length) {
+        const loopDescription = loopCallbackDescription(call, callbacks[0].callback, sourceFile)
+        return [populatedFlowCandidate(
+          statement,
+          path,
+          loopDescription ? 'loop' : 'scope',
+          loopDescription ?? callbackScopeText(description, callbacks[0].callback),
+          callbackChildren,
+        )]
+      }
+      // A wrapper whose own meaning is unknown may still contain proven checks.
+      if (!description && callbackChildren.length) return callbackChildren
     }
 
-    // A known rule that could not prove readable wording remains absent from
-    // the story. Still inspect callback bodies: their setup and checks can be
-    // independently proven even when the wrapper call itself cannot.
-    if (!renderedAction) {
-      const generic = genericCallStory(statement, sourceFile)
-      if (generic) add(statement, path, generic, options)
-    }
-
-    callbackBlocks(callFromStatement(statement)).forEach((block, index) => {
-      walkStatements(block.statements, [...path, index], options)
-    })
+    const candidate = description ? stepCandidate(statement, path, description, options) : undefined
+    return candidate ? [candidate] : []
   }
 
-  walkStatements(statements, [], { includeActions: true })
-  return candidates
+  return walkStatements(statements, [], { includeActions: true })
 }

@@ -10,6 +10,7 @@ import {
   type ReadableNode,
   type ReadableSemanticRuleConfig,
   type ReadableSource,
+  type ReadableStoryItem,
   type ReadableTest,
   type ReadableTestStory,
 } from '../../../../../shared/readable-tests/types'
@@ -557,17 +558,29 @@ function translateStory(
   statements: readonly ts.Statement[],
   context: TranslationContext,
 ): ReadableTestStory | undefined {
-  const story: ReadableTestStory = { steps: [] }
-  for (const candidate of storyCandidates(statements, context.sourceFile)) {
+  const translateCandidate = (
+    candidate: ReturnType<typeof storyCandidates>[number],
+  ): ReadableStoryItem => {
     const source = sourceFor(candidate.node, context.sourceFile, context.file, context.lineOffset)
-    story.steps.push({
+    const base = {
       id: stableNodeId(source, [-1, ...candidate.path]),
       role: candidate.role,
       text: candidate.text,
       spans: candidate.spans,
       fidelity: candidate.fidelity,
       source,
-    })
+    }
+    return candidate.kind === 'flow'
+      ? {
+          ...base,
+          kind: 'flow',
+          flowKind: candidate.flowKind,
+          children: candidate.children.map(translateCandidate),
+        }
+      : base
+  }
+  const story: ReadableTestStory = {
+    steps: storyCandidates(statements, context.sourceFile).map(translateCandidate),
   }
   return story.steps.length ? story : undefined
 }

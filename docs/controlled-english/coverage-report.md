@@ -59,8 +59,6 @@ Reproduce the two rows with:
 
 ```sh
 node --import tsx tools/check-controlled-english-corpus.ts
-node --import tsx tools/check-controlled-english-corpus.ts \
-  /Users/oddle/Documents/canary-lab-workspace/features
 ```
 
 ## Known limits

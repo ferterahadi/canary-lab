@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type {
   ReadableSource,
+  ReadableStoryFlowKind,
   ReadableStoryItem,
   ReadableStoryRole,
   ReadableStorySpan,
@@ -38,18 +39,12 @@ export function ReadableTestView({
     >
       <div className="cl-readable-body" style={{ backgroundColor: canvas.bg, color: canvas.fg }}>
         {steps.length ? (
-          <ol data-testid="readable-test-sequence" className="m-0 flex list-none flex-col p-0">
-            {steps.map((step, index) => (
-              <StoryRow
-                key={step.id}
-                step={step}
-                sequence={index + 1}
-                sourceFile={sourceFile}
-                selected={selectedNodeId === step.id}
-                onSourceSelect={onSourceSelect}
-              />
-            ))}
-          </ol>
+          <StorySequence
+            steps={steps}
+            sourceFile={sourceFile}
+            selectedNodeId={selectedNodeId}
+            onSourceSelect={onSourceSelect}
+          />
         ) : (
           <span data-testid="readable-test-empty" className="block px-2" style={{ color: 'var(--text-muted)' }}>
             No readable steps found in this test body.
@@ -60,32 +55,76 @@ export function ReadableTestView({
   )
 }
 
+function StorySequence({
+  steps,
+  parentSequence = [],
+  sourceFile,
+  selectedNodeId,
+  onSourceSelect,
+}: {
+  steps: ReadableStoryItem[]
+  parentSequence?: number[]
+  sourceFile?: string
+  selectedNodeId?: string | null
+  onSourceSelect?: (selection: ReadableSourceSelection) => void
+}) {
+  const nested = parentSequence.length > 0
+  return (
+    <ol
+      {...(!nested ? { 'data-testid': 'readable-test-sequence' } : {})}
+      className="m-0 flex list-none flex-col p-0"
+      style={nested ? {
+        marginLeft: '1.25rem',
+        borderLeft: '1px solid var(--border-default)',
+      } : undefined}
+    >
+      {steps.map((step, index) => (
+        <StoryRow
+          key={step.id}
+          step={step}
+          sequence={[...parentSequence, index + 1]}
+          sourceFile={sourceFile}
+          selectedNodeId={selectedNodeId}
+          onSourceSelect={onSourceSelect}
+        />
+      ))}
+    </ol>
+  )
+}
+
 function StoryRow({
   step,
   sequence,
   sourceFile,
-  selected,
+  selectedNodeId,
   onSourceSelect,
 }: {
   step: ReadableStoryItem
-  sequence: number
+  sequence: number[]
   sourceFile?: string
-  selected: boolean
+  selectedNodeId?: string | null
   onSourceSelect?: (selection: ReadableSourceSelection) => void
 }) {
   const fileNote = sourceFile && step.source.file !== sourceFile ? fileName(step.source.file) : undefined
-  const sequenceLabel = String(sequence).padStart(2, '0')
+  const sequenceLabel = storySequenceLabel(sequence)
+  const keyword = storyKeyword(step)
+  const selected = selectedNodeId === step.id
   return (
-    <li data-story-role={step.role} data-story-sequence={sequence}>
+    <li
+      data-story-role={step.role}
+      data-story-sequence={sequenceLabel}
+      data-story-depth={sequence.length - 1}
+      {...(step.kind === 'flow' ? { 'data-story-flow': step.flowKind } : {})}
+    >
       <button
         type="button"
         data-testid={`readable-story-item-${step.id}`}
         data-fidelity={step.fidelity}
         aria-pressed={selected}
-        aria-label={`${sequence}. ${roleLabel(step.role)}: ${step.text}. Show ${sourceLabel(step.source)}`}
+        aria-label={`${sequenceLabel}. ${keyword}: ${step.text}. Show ${sourceLabel(step.source)}`}
         title={`${sourceLabel(step.source)} — ${fidelityTitle(step.fidelity)}`}
         onClick={() => onSourceSelect?.({ id: step.id, source: step.source })}
-        className="grid w-full grid-cols-[3ch_7ch_minmax(0,1fr)] items-start gap-x-2 px-2 py-0.5 text-left leading-[1.65] transition-colors hover:bg-running/10"
+        className="grid w-full grid-cols-[max-content_8ch_minmax(0,1fr)] items-start gap-x-2 px-2 py-0.5 text-left leading-[1.65] transition-colors hover:bg-running/10"
         style={{
           background: selected ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : undefined,
           boxShadow: selected ? 'inset 2px 0 0 var(--accent)' : undefined,
@@ -94,15 +133,24 @@ function StoryRow({
         <span aria-hidden="true" style={{ color: 'var(--text-muted)' }}>{sequenceLabel}</span>
         <span
           data-testid={`readable-story-role-${step.id}`}
-          style={{ color: roleColor(step.role), fontWeight: 600 }}
+          style={{ color: storyKeywordColor(step), fontWeight: 600 }}
         >
-          {roleLabel(step.role)}
+          {keyword}
         </span>
         <span className="min-w-0 whitespace-pre-wrap break-words">
           {step.spans.map((span, index) => <StorySpan key={index} span={span} />)}
           {fileNote && <span style={{ color: 'var(--text-muted)' }}> {`// ${fileNote}`}</span>}
         </span>
       </button>
+      {step.kind === 'flow' && step.children.length > 0 && (
+        <StorySequence
+          steps={step.children}
+          parentSequence={sequence}
+          sourceFile={sourceFile}
+          selectedNodeId={selectedNodeId}
+          onSourceSelect={onSourceSelect}
+        />
+      )}
     </li>
   )
 }
@@ -122,6 +170,34 @@ function roleColor(role: ReadableStoryRole): string {
   if (role === 'setup') return 'var(--code-cyan)'
   if (role === 'action') return 'var(--code-keyword)'
   return 'var(--semantic-attention)'
+}
+
+function storyKeywordColor(step: ReadableStoryItem): string {
+  if (step.kind !== 'flow') return roleColor(step.role)
+  if (step.flowKind === 'catch') return 'var(--semantic-attention)'
+  return step.role === 'setup' ? 'var(--code-cyan)' : 'var(--code-keyword)'
+}
+
+function storyKeyword(step: ReadableStoryItem): string {
+  if (step.kind !== 'flow') return roleLabel(step.role)
+  const keywords: Record<ReadableStoryFlowKind, string> = {
+    scope: roleLabel(step.role),
+    condition: 'IF',
+    then: 'THEN',
+    otherwise: 'OTHERWISE',
+    switch: 'SWITCH',
+    case: 'WHEN',
+    loop: 'REPEAT',
+    retry: 'RETRY',
+    try: 'TRY',
+    catch: 'ON ERROR',
+    finally: 'ALWAYS',
+  }
+  return keywords[step.flowKind]
+}
+
+function storySequenceLabel(sequence: readonly number[]): string {
+  return sequence.map((part, index) => index === 0 ? String(part).padStart(2, '0') : String(part)).join('.')
 }
 
 function roleLabel(role: ReadableStoryRole): 'SETUP' | 'ACTION' | 'CHECK' {

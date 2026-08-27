@@ -226,7 +226,6 @@ export function renderAssertionStatement(statement: ts.Statement, sourceFile: ts
     subject.fidelity === 'unresolved'
     || expected?.fidelity === 'unresolved'
     || options.some((option) => option.fidelity === 'unresolved')
-    || message?.fidelity === 'unresolved'
   ) {
     return fallback(call, sourceFile)
   }
@@ -240,7 +239,10 @@ export function renderAssertionStatement(statement: ts.Statement, sourceFile: ts
   }
   const prefix = expectation.soft ? 'Soft-check that' : 'Check that'
   const optionsText = options.length ? ` using ${options.map((option) => option.text).join(' and ')}` : ''
-  const messageText = message ? ` with message ${message.text}` : ''
+  // A diagnostic message does not change what the assertion proves. Keep the
+  // check when that optional context is dynamic instead of hiding the entire
+  // requirement behind a source fallback.
+  const messageText = message && message.fidelity !== 'unresolved' ? ` with message ${message.text}` : ''
   return {
     text: `${prefix} ${rule.render(context)}${optionsText}${messageText}`,
     fidelity: 'derived',

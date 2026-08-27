@@ -94,7 +94,6 @@ describe('Playwright assertion edge cases', () => {
       'expect(computeTotal()).toBe(2)',
       'expect(total).toBe(computeExpected())',
       'expect(total).toBe(2, computeOptions())',
-      "expect(total, computeMessage()).toBe(2)",
       'expect(response.status(1)).toBe(200)',
       'expect(response.headers()).toBeDefined()',
     ]
@@ -102,5 +101,18 @@ describe('Playwright assertion edge cases', () => {
     for (const source of sources) {
       expect(assertionFrom(source)).toEqual({ text: source, fidelity: 'unresolved', role: 'check' })
     }
+  })
+
+  it('keeps a proven assertion when only its diagnostic message is dynamic', () => {
+    expect(assertionFrom('expect(total, computeMessage()).toBe(2)')).toEqual({
+      text: 'Check that total equals 2',
+      fidelity: 'derived',
+      role: 'check',
+    })
+    expect(assertionFrom('expect(allSms.length, JSON.stringify(allSms.map((sms) => sms.body))).toBe(1)')).toEqual({
+      text: 'Check that all sms length equals 1',
+      fidelity: 'derived',
+      role: 'check',
+    })
   })
 })

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { ReadableStoryItem } from '../../../../../shared/readable-tests/types'
 import { translateReadableTest } from './translator'
 
 const INPUT = {
@@ -11,7 +12,15 @@ function textsFor(
   translated: ReturnType<typeof translateReadableTest>,
   role: 'setup' | 'action' | 'check',
 ): string[] {
-  return translated.story?.steps.filter((step) => step.role === role).map((step) => step.text) ?? []
+  return storyItems(translated).filter((step) => step.role === role).map((step) => step.text)
+}
+
+function storyItems(translated: ReturnType<typeof translateReadableTest>): ReadableStoryItem[] {
+  const descend = (items: ReadableStoryItem[]): ReadableStoryItem[] => items.flatMap((item) => [
+    item,
+    ...(item.kind === 'flow' ? descend(item.children) : []),
+  ])
+  return descend(translated.story?.steps ?? [])
 }
 
 describe('readable test story', () => {
@@ -38,11 +47,12 @@ describe('readable test story', () => {
     expect(textsFor(translated, 'setup')).toEqual([
       'Skip this scenario — “sync SQL not configured”',
       'Create variable ids using “fallback-A”',
-      'Use sync SQL connection',
+      'Using sync SQL connection as conn',
     ])
     expect(textsFor(translated, 'action')).toEqual([
       'Send call using ids, saving the result as res',
-      'Wait for callRow',
+      'Until the result status equals “COMPLETED” when available, saving the matching result as callRow',
+      'Read call outbound using conn and ids.messageId',
       'Read WhatsApp outbound using conn and ids.messageId, saving the result as wa',
     ])
     expect(textsFor(translated, 'check')).toEqual([
@@ -50,20 +60,21 @@ describe('readable test story', () => {
       'Check that call row status, if available equals “COMPLETED”',
       'Check that WhatsApp outbound is null',
     ])
-    expect(translated.story?.steps.map((step) => `${step.role}: ${step.text}`)).toEqual([
+    expect(storyItems(translated).map((step) => `${step.role}: ${step.text}`)).toEqual([
       'setup: Skip this scenario — “sync SQL not configured”',
       'setup: Create variable ids using “fallback-A”',
       'action: Send call using ids, saving the result as res',
       'check: Check that response status is less than 300',
-      'setup: Use sync SQL connection',
-      'action: Wait for callRow',
+      'setup: Using sync SQL connection as conn',
+      'action: Until the result status equals “COMPLETED” when available, saving the matching result as callRow',
+      'action: Read call outbound using conn and ids.messageId',
       'check: Check that call row status, if available equals “COMPLETED”',
       'action: Read WhatsApp outbound using conn and ids.messageId, saving the result as wa',
       'check: Check that WhatsApp outbound is null',
     ])
-    const text = translated.story?.steps.map((item) => item.text).join('\n') ?? ''
+    const text = storyItems(translated).map((item) => item.text).join('\n')
     expect(text).not.toMatch(/\b(?:await|const|expect)\b|=>|[{}`]/)
-    expect(translated.story?.steps.flatMap((step) => (
+    expect(storyItems(translated).flatMap((step) => (
       step.spans.filter((span) => span.kind === 'variable').map((span) => span.text)
     ))).toEqual(expect.arrayContaining([
       'ids',
@@ -88,7 +99,7 @@ describe('readable test story', () => {
     })
 
     expect(textsFor(translated, 'action')).toEqual(['Submit the checkout form'])
-    expect(translated.story?.steps.find((step) => step.role === 'action')?.fidelity).toBe('exact')
+    expect(storyItems(translated).find((step) => step.role === 'action')?.fidelity).toBe('exact')
     expect(textsFor(translated, 'check')).toEqual([
       'Check that the text “Order confirmed” is visible',
     ])
@@ -179,14 +190,62 @@ describe('readable test story', () => {
 }`,
     })
 
-    expect(translated.story?.steps.map((step) => step.text)).toEqual([
+    expect(storyItems(translated).map((step) => step.text)).toEqual([
       'Create variable txId using “tx-42”',
       'Create variable request using txId',
       'Send batch using request and txId',
     ])
-    expect(translated.story?.steps.flatMap((step) => (
+    expect(storyItems(translated).flatMap((step) => (
       step.spans.filter((span) => span.kind === 'variable').map((span) => span.text)
     ))).toEqual(expect.arrayContaining(['txId', 'request']))
+  })
+
+  it('keeps mapping, callback, loop, and retry execution nested in the concise story', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  const attempts = ['a', 'b'].map((suf) => ({ messageId: suf, transactionId: sharedTxn }))
+  await withSyncSqlConnection(async (conn) => {
+    for (const ids of attempts) {
+      const res = await postSendCall(ids)
+      expect(res.status).toBeLessThan(300)
+      const callRow = await pollUntil(
+        () => queryCallOutbound(conn, ids.messageId),
+        { predicate: (row) => row?.status === 'REJECTED', timeoutMs: 60_000 },
+      )
+      expect(callRow?.status).toBe('REJECTED')
+    }
+  })
+}`,
+    })
+
+    expect(translated.story?.steps[0]).toEqual(expect.objectContaining({
+      role: 'setup',
+      text: 'Create attempts by transforming each suf in the values “a” and “b”',
+    }))
+    const scope = translated.story?.steps[1]
+    expect(scope).toEqual(expect.objectContaining({
+      kind: 'flow',
+      flowKind: 'scope',
+      text: 'Using sync SQL connection as conn',
+    }))
+    if (scope?.kind !== 'flow') throw new Error('Expected the connection callback to be a story flow')
+    const loop = scope.children[0]
+    expect(loop).toEqual(expect.objectContaining({
+      kind: 'flow',
+      flowKind: 'loop',
+      text: 'Sequentially, for each ids in attempts',
+    }))
+    if (loop?.kind !== 'flow') throw new Error('Expected the for-of statement to be a story flow')
+    const retry = loop.children.find((item) => item.kind === 'flow' && item.flowKind === 'retry')
+    expect(retry).toEqual(expect.objectContaining({
+      text: 'For up to 60 seconds, until the result status equals “REJECTED” when available, saving the matching result as callRow',
+      children: [expect.objectContaining({ text: 'Read call outbound using conn and ids.messageId' })],
+    }))
+    expect(loop.children.at(-1)).toEqual(expect.objectContaining({
+      role: 'check',
+      text: 'Check that call row status, if available equals “REJECTED”',
+    }))
   })
 
   it('walks control-flow bodies while omitting nested declarations', () => {
@@ -211,7 +270,7 @@ describe('readable test story', () => {
 }`,
     })
 
-    const storyText = translated.story?.steps.map((item) => item.text).join('\n') ?? ''
+    const storyText = storyItems(translated).map((item) => item.text).join('\n')
     expect(storyText).toContain('Prepare block')
     expect(storyText).toContain('Send if branch')
     expect(storyText).toContain('Send catch body')
@@ -219,6 +278,22 @@ describe('readable test story', () => {
     expect(storyText).toContain('Send for in body')
     expect(storyText).toContain('Send do body')
     expect(storyText).not.toContain('hidden')
+    expect(storyText).toContain('While ready is true; this may run zero times')
+    expect(storyText).toContain('Run once, then repeat while ready is true')
+    expect(storyItems(translated).filter((item) => item.kind === 'flow').map((item) => item.flowKind))
+      .toEqual(expect.arrayContaining([
+        'condition',
+        'then',
+        'otherwise',
+        'switch',
+        'case',
+        'try',
+        'catch',
+        'finally',
+        'loop',
+      ]))
+    expect(storyText).toContain('Stop this loop')
+    expect(storyText).not.toContain('`')
   })
 
   it('keeps sequence and variable spans deterministic across uncommon statement shapes', () => {
@@ -240,7 +315,7 @@ describe('readable test story', () => {
 }`,
     })
 
-    expect(translated.story?.steps.map((step) => step.text)).toEqual(expect.arrayContaining([
+    expect(storyItems(translated).map((step) => step.text)).toEqual(expect.arrayContaining([
       'Read the saved record',
       'Use context',
       'Send only then',
@@ -248,11 +323,11 @@ describe('readable test story', () => {
       'Check that line entity identifier equals identifiers entity identifier',
       'Check that foo equals bar',
     ]))
-    const comparison = translated.story?.steps.find((step) => step.text.includes('line entity'))
+    const comparison = storyItems(translated).find((step) => step.text.includes('line entity'))
     expect(comparison?.spans.filter((span) => span.kind === 'variable').map((span) => span.text))
       .toEqual(['line', 'identifiers'])
-    expect(translated.story?.steps.find((step) => step.text === 'order is submitted')?.spans[0])
+    expect(storyItems(translated).find((step) => step.text === 'order is submitted')?.spans[0])
       .toEqual({ text: 'order', kind: 'variable' })
-    expect(translated.story?.steps.some((step) => step.text.includes('UnknownMatcher'))).toBe(false)
+    expect(storyItems(translated).some((step) => step.text.includes('UnknownMatcher'))).toBe(false)
   })
 })
