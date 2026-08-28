@@ -98,7 +98,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     const cap = portifyConcurrencyCap()
     if (active.size >= cap) {
       throw Object.assign(
-        new Error(`At port-ification capacity (${active.size}/${cap} active) — wait for one to finish, or save/cancel an active workflow before starting another feature.`),
+        new Error(`At port-ification capacity (${active.size}/${cap} active) — wait for one to finish, or save/cancel an active workflow before starting another suite.`),
         { statusCode: 429 },
       )
     }
@@ -114,7 +114,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
   async function startPortify(input: StartPortifyInput): Promise<StartPortifyResult> {
     admitNewWorkflow(input.feature)
     const feature = deps.loadFeatures().find((f) => f.name === input.feature)
-    if (!feature) throw Object.assign(new Error(`feature not found: ${input.feature}`), { statusCode: 404 })
+    if (!feature) throw Object.assign(new Error(`suite not found: ${input.feature}`), { statusCode: 404 })
     const agent = deps.pickAgent(input.agent)
     if (!agent) {
       const want = input.agent ? `the ${input.agent} CLI` : 'a claude/codex CLI'

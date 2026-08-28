@@ -216,10 +216,10 @@ export function collectConcurrencyAdvisories(featuresDir: string, features: stri
 function printConcurrencyAdvisory(advisories: ConcurrencyAdvisory[]): void {
   section('Concurrency readiness (1.2.0)')
   if (advisories.length === 0) {
-    ok('No features hardcode an app port — nothing to do for concurrency.')
+    ok('No suites hardcode an app port — nothing to do for concurrency.')
     return
   }
-  info('Multiple runs can now run at once. A feature that hardcodes a port can clash with another run; declare a port slot and use ${port.<slot>} so each run gets its own.')
+  info('Multiple runs can now run at once. A suite that hardcodes a port can clash with another run; declare a port slot and use ${port.<slot>} so each run gets its own.')
   for (const a of advisories) {
     const portList = a.hardcodedPorts.map((p) => `:${p}`).join(', ')
     const label = ansiPath(`features/${a.feature}`)
@@ -231,7 +231,7 @@ function printConcurrencyAdvisory(advisories: ConcurrencyAdvisory[]): void {
     bullet(dim("add `ports: [{ name: 'api', env: 'PORT' }]` to each startCommand, then replace the literal ports with `${port.api}` in the command (--port), the healthCheck URL, and inter-service envset values"))
   }
   line()
-  info('This is advisory only — leaving features as-is keeps them working (they just queue instead of running concurrently with a port-clashing run). See the "Concurrent Runs" section in CLAUDE.md.')
+  info('This is advisory only — leaving suites as-is keeps them working (they just queue instead of running concurrently with a port-clashing run). See the "Concurrent Runs" section in CLAUDE.md.')
 }
 
 function applyPlan(plan: FeaturePlan): void {
@@ -283,7 +283,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const advisories = collectConcurrencyAdvisories(featuresDir, allFeatures)
 
   if (legacyFeatures.length === 0) {
-    ok('Nothing to migrate — no features with the 0.8.0 `src/config.ts` layout detected.')
+    ok('Nothing to migrate — no suites with the 0.8.0 `src/config.ts` layout detected.')
     printConcurrencyAdvisory(advisories)
     return
   }
@@ -324,11 +324,11 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 
   if (!opts.dryRun && migrated > 0) {
     line()
-    info('Run `npx canary-lab ui` to verify the migrated features still pass.')
+    info('Run `npx canary-lab ui` to verify the migrated suites still pass.')
   }
   if (skipped > 0) {
     line()
-    info('Skipped features were left untouched — migrate them by hand if desired.')
+    info('Skipped suites were left untouched — migrate them by hand if desired.')
   }
 
   printConcurrencyAdvisory(advisories)

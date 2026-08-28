@@ -138,7 +138,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         const boot = deps.store.get(bootRunId)?.manifest
         if (!boot || boot.executionType !== 'boot' || boot.feature !== feature.name || !isActiveRunStatus(boot.status)) {
           reply.code(400)
-          return { error: 'bootRunId must name an active boot session for this feature' }
+          return { error: 'bootRunId must name an active boot session for this suite' }
         }
       }
       const active = deps.store.list().find((run) =>

@@ -6,6 +6,13 @@ skills own procedures; this document explains how the shipped parts cooperate.
 See the [PRD](PRD.md) for product intent and the [README](../README.md) or
 [Guide](GUIDE.md) for usage.
 
+**Terminology.** The product UI calls the runnable test unit a **suite**. Its
+older compatibility contracts still say `feature`: `features/<name>/`,
+`feature.config.cjs`, REST paths, wire fields, and CLI or MCP arguments. This
+document also uses *feature* for the separate code-architecture meaning: a
+vertical module under `apps/*/src/features/`. Keep literal and module names as
+`feature`; use `suite` for the product concept shown to a user.
+
 At runtime, one local server composes the web UI, REST routes, WebSocket streams,
 and Model Context Protocol (MCP) tools over shared stores. Thin CLI commands and
 external agents call those same server-owned workflows. Playwright and the
@@ -22,6 +29,7 @@ coverage ledger compute verdicts; agents produce candidate artifacts and fixes.
 - [MCP Layer](#mcp-layer)
 - [Portify and Benchmark](#portify-and-benchmark)
 - [Requirement Coverage](#requirement-coverage)
+- [Readable Tests](#readable-tests)
 - [Keep-in-Sync Invariants](#keep-in-sync-invariants)
 
 ## Package Model
@@ -69,14 +77,15 @@ entry. The three places that must agree for the web aliases are
 | `apps/cli/` | CLI entry, scaffold/setup/upgrade/env commands, MCP bridge (`apps/cli/mcp.ts` includes `inferMcpClientKind` client-kind detection) |
 | `apps/web-server/src/server.ts` | Fastify app: UI assets, REST routes, WebSocket streams, the `startRun` factory, scheduler wiring |
 | `apps/web-server/src/mcp/` | MCP HTTP server and tool registration. `server.ts` owns transports and profile instructions; `tools.ts` applies the profile gate and calls the `reads`, `authoring`, `run-lifecycle`, and `heal-flow` registrars. `authoring.ts` composes feature, envset, draft, coverage, export, Flight, and Portify tool groups. `tool-profiles.ts` is the source of truth for profile membership. |
-| `apps/web-server/src/features/` | Server features. `runs` owns execution and repair; `coverage` owns the ledger and deployed verification; `flights` owns the conducted pipeline; `wizard` stores external test-authoring drafts; `evaluation` owns exports; `config` owns feature and project configuration; `portify` owns port overlays; `benchmark` owns the preview harness; `agent-sessions` owns process and transcript state; `version` owns update checks. |
-| `apps/web-server/src/shared/` | Web-server-local shared infra: `git-repo`, `gh-cli`, `ring-buffer`, `simple-zip`, `toon`, `workspace-events`, `editor-launch`, `open-browser`, `prompts` (the `.md` template loader), `feature-loader`, `launcher-startup` (service startup + health probes), `config-ast`, `ast-extractor` (the Playwright tag/assertion parser the coverage ledger reads), and `ws/workspace-stream` |
+| `apps/web-server/src/features/` | Server features. `runs` owns execution and repair; `coverage` owns the ledger and deployed verification; `flights` owns the conducted pipeline; `wizard` stores external test-authoring drafts; `evaluation` owns exports; `config` owns suite and project configuration; `portify` owns port overlays; `benchmark` owns the preview harness; `agent-sessions` owns process and transcript state; `version` owns update checks. |
+| `apps/web-server/src/shared/` | Web-server-local shared infra: `git-repo`, `gh-cli`, `ring-buffer`, `simple-zip`, `toon`, `workspace-events`, `editor-launch`, `open-browser`, `prompts` (the `.md` template loader), `feature-loader`, `launcher-startup` (service startup + health probes), `config-ast`, `ast-extractor` (the Playwright parser that attaches coverage tags, assertions, and source-linked Readable Tests), `controlled-english`, `readable-tests`, and `ws/workspace-stream` |
 | `apps/web-server/src/features/runs/logic/runtime/` | The run orchestrator and its modules (see [Run Lifecycle](#run-lifecycle) and below) |
 | `apps/web/` | React UI (Vite, Tailwind) |
 | `shared/e2e-runner/` | Playwright fixture support (`log-marker-fixture`, summary reporter) |
 | `shared/configs/` | Base Playwright config and env loader |
+| `shared/readable-tests/types.ts` | Shared Readable Test wire contract used by the server extractor and web UI |
 | `shared/runtime/` | Shared project-root resolver |
-| `templates/project/` | Files copied into initialized workspaces. The storefront sample exercises Run and Heal, `flight-app/` starts without a feature so Flight has real onboarding work, and `workflow-app/` plus `features/workflow-workbench/` exercises Coverage, Author, Portify, and Verify. |
+| `templates/project/` | Files copied into initialized workspaces. The storefront sample exercises Run and Heal, `flight-app/` starts without a suite so Flight has real onboarding work, and `workflow-app/` plus `features/workflow-workbench/` exercises Coverage, Author, Portify, and Verify. |
 | `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, the demo PRD-summary generators, `clean-dist`, `prepare-assets`, `smoke-pack`, `smoke-demo`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the repo gates. `tools/fixtures/` holds contributor-only fixtures; the storefront and workflow-workbench suites ship in the scaffold under `templates/project/features/`. |
 
 **Web `cleanup` has no server twin, on purpose.** The `apps/web/src/features/cleanup`
@@ -243,9 +252,9 @@ reimplementing coverage, Portify, runs, or export.
 
 | Stage | Server-owned result |
 | --- | --- |
-| `similarity` | Match an existing feature or establish a new one |
-| `scout` | Candidate repository survey and feature config |
-| `scaffold` | Valid feature skeleton on disk |
+| `similarity` | Match an existing suite or establish a new one |
+| `scout` | Candidate repository survey and suite configuration |
+| `scaffold` | Valid suite skeleton on disk |
 | `env-capture` | Envset files and unresolved-key checkpoint |
 | `docs` | Requirement source collection |
 | `prd-summary` | Stable structured requirements and readable summary |
@@ -255,7 +264,8 @@ reimplementing coverage, Portify, runs, or export.
 | `evaluation-export` | Downloadable Report archive |
 | `portify` | Parallel setup overlay backed by concurrent double-boot verification |
 
-One feature has one Flight manifest. The conductor persists stage evidence and
+One suite has one Flight manifest, keyed internally by `feature`. The conductor
+persists stage evidence and
 typed checkpoints. It always finishes the active or explicitly re-entered stage,
 then selects the first unfinished stage in `FLIGHT_EXECUTION_ORDER`. That priority
 runs the serial Test run, its repair mirror, and Report before independent
@@ -367,10 +377,10 @@ run while another active run uses the same repo returns
 `repo_collision_requires_choice` (REST 409 / MCP result). The user may choose
 **worktree** to bypass the edit collision and run now, or **queue** to wait.
 Choosing worktree does not rewrite fixed ports; the second boot can still fail
-with an address-in-use error. Queue is the safe choice unless the feature's
+with an address-in-use error. Queue is the safe choice unless the suite's
 services already accept distinct injected ports.
 
-Different-repo runs do not trigger this collision check. A portified feature
+Different-repo runs do not trigger this collision check. A portified suite
 registers no repo collision because its verified overlay gives each boot
 distinct allocated ports and it always uses worktrees. See
 `apps/web-server/src/features/runs/logic/runtime/repo-collision.ts` + `repo-worktree.ts`.
@@ -411,7 +421,7 @@ Worktree isolation covers concurrent repair edits, not ports. Two runs of the
 same fixed-port app should queue; an explicit worktree bypass may still fail at
 boot. Apps that hardcode a port in source (ignoring `PORT`/`--port`/config) cannot be relocated until
 [Portify](#portify-and-benchmark) fixes. OAuth issuer + redirect URIs are
-pre-registered with the provider for a fixed host:port, so OAuth features (e.g.
+pre-registered with the provider for a fixed host:port, so OAuth flows (e.g.
 `shop_oauth`) run one at a time regardless of any rewiring. The `${port}` envset
 resolver and a verified source overlay unlock same-app concurrency; the envset
 resolver alone cannot fix a listener that ignores its injected value.
@@ -520,9 +530,9 @@ single mechanism behind both the automatic trigger and the user's own **Propose 
 still never touched: the patch is applied in a throwaway worktree cut from the captured
 `baseSha`, committed, force-pushed, and turned into a PR by `gh`, whose own credential does
 the push — Canary Lab never handles a token. What the product repo *does* gain is the fix
-branch ref and its remote-tracking ref. The branch is scoped to **feature + repo**
+branch ref and its remote-tracking ref. The branch is scoped to **suite + repo**
 (`fixBranchName(feature, repoName)` → `canary-lab/fix-<feature>-<repo>`), not to the run, so
-healing the same feature three times updates ONE pull request instead of opening three. That
+healing the same suite three times updates ONE pull request instead of opening three. That
 makes the order load-bearing: the push happens FIRST and an existing PR is looked up only
 afterwards, so a reviewer never opens a stale earlier attempt.
 
@@ -548,7 +558,7 @@ link, or the per-repo reason there is none.
   initialize and reconnect without a flag. The SDK classifies each request from
   its protocol envelope; both paths build tools from the same profile factory.
 - **Profiles** pick the tool surface via `?profile=`. There are seven workflow profiles, two composed direct-tool profiles, and one compact dispatcher profile: `repair` (heal loop), `verify` (verification configs), `author`
-  (feature/envset/draft authoring), `coverage` (docs → PRD summary → ledger), `export`
+  (suite/envset/draft authoring), `coverage` (docs → PRD summary → ledger), `export`
   (evaluation archives), `flight` (the conducted pipeline), `portify` (port-injection
   workflow), then `lifecycle` (repair + verify + author + coverage + export + flight,
   no portify), `full` (lifecycle + portify), and `compact` (**the bare-server and
@@ -603,7 +613,7 @@ link, or the per-repo reason there is none.
   own. It has to ride the *result*: `REPAIR_INSTRUCTIONS` never mentions the pull request at
   all, so a skill-less client would otherwise push a duplicate branch on top of the one the
   run just opened.
-- **Feature docs convention**: feature-scoped prose (distilled sessions, plans,
+- **Suite docs convention**: suite-scoped prose (distilled sessions, plans,
   notes) lives at `features/<name>/docs/<slug>.md`. The `write_feature_doc` MCP tool
   (`coverage` / `flight` / `lifecycle` / `full` direct profiles, or dispatched through
   `compact` — **not** the direct `author` profile) is the only
@@ -614,8 +624,8 @@ link, or the per-repo reason there is none.
 ## Portify and Benchmark
 
 **Portify** (`apps/web-server/src/features/portify/logic/runtime/`, ~16 files) is an agent-driven
-workflow that rewrites a feature's services so every network listener reads an
-injected port, proven by a concurrent double-boot — making the feature eligible for
+workflow that rewrites a suite's services so every network listener reads an
+injected port, proven by a concurrent double-boot — making the suite eligible for
 concurrent runs and benchmark arms. Two execution models, split by who initiates
 (see "Internal vs external execution" under Requirement Coverage — the same rule):
 the **GUI** spawns a local agent (`startPortify`/`revise`, REST only) that streams
@@ -630,12 +640,12 @@ failed double-boot re-parks at `editing` and `get_portify` rides the rendered
 verification calls `revise_external_portify(workflowId, feedback)`, which reopens
 the same worktree (`orchestrator.reopenExternal`) and returns
 `portify-feedback.md` — the point being that `cancel_portify` would discard a
-verified worktree that the client would then have to rebuild from scratch. One workflow **per feature** (a second start on the
-same feature is a 409); different features port-ify concurrently up to a global
+verified worktree that the client would then have to rebuild from scratch. One workflow **per suite** (a second start on the
+same suite is a 409); different suites port-ify concurrently up to a global
 resource cap — `portifyConcurrencyCap()` reuses the run loop's `computeSlotBudget`
 heuristic, with an optional manual ceiling via env `CANARY_MAX_CONCURRENT_PORTIFY`
 (mirrors `CANARY_MAX_CONCURRENT_RUNS`). Over the cap, a start returns 429 (no queue —
-the caller waits/retries). `list_portify_status` shows which features have a saved overlay.
+the caller waits/retries). `list_portify_status` shows which suites have a saved overlay.
 
 **Ephemeral overlay model** (the source edits never touch the product repo): the
 agent edits source in a throwaway scratch worktree and the verified diff is captured
@@ -643,33 +653,33 @@ as a per-repo patch under `features/<feature>/portify/` (`overlay.ts`: `writeOve
 `readOverlay`/`overlayExists`/`checkStaleness`). `save_portify` writes the overlay and
 discards the scratch worktree — nothing is committed or merged. At RUN time every repo is
 already worktree-isolated (see [Run worktrees and fix capture](#run-worktrees-and-fix-capture); for a
-portified feature this is non-negotiable rather than best-effort — a repo that can't be
+portified suite this is non-negotiable rather than best-effort — a repo that can't be
 worktree'd fails the run). The orchestrator `applyOverlay`s the
 patch (plain `git apply`, `--3way` fallback) before boot after a staleness check, and
 `reverseOverlay`s it (atomic `git apply -R`) at teardown while KEEPING the worktree
 (it holds heal edits). Apply/staleness failure aborts the run loudly ("re-run Portify")
-— it never boots un-portified. The feature-config `ports` slots + envset tokenization
+— it never boots un-portified. The suite configuration's `ports` slots + envset tokenization
 the agent also writes are PERMANENT (Canary Lab reads the slots in `allocateRunPorts`
 before the overlay applies), so only the product-repo source is ephemeral.
 
-**Cross-feature reuse** (the overlay is filed per feature but the patch belongs to a
+**Cross-suite reuse** (the overlay is filed per suite but the patch belongs to a
 git ROOT): at setup `buildSiblingOverlayIndex` (`portify-worktree-borrow.ts`) indexes
-every OTHER feature's non-empty patches by resolved git toplevel, `pickBorrowable`
+every OTHER suite's non-empty patches by resolved git toplevel, `pickBorrowable`
 prefers an exact base-SHA match then the newest capture, and the winner is
 `applyOverlay`-ed into the scratch worktree AFTER the diff baseline — so the borrowed
-lines flow into THIS feature's own captured overlay (self-contained, no pointer back to
-the source feature). A conflict resets the worktree and the agent starts from scratch;
+lines flow into THIS suite's own captured overlay (self-contained, no pointer back to
+the source suite). A conflict resets the worktree and the agent starts from scratch;
 borrowing is an optimization, never fatal. What does NOT travel is the config half: the
-`ports` slots are per feature, so each overlay ALSO records the slots its feature
+`ports` slots are per suite, so each overlay ALSO records the slots its suite
 declared (`OverlayRepo.ports`) purely as a hint — `buildSeededNote` hands that list to
-the borrowing agent/client, which confirms it against the start commands THIS feature
-boots (a differently-booted stack can bind a listener the source feature never did)
-instead of re-deriving it from the diff. When the borrowing feature already declares
+the borrowing agent/client, which confirms it against the start commands THIS suite
+boots (a differently-booted stack can bind a listener the source suite never did)
+instead of re-deriving it from the diff. When the borrowing suite already declares
 every recorded slot there is nothing left to edit at all, and `start_external_portify`
 begins the double-boot itself (`seededSlotsAlreadyDeclared`) rather than waiting for a
 submit — the internal path has the equivalent attempt-0 gate in `orchestrator.run()`.
 The concurrent double-boot stays the only proof on every path. Because a borrowed patch
-lands in features that may not boot the same peers, `portify.md` requires every port
+lands in suites that may not boot the same peers, `portify.md` requires every port
 rewrite — listener AND inter-service client — to keep its original value as a fallback,
 so an un-injected peer is dialled exactly where it always was.
 
@@ -702,7 +712,7 @@ self-report:
   DB/state → 2, app API/UI → 3, browser-at-real-destination → 4) by structural heuristics
   (no agent), grades the test `shallow` / `basic` / `solid` / `strong`, and surfaces a
   `suggestedStrongerCheck`.
-- **Latest-run proof** — `service.ts` reads the feature's latest run outcomes
+- **Latest-run proof** — `service.ts` reads the suite's latest run outcomes
   and joins them to tests by title. `ledger.ts` then adds per-path or
   path-by-variant `proven` flags, `totals.proven`, and `provenPct`. A test that
   failed or never ran may still claim coverage, but it proves nothing in that
@@ -735,6 +745,41 @@ highest-risk invariant is **requirement-id stability across PRD regeneration** �
 (by echoed id or exact title match) and carries dropped ones as `deprecated`, because a
 renumber would silently break every inline `@requirement` annotation.
 
+## Readable Tests
+
+Readable Tests are deterministic source explanations, not execution evidence.
+The Test Ledger and Coverage Ledger render a reader-first English story for each
+Playwright test, while pass, fail, running, and changed-test states remain attached
+to the test itself. A static child step never claims that Playwright executed or
+passed it.
+
+The active pipeline is:
+
+1. `apps/web-server/src/shared/ast-extractor.ts` compiles the complete source file
+   once with `compileSemanticSource`, discovers tests and top-level helpers, and
+   passes the same TypeScript syntax tree to `translateReadableTestFromAst`.
+2. `apps/web-server/src/shared/controlled-english/` produces exhaustive syntax
+   wording plus conservative semantic classifications. Semantic categories come from compiler
+   symbols, known fixtures, or explicit `feature.config.cjs` semantic rules — never
+   from an identifier guess or an LLM.
+3. `apps/web-server/src/shared/readable-tests/` builds the source-ordered story,
+   preserves branches, loops, retries, helpers, and evaluation order, and keeps an
+   exact file, line range, and snippet on every story item. Unsupported or unresolved
+   syntax remains visible and makes the test `partial` instead of disappearing.
+4. `shared/readable-tests/types.ts` is the single server/web contract. The
+   `/api/features/:name/tests` route sends `ExtractedTest.readable`; `TestPresentation` and
+   `ReadableTestView` provide English-by-default and exact-source navigation in both
+   ledgers. Evaluation flowcharts reuse the same translator rather than inventing a
+   second parser.
+
+Nothing is persisted as a translated sidecar: the server derives the view from the
+current source when it extracts tests. TypeScript is pinned to 5.9.3 because its AST
+is the input language; `compiler-context.ts` and the syntax inventory tests force a
+deliberate vocabulary audit before that compiler version can change. The detailed
+contracts live in the [controlled-English grammar](controlled-english/controlled-english-grammar.md),
+[semantic boundaries](controlled-english/semantic-boundaries.md), and
+[coverage report](controlled-english/coverage-report.md).
+
 ## Keep-in-Sync Invariants
 
 The canonical table. Each row is a set of files that must change together — nothing
@@ -759,6 +804,7 @@ procedure.
 | Templates ↔ shipped package | `templates/project/**` ↔ `dist/templates/` copy (`tools/prepare-assets.mjs`) ↔ consumer `canary-lab upgrade` | `npm run smoke:pack` | `cl_add-sample-feature` |
 | Coverage ledger single computation layer | `apps/web-server/src/features/coverage/logic/coverage/service.ts` joins requirements + tags + `run-outcomes.ts` ↔ `ledger.ts` computes claim and proof axes ↔ `routes/coverage.ts` and `get_feature_coverage` return that result without recomputing it | service, ledger, route, and MCP tests | `cl_run-evidence-invariants` |
 | Requirement-id stability | `reconcileRequirementIds` (`apps/web-server/src/features/coverage/logic/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
+| Readable Test compiler ↔ source links ↔ consumers | TypeScript 5.9.3 in `package.json` ↔ `controlled-english/compiler-context.ts` and syntax inventories ↔ `readable-tests/translator.ts` ↔ `ast-extractor.ts` ↔ `shared/readable-tests/types.ts` ↔ `TestPresentation` / `ReadableTestView` and the evaluation flowchart adapter. The story stays deterministic and source-linked; runner verdicts stay at test level. | controlled-English, readable-tests, extractor, presentation, and `npm run check:wire` tests | `cl_run-evidence-invariants` |
 | Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ generated `AGENTS.md` ↔ `docs/ARCHITECTURE.md` (mechanisms) ↔ `docs/PRD.md` (intent) ↔ `docs/GUIDE.md` / `docs/FEATURES.md` (user-facing operation) ↔ the skill index in `CLAUDE.md` | contributor-doc audit in `cl_verify-changes` | `cl_verify-changes` |
 | **Web↔server wire contract** | Server response types ↔ hand-written mirrors in `apps/web/src/shared/api/**` ↔ the `WorkspaceEvent` union on both sides. The web app cannot import server code, so this contract needs a dedicated comparison gate. | `npm run check:wire` (`tools/check-wire-contracts.mjs`) | — |
 | **Checkpoint option vocabulary** | `CHECKPOINT_OPTIONS` (`shared/flights/types.ts`) ↔ checkpoint emitters under `flights/logic/stages/` ↔ `respond_flight_checkpoint` ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`). Option keys are wire values. `prd-source` may offer a subset. `external-work` renders its normal `submit` / `run-internally` options visibly but disabled in the web viewer; the separate takeover control requests a safe release instead of posting either answer on the external client's behalf. | `stage-meta.checkpoints.test.ts` (every kind titled, every rendered option labelled, fallback intact) + `FlightPage.checkpoints.test.tsx` + `satisfies Record<FlightCheckpointKind, …>` | `cl_sync-agent-surfaces` |

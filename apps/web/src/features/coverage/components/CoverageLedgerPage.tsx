@@ -343,7 +343,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
       ) : (
         <>
           {ledger.tests.length === 0 && (
-            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No tests found in this feature&apos;s specs.</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No tests found in this suite&apos;s specs.</div>
           )}
           {orphanTests.length > 0 && (
             <div data-testid="orphan-tests-note" style={{ marginBottom: 10, fontSize: 11, color: 'var(--warning)' }}>

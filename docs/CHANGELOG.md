@@ -8,7 +8,7 @@ Each entry is tagged with the area it touches:
 - **[Test Generation]** — spec authoring and PRD/plan drafting (the flight's authoring stage; the standalone Add Test wizard before it)
 - **[Coverage]** — verified coverage ledger, requirement-to-test traceability
 - **[Export evaluation]** — exported evaluation reports
-- **[Portify]** — port-ification wizard, converting features to dynamic port allocation
+- **[Portify]** — port-ification wizard, converting suites to dynamic port allocation
 - **[Cleanup]** — log and run history cleanup
 - **[Benchmark]** — measuring how the repair loop performs compared to running tests without Canary Lab
 - **[General]** — UI shell, CLI, scaffolding, packaging
@@ -19,6 +19,7 @@ Each entry is tagged with the area it touches:
 
 > Run `npx canary-lab upgrade`, then restart connected agent apps, to refresh Canary Lab skills and switch existing connections to the compact profile.
 
+- **[General]** **Runnable test folders are now called suites.** The UI, CLI, and guides use the same name while existing workspaces and automation keep their current folder, command, and API names.
 - **[General]** **Playwright tests now open in plain English.** The Test Ledger renders authored steps, actions, checks, helpers, branches, retries, and loops as a nested story derived locally without an LLM, with the original code one click away.
 - **[Coverage]** **Coverage uses the same source-linked test story.** Selecting an English step opens its exact code and editor location—even inside a helper file—while unsupported syntax stays visible as source instead of being guessed.
 - **[Coverage]** **Coverage passes focus on the gaps still open.** Flight validates each authored batch, asks the mapper only about requirements that remain uncovered, preserves every pass in Activity, and stores the exact coverage percentage for stable status updates.

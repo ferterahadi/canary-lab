@@ -589,7 +589,7 @@ describe('TestCasesColumn', () => {
       root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
     })
 
-    expect(container.textContent).toContain('Unable to load tests for this feature. Server returned HTTP 500.')
+    expect(container.textContent).toContain('Unable to load tests for this suite. Server returned HTTP 500.')
     expect(container.textContent).not.toContain('Loading...')
   })
 

@@ -43,7 +43,7 @@ export const ARM_MATRIX: { section: string; note: string; rows: ArmRow[] }[] = [
       { label: 'Diagnosis journal', detail: 'what prior heal cycles already tried', harness: true, baseline: false },
       { label: 'Captured service logs', detail: 'canary-lab’s svc-*.log capture', harness: true, baseline: false },
       { label: 'Playwright summary', detail: 'the e2e-summary.json reporter output', harness: true, baseline: false },
-      { label: 'Feature docs / wiki', detail: 'product context + preserved prior work', harness: true, baseline: false },
+      { label: 'Suite docs / wiki', detail: 'product context + preserved prior work', harness: true, baseline: false },
     ],
   },
 ]

@@ -41,7 +41,7 @@ const WORKFLOW_WAIT_LABEL: Record<string, string> = {
   coverage: 'Measure Coverage',
   author: 'Author Tests',
   portify: 'Enable Parallel Runs',
-  heal: 'Run and Heal a Feature',
+  heal: 'Run and Heal a Suite',
   // A pre-upgrade active session can still carry the retired key.
   verify: 'Verify a Running App',
   export: 'Export an Evaluation',

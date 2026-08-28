@@ -20,7 +20,7 @@ const WORKFLOWS: OnboardingWorkflow[] = [
   ['coverage', 'more', 1, 'Measure Coverage', '/canary-lab-coverage'],
   ['author', 'more', 2, 'Author Tests', '/canary-lab-author'],
   ['portify', 'more', 3, 'Enable Parallel Runs', '/canary-lab-portify'],
-  ['heal', 'more', 4, 'Run and Heal a Feature', '/canary-lab-run'],
+  ['heal', 'more', 4, 'Run and Heal a Suite', '/canary-lab-run'],
   ['export', 'more', 5, 'Export an Evaluation', '/canary-lab-export'],
 ].map(([id, group, order, title, skill]) => ({
   id: id as OnboardingWorkflowId,

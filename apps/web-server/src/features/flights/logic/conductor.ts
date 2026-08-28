@@ -196,10 +196,10 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
   // Fresh record: the caller must actually supply the inputs (a mode-carrying
   // call that found no record to reuse lands here with empty fallbacks).
   if (args.repoPaths.length === 0) {
-    throw new FlightStageEntryError(`feature "${args.feature}" has no flight record — repoPaths are required to start one`)
+    throw new FlightStageEntryError(`suite "${args.feature}" has no flight record — repoPaths are required to start one`)
   }
   if (!args.description.trim()) {
-    throw new FlightStageEntryError(`feature "${args.feature}" has no flight record — a description is required to start one`)
+    throw new FlightStageEntryError(`suite "${args.feature}" has no flight record — a description is required to start one`)
   }
   const entryLinks = checkStageEntry(args, deps, null)
 

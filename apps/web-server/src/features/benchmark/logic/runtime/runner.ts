@@ -67,7 +67,7 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
       )
     }
     const found = deps.loadFeatures().find((f) => f.name === input.feature)
-    if (!found) throw Object.assign(new Error(`feature not found: ${input.feature}`), { statusCode: 404 })
+    if (!found) throw Object.assign(new Error(`suite not found: ${input.feature}`), { statusCode: 404 })
     const feature: FeatureConfig = found
     const agentChoice = deps.pickAgent(input.agent)
     if (!agentChoice) {
@@ -82,7 +82,7 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
 
     const env = feature.envs?.[0]
     const repo0 = (feature.repos ?? [])[0]
-    if (!repo0) throw Object.assign(new Error(`feature "${feature.name}" declares no repos to sabotage`), { statusCode: 409 })
+    if (!repo0) throw Object.assign(new Error(`suite "${feature.name}" declares no repos to sabotage`), { statusCode: 409 })
     const repo: RepoPrerequisite = repo0
 
     // Worktrees only see COMMITTED files, so uncommitted edits to the feature's
@@ -105,7 +105,7 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
     if (repoStatus.stdout.trim()) {
       throw Object.assign(
         new Error(
-          `feature "${feature.name}" has uncommitted changes — commit or stash them before benchmarking (worktrees only see committed files)`,
+          `suite "${feature.name}" has uncommitted changes — commit or stash them before benchmarking (worktrees only see committed files)`,
         ),
         { statusCode: 409 },
       )

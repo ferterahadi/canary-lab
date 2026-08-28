@@ -104,7 +104,7 @@ export function FlightsPickerDialog({
     >
       {rows.length === 0 && preFlightRows.length === 0 ? (
         <div className="px-4 py-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-          No flights yet. Fly a suite from its row in the features list — or start one from a terminal:
+          No flights yet. Fly a suite from its row in the suites list — or start one from a terminal:
           <div className="cl-code-shell mt-2 px-2 py-1.5 text-[11px]">
             npx canary-lab flight ../your-repo "what to test"
           </div>

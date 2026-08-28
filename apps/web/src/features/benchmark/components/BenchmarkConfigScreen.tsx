@@ -133,7 +133,7 @@ export function ConfigScreen({
             </>
           )}
 
-          <Field label="Feature">
+          <Field label="Suite">
             <select
               value={feature}
               onChange={(e) => {

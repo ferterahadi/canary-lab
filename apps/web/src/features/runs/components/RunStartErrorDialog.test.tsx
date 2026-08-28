@@ -126,7 +126,7 @@ describe('RunStartErrorDialog — branch mismatch', () => {
   it('the Pin option adopts the current branch', async () => {
     const onPinCurrent = vi.fn().mockResolvedValue(undefined)
     await render({ error: branchMismatchError(), onPinCurrent })
-    click(buttonContaining('Pin the feature'))
+    click(buttonContaining('Pin the suite'))
     await flush()
     expect(onPinCurrent).toHaveBeenCalledOnce()
   })

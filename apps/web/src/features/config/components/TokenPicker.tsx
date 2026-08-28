@@ -135,7 +135,7 @@ export function TokenPicker({
               )}
               {slots.length === 0 ? (
                 <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                  No slots in this feature. Add one in the Envsets tab.
+                  No slots in this suite. Add one in the Envsets tab.
                 </div>
               ) : (
                 <div className="max-h-60 overflow-y-auto scrollbar-thin">

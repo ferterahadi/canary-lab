@@ -121,7 +121,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
   if (!feature) {
     return (
       <div className="flex h-full items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
-        Select a feature
+        Select a suite
       </div>
     )
   }
@@ -270,9 +270,9 @@ function summaryIdentityForWorkspaceTest(
 
 function formatLoadError(err: unknown): string {
   if (err instanceof api.ApiError) {
-    return `Unable to load tests for this feature. Server returned HTTP ${err.status}.`
+    return `Unable to load tests for this suite. Server returned HTTP ${err.status}.`
   }
-  return 'Unable to load tests for this feature.'
+  return 'Unable to load tests for this suite.'
 }
 
 function TestCard({

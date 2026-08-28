@@ -100,11 +100,10 @@ describe('TestCasesColumn', () => {
       )
     })
 
+    const codeTab = container.querySelector<HTMLButtonElement>('[data-testid="test-presentation-code-tab"]')
+    expect(codeTab).not.toBeNull()
     await act(async () => {
-      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-    await act(async () => {
-      ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
+      codeTab?.click()
     })
 
     expect(container.textContent).toContain("page.goto('/line/rejected')")

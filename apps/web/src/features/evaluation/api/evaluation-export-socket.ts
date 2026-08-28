@@ -12,6 +12,7 @@ export interface ConnectEvaluationExportOptions {
   onData: (chunk: string) => void
   onExit?: (code: number) => void
   onError?: (err: string) => void
+  onUnavailable?: (err: string) => void
   wsBase?: string
   WebSocketImpl?: typeof WebSocket
   maxReconnects?: number
@@ -28,6 +29,9 @@ export function connectEvaluationExport(opts: ConnectEvaluationExportOptions): E
     WebSocketImpl: opts.WebSocketImpl,
     maxReconnects: opts.maxReconnects,
     onError: opts.onError,
+    onSetupError: opts.onUnavailable
+      ? (error) => opts.onUnavailable?.(error instanceof Error ? error.message : String(error))
+      : undefined,
     onMessage: (data) => {
       let msg: EvaluationExportSocketMessage
       try {

@@ -267,6 +267,29 @@ describe('connectReconnectingSocket', () => {
     expect(reconnects).toEqual([1, 2])
   })
 
+  it('preserves constructor failures for callers that handle setup errors', () => {
+    const failure = new Error('socket unavailable')
+    class ThrowingWebSocket {
+      constructor() {
+        throw failure
+      }
+    }
+    const setupErrors: unknown[] = []
+    const transportErrors: string[] = []
+
+    connectReconnectingSocket({
+      url: 'ws://host/test',
+      WebSocketImpl: ThrowingWebSocket as unknown as typeof WebSocket,
+      onMessage: () => {},
+      onSetupError: (error) => setupErrors.push(error),
+      onError: (message) => transportErrors.push(message),
+      maxReconnects: 0,
+    })
+
+    expect(setupErrors).toEqual([failure])
+    expect(transportErrors).toEqual([])
+  })
+
   it('onError callback fires on socket error', () => {
     const errors: string[] = []
     connectReconnectingSocket({

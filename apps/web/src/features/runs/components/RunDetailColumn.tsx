@@ -39,7 +39,7 @@ export function healEmptyCopy(status: RunStatus, healCycles: number): { title: s
   if (healCycles === 0) {
     return {
       title: 'No repair agent ran',
-      body: 'This run ended before a repair cycle started — it was aborted, or heal is switched off for this feature.',
+      body: 'This run ended before a repair cycle started — it was aborted, or heal is switched off for this suite.',
       tone: 'neutral',
     }
   }

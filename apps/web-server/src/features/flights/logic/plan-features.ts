@@ -118,12 +118,12 @@ function sameRepoSet(a: string[], b: string[]): boolean {
  *  step couldn't act on — the task then fails with the parse story intact. */
 export function normalizePlanResult(raw: PlanFeaturesResult): PlanFeaturesResult {
   if (!raw || !Array.isArray(raw.features) || raw.features.length === 0) {
-    throw new Error('plan agent returned no features')
+    throw new Error('plan agent returned no suites')
   }
   const features: PlannedFeature[] = raw.features.slice(0, 8).map((f) => {
     const name = deriveFeatureSlug(String(f?.name ?? ''))
     const description = String(f?.description ?? '').trim()
-    if (!description) throw new Error(`planned feature "${name}" has no description`)
+    if (!description) throw new Error(`planned suite "${name}" has no description`)
     return {
       name,
       description,
@@ -132,7 +132,7 @@ export function normalizePlanResult(raw: PlanFeaturesResult): PlanFeaturesResult
     }
   })
   const names = new Set(features.map((f) => f.name))
-  if (names.size !== features.length) throw new Error('plan agent proposed duplicate feature names')
+  if (names.size !== features.length) throw new Error('plan agent proposed duplicate suite names')
   const split = features.length > 1
   return { split, features }
 }

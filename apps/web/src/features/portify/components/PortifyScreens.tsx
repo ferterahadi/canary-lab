@@ -109,7 +109,7 @@ export function PlanScreen({ feature, agent, busy, onStart }: { feature: string;
         </div>
         <h2 style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em', margin: '0 0 14px' }}>What will happen</h2>
         <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.65, margin: '0 0 10px' }}>
-          The <b style={{ color: 'var(--text-primary)' }}>{agent}</b> agent edits <b style={{ color: 'var(--text-primary)' }}>{feature}</b> in an isolated scratch worktree so each app reads its listen port from an injected env var, and declares matching <code style={mono}>ports</code> slots in the feature config.
+          The <b style={{ color: 'var(--text-primary)' }}>{agent}</b> agent edits <b style={{ color: 'var(--text-primary)' }}>{feature}</b> in an isolated scratch worktree so each app reads its listen port from an injected env var, and declares matching <code style={mono}>ports</code> slots in the suite configuration.
         </p>
         <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.65, margin: '0 0 24px' }}>
           The harness then boots the stack <b style={{ color: 'var(--text-primary)' }}>twice at once on different ports</b> and requires both to pass health checks — proof the rewrite works. You review the diff and save it.

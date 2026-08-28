@@ -195,7 +195,7 @@ export function FeaturesColumn({
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-2 py-2" style={{ scrollbarGutter: 'stable' }}>
         {features.length === 0 ? (
-          <div className="px-2 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>No features detected.</div>
+          <div className="px-2 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>No suites detected.</div>
         ) : (
           <div className="flex flex-col gap-1">
             {ungrouped.length > 0 && (

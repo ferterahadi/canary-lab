@@ -22,6 +22,9 @@ export interface ReconnectingSocketOptions {
   onReconnect?: (attempt: number) => void
   // Low-level transport error (ws.onerror). Frame-level errors stay the caller's.
   onError?: (message: string) => void
+  // Constructor failures happen before a socket exists. Callers that need the
+  // original reason can handle it separately while reconnecting stays active.
+  onSetupError?: (error: unknown) => void
   // Reconnect attempts after an unexpected close. Default 1 (per-task streams).
   // Pass Infinity for an always-on stream that must survive server restarts.
   maxReconnects?: number
@@ -77,8 +80,9 @@ export function connectReconnectingSocket(opts: ReconnectingSocketOptions): Reco
     let ws: WebSocket
     try {
       ws = new WSImpl(opts.url)
-    } catch {
-      opts.onError?.('socket error')
+    } catch (error) {
+      if (opts.onSetupError) opts.onSetupError(error)
+      else opts.onError?.('socket error')
       reconnect()
       return
     }

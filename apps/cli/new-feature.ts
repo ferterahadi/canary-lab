@@ -42,7 +42,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
 
   if (!isValidFeatureName(name)) {
-    fail(`Invalid feature name "${name}". Use letters, numbers, hyphens, or underscores.`)
+    fail(`Invalid suite name "${name}". Use letters, numbers, hyphens, or underscores.`)
     process.exit(1)
   }
 
@@ -51,11 +51,11 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const result = applyFeatureScaffold({ projectRoot, featureName: name, files })
 
   if (!result.ok) {
-    fail(result.details ?? `Could not create feature: ${result.error}`)
+    fail(result.details ?? `Could not create suite: ${result.error}`)
     process.exit(result.error === 'feature-exists' ? 2 : 1)
   }
 
-  ok(`Feature "${name}" created at ${ansiPath(`features/${name}/`)}`)
+  ok(`Suite "${name}" created at ${ansiPath(`features/${name}/`)}`)
   section('Created files')
   for (const relPath of canonicalScaffoldPaths(name)) {
     bullet(dim(`features/${name}/`) + relPath)

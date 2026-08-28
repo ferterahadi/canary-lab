@@ -92,7 +92,7 @@ export function removeFlightRecordsForFeature(
   const records = store.list().filter((e) => e.feature === feature)
   const active = records.find((e) => isActiveFlightStatus(e.status))
   if (active) {
-    return { error: `flight ${active.flightId} is ${active.status} — pause it before deleting the feature`, removed: 0 }
+    return { error: `flight ${active.flightId} is ${active.status} — pause it before deleting the suite`, removed: 0 }
   }
   for (const record of records) store.remove(record.flightId)
   return { removed: records.length }

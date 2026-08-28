@@ -2,22 +2,22 @@
 
 Operational reference for environments, runs, repair, Flight, coverage, and
 evaluation export. See the [README](../README.md) for installation and the main
-workflow, and [FEATURES](FEATURES.md) for the feature-folder contract.
+workflow, and [FEATURES](FEATURES.md) for the suite-folder contract.
 
 ## Environment switching
 
-An envset is a named collection of files applied for one feature environment.
+An envset is a named collection of files applied for one suite environment.
 Canary Lab backs up each configured target, writes the selected values before
 the run, and restores the originals during teardown. Manage envsets in the UI;
 their source files live under `features/<feature>/envsets/`.
 
-Feature configuration can also make service startup environment-specific. A
-typical feature starts local services for `local` and skips them for
+Suite configuration can also make service startup environment-specific. A
+typical suite starts local services for `local` and skips them for
 `production`, where Playwright points at a deployed URL.
 
 ### Test a deployed URL
 
-To run the same feature against a deployed environment without booting its local
+To run the same suite against a deployed environment without booting its local
 services:
 
 1. Add the environment to `feature.config.cjs`, for example
@@ -70,7 +70,7 @@ Export a terminal run from its **Overview** tab. The archive contains
 helpers, evidence, checks, and actual status. Failed, aborted, skipped, and
 never-run cases keep those states; export never rounds them into passes.
 
-When the feature has a PRD summary, the report separates two questions:
+When the suite has a PRD summary, the report separates two questions:
 
 - **Mapped coverage:** tags map a test to every required path and variant.
 - **Proven in this run:** the mapped test passed in the exported run.
@@ -135,7 +135,7 @@ hold repair edits; manage them under **Cleanup → Worktrees**.
 
 When a captured repair makes the run green and **Settings → GitHub → Open a
 draft PR when a run heals green** is enabled, Canary Lab updates a fix branch
-for the feature and product repository, then opens or updates a draft pull
+for the suite and product repository, then opens or updates a draft pull
 request. A GitHub failure is recorded on the manifest and does not change the
 test verdict. Red or abandoned repairs are never proposed.
 
@@ -229,7 +229,7 @@ client is gone, **Force takeover** is available behind a warning because Canary
 cannot interrupt file writes already happening in another process.
 
 The default coverage target is 100%. Portify proves injected-port readiness with
-a concurrent double boot. Skipping it leaves the feature serial; it does not
+a concurrent double boot. Skipping it leaves the suite serial; it does not
 make fixed ports safe for concurrent runs.
 
 ### Checkpoints and autopilot
@@ -243,7 +243,7 @@ Autopilot answers seven routine decisions by default and logs each answer as
 
 | Checkpoint | Decision | Autopilot |
 | --- | --- | --- |
-| `similarity-choice` | Rerun, enhance, or create a new feature when one already matches | Always asks |
+| `similarity-choice` | Rerun, enhance, or create a new suite when one already matches | Always asks |
 | `config-approval` | Accept the on-disk `feature.config.cjs` or re-scan | `approve` |
 | `prd-source` | Continue with docs, collect repo docs, or infer from the branch diff | `continue` with docs; otherwise `collect-repo-docs` |
 | `coverage-stuck` | Accept partial coverage or retry | `accept-partial` |
@@ -264,7 +264,7 @@ Markdown content or link a local file before choosing `continue`.
 
 ### Resume, redo, and queue
 
-One feature has one Flight record.
+One suite has one Flight record.
 
 - Recalling an active Flight follows it.
 - Recalling a paused Flight resumes its first open stage without deleting
@@ -285,9 +285,9 @@ different: it stops live stage work and must not be resumed without the user's
 request.
 
 Deleting a Flight record is available only in the web UI. It removes Flight
-history but keeps the feature and its files.
+history but keeps the suite and its files.
 
-The web UI can split a broad description into several proposed features. After
+The web UI can split a broad description into several proposed suites. After
 confirmation, the first Flight starts and siblings sharing the same repositories
 queue. This planning surface is not available through the CLI or MCP.
 
@@ -303,7 +303,7 @@ author the content:
 The names below are exact `command` values inside `exec.arguments`; for example,
 `{"command":"create_feature","arguments":{...}}`.
 
-1. `create_feature` writes the feature config, Playwright config, and envset
+1. `create_feature` writes the suite config, Playwright config, and envset
    skeleton.
 2. `capture_feature_env_files` or `write_envset` adds environment files. Capture
    responses expose redacted key names only.

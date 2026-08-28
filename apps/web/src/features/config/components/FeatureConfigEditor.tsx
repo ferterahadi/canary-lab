@@ -46,7 +46,7 @@ export function FeatureConfigEditor({ feature, portified = false, onClose, onDel
       <Modal
         open
         onClose={onClose}
-        eyebrow="Feature configuration"
+        eyebrow="Suite configuration"
         title={feature}
         width={960}
         height="88vh"

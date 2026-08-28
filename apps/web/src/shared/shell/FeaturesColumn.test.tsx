@@ -56,6 +56,22 @@ afterEach(() => {
 })
 
 describe('FeaturesColumn MCP promo gate', () => {
+  it('uses the suite vocabulary in the list heading and empty state', () => {
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[]}
+          selectedFeature={null}
+          onSelectFeature={() => {}}
+        />,
+      )
+    })
+
+    expect(container.textContent).toContain('Suites')
+    expect(container.textContent).toContain('No suites detected.')
+    expect(container.textContent).not.toContain('No features detected.')
+  })
+
   it('gates the "+ New" flight launcher behind the promo (R40: New starts a flight)', () => {
     const onStartNewFlight = vi.fn()
     gatePromo.mockImplementationOnce(() => {})

@@ -106,9 +106,9 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
       </div>
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         {!feature ? (
-          <div className="px-4 py-6 text-xs" style={{ color: 'var(--text-muted)' }}>Select a feature.</div>
+          <div className="px-4 py-6 text-xs" style={{ color: 'var(--text-muted)' }}>Select a suite.</div>
         ) : runs.length === 0 ? (
-          <div className="px-4 py-6 text-xs" style={{ color: 'var(--text-muted)' }}>No runs yet for this feature.</div>
+          <div className="px-4 py-6 text-xs" style={{ color: 'var(--text-muted)' }}>No runs yet for this suite.</div>
         ) : (
           <ul className="flex flex-col gap-1 px-2 py-2">
             {runs.map((r) => {

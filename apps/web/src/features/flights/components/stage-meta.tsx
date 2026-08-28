@@ -74,7 +74,7 @@ export const STAGE_BLURB: Record<FlightStageKey, string> = {
   'scout': 'Reads your repo to learn what it is built with and how it starts.',
   'scaffold': 'Creates the test suite in your workspace, with settings and a start command.',
   'env-capture': 'Copies the settings the app needs to start.',
-  'docs': 'Collects the documents that describe what the feature should do.',
+  'docs': 'Collects the documents that describe what the suite should do.',
   'prd-summary': 'Turns those documents into a short list of things to test.',
   'specs-coverage': 'Writes tests and maps them to requirements against your coverage target.',
   'portify': 'Lets each service take its port from settings, so two runs can go at once.',

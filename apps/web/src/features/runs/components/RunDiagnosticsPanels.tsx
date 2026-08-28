@@ -50,7 +50,7 @@ export function PlaywrightPanel({
               <button
                 type="button"
                 onClick={onOpenArtifactSettings}
-                title="Choose which Playwright artifacts this feature keeps — screenshots, video, trace"
+                title="Choose which Playwright artifacts this suite keeps — screenshots, video, trace"
                 className="cl-button mb-1 inline-flex shrink-0 items-center gap-1.5 px-2 py-1 text-[11px] font-medium"
               >
                 <GearIcon />

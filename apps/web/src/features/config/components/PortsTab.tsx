@@ -252,7 +252,7 @@ export function PortsTab({
                 type="button"
                 onClick={() => { setRemoveError(null); setConfirmRemove(true) }}
                 aria-label="Remove portification"
-                title="Deletes the saved overlay and restores the config; the feature reverts to its fixed ports."
+                title="Deletes the saved overlay and restores the config; the suite reverts to its fixed ports."
                 className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-[11px] font-medium transition-colors duration-150"
                 style={{
                   color: 'var(--danger)',
@@ -278,7 +278,7 @@ export function PortsTab({
                   ? `Portify runs one workflow at a time — ${blockedBy.feature} is currently portifying.`
                   : bandState === 'declared'
                   ? 'Optional — slots are already declared. Run it if a service ignores its env var and needs its listener rewritten.'
-                  : 'Rewrite every listener to an injectable port so the feature can boot concurrently.'}
+                  : 'Rewrite every listener to an injectable port so the suite can boot concurrently.'}
                 style={bandState === 'declared'
                   ? {
                       color: 'var(--text-secondary)',
@@ -307,11 +307,11 @@ export function PortsTab({
             {activeHere
               ? (activeHere.status === 'ready-to-save'
                 ? 'The rewrite is verified and parked for review. Open it to review the diff and save the overlay.'
-                : 'A port-ification workflow is running for this feature — it may have been started from a flight or by an agent. Open it to follow along.')
+                : 'A port-ification workflow is running for this suite — it may have been started from a flight or by an agent. Open it to follow along.')
               : bandState === 'verified'
               ? 'Rewritten by the agent, applied as an overlay each run.'
               : bandState === 'declared'
-              ? 'Every start command declares a port slot; Canary injects a free port through its env var at boot. Declared, not agent-verified — proven live whenever the feature boots twice.'
+              ? 'Every start command declares a port slot; Canary injects a free port through its env var at boot. Declared, not agent-verified — proven live whenever the suite boots twice.'
               : bandState === 'partial'
               ? 'Commands without a slot keep their fixed ports — two boots would clash there. Portify can cover the remaining commands.'
               : 'Concurrent boots would clash on fixed ports. Portify rewrites listeners to read injected ports and saves the diff as an overlay — the repo itself is never modified.'}
@@ -429,7 +429,7 @@ export function PortsTab({
               This reverts the port-ification of <code style={{ fontFamily: 'var(--font-mono)' }}>{feature}</code>: the code overlay is deleted and its <code style={{ fontFamily: 'var(--font-mono)' }}>feature.config.cjs</code> edits (the port slots and <code style={{ fontFamily: 'var(--font-mono)' }}>{'${port.…}'}</code> health-check URLs) are restored to how they were before. It boots on its fixed ports again and can no longer run concurrently.
             </p>
             <p style={{ color: 'var(--text-muted)' }}>
-              Your product repo is untouched. To re-derive the overlay from current source, remove it and run Portify again — the band offers it as soon as this completes. Until a new overlay is saved, the feature can't boot concurrently.
+              Your product repo is untouched. To re-derive the overlay from current source, remove it and run Portify again — the band offers it as soon as this completes. Until a new overlay is saved, the suite can&apos;t boot concurrently.
             </p>
             {removeError && <p style={{ color: 'var(--danger)' }}>{removeError}</p>}
           </div>

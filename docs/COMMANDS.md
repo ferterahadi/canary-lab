@@ -24,8 +24,8 @@ npx canary-lab upgrade [--silent] [--check] [--force-archive]
 `flight` takes one or more product repos from suite setup through evaluation export.
 
 - It creates or finds the workspace and starts the server when needed.
-- Autopilot answers seven routine checkpoints. Existing-feature choices, missing secrets, and failed automatic answers still reach you. See [Checkpoints and autopilot](GUIDE.md#checkpoints-and-autopilot).
-- `--redo` restarts the existing flight. `--from-stage <key>` re-enters at a stage after checking its prerequisites. `--fresh` creates a new feature.
+- Autopilot answers seven routine checkpoints. Existing-suite choices, missing secrets, and failed automatic answers still reach you. See [Checkpoints and autopilot](GUIDE.md#checkpoints-and-autopilot).
+- `--redo` restarts the existing flight. `--from-stage <key>` re-enters at a stage after checking its prerequisites. `--fresh` creates a new suite.
 - Repos and the test description are fixed after startup. To change them, stop and delete the flight in the UI, then start again.
 - Exit codes are `0` for green, `1` for a completed non-green run, `2` for a checkpoint, and `3` for failure.
 
@@ -36,9 +36,9 @@ The web UI and MCP tools (`start_flight`, `get_flight`, and `respond_flight_chec
 - `init` creates the workspace, installs dependencies and Chromium, and registers agent skills plus the compact MCP profile. Use `--no-install` for CI or offline setup.
 - `ui` starts the main human interface. Its port comes from `canary-lab.config.json`; change it in Project Settings, not with `ui --port`.
 - `setup` refreshes agent skills and registers only the `compact` MCP profile. It exposes one always-loaded `exec` tool that dispatches every Canary Lab command, including Portify. `--force` replaces existing entries, `--dry-run` previews changes, and `--agent` limits the target.
-- `boot` starts a feature's services without tests. It requires the UI server; `boot stop <runId>` ends the session.
+- `boot` starts a suite's services without tests. It requires the UI server; `boot stop <runId>` ends the session.
 - `mcp` connects an AI client to the UI server. A bare command and setup-installed clients both default to `compact`; focused profiles, `lifecycle`, and `full` remain opt-in direct-tool surfaces for debugging and rollback.
-- `new feature` creates a feature deterministically. `env` applies or restores an envset.
+- `new feature` creates a suite deterministically. `env` applies or restores an envset.
 - `upgrade` refreshes managed workspace files, existing agent skills, and existing MCP connections. It also repairs the browser-install hook and downloads the matching browser when an older workspace needs it. It does not install a newer npm package by itself.
 
 ### Upgrade from 1.5.x to 2.0.0
@@ -54,7 +54,7 @@ Restart `canary-lab ui` and connected agent apps afterwards. The 2.0 UI Update
 button runs both commands for you. When the 1.5.x Update button installs 2.0 but
 its older updater cannot run the new migration, the first 2.0 startup detects
 the 1.5.x workspace stamp and finishes that migration before serving the UI.
-Upgrade preserves existing feature folders, personal `CLAUDE.md` / `AGENTS.md`
+Upgrade preserves existing suite folders, personal `CLAUDE.md` / `AGENTS.md`
 notes, custom skills, and unrelated `package.json` fields. The 2.0 demonstration
 apps ship only in newly initialized workspaces; upgrading an existing workspace
 does not add or replace samples.
@@ -68,7 +68,7 @@ name as `command` and keep its inputs in the structured `arguments` object:
 {"command":"<exact_tool_name>","arguments":{"feature":"<feature_name>"}}
 ```
 
-That is the feature-scoped shape; commands with different inputs use the
+That is the suite-scoped shape; commands with different inputs use the
 argument fields returned by `describe_tool`.
 
 `list_tools`, `search_tools`, and `describe_tool` are internal discovery
@@ -97,9 +97,9 @@ Major capabilities share stores, so work started on one surface appears on the o
 | Capability | Agent skill | MCP profile (tools) | REST | UI |
 |---|---|---|---|---|
 | Flight (end-to-end) | `/canary-lab` | `flight` — `start_flight` / `get_flight` / `respond_flight_checkpoint` | `POST/GET /api/flights*` | Flights pill → flight view |
-| Run + heal | `/canary-lab-run` | `repair` — `start_run` / `wait_for_heal_task` / `signal_run` … | `/api/runs*` | feature Runs column / run detail |
+| Run + heal | `/canary-lab-run` | `repair` — `start_run` / `wait_for_heal_task` / `signal_run` … | `/api/runs*` | suite Runs column / run detail |
 | Deployed verification | `/canary-lab-verify` | `verify` — `execute_verification` … | `/api/verification*` | Verify dialog |
-| Feature authoring | `/canary-lab-author` | `author` — `create_feature` / draft flow / envsets | `/api/features*` | Flight → Test authoring & coverage stage / config editor |
+| Suite authoring | `/canary-lab-author` | `author` — `create_feature` / draft flow / envsets | `/api/features*` | Flight → Test authoring & coverage stage / config editor |
 | Coverage ledger | `/canary-lab-coverage` | `coverage` — summary/coverage jobs + ledger | `/api/coverage*` | Coverage ledger page (Suites column) |
 | Portify | `/canary-lab-portify` | `portify` — external portify workflow | `/api/portify*` | Flight → Parallel readiness stage (also run-collision recovery); Ports tab reports injectability |
 | Evaluation export | `/canary-lab-export` | `export` — evaluation export tools | `/api/evaluation*` | run detail → Export Evaluation |

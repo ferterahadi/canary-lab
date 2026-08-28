@@ -115,9 +115,9 @@ const BASELINE = new Map([
     reason: 'not drift: the AST extractor\'s type is an INTERNAL superset, and `GET /api/features/:name/tests` builds each entry fresh from name/line/bodySource/steps/readable(/sourceFile). The mirror describes that projection. The coverage-linkage fields never leave the server — the UI reads them off the coverage payload — so mirroring them would describe a wire that does not exist',
   }],
   ['FeatureStageEvidence', {
-    onlyServer: ['booted', 'portInjectability'],
-    onlyWeb: ['booted?', 'portInjectability?'],
-    reason: 'optionality-only: server always stamps both, web tolerates pre-1.5 records that lack them',
+    onlyServer: ['booted', 'coverageMapping', 'portInjectability'],
+    onlyWeb: ['booted?', 'coverageMapping?', 'portInjectability?'],
+    reason: 'optionality-only: server always stamps all three; web tolerates pre-1.5 records that lack booted/portInjectability and pre-2.1 payloads that lack coverageMapping',
   }],
 ])
 

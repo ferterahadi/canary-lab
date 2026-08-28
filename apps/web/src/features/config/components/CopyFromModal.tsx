@@ -113,7 +113,7 @@ export function CopyFromModal({
       {stage === 'pick' ? (
         <div className="flex flex-col gap-3 px-4 py-3">
           <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-            Pick a source to seed values from — another env in this feature, or any .env file on disk. Keys will be compared and you'll review the diff before anything is written into this editor's draft.
+            Pick a source to seed values from — another env in this suite, or any .env file on disk. Keys will be compared and you&apos;ll review the diff before anything is written into this editor&apos;s draft.
           </div>
           <div className="flex items-center gap-1.5">
             <button

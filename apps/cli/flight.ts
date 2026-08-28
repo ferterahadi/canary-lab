@@ -355,7 +355,7 @@ function usage(): void {
   console.log(`                 ${dim('[--coverage-target <pct>] [--base <branch>] [--from-stage <key>] [--redo] [--yolo] [--fresh]')}`)
   line()
   info('One command: repo → scaffold → env → PRD → Tests & coverage → Test run → Auto-repair → Report → Parallel setup.')
-  info('Re-running `flight` resumes an interrupted flight; `--redo` restarts the feature\'s flight from stage 1; `--from-stage <key>` starts at a chosen stage (prerequisites checked); `--fresh` is for a brand-new feature; `--yolo` skips all checkpoints except missing secrets.')
+  info('Re-running `flight` resumes an interrupted flight; `--redo` restarts the suite\'s flight from stage 1; `--from-stage <key>` starts at a chosen stage (prerequisites checked); `--fresh` is for a brand-new suite; `--yolo` skips all checkpoints except missing secrets.')
 }
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
@@ -434,11 +434,11 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       const existingId = String(started.json.existingFlightId)
       const existingStatus = String(started.json.existingStatus ?? '')
       if (!process.stdin.isTTY) {
-        info(`Feature "${feature}" already has a flight (${existingId}, ${existingStatus}).`)
+        info(`Suite "${feature}" already has a flight (${existingId}, ${existingStatus}).`)
         info('Re-run with `--redo` (restart from stage 1) or `--from-stage <key>` (jump), or resume it from the web UI.')
         process.exit(2)
       }
-      section(`Feature "${feature}" already has a flight (${existingStatus})`)
+      section(`Suite "${feature}" already has a flight (${existingStatus})`)
       console.log('  1) continue — resume where it left off')
       console.log('  2) redo — restart from stage 1 (discards its stage evidence)')
       console.log('  3) jump — start at a chosen stage (prerequisites checked)')
@@ -471,7 +471,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     } else if (started.status === 409 && started.json.type === 'flight_frozen') {
       // Repos + intent are frozen once a flight exists. A redo/jump that passed
       // DIFFERENT repos or description gets here — steer to the reuse path.
-      fail(`This feature's repos and intent are frozen for its flight — they're set when it first starts and can't be changed on a redo/jump.`)
+      fail(`This suite's repos and intent are frozen for its flight — they're set when it first starts and can't be changed on a redo/jump.`)
       info(`Re-run without new repo paths or description (e.g. \`canary-lab flight --redo --feature ${feature}\`) to reuse the stored ones,`)
       info('or delete the flight in the web UI to start fresh with different repos/intent.')
       process.exit(1)
@@ -482,8 +482,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       return
     } else {
       flightId = String((started.json as { flightId?: string }).flightId)
-      const forWhat = flight.repoPaths.length > 0 ? flight.repoPaths.join(', ') : `feature "${feature}"`
-      ok(`Flight ${dim(flightId)} started for ${dim(forWhat)} → feature "${feature}".`)
+      const forWhat = flight.repoPaths.length > 0 ? flight.repoPaths.join(', ') : `suite "${feature}"`
+      ok(`Flight ${dim(flightId)} started for ${dim(forWhat)} → suite "${feature}".`)
       info(`Watch it live in the web UI: ${dim(base)}`)
     }
   }

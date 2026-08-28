@@ -17,7 +17,7 @@ export const coverageMappingInput = z.object({
   testName: z.string().describe('Exact test name as given in the start context.'),
   requirements: z.array(z.string()).describe('Requirement id(s) this test verifies (e.g. ["R1"]). Unknown ids are dropped.'),
   pathTypes: z.array(z.enum(['happy', 'sad', 'edge'])).optional(),
-  variants: z.array(z.string()).optional().describe('Variant value(s) this test exercises (e.g. ["email"]), from the feature\'s variant dimension. Values outside it are dropped. Omit for a variant-agnostic test.'),
+  variants: z.array(z.string()).optional().describe('Variant value(s) this test exercises (e.g. ["email"]), from the suite\'s variant dimension. Values outside it are dropped. Omit for a variant-agnostic test.'),
   file: z.string().optional().describe('Relative spec path; omit and Canary resolves it by test name.'),
   rationale: z.string().optional(),
   confidence: z.number().optional(),
@@ -35,7 +35,7 @@ export const summaryRequirementInput = z.object({
   happyPath: z.string().optional(),
   unhappyPath: z.string().optional(),
   pathTypes: z.array(z.enum(['happy', 'sad', 'edge'])).describe('At least one of happy/sad/edge.'),
-  variants: z.array(z.string()).optional().describe('Variant value(s) this requirement must hold across (≥2 of the feature\'s variantDimension values, e.g. ["email","whatsapp"]). Omit for a single-value / variant-agnostic requirement.'),
+  variants: z.array(z.string()).optional().describe('Variant value(s) this requirement must hold across (≥2 of the suite\'s variantDimension values, e.g. ["email","whatsapp"]). Omit for a single-value / variant-agnostic requirement.'),
   variantsNA: z.array(z.object({ variant: z.string(), reason: z.string() })).optional().describe('Variants from `variants` with NO testable surface (e.g. {variant:"line",reason:"no broadcast endpoint"}). Excluded from coverage + shown as N/A. Only when you confirmed the surface is absent — not merely untested.'),
   strictnessLadder: z.array(z.object({
     tier: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),

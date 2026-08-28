@@ -99,7 +99,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     // Test execution still lives in the web UI. Feature/env commands above are
     // deterministic wrappers for agents and compatibility.
     case 'run':
-      fail(`\`canary-lab ${command}\` was removed. Use \`canary-lab ui\` to run tests, edit envsets, and manage feature config from the web UI.`)
+      fail(`\`canary-lab ${command}\` was removed. Use \`canary-lab ui\` to run tests, edit envsets, and manage suite configuration from the web UI.`)
       process.exit(1)
       return
     case '-h':
