@@ -338,7 +338,7 @@ describe('verification routes', () => {
       payload: { playwrightEnvsetId: 'local', bootRunId: 'missing' },
     })
     expect(missingBoot.statusCode).toBe(400)
-    expect(missingBoot.json()).toEqual({ error: 'bootRunId must name an active boot session for this feature' })
+    expect(missingBoot.json()).toEqual({ error: 'bootRunId must name an active boot session for this suite' })
 
     startVerification.mockResolvedValueOnce(fakeOrchestrator('verify-config'))
     const configOnly = await app.inject({

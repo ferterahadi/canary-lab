@@ -22,6 +22,9 @@ import {
 import { BRACKETED_PASTE_BEGIN, BRACKETED_PASTE_END, defaultSpawnCommand, killTree, scheduleSigkillFallback } from './run-spawn'
 import { HEAL_AGENT_TAIL_BYTES, defaultHealPrompt, formatUserInterjectBlock } from './heal-agent-text'
 import { appendJournalIteration, recordLifecycle } from './run-manifest-writer'
+import { repoPathOverrideEnv } from './repo-path-env'
+import { writeHealAgentIsolationSettings } from './heal-agent-isolation'
+import { enabledForEnv, resolvePath } from '../../../../shared/launcher-startup'
 
 /**
  * Interrupt & Redirect — drop the user's correction into the live REPL's
@@ -175,6 +178,7 @@ export function ensureHealWorkspaceTrusted(ctx: RunContext): void {
 export function agentPtyEnv(ctx: RunContext): Record<string, string> {
   return {
     CANARY_LAB_PROJECT_ROOT: ctx.feature.featureDir,
+    ...repoPathOverrideEnv(ctx.repoPathOverrides),
     // Kept as a hint for tools or shell rc files that want to surface the
     // session id — the orchestrator writes the UUID to this path itself
     // (no formatter sidecar in REPL mode).
@@ -524,6 +528,21 @@ export function spawnHealAgentRepl(ctx: RunContext): PtyHandle {
   const workspaceRoot = healWorkspaceTrustRoot(ctx)
   let command: string
   try {
+    const editableRepoDirs = (ctx.feature.repos ?? [])
+      .filter((repo) => enabledForEnv(repo.envs, ctx.env))
+      .map((repo) => ctx.repoPathOverrides[repo.name] ?? resolvePath(repo.localPath))
+      .filter((candidate) => fs.existsSync(candidate))
+    const serviceMode = editableRepoDirs.length > 0
+    const writableDirs = [...new Set(serviceMode ? editableRepoDirs : [ctx.feature.featureDir])]
+    const isolationSettingsFile = cfg.agent === 'claude'
+      ? writeHealAgentIsolationSettings({
+          runDir: ctx.runDir,
+          writableDirs,
+          featureDir: ctx.feature.featureDir,
+          featureDirReadOnly: serviceMode,
+          worktrees: ctx.worktreeHandles,
+        })
+      : undefined
     command = (cfg.buildSpawnCommand ?? defaultSpawnCommand)({
       sessionId,
       resume,
@@ -532,10 +551,20 @@ export function spawnHealAgentRepl(ctx: RunContext): PtyHandle {
       // caller (`runHealAgent`); the wired spawn-command builder
       // appends `"@<promptFile>"` so claude reads it on startup.
       promptFile: healPromptFile(ctx),
-      // Service `cwd`s, not the feature's declared `localPath`s: on a
-      // worktree-isolated run those differ, and the agent must be granted the
-      // tree it will actually edit. The feature dir carries the specs.
-      writableDirs: [...ctx.services.map((svc) => svc.cwd), ctx.feature.featureDir],
+      // Effective repo paths, not the feature's declared `localPath`s: on a
+      // worktree-isolated run those differ, and the agent is granted only the
+      // tree it may actually edit. A repo-less feature is the explicit test-heal
+      // mode and keeps its suite writable. Otherwise Claude can read the suite
+      // while the invocation settings keep it and source checkouts read-only.
+      writableDirs,
+      ...(cfg.agent === 'claude' && serviceMode
+        ? {
+            readableDirs: [ctx.feature.featureDir],
+            isolationSettingsFile,
+          }
+        : cfg.agent === 'claude'
+          ? { isolationSettingsFile }
+          : {}),
       // Codex's interactive TUI stops at a repository-trust menu before it
       // reads the prompt. The production builder turns this into an
       // invocation-scoped config override with hooks disabled, leaving

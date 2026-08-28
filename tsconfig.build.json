@@ -6,6 +6,12 @@
     "rootDir": ".",
     "declaration": true
   },
-  "include": ["shared/**/*", "apps/cli/**/*", "apps/web-server/src/features/*/logic/runtime/**/*.ts"],
+  "include": [
+    "shared/**/*",
+    "apps/cli/**/*",
+    "apps/web-server/src/features/*/logic/runtime/**/*.ts",
+    "apps/web-server/src/shared/controlled-english/**/*.ts",
+    "apps/web-server/src/shared/readable-tests/**/*.ts"
+  ],
   "exclude": ["node_modules", "dist", "templates", "tools", "**/*.test.ts"]
 }

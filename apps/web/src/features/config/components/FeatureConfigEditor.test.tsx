@@ -40,6 +40,13 @@ function clickTab(label: string): void {
 }
 
 describe('FeatureConfigEditor tab ownership', () => {
+  it('uses the suite vocabulary in the visible dialog heading', () => {
+    act(() => { root.render(<FeatureConfigEditor feature="checkout" onClose={vi.fn()} />) })
+
+    expect(container.textContent).toContain('Suite configuration')
+    expect(container.textContent).not.toContain('Feature configuration')
+  })
+
   // The unrouted mount (the features-list gear) owns its own tab state.
   it('uncontrolled: opens on initialTab and switches tabs by itself', () => {
     act(() => { root.render(<FeatureConfigEditor feature="checkout" onClose={vi.fn()} />) })

@@ -5,6 +5,7 @@
 
 export {
   CHECKPOINT_OPTIONS,
+  FLIGHT_EXECUTION_ORDER,
   FLIGHT_STAGE_KEYS,
   STAGE_DEPENDS_ON,
   ACTIVE_FLIGHT_STATUSES,
@@ -21,9 +22,13 @@ export type {
   FlightCheckpointResponse,
   ExternalWorkCheckpointData,
   FlightStage,
+  FlightStageAgentSession,
+  FlightStageTiming,
+  FlightStageTimingKey,
   FlightStageErrorDetail,
   FlightStatus,
   FlightOptions,
+  FlightExternalAgentSession,
   FlightManifest,
   FlightIndexEntry,
   FlightStageEntryOption,

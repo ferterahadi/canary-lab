@@ -1,6 +1,6 @@
 import { type KeyboardEvent as ReactKeyboardEvent, useState } from 'react'
-import type { CoverageLedger, CoverageStatus, GapType, RequirementCoverage, TestCoverage, TestStrength } from '@/shared/api/types'
-import { ShikiCode } from '@/shared/ui/TestCodeBlock'
+import type { CoverageLedger, CoverageStatus, ExtractedTest, GapType, RequirementCoverage, TestCoverage, TestStrength } from '@/shared/api/types'
+import { TestPresentation } from '@/shared/ui/TestPresentation'
 import { TestIdBadge } from '@/shared/ui/TestIdBadge'
 import { stripLeadingTestOrdinal } from '@/shared/test-numbering'
 
@@ -311,7 +311,7 @@ export function VariantCoverage({ rc }: { rc: RequirementCoverage }) {
 // The test's strength chip + `@req-*` / `@path-*` tags carry the meaning — no
 // decorative accent border, and no run-coupled "verified" dot (coverage is semantic).
 // Click the header to disclose the actual test source (lazily fetched by the parent).
-export function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, source, sourceLoading, sourceError, onOpenEditor, onReqClick }: {
+export function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, source, sourceLoading, sourceError, onReqClick }: {
   test: TestCoverage
   testNumber?: number
   color: string
@@ -319,10 +319,9 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
   dimmed: boolean
   onHover: (on: boolean) => void
   onExpand: () => void
-  source: { body: string; absFile: string; line: number } | null
+  source: { test: ExtractedTest; absFile: string } | null
   sourceLoading: boolean
   sourceError: string | null
-  onOpenEditor: (absFile: string, line?: number) => void
   onReqClick: (id: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -363,8 +362,8 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
       >
         <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>
         <span className="clcov-testid"><TestIdBadge n={testNumber} /></span>
-        {/* Name is the identity; the file:line locator lives on the expanded
-            source head (with Open-in-editor), so it's not repeated here. */}
+        {/* Name is the identity; the expanded shared presentation owns the
+            file:line locator and Code mode's editor action. */}
         <strong className="clcov-req-title">{stripLeadingTestOrdinal(test.name)}</strong>
       </div>
       {/* One compact meta row: strength (what the test IS) + the requirement links it
@@ -403,23 +402,10 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
       {expanded && (
         <div className="clcov-source" data-testid={`test-source-${test.name}`}>
           {source ? (
-            <>
-              <div className="clcov-source-head">
-                <span className="clcov-source-path">{test.file}{test.line ? `:${test.line}` : ''}</span>
-                <button
-                  type="button"
-                  className="clcov-source-open"
-                  data-testid={`test-open-editor-${test.name}`}
-                  onClick={() => onOpenEditor(source.absFile, source.line)}
-                >
-                  Open in editor ↗
-                </button>
-              </div>
-              {/* Same syntax-highlighted code block as the run/playback view
-                  (ShikiCode), but static: no activeLine / runningHighlight, so it
-                  never shows a "currently running" line — coverage isn't a run. */}
-              <ShikiCode source={source.body} />
-            </>
+            <TestPresentation
+              test={source.test}
+              sourceFile={source.absFile}
+            />
           ) : sourceLoading ? (
             <div className="clcov-source-note">Loading source…</div>
           ) : sourceError ? (

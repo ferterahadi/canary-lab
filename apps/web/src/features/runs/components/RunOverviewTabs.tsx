@@ -78,7 +78,7 @@ export function RunOverviewTab({
           where a fixed-width button squeezed the tab row on a narrow panel. */}
       <div className="flex items-start gap-4">
         <dl className="grid min-w-0 flex-1 grid-cols-[92px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-xs">
-        <dt className="cl-rubric self-center">Feature</dt>
+        <dt className="cl-rubric self-center">Suite</dt>
         <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={manifest.feature}>{manifest.feature}</dd>
         <dt className="cl-rubric self-center">Envset</dt>
         <dd className="truncate" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }} title={manifest.env ?? ''}>{manifest.env ?? '-'}</dd>
@@ -152,7 +152,7 @@ export function healAgentOverviewLabel(manifest: RunManifest): string | null {
   if (manifest.healAgent === 'claude') return 'Claude'
   if (manifest.healAgent === 'codex') return 'Codex'
   if (manifest.healMode === 'manual') return 'Manual'
-  if (manifest.healMode === 'external') return 'External client'
+  if (manifest.healMode === 'external') return 'External agent session'
   if (manifest.healMode === 'auto') return 'Auto'
   return null
 }
@@ -163,7 +163,7 @@ export function externalHealClientLabel(kind: NonNullable<RunManifest['externalH
     case 'codex': return 'Codex'
     case 'claude-pty': return 'Claude (runner)'
     case 'codex-pty': return 'Codex (runner)'
-    case 'other': return 'External client'
+    case 'other': return 'External agent session'
   }
 }
 
@@ -180,7 +180,7 @@ export function VerifyOverviewTab({
   return (
     <RunPane padded>
       <dl className="grid grid-cols-[118px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-xs">
-        <dt className="cl-rubric self-center">Feature</dt>
+        <dt className="cl-rubric self-center">Suite</dt>
         <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={manifest.feature}>{manifest.feature}</dd>
         <dt className="cl-rubric self-center">Configuration</dt>
         <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={verification?.configName ?? 'Unsaved'}>{verification?.configName ?? 'Unsaved'}</dd>

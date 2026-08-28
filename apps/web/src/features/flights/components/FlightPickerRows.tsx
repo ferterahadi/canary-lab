@@ -5,7 +5,7 @@ import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import type { FeatureActivity } from '../state/feature-activity'
 import { Chip } from '@/shared/ui/StatusChip'
 import { Tooltip } from '@/shared/ui/Tooltip'
-import { STAGE_STATUS_LABEL, stageRailRows, stageStatusTone } from './stage-meta'
+import { FLIGHT_OVERVIEW, STAGE_STATUS_LABEL, stageRailRows, stageStatusTone } from './stage-meta'
 import { readGroupOpen, writeGroupOpen } from '../lib/group-open-state'
 import { derivedFlightToken } from '../lib/derived-stages'
 import { ACTIVITY_CHIP, FeatureActivityRow, FlightStatusChip, PickerGroup, activityStages, featureActivityRows, featureChipState, groupPickerRows, preFlightChipState } from './FlightChipState'
@@ -92,7 +92,7 @@ export function FlightsPickerDialog({
               Flights
             </h2>
             <p className="mt-0.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-              One command from a bare repo to a green, covered, evaluated run. Pick a flight to follow its stages and answer checkpoints.
+              {FLIGHT_OVERVIEW} Pick a flight to follow its stages and answer checkpoints.
             </p>
           </div>
           <button type="button" aria-label="Close flights picker" onClick={onClose} className="cl-button px-2 py-1 text-xs">
@@ -104,7 +104,7 @@ export function FlightsPickerDialog({
     >
       {rows.length === 0 && preFlightRows.length === 0 ? (
         <div className="px-4 py-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-          No flights yet. Fly a suite from its row in the features list — or start one from a terminal:
+          No flights yet. Fly a suite from its row in the suites list — or start one from a terminal:
           <div className="cl-code-shell mt-2 px-2 py-1.5 text-[11px]">
             npx canary-lab flight ../your-repo "what to test"
           </div>

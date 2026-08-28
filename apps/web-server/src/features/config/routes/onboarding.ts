@@ -241,7 +241,7 @@ export function readOnboardingSamples(
       id: 'heal',
       group: 'more',
       order: 4,
-      title: 'Run and Heal a Feature',
+      title: 'Run and Heal a Suite',
       outcome: 'Complete a normal test run that can be exported as an evaluation.',
       steps: ['Run the suite', 'Heal failures', 'Finish passing'],
       skill: '/canary-lab-run',

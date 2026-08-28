@@ -5,7 +5,12 @@
 // The TypeScript grammar also covers JavaScript for our purposes, so callers pass
 // `lang: 'typescript'` for both .ts and .js.
 
-type Highlighter = { codeToHtml: (code: string, opts: { lang: string; theme: string }) => string }
+type Highlighter = {
+  codeToHtml: (code: string, opts: { lang: string; theme: string }) => string
+  /** The theme's own canvas colours — what Shiki paints as the <pre> background
+   *  and default token colour — so non-code surfaces can share the exact canvas. */
+  themeColors: (theme: string) => { bg?: string; fg?: string }
+}
 
 let highlighterPromise: Promise<Highlighter> | null = null
 
@@ -25,7 +30,13 @@ export function getCodeHighlighter(): Promise<Highlighter> {
         langs: [ts.default],
         engine: createOnigurumaEngine(wasm.default),
       })
-      return { codeToHtml: (code, opts) => hl.codeToHtml(code, opts) }
+      return {
+        codeToHtml: (code, opts) => hl.codeToHtml(code, opts),
+        themeColors: (theme) => {
+          const registration = hl.getTheme(theme)
+          return { bg: registration.bg, fg: registration.fg }
+        },
+      }
     })()
   }
   return highlighterPromise

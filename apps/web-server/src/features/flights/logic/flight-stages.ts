@@ -1,7 +1,7 @@
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { FLIGHT_STAGE_KEYS, type AgentActivity, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightStage, type FlightStageErrorDetail, type FlightStageKey } from './types'
+import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, type AgentActivity, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightStage, type FlightStageAgentSession, type FlightStageErrorDetail, type FlightStageKey, type FlightStageTimingKey } from './types'
 import { FlightConductorDeps, StartFlightArgs, redoFlight, startFlight } from './conductor'
 import { drive } from './flight-drive'
 import { FlightStageEntryError, stampSystemLine } from './flight-errors'
@@ -36,12 +36,18 @@ export interface StageContext {
    *  same channel as appendLog). The last snapshot survives settle as the
    *  audit trail — see FlightStage.progress. */
   setProgress(progress: unknown): void
+  /** Switch the stage's named wall-clock phase. Production contexts always
+   * provide this; optional keeps third-party/test StageContext adapters source
+   * compatible while they migrate. */
+  setTimingPhase?(phase: Exclude<FlightStageTimingKey, 'checkpoint-wait'> | null): void
   /** Publish what this stage's spawned agent is doing right now. A separate
    *  channel from `setProgress` on purpose: the two are written by different
    *  writers at very different rates (an agent streams; a stage transitions),
    *  so sharing one field would have each clobbering the other. Adapters get
    *  this for free by piping agent output through `agentProgressSink`. */
   setAgentActivity(activity: AgentActivity): void
+  /** Append one immutable session ref to this stage's Activity history. */
+  addAgentSession(session: FlightStageAgentSession): void
   /** Merge flight-level fields an adapter is allowed to settle: deliverable
    *  links, the run verdict, and the target feature (similarity re-pointing
    *  the flight at an existing feature). */
@@ -91,7 +97,7 @@ export interface StageAdapter {
    *  never ran — including user-supplied inputs the stage collected (explicit
    *  user ruling: a restart rewinds the step to zero). Invoked ONLY on the
    *  explicit restart entry path (startFlight mode redo/jump, redoFlight) for
-   *  the entry stage and every later stage, in order — never on resume.
+   *  the entry's invalidation set, in stable order — never on resume.
    *  ctx.manifest() returns the PRIOR record (the one being discarded), so old
    *  deliverable links (runId, evaluationTaskId) are still readable. Same
    *  error posture as `teardown`: best-effort, never blocks the restart. */
@@ -111,6 +117,49 @@ export function defaultFlightId(): string {
  *  stops promptly. In-memory by design — after a restart there is nothing to
  *  cancel (store reconcile already parked the flight). */
 export const driveControllers = new Map<string, AbortController>()
+
+export function bankStageTiming(
+  stage: FlightStage,
+  key: FlightStageTimingKey,
+  nowIso: string,
+): FlightStage {
+  const timer = stage.timings?.[key]
+  if (!timer?.since) return stage
+  return {
+    ...stage,
+    timings: {
+      ...stage.timings,
+      [key]: {
+        elapsedMs: timer.elapsedMs + Math.max(0, Date.parse(nowIso) - Date.parse(timer.since)),
+      },
+    },
+  }
+}
+
+export function startStageTiming(
+  stage: FlightStage,
+  key: FlightStageTimingKey,
+  nowIso: string,
+): FlightStage {
+  if (stage.timings?.[key]?.since) return stage
+  return {
+    ...stage,
+    timings: {
+      ...stage.timings,
+      [key]: { elapsedMs: stage.timings?.[key]?.elapsedMs ?? 0, since: nowIso },
+    },
+  }
+}
+
+export function bankAllStageTimings(
+  stage: FlightStage,
+  nowIso: string,
+  preserve: readonly FlightStageTimingKey[] = [],
+): FlightStage {
+  return (Object.keys(stage.timings ?? {}) as FlightStageTimingKey[])
+    .filter((key) => !preserve.includes(key))
+    .reduce((current, key) => bankStageTiming(current, key, nowIso), stage)
+}
 
 /** The StageContext the drive hands an adapter, and the one `interruptStage`
  *  hands a teardown. Extracted so the two cannot drift: a teardown that could
@@ -143,6 +192,16 @@ export function buildStageContext(
       stages: m.stages.map((s) => (s.key === stageKey ? { ...s, ...patch } : s)),
     })
   }
+  const switchTimingPhase = (
+    stage: FlightStage,
+    phase: Exclude<FlightStageTimingKey, 'checkpoint-wait'> | null,
+    at: string,
+  ): FlightStage => {
+    const closed = (['authoring', 'mapping', 'validation', 'service-readiness'] as const)
+      .filter((key) => key !== phase)
+      .reduce((current, key) => bankStageTiming(current, key, at), stage)
+    return phase ? startStageTiming(closed, phase, at) : closed
+  }
   return {
     manifest: read,
     flightDir: store.flightDir(flightId),
@@ -152,7 +211,22 @@ export function buildStageContext(
       patchStage({ log: (cur?.log ?? '') + stampSystemLine(chunk, now()) })
     },
     setProgress: (progress) => { patchStage({ progress }) },
+    setTimingPhase: (phase) => {
+      const m = read()
+      const at = now()
+      store.save({
+        ...m,
+        updatedAt: at,
+        stages: m.stages.map((stage) => stage.key === stageKey ? switchTimingPhase(stage, phase, at) : stage),
+      })
+    },
     setAgentActivity: (agentActivity) => { patchStage({ agentActivity }) },
+    addAgentSession: (session) => {
+      const stage = read().stages.find((candidate) => candidate.key === stageKey)
+      const prior = stage?.agentSessions ?? []
+      if (prior.some((candidate) => candidate.sidecar === session.sidecar)) return
+      patchStage({ agentSessions: [...prior, session] })
+    },
     patchFlight: (patch) => {
       const cur = read()
       store.save({
@@ -196,8 +270,20 @@ export function stageSidecarDirs(key: FlightStageKey): string[] {
   return key === 'specs-coverage' ? ['specs-coverage', 'coverage-map'] : [key]
 }
 
+/** Which stage records and artifacts an explicit re-entry invalidates.
+ *
+ * Most entries retain the historical positional boundary: changing an earlier
+ * artifact can invalidate everything recorded after it. Parallel setup is the
+ * one independent terminal task. It reads suite/env configuration but neither
+ * Test run nor Report reads its output, so retrying it must not erase evidence
+ * the user already received. */
+export function stagesResetByEntry(entry: FlightStageKey): readonly FlightStageKey[] {
+  if (entry === 'portify') return ['portify']
+  return FLIGHT_STAGE_KEYS.slice(FLIGHT_STAGE_KEYS.indexOf(entry))
+}
+
 /** R78: rewind the feature to the state just before `entry` ran — invoke each
- *  stage's reset (entry stage and every later one, in order) against the PRIOR
+ *  invalidated stage's reset in stable order against the PRIOR
  *  record, then drop the stage's sidecar dir so the panel can never resolve a
  *  discarded attempt's transcript (even for stages with no reset of their own).
  *  Best-effort throughout: a broken wipe must not block the restart itself. */
@@ -209,7 +295,6 @@ export async function resetStagesForRestart(
   // `entry` is always a real stage key here: `checkStageEntry` rejects an
   // unknown `fromStage` before any restart path reaches this, so the index
   // lookup cannot miss.
-  const startIdx = FLIGHT_STAGE_KEYS.indexOf(entry)
   const flightDir = deps.store.flightDir(prior.flightId)
   const ctx: StageContext = {
     manifest: () => prior,
@@ -218,9 +303,10 @@ export async function resetStagesForRestart(
     appendLog: () => {},
     setProgress: () => {},
     setAgentActivity: () => {},
+    addAgentSession: () => {},
     patchFlight: () => {},
   }
-  for (const key of FLIGHT_STAGE_KEYS.slice(startIdx)) {
+  for (const key of stagesResetByEntry(entry)) {
     const adapter = deps.adapters[key]
     if (adapter?.reset) {
       try {
@@ -229,7 +315,12 @@ export async function resetStagesForRestart(
         /* best-effort */
       }
     }
-    for (const dir of stageSidecarDirs(key)) {
+    const priorStage = prior.stages.find((stage) => stage.key === key)
+    const sidecars = new Set([
+      ...stageSidecarDirs(key),
+      ...(priorStage?.agentSessions ?? []).map((session) => session.sidecar),
+    ])
+    for (const dir of sidecars) {
       try {
         fs.rmSync(path.join(flightDir, dir), { recursive: true, force: true })
       } catch {
@@ -269,10 +360,11 @@ export function freshStages(fromStage: FlightStageKey | undefined, now: () => st
   )
 }
 
-/** Jump re-entry on an EXISTING record: stages before `fromStage` keep their
- *  prior records verbatim, and only `fromStage` and every later stage reset to
- *  pending. A jump rewinds the chosen step and its successors (resetStagesForRestart
- *  wipes those on disk); the earlier steps already ran in THIS flight, so their
+/** Jump re-entry on an EXISTING record: unaffected stages keep their prior
+ *  records verbatim, and the entry's invalidation set resets to pending. Most
+ *  entries rewind the chosen step and every later stable-record stage;
+ *  independent Parallel setup rewinds only itself. resetStagesForRestart wipes
+ *  that same set on disk. The preserved steps already ran in THIS flight, so their
  *  `done` status, evidence, log and agent-session refs stay true and the UI can
  *  still show their history. Contrast `freshStages(fromStage)`, which pre-skips
  *  earlier stages as `stage-entry` — correct only for a brand-new flight that
@@ -282,12 +374,12 @@ export function stagesForJump(
   fromStage: FlightStageKey,
   now: () => string,
 ): FlightStage[] {
-  const startIdx = FLIGHT_STAGE_KEYS.indexOf(fromStage)
-  return FLIGHT_STAGE_KEYS.map((key, i) => {
-    if (i >= startIdx) return { key, status: 'pending' as const }
+  const reset = new Set(stagesResetByEntry(fromStage))
+  return FLIGHT_STAGE_KEYS.map((key) => {
+    if (reset.has(key)) return { key, status: 'pending' as const }
     const prior = existing.stages.find((s) => s.key === key)
     // A well-formed record carries every stage; fall back to the stage-entry
-    // skip only if a prior record somehow lacks this earlier stage.
+    // skip only if a prior record somehow lacks this preserved stage.
     return prior ?? { key, status: 'skipped' as const, skipReason: 'stage-entry', endedAt: now() }
   })
 }
@@ -309,7 +401,28 @@ export function bankStageActivity(stage: FlightStage, nowIso: string): FlightSta
 }
 
 export function firstOpenStageIndex(m: FlightManifest): number {
-  return m.stages.findIndex((s) => s.status !== 'done' && s.status !== 'skipped')
+  const settled = (stage: FlightStage): boolean => stage.status === 'done' || stage.status === 'skipped'
+  // A live/checkpointed stage owns the next call even when its key is later in
+  // normal priority. Otherwise a checkpoint response could be delivered to
+  // Test run while an older Flight is still parked in Parallel setup.
+  const active = m.stages.findIndex((stage) =>
+    stage.status === 'running' || stage.status === 'waiting-for-approval',
+  )
+  if (active >= 0) return active
+
+  // Explicit entry and resume keep their chosen/in-progress stage. This is
+  // what preserves “From Parallel setup” while fresh linear progression
+  // takes the faster Test Run-first path below.
+  const current = m.currentStage
+    ? m.stages.findIndex((stage) => stage.key === m.currentStage && !settled(stage))
+    : -1
+  if (current >= 0) return current
+
+  for (const key of FLIGHT_EXECUTION_ORDER) {
+    const index = m.stages.findIndex((stage) => stage.key === key && !settled(stage))
+    if (index >= 0) return index
+  }
+  return -1
 }
 
 /** Check a fromStage entry through the injected harness validator. */

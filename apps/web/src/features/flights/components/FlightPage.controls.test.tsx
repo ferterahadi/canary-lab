@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightManifest } from '@/shared/api/client'
+import type { FlightManifest, FlightStageKey } from '@/shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
 
@@ -297,6 +297,24 @@ describe('flight controls (R48/R71)', () => {
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-scout"]')?.click() })
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-submit"]')?.click() })
     expect(mocks.redoFlight).toHaveBeenCalledWith('fl_1', { fromStage: 'scout', feedback: undefined })
+  })
+
+  it('names Test run as the next resumed step before pending Parallel setup', async () => {
+    const done = new Set<FlightStageKey>([
+      'similarity', 'scout', 'scaffold', 'env-capture', 'docs', 'prd-summary', 'specs-coverage',
+    ])
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'paused',
+      pauseReason: 'user',
+      currentStage: 'specs-coverage',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: done.has(key) ? ('done' as const) : ('pending' as const),
+      })),
+    }))
+    await render('fl_1')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')?.click() })
+    expect(container.querySelector('[data-testid="flight-resume"]')?.textContent).toContain('Resume at Test run')
   })
 
   it('R71/W1: the breadcrumb goes back to the picker; Escape closes to the workspace', async () => {

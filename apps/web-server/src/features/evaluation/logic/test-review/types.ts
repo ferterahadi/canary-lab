@@ -125,6 +125,8 @@ export interface FlowNode {
   title: string
   detail?: string
   codeLine?: number
+  /** The title already came from the canonical readable-test translator. */
+  readable?: true
 }
 
 export interface SourceTest {
@@ -147,6 +149,8 @@ export interface HelperDefinition {
   name: string
   file: string
   snippet: string
+  bodySource?: string
+  startLine?: number
   externalImports: string[]
   dependencies: HelperDefinition[]
   assertions: TestReviewAssertion[]

@@ -49,7 +49,7 @@ describe('ExternalPortifyPanel', () => {
     expect(text).toContain('Claude')
     expect(text).toContain('make ports injectable')
     expect(text).toContain('Editing')
-    expect(text).toContain('External port-ification session')
+    expect(text).toContain('External agent session')
   })
 
   it('surfaces the worktree edit paths while editing', () => {

@@ -102,7 +102,7 @@ export function BranchControl({
       const n = status.dirtyFiles.length
       return `Commit or stash ${n} uncommitted ${n === 1 ? 'change' : 'changes'} to enable`
     }
-    if (activeRun) return 'Disabled while this feature is running'
+    if (activeRun) return 'Disabled while this suite is running'
     if (status.currentBranch === target.trim()) return 'Already on this branch'
     return undefined
   })()
@@ -174,7 +174,7 @@ export function BranchControl({
         )}
         {activeRun && (
           <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-            Switch disabled while this feature is running
+            Switch disabled while this suite is running
           </div>
         )}
         {error && <div className="text-[10px]" style={{ color: 'var(--danger)' }}>{error}</div>}

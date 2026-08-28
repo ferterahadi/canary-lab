@@ -145,10 +145,10 @@ export interface McpHealth {
   projectRoot: string
 }
 
-export function getMcpHealth(profile = 'repair', opts?: ClientOptions): Promise<McpHealth> {
+export function getMcpHealth(opts?: ClientOptions): Promise<McpHealth> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<McpHealth>(
-    `${baseUrl}/mcp/health?profile=${encodeURIComponent(profile)}`,
+    `${baseUrl}/mcp/health?profile=compact`,
     { method: 'GET' },
     fetchImpl,
   )

@@ -362,7 +362,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     // fan-out rule and its NOTHING_FOUND contract — and writes the same outPath,
     // so `settleCollected` judges both producers identically.
     if (forceInternal !== true && handsOffToClient(ctx)) {
-      ctx.appendLog(`[docs] handed the ${MODE_LABEL[mode]} step to the external client…\n`)
+      ctx.appendLog(`[docs] handed the ${MODE_LABEL[mode]} step to the external agent session…\n`)
       return externalWorkCheckpoint(ctx, 'docs', prompt, {
         message: `Ask your user first: if they have a PRD/spec to supply, write THAT to ${outPath} instead of gathering — never invent one. Otherwise gather requirement docs (${MODE_LABEL[mode]}) in your own client and write the doc to the same path, then respond. Reply NOTHING_FOUND on \`data\` if there is nothing relevant.`,
         context: { mode, outPath, outName, intent: m.description },

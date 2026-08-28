@@ -43,7 +43,7 @@ test('handles a numeric import specifier', async ({ page }) => {
     expect(packet.tests[0].externalImports.some((imp) => imp.includes('123'))).toBe(false)
   })
 
-  it('labels shared helper flow steps by their nested assertion count', () => {
+  it('expands shared helper flow steps into canonical child actions and checks', () => {
     const featureDir = path.join(tmpDir, 'nested-counts')
     fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
     const spec = path.join(featureDir, 'e2e', 'nested.spec.ts')
@@ -79,12 +79,13 @@ function stepTwo(page) {
       title: 'nested counts',
     }))
     const nodes = __testReviewExportInternals.flowNodesForTest(packet.tests[0])
-    const details = nodes.map((n) => n.detail ?? '')
+    const titles = nodes.map((node) => node.title)
 
-    expect(details).toContain('1 nested assertion')
-    expect(details).toContain('2 nested assertions')
-    // A zero-assertion helper falls back to the inlined call statement.
-    expect(details.some((d) => d.includes('stepZero(page)'))).toBe(true)
+    expect(titles).toContain('await:\n    call `stepZero`\n    with argument `page`')
+    expect(titles.some((title) => title.includes('property `goto`'))).toBe(true)
+    expect(titles).toContain('await:\n    call `stepOne`\n    with argument `page`')
+    expect(titles).toContain('await:\n    call `stepTwo`\n    with argument `page`')
+    expect(nodes.filter((node) => node.kind === 'assertion')).toHaveLength(4)
   })
 
   it('skips helper dependencies that resolve to no definition', () => {
@@ -162,9 +163,22 @@ test('nested helper assertions', async ({ page }) => {
 
     expect(outerDef?.assertions).toEqual([])
     expect(outerDef?.dependencies.map((dep) => dep.name)).toEqual(['inner'])
-    const helperNode = __testReviewExportInternals.flowNodesForTest(packet.tests[0])
-      .find((node) => node.title === 'Helper: outer')
-    expect(helperNode?.detail).toBe('1 nested assertion')
+    const helperNodes = __testReviewExportInternals.flowNodesForTest(packet.tests[0])
+    expect(helperNodes).toContainEqual(expect.objectContaining({
+      title: 'call `outer`\nwith argument `page`',
+      kind: 'helper',
+      readable: true,
+    }))
+    expect(helperNodes).toContainEqual(expect.objectContaining({
+      title: 'return:\n    call `inner`\n    with argument `page`',
+      kind: 'helper',
+      readable: true,
+    }))
+    expect(helperNodes).toContainEqual(expect.objectContaining({
+      title: expect.stringContaining('property `toHaveText`'),
+      kind: 'assertion',
+      readable: true,
+    }))
 
     // `detail` is optional on a FlowNode, so the audience title reads the helper
     // name when there is nothing else to describe the step with.

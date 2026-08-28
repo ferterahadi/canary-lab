@@ -91,8 +91,20 @@ vi.mock('@/shared/api/client', () => ({
 // pre/post around the agent's slot; expose them so the flight tests can assert
 // they ride the same block instead of standalone log panes.
 vi.mock('@/shared/ui/AgentSessionView', () => ({
-  AgentSessionView: ({ source, systemRows, empty }: { source?: { kind: string; stage?: string }; systemRows?: { pre: string[]; post: string[] }; empty?: { title: string } }) => (
-    <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage} data-empty-title={empty?.title}>
+  AgentSessionView: ({ source, sessionSources, systemRows, empty }: {
+    source?: { kind: string; stage?: string }
+    sessionSources?: Array<{ source: { stage?: string; live?: boolean }; label?: string }>
+    systemRows?: { pre: string[]; post: string[] }
+    empty?: { title: string }
+  }) => (
+    <div
+      data-testid="agent-session-view"
+      data-kind={source?.kind}
+      data-stage={source?.stage}
+      data-session-stages={sessionSources?.map(({ source: session }) => `${session.stage}:${session.live ? 'live' : 'history'}`).join(',')}
+      data-session-labels={sessionSources?.map(({ label }) => label).join(',')}
+      data-empty-title={empty?.title}
+    >
       {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}
       {systemRows?.post.map((l, i) => <div key={`post-${i}`} data-testid="system-post">{l}</div>)}
     </div>
@@ -269,7 +281,7 @@ describe('trailer model (R14–R18)', () => {
       })),
     }))
     await render('fl_1')
-    expect(container.querySelector('[data-testid="stage-rail-specs-coverage"]')?.textContent).toContain('Test authoring & coverage')
+    expect(container.querySelector('[data-testid="stage-rail-specs-coverage"]')?.textContent).toContain('Tests & coverage')
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Pass 2 of 5 — writing tests to close 3 gaps…')
     // "Pass 2 of 5" is the state line's and the passes card's subject. It is
     // deliberately NOT a band tile: the band shows the settled tile set in every
@@ -292,13 +304,22 @@ describe('trailer model (R14–R18)', () => {
         key,
         status: key === 'specs-coverage' ? ('running' as const) : ('pending' as const),
         ...(key === 'specs-coverage'
-          ? { progress: { pass: 1, maxPasses: 5, phase: 'mapping', coveragePct: 0, target: 100, gapsOpen: 3, passes: [] } }
+          ? {
+              progress: { pass: 1, maxPasses: 5, phase: 'mapping', coveragePct: 0, target: 100, gapsOpen: 3, passes: [] },
+              agentSessions: [
+                { sidecar: 'specs-coverage-session-001', label: 'Pass 1 · Authoring', startedAt: '2026-08-26T01:00:00.000Z', phase: 'authoring', pass: 1 },
+                { sidecar: 'specs-coverage-session-002', label: 'Pass 1 · Mapping', startedAt: '2026-08-26T01:01:00.000Z', phase: 'mapping', pass: 1 },
+              ],
+            }
           : {}),
       })),
     }))
     await render('fl_1')
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Pass 1 of 5 — matching the tests to the requirements…')
-    expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-stage')).toBe('coverage-map')
+    const activity = container.querySelector('[data-testid="agent-session-view"]')
+    expect(activity?.getAttribute('data-stage')).toBeNull()
+    expect(activity?.getAttribute('data-session-stages')).toBe('specs-coverage-session-001:history,specs-coverage-session-002:live')
+    expect(activity?.getAttribute('data-session-labels')).toBe('Pass 1 · Authoring,Pass 1 · Mapping')
   })
 
   it('R27: a settled loop keeps the pass history and the pass count fact, without a live row', async () => {

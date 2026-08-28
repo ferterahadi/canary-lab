@@ -3,20 +3,32 @@ import * as api from '../api/client'
 import { useInvalidationKey } from '../state/invalidation'
 import type { DirtySpecSummary, ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
 import {
-  activeBodyLineForTest,
   colorClassForStatus,
-  runningTestForSummaryName,
+  executionLineHighlightForTest,
+  runningTestForTest,
+  sameSourceFile,
+  sourceLineForBodyLine,
   statusForTest,
   type StepStatus,
+  type TestExecutionLineHighlight,
+  type TestStatusIdentity,
   summaryEntryName,
 } from '@/features/runs'
 import type { RunSummary, RunSummaryRunningStep } from '../api/types'
-import { ShikiCode, StepStatusBadge, StepBlock } from '../ui/TestCodeBlock'
+import { StepStatusBadge } from '../ui/TestCodeBlock'
+import { TestPresentation } from '../ui/TestPresentation'
 import { TestIdBadge } from '../ui/TestIdBadge'
 import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
 import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
 
 type DirtyDiff = { name: string; changedLines: number[] }[]
+type TestCardExecutionHighlight = TestExecutionLineHighlight & { sourceLine: number }
+
+interface ExpandedTestSelection {
+  feature: string
+  key: string | null
+  autoExpandPending: boolean
+}
 
 interface Props {
   feature: string | null
@@ -34,7 +46,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
   const refreshKey = useInvalidationKey('tests')
   const [specs, setSpecs] = useState<FeatureSpecFile[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [expandedTest, setExpandedTest] = useState<string | null>(null)
+  const [expandedTest, setExpandedTest] = useState<ExpandedTestSelection | null>(null)
   // Per-test changed-line numbers for each dirty spec file (diffed against git
   // HEAD server-side), keyed by that file's path. Fetched lazily, once per file.
   const [dirtyDiffs, setDirtyDiffs] = useState<Record<string, DirtyDiff>>({})
@@ -43,17 +55,36 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
     if (!feature) {
       setSpecs(null)
       setLoadError(null)
+      setExpandedTest(null)
       return
     }
     let cancelled = false
+    setExpandedTest((current) => current?.feature === feature
+      ? current
+      : { feature, key: null, autoExpandPending: true })
     setSpecs(null)
     setLoadError(null)
-    setExpandedTest(null)
     setDirtyDiffs({})
     api.getFeatureTests(feature)
       .then((data) => {
         if (cancelled) return
+        const availableKeys = new Set(
+          data.flatMap((spec) => spec.tests.map((test) => workspaceTestKey(spec.file, test))),
+        )
         setSpecs(data)
+        setExpandedTest((current) => {
+          if (current?.feature !== feature || current.autoExpandPending) {
+            return {
+              feature,
+              key: availableKeys.values().next().value ?? null,
+              autoExpandPending: false,
+            }
+          }
+          if (current.key !== null && !availableKeys.has(current.key)) {
+            return { feature, key: null, autoExpandPending: false }
+          }
+          return current
+        })
       })
       .catch((err) => {
         if (cancelled) return
@@ -90,7 +121,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
   if (!feature) {
     return (
       <div className="flex h-full items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
-        Select a feature
+        Select a suite
       </div>
     )
   }
@@ -147,42 +178,55 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
                 // endpoint builds each entry from name/line/bodySource/steps and
                 // never sets an id, so the fallback was the only live arm — and
                 // the mirror declared a field the server does not send.
-                const key = `${spec.file}:${t.line}:${t.name}`
-                const isExpanded = expandedTest === key
-                const entryName = summaryEntryName(t.name)
+                const sourceFile = t.sourceFile ?? spec.file
+                const key = workspaceTestKey(spec.file, t)
+                const isExpanded = expandedTest?.feature === feature && expandedTest.key === key
+                const testIdentity = summaryIdentityForWorkspaceTest(
+                  t.name,
+                  t.line,
+                  sourceFile,
+                  activeRunSummary,
+                )
                 const runningTest = isRunActivelyTesting && activeRunSummary
-                  ? runningTestForSummaryName(activeRunSummary, entryName)
+                  ? runningTestForTest(activeRunSummary, testIdentity)
                   : undefined
-                const runningLocation = runningTest?.location
-                const isRunningTest = Boolean(runningLocation)
-                const activeLine = activeBodyLineForTest({
+                const isRunningTest = Boolean(runningTest)
+                const bodyStartLine = t.bodyLine ?? t.line
+                const executionLine = executionLineHighlightForTest({
                   testName: t.name,
+                  testId: testIdentity.id,
+                  allowNameFallback: testIdentity.allowNameFallback,
                   testLine: t.line,
+                  bodyLine: bodyStartLine,
                   bodySource: t.bodySource,
-                  summary: isRunActivelyTesting ? activeRunSummary : undefined,
-                  sourceFile: t.sourceFile ?? spec.file,
+                  summary: activeRunSummary,
+                  sourceFile,
+                  isRunActivelyTesting,
                 })
-                const activeSourceLine = activeLine == null ? null : t.line + activeLine - 1
+                const executionHighlight: TestCardExecutionHighlight | undefined = executionLine
+                  ? {
+                      ...executionLine,
+                      sourceLine: sourceLineForBodyLine(bodyStartLine, executionLine.bodyLine),
+                    }
+                  : undefined
                 return (
                   <TestCard
                     key={key}
-                    sourceFile={t.sourceFile ?? spec.file}
-                    testNumber={testNumbering.get(testNumberKey(t.sourceFile ?? spec.file, t.line))}
+                    sourceFile={sourceFile}
+                    testNumber={testNumbering.get(testNumberKey(sourceFile, t.line))}
                     test={t}
-                    status={statusForTest(
-                      summaryIdentityForWorkspaceTest(t.name, t.line, t.sourceFile ?? spec.file, activeRunSummary),
-                      activeRunSummary,
-                      isRunActivelyTesting,
-                    )}
-                    runningLocation={runningLocation}
+                    status={statusForTest(testIdentity, activeRunSummary, isRunActivelyTesting)}
                     isRunningTest={isRunningTest}
                     runningStep={runningTest?.step}
-                    activeLine={activeLine}
-                    activeSourceLine={activeSourceLine}
+                    executionHighlight={executionHighlight}
                     expanded={isExpanded}
                     dirty={testDirty}
                     changedLines={changedLines}
-                    onToggle={() => setExpandedTest(isExpanded ? null : key)}
+                    onToggle={() => setExpandedTest({
+                      feature,
+                      key: isExpanded ? null : key,
+                      autoExpandPending: false,
+                    })}
                   />
                 )
               })
@@ -192,6 +236,10 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
       </div>
     </div>
   )
+}
+
+function workspaceTestKey(specFile: string, test: ExtractedTest): string {
+  return `${test.sourceFile ?? specFile}:${test.line}:${test.name}`
 }
 
 function parseSummaryLocation(location: string | undefined): { file: string; line: number } | null {
@@ -206,25 +254,25 @@ function summaryIdentityForWorkspaceTest(
   line: number,
   file: string,
   summary: RunSummary | undefined,
-): { name: string; id?: string } {
+): TestStatusIdentity {
   const matchesName = (known: NonNullable<RunSummary['knownTests']>[number]) => {
     return known.title === name || known.name === summaryEntryName(name)
   }
   const known = summary?.knownTests?.find((entry) => {
     const parsed = parseSummaryLocation(entry.location)
-    return parsed?.file === file && parsed.line === line && matchesName(entry)
-  }) ?? summary?.knownTests?.find((entry) => {
-    const parsed = parseSummaryLocation(entry.location)
-    return parsed?.file === file && parsed.line === line
+    return Boolean(parsed && sameSourceFile(parsed.file, file) && parsed.line === line && matchesName(entry))
   })
-  return known?.id ? { name, id: known.id } : { name }
+  if (known?.id) return { name, id: known.id }
+  return summary?.knownTests?.length
+    ? { name, allowNameFallback: false }
+    : { name }
 }
 
 function formatLoadError(err: unknown): string {
   if (err instanceof api.ApiError) {
-    return `Unable to load tests for this feature. Server returned HTTP ${err.status}.`
+    return `Unable to load tests for this suite. Server returned HTTP ${err.status}.`
   }
-  return 'Unable to load tests for this feature.'
+  return 'Unable to load tests for this suite.'
 }
 
 function TestCard({
@@ -232,11 +280,9 @@ function TestCard({
   testNumber,
   test,
   status,
-  runningLocation,
   isRunningTest,
   runningStep,
-  activeLine,
-  activeSourceLine,
+  executionHighlight,
   expanded,
   dirty = false,
   changedLines,
@@ -246,11 +292,9 @@ function TestCard({
   testNumber?: number
   test: ExtractedTest
   status: StepStatus
-  runningLocation?: string
   isRunningTest: boolean
   runningStep?: RunSummaryRunningStep
-  activeLine?: number | null
-  activeSourceLine?: number | null
+  executionHighlight?: TestCardExecutionHighlight
   expanded: boolean
   dirty?: boolean
   /** Lines in `test.bodySource` that differ from the git HEAD version — see
@@ -258,6 +302,16 @@ function TestCard({
   changedLines?: Set<number>
   onToggle: () => void
 }) {
+  const lineColor = executionHighlight?.kind === 'failed' ? 'var(--danger)' : 'var(--running)'
+  const lineMessage = executionHighlight?.kind === 'failed'
+    ? `Last failed line · line ${executionHighlight.sourceLine}`
+    : executionHighlight
+      ? `Running now · line ${executionHighlight.sourceLine}${runningStep?.category ? ` · ${runningStep.category}` : ''}`
+      : isRunningTest
+        ? runningStep?.category
+          ? `Running now · ${runningStep.category} · source line unavailable`
+          : 'Running test · source line unavailable'
+        : undefined
   return (
     <div
       className={`cl-card cl-card-hover transition-all duration-150 ${colorClassForStatus(status)}`}
@@ -304,76 +358,42 @@ function TestCard({
       </button>
       {expanded && (
         <div className="space-y-2 px-3 pb-3">
-          {runningLocation && (
+          {lineMessage && (
             <div
               className="rounded-md border px-2 py-1 text-[10px]"
               style={{
                 color: 'var(--text-secondary)',
-                borderColor: isRunningTest
-                  ? 'var(--warning)'
-                  : 'color-mix(in srgb, var(--accent) 40%, transparent)',
-                background: isRunningTest ? 'color-mix(in srgb, var(--warning) 15%, transparent)' : 'var(--accent-soft)',
+                borderColor: lineColor,
+                background: `color-mix(in srgb, ${lineColor} 14%, transparent)`,
                 fontFamily: 'var(--font-mono)',
               }}
             >
-              {runningStep?.location
-                ? `Running line ${lineLabel(runningStep.location)} · ${runningStep.category}`
-                : `Running from ${shortLocation(runningLocation)}`}
+              {lineMessage}
             </div>
           )}
-          {test.steps.length > 0 ? (
-            <ul className="space-y-1.5 pl-3" style={{ borderLeft: '1px solid var(--border-default)' }}>
-              {test.steps.map((s, i) => (
-                <StepBlock
-                  key={`${s.line}:${i}`}
-                  step={s}
-                  status={status}
-                  depth={0}
-                  sourceFile={sourceFile}
-                  runningSourceLine={isRunningTest ? activeSourceLine : null}
-                />
-              ))}
-            </ul>
-          ) : test.bodySource ? (
-            <div
-              style={
-                isRunningTest && activeLine == null
-                  ? {
-                      borderRadius: 6,
-                      padding: 2,
-                      background: 'color-mix(in srgb, var(--warning) 12%, transparent)',
-                      boxShadow: 'inset 0 0 0 1px var(--warning), inset 3px 0 0 var(--warning)',
-                    }
-                  : undefined
-              }
-            >
-              <ShikiCode
-                source={test.bodySource}
-                activeLine={activeLine}
-                sourceLocation={{ file: sourceFile, startLine: test.line }}
-                runningHighlight={isRunningTest}
-                changedLines={changedLines}
-              />
-            </div>
-          ) : (
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              No test body available.
-            </div>
-          )}
+          <div
+            style={
+              isRunningTest && executionHighlight == null
+                ? {
+                    borderRadius: 6,
+                    padding: 2,
+                    background: 'color-mix(in srgb, var(--running) 12%, transparent)',
+                    boxShadow: 'inset 0 0 0 1px var(--running), inset 3px 0 0 var(--running)',
+                  }
+                : undefined
+            }
+          >
+            <TestPresentation
+              test={test}
+              sourceFile={sourceFile}
+              executionHighlight={executionHighlight}
+              changedLines={changedLines}
+            />
+          </div>
         </div>
       )}
     </div>
   )
-}
-
-function lineLabel(location: string): string {
-  const match = location.match(/:(\d+)(?::\d+)?$/)
-  return match ? match[1] : shortLocation(location)
-}
-
-function shortLocation(location: string): string {
-  const parts = location.split('/')
-  return parts.slice(-2).join('/')
 }
 
 function TestsHeaderIndicator({

@@ -17,9 +17,9 @@ import { type FlightManifest } from './types'
  *  column, so the log stays one plain-text stream and an unstamped line from a
  *  pre-stamping flight still parses — the reader just gets no time for it.
  *
- *  Only a chunk that OPENS with a tag is stamped: agent output is mirrored into
- *  the same log untagged and in partial chunks, and stamping mid-stream would
- *  splice timestamps into the agent's prose. */
+ *  Only a chunk that OPENS with a tag is stamped. Agent transcripts live in the
+ *  CLI JSONL instead of this compact system log; multiline system evidence can
+ *  still contain untagged continuation lines. */
 export function stampSystemLine(chunk: string, iso: string): string {
   return chunk.replace(/^\[([\w-]+)\]/, `[$1@${iso}]`)
 }

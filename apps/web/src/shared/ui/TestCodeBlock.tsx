@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
+import type { FormattedDisplayLine } from '@shared/code-display-format'
 import { useTheme } from '../lib/theme'
 import type { ExtractedStep } from '../api/types'
 import * as api from '../api/client'
 import { getCodeHighlighter, codeThemeFor } from './code-highlighter'
+import type { StoryCodeLineNumber } from './readable-story-sequence'
 import {
   colorClassForStatus,
   sourceLineForBodyLine,
   statusLabel,
   statusPillClassForStatus,
   type StepStatus,
+  type TestExecutionHighlightKind,
 } from '@/features/runs'
 
 interface SourceLocation {
@@ -17,29 +20,49 @@ interface SourceLocation {
   startLine: number
 }
 
+type OpenSourceAtLine = (line: number) => Promise<void>
+
+interface ResolvedSourceLineMapping {
+  sourceLine: number | null
+  sourceLines: readonly number[]
+}
+
+interface CodeLineHighlight {
+  kind: TestExecutionHighlightKind
+  lines: ReadonlySet<number>
+}
+
 // Renders syntax-highlighted code using Shiki. The `source` prop comes from
 // the feature's own spec files (server-side AST extraction), not untrusted
 // user input, so innerHTML is safe here.
 export function ShikiCode({
   source,
-  activeLine,
+  lineHighlight,
   sourceLocation,
-  runningHighlight,
+  sourceLineMap,
   changedLines,
+  showOpenButton = true,
+  selectedSourceRange,
+  storyLineNumbers,
 }: {
   source: string
-  activeLine?: number | null
+  lineHighlight?: CodeLineHighlight
   sourceLocation?: SourceLocation
-  runningHighlight?: boolean
-  /** 1-indexed body-relative line numbers (same convention as `activeLine`) to
-   *  tint as changed — the diff-against-HEAD cue for a dirty test's body. Takes
-   *  visual precedence over `activeLine`; the two aren't expected to co-occur
-   *  (one's for a live-running test, the other for a completed dirty one). */
+  /** Explicit display-row to absolute source-row mapping. When absent, rows
+   *  retain the historical `startLine + displayRow - 1` mapping. */
+  sourceLineMap?: readonly FormattedDisplayLine[]
+  showOpenButton?: boolean
+  selectedSourceRange?: { startLine: number; endLine: number }
+  /** Absolute source line to the corresponding English story number. When
+   * present, continuation and structural source rows intentionally stay blank. */
+  storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>
+  /** 1-indexed displayed rows to tint as changed — the diff-against-HEAD cue
+   *  for a dirty test's body. This remains visually stronger than an execution
+   *  highlight when both refer to the same row. */
   changedLines?: Set<number>
 }) {
   const { resolved } = useTheme()
   const [html, setHtml] = useState<string | null>(null)
-  const [openError, setOpenError] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
     const themeName = codeThemeFor(resolved)
@@ -54,6 +77,117 @@ export function ShikiCode({
     return () => { cancelled = true }
   }, [source, resolved])
 
+  const openClickedLine = (target: EventTarget | null, openAt: OpenSourceAtLine): void => {
+    const line = (target as HTMLElement | null)?.closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine
+    if (line) void openAt(Number(line))
+  }
+
+  if (html === null) {
+    return (
+      <SourceOpenShell sourceLocation={sourceLocation} showOpenButton={showOpenButton}>
+        {(openAt) => (
+          <pre
+            className={`cl-numbered-code cl-code-shell overflow-x-auto overflow-y-hidden whitespace-pre break-normal rounded-md p-2 text-[11px] leading-[1.65] ${sourceLocation ? 'cursor-pointer' : ''}`}
+            style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+            onClick={(event) => openClickedLine(event.target, openAt)}
+          >
+            <code>
+              <FallbackCodeLines
+                source={source}
+                lineHighlight={lineHighlight}
+                startLine={sourceLocation?.startLine}
+                sourceLineMap={sourceLineMap}
+                changedLines={changedLines}
+                selectedSourceRange={selectedSourceRange}
+                storyLineNumbers={storyLineNumbers}
+              />
+            </code>
+          </pre>
+        )}
+      </SourceOpenShell>
+    )
+  }
+
+  return (
+    <SourceOpenShell sourceLocation={sourceLocation} showOpenButton={showOpenButton}>
+      {(openAt) => (
+        <div
+          className={`shiki-block cl-numbered-code cl-code-shell overflow-x-auto overflow-y-hidden rounded-md text-[11px] leading-[1.65] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-running/10' : ''}`}
+          onClick={(event) => openClickedLine(event.target, openAt)}
+          // Shiki has already escaped the source it highlighted; decorateShikiLines
+          // only wraps those tokens in spans.
+          // eslint-disable-next-line no-restricted-syntax
+          dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, lineHighlight, sourceLocation?.startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers) }}
+        />
+      )}
+    </SourceOpenShell>
+  )
+}
+
+function FallbackCodeLines({
+  source,
+  lineHighlight,
+  startLine,
+  sourceLineMap,
+  changedLines,
+  selectedSourceRange,
+  storyLineNumbers,
+}: {
+  source: string
+  lineHighlight?: CodeLineHighlight
+  startLine?: number
+  sourceLineMap?: readonly FormattedDisplayLine[]
+  changedLines?: Set<number>
+  selectedSourceRange?: { startLine: number; endLine: number }
+  storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>
+}) {
+  const shownStorySequences = new Set<string>()
+  return source.split('\n').map((line, index) => {
+    const lineNumber = index + 1
+    const mapped = sourceMappingForDisplayLine(lineNumber, startLine, sourceLineMap)
+    const number = codeLineNumber(lineNumber, mapped.sourceLines, storyLineNumbers, shownStorySequences)
+    const selected = sourceRangeIncludesAny(selectedSourceRange, mapped.sourceLines)
+    const changed = changedLines?.has(lineNumber) === true
+    const active = lineHighlight?.lines.has(lineNumber) === true
+    const highlightColors = lineHighlight ? codeLineHighlightColors(lineHighlight.kind) : undefined
+    const style = changed
+      ? { background: 'color-mix(in srgb, var(--danger) 16%, transparent)', boxShadow: 'inset 2px 0 0 var(--danger)' }
+      : active && highlightColors
+        ? { background: highlightColors.background, boxShadow: `inset 2px 0 0 ${highlightColors.bar}` }
+        : selected
+          ? { background: 'color-mix(in srgb, var(--accent) 14%, transparent)', boxShadow: 'inset 2px 0 0 var(--accent)' }
+          : undefined
+    return (
+      <span
+        key={index}
+        className="line"
+        data-code-line={number.physical}
+        data-code-sequence={number.sequence}
+        data-code-sequence-label={number.label}
+        data-source-line={mapped.sourceLine ?? undefined}
+        data-selected-line={selected ? 'true' : undefined}
+        data-changed-line={changed ? 'true' : undefined}
+        data-active-line={active ? 'true' : undefined}
+        data-execution-highlight={active ? lineHighlight?.kind : undefined}
+        title={number.title}
+        style={style}
+      >
+        {line}
+      </span>
+    )
+  })
+}
+
+export function SourceOpenShell({
+  children,
+  sourceLocation,
+  showOpenButton = true,
+}: {
+  children: ReactNode | ((openAt: OpenSourceAtLine) => ReactNode)
+  sourceLocation?: SourceLocation
+  showOpenButton?: boolean
+}) {
+  const [openError, setOpenError] = useState<string | null>(null)
   const openAt = async (line: number): Promise<void> => {
     if (!sourceLocation) return
     setOpenError(null)
@@ -63,64 +197,28 @@ export function ShikiCode({
       setOpenError(e instanceof Error ? e.message : 'Failed to open editor')
     }
   }
-
-  if (html === null) {
-    return (
-      <CodeShell sourceLocation={sourceLocation} openError={openError} onOpenStart={() => openAt(sourceLocation?.startLine ?? 1)}>
-        <pre className="cl-code-shell overflow-hidden whitespace-pre-wrap break-words rounded-md p-2 text-[11px]" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-          <code>{source}</code>
-        </pre>
-      </CodeShell>
-    )
-  }
-
-  return (
-    <CodeShell sourceLocation={sourceLocation} openError={openError} onOpenStart={() => openAt(sourceLocation?.startLine ?? 1)}>
-      <div
-        className={`shiki-block cl-code-shell overflow-hidden rounded-md text-[11px] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-running/10' : ''}`}
-        onClick={(e) => {
-          const line = (e.target as HTMLElement).closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine
-          if (line) void openAt(Number(line))
-        }}
-        // Shiki has already escaped the source it highlighted; decorateShikiLines
-        // only wraps those tokens in spans.
-        // eslint-disable-next-line no-restricted-syntax
-        dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, activeLine, sourceLocation?.startLine, runningHighlight, changedLines) }}
-      />
-    </CodeShell>
-  )
-}
-
-function CodeShell({
-  children,
-  sourceLocation,
-  openError,
-  onOpenStart,
-}: {
-  children: ReactNode
-  sourceLocation?: SourceLocation
-  openError: string | null
-  onOpenStart: () => void
-}) {
-  if (!sourceLocation) return <>{children}</>
+  const content = typeof children === 'function' ? children(openAt) : children
+  if (!sourceLocation) return <>{content}</>
   return (
     <div className="space-y-1">
       <div className="relative">
-        <button
-          type="button"
-          title="Open in editor"
-          aria-label="Open in editor"
-          onClick={onOpenStart}
-          className="cl-icon-button absolute right-1 top-1 z-10 h-6 w-6 text-[12px]"
-          style={{
-            border: '1px solid var(--border-default)',
-            background: 'color-mix(in srgb, var(--bg-surface) 92%, transparent)',
-            boxShadow: 'var(--shadow-panel)',
-          }}
-        >
-          ↗
-        </button>
-        {children}
+        {showOpenButton && (
+          <button
+            type="button"
+            title="Open in editor"
+            aria-label="Open in editor"
+            onClick={() => { void openAt(sourceLocation.startLine) }}
+            className="cl-icon-button absolute right-1 top-1 z-10 h-6 w-6 text-[12px]"
+            style={{
+              border: '1px solid var(--border-default)',
+              background: 'color-mix(in srgb, var(--bg-surface) 92%, transparent)',
+              boxShadow: 'var(--shadow-panel)',
+            }}
+          >
+            ↗
+          </button>
+        )}
+        {content}
       </div>
       {openError && (
         <div className="text-[10px]" style={{ color: 'var(--danger)' }}>
@@ -133,25 +231,90 @@ function CodeShell({
 
 function decorateShikiLines(
   html: string,
-  activeLine?: number | null,
+  lineHighlight?: CodeLineHighlight,
   startLine?: number,
-  runningHighlight?: boolean,
+  sourceLineMap?: readonly FormattedDisplayLine[],
   changedLines?: Set<number>,
+  selectedSourceRange?: { startLine: number; endLine: number },
+  storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>,
 ): string {
   let lineNo = 0
-  const bg = runningHighlight
-    ? 'color-mix(in srgb, var(--warning) 22%, transparent)'
-    : 'color-mix(in srgb, var(--running) 18%, transparent)'
-  const bar = runningHighlight ? 'var(--warning)' : 'var(--running)'
-  return html.replace(/<span class="line"/g, (match) => {
+  const shownStorySequences = new Set<string>()
+  // Lines render as full-width blocks (`.shiki-block pre span.line`), so the
+  // newline text nodes Shiki leaves between them must go — under pre-wrap each
+  // would paint an extra blank row.
+  return html.replace(/\n(?=<span class="line")/g, '').replace(/<span class="line"/g, (match) => {
     lineNo += 1
-    const attrs = startLine ? ` data-source-line="${sourceLineForBodyLine(startLine, lineNo)}"` : ''
+    const mapped = sourceMappingForDisplayLine(lineNo, startLine, sourceLineMap)
+    const number = codeLineNumber(lineNo, mapped.sourceLines, storyLineNumbers, shownStorySequences)
+    const selected = sourceRangeIncludesAny(selectedSourceRange, mapped.sourceLines)
+    const attrs = ` data-code-line="${number.physical}" data-code-sequence="${number.sequence}" data-code-sequence-label="${number.label}"${number.title ? ` title="${number.title}"` : ''}${mapped.sourceLine !== null ? ` data-source-line="${mapped.sourceLine}"` : ''}${selected ? ' data-selected-line="true"' : ''}`
     if (changedLines?.has(lineNo)) {
-      return `<span class="line"${attrs} data-changed-line="true" style="display:block;margin:0 -0.5rem;padding:0 0.5rem;background:color-mix(in srgb, var(--danger) 16%, transparent);box-shadow:inset 2px 0 0 var(--danger)"`
+      return `<span class="line"${attrs} data-changed-line="true" style="background:color-mix(in srgb, var(--danger) 16%, transparent);box-shadow:inset 2px 0 0 var(--danger)"`
     }
-    if (lineNo !== activeLine) return `${match}${attrs}`
-    return `<span class="line"${attrs} data-active-line="true" style="display:block;margin:0 -0.5rem;padding:0 0.5rem;background:${bg};box-shadow:inset 2px 0 0 ${bar}"`
+    if (lineHighlight?.lines.has(lineNo)) {
+      const colors = codeLineHighlightColors(lineHighlight.kind)
+      return `<span class="line"${attrs} data-active-line="true" data-execution-highlight="${lineHighlight.kind}" style="background:${colors.background};box-shadow:inset 2px 0 0 ${colors.bar}"`
+    }
+    if (selected) {
+      return `<span class="line"${attrs} style="background:color-mix(in srgb, var(--accent) 14%, transparent);box-shadow:inset 2px 0 0 var(--accent)"`
+    }
+    return `${match}${attrs}`
   })
+}
+
+function codeLineHighlightColors(kind: TestExecutionHighlightKind): { background: string; bar: string } {
+  return kind === 'failed'
+    ? { background: 'color-mix(in srgb, var(--danger) 18%, transparent)', bar: 'var(--danger)' }
+    : { background: 'color-mix(in srgb, var(--running) 18%, transparent)', bar: 'var(--running)' }
+}
+
+function codeLineNumber(
+  lineNumber: number,
+  sourceLines: readonly number[],
+  storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>,
+  shownStorySequences?: Set<string>,
+): {
+  physical: string
+  sequence: string
+  label: string
+  title?: string
+} {
+  const physical = String(lineNumber).padStart(2, '0')
+  if (!storyLineNumbers) {
+    return { physical, sequence: physical, label: physical }
+  }
+  const story = sourceLines.map((sourceLine) => storyLineNumbers.get(sourceLine)).find(Boolean)
+  if (!story || shownStorySequences?.has(story.sequence)) {
+    return { physical, sequence: '', label: '' }
+  }
+  shownStorySequences?.add(story.sequence)
+  return { physical, sequence: story.sequence, label: story.label, title: `English step ${story.sequence}` }
+}
+
+function sourceMappingForDisplayLine(
+  lineNumber: number,
+  startLine?: number,
+  sourceLineMap?: readonly FormattedDisplayLine[],
+): ResolvedSourceLineMapping {
+  const mapped = sourceLineMap?.[lineNumber - 1]
+  if (mapped) {
+    return mapped.sourceLines.length === 0
+      ? { sourceLine: mapped.sourceLine, sourceLines: [mapped.sourceLine] }
+      : mapped
+  }
+  if (startLine === undefined) return { sourceLine: null, sourceLines: [] }
+  const sourceLine = sourceLineForBodyLine(startLine, lineNumber)
+  return { sourceLine, sourceLines: [sourceLine] }
+}
+
+function sourceRangeIncludesAny(
+  sourceRange: { startLine: number; endLine: number } | undefined,
+  sourceLines: readonly number[],
+): boolean {
+  return sourceRange !== undefined && sourceLines.some(
+    (sourceLine) => sourceLine >= sourceRange.startLine && sourceLine <= sourceRange.endLine,
+  )
 }
 
 export function StepStatusBadge({ status }: { status: StepStatus }) {
@@ -202,9 +365,10 @@ export function StepBlock({
         <div className="mt-1.5">
           <ShikiCode
             source={step.bodySource}
-            activeLine={activeLine}
+            lineHighlight={activeLine == null
+              ? undefined
+              : { kind: 'running', lines: new Set([activeLine]) }}
             sourceLocation={sourceFile ? { file: sourceFile, startLine: step.line } : undefined}
-            runningHighlight={isRunningStep}
           />
         </div>
       )}

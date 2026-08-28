@@ -48,6 +48,8 @@ export interface StartFlightBody {
   /** R79: which CLI conducts the flight's stage agents. Sticky per record —
    *  jump/continue reuse the stored one. Absent = claude. */
   agent?: 'claude' | 'codex'
+  /** MCP-owned flights only; the web launcher leaves this absent. */
+  externalAgentSession?: FlightManifestT['externalAgentSession']
   /** Marks a Getting Started demo start; ordinary flights omit it. */
   gettingStartedSource?: 'internal' | 'external'
   /** Which Getting Started card a demo flight belongs to: the author/portify/

@@ -395,7 +395,15 @@ describe('evaluation-export — external producer', () => {
 
   it('yolo + external defaults to localized and hands the rewrite off — work delivery, not an ask', async () => {
     writeRunRecord()
-    const { ctx, current } = ctxFor(externalManifest({ opts: { env: 'local', coverageTarget: 100, yolo: true, stageProducer: 'external' } }))
+    const { ctx, current } = ctxFor(externalManifest({
+      opts: { env: 'local', coverageTarget: 100, yolo: true, stageProducer: 'external' },
+      externalAgentSession: {
+        clientKind: 'claude',
+        sessionId: 'claude-session-1',
+        conversationName: 'export checkout',
+        sessionUrl: 'https://claude.ai/chat/1',
+      },
+    }))
     const cp = parkOf(await evaluationExportStage(deps()).run(ctx))
     expect(cp.kind).toBe('external-work')
     expect(cp.data.stage).toBe('evaluation-export')
@@ -405,7 +413,14 @@ describe('evaluation-export — external producer', () => {
     expect(context.caseCount).toBe(1)
     // A real external task record backs the hand-off, linked for resume/cleanup.
     expect(current().links?.evaluationTaskId).toBe(context.taskId)
-    expect(readEvaluationExportTask(logsDir, context.taskId)).toMatchObject({ producer: 'external', mode: 'localized' })
+    expect(readEvaluationExportTask(logsDir, context.taskId)).toMatchObject({
+      producer: 'external',
+      mode: 'localized',
+      sessionId: 'claude-session-1',
+      clientKind: 'claude',
+      conversationName: 'export checkout',
+      externalSessionUrl: 'https://claude.ai/chat/1',
+    })
   })
 
   it('non-yolo external still parks the export-mode ASK first — only the default moved', async () => {

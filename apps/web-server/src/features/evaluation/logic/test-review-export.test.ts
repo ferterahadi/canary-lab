@@ -311,9 +311,10 @@ test('A. WA metadata.url -> SMS', async () => {
     // Dotted identifiers are still humanised; bare acronyms are left alone
     // (lowercasing every capitalised run turned "OTPs" into "ot ps").
     expect(html).toContain('WA metadata url then SMS')
-    expect(html).toContain('Skip if required test setup is missing')
-    expect(html).toContain('Prepare unique identifiers')
-    expect(html).toContain('Send message')
+    // Flow steps keep exact identifiers rather than interpreting them.
+    expect(html).toContain('call property `skip` of `test`')
+    expect(html).toContain('call `makeIds`')
+    expect(html).toContain('call `postSendMessage`')
     expect(html).not.toContain('WhatsApp')
     expect(html).not.toContain('message link')
     expect(html).not.toContain('Make ids')

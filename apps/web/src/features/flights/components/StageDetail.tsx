@@ -1,5 +1,5 @@
 import type { ExternalWorkCheckpointData, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
-import type { AgentSessionSource, ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
+import type { AgentSessionSegmentSource, AgentSessionSource, ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
 import { clientLabel, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
 import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel, RequirementsFork } from './FlightStagePanels'
@@ -53,8 +53,25 @@ const PORTIFY_NO_TRANSCRIPT = {
 
 /** A standalone external task has no Canary-owned transcript. Translate its
  *  durable producer record into one compact row on the shared Activity rail. */
-export function externalSessionActivity(trace: ExternalWorkTrace): ExternalSessionActivity {
-  const clientKind = externalClientKind(trace.clientKind)
+export function externalSessionActivity(
+  trace: ExternalWorkTrace,
+  flightSession?: FlightManifest['externalAgentSession'],
+): ExternalSessionActivity {
+  // Older Flight-owned jobs persisted `flight:<id>` instead of the caller's
+  // real session. Prefer the Flight-level identity for those legacy traces;
+  // keep an independently started task's own identity intact.
+  const legacyFlightId = trace.sessionId?.startsWith('flight:') === true
+  const inheritsFlightSession = trace.sessionId === undefined
+    || legacyFlightId
+    || trace.sessionId === flightSession?.sessionId
+  const clientKind = externalClientKind(
+    trace.clientKind === undefined || trace.clientKind === 'other'
+      ? inheritsFlightSession ? flightSession?.clientKind : trace.clientKind
+      : trace.clientKind,
+  )
+  const sessionId = legacyFlightId
+    ? flightSession?.sessionId
+    : trace.sessionId ?? flightSession?.sessionId
   const client = clientLabel(clientKind, 'external agent')
   const owner = clientKind === 'other' ? 'your external agent session' : `your ${client} session`
   const fileCount = trace.itemCount != null
@@ -74,12 +91,21 @@ export function externalSessionActivity(trace: ExternalWorkTrace): ExternalSessi
   }
   return {
     clientKind,
+    ...(sessionId ? { sessionId } : {}),
     status: trace.status,
     message,
     startedAt: trace.startedAt,
     ...(trace.status === 'running' ? {} : { endedAt: trace.updatedAt }),
-    ...(trace.conversationName ? { conversationName: trace.conversationName } : {}),
-    ...(trace.sessionUrl ? { sessionUrl: trace.sessionUrl } : {}),
+    ...(trace.conversationName
+      ? { conversationName: trace.conversationName }
+      : inheritsFlightSession && flightSession?.conversationName
+        ? { conversationName: flightSession.conversationName }
+        : {}),
+    ...(trace.sessionUrl
+      ? { sessionUrl: trace.sessionUrl }
+      : inheritsFlightSession && flightSession?.sessionUrl
+        ? { sessionUrl: flightSession.sessionUrl }
+        : {}),
   }
 }
 
@@ -258,7 +284,9 @@ export function StageDetail({
     : handOffData?.lastRejection === 'stale_submission'
       ? EXTERNAL_WORK_COPY.lateResultNote
       : undefined
-  const historicalExternalSessions = externalStage.traces.map(externalSessionActivity)
+  const historicalExternalSessions = externalStage.traces.map((trace) =>
+    externalSessionActivity(trace, flight.externalAgentSession),
+  )
   // The live activity map can update before the durable resource list. Keep a
   // temporary row during that gap, but drop it once the persisted running trace
   // arrives so one external task never appears twice.
@@ -266,9 +294,18 @@ export function StageDetail({
     (activityOnThisRow || flightHandOff)
       && !historicalExternalSessions.some((session) => session.status === 'running')
       ? {
-          clientKind: 'other',
+          clientKind: externalClientKind(flight.externalAgentSession?.clientKind),
+          ...(flight.externalAgentSession?.sessionId
+            ? { sessionId: flight.externalAgentSession.sessionId }
+            : {}),
           status: 'running',
           message: handOffMessage ?? 'Work is continuing in your external agent session.',
+          ...(flight.externalAgentSession?.conversationName
+            ? { conversationName: flight.externalAgentSession.conversationName }
+            : {}),
+          ...(flight.externalAgentSession?.sessionUrl
+            ? { sessionUrl: flight.externalAgentSession.sessionUrl }
+            : {}),
         }
       : undefined
   const baseExternalSessions = liveExternalFallback
@@ -298,14 +335,27 @@ export function StageDetail({
     : portifyId ? { kind: 'portify', workflowId: portifyId, live }
     : agentDir ? { kind: 'flight', flightId, stage: agentDir, live }
     : undefined
-  // External producers have no Canary-owned transcript. Suppress the local
-  // source entirely so its generic live tail cannot add a second spinner under
-  // the external-session row or replay an older internal session as current.
+  // External producers have no Canary-owned current transcript. Historical
+  // internal sessions stay on the rail, but none of them may present as live.
   const externalOwnsCurrent = externalTrace !== undefined || liveExternalFallback !== undefined
-  const activitySource = externalOwnsCurrent ? undefined : localActivitySource
-  const activityKey = externalOwnsCurrent
-    ? `external:${externalTrace?.resourceId ?? externalTrace?.sessionId ?? stage.key}`
-    : evalTaskId ? `evaluation:${evalTaskId}` : portifyId ? `portify:${portifyId}` : (agentDir ?? 'system-only')
+  const sessionSources: AgentSessionSegmentSource[] = (stage.agentSessions ?? []).map((session, index, sessions) => ({
+    label: session.label,
+    startedAt: session.startedAt,
+    source: {
+      kind: 'flight',
+      flightId,
+      stage: session.sidecar,
+      live: live
+        && !externalOwnsCurrent
+        && index === sessions.length - 1
+        && loopProgress?.phase === session.phase
+        && loopProgress?.pass === session.pass,
+    },
+  }))
+  // Suppress the legacy local source entirely so its generic live tail cannot
+  // add a second spinner under the external-session row or replay an older
+  // internal session as current.
+  const activitySource = sessionSources.length > 0 || externalOwnsCurrent ? undefined : localActivitySource
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -588,7 +638,7 @@ export function StageDetail({
       {!runMerged && (
         <StageActivity
           source={activitySource}
-          sourceKey={activityKey}
+          sessionSources={sessionSources}
           live={live || externalSessions.some((session) => session.status === 'running')}
           settled={settled}
           log={combinedLog}

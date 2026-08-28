@@ -67,9 +67,9 @@ describe('ExternalHealPanel', () => {
     )
 
     expect(html).toContain('AI Agent')
-    expect(html).toContain('No external client has claimed this run yet')
+    expect(html).toContain('No external agent session has claimed this run yet')
     expect(html).toContain('AI Agent MCP session')
-    expect(html).toContain('aria-label="External client"')
+    expect(html).toContain('aria-label="External agent session"')
     expect(html).not.toContain('Open Claude')
     expect(html).not.toContain('Open Codex')
   })
@@ -83,7 +83,7 @@ describe('ExternalHealPanel', () => {
     )
 
     expect(html).toContain('AI Agent')
-    expect(html).toContain('No external client is actively waiting for a signal')
+    expect(html).toContain('No external agent session is actively waiting for a signal')
     expect(html).toContain('Failed')
     expect(html).toContain('var(--danger)')
     expect(html).not.toContain('external external')

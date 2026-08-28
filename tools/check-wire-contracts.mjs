@@ -13,9 +13,10 @@
 // sends — and every one of them compiled clean on both sides, because a mirror
 // has no link to its original for `tsc` to check.
 //
-// This is the same shape of rule as `check-feature-boundaries.mjs`: a registry
-// of pairs, an allowlist of recorded exceptions with reasons, and a failure when
-// an allowlist entry stops being needed. Shrink BASELINE; don't grow it.
+// This is the same shape of rule as `check-feature-boundaries.mjs`: registries
+// of mirrored and shared contracts, an allowlist of recorded exceptions with
+// reasons, and a failure when an allowlist entry stops being needed. Shrink
+// BASELINE; don't grow it.
 //
 // Run: node tools/check-wire-contracts.mjs
 
@@ -67,6 +68,28 @@ const PAIRS = [
   { name: 'VersionStatus', server: 'apps/web-server/src/features/version/logic/version-state.ts' },
 ]
 
+// Semantic types that deliberately have no web mirror. Both sides must import
+// and use the root declaration, otherwise matching field names can conceal a
+// different nested shape from the mirrored-interface check above.
+const SHARED_TYPES = [
+  {
+    name: 'ReadableTest',
+    declaration: 'shared/readable-tests/types.ts',
+    consumers: [
+      {
+        file: 'apps/web-server/src/shared/ast-extractor.ts',
+        importFrom: '../../../../shared/readable-tests/types',
+        usage: 'readable: ReadableTest',
+      },
+      {
+        file: 'apps/web/src/shared/api/types.ts',
+        importFrom: '@shared/readable-tests/types',
+        usage: 'readable: ReadableTest',
+      },
+    ],
+  },
+]
+
 // The workspace WebSocket frame union, declared on both sides. Compared by
 // variant tag rather than by field, because that is what a client switches on.
 const UNION = {
@@ -89,17 +112,21 @@ const BASELINE = new Map([
   ['ExtractedTest', {
     onlyServer: ['requirements?', 'pathTypes?', 'variants?', 'assertions?'],
     onlyWeb: [],
-    reason: 'not drift: the AST extractor\'s type is an INTERNAL superset, and `GET /api/features/:name/tests` builds each entry fresh from name/line/bodySource/steps(/sourceFile). The mirror describes that projection. The coverage-linkage fields never leave the server — the UI reads them off the coverage payload — so mirroring them would describe a wire that does not exist',
+    reason: 'not drift: the AST extractor\'s type is an INTERNAL superset, and `GET /api/features/:name/tests` builds each entry fresh from name/line/bodySource/steps/readable(/sourceFile). The mirror describes that projection. The coverage-linkage fields never leave the server — the UI reads them off the coverage payload — so mirroring them would describe a wire that does not exist',
   }],
   ['FeatureStageEvidence', {
-    onlyServer: ['booted', 'portInjectability'],
-    onlyWeb: ['booted?', 'portInjectability?'],
-    reason: 'optionality-only: server always stamps both, web tolerates pre-1.5 records that lack them',
+    onlyServer: ['booted', 'coverageMapping', 'portInjectability'],
+    onlyWeb: ['booted?', 'coverageMapping?', 'portInjectability?'],
+    reason: 'optionality-only: server always stamps all three; web tolerates pre-1.5 records that lack booted/portInjectability and pre-2.1 payloads that lack coverageMapping',
   }],
 ])
 
 function read(rel) {
   return readFileSync(path.join(REPO, rel), 'utf8')
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /** Resolve a relative import specifier for `name` in `rel` to a repo-relative
@@ -245,6 +272,35 @@ for (const [name] of BASELINE) {
   }
 }
 
+for (const sharedType of SHARED_TYPES) {
+  const declaration = read(sharedType.declaration)
+  if (!new RegExp(`export interface ${sharedType.name}\\b`).test(declaration)) {
+    problems.push(
+      `${sharedType.name}: not declared in ${sharedType.declaration} — the shared-contract registry is stale`,
+    )
+    continue
+  }
+
+  for (const consumer of sharedType.consumers) {
+    const source = read(consumer.file)
+    const importPattern = new RegExp(
+      `import(?:\\s+type)?\\s*\\{[^}]*\\b${sharedType.name}\\b[^}]*\\}` +
+      `\\s*from\\s*['\"]${escapeRegExp(consumer.importFrom)}['\"]`,
+      's',
+    )
+    if (!importPattern.test(source)) {
+      problems.push(
+        `${sharedType.name}: ${consumer.file} must import the canonical type from ${consumer.importFrom}`,
+      )
+    }
+    if (!source.includes(consumer.usage)) {
+      problems.push(
+        `${sharedType.name}: ${consumer.file} must use it as \`${consumer.usage}\``,
+      )
+    }
+  }
+}
+
 // The workspace event union.
 const serverTags = unionTags(read(UNION.server.file), UNION.server.name)
 const webTags = unionTags(read(UNION.web.file), UNION.web.name)
@@ -270,6 +326,7 @@ if (!serverTags || !webTags) {
 if (problems.length === 0) {
   console.log(
     `✔ wire contracts clean — ${PAIRS.length} mirrored types, ` +
+    `${SHARED_TYPES.length} shared semantic type${SHARED_TYPES.length === 1 ? '' : 's'}, ` +
     `${serverTags.size} event variants, ${BASELINE.size} recorded drift${BASELINE.size === 1 ? '' : 's'}`,
   )
   process.exit(0)

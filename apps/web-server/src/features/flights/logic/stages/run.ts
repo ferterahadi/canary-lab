@@ -9,6 +9,7 @@ import { pollUntil, type FlightStageDeps } from './context'
 import { runJob } from './stage-jobs'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../types'
+import { externalAgentSessionForFlight } from '../external-agent-session'
 
 // Start the real run through the runs route and wait for a terminal verdict.
 // The flight's verdict IS the run's terminal status (harness-owned). A
@@ -110,7 +111,7 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
    *  terminal — check it". */
   const externalHealHandOff = (ctx: StageContext, runId: string): StageOutcome => {
     const m = ctx.manifest()
-    ctx.appendLog(`[run] heal duty handed to the external client (run ${runId}, unclaimed)\n`)
+    ctx.appendLog(`[run] heal duty handed to the external agent session (run ${runId}, unclaimed)\n`)
     return externalWorkCheckpoint(ctx, 'run', renderPrompt('flight-heal-handoff.md', { runId, feature: m.feature }), {
       message: `Run ${runId} started with heal duty assigned to YOU: claim_heal with your own session id, loop wait_for_heal_task, fix APP code (never tests) and signal_run — then respond submit here once the run is terminal. Canary reads the verdict from the run record itself. Answer run-internally to hand the run back to Canary's own heal agent.`,
       context: { runId },
@@ -156,11 +157,22 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
     // External: start the run in external-heal mode, UNCLAIMED. claimable:false
     // is the whole trick — a claim held by `flight:<id>` would block the real
     // client's claim_heal with already-claimed.
+    const externalAgentSession = externalAgentSessionForFlight(m)
     const payload = {
       feature: m.feature,
       env: m.opts.env,
       ...(external
-        ? { healAgent: { kind: 'external', sessionId: `flight:${m.flightId}`, clientKind: 'other', claimable: false } }
+        ? {
+            healAgent: {
+              kind: 'external',
+              sessionId: externalAgentSession.sessionId,
+              clientKind: externalAgentSession.clientKind,
+              ...(externalAgentSession.conversationName
+                ? { conversationName: externalAgentSession.conversationName }
+                : {}),
+              claimable: false,
+            },
+          }
         : {}),
     }
     let resp = await deps.inject({ method: 'POST', url: '/api/runs', payload })

@@ -22,10 +22,17 @@ export { sourceLineForBodyLine } from './utils/editor-location'
 export {
   activeBodyLineForTest,
   colorClassForStatus,
-  runningTestForSummaryName,
+  executionLineHighlightForTest,
+  runningTestForTest,
+  sameSourceFile,
   statusForTest,
   statusLabel,
   statusPillClassForStatus,
   summaryEntryName,
 } from './utils/test-step-status'
-export type { StepStatus } from './utils/test-step-status'
+export type {
+  StepStatus,
+  TestExecutionHighlightKind,
+  TestExecutionLineHighlight,
+  TestStatusIdentity,
+} from './utils/test-step-status'

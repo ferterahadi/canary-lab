@@ -112,6 +112,10 @@ function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightMa
       manifest: () => state.m,
       flightDir: path.join(logsDir, 'flights', state.m.flightId),
       setProgress: (progress) => { progressLog.push(progress) },
+      addAgentSession: (session) => {
+        const stage = state.m.stages.find((candidate) => candidate.key === 'specs-coverage')
+        setStage('specs-coverage', { agentSessions: [...(stage?.agentSessions ?? []), session] })
+      },
       patchFlight: (patch) => {
         state.m = {
           ...state.m,
@@ -128,14 +132,35 @@ function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightMa
 describe('specs-coverage stage', () => {
   const SPEC = `import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'\n\ntest('checkout @req-R1 @path-happy', async ({ page }) => { expect(1).toBe(1) })\n`
 
-  function ledger(pct: number): CoverageLedger {
+  function ledger(pct: number, requirementId = 'R1'): CoverageLedger {
     return {
       feature: 'checkout',
-      requirements: pct >= 100 ? [] : [{ requirement: { id: 'R1', title: 't', text: 'x', pathTypes: ['happy'] }, annotatedTestNames: [], pathCoverage: [], gapType: 'untested', coverageStatus: 'uncovered' }],
+      requirements: pct >= 100 ? [] : [{ requirement: { id: requirementId, title: 't', text: 'x', pathTypes: ['happy'] }, annotatedTestNames: [], pathCoverage: [], gapType: 'untested', coverageStatus: 'uncovered' }],
       tests: [],
       totals: { total: 1, covered: pct >= 100 ? 1 : 0, pathIncomplete: 0, variantIncomplete: 0, untested: pct >= 100 ? 0 : 1, orphanTests: 0 },
       coveragePct: pct,
       mappedPct: pct,
+      orphanRequirementIds: [],
+      orphanTestNames: [],
+    }
+  }
+
+  function pathLedger(covered: Array<'happy' | 'sad' | 'edge'>): CoverageLedger {
+    const paths = ['happy', 'sad', 'edge'] as const
+    const complete = paths.every((pathType) => covered.includes(pathType))
+    return {
+      feature: 'checkout',
+      requirements: [{
+        requirement: { id: 'R1', title: 't', text: 'x', pathTypes: [...paths] },
+        annotatedTestNames: ['mapped test'],
+        pathCoverage: paths.map((pathType) => ({ path: pathType, covered: covered.includes(pathType) })),
+        gapType: complete ? 'covered' : 'path-incomplete',
+        coverageStatus: complete ? 'covered' : 'partial',
+      }],
+      tests: [],
+      totals: { total: 1, covered: complete ? 1 : 0, pathIncomplete: complete ? 0 : 1, variantIncomplete: 0, untested: 0, orphanTests: 0 },
+      coveragePct: complete ? 100 : 0,
+      mappedPct: 100,
       orphanRequirementIds: [],
       orphanTestNames: [],
     }
@@ -153,30 +178,43 @@ describe('specs-coverage stage', () => {
   // The agent edits <featureDir>/e2e/*.spec.ts in place — the mock spawn
   // writes to disk like the real agent's Write tool would.
   function writingSpawnAgent(prompts: string[], content = SPEC): FlightStageDeps['spawnAgent'] {
+    let session = 0
     return async (opts) => {
       prompts.push(opts.prompt)
       const e2eDir = path.join(featuresDir, 'checkout', 'e2e')
       fs.mkdirSync(e2eDir, { recursive: true })
       fs.writeFileSync(path.join(e2eDir, 'checkout.spec.ts'), content)
+      session += 1
+      opts.onAgentSession?.({
+        agent: opts.agent ?? 'claude',
+        sessionId: `author-sess-${session}`,
+        spawnedAt: `2026-08-26T01:0${session}:00.000Z`,
+      })
       return { text: 'rewrote e2e/checkout.spec.ts' }
     }
   }
 
   it('loops author→map until the harness-computed ledger meets the target', async () => {
-    const ledgers = [ledger(0), ledger(100)]
+    const ledgers = [ledger(0), ledger(0), ledger(100)]
     let engineRuns = 0
+    let mappedRequirementIds: string[] | undefined
     const prompts: string[] = []
     const d = deps({
       spawnAgent: writingSpawnAgent(prompts),
       validateSpecs: async () => ({ ok: true }),
       coverage: {
         compute: (() => ledgers.shift() ?? ledger(100)) as never,
-        runEngine: (async () => { engineRuns += 1; return {} as never }) as never,
+        runEngine: (async (args: { requirementIds?: string[] }) => {
+          engineRuns += 1
+          mappedRequirementIds = args.requirementIds
+          return {} as never
+        }) as never,
       },
     })
     const outcome = await specsCoverageStage(d).run(ctxFor(manifest()).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { coveragePct: 100 } })
     expect(engineRuns).toBe(1)
+    expect(mappedRequirementIds).toEqual(['R1'])
     expect(fs.readFileSync(path.join(featuresDir, 'checkout', 'e2e', 'checkout.spec.ts'), 'utf-8')).toBe(SPEC)
     // Edit-in-place contract: absolute feature dir in the prompt, no inlined specs.
     expect(prompts[0]).toContain(path.join(featuresDir, 'checkout'))
@@ -198,10 +236,15 @@ describe('specs-coverage stage', () => {
     expect(prompt).toContain('slot `checkout-service` is exposed as `CANARY_PORT_checkout_service`')
     expect(prompt).toContain('every local service URL must check its shell-safe `CANARY_PORT_<env-slot>` first')
     expect(prompt).toContain("const baseUrl = 'http://localhost:4300'")
+    expect(prompt).toContain('resolveRunRepoPath(repo.name, repo.localPath)')
+    expect(prompt).toContain('Never spawn from `repo.localPath` directly')
+    expect(prompt).toContain('first serial Test run and Report')
   })
 
   it('R27: publishes the loop shape — authoring/validating/mapping per pass, with the pass history', async () => {
-    const ledgers = [ledger(0), ledger(40), ledger(100)]
+    // Each clean pass now has a pre-map recompute that scopes inference to the
+    // live gaps, followed by the post-map verdict recompute.
+    const ledgers = [ledger(0), ledger(0), ledger(40), ledger(40), ledger(100)]
     const d = deps({
       spawnAgent: writingSpawnAgent([]),
       validateSpecs: async () => ({ ok: true }),
@@ -245,23 +288,81 @@ describe('specs-coverage stage', () => {
     expect(last.passes[1]).toMatchObject({ pass: 2, coveragePct: 100 })
   })
 
-  it('parks on coverage-stuck at the iteration bound and accept-partial settles with the ledger recorded', async () => {
+  it('parks early when a mapped percentage and its exact gaps repeat, then accept-partial records the ledger', async () => {
+    const ledgers = [ledger(0), ledger(0), ledger(40), ledger(40), ledger(80), ledger(80), ledger(80)]
+    const prompts: string[] = []
+    let engineRuns = 0
     const d = deps({
-      spawnAgent: writingSpawnAgent([]),
+      spawnAgent: writingSpawnAgent(prompts),
       validateSpecs: async () => ({ ok: true }),
       coverage: {
-        compute: (() => ledger(0)) as never,
-        runEngine: (async () => ({}) as never) as never,
+        compute: (() => ledgers.shift() ?? ledger(80)) as never,
+        runEngine: (async () => { engineRuns += 1; return {} as never }) as never,
       },
     })
     const adapter = specsCoverageStage(d)
     const { ctx, setStage } = ctxFor(manifest())
     const parked = await adapter.run(ctx)
-    expect(parked).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'coverage-stuck' } })
+    expect(parked).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: {
+        kind: 'coverage-stuck',
+        message: expect.stringContaining('same 1 open gap(s) across two mapped passes'),
+        data: { coveragePct: 80, stopReason: 'no-progress' },
+      },
+    })
+    expect(engineRuns).toBe(3)
+    expect(prompts).toHaveLength(3)
     if (parked.kind !== 'checkpoint') throw new Error('unreachable')
     setStage('specs-coverage', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'accept-partial' })
-    expect(outcome).toMatchObject({ kind: 'done', evidence: { acceptedPartial: true, coveragePct: 0 } })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { acceptedPartial: true, coveragePct: 80 } })
+  })
+
+  it('does not call an unchanged percentage stuck while open path cells are shrinking', async () => {
+    const onePath = pathLedger(['happy'])
+    const twoPaths = pathLedger(['happy', 'sad'])
+    const allPaths = pathLedger(['happy', 'sad', 'edge'])
+    const ledgers = [onePath, onePath, onePath, onePath, twoPaths, twoPaths, allPaths]
+    const prompts: string[] = []
+    let engineRuns = 0
+    const d = deps({
+      spawnAgent: writingSpawnAgent(prompts),
+      validateSpecs: async () => ({ ok: true }),
+      coverage: {
+        compute: (() => ledgers.shift() ?? allPaths) as never,
+        runEngine: (async () => { engineRuns += 1; return {} as never }) as never,
+      },
+    })
+
+    const outcome = await specsCoverageStage(d).run(ctxFor(manifest()).ctx)
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { coveragePct: 100 } })
+    expect(engineRuns).toBe(3)
+    expect(prompts).toHaveLength(3)
+  })
+
+  it('keeps the five-pass safety cap when the open gaps continue changing', async () => {
+    const prompts: string[] = []
+    let engineRuns = 0
+    const d = deps({
+      spawnAgent: writingSpawnAgent(prompts),
+      validateSpecs: async () => ({ ok: true }),
+      coverage: {
+        compute: (() => ledger(0, `R${engineRuns + 1}`)) as never,
+        runEngine: (async () => { engineRuns += 1; return {} as never }) as never,
+      },
+    })
+
+    const parked = await specsCoverageStage(d).run(ctxFor(manifest()).ctx)
+    expect(parked).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: {
+        message: expect.stringContaining('After 5 passes'),
+        data: { stopReason: 'max-passes' },
+      },
+    })
+    expect(engineRuns).toBe(5)
+    expect(prompts).toHaveLength(5)
   })
 
   it('rejects structurally invalid on-disk specs and feeds the apply error into the next prompt', async () => {
@@ -326,16 +427,18 @@ describe('specs-coverage stage', () => {
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('no PRD summary') })
   })
 
-  it('pins the coverage-map agent-session ref via onAgentSession', async () => {
+  it('pins every authoring and mapping session in pass order', async () => {
     fs.mkdirSync(path.join(logsDir, 'flights', 'fl-test', 'coverage-map'), { recursive: true })
-    const ledgers = [ledger(0), ledger(100)]
+    const ledgers = [ledger(0), ledger(0), ledger(40), ledger(40), ledger(100)]
+    let mapSession = 0
     const d = deps({
       spawnAgent: writingSpawnAgent([]),
       validateSpecs: async () => ({ ok: true }),
       coverage: {
         compute: (() => ledgers.shift() ?? ledger(100)) as never,
         runEngine: (async (args: { onAgentSession?: (s: { agent: 'claude' | 'codex'; sessionId: string }) => void }) => {
-          args.onAgentSession?.({ agent: 'claude', sessionId: 'map-sess-1' })
+          mapSession += 1
+          args.onAgentSession?.({ agent: 'claude', sessionId: `map-sess-${mapSession}` })
           return {} as never
         }) as never,
       },
@@ -345,7 +448,41 @@ describe('specs-coverage stage', () => {
     expect(outcome).toMatchObject({ kind: 'done' })
     const refPath = path.join(logsDir, 'flights', current().flightId, 'coverage-map', 'agent-session.json')
     const ref = JSON.parse(fs.readFileSync(refPath, 'utf-8'))
-    expect(ref.sessions.claude.sessionId).toBe('map-sess-1')
+    expect(ref.sessions.claude.sessionId).toBe('map-sess-2')
+    expect(current().stages.find((stage) => stage.key === 'specs-coverage')?.agentSessions).toMatchObject([
+      {
+        sidecar: 'specs-coverage-session-001',
+        label: 'Pass 1 · Authoring',
+        phase: 'authoring',
+        pass: 1,
+      },
+      {
+        sidecar: 'specs-coverage-session-002',
+        label: 'Pass 1 · Mapping',
+        phase: 'mapping',
+        pass: 1,
+      },
+      {
+        sidecar: 'specs-coverage-session-003',
+        label: 'Pass 2 · Authoring',
+        phase: 'authoring',
+        pass: 2,
+      },
+      {
+        sidecar: 'specs-coverage-session-004',
+        label: 'Pass 2 · Mapping',
+        phase: 'mapping',
+        pass: 2,
+      },
+    ])
+    const authorRef = JSON.parse(fs.readFileSync(path.join(logsDir, 'flights', 'fl-test', 'specs-coverage-session-001', 'agent-session.json'), 'utf-8'))
+    const mapRef = JSON.parse(fs.readFileSync(path.join(logsDir, 'flights', 'fl-test', 'specs-coverage-session-002', 'agent-session.json'), 'utf-8'))
+    const laterAuthorRef = JSON.parse(fs.readFileSync(path.join(logsDir, 'flights', 'fl-test', 'specs-coverage-session-003', 'agent-session.json'), 'utf-8'))
+    const laterMapRef = JSON.parse(fs.readFileSync(path.join(logsDir, 'flights', 'fl-test', 'specs-coverage-session-004', 'agent-session.json'), 'utf-8'))
+    expect(authorRef.sessions.claude.sessionId).toBe('author-sess-1')
+    expect(mapRef.sessions.claude.sessionId).toBe('map-sess-1')
+    expect(laterAuthorRef.sessions.claude.sessionId).toBe('author-sess-2')
+    expect(laterMapRef.sessions.claude.sessionId).toBe('map-sess-2')
   })
 
   it('checkpoint response: retry re-enters the loop (not just accept-partial)', async () => {

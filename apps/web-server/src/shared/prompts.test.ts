@@ -85,6 +85,32 @@ describe('renderPrompt', () => {
     expect(out).toContain('/f/feature.config.cjs')
     expect(out).toContain('port 3007 still bound')
   })
+
+  it('keeps service setup facts out of gathered coverage requirements', () => {
+    const prompts = [
+      renderPrompt('flight-collect-docs.md', {
+        feature: 'checkout',
+        description: 'checkout flow',
+        feedbackNote: '',
+        repoPaths: '- /repo',
+        outPath: '/features/checkout/docs/checkout-prd.md',
+      }),
+      renderPrompt('flight-infer-diff.md', {
+        feature: 'checkout',
+        description: 'checkout flow',
+        feedbackNote: '',
+        repoTargets: '- /repo (diff vs main)',
+        outPath: '/features/checkout/docs/checkout-from-diff.md',
+      }),
+    ]
+
+    for (const out of prompts) {
+      expect(out).toContain('fixed or hardcoded ports')
+      expect(out).toContain('env-file or env-var loading (including their absence)')
+      expect(out).toContain('belong to Repo scan and Parallel setup, not the coverage ledger')
+      expect(out).toContain('"these are the whole feature"')
+    }
+  })
 })
 
 // Every *.schema.json under prompts/ is handed to `codex exec --output-schema`,

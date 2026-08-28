@@ -198,6 +198,34 @@ describe('statusForTest', () => {
     expect(statusForTest({ name: 'validates input', id: 'test-id-beta' }, summary)).toBe('testing')
   })
 
+  it('does not mark a same-title sibling as running when its id differs', () => {
+    const summary: RunSummary = {
+      complete: false,
+      total: 2,
+      passed: 0,
+      failed: [],
+      running: { id: 'test-id-alpha', name: 'test-case-validates-input', location: '/a.spec.ts:10' },
+    } as RunSummary
+
+    expect(statusForTest({ name: 'validates input', id: 'test-id-beta' }, summary)).toBe('pending')
+  })
+
+  it('fails closed when a modern inventory exists but no exact test id was resolved', () => {
+    const summary: RunSummary = {
+      complete: false,
+      total: 1,
+      passed: 0,
+      failed: [],
+      running: { id: 'test-id-alpha', name: 'test-case-validates-input', location: '/a.spec.ts:10' },
+      passedNames: ['test-case-validates-input'],
+    } as RunSummary
+
+    expect(statusForTest({
+      name: 'validates input',
+      allowNameFallback: false,
+    }, summary)).toBe('pending')
+  })
+
   it('falls back to summary.running when only its id matches the identity id', () => {
     const summary: RunSummary = {
       complete: false,
@@ -236,6 +264,20 @@ describe('statusForTest', () => {
       skippedNames: ['test-case-creates-a-todo'],
     }
     expect(statusForTest('Creates a TODO', summary)).toBe('skipped')
+  })
+
+  it('does not apply a duplicate title\'s skipped name when stable ids are available', () => {
+    const summary: RunSummary = {
+      complete: false,
+      total: 2,
+      passed: 0,
+      failed: [],
+      skipped: 1,
+      skippedIds: ['test-id-alpha'],
+      skippedNames: ['test-case-validates-input'],
+    } as RunSummary
+
+    expect(statusForTest({ name: 'validates input', id: 'test-id-beta' }, summary)).toBe('pending')
   })
 })
 

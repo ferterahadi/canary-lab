@@ -25,6 +25,7 @@ export interface StageContextStubOptions {
   appendLog?: StageContext['appendLog']
   setProgress?: StageContext['setProgress']
   setAgentActivity?: StageContext['setAgentActivity']
+  addAgentSession?: StageContext['addAgentSession']
   /** Override to drive the pause/abort paths. */
   signal?: AbortSignal
 }
@@ -37,6 +38,7 @@ export function stageContextStub(opts: StageContextStubOptions): StageContext {
     appendLog: opts.appendLog ?? ((): void => {}),
     setProgress: opts.setProgress ?? ((): void => {}),
     setAgentActivity: opts.setAgentActivity ?? ((): void => {}),
+    addAgentSession: opts.addAgentSession ?? ((): void => {}),
     patchFlight: opts.patchFlight,
   }
 }

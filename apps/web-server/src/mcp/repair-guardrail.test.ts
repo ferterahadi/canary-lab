@@ -58,6 +58,8 @@ describe('repair guardrail — the flight heal hand-off prompt', () => {
     expect(template).toContain('claim_heal')
     expect(template).toContain('wait_for_heal_task')
     expect(template).toContain('signal_run')
+    expect(template).toContain('The signal requests runner verification')
+    expect(template).toContain('Do not start services or run Playwright')
     // The submit is a "check the record" release, not an answer payload.
     expect(template).toMatch(/reads the verdict from the run record/i)
   })
@@ -83,6 +85,11 @@ describe('repair guardrail — MCP instructions', () => {
     // Counts come from the real result lines; `total - failed` silently converts
     // never-run tests into passes.
     expect(INSTRUCTIONS_BY_PROFILE.repair).toMatch(/never total - failed/i)
+  })
+
+  it('repair instructions assign runtime verification to the runner', () => {
+    expect(INSTRUCTIONS_BY_PROFILE.repair).toContain('The signal requests runner verification')
+    expect(INSTRUCTIONS_BY_PROFILE.repair).toContain('Do not start services or run Playwright')
   })
 })
 
@@ -127,6 +134,13 @@ describe('repair guardrail — delivery, not just presence', () => {
     expect(steps).toMatch(/not tests, unless a test is provably wrong/i)
     expect(steps).toMatch(/never delete, skip, weaken, or loosen an assertion/i)
   })
+
+  it('runner-owned verification rides the heal result', () => {
+    const steps = EXTERNAL_HEAL_NEXT_STEPS.join('\n')
+    expect(steps).toContain('The signal requests runner verification')
+    expect(steps).toContain('Do not start services or run Playwright')
+    expect(steps).toContain('targeted Playwright verification after the signal')
+  })
 })
 
 describe('repair guardrail — shipped agent skills', () => {
@@ -156,6 +170,16 @@ describe('repair guardrail — shipped agent skills', () => {
       // prohibition, not one phrasing.
       expect(text).toMatch(/(never|do not|don't)[\s\S]{0,120}total\s*-\s*(summary\.)?failed/i)
       expect(text).toMatch(/not run, not passed/i)
+    },
+  )
+
+  it.each(runLoopSkills.map((f) => [path.relative(REPO_ROOT, f), f]))(
+    '%s assigns runtime verification to the runner',
+    (_label, file) => {
+      const text = fs.readFileSync(file, 'utf8')
+      expect(text).toContain('The signal requests runner verification')
+      expect(text).toContain('Do not start services or run Playwright')
+      expect(text).toContain('targeted Playwright verification after the signal')
     },
   )
 })

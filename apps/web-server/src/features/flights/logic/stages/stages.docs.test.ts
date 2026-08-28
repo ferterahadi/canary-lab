@@ -371,19 +371,18 @@ describe('docs stage', () => {
     expect(outcome).toMatchObject({ kind: 'failed', error: 'feature not found' })
   })
 
-  it('write() succeeding at a DIFFERENT feature dir than featureDirFor still reports no docs landed', async () => {
-    // A feature.config.cjs declaring name "checkout" but living in a
-    // differently-named directory: writeFeatureDoc resolves featureDir via the
-    // declared name (finds it, writes succeed there), while docsStage's own
-    // featureDirFor(deps, 'checkout') is a straight path join that never
-    // existed — so the harness-read userDocs() comes back empty.
+  it('reads evidence from the config directory when it differs from the feature name', async () => {
+    // A rename deliberately leaves the directory in place. Both the writer and
+    // the harness read must follow config.featureDir or a doc that landed
+    // successfully would still be reported missing.
     fs.rmSync(path.join(featuresDir, 'checkout'), { recursive: true, force: true })
     const otherDir = path.join(featuresDir, 'other-dir')
     fs.mkdirSync(otherDir, { recursive: true })
     fs.writeFileSync(path.join(otherDir, 'feature.config.cjs'), configCjs('checkout', repoDir))
     const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true } })
     const outcome = await docsStage(deps()).run(ctxFor(m).ctx)
-    expect(outcome).toMatchObject({ kind: 'failed', error: 'no docs landed in features/<f>/docs/' })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'description-only', docs: ['description.md'] } })
+    expect(fs.existsSync(path.join(otherDir, 'docs', 'description.md'))).toBe(true)
   })
 
   it('legacy use-repo-docs choice degrades to the collect-repo-docs agent path', async () => {

@@ -213,7 +213,7 @@ export function externalDraftView(record: DraftRecord): Record<string, unknown> 
 
 export function externalDraftAuthoringNextSteps(feature: string): string[] {
   return [
-    'Tell the user you are authoring tests now and they can wait in the external client.',
+    'Tell the user you are authoring tests now and they can wait in the external agent session.',
     `Author or edit Playwright specs under features/${feature}/e2e.`,
     'Call update_external_draft_stage as progress changes.',
     'Call apply_external_draft when the files are ready to validate and record.',

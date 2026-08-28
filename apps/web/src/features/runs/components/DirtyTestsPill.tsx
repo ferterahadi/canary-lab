@@ -17,7 +17,7 @@ export function DirtyTestsPill({ count, onOpen }: { count: number; onOpen: () =>
       freshPulseKey={count}
       onClick={onOpen}
       title="Test files were modified — review before trusting the result"
-      ariaLabel={`${count} feature${count > 1 ? 's' : ''} with modified test files — review`}
+      ariaLabel={`${count} suite${count > 1 ? 's' : ''} with modified test files — review`}
     />
   )
 }

@@ -79,4 +79,14 @@ describe('writeCoverageRunState', () => {
     writeCoverageRunState(featureDir, state)
     expect(readCoverageRunState(featureDir)).toEqual(state)
   })
+
+  it('persists the exact percentage for the lightweight suite-list scan', () => {
+    const state = {
+      requirementsHash: 'h1',
+      ranAt: '2026-01-01T00:00:00Z',
+      coveragePct: 62.5,
+    }
+    writeCoverageRunState(featureDir, state)
+    expect(readCoverageRunState(featureDir)).toEqual(state)
+  })
 })

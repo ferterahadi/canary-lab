@@ -24,14 +24,14 @@ export function describeRunStartError(err: unknown, feature: string): {
       return {
         title,
         detail,
-        hint: 'This feature no longer exists — it may have been deleted or renamed. Reload and pick a feature that’s still listed.',
+        hint: 'This suite no longer exists — it may have been deleted or renamed. Reload and pick a suite that’s still listed.',
       }
     }
     if (err.status === 400) {
       return {
         title,
         detail,
-        hint: 'The request was rejected. Pick a valid environment for this feature, then try again.',
+        hint: 'The request was rejected. Pick a valid environment for this suite, then try again.',
       }
     }
     if (err.status === 409) {
@@ -83,7 +83,7 @@ export function RunStartErrorDialog({ error, feature, onRetry, onSwitchBranches,
       onClose={onClose}
       width={480}
       role="alertdialog"
-      ariaLabel={mismatch ? 'Repos not on the feature’s branch' : 'Run failed to start'}
+      ariaLabel={mismatch ? 'Repos not on the suite’s branch' : 'Run failed to start'}
     >
       <div className="p-5">
         {mismatch
@@ -172,7 +172,7 @@ function BranchMismatchBody({ mismatch, onSwitchBranches, onPinCurrent, onClose 
         {onSwitchBranches && (
           <OptionCard
             singleBranch={expectedName}
-            title="The branches this feature targets"
+            title="The branches this suite targets"
             rows={switchRows}
             sideLabel="recommended"
             action={busy === 'switch' ? 'Switching…' : `Switch ${repoLabel}, then run`}
@@ -187,7 +187,7 @@ function BranchMismatchBody({ mismatch, onSwitchBranches, onPinCurrent, onClose 
             title="The branches you’re on now"
             rows={pinRows}
             sideLabel="pins each where it is"
-            action={busy === 'pin' ? 'Pinning…' : `Pin the feature to ${currentName ? 'it' : 'these'}, then run`}
+            action={busy === 'pin' ? 'Pinning…' : `Pin the suite to ${currentName ? 'it' : 'these'}, then run`}
             disabled={busy !== null}
             onClick={run('pin', onPinCurrent)}
           />

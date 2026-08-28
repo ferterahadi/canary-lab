@@ -9,6 +9,11 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["shared/**/*", "apps/cli/**/*"],
+  "include": [
+    "shared/**/*",
+    "apps/cli/**/*",
+    "apps/web-server/src/shared/controlled-english/**/*.ts",
+    "apps/web-server/src/shared/readable-tests/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 }

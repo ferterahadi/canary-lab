@@ -6,8 +6,7 @@ import { agentProgressSink } from './agent-progress'
 const textDelta = (text: string) =>
   `${JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } })}\n`
 
-/** Records both channels so a test can assert the log kept everything while
- *  progress was throttled — the two halves of this sink's contract. */
+/** Records both channels so tests pin the transcript/manifest boundary. */
 function recordingCtx() {
   const log: string[] = []
   const published: AgentActivity[] = []
@@ -26,7 +25,7 @@ describe('agentProgressSink', () => {
     expect(published).toEqual([{ phase: 'writing', thinkingTokens: 0, chars: 5, tail: 'hello' }])
   })
 
-  it('keeps every chunk in the log even while it throttles progress', () => {
+  it('does not copy raw CLI chunks into the Flight manifest while throttling activity', () => {
     const { ctx, log, published } = recordingCtx()
     let clock = 1_000_000
     const sink = agentProgressSink(ctx, () => clock)
@@ -35,10 +34,8 @@ describe('agentProgressSink', () => {
     sink(textDelta('b'))
     clock += 200
     sink(textDelta('c'))
-    // One publish, three appends: the raw record is never the thing that gets
-    // dropped when progress is being rate-limited.
     expect(published).toHaveLength(1)
-    expect(log).toHaveLength(3)
+    expect(log).toEqual([])
   })
 
   it('publishes again once the window has passed, with the accumulated answer', () => {
@@ -54,11 +51,11 @@ describe('agentProgressSink', () => {
     expect(published[1]).toEqual({ phase: 'writing', thinkingTokens: 0, chars: 13, tail: 'one two three' })
   })
 
-  it('logs a chunk that yields no activity without publishing anything', () => {
+  it('ignores a chunk that yields no activity', () => {
     const { ctx, log, published } = recordingCtx()
     let clock = 1_000_000
     agentProgressSink(ctx, () => clock)('[specs] plain adapter line, not stream-json\n')
-    expect(log).toHaveLength(1)
+    expect(log).toEqual([])
     expect(published).toEqual([])
   })
 

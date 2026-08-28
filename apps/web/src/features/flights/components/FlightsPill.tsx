@@ -5,6 +5,7 @@ import { StatusPill } from '@/shared/ui/StatusPill'
 import { FLIGHT_STATUS_TONE, featureActivityRows, featureChipState, preFlightChipState } from './FlightChipState'
 import { FlightsPickerDialog } from './FlightPickerRows'
 import { flightAwaitsUser } from '../lib/external-work'
+import { FLIGHT_OVERVIEW } from './stage-meta'
 
 export { FLIGHT_STATUS_TONE, FeatureChipBadge, FlightStatusChip, activityStages, featureActivityRows, featureChipState, flightStatusLabel, groupPickerRows, preFlightChipState, resolveFeatureFlightAction } from './FlightChipState'
 export type { FeatureActivityRow, FeatureChipState, FeatureFlightAction, FeatureRef, PickerGroup } from './FlightChipState'
@@ -98,7 +99,7 @@ export function FlightsPill({
       ].join('\n')
     // The picker's own tagline, verbatim — the pill and the panel it opens must
     // not describe the same thing in two different sentences.
-    : 'One command from a bare repo to a green, covered, evaluated run.'
+    : FLIGHT_OVERVIEW
 
   return (
     <div className="shrink-0" data-testid="flights-pill">

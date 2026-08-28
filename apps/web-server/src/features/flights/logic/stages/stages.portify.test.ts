@@ -129,10 +129,13 @@ describe('portify stage', () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
   })
 
-  function markPortified(): void {
-    const dir = path.join(featuresDir, 'checkout', 'portify')
+  function markPortified(
+    featureDir = path.join(featuresDir, 'checkout'),
+    featureName = 'checkout',
+  ): void {
+    const dir = path.join(featureDir, 'portify')
     fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ version: 1, featureName: 'checkout', agent: 'claude', repos: [{ name: 'app' }], capturedAt: 'x' }))
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ version: 1, featureName, agent: 'claude', repos: [{ name: 'app' }], capturedAt: 'x' }))
   }
 
   // Every non-yolo run() parks the upfront portify-gate first. Answer it
@@ -180,6 +183,30 @@ describe('portify stage', () => {
       return undefined
     })
     const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { workflowId: 'wf1', edits: false } })
+  })
+
+  it('verifies the saved mark in the config directory after a suite rename', async () => {
+    const featureDir = path.join(featuresDir, 'checkout')
+    const configPath = path.join(featureDir, 'feature.config.cjs')
+    const renamed = 'renamed-checkout'
+    fs.writeFileSync(
+      configPath,
+      fs.readFileSync(configPath, 'utf8').replace("name: 'checkout'", `name: '${renamed}'`),
+    )
+    let status = 'verifying'
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') { status = 'ready-to-save'; return { statusCode: 201, body: { workflowId: 'wf1' } } }
+      if (call.method === 'GET') return { statusCode: 200, body: { status, diff: '' } }
+      if (call.url.endsWith('/save')) { status = 'saved'; markPortified(featureDir, renamed); return { statusCode: 200, body: {} } }
+      return undefined
+    })
+
+    const outcome = await runPastGate(
+      portifyStage(deps({ inject })),
+      ctxFor(manifest({ feature: renamed })),
+    )
+
     expect(outcome).toMatchObject({ kind: 'done', evidence: { workflowId: 'wf1', edits: false } })
   })
 
@@ -536,7 +563,7 @@ describe('portify stage', () => {
 
 })
 
-describe('portify — external producer', () => {
+describe('portify — external Flight compatibility and background ownership', () => {
   beforeEach(() => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
   })
@@ -568,46 +595,46 @@ describe('portify — external producer', () => {
     },
   })
 
-  it('yolo + external starts an EXTERNAL workflow and parks the whole engagement — no stage-side poll', async () => {
+  it('yolo + external starts and follows a server-owned workflow', async () => {
     const calls: InjectCall[] = []
+    let reads = 0
     const inject = makeInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify') return { statusCode: 200, body: [] }
       if (call.method === 'POST' && call.url === '/api/portify') {
-        return { statusCode: 201, body: { workflowId: 'wf-1', targets: [{ name: 'app', editPath: '/wt/app' }], configPath: '/cfg/feature.config.cjs', instructions: 'Port-ify the listeners.' } }
+        return { statusCode: 201, body: { workflowId: 'wf-1' } }
       }
+      if (call.method === 'GET' && call.url === '/api/portify/wf-1') {
+        reads += 1
+        return { statusCode: 200, body: reads === 1 ? { status: 'ready-to-save', diff: '+ port' } : { status: 'saved' } }
+      }
+      if (call.method === 'POST' && call.url === '/api/portify/wf-1/save') { markPortified(); return { statusCode: 200, body: {} } }
       return undefined
     }, calls)
     const { ctx, progressLog } = ctxFor(externalManifest())
-    const cp = parkOf(await portifyStage(deps({ inject })).run(ctx))
-    expect(cp.kind).toBe('external-work')
-    expect(cp.data.stage).toBe('portify')
-    // The runner's own task instructions, workflowId + edit targets alongside.
-    expect(cp.data.prompt).toBe('Port-ify the listeners.')
-    expect(cp.data.context).toMatchObject({ workflowId: 'wf-1', configPath: '/cfg/feature.config.cjs' })
-    expect(cp.message).toContain('Do NOT call save_portify')
-    // Producer + flight identity rode the start request.
+    const outcome = await portifyStage(deps({ inject })).run(ctx)
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { workflowId: 'wf-1', edits: true } })
+    // Parallel setup does not inherit the external producer or conversation.
     const start = calls.find((c) => c.method === 'POST' && c.url === '/api/portify')
-    expect(start?.payload).toMatchObject({ producer: 'external', sessionId: 'flight:fl-test' })
-    // The id is pinned for drill-through/teardown, and nothing polled the workflow.
+    expect(start?.payload).toEqual({ feature: 'checkout' })
+    // The id is pinned for live drill-through and the stage follows the workflow.
     expect(progressLog).toContainEqual({ workflowId: 'wf-1' })
-    expect(calls.some((c) => c.method === 'GET' && c.url === '/api/portify/wf-1')).toBe(false)
+    expect(calls.some((c) => c.method === 'GET' && c.url === '/api/portify/wf-1')).toBe(true)
   })
 
-  it('the gate answered "run" under an external producer starts the external workflow', async () => {
+  it('the gate answered "run" under an external producer starts the server-owned workflow', async () => {
+    const calls: InjectCall[] = []
     const inject = makeInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') {
-        // No instructions/targets/configPath — a degraded start still parks
-        // (the workflowId is the load-bearing part; the client can get_portify).
         return { statusCode: 201, body: { workflowId: 'wf-1' } }
       }
+      if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { status: 'ready-to-save', diff: '+ port' } }
       return undefined
-    })
+    }, calls)
     const { ctx, setStage } = ctxFor(externalManifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' } }))
     setStage('portify', { checkpoint: { kind: 'portify-gate', message: 'q', options: ['run', 'skip'] } })
-    const cp = parkOf(await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'run' }))
-    expect(cp.kind).toBe('external-work')
-    expect(cp.data.prompt).toBe('')
-    expect(cp.data.context).toEqual({ workflowId: 'wf-1' })
+    const outcome = await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'run' })
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-apply', data: { workflowId: 'wf-1' } } })
+    expect(calls.find((c) => c.method === 'POST' && c.url === '/api/portify')?.payload).toEqual({ feature: 'checkout' })
   })
 
   it('a submit while the workflow is still editing re-parks the SAME engagement with the live status', async () => {
@@ -722,6 +749,7 @@ describe('portify — external producer', () => {
   it('a revise on the review re-opens the EXTERNAL window and re-parks the engagement', async () => {
     const calls: InjectCall[] = []
     const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { producer: 'external' } }
       if (call.method === 'POST' && call.url === '/api/portify/wf-1/revise') return { statusCode: 200, body: { instructions: 'Revised task — ports only.' } }
       return undefined
     }, calls)
@@ -734,7 +762,26 @@ describe('portify — external producer', () => {
     // The route was asked for the EXTERNAL reopen, not the local revise agent.
     expect(calls.find((c) => c.url.endsWith('/revise'))?.payload).toMatchObject({ external: true, feedback: 'use env-driven ports' })
   })
-  it('a rejected external start fails the stage with the server reason (or "unknown" without one)', async () => {
+
+  it('an internal workflow stays server-owned when revised from an external Flight', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify/wf-1') {
+        return { statusCode: 200, body: { producer: 'internal', status: 'ready-to-save', diff: '+ revised', verification: { ok: true } } }
+      }
+      if (call.method === 'POST' && call.url === '/api/portify/wf-1/revise') return { statusCode: 200, body: {} }
+      return undefined
+    }, calls)
+    const { ctx, setStage } = ctxFor(externalManifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' } }))
+    setStage('portify', { checkpoint: { kind: 'portify-apply', message: 'save?', data: { workflowId: 'wf-1', diff: '+ p' } } })
+
+    const outcome = await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'revise', feedback: 'use env-driven ports' })
+
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-apply', data: { workflowId: 'wf-1', diff: '+ revised' } } })
+    expect(calls.find((c) => c.url.endsWith('/revise'))?.payload).toEqual({ feedback: 'use env-driven ports' })
+  })
+
+  it('a rejected background start fails the stage with the server reason (or "unknown" without one)', async () => {
     const rejected = makeInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify') return { statusCode: 200, body: [] }
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 500, body: { error: 'nope' } }
@@ -841,6 +888,7 @@ describe('portify — external producer', () => {
 
   it('a revise whose reopen returns no instructions re-parks with the feedback as the task', async () => {
     const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { producer: 'external' } }
       if (call.method === 'POST' && call.url === '/api/portify/wf-1/revise') return { statusCode: 200, body: {} }
       return undefined
     })
@@ -851,4 +899,3 @@ describe('portify — external producer', () => {
     expect(cp.data.prompt).toBe('use env ports')
   })
 })
-

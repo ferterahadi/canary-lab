@@ -165,10 +165,10 @@ describe('MCP HTTP server (smoke)', () => {
         externalStage: 'authoring-tests',
         sessionId: 'sess-author-1',
         canaryLabBehavior: 'tracking-only',
-        statusMeaning: 'External client is authoring tests; Canary Lab is not running an internal wizard agent.',
+        statusMeaning: 'External agent session is authoring tests; Canary Lab is not running an internal wizard agent.',
       })
       expect(draftBody.nextSteps).toEqual([
-        'Tell the user you are authoring tests now and they can wait in the external client.',
+        'Tell the user you are authoring tests now and they can wait in the external agent session.',
         'Author or edit Playwright specs under features/checkout_flow/e2e.',
         'Call update_external_draft_stage as progress changes.',
         'Call apply_external_draft when the files are ready to validate and record.',

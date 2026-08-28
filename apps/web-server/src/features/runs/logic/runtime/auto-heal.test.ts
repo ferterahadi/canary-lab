@@ -43,6 +43,17 @@ describe('buildClaudeMcpConfigArg', () => {
 })
 
 describe('buildAgentSpawnCommand', () => {
+  it('enforces the 258K context and auto-compaction policy on both REPLs', () => {
+    expect(buildAgentSpawnCommand('claude')).toContain('--autocompact 258k')
+    for (const cmd of [
+      buildAgentSpawnCommand('codex'),
+      buildAgentSpawnCommand('codex', { sessionId: 'sid', resume: true }),
+    ]) {
+      expect(cmd).toContain('-c model_context_window=258000')
+      expect(cmd).toContain('-c model_auto_compact_token_limit=232200')
+    }
+  })
+
   it('claude REPL: pins --session-id and wires MCP, but does NOT bypass permissions', () => {
     const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-spawn-')))
     try {
@@ -87,19 +98,36 @@ describe('buildAgentSpawnCommand', () => {
     expect(cmd.includes('--dangerously-skip-permissions')).toBe(false)
   })
 
-  it('grants each writable dir on both arms — cwd is the run dir, so repos are out of scope', () => {
+  it('grants writable repos on both arms and read-only suite context only to Claude', () => {
     // The third gate, which no permission mode covers: the agent's cwd is the
     // run directory, so its first touch of a repo asks "allow reading from …?"
     // and nothing answers. Deduped, because two services can share one repo.
     for (const agent of ['claude', 'codex'] as const) {
       const cmd = buildAgentSpawnCommand(agent, {
         sessionId: 'x',
-        writableDirs: ['/repos/api', '/repos/api', '/ws/features/demo'],
+        writableDirs: ['/repos/api', '/repos/api'],
+        readableDirs: ['/ws/features/demo'],
       })
       expect(cmd).toContain('--add-dir "/repos/api"')
-      expect(cmd).toContain('--add-dir "/ws/features/demo"')
-      expect(cmd.match(/--add-dir/g)).toHaveLength(2)
+      if (agent === 'claude') {
+        expect(cmd).toContain('--add-dir "/ws/features/demo"')
+        expect(cmd.match(/--add-dir/g)).toHaveLength(2)
+      } else {
+        expect(cmd).not.toContain('/ws/features/demo')
+        expect(cmd.match(/--add-dir/g)).toHaveLength(1)
+      }
     }
+  })
+
+  it('claude REPL loads only the run isolation settings when supplied', () => {
+    const cmd = buildAgentSpawnCommand('claude', {
+      isolationSettingsFile: '/runs/demo/heal-agent-isolation.settings.json',
+    })
+    expect(cmd).toContain('--setting-sources ""')
+    expect(cmd).toContain('--settings "/runs/demo/heal-agent-isolation.settings.json"')
+    expect(buildAgentSpawnCommand('codex', {
+      isolationSettingsFile: '/runs/demo/heal-agent-isolation.settings.json',
+    })).not.toContain('--settings')
   })
 
   it('codex REPL: never asks for approval, on a fresh spawn and on resume', () => {
@@ -148,7 +176,7 @@ describe('buildAgentSpawnCommand', () => {
       resume: true,
       sessionId: 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f',
     })
-    expect(codexResume.startsWith('"/opt/homebrew/bin/codex" -a never --sandbox workspace-write resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f"')).toBe(true)
+    expect(codexResume.startsWith('"/opt/homebrew/bin/codex" -c model_context_window=258000 -c model_auto_compact_token_limit=232200 -a never --sandbox workspace-write resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f"')).toBe(true)
   })
 
   it('claude REPL: throws when mcpOutputDir is set but mcpConfigFile is not', () => {
@@ -218,7 +246,7 @@ describe('buildAgentSpawnCommand', () => {
     })
     // `-a never` sits before the subcommand, same as `--model` — clap reads it
     // as a global flag there. Verified against the codex CLI's own parser.
-    expect(cmd).toBe('codex -a never --sandbox workspace-write resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f" -- "@/tmp/run/heal-prompt.md"')
+    expect(cmd).toBe('codex -c model_context_window=258000 -c model_auto_compact_token_limit=232200 -a never --sandbox workspace-write resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f" -- "@/tmp/run/heal-prompt.md"')
     expect(cmd.includes('--session-id')).toBe(false)
     expect(cmd.includes('--resume')).toBe(false)
   })
@@ -295,12 +323,15 @@ describe('makeAgentSpawnCommandBuilder', () => {
       resume: true,
       sessionId: 'session-1',
       promptFile: '/runs/demo/heal-prompt.md',
-      writableDirs: ['/runs/demo/worktrees/api', '/workspace/features/demo'],
+      writableDirs: ['/runs/demo/worktrees/api'],
+      readableDirs: ['/workspace/features/demo'],
+      isolationSettingsFile: '/runs/demo/heal-agent-isolation.settings.json',
     })
 
     expect(cmd).toContain('"/opt/bin/codex"')
     expect(cmd).toContain('--add-dir "/runs/demo/worktrees/api"')
-    expect(cmd).toContain('--add-dir "/workspace/features/demo"')
+    expect(cmd).not.toContain('/workspace/features/demo')
+    expect(cmd).not.toContain('--settings')
     expect(cmd).toContain('resume "session-1"')
     expect(cmd).toContain('-- "@/runs/demo/heal-prompt.md"')
   })

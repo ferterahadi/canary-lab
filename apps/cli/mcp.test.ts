@@ -42,7 +42,7 @@ class BufferWritable extends Writable {
 }
 
 describe('canary-lab mcp', () => {
-  it('doctor verifies a running UI MCP server and the default lifecycle profile', async () => {
+  it('doctor verifies a running UI MCP server and the default compact profile', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     const stdout = new BufferWritable()
@@ -52,9 +52,9 @@ describe('canary-lab mcp', () => {
       await expect(doctor(`${address}/mcp`, { stdout, stderr })).resolves.toBe(true)
       expect(stdout.text()).toContain('Canary Lab MCP is reachable')
       expect(stdout.text()).toContain(`Protocol: ${CANARY_LAB_MCP_PROTOCOL_VERSION}`)
-      expect(stdout.text()).toContain('Profile: lifecycle')
-      expect(stdout.text()).toContain('create_feature')
-      expect(stdout.text()).toContain('execute_verification')
+      expect(stdout.text()).toContain('Profile: compact')
+      expect(stdout.text()).toContain('Required tools: exec')
+      expect(stdout.text()).toContain('Command probe: get_feature_coverage discovered')
       expect(stderr.text()).toBe('')
       const health = await fetch(`${address}/mcp/health`).then((res) => res.json()) as {
         projectRoot?: string
@@ -62,7 +62,7 @@ describe('canary-lab mcp', () => {
         protocolVersion?: string
       }
       expect(health.projectRoot).toBe(projectRoot)
-      expect(health.profile).toBe('lifecycle')
+      expect(health.profile).toBe('compact')
       expect(health.protocolVersion).toBe(CANARY_LAB_MCP_PROTOCOL_VERSION)
     } finally {
       await app.close()

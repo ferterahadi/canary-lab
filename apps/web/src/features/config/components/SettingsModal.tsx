@@ -341,7 +341,7 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
                   checked={draft.autoProposePr !== false}
                   onChange={(autoProposePr) => setDraft({ ...draft, autoProposePr })}
                   label="Open a draft PR when a run heals green"
-                  description="One pull request per feature, force-pushed to the same branch each time so it always carries the newest fix. Nothing is pushed for a run that failed or gave up."
+                  description="One pull request per suite, force-pushed to the same branch each time so it always carries the newest fix. Nothing is pushed for a run that failed or gave up."
                 />
                 <GitHubSection divider />
               </Section>

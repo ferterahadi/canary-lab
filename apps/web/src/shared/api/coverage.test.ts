@@ -78,6 +78,24 @@ describe('coverage api', () => {
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/coverage/states', { method: 'GET' })
   })
 
+  it('coalesces simultaneous coverage-state reads from the same page load', async () => {
+    const states = [{ feature: 'checkout', headline: 'Covered 100%', summary: 'fresh', coverage: 'fresh', coveragePct: 100 }]
+    let settle: ((response: Response) => void) | undefined
+    const fetchImpl = vi.fn(() => new Promise<Response>((resolve) => { settle = resolve }))
+
+    const first = listCoverageStates({ baseUrl: 'http://x', fetchImpl })
+    const second = listCoverageStates({ baseUrl: 'http://x', fetchImpl })
+
+    expect(second).toBe(first)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    settle?.(ok(states))
+    await expect(Promise.all([first, second])).resolves.toEqual([states, states])
+
+    fetchImpl.mockResolvedValueOnce(ok(states))
+    await expect(listCoverageStates({ baseUrl: 'http://x', fetchImpl })).resolves.toEqual(states)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
   it('regeneratePrdSummary POSTs with adapter when provided', async () => {
     const payload = { feature: 'checkout', summary: {}, written: [] }
     const fetchImpl = vi.fn().mockResolvedValue(ok(payload))

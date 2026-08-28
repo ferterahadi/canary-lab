@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, getFeatureDirtyDiff, getFeatureTests } from '../api/client'
+import { readableTest } from '../api/__fixtures__/readable-test'
 import { TestCasesColumn } from './TestCasesColumn'
 
 vi.mock('../api/client', async () => {
@@ -65,6 +66,7 @@ describe('TestCasesColumn', () => {
             line: 396,
             bodySource: "{\n  await page.goto('/line/rejected')\n  await expect(page).toHaveText('REJECTED')\n}",
             steps: [],
+            readable: readableTest('retrieves a REJECTED record with reason populated'),
           },
         ],
       },
@@ -98,8 +100,10 @@ describe('TestCasesColumn', () => {
       )
     })
 
+    const codeTab = container.querySelector<HTMLButtonElement>('[data-testid="test-presentation-code-tab"]')
+    expect(codeTab).not.toBeNull()
     await act(async () => {
-      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      codeTab?.click()
     })
 
     expect(container.textContent).toContain("page.goto('/line/rejected')")
@@ -135,17 +139,19 @@ describe('TestCasesColumn', () => {
             line: idx + 1,
             bodySource: '',
             steps: [],
+            readable: readableTest(test.title),
           })),
-          { name: 'validates duplicate', line: 100, bodySource: '', steps: [] },
-          { name: 'validates duplicate', line: 120, bodySource: '', steps: [] },
+          { name: 'validates duplicate', line: 100, bodySource: '', steps: [], readable: readableTest('validates duplicate') },
+          { name: 'validates duplicate', line: 120, bodySource: '', steps: [], readable: readableTest('validates duplicate') },
           ...knownTests.slice(7, 31).map((test, idx) => ({
             name: test.title,
             line: idx + 8,
             bodySource: '',
             steps: [],
+            readable: readableTest(test.title),
           })),
-          { name: 'workspace-only test 32', line: 132, bodySource: '', steps: [] },
-          { name: 'workspace-only test 33', line: 133, bodySource: '', steps: [] },
+          { name: 'workspace-only test 32', line: 132, bodySource: '', steps: [], readable: readableTest('workspace-only test 32') },
+          { name: 'workspace-only test 33', line: 133, bodySource: '', steps: [], readable: readableTest('workspace-only test 33') },
         ],
       },
     ])

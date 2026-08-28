@@ -1,13 +1,18 @@
-# Feature Folder Reference
+# Suite Folder Reference
 
-A Canary Lab feature is the unit that one run executes. It connects product
+A Canary Lab suite is the unit that one run executes. It connects product
 repositories and service start commands to Playwright tests, environment files,
-and requirement evidence. Features live under `features/<name>/`.
+and requirement evidence. Suites live under `features/<name>/`.
+
+The on-disk, CLI, REST, and Model Context Protocol (MCP) contracts retain the
+established `feature` name for compatibility. Literal names such as
+`feature.config.cjs`, `npx canary-lab new feature`, `/api/features`, and a
+`feature` argument do not change when the UI calls the same object a suite.
 
 See the [README](../README.md) for workspace setup and the [Guide](GUIDE.md) for
-running, repairing, and exporting a feature.
+running, repairing, and exporting a suite.
 
-## Create a feature
+## Create a suite
 
 Create a deterministic starter from the UI or CLI:
 
@@ -15,7 +20,7 @@ Create a deterministic starter from the UI or CLI:
 npx canary-lab new feature checkout-discounts --description "Validate checkout discounts"
 ```
 
-The scaffold contains a feature config, Playwright config, envset metadata, a
+The scaffold contains `feature.config.cjs`, a Playwright config, envset metadata, a
 local envset, and an example spec. Replace the example with real behavior.
 
 Flight can build the same structure from one or more product repos, collect
@@ -23,6 +28,27 @@ requirements, author and map tests, prepare services for concurrent ports, run
 the suite, repair failures, and export the evaluation. An external MCP client
 can instead author specs through `start_external_draft` →
 `update_external_draft_stage` → `apply_external_draft`.
+
+## Readable tests
+
+The Test Ledger and Coverage Ledger open each Playwright test in English by
+default. Choose **Code** to see the original source. Selecting an English node
+opens Code at that node's exact file and line range; helper steps can point to a
+different source file from the test that called them.
+
+Canary Lab builds this representation deterministically while it parses the
+current test source:
+
+- Playwright actions, assertions, and semantic locators use fixed syntax rules.
+- Literal `test.step` labels stay authored text. Helpers, branches, switch
+  paths, and all JavaScript loop forms stay nested instead of being flattened.
+- Every node records whether its wording is authored, rule-derived, or
+  unresolved. Unresolved syntax shows the exact source snippet immediately.
+- No LLM request is made, and no translation sidecar is stored. Existing tests
+  receive the English view automatically the next time the tests payload is
+  extracted; each screen only keeps its normal in-memory fetch cache.
+- Pass, fail, running, and changed-test states remain attached to the real test.
+  Static English child nodes never claim execution evidence they do not have.
 
 ## Folder layout
 
@@ -46,16 +72,16 @@ features/<name>/
 
 | Path | Purpose |
 | --- | --- |
-| `feature.config.cjs` | Feature name, environments, repositories, service commands, readiness checks, and optional port slots |
+| `feature.config.cjs` | Suite name, environments, repositories, service commands, readiness checks, and optional port slots |
 | `playwright.config.ts` | Playwright execution and artifact policy for this suite |
-| `e2e/*.spec.ts` | Tests executed by the feature |
+| `e2e/*.spec.ts` | Tests executed by the suite |
 | `envsets/envsets.config.json` | Maps named slot files to their target paths and defines the test command |
 | `envsets/<environment>/` | Values temporarily applied for a selected environment |
 | `docs/` | Source requirements and generated PRD summary sidecars |
 | `portify/` | Verified patches that make service ports injectable; applied only in run worktrees |
 | `verification.configs.json` | Saved deployed-environment verification inputs |
 
-## Feature configuration
+## Suite configuration
 
 `feature.config.cjs` exports `{ config }`. A repository may start several
 services. Each structured start command can declare a readiness check, restrict
@@ -115,7 +141,7 @@ test('DELETE /todos/:id removes a todo', {
 - `@req-<id>` maps the test to a requirement. It is repeatable.
 - `@path-happy`, `@path-sad`, and `@path-edge` state which expected,
   error, or boundary paths the test exercises.
-- `@variant-<value>` claims a value from the feature's optional variant
+- `@variant-<value>` claims a value from the suite's optional variant
   dimension, such as channel, tenant, region, role, or plan.
 - Legacy `@requirement`, `@path`, and `@variant` comments immediately above a
   test still parse as a migration fallback.
@@ -131,7 +157,7 @@ path-by-variant cell. It does not become covered merely because a test passed.
 | `variant-incomplete` | At least one applicable path-by-variant cell is unclaimed |
 | `covered` | Every required path, or every applicable path-by-variant cell, is claimed |
 
-When the feature has run, the ledger adds a separate **proven** view from the
+When the suite has run, the ledger adds a separate **proven** view from the
 latest run. A mapped test can therefore claim coverage while its requirement
 remains unproven because the test failed or did not run. This latest-run overlay
 does not change the claim-based gap types or coverage percentage.

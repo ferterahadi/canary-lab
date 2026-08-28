@@ -53,7 +53,7 @@ export function ServicesDialog({ onClose }: Props) {
     >
       {sessions.length === 0 ? (
         <div className="px-3 py-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-          No services booted. Use a feature's <span style={{ color: 'var(--boot)' }}>Run ▸ Boot</span> to bring an app up.
+          No services booted. Use a suite&apos;s <span style={{ color: 'var(--boot)' }}>Run ▸ Boot</span> to bring an app up.
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">

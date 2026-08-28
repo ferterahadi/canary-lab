@@ -85,6 +85,7 @@ export interface OrchestratorAutoHealFactoryOptions {
 }
 
 export interface BuildHealCyclePromptArgs {
+  /** 1-based cycle number, shared with lifecycle events and the manifest. */
   cycle: number
   outputDir: string
   userGuidance?: string
@@ -149,7 +150,7 @@ export function buildOrchestratorHealPrompt(
       closingDirective: modeCopy.closingDirective,
     })
     const stateAddendum = buildHealAddendum({
-      cycle: cycle + 1,
+      cycle,
       mode,
       summaryPath: paths.summaryPath,
       journalPath: paths.diagnosisJournalPath,

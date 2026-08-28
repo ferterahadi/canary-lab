@@ -2,7 +2,7 @@ import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { listSpecFiles } from '../../../../shared/feature-loader'
-import { extractTestsFromSource } from '../../../../shared/ast-extractor'
+import { extractTestMetadataFromSource } from '../../../../shared/ast-extractor'
 import { getGitRoot, runGit } from '../../../../shared/git-repo'
 
 // Test-file integrity detection. Canary Lab's promise is that a verdict stays
@@ -70,7 +70,7 @@ export function listFeatureSpecs(featureDir: string): SpecInfo[] {
     } catch {
       /* unreadable spec → no tests */
     }
-    const { tests } = extractTestsFromSource(abs, source)
+    const { tests } = extractTestMetadataFromSource(abs, source)
     return { rel: path.relative(featureDir, abs), abs, tests: tests.map((t) => t.name) }
   })
 }
@@ -95,7 +95,7 @@ export function hashFeatureSpecs(featureDir: string): SpecHashes {
 // test(s) actually edited rather than every test declared in the file.
 function hashTestBodies(rel: string, source: string): SpecHashes {
   const out: SpecHashes = {}
-  const { tests } = extractTestsFromSource(rel, source)
+  const { tests } = extractTestMetadataFromSource(rel, source)
   for (const t of tests) out[testHashKey(rel, t.name)] = hashContent(t.bodySource)
   return out
 }

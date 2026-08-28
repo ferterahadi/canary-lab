@@ -15,7 +15,7 @@ export function registerHealFlowTools(ctx: ToolGroupContext): void {
 
   registerTool('claim_heal', {
     description:
-      'Claim heal duty for a run as this external session. Idempotent if the same session_id is already the holder; rejected with already-claimed if a different session holds it.',
+      'Claim heal duty for a run as this external agent session. Idempotent if the same session_id is already the holder; rejected with already-claimed if a different session holds it.',
     inputSchema: {
       runId: z.string(),
       session_id: z.string(),
@@ -122,7 +122,7 @@ export function registerHealFlowTools(ctx: ToolGroupContext): void {
 
   registerTool('handoff_heal', {
     description:
-      'Hand off heal duty from this external session to a local heal mode (auto/claude/codex/manual). For active runs only manual is supported (the orchestrator cannot hot-swap to a local agent); for failed/aborted runs auto/claude/codex restart the heal with a fresh agent.',
+      'Hand off heal duty from this external agent session to a local heal mode (auto/claude/codex/manual). For active runs only manual is supported (the orchestrator cannot hot-swap to a local agent); for failed/aborted runs auto/claude/codex restart the heal with a fresh agent.',
     inputSchema: {
       runId: z.string(),
       to: z.enum(['auto', 'claude', 'codex', 'manual']),

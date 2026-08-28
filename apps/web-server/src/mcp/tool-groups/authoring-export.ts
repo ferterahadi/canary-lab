@@ -45,7 +45,7 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
 
   registerTool('start_external_evaluation_export', {
-    description: 'Create an evaluation export task for an external client to author. Returns run context plus the report/archive submission schema. Does not start any local LLM.',
+    description: 'Create an evaluation export task for an external agent session to author. Returns run context plus the report/archive submission schema. Does not start any local LLM.',
     inputSchema: {
       runId: z.string(),
       language: z.string().default('English'),

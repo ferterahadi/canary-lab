@@ -49,9 +49,9 @@ describe('stampSystemLine', () => {
       .toBe(`[docs@${iso}] collecting repo docs…\n`)
   })
 
-  it('leaves mirrored agent output alone — it is untagged and arrives in partial chunks', () => {
-    expect(stampSystemLine('The agent found nothing relevant', iso))
-      .toBe('The agent found nothing relevant')
+  it('leaves an untagged system-log continuation alone', () => {
+    expect(stampSystemLine('TypeScript: expected string, received number', iso))
+      .toBe('TypeScript: expected string, received number')
     // A bracket mid-chunk is prose, not a tag opening the line.
     expect(stampSystemLine('see [docs] above', iso)).toBe('see [docs] above')
   })

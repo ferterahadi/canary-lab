@@ -31,6 +31,9 @@ export { FLIGHT_STAGE_LABEL as STAGE_LABEL, flightStageLabel as stageLabel } fro
  *  blurbs) deliberately stays at the narrower 76ch reading measure. */
 export const STAGE_COLUMN = 'w-full max-w-[92ch]'
 
+/** Shared promise shown anywhere a person can start or open a Flight. */
+export const FLIGHT_OVERVIEW = 'From a bare repo to tests, coverage evidence, and a downloadable report.'
+
 /** The Test Run hero's row geometry, in ONE place. Four blocks stack inside that
  *  card — the run identity row, the stats line, the failing-test rows, and the
  *  skeleton that stands in for all three — and each used to state its own gutter
@@ -71,9 +74,9 @@ export const STAGE_BLURB: Record<FlightStageKey, string> = {
   'scout': 'Reads your repo to learn what it is built with and how it starts.',
   'scaffold': 'Creates the test suite in your workspace, with settings and a start command.',
   'env-capture': 'Copies the settings the app needs to start.',
-  'docs': 'Collects the documents that describe what the feature should do.',
+  'docs': 'Collects the documents that describe what the suite should do.',
   'prd-summary': 'Turns those documents into a short list of things to test.',
-  'specs-coverage': 'Writes tests and matches them to requirements until all are covered.',
+  'specs-coverage': 'Writes tests and maps them to requirements against your coverage target.',
   'portify': 'Lets each service take its port from settings, so two runs can go at once.',
   'run': 'Starts the app and runs the tests, fixing failures as they come up.',
   'heal': 'Fixes failures by editing the app, then runs the tests again.',

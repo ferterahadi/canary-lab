@@ -1,9 +1,9 @@
 import type { FlightStore } from './store'
-import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type ExternalWorkCheckpointData, type FlightCheckpointResponse, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey } from './types'
+import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type ExternalWorkCheckpointData, type FlightCheckpointResponse, type FlightExternalAgentSession, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey } from './types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { drive } from './flight-drive'
 import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightNotParkedError, FlightStageEntryError, FlightTakeoverRequestedError, stampSystemLine } from './flight-errors'
-import { FlightEntryMode, StageAdapters, bankStageActivity, checkStageEntry, defaultFlightId, driveControllers, firstOpenStageIndex, freshStages, interruptStage, resetStagesForRestart, sameRepoSet, stagesForJump } from './flight-stages'
+import { FlightEntryMode, StageAdapters, bankAllStageTimings, bankStageActivity, checkStageEntry, defaultFlightId, driveControllers, firstOpenStageIndex, freshStages, interruptStage, resetStagesForRestart, sameRepoSet, stagesForJump } from './flight-stages'
 
 export { abortFlight, deleteFlight, drainQueuedFlights, enqueueFlight, removeFlightRecordsForFeature } from './flight-queue'
 
@@ -17,6 +17,9 @@ export interface StartFlightArgs {
   repoPaths: string[]
   description: string
   opts: FlightOptions
+  /** The MCP conversation driving an external Flight. Replaced when an
+   *  external redo/jump is explicitly started from a newer session. */
+  externalAgentSession?: FlightExternalAgentSession
   /** Stage to start at instead of stage 1 (jump / fresh stage entry). Stages
    *  before it are marked `skipped` (skipReason `stage-entry`); prerequisites
    *  are checked via deps.validateStageEntry first. */
@@ -86,7 +89,7 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
     const mode: FlightEntryMode | undefined = args.mode ?? (args.fromStage ? 'jump' : undefined)
     if (!mode) throw new FlightExistsError(args.feature, existing.flightId, existing.status)
     if (mode === 'continue') {
-      if (existing.status === 'paused') return resumeFlight(existing.flightId, deps)
+      if (existing.status === 'paused') return resumeFlight(existing.flightId, deps, args.externalAgentSession)
       throw new FlightExistsError(args.feature, existing.flightId, existing.status)
     }
     // redo / jump: reset the SAME record — prior stage evidence is discarded
@@ -110,6 +113,26 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
     const nextRepoPaths = mode === 'redo' && wantsNewRepos ? args.repoPaths : existing.repoPaths
     const nextDescription = mode === 'redo' && wantsNewIntent ? trimmedDescription : existing.description
     const entryLinks = checkStageEntry({ ...args, repoPaths: nextRepoPaths }, deps, existing)
+    const preservesReport = mode === 'jump' && args.fromStage === 'portify'
+    const nextOpts: FlightOptions = {
+      ...args.opts,
+      ...(mode === 'redo'
+        ? { agent: args.opts.agent ?? existing.opts.agent }
+        : existing.opts.agent
+          ? { agent: existing.opts.agent }
+          : {}),
+      // Resolved, never omitted: the MCP layer now DEFAULTS this per client, so
+      // leaving it absent would let that default spread onto a record whose
+      // earlier stages already ran internally — the two-producer evidence the
+      // comment below rules out. A pre-existing record with no stored value ran
+      // internally by definition, so that is what it keeps.
+      ...(mode === 'redo'
+        ? { stageProducer: args.opts.stageProducer ?? existing.opts.stageProducer }
+        : { stageProducer: existing.opts.stageProducer ?? 'internal' }),
+    }
+    const nextExternalAgentSession = nextOpts.stageProducer === 'external'
+      ? args.externalAgentSession ?? existing.externalAgentSession
+      : undefined
     const manifest: FlightManifest = {
       ...existing,
       repoPaths: nextRepoPaths,
@@ -121,22 +144,11 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       // switched executor mid-pipeline would hold stage evidence from two
       // different producers, and the earlier stages' artifacts are what the
       // later ones read.
-      opts: {
-        ...args.opts,
-        ...(mode === 'redo'
-          ? { agent: args.opts.agent ?? existing.opts.agent }
-          : existing.opts.agent
-            ? { agent: existing.opts.agent }
-            : {}),
-        // Resolved, never omitted: the MCP layer now DEFAULTS this per client, so
-        // leaving it absent would let that default spread onto a record whose
-        // earlier stages already ran internally — the two-producer evidence the
-        // comment above rules out. A pre-existing record with no stored value ran
-        // internally by definition, so that is what it keeps.
-        ...(mode === 'redo'
-          ? { stageProducer: args.opts.stageProducer ?? existing.opts.stageProducer }
-          : { stageProducer: existing.opts.stageProducer ?? 'internal' }),
-      },
+      opts: nextOpts,
+      // A jump/redo invoked from a newer MCP conversation transfers the work
+      // surface to that conversation. Switching the producer to internal clears
+      // the old external owner instead of leaving a stale Open action behind.
+      externalAgentSession: nextExternalAgentSession,
       status: 'running',
       pauseReason: undefined,
       currentStage: args.fromStage ?? FLIGHT_STAGE_KEYS[0],
@@ -158,18 +170,20 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       startedAt: now(),
       endedAt: undefined,
       error: undefined,
-      runVerdict: undefined,
+      runVerdict: preservesReport ? existing.runVerdict : undefined,
       // A jump straight to evaluation-export was validated AGAINST the old
       // record's run — that runId is the stage's input, so it must survive
       // the reset (the deliverable links are dropped and regenerated).
       links:
-        mode === 'jump' && args.fromStage === 'evaluation-export'
+        preservesReport
+          ? existing.links
+          : mode === 'jump' && args.fromStage === 'evaluation-export'
           ? (existing.links?.runId ? { runId: existing.links.runId } : entryLinks)
           : undefined,
     }
     store.save(manifest)
-    // R78: an explicit restart wipes the entry stage's artifacts and every
-    // later stage's — BEFORE the drive re-runs anything, so no adapter can
+    // R78: an explicit restart wipes the entry stage's invalidation set —
+    // BEFORE the drive re-runs anything, so no adapter can
     // mistake a discarded attempt's leftovers for prior state. `existing` is
     // the pre-reset snapshot: resets read the old deliverable links from it.
     const entryStage = mode === 'jump' ? args.fromStage! : FLIGHT_STAGE_KEYS[0]
@@ -182,10 +196,10 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
   // Fresh record: the caller must actually supply the inputs (a mode-carrying
   // call that found no record to reuse lands here with empty fallbacks).
   if (args.repoPaths.length === 0) {
-    throw new FlightStageEntryError(`feature "${args.feature}" has no flight record — repoPaths are required to start one`)
+    throw new FlightStageEntryError(`suite "${args.feature}" has no flight record — repoPaths are required to start one`)
   }
   if (!args.description.trim()) {
-    throw new FlightStageEntryError(`feature "${args.feature}" has no flight record — a description is required to start one`)
+    throw new FlightStageEntryError(`suite "${args.feature}" has no flight record — a description is required to start one`)
   }
   const entryLinks = checkStageEntry(args, deps, null)
 
@@ -196,6 +210,9 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
     repoPaths: args.repoPaths,
     description: args.description,
     opts: args.opts,
+    ...(args.opts.stageProducer === 'external' && args.externalAgentSession
+      ? { externalAgentSession: args.externalAgentSession }
+      : {}),
     status: 'running',
     currentStage: args.fromStage ?? FLIGHT_STAGE_KEYS[0],
     stages: freshStages(args.fromStage, now),
@@ -218,7 +235,11 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
  *  was executing when paused is REPLAYED (never re-asked). Resetting a step to
  *  its initial state is what "From a step…" (redo/jump) is for; it discards
  *  the target stage's evidence and everything after it. */
-export function resumeFlight(flightId: string, deps: FlightConductorDeps): StartFlightResult {
+export function resumeFlight(
+  flightId: string,
+  deps: FlightConductorDeps,
+  externalAgentSession?: FlightExternalAgentSession,
+): StartFlightResult {
   const store = deps.store
   const now = deps.now ?? (() => new Date().toISOString())
   const current = store.get(flightId)
@@ -228,6 +249,14 @@ export function resumeFlight(flightId: string, deps: FlightConductorDeps): Start
   }
   const manifest: FlightManifest = {
     ...current,
+    // `externalAgentSession` checked FIRST: it is absent on almost every
+    // resume (plain pause/resume, the remedy route, the queue drain), and
+    // short-circuiting there skips the `current.opts` read entirely for that
+    // common case instead of taking on a dependency, for this one branch,
+    // that a manifest's `opts` is always populated.
+    ...(externalAgentSession && current.opts.stageProducer === 'external'
+      ? { externalAgentSession }
+      : {}),
     status: 'running',
     pauseReason: undefined,
     error: undefined,
@@ -291,11 +320,12 @@ export async function pauseFlight(flightId: string, deps: FlightConductorDeps): 
   const openStage = current.stages.find(
     (s) => s.status === 'running' || s.status === 'waiting-for-approval',
   )
+  const pausedAt = now()
   const manifest: FlightManifest = {
     ...current,
     status: 'paused',
     pauseReason: 'user',
-    updatedAt: now(),
+    updatedAt: pausedAt,
     stages: current.stages.map((s) =>
       s.key === openStage?.key
         ? {
@@ -303,7 +333,7 @@ export async function pauseFlight(flightId: string, deps: FlightConductorDeps): 
             // and the time parked must not count as stage work. A stage paused
             // while parked at a checkpoint was already banked at the park —
             // bankStageActivity is a no-op there.
-            ...bankStageActivity(s, now()),
+            ...bankAllStageTimings(bankStageActivity(s, pausedAt), pausedAt),
             status: 'pending' as const,
             checkpoint: undefined,
             // An answer the stage was EXECUTING when paused survives — resume

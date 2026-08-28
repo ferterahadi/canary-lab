@@ -87,7 +87,7 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
             <FieldRow label="Group">
               <TextInput
                 value={ed.draft.group}
-                placeholder="Features with the same group are shown together."
+                placeholder="Suites with the same group are shown together."
                 onChange={(group) => ed.setDraft((d) => ({ ...d, group }))}
               />
             </FieldRow>

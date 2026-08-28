@@ -13,6 +13,10 @@ import type { PtyFactory } from './logic/runtime/pty-spawner'
 import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { RunOrchestrator } from './logic/runtime/orchestrator'
 import { makeAttachRunStreams, makeRestartExternalRun } from './run-stream-wiring'
+import type {
+  SummaryChangeWatcher,
+  SummaryChangeWatcherOptions,
+} from './logic/summary-change-watcher'
 import type { ServerContext } from '../../server-context'
 import type { ClientKind } from '../../../../../shared/run-mode'
 
@@ -247,6 +251,42 @@ describe('makeAttachRunStreams — pane fan-out', () => {
     orch.emit('agent-output', { chunk: 'cycle 1\n' })
     orch.emit('agent-started', { redirect: true })
     expect(broker.snapshot('agent')).toBe('cycle 1\n')
+  })
+
+  it('pushes reporter summary changes through RunStore and closes the watcher with the run', () => {
+    const orch = fakeOrch('r-1')
+    const runnerLog = newRunnerLog('r-1')
+    const close = vi.fn()
+    let watcherOptions: SummaryChangeWatcherOptions | undefined
+    const startSummaryWatcher = vi.fn((options: SummaryChangeWatcherOptions): SummaryChangeWatcher => {
+      watcherOptions = options
+      return { close }
+    })
+    const events: Array<{ kind: string; runId?: string }> = []
+    runStore.onEvent((event) => events.push(event))
+
+    makeAttachRunStreams(makeCtx(), startSummaryWatcher)(orch.asOrch, runnerLog, 'foo', null)
+
+    expect(startSummaryWatcher).not.toHaveBeenCalled()
+    orch.emit('playwright-started', { command: 'playwright test' })
+    expect(startSummaryWatcher).toHaveBeenCalledWith(expect.objectContaining({
+      summaryPath: buildRunPaths(runDirFor(logsDir, 'r-1')).summaryPath,
+    }))
+    watcherOptions!.onChange()
+    expect(events).toEqual([{ kind: 'changed', runId: 'r-1' }])
+
+    watcherOptions!.onError?.(new Error('watch unavailable'))
+    expect(readRunnerLog('r-1')).toContain('summary watcher failed: watch unavailable')
+
+    orch.emit('playwright-exit', { exitCode: 0 })
+    expect(close).toHaveBeenCalledTimes(1)
+
+    // A later retry gets a fresh watch, and terminal completion remains the
+    // cleanup path if that process never reports its exit event.
+    orch.emit('playwright-started', { command: 'playwright test --grep retry' })
+    expect(startSummaryWatcher).toHaveBeenCalledTimes(2)
+    orch.emit('run-complete', { status: 'passed' })
+    expect(close).toHaveBeenCalledTimes(2)
   })
 
   it('holds no envset state for a run that applied none', () => {

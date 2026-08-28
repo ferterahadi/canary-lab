@@ -189,12 +189,12 @@ describe('computeDirty', () => {
 
     // Simulate a test that's declared (from the file-level listing) but whose
     // body hash never lands in `currentTests` — e.g. an extractor edge case.
-    // The first `extractTestsFromSource` call (inside `listFeatureSpecs`) is
+    // The first `extractTestMetadataFromSource` call (inside `listFeatureSpecs`) is
     // given an extra phantom test name; every other call (per-test hashing)
     // sees the real source unmodified.
-    const real = astExtractor.extractTestsFromSource
+    const real = astExtractor.extractTestMetadataFromSource
     let calls = 0
-    const spy = vi.spyOn(astExtractor, 'extractTestsFromSource').mockImplementation((file, source) => {
+    const spy = vi.spyOn(astExtractor, 'extractTestMetadataFromSource').mockImplementation((file, source) => {
       calls++
       const result = real(file, source)
       if (calls === 1) {
@@ -202,7 +202,12 @@ describe('computeDirty', () => {
           ...result,
           tests: [
             ...result.tests,
-            { name: 'phantom test', bodySource: 'unused', line: 0, steps: [] } as (typeof result.tests)[number],
+            {
+              name: 'phantom test',
+              bodySource: 'unused',
+              bodyLine: 0,
+              line: 0,
+            },
           ],
         }
       }

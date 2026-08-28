@@ -78,6 +78,27 @@ describe('runCoverageEngine — auto mode', () => {
     expect(res.ledger.orphanTestNames).not.toContain('create makes a new todo item')
     expect(res.ledger.requirements[0].annotatedTestNames).toContain('create makes a new todo item')
   })
+
+  it('restricts agent inference to an explicit set of live gap requirements', async () => {
+    writeFeature('checkout')
+    await seedSummary('checkout')
+    const dir = path.join(featuresDir, 'checkout')
+    const summaryPath = path.join(dir, 'docs', '_prd-summary.json')
+    const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8'))
+    summary.requirements.push({ id: 'R2', title: 'Delete todo', text: 'a user can delete a todo', pathTypes: ['happy'] })
+    fs.writeFileSync(summaryPath, JSON.stringify(summary))
+
+    let seenIds: string[] = []
+    await runCoverageEngineReal(
+      { featuresDir, logsDir, feature: 'checkout', requirementIds: ['R2'] },
+      { propose: async ({ requirements }) => {
+        seenIds = requirements.map((requirement) => requirement.id)
+        return []
+      } },
+    )
+
+    expect(seenIds).toEqual(['R2'])
+  })
 })
 
 describe('flagMappingIssues — deterministic claim validation (flag, never drop)', () => {
@@ -261,10 +282,11 @@ describe('runCoverageEngine — no PRD summary (summary null branch)', () => {
     // The run-state file is at <featureDir>/docs/_coverage-state.json.
     const runStateFile = path.join(dir, 'docs', '_coverage-state.json')
     expect(fs.existsSync(runStateFile)).toBe(true)
-    const runState = JSON.parse(fs.readFileSync(runStateFile, 'utf-8')) as { requirementsHash: string }
+    const runState = JSON.parse(fs.readFileSync(runStateFile, 'utf-8')) as { requirementsHash: string; coveragePct: number }
     // requirementsSetHash([]) produces a deterministic hash.
     expect(typeof runState.requirementsHash).toBe('string')
     expect(runState.requirementsHash.length).toBeGreaterThan(0)
+    expect(runState.coveragePct).toBe(res.ledger.coveragePct)
   })
 })
 

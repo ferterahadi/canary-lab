@@ -11,6 +11,10 @@ import type { SummarizeAdapter } from '../logic/coverage/prd-summary'
 import { coverageJobStore, type CoverageJobStore } from '../logic/coverage/jobs/store'
 import { startCoverageJob, CoverageJobConflictError } from '../logic/coverage/jobs/runner'
 import type { CoverageJobKind } from '../logic/coverage/jobs/types'
+import { readPrdSummary } from '../logic/coverage/prd-summary'
+import { deriveCoverageStateView } from '../logic/coverage/state'
+import { readCoverageRunState } from '../logic/coverage/run-state'
+import { readDocsCollection } from '../logic/coverage/docs-collection'
 import { writeFeatureDoc, deleteFeatureDoc, linkFeatureDoc, type FeatureAuthoringContext } from '../../config/logic/feature-authoring'
 import { reopenStages } from '../../flights/logic/conductor'
 import type { FlightStore } from '../../flights/logic/store'
@@ -254,27 +258,55 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
   })
 
   // Per-feature coverage headline + axes — feeds the feature-column action's
-  // state-aware icon (R8). Computed per feature; failures degrade to null.
+  // state-aware icon (R8). This is deliberately a manifest scan: summaries,
+  // coverage-run markers, source-doc hashes and the job index. It never opens a
+  // spec or invokes the TypeScript parser; the selected ledger route owns that.
   app.get('/api/coverage/states', async () => {
     const out: Array<{ feature: string; headline: string | null; summary: string | null; coverage: string | null; coveragePct: number | null }> = []
+    const activeJobs = new Map<string, CoverageJobKind>()
+    for (const job of jobStore.list()) {
+      if (job.status !== 'running') continue
+      // Same precedence as computeFeatureCoverage: a summary job owns the state
+      // while both kinds are present in an old/corrupt index.
+      if (job.kind === 'summary' || !activeJobs.has(job.feature)) activeJobs.set(job.feature, job.kind)
+    }
     for (const f of loadFeatures(deps.featuresDir)) {
       try {
-        // Hand over the directory we already have — otherwise each iteration
-        // re-loads (and re-compiles) every feature config in the workspace.
-        // A feature without a `featureDir` falls through to the resolver, which
-        // throws FeatureNotFoundError and degrades to nulls below, as before.
-        const ledger = computeFeatureCoverage({
-          featuresDir: deps.featuresDir,
-          logsDir: deps.logsDir,
-          feature: f.name,
-          ...(f.featureDir ? { featureDir: f.featureDir } : {}),
+        if (!f.featureDir) throw new FeatureNotFoundError(f.name)
+        const summary = readPrdSummary(f.featureDir)
+        const runState = summary ? readCoverageRunState(f.featureDir) : null
+        const summaryDrifted = summary
+          ? readDocsCollection(f.featureDir).docsHash !== summary.docsHash
+          : false
+        const coveragePct = typeof runState?.coveragePct === 'number' && Number.isFinite(runState.coveragePct)
+          ? runState.coveragePct
+          : null
+        const state = deriveCoverageStateView({
+          hasSummary: Boolean(summary),
+          summaryDrifted,
+          changedDocs: [],
+          // A completed mapper manifest is the durable proof used by this
+          // lightweight route. Manual/source-only claims are resolved on the
+          // selected ledger, where exact AST extraction belongs.
+          hasAnnotatedTests: false,
+          hasCoverageRun: Boolean(runState),
+          coverageStale: Boolean(
+            runState
+            && summary?.requirementsHash
+            && runState.requirementsHash !== summary.requirementsHash,
+          ),
+          coveragePct: coveragePct ?? 0,
+          activeJob: activeJobs.get(f.name) ?? null,
         })
+        const headline = state.coverage === 'fresh' && coveragePct === null
+          ? 'Covered'
+          : state.headline
         out.push({
           feature: f.name,
-          headline: ledger.state?.headline ?? null,
-          summary: ledger.state?.summary ?? null,
-          coverage: ledger.state?.coverage ?? null,
-          coveragePct: ledger.coveragePct,
+          headline,
+          summary: state.summary,
+          coverage: state.coverage,
+          coveragePct: summary ? coveragePct : 0,
         })
       } catch {
         out.push({ feature: f.name, headline: null, summary: null, coverage: null, coveragePct: null })

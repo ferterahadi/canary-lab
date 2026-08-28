@@ -38,7 +38,7 @@ const LAUNCH_MODES: Record<LaunchMode, { label: string; note: string; icon: Reac
   },
   test: {
     label: 'Test',
-    note: 'Boots services and runs the feature’s tests — tears them down when done.',
+    note: 'Boots services and runs the suite’s tests — tears them down when done.',
     icon: (
       <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
         <path d="M5 3.2v9.6a.6.6 0 0 0 .92.508l7.2-4.8a.6.6 0 0 0 0-1.016l-7.2-4.8A.6.6 0 0 0 5 3.2z" />

@@ -72,9 +72,11 @@ describe('context helpers', () => {
       process.env.CANARY_LAB_CLAUDE_BIN = fakeAgentScript('echo \'{"type":"result","result":"ok"}\'')
       const stageDir = path.join(tmpDir, 'stage-rec')
       fs.mkdirSync(stageDir, { recursive: true })
+      const onAgentSession = vi.fn()
       await defaultSpawnAgent({
         prompt: 'p', cwd: tmpDir, stageDir,
         job: { flightId: 'fl-1', feature: 'checkout', stage: 'scout', logsDir },
+        onAgentSession,
       })
       const rec = agentJobStore(logsDir).get('fl-1:scout')!
       expect(rec).toMatchObject({ status: 'done', flightId: 'fl-1', stage: 'scout', agent: 'claude' })
@@ -82,6 +84,11 @@ describe('context helpers', () => {
       // agent-session ref carries, so a row and its timeline agree.
       const ref = JSON.parse(fs.readFileSync(path.join(stageDir, 'agent-session.json'), 'utf-8'))
       expect(rec.sessionId).toBe(ref.sessions.claude.sessionId)
+      expect(onAgentSession).toHaveBeenCalledWith({
+        agent: 'claude',
+        sessionId: ref.sessions.claude.sessionId,
+        spawnedAt: expect.any(String),
+      })
     })
 
     it('records a codex spawn, which pins no session id', async () => {
@@ -132,6 +139,41 @@ describe('context helpers', () => {
       const ref = JSON.parse(fs.readFileSync(path.join(stageDir, 'agent-session.json'), 'utf-8'))
       expect(ref.activeAgent).toBe('claude')
       expect(ref.sessions.claude.sessionId).toEqual(expect.any(String))
+    })
+
+    it('forks the prior successful flight pass into a new provenance session', async () => {
+      const callsPath = path.join(tmpDir, 'calls.txt')
+      process.env.CANARY_LAB_CLAUDE_BIN = fakeAgentScript(
+        `printf '%s\\n' "$*" >> '${callsPath}'\necho '{"type":"result","result":"ok"}'`,
+      )
+      const flightDir = path.join(tmpDir, 'flight')
+      await defaultSpawnAgent({ prompt: 'scout', cwd: repoDir, stageDir: path.join(flightDir, 'scout') })
+      await defaultSpawnAgent({ prompt: 'docs', cwd: repoDir, stageDir: path.join(flightDir, 'docs') })
+
+      const [first, second] = fs.readFileSync(callsPath, 'utf-8').trim().split('\n')
+      const scoutRef = JSON.parse(fs.readFileSync(path.join(flightDir, 'scout', 'agent-session.json'), 'utf-8'))
+      const docsRef = JSON.parse(fs.readFileSync(path.join(flightDir, 'docs', 'agent-session.json'), 'utf-8'))
+      expect(first).not.toContain('--fork-session')
+      expect(second).toContain(`--resume ${scoutRef.sessions.claude.sessionId} --fork-session`)
+      expect(second).toContain(`--session-id ${docsRef.sessions.claude.sessionId}`)
+      expect(docsRef.sessions.claude.sessionId).not.toBe(scoutRef.sessions.claude.sessionId)
+    })
+
+    it('does not reuse a failed flight pass', async () => {
+      const callsPath = path.join(tmpDir, 'failed-calls.txt')
+      process.env.CANARY_LAB_CLAUDE_BIN = fakeAgentScript(
+        `printf '%s\\n' "$*" >> '${callsPath}'\nexit 7`,
+      )
+      const flightDir = path.join(tmpDir, 'failed-flight')
+      await expect(defaultSpawnAgent({ prompt: 'bad', cwd: repoDir, stageDir: path.join(flightDir, 'scout') }))
+        .rejects.toThrow('agent exited with code 7')
+      process.env.CANARY_LAB_CLAUDE_BIN = fakeAgentScript(
+        `printf '%s\\n' "$*" >> '${callsPath}'\necho '{"type":"result","result":"ok"}'`,
+      )
+      await defaultSpawnAgent({ prompt: 'retry', cwd: repoDir, stageDir: path.join(flightDir, 'docs') })
+
+      const [, retry] = fs.readFileSync(callsPath, 'utf-8').trim().split('\n')
+      expect(retry).not.toContain('--fork-session')
     })
 
     it('forwards stderr chunks to onChunk', async () => {

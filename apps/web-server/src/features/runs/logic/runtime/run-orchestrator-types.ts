@@ -223,6 +223,8 @@ export interface AutoHealConfig {
     mcpOutputDir?: string
     promptFile?: string
     writableDirs?: readonly string[]
+    readableDirs?: readonly string[]
+    isolationSettingsFile?: string
     workspaceRoot?: string
   }) => string
   // Returns the prompt text to write to the REPL's stdin for cycle N.

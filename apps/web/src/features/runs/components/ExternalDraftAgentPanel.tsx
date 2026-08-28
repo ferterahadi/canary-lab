@@ -22,7 +22,7 @@ export function ExternalDraftAgentPanel({ draft, stageView }: Props) {
     <ExternalAgentCard
       clientKind={clientKind}
       fill
-      eyebrow="External authoring session"
+      eyebrow="External agent session"
       headline={headlineFor(clientKind)}
       subtitle={draft.externalConversationName ?? undefined}
       statusPill={<ExternalStatusPill label={stageLabel(stage)} palette={stagePalette(stage)} />}
@@ -88,7 +88,7 @@ function bodyCopy(
     return `The ${agent} session reported an error. Check the conversation window for details and retry from there.`
   }
   if (stage === 'applied') {
-    return `The ${agent} session applied the test files for this feature. You can close the wizard or continue with another step.`
+    return `The ${agent} session applied the test files for this suite. You can close the wizard or continue with another step.`
   }
   if (stage === 'ready') {
     const noun = stageView === 'planning' ? 'plan' : 'spec'
@@ -98,12 +98,12 @@ function bodyCopy(
     return `${agent} is validating the generated files. Live progress is streaming in your ${agent} window — this panel updates when the stage advances.`
   }
   if (stage === 'authoring-tests') {
-    return `${agent} is drafting tests for this feature. Follow the conversation in your ${agent} window — Canary Lab does not have a local transcript for external authoring sessions.`
+    return `${agent} is drafting tests for this suite. Follow the conversation in your ${agent} window — Canary Lab does not have a local transcript for external authoring sessions.`
   }
   // scaffolding
-  return `${agent} is scaffolding the feature. The live transcript lives in your ${agent} window; this panel tracks the high-level stage.`
+  return `${agent} is scaffolding the suite. The live transcript lives in your ${agent} window; this panel tracks the high-level stage.`
 }
 
 function headlineFor(kind: ExternalClientKind): string {
-  return kind === 'other' ? 'External Client' : clientLabel(kind)
+  return clientLabel(kind)
 }

@@ -14,11 +14,22 @@ export const FLIGHT_STAGE_LABEL: Record<FlightStageKey, string> = {
   'env-capture': 'Settings snapshot',
   'docs': 'Doc collection',
   'prd-summary': 'Requirements summary',
-  'specs-coverage': 'Test authoring & coverage',
-  'portify': 'Parallel readiness',
+  'specs-coverage': 'Tests & coverage',
+  'portify': 'Parallel setup',
   'run': 'Test run',
   'heal': 'Auto-repair',
-  'evaluation-export': 'Evaluation report',
+  'evaluation-export': 'Report',
+}
+
+/** The rail folds implementation stages into user-visible steps. Keep the
+ * restart menu on this same vocabulary so its labels cannot drift. */
+export const FLIGHT_RAIL_LABEL: Partial<Record<FlightStageKey, string>> = {
+  'scaffold': 'Suite setup',
+  'docs': 'Requirements',
+}
+
+export function flightRailLabel(key: FlightStageKey): string {
+  return FLIGHT_RAIL_LABEL[key] ?? flightStageLabel(key)
 }
 
 export function flightStageLabel(key: string): string {

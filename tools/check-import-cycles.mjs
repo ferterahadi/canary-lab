@@ -58,11 +58,10 @@ const CEILING = {
    *  dependency-free `draft-types` and `evaluation-export-types` modules
    *  restored the ceiling to 10.
    *
-   *  Every remaining knot of size > 4 is COHESION rather than accident: the ten
-   *  `test-review` modules are one HTML report generator, the nine coverage and
-   *  evaluation modules share one ledger service, and the five
-   *  `agent-session-*` modules are one transcript parser. */
-  largest: 10,
+   *  The controlled-English and reader UI work later shrank the largest
+   *  remaining knot from ten modules to seven. Keep that measured reduction
+   *  pinned instead of allowing the old coupling to return. */
+  largest: 7,
 }
 
 function walk(dir, out = []) {

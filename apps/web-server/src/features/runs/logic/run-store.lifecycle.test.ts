@@ -157,6 +157,18 @@ describe('RunStore', () => {
     expect(readManifest(store.manifestPath('r-journal-1'))?.status).toBe('healing')
   })
 
+  it('emits changed for a reporter-owned summary write without mutating the manifest', () => {
+    seedRun('r-summary-1', { status: 'running' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    store.notifySummaryChanged('r-summary-1')
+
+    expect(events).toEqual([{ kind: 'changed', runId: 'r-summary-1' }])
+    expect(readManifest(store.manifestPath('r-summary-1'))?.status).toBe('running')
+  })
+
   it('emits an external-heal-task event when an external run waits for a signal', () => {
     seedRun('r-life-external', { status: 'healing', healMode: 'external' })
     const store = new RunStore(tmpDir, createRegistry())

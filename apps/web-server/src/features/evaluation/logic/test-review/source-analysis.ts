@@ -1,6 +1,6 @@
 import fs from 'fs'
 import ts from 'typescript'
-import { formatCodeForDisplay } from '../../../../../../../shared/code-display-format'
+import { formatCodeForDisplay, formatSourceSnippetForDisplay } from '../../../../../../../shared/code-display-format'
 import { assertionFor, collectDirectAssertions, dedupeAssertions, helperAssertion, isNoiseHelper } from './assertions'
 import { calledIdentifier, functionBody, functionLikeBody, functionName, isAssertionCall, isPlaywrightTestCall, isWaitAssertionCall, lineFor, listSpecFiles, resolveImport, safeRead, stringArg } from './ast'
 import { cleanSnippet, dedupe } from './text'
@@ -114,6 +114,12 @@ export function readHelperDefinition(imported: ImportedHelper, seen: Set<string>
       name,
       file: imported.file,
       snippet: cleanSnippet(node.getText(src)),
+      ...(body
+        ? {
+            bodySource: formatSourceSnippetForDisplay(body.getText(src)),
+            startLine: lineFor(body, src),
+          }
+        : {}),
       externalImports,
       dependencies,
       assertions: body ? collectDirectAssertions(body, src) : [],

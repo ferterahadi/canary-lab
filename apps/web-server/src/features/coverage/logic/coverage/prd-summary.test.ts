@@ -389,6 +389,10 @@ describe('buildPrdSummaryPrompt', () => {
     expect(prompt).toContain('"id": "R1"')
     expect(prompt).toContain('A failed assertion is evidence, not an unhappy path.')
     expect(prompt).toContain('MUST NOT add `sad` to `pathTypes`')
+    expect(prompt).toContain('Repo scan and Parallel setup own these facts, not the coverage ledger')
+    expect(prompt).toContain('the service boots without an env file')
+    expect(prompt).toContain('that declaration')
+    expect(prompt).toContain('wins over incidental behaviors')
   })
 
   it('returns unknown {{key}} placeholders unchanged (return match branch)', () => {

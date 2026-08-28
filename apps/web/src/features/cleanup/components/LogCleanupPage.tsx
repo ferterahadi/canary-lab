@@ -204,7 +204,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
                 <SortHeader sortKey="runId" label="Run" sort={sort} onSort={toggleSort} />
                 <SortHeader sortKey="kind" label="Kind" sort={sort} onSort={toggleSort} />
                 <SortHeader sortKey="status" label="Status" sort={sort} onSort={toggleSort} />
-                <SortHeader sortKey="feature" label="Feature" sort={sort} onSort={toggleSort} />
+                <SortHeader sortKey="feature" label="Suite" sort={sort} onSort={toggleSort} />
                 <SortHeader sortKey="age" label="Age" sort={sort} onSort={toggleSort} />
                 <SortHeader sortKey="folder" label="Folder" align="right" sort={sort} onSort={toggleSort} />
                 <SortHeader sortKey="artifacts" label="Artifacts" align="right" sort={sort} onSort={toggleSort} />

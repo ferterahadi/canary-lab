@@ -1,14 +1,29 @@
 export const TIMELINE_CSS = `
-.agentts-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:7px;padding:6px 11px;border-bottom:1px solid var(--border-default);background:color-mix(in srgb,var(--bg-base) 90%,transparent);backdrop-filter:blur(8px);font-size:10px}
+.agentts-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:8px;padding:6px 11px;border-bottom:1px solid var(--border-default);background:color-mix(in srgb,var(--bg-base) 90%,transparent);backdrop-filter:blur(8px);font-size:10px}
+.agentts-head[data-sticky="false"]{position:static}
+/* The segment label is the only thing that differs between two headers in the
+   same stack, so it is the one item allowed to read as primary. */
+.agentts-session-label{font-size:11px;font-weight:650;color:var(--text-primary);white-space:nowrap}
 .agentts-mode{display:inline-flex;align-items:center;gap:5px;min-height:18px;padding:1px 6px;border:1px solid var(--border-default);border-radius:var(--radius-sm);color:var(--text-muted);font-size:8.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;line-height:1}
+/* One pill in two tempers, so the header always names what you are reading:
+   a settled segment rests in the muted base style with a still dot, and only the
+   live one takes the running hue and the pulse. */
+.agentts-mode[data-live="false"]{background:color-mix(in srgb,var(--text-muted) 5%,transparent)}
 .agentts-mode[data-live="true"]{border-color:color-mix(in srgb,var(--running) 32%,var(--border-default));color:var(--running);background:color-mix(in srgb,var(--running) 7%,transparent)}
 .agentts-statusdot{width:5px;height:5px;border-radius:var(--radius-sm);background:var(--text-muted);flex:none}
 .agentts-mode[data-live="true"] .agentts-statusdot{background:var(--running);box-shadow:0 0 7px color-mix(in srgb,var(--running) 65%,transparent);animation:agentts-pulse 1.8s ease-in-out infinite}
-.agentts-agent{font-weight:600;color:var(--text-primary);text-transform:uppercase;letter-spacing:.07em;font-size:10px}
-.agentts-sid{font-family:var(--font-mono);color:var(--text-secondary);font-size:9.5px}
-.agentts-dot{color:var(--text-muted);font-size:9.5px}
-.agentts-model{font-family:var(--font-mono);color:var(--text-secondary);font-size:9.5px}
-.agentts-count{color:var(--text-muted);font-size:10px;font-variant-numeric:tabular-nums}
+/* One dashed rule splits "which segment is this" from "what produced it" — the
+   same gesture the Activity bar above uses to separate its label from its grip.
+   Two zones read faster than a flat row of same-weight chips. */
+.agentts-headrule{flex:1 1 auto;min-width:12px;height:0;border-top:1px dashed var(--border-default);opacity:.7}
+/* Provenance is a footnote, not a headline: one muted mono cluster, with the
+   separators supplied by the layout so a missing item leaves no orphan dot. */
+.agentts-provenance{display:inline-flex;align-items:center;gap:6px;min-width:0;color:var(--text-muted)}
+.agentts-provenance>*+*::before{content:'·';margin-right:6px;opacity:.55}
+.agentts-agent{font-weight:600;text-transform:uppercase;letter-spacing:.07em;font-size:9.5px}
+.agentts-sid{font-family:var(--font-mono);font-size:9.5px}
+.agentts-model{font-family:var(--font-mono);font-size:9.5px}
+.agentts-count{font-family:var(--font-mono);font-size:9.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .agentts-rail{margin:0;padding:9px 13px 11px;list-style:none}
 .agentts-row{position:relative;padding:0 0 8px 23px;animation:agentts-in .26s cubic-bezier(.22,1,.36,1) both}
 .agentts-row:last-child{padding-bottom:2px}
@@ -39,6 +54,7 @@ export const TIMELINE_CSS = `
 .agentts-extbody{display:flex;min-width:0;flex-direction:column;gap:3px}
 .agentts-exthead{display:flex;min-width:0;align-items:baseline;gap:7px;min-height:14px}
 .agentts-extlabel{font-family:var(--font-mono)}
+.agentts-extagent{flex:none;color:var(--text-secondary);font-size:9.5px;font-weight:600;white-space:nowrap}
 .agentts-extline{display:flex;min-width:0;align-items:baseline;gap:10px}
 .agentts-extmessage{min-width:0;flex:1;color:var(--text-secondary);font-size:12px;line-height:1.55;word-break:break-word}
 .agentts-extaction{flex:none;border:0;background:none;padding:0;color:var(--accent);cursor:pointer;font-family:var(--font-sans);font-size:10.5px;font-weight:500;white-space:nowrap}

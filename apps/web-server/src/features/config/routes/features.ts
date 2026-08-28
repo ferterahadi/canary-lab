@@ -1,9 +1,11 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import path from 'path'
+import { formatCodeForDisplayWithLineMap } from '../../../../../../shared/code-display-format'
 import { loadFeatures, listSpecFiles } from '../../../shared/feature-loader'
 import { extractTestsFromSource, type ExtractedTest } from '../../../shared/ast-extractor'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
+import { translateReadableTest } from '../../../shared/readable-tests/translator'
 import type { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
 import { diffChangedLines } from '../../runs/logic/dirty-specs/text-diff'
 import { listPlaywrightTests, type PlaywrightListSpawner } from '../../runs/logic/playwright-list'
@@ -152,7 +154,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       const abs = path.join(realDir, rel)
       let currentSource = ''
       try { currentSource = fs.readFileSync(abs, 'utf8') } catch { /* unreadable — no tests to diff */ }
-      const { tests: currentTests } = extractTestsFromSource(rel, currentSource)
+      const { tests: currentTests } = extractTestsFromSource(rel, currentSource, feature.semanticRules)
 
       const repoRel = path.relative(root, abs)
       const head = await runGit(root, ['show', `HEAD:${repoRel}`])
@@ -161,7 +163,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       // clean, not "everything changed"). A test missing from an otherwise
       // tracked file is a different case, handled per-test below.
       if (head.code !== 0) return { tests: [] }
-      const { tests: headTests } = extractTestsFromSource(rel, head.stdout)
+      const { tests: headTests } = extractTestsFromSource(rel, head.stdout, feature.semanticRules)
 
       const results = await Promise.all(currentTests.map(async (t) => {
         const headBody = headTests.find((h) => h.name === t.name)?.bodySource
@@ -204,6 +206,18 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       reply.code(404)
       return { error: 'feature not found' }
     }
+    const codeDisplayCache = new Map<string, ReturnType<typeof formatCodeForDisplayWithLineMap>>()
+    const withCodeDisplay = (test: ExtractedTest): ExtractedTest => {
+      if (!test.bodySource) return test
+      const sourceStartLine = test.bodyLine ?? test.line
+      const key = `${sourceStartLine}\0${test.bodySource}`
+      let codeDisplay = codeDisplayCache.get(key)
+      if (!codeDisplay) {
+        codeDisplay = formatCodeForDisplayWithLineMap(test.bodySource, sourceStartLine)
+        codeDisplayCache.set(key, codeDisplay)
+      }
+      return { ...test, codeDisplay }
+    }
     const specFiles = listSpecFiles(feature.featureDir)
 
     // 1. Run AST over each spec to gather (line -> { bodySource, steps }) for
@@ -212,7 +226,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     for (const file of specFiles) {
       let source = ''
       try { source = fs.readFileSync(file, 'utf-8') } catch { /* unreadable */ }
-      astByFile.set(file, extractTestsFromSource(file, source))
+      astByFile.set(file, extractTestsFromSource(file, source, feature.semanticRules))
     }
 
     // 2. Ask Playwright to enumerate the resolved test list (loops expanded,
@@ -230,7 +244,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
         const result = astByFile.get(file)!
         return {
           file,
-          tests: result.tests,
+          tests: result.tests.map(withCodeDisplay),
           ...(result.parseError ? { parseError: result.parseError } : {}),
         }
       })
@@ -255,7 +269,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       if (astByFile.has(entry.originFile) || originAstByFile.has(entry.originFile)) continue
       let source = ''
       try { source = fs.readFileSync(entry.originFile, 'utf-8') } catch { /* unreadable */ }
-      originAstByFile.set(entry.originFile, extractTestsFromSource(entry.originFile, source))
+      originAstByFile.set(entry.originFile, extractTestsFromSource(entry.originFile, source, feature.semanticRules))
     }
 
     function lookupAstByLine(file: string, line: number): ExtractedTest | undefined {
@@ -273,7 +287,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       if (!pwEntries || pwEntries.length === 0) {
         return {
           file,
-          tests: ast.tests,
+          tests: ast.tests.map(withCodeDisplay),
           ...(ast.parseError ? { parseError: ast.parseError } : {}),
         }
       }
@@ -290,10 +304,19 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
             name: entry.title,
             line: isHelperDefined ? entry.originLine : entry.line,
             bodySource: fromAst?.bodySource ?? '',
+            bodyLine: fromAst?.bodyLine ?? (isHelperDefined ? entry.originLine : entry.line),
             steps: fromAst?.steps ?? [],
+            readable: fromAst
+              ? { ...fromAst.readable, title: entry.title }
+              : translateReadableTest({
+                  file: isHelperDefined ? entry.originFile : file,
+                  title: entry.title,
+                  bodySource: '',
+                  startLine: isHelperDefined ? entry.originLine : entry.line,
+                }),
           }
           if (isHelperDefined) test.sourceFile = entry.originFile
-          return test
+          return withCodeDisplay(test)
         })
       return {
         file,

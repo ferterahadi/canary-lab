@@ -7,6 +7,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError, getFeatureDirtyDiff, getFeatureTests } from '../api/client'
+import { readableTest } from '../api/__fixtures__/readable-test'
 
 import type { FeatureTests } from '../api/types'
 
@@ -89,8 +90,21 @@ describe('TestCasesColumn', () => {
           {
             name: 'loads checkout',
             line: 3,
-            bodySource: '',
+            bodySource: "{\n  await page.goto('/checkout')\n}",
             steps: [],
+            readable: readableTest('loads checkout', [{
+              id: 'open-checkout',
+              kind: 'leaf',
+              role: 'action',
+              text: 'Open “/checkout”',
+              fidelity: 'derived',
+              source: {
+                file: '/tmp/features/alpha/e2e/a.spec.ts',
+                startLine: 4,
+                endLine: 4,
+                snippet: "await page.goto('/checkout')",
+              },
+            }]),
           },
         ],
       },
@@ -102,19 +116,81 @@ describe('TestCasesColumn', () => {
 
     expect(container.textContent).toContain('loads checkout')
     expect(container.textContent).not.toContain('Loading...')
+    expect(container.querySelector('[data-testid="test-presentation-english"]')).not.toBeNull()
+    expect(container.textContent).toContain('Open “/checkout”')
+    expect(container.querySelector('[data-testid="test-presentation-code"]')).toBeNull()
+  })
+
+  it('expands the first test whenever a different suite is selected', async () => {
+    vi.mocked(getFeatureTests).mockImplementation(async (feature) => [{
+      file: `/tmp/features/${feature}/e2e/a.spec.ts`,
+      tests: [
+        {
+          name: `${feature} first test`,
+          line: 3,
+          bodySource: '',
+          steps: [],
+          readable: readableTest(`${feature} first test`, [{
+            id: `${feature}-first-step`,
+            kind: 'leaf',
+            role: 'action',
+            text: `Run ${feature} first step`,
+            fidelity: 'derived',
+            source: {
+              file: `/tmp/features/${feature}/e2e/a.spec.ts`,
+              startLine: 4,
+              endLine: 4,
+              snippet: `run${feature}FirstStep()`,
+            },
+          }]),
+        },
+        {
+          name: `${feature} second test`,
+          line: 10,
+          bodySource: '',
+          steps: [],
+          readable: readableTest(`${feature} second test`),
+        },
+      ],
+    }])
+
+    await act(async () => {
+      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+    })
+
+    expect(container.textContent).toContain('Run alpha first step')
+    expect(container.querySelectorAll('[data-testid="test-presentation-english"]')).toHaveLength(1)
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('alpha first test'))?.click()
+    })
+    expect(container.querySelector('[data-testid="test-presentation-english"]')).toBeNull()
+
+    await act(async () => {
+      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+    })
+    expect(container.querySelector('[data-testid="test-presentation-english"]')).toBeNull()
+
+    await act(async () => {
+      root.render(<TestCasesColumn feature="beta" activeRunSummary={undefined} activeRunStatus={undefined} />)
+    })
+
+    expect(container.textContent).toContain('Run beta first step')
+    expect(container.querySelectorAll('[data-testid="test-presentation-english"]')).toHaveLength(1)
+    expect(container.textContent).not.toContain('Run alpha first step')
   })
 
   it('numbers tests by source order and strips a baked-in ordinal from the title', async () => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {
         file: '/tmp/features/alpha/e2e/b.spec.ts',
-        tests: [{ name: 'zeta runs last alphabetically', line: 1, bodySource: '', steps: [] }],
+        tests: [{ name: 'zeta runs last alphabetically', line: 1, bodySource: '', steps: [], readable: readableTest('zeta runs last alphabetically') }],
       },
       {
         file: '/tmp/features/alpha/e2e/a.spec.ts',
         tests: [
-          { name: '1. gateway is healthy', line: 30, bodySource: '', steps: [] },
-          { name: 'happy path', line: 5, bodySource: '', steps: [] },
+          { name: '1. gateway is healthy', line: 30, bodySource: '', steps: [], readable: readableTest('1. gateway is healthy') },
+          { name: 'happy path', line: 5, bodySource: '', steps: [], readable: readableTest('happy path') },
         ],
       },
     ])
@@ -143,12 +219,14 @@ describe('TestCasesColumn', () => {
             line: 3,
             bodySource: '',
             steps: [],
+            readable: readableTest('loads checkout'),
           },
           {
             name: 'submits payment',
             line: 12,
             bodySource: '',
             steps: [],
+            readable: readableTest('submits payment'),
           },
         ],
       },
@@ -174,6 +252,7 @@ describe('TestCasesColumn', () => {
             line: 3,
             bodySource: '',
             steps: [],
+            readable: readableTest('loads checkout'),
           },
         ],
       },
@@ -197,6 +276,7 @@ describe('TestCasesColumn', () => {
             line: 3,
             bodySource: '',
             steps: [],
+            readable: readableTest('loads checkout'),
           },
         ],
       },
@@ -236,12 +316,14 @@ describe('TestCasesColumn', () => {
             line: 3,
             bodySource: '',
             steps: [],
+            readable: readableTest('loads checkout'),
           },
           {
             name: 'submits payment',
             line: 12,
             bodySource: '',
             steps: [],
+            readable: readableTest('submits payment'),
           },
         ],
       },
@@ -282,7 +364,7 @@ describe('TestCasesColumn', () => {
     expect(container.querySelectorAll('.border-running\\/50')).toHaveLength(2)
   })
 
-  it('shows the amber running-line highlight inside an expanded step body', async () => {
+  it('moves the runner-owned highlight from the current line to the last failed line in English and Code', async () => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {
         file: '/tmp/features/alpha/e2e/a.spec.ts',
@@ -290,7 +372,36 @@ describe('TestCasesColumn', () => {
           {
             name: 'sends message',
             line: 3,
+            bodyLine: 5,
             bodySource: "{\n  await test.step('send', async () => {\n    const payload = createPayload()\n    await send(payload)\n  })\n}",
+            readable: readableTest('sends message', [
+              {
+                id: 'create-payload',
+                kind: 'leaf',
+                role: 'setup',
+                text: 'Create the payload',
+                fidelity: 'derived',
+                source: {
+                  file: '/tmp/features/alpha/e2e/a.spec.ts',
+                  startLine: 7,
+                  endLine: 7,
+                  snippet: 'const payload = createPayload()',
+                },
+              },
+              {
+                id: 'send-payload',
+                kind: 'leaf',
+                role: 'action',
+                text: 'Send the payload',
+                fidelity: 'derived',
+                source: {
+                  file: '/tmp/features/alpha/e2e/a.spec.ts',
+                  startLine: 8,
+                  endLine: 8,
+                  snippet: 'await send(payload)',
+                },
+              },
+            ]),
             steps: [
               {
                 label: 'send',
@@ -321,7 +432,7 @@ describe('TestCasesColumn', () => {
               step: {
                 title: 'send payload',
                 category: 'test.step',
-                location: '/tmp/features/alpha/e2e/a.spec.ts:6:5',
+                location: '/tmp/features/alpha/e2e/a.spec.ts:8:5',
               },
             },
           }}
@@ -329,20 +440,82 @@ describe('TestCasesColumn', () => {
       )
     })
 
-    const buttons = Array.from(container.querySelectorAll('button'))
-    const testButton = buttons.find((button) => button.textContent?.includes('sends message'))
+    const runningEnglish = container.querySelector<HTMLElement>('[data-execution-highlight="running"]')
+    expect(runningEnglish?.textContent).toContain('Send the payload')
+    expect(runningEnglish?.getAttribute('style')).toContain('var(--running)')
+
     await act(async () => {
-      testButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-    const stepButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '▸sendL4')
-    await act(async () => {
-      stepButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
     })
     await waitFor(() => Boolean(container.querySelector('[data-active-line="true"]')))
 
     const activeLine = container.querySelector<HTMLElement>('[data-active-line="true"]')
     expect(activeLine?.textContent).toContain('await send(payload)')
-    expect(activeLine?.getAttribute('style')).toContain('var(--warning)')
+    expect(activeLine?.dataset.executionHighlight).toBe('running')
+    expect(activeLine?.getAttribute('style')).toContain('var(--running)')
+    expect(container.textContent).toContain('Running now · line 8 · test.step')
+
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          activeRunStatus="running"
+          activeRunSummary={{
+            complete: false,
+            total: 1,
+            passed: 0,
+            passedNames: [],
+            failed: [],
+            running: {
+              name: 'test-case-sends-message',
+              location: '/tmp/features/alpha/e2e/a.spec.ts:3:1',
+              step: {
+                title: 'send request',
+                category: 'pw:api',
+                location: '/tmp/features/alpha/helpers/send.ts:8:5',
+              },
+            },
+          }}
+        />,
+      )
+    })
+    await waitFor(() => container.querySelector('[data-active-line="true"]') === null)
+    expect(container.textContent).toContain('Running now · pw:api · source line unavailable')
+    expect(container.textContent).not.toContain('Running now · line 8')
+
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          activeRunStatus="healing"
+          activeRunSummary={{
+            complete: true,
+            total: 1,
+            passed: 0,
+            passedNames: [],
+            failed: [{
+              name: 'test-case-sends-message',
+              location: '/tmp/features/alpha/e2e/a.spec.ts:3:1',
+              locations: ['/tmp/features/alpha/e2e/a.spec.ts:7:5'],
+            }],
+          }}
+        />,
+      )
+    })
+    await waitFor(() => container.querySelector<HTMLElement>('[data-execution-highlight="failed"]')?.textContent?.includes('createPayload') === true)
+
+    const failedCode = container.querySelector<HTMLElement>('[data-execution-highlight="failed"]')
+    expect(failedCode?.dataset.activeLine).toBe('true')
+    expect(failedCode?.getAttribute('style')).toContain('var(--danger)')
+    expect(container.textContent).toContain('Last failed line · line 7')
+
+    await act(async () => {
+      ;(container.querySelector('[data-testid="test-presentation-english-tab"]') as HTMLButtonElement).click()
+    })
+    const failedEnglish = container.querySelector<HTMLElement>('[data-execution-highlight="failed"]')
+    expect(failedEnglish?.textContent).toContain('Create the payload')
+    expect(failedEnglish?.textContent).toContain('FAILED HERE')
+    expect(failedEnglish?.getAttribute('style')).toContain('var(--danger)')
   })
 
   it('rings only the test named in affectedTests, not every card in the spec', async () => {
@@ -350,8 +523,8 @@ describe('TestCasesColumn', () => {
       {
         file: '/tmp/features/alpha/e2e/a.spec.ts',
         tests: [
-          { name: 'a', line: 3, bodySource: '', steps: [] },
-          { name: 'b', line: 12, bodySource: '', steps: [] },
+          { name: 'a', line: 3, bodySource: '', steps: [], readable: readableTest('a') },
+          { name: 'b', line: 12, bodySource: '', steps: [], readable: readableTest('b') },
         ],
       },
     ])
@@ -380,7 +553,7 @@ describe('TestCasesColumn', () => {
       {
         file: '/tmp/features/alpha/e2e/a.spec.ts',
         tests: [
-          { name: 'a', line: 3, bodySource: '{\n  const x = 1\n  expect(x).toBe(2)\n}', steps: [] },
+          { name: 'a', line: 3, bodySource: '{\n  const x = 1\n  expect(x).toBe(2)\n}', steps: [], readable: readableTest('a') },
         ],
       },
     ])
@@ -400,7 +573,7 @@ describe('TestCasesColumn', () => {
     })
 
     await act(async () => {
-      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
     })
     await waitFor(() => Boolean(container.querySelector('[data-changed-line="true"]')))
 
@@ -416,7 +589,7 @@ describe('TestCasesColumn', () => {
       root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
     })
 
-    expect(container.textContent).toContain('Unable to load tests for this feature. Server returned HTTP 500.')
+    expect(container.textContent).toContain('Unable to load tests for this suite. Server returned HTTP 500.')
     expect(container.textContent).not.toContain('Loading...')
   })
 
@@ -440,6 +613,7 @@ describe('TestCasesColumn', () => {
             line: 14,
             bodySource: "{\n  await page.goto('/checkout')\n  await expect(page).toHaveURL(/checkout/)\n}",
             steps: [],
+            readable: readableTest('validates checkout'),
           },
         ],
       },
@@ -471,7 +645,7 @@ describe('TestCasesColumn', () => {
     })
 
     await act(async () => {
-      container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
     })
 
     expect(container.textContent).toContain("page.goto('/checkout')")

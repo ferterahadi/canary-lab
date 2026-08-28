@@ -92,6 +92,7 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
           void refreshTask(taskId)
         },
         onError: (err) => appendLog(taskId, `[evaluation] log stream error: ${err}\n`),
+        onUnavailable: (err) => appendLog(taskId, `[evaluation] log stream unavailable: ${err}\n`),
       })
     } catch (err) {
       appendLog(taskId, `[evaluation] log stream unavailable: ${err instanceof Error ? err.message : String(err)}\n`)

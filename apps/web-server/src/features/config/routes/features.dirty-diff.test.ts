@@ -202,6 +202,14 @@ describe('GET /api/features/:name/tests', () => {
     expect(body).toHaveLength(1)
     expect(body[0].tests[0].name).toBe('first')
     expect(body[0].tests[0].steps.map((s: { label: string }) => s.label)).toEqual(['one', 'two'])
+    expect(body[0].tests[0].readable).toEqual(expect.objectContaining({
+      title: 'first',
+      completeness: 'complete',
+      nodes: [
+        expect.objectContaining({ kind: 'group', text: 'one', children: [] }),
+        expect.objectContaining({ kind: 'group', text: 'two', children: [] }),
+      ],
+    }))
   })
 
   it('returns [] when feature has no e2e dir', async () => {
@@ -280,9 +288,57 @@ describe('GET /api/features/:name/tests', () => {
     }))
     const app = await build({ spawner })
     const res = await app.inject({ method: 'GET', url: '/api/features/orphan/tests' })
-    const body = res.json() as Array<{ tests: Array<{ name: string; bodySource: string; steps: unknown[] }> }>
+    const body = res.json() as Array<{
+      tests: Array<{ name: string; bodySource: string; steps: unknown[]; readable: { title: string; completeness: string; nodes: unknown[] } }>
+    }>
     expect(body[0].tests[0].bodySource).toBe('')
     expect(body[0].tests[0].steps).toEqual([])
+    expect(body[0].tests[0].readable).toEqual(expect.objectContaining({
+      title: 'first',
+      completeness: 'complete',
+      nodes: [],
+    }))
+  })
+
+  it('falls back to the helper source location when its Playwright line has no AST match', async () => {
+    const dir = writeFeature('orphanhelper', {
+      spec: "import { defineSpecs } from './helpers/factory'\ndefineSpecs()\n",
+    })
+    const wrapperSpec = path.join(dir, 'e2e', 'a.spec.ts')
+    const helpersDir = path.join(dir, 'e2e', 'helpers')
+    fs.mkdirSync(helpersDir, { recursive: true })
+    const helperFile = path.join(helpersDir, 'factory.ts')
+    fs.writeFileSync(helperFile, "export function defineSpecs() {}\n")
+    const spawner = jsonSpawner(() => ({
+      config: { rootDir: dir },
+      suites: [{
+        file: wrapperSpec,
+        suites: [{
+          file: helperFile,
+          specs: [{ title: 'generated inner', file: helperFile, line: 99 }],
+        }],
+      }],
+    }))
+    const app = await build({ spawner })
+    const res = await app.inject({ method: 'GET', url: '/api/features/orphanhelper/tests' })
+    const body = res.json() as Array<{
+      tests: Array<{
+        line: number
+        bodyLine?: number
+        sourceFile?: string
+        readable: { title: string; nodes: unknown[] }
+      }>
+    }>
+
+    expect(body[0].tests[0]).toEqual(expect.objectContaining({
+      line: 99,
+      bodyLine: 99,
+      sourceFile: helperFile,
+    }))
+    expect(body[0].tests[0].readable).toEqual(expect.objectContaining({
+      title: 'generated inner',
+      nodes: [],
+    }))
   })
 
   it('expands loop-generated tests using Playwright --list output', async () => {
@@ -317,7 +373,13 @@ describe('GET /api/features/:name/tests', () => {
     expect(res.statusCode).toBe(200)
     const body = res.json()
     expect(body).toHaveLength(1)
-    const tests = body[0].tests as Array<{ name: string; line: number; steps: { label: string }[]; bodySource: string }>
+    const tests = body[0].tests as Array<{
+      name: string
+      line: number
+      steps: { label: string }[]
+      bodySource: string
+      readable: { title: string; nodes: unknown[] }
+    }>
     expect(tests.map((t) => t.name)).toEqual(['runs a case', 'runs b case', 'runs c case', 'plain'])
     // Loop iterations all share the same call-site body/steps.
     expect(tests[0].line).toBe(3)
@@ -326,9 +388,57 @@ describe('GET /api/features/:name/tests', () => {
     expect(tests[0].steps.map((s) => s.label)).toEqual(['inner'])
     expect(tests[0].bodySource).toBe(tests[1].bodySource)
     expect(tests[0].bodySource).not.toBe('')
+    expect(tests.slice(0, 3).map((test) => test.readable.title)).toEqual(['runs a case', 'runs b case', 'runs c case'])
+    expect(tests[0].readable.nodes).toEqual(tests[1].readable.nodes)
     // Standalone test still surfaced.
     expect(tests[3].line).toBe(7)
     expect(tests[3].steps).toEqual([])
+  })
+
+  it('attaches one shared body to loop titles resolved from an object property', async () => {
+    const dir = writeFeature('property-titles', {
+      spec: [
+        'const variants = [',
+        "  { desc: 'first inner' },",
+        "  { desc: 'second inner' },",
+        ']',
+        'for (const variant of variants) {',
+        '  test(',
+        '    variant.desc,',
+        '    async () => {',
+        "      await test.step('inner', async () => {})",
+        '    },',
+        '  )',
+        '}',
+      ].join('\n'),
+    })
+    const specFile = path.join(dir, 'e2e', 'a.spec.ts')
+    const spawner = jsonSpawner(() => ({
+      config: { rootDir: dir },
+      suites: [{
+        file: specFile,
+        specs: [
+          { title: 'first inner', file: specFile, line: 6 },
+          { title: 'second inner', file: specFile, line: 6 },
+        ],
+      }],
+    }))
+    const app = await build({ spawner })
+    const res = await app.inject({ method: 'GET', url: '/api/features/property-titles/tests' })
+    expect(res.statusCode).toBe(200)
+    const tests = res.json()[0].tests as Array<{
+      name: string
+      bodyLine: number
+      bodySource: string
+      steps: { label: string }[]
+      readable: { title: string; nodes: unknown[] }
+    }>
+
+    expect(tests.map((test) => test.name)).toEqual(['first inner', 'second inner'])
+    expect(tests.every((test) => test.bodyLine === 8)).toBe(true)
+    expect(tests.every((test) => test.bodySource.includes("test.step('inner'"))).toBe(true)
+    expect(tests.every((test) => test.steps[0]?.label === 'inner')).toBe(true)
+    expect(tests.every((test) => test.readable.nodes.length > 0)).toBe(true)
   })
 
   it('falls back to AST output (raw template text) when Playwright --list fails', async () => {
@@ -348,6 +458,7 @@ describe('GET /api/features/:name/tests', () => {
     // the raw `${key}` placeholder so the user at least sees something.
     expect(body[0].tests).toHaveLength(1)
     expect(body[0].tests[0].name).toBe('runs ${key} case')
+    expect(body[0].tests[0].readable.title).toBe('runs ${key} case')
   })
 
   it('attributes helper-defined tests to the entry-point spec with body from the helper file', async () => {
@@ -399,7 +510,14 @@ describe('GET /api/features/:name/tests', () => {
     expect(res.statusCode).toBe(200)
     const body = res.json() as Array<{
       file: string
-      tests: Array<{ name: string; line: number; bodySource: string; sourceFile?: string; steps: Array<{ label: string }> }>
+      tests: Array<{
+        name: string
+        line: number
+        bodySource: string
+        sourceFile?: string
+        steps: Array<{ label: string }>
+        readable: { title: string; nodes: Array<{ kind: string; text: string; source: { file: string; startLine: number } }> }
+      }>
     }>
     // Only the wrapper spec is returned by `listSpecFiles` (helpers/ is
     // ignored). The helper-defined test must show up under the wrapper.
@@ -412,6 +530,12 @@ describe('GET /api/features/:name/tests', () => {
     expect(t.sourceFile).toBe(helperFile)
     expect(t.bodySource).toContain("test.step('inner-step'")
     expect(t.steps.map((s) => s.label)).toEqual(['inner-step'])
+    expect(t.readable.title).toBe('inner case')
+    expect(t.readable.nodes[0]).toEqual(expect.objectContaining({
+      kind: 'group',
+      text: 'inner-step',
+      source: expect.objectContaining({ file: helperFile, startLine: 5 }),
+    }))
   })
 
   it('passes the first feature envset into Playwright list without applying files', async () => {

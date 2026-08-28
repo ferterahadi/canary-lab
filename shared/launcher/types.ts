@@ -1,3 +1,5 @@
+import type { ReadableSemanticRuleConfig } from '../readable-tests/types'
+
 export interface RepoPrerequisite {
   name: string
   localPath: string      // absolute or ~/... path
@@ -116,6 +118,9 @@ export interface FeatureConfig {
   tunnels?: NgrokTunnel[]              // used by the tunnel env — one ngrok tab per entry
   startScript?: Record<string, string> // optional override: env name → absolute path to tsx script
   featureDir: string                   // absolute path to feature folder
+  /** Optional deterministic semantic knowledge for the controlled-English
+   *  renderer. Values are module specifiers, not guessed method names. */
+  semanticRules?: ReadableSemanticRuleConfig
   // Mid-Run Heal: Playwright is invoked with --max-failures=<N> so the heal
   // loop fires as soon as N tests fail rather than waiting for the whole suite
   // to finish. When omitted, `loadFeatures` applies

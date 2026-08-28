@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { CoverageJobKind, CoverageJobManifest, CoverageLedger, FeatureTests, GapType, TestCoverage, TestStrength } from '@/shared/api/types'
+import type { CoverageJobKind, CoverageJobManifest, CoverageLedger, ExtractedTest, FeatureTests, GapType, TestCoverage, TestStrength } from '@/shared/api/types'
 import type { FlightStageKey, FlightStageStatus } from '@/shared/api/client'
 import { StageStatusChip, stageLabel } from '@/features/flights/components/stage-meta'
 import { CoverageDocsRail } from './CoverageDocsRail'
@@ -240,12 +240,12 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   // name as a secondary fallback. Each entry keeps the ABSOLUTE file for open-in-editor.
   const sourceByTest = useMemo(() => {
     const base = (p: string) => p.split(/[\\/]/).pop() ?? p
-    const byLoc = new Map<string, { body: string; absFile: string; line: number }>()
-    const byName = new Map<string, { body: string; absFile: string; line: number }>()
+    const byLoc = new Map<string, { test: ExtractedTest; absFile: string }>()
+    const byName = new Map<string, { test: ExtractedTest; absFile: string }>()
     for (const sf of specSource ?? []) {
       for (const t of sf.tests) {
         const absFile = t.sourceFile ?? sf.file
-        const entry = { body: t.bodySource, absFile, line: t.line }
+        const entry = { test: t, absFile }
         byLoc.set(`${base(absFile)}:${t.line}`, entry)
         if (!byName.has(t.name)) byName.set(t.name, entry)
       }
@@ -263,10 +263,6 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
     },
     [sourceByTest],
   )
-
-  const openTestInEditor = useCallback((absFile: string, line?: number) => {
-    api.openEditor({ file: absFile, line }).catch(() => {})
-  }, [])
 
   // The two-way highlight relation: a hovered test lights its requirements; a
   // hovered requirement lights its tests.
@@ -347,7 +343,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
       ) : (
         <>
           {ledger.tests.length === 0 && (
-            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No tests found in this feature&apos;s specs.</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No tests found in this suite&apos;s specs.</div>
           )}
           {orphanTests.length > 0 && (
             <div data-testid="orphan-tests-note" style={{ marginBottom: 10, fontSize: 11, color: 'var(--warning)' }}>
@@ -369,7 +365,6 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
               source={lookupSource(t)}
               sourceLoading={specSourceLoading}
               sourceError={specSourceError}
-              onOpenEditor={openTestInEditor}
               onReqClick={focusRequirement}
             />
           ))}

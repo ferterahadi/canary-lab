@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { HEAL_MODELS } from '../../../agent-sessions/logic/agent-models'
 import { resolveAgentBinary, isAgentCliAvailable, type HealAgent, type AgentResolveDeps } from '../../../agent-sessions/logic/agent-binary'
+import { internalAgentContextShellFlags } from '../../../agent-sessions/logic/agent-context-policy'
 
 // Heal-agent command builders for the web-server orchestrator. The orchestrator
 // runs claude / codex as a long-lived interactive REPL (no `-p`, no formatter
@@ -90,12 +91,19 @@ export interface AgentSpawnArgs {
    *  which keep asserting against the bare command name. */
   binaryPath?: string
   /** Directories the agent must be able to read and write outside its cwd —
-   *  the service repos it repairs and the feature dir holding the specs. The
+   *  the effective service repos it repairs. The
    *  agent's cwd is the run directory, so every repo it edits is out of scope
    *  by default and each first touch raises an "allow reading from …?" prompt
    *  that nothing answers under autopilot. Effective (worktree-aware) paths:
    *  pass service `cwd`s, not the feature's declared `localPath`s. */
   writableDirs?: readonly string[]
+  /** Extra read-only context for Claude. Codex receives no `--add-dir` for
+   * these paths because its workspace-write sandbox has no matching negative
+   * path rule; Claude's invocation-local settings enforce the read-only half. */
+  readableDirs?: readonly string[]
+  /** Invocation-local Claude settings containing the run's sandbox boundary.
+   * Ignored by Codex, whose workspace-write roots come from cwd + writableDirs. */
+  isolationSettingsFile?: string
   /** Workspace root whose interactive Codex trust gate should be satisfied for
    *  this invocation. Codex applies trust to the repository root when its cwd
    *  is a nested run directory; a whole-map `-c projects={...}` override avoids
@@ -212,14 +220,23 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
   // string when the feature runs on the agent default (HEAL_MODELS).
   const model = HEAL_MODELS[agent]
   const modelFlag = model ? ` --model ${JSON.stringify(model)}` : ''
+  const contextFlags = internalAgentContextShellFlags(agent)
 
-  // Both CLIs spell it `--add-dir`. Deduped: two services in one repo would
-  // otherwise pass the same directory twice.
-  const addDirs = [...new Set(args.writableDirs ?? [])]
+  // Both CLIs spell it `--add-dir`. Claude also gets the suite as read-only
+  // context; its isolation settings deny edits and sandbox writes there.
+  // Codex gets only writable roots because it has no equivalent negative path
+  // override. Deduped: two services in one repo can share a cwd.
+  const addDirs = [...new Set([
+    ...(args.writableDirs ?? []),
+    ...(agent === 'claude' ? (args.readableDirs ?? []) : []),
+  ])]
     .map((dir) => ` --add-dir ${JSON.stringify(dir)}`)
     .join('')
 
   if (agent === 'claude') {
+    const isolation = args.isolationSettingsFile
+      ? ` --setting-sources "" --settings ${JSON.stringify(args.isolationSettingsFile)}`
+      : ''
     const sid = args.sessionId
       ? (args.resume
         ? ` --resume ${JSON.stringify(args.sessionId)}`
@@ -234,7 +251,7 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
     }
     // Still not `--dangerously-skip-permissions`: `auto` keeps Claude Code's
     // background safety classifier in the loop, which the blanket bypass drops.
-    return `${head}${modelFlag} --permission-mode auto${addDirs}${sid}${mcp}${promptArg}`
+    return `${head}${modelFlag}${contextFlags}${isolation} --permission-mode auto${addDirs}${sid}${mcp}${promptArg}`
   }
   // codex interactive REPL. `-a never` is codex's spelling of the same posture:
   // it never asks for approval, and a command the sandbox refuses comes back to
@@ -248,7 +265,7 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
   // `--session-id` analogue, so the first run starts normally. Once the
   // orchestrator discovers Codex's persisted session id, Restart Heal can use
   // `codex resume <id>`.
-  const codexAuto = ` -a never --sandbox workspace-write${codexWorkspaceTrustFlag(args.workspaceRoot)}${addDirs}`
+  const codexAuto = `${contextFlags} -a never --sandbox workspace-write${codexWorkspaceTrustFlag(args.workspaceRoot)}${addDirs}`
   if (args.resume && args.sessionId) {
     return `${head}${modelFlag}${codexAuto} resume ${JSON.stringify(args.sessionId)}${promptArg}`
   }

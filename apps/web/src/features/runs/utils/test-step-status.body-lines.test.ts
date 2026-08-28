@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   activeBodyLineForTest,
+  executionLineHighlightForTest,
   slugify,
   summaryEntryName,
   statusForTest,
@@ -37,6 +38,27 @@ describe('activeBodyLineForTest', () => {
       bodySource: '{\n  await page.goto(\"/\")\n  await expect(locator).toBeVisible()\n}',
       summary,
     })).toBe(3)
+  })
+
+  it('maps from bodyLine when a multiline declaration starts above the displayed body', () => {
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 49,
+      bodyLine: 52,
+      bodySource: '{\n  await page.goto(\"/\")\n}',
+      sourceFile: '/features/cns/e2e/todo.spec.ts',
+      summary: {
+        ...summary,
+        running: {
+          ...summary.running!,
+          location: '/features/cns/e2e/todo.spec.ts:49',
+          step: {
+            ...summary.running!.step!,
+            location: '/features/cns/e2e/todo.spec.ts:53',
+          },
+        },
+      },
+    })).toBe(2)
   })
 
   it('returns null when the step location is outside the displayed body', () => {
@@ -94,6 +116,38 @@ describe('activeBodyLineForTest', () => {
         ],
       },
     })).toBe(3)
+  })
+
+  it('uses the live step while testing and the persisted failure after testing stops', () => {
+    const transitioningSummary: RunSummary = {
+      complete: false,
+      total: 1,
+      passed: 0,
+      running: {
+        name: 'test-case-creates-a-todo',
+        location: '/todo.spec.ts:10',
+        step: {
+          title: 'send request',
+          category: 'pw:api',
+          location: '/todo.spec.ts:12',
+        },
+      },
+      failed: [{
+        name: 'test-case-creates-a-todo',
+        locations: ['/todo.spec.ts:11'],
+      }],
+    }
+    const input = {
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto("/")\n  await sendRequest()\n}',
+      summary: transitioningSummary,
+    }
+
+    expect(executionLineHighlightForTest({ ...input, isRunActivelyTesting: true }))
+      .toEqual({ kind: 'running', bodyLine: 3 })
+    expect(executionLineHighlightForTest({ ...input, isRunActivelyTesting: false }))
+      .toEqual({ kind: 'failed', bodyLine: 2 })
   })
 
   it('falls back to the failed entry location when locations is absent entirely', () => {
@@ -198,7 +252,54 @@ describe('activeBodyLineForTest', () => {
     })).toBeNull()
   })
 
+  it('does not use a same-title sibling when stable test ids differ', () => {
+    const duplicateTitleSummary: RunSummary = {
+      ...summary,
+      running: {
+        id: 'test-id-alpha',
+        name: 'test-case-creates-a-todo',
+        location: '/todo.spec.ts:10',
+        step: {
+          title: 'expect(locator).toBeVisible',
+          category: 'expect',
+          location: '/todo.spec.ts:12',
+        },
+      },
+    }
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testId: 'test-id-beta',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n  await expect(locator).toBeVisible()\n}',
+      summary: duplicateTitleSummary,
+    })).toBeNull()
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testId: 'test-id-alpha',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n  await expect(locator).toBeVisible()\n}',
+      summary: duplicateTitleSummary,
+    })).toBe(3)
+  })
+
+  it('does not highlight by title when an exact modern test identity was not resolved', () => {
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      allowNameFallback: false,
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n  await expect(locator).toBeVisible()\n}',
+      summary,
+    })).toBeNull()
+  })
+
   it('returns null when no test is running or the location has no line number', () => {
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n}',
+      summary: undefined,
+    })).toBeNull()
+
     expect(activeBodyLineForTest({
       testName: 'Creates a TODO',
       testLine: 10,
@@ -329,7 +430,7 @@ describe('activeBodyLineForTest', () => {
     })).toBeNull()
   })
 
-  it('matches the spec file by basename when paths differ in prefix', () => {
+  it('matches the same feature file across different checkout roots', () => {
     expect(activeBodyLineForTest({
       testName: 'Creates a TODO',
       testLine: 10,
@@ -339,10 +440,34 @@ describe('activeBodyLineForTest', () => {
         ...summary,
         running: {
           ...summary.running!,
-          step: { ...summary.running!.step!, location: '/todo.spec.ts:12', locations: ['/todo.spec.ts:12'] },
+          step: {
+            ...summary.running!.step!,
+            location: '/worktree/features/x/e2e/todo.spec.ts:12',
+            locations: ['/worktree/features/x/e2e/todo.spec.ts:12'],
+          },
         },
       },
     })).toBe(3)
+  })
+
+  it('does not match unrelated files that only share a basename', () => {
+    expect(activeBodyLineForTest({
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto(\"/\")\n  await expect(locator).toBeVisible()\n}',
+      sourceFile: '/abs/features/x/e2e/todo.spec.ts',
+      summary: {
+        ...summary,
+        running: {
+          ...summary.running!,
+          step: {
+            ...summary.running!.step!,
+            location: '/abs/features/y/e2e/todo.spec.ts:12',
+            locations: ['/abs/features/y/e2e/todo.spec.ts:12'],
+          },
+        },
+      },
+    })).toBeNull()
   })
 })
 

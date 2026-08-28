@@ -93,14 +93,13 @@ function expectOneNested(page) {
     expect(exported.assets).toEqual([])
     expect(html).toContain('pill-failed')
     expect(svg).toContain('stroke="var(--flow-fail-line)"')
-    expect(svg).toContain('Prepare the scenario')
-    expect(svg).toContain('Open checkout')
-    expect(svg).toContain('1 check inside this shared step')
-    expect(svg).toContain('Check the expected outcome')
+    expect(svg).toContain('call property `route` of `page`')
+    expect(svg).toContain('call `openCheckout`')
+    expect(svg).toContain('property `toBeVisible`')
     expect(svg).toContain('…')
   })
 
-  it('renders readable action labels for the major statement families', async () => {
+  it('renders controlled-English labels for the major statement families', async () => {
     const featureDir = path.join(tmpDir, 'action-label-feature')
     const e2eDir = path.join(featureDir, 'e2e')
     fs.mkdirSync(e2eDir, { recursive: true })
@@ -192,19 +191,28 @@ function unknownUtility(page) {
     }))
 
     expect(html).toContain('Auth api then warning including automatically resolved')
-    expect(html).toContain('Skip if required test setup is missing')
-    expect(html).toContain('Prepare the scenario')
-    expect(html).toContain('Record the start time')
-    expect(html).toContain('Prepare unique identifiers')
-    expect(html).toContain('Prepare inventory')
-    expect(html).toContain('Prepare cart')
-    expect(html).toContain('Send checkout request')
-    expect(html).toContain('Read saved order')
-    expect(html).toContain('Wait for for receipt')
-    expect(html).toContain('Toggle voucher')
-    expect(html).toContain('Check linked records')
-    expect(html).toContain('Click the relevant control')
-    expect(html).toContain('Enter the required value')
+    // Flow labels keep names and source structure instead of interpreting
+    // their domain meaning.
+    expect(html).toContain('call property `skip` of `test`')
+    expect(html).toContain('call property `route` of `page`')
+    expect(html).toContain('construct a new `Date` with no arguments')
+    for (const helper of [
+      'makeIds',
+      'mockInventory',
+      'createCart',
+      'sendCheckoutRequest',
+      'fetchSavedOrder',
+      'waitForReceipt',
+      'toggleVoucher',
+      'withLinkedRecords',
+      'clickRelevantControl',
+      'fillRequiredValue',
+    ]) {
+      expect(html).toContain(`call \`${helper}\``)
+    }
+    expect(html).toContain('property `click`')
+    expect(html).toContain('property `fill`')
+    expect(html).toContain('property `waitForURL`')
     // expectUnknownOutcome resolves to a nested toBeTruthy (surface-level), so it
     // is graded; only expectFromLib is genuinely unresolvable and not graded. The
     // built-in `expect(...)` receiver of each real assertion must NOT be counted
@@ -218,7 +226,7 @@ function unknownUtility(page) {
     expect(html).not.toContain('<code>expect(page.getByText(&#39;Success&#39;))</code>')
   })
 
-  it('descends into try/blocks, surfaces meaningful inner steps, drops literal-only decls', async () => {
+  it('descends into try/blocks, surfaces meaningful inner steps, translates literal-only decls', async () => {
     const featureDir = path.join(tmpDir, 'flow-descend')
     fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
     const spec = path.join(featureDir, 'e2e', 'flow.spec.ts')
@@ -250,8 +258,13 @@ test('wrapped in try', async ({ page }) => {
     expect(nodes[nodes.length - 1].kind).toBe('end')
     // Inner assertions inside the try are surfaced (≥2), not collapsed.
     expect(nodes.filter((n) => n.kind === 'assertion').length).toBeGreaterThanOrEqual(2)
-    // The literal-only declaration is not a flow step.
-    expect(nodes.some((n) => (n.detail ?? '').includes('literal only'))).toBe(false)
+    // The literal-only declaration remains visible — now as a translated setup
+    // step rather than an unresolved "Review this source step" node.
+    expect(nodes.some((node) => (
+      node.title === 'declare constant `noise` and initialize it to string "literal only"'
+      && node.readable
+      && (node.detail ?? '').includes("const noise = 'literal only'")
+    ))).toBe(true)
   })
 
   it('soft-caps a very long flow with a "+N more steps" node', async () => {

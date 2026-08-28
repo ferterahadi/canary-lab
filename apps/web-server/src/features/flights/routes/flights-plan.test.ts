@@ -237,8 +237,8 @@ describe('plan-features (R54)', () => {
 })
 
 describe('plan-features.ts direct unit coverage (paths no route surface reaches)', () => {
-  it('normalizePlanResult rejects zero features, a missing description, and duplicate names', () => {
-    expect(() => normalizePlanResult({ split: false, features: [] })).toThrow(/no features/)
+  it('normalizePlanResult rejects zero suites, a missing description, and duplicate names', () => {
+    expect(() => normalizePlanResult({ split: false, features: [] })).toThrow(/no suites/)
     expect(() =>
       normalizePlanResult({ split: false, features: [{ name: 'x' } as PlannedFeature] }),
     ).toThrow(/has no description/)
@@ -250,7 +250,7 @@ describe('plan-features.ts direct unit coverage (paths no route surface reaches)
           { name: 'dup', description: 'd2' },
         ],
       }),
-    ).toThrow(/duplicate feature names/)
+    ).toThrow(/duplicate suite names/)
   })
 
   it('normalizePlanResult falls back to "feature" when the name key is entirely absent', () => {

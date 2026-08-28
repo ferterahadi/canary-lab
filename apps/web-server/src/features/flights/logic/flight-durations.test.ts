@@ -177,6 +177,67 @@ describe('stage work clock (activeMs / activeSince)', () => {
   })
 })
 
+describe('durable stage substage timings', () => {
+  it('banks named wall phases and checkpoint wait without double-counting resume', async () => {
+    const adapters = allDone()
+    adapters.scout = {
+      teardown: () => null,
+      run: async (ctx) => {
+        ctx.setTimingPhase?.('authoring')
+        tick(3_000)
+        ctx.setTimingPhase?.('validation')
+        tick(2_000)
+        return { kind: 'checkpoint', checkpoint: { kind: 'similarity-choice', message: 'approve?', options: ['approve'] } }
+      },
+      onCheckpointResponse: async (ctx) => {
+        ctx.setTimingPhase?.('mapping')
+        tick(4_000)
+        return { kind: 'done' }
+      },
+    }
+    const d = deps(adapters)
+    const { manifest, completion } = startFlight(args(), d)
+    await completion
+    tick(60_000)
+    const { completion: resumed } = respondToFlightCheckpoint(manifest.flightId, { choice: 'approve' }, d)
+    await resumed
+
+    const timings = store.get(manifest.flightId)!.stages.find((stage) => stage.key === 'scout')!.timings
+    expect(timings).toEqual({
+      authoring: { elapsedMs: 3_000 },
+      validation: { elapsedMs: 2_000 },
+      'checkpoint-wait': { elapsedMs: 60_000 },
+      mapping: { elapsedMs: 4_000 },
+    })
+  })
+
+  it('drops an unknowable live segment on restart but keeps its banked total', () => {
+    const flightId = 'fl-substage-crashed'
+    store.save({
+      flightId,
+      feature: 'checkout',
+      repoPaths: ['/repo/a'],
+      description: 'checkout flow',
+      opts: OPTS,
+      status: 'running',
+      currentStage: 'specs-coverage',
+      stages: [{
+        key: 'specs-coverage',
+        status: 'running',
+        activeSince: now(),
+        timings: { authoring: { elapsedMs: 2_000, since: now() } },
+      }],
+      createdAt: now(),
+      updatedAt: now(),
+    })
+    tick(60_000)
+
+    const reopened = new FlightRunStore(tmpDir)
+    reopened.reconcileInterrupted(now)
+    expect(reopened.get(flightId)!.stages[0].timings).toEqual({ authoring: { elapsedMs: 2_000 } })
+  })
+})
+
 describe('flight startedAt (ELAPSED starts when work does)', () => {
   it('a queued flight is stamped at dequeue, not at enqueue', async () => {
     const adapters = allDone()

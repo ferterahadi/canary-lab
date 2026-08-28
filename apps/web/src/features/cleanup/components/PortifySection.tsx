@@ -115,7 +115,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
           <thead>
             <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               <th className="py-1 pr-2" style={{ width: 28 }} />
-              <th className="py-1 pr-3">Feature</th>
+              <th className="py-1 pr-3">Suite</th>
               <th className="py-1 pr-3">Status</th>
               <th className="py-1 pr-3">Age</th>
               <th className="py-1 pr-3" style={{ textAlign: 'right' }}>Folder</th>
@@ -195,7 +195,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
           >
             <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Delete Portify record{confirmTargets.length === 1 ? '' : 's'}</h2>
             <p className="mt-2" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-              Remove <strong>{confirmTargets.length}</strong> port-ification record{confirmTargets.length === 1 ? '' : 's'} from history, reclaiming about <strong>{formatBytes(confirmTargets.reduce((s, w) => s + w.folderBytes, 0))}</strong>. This drops the workflow record only — a feature's saved overlay (its live port-ification) is untouched. Remove an overlay from the feature's Ports tab.
+              Remove <strong>{confirmTargets.length}</strong> port-ification record{confirmTargets.length === 1 ? '' : 's'} from history, reclaiming about <strong>{formatBytes(confirmTargets.reduce((s, w) => s + w.folderBytes, 0))}</strong>. This drops the workflow record only — a suite&apos;s saved overlay (its live port-ification) is untouched. Remove an overlay from the suite&apos;s Ports tab.
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={() => setConfirmTargets(null)} disabled={bulkBusy} className="cl-button px-3 py-1">Cancel</button>

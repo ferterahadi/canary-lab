@@ -11,6 +11,7 @@ import { type RunLifecycleTargetedRerun, type RunManifest } from './manifest'
 import { SummaryShape, VerificationPlan, computeVerificationPlan, decideRunStatus, normalizeRerunSelection, readLatestHealOnFailureThreshold, type PlaywrightRerunSelection } from './run-verdict'
 import { testPortEnv } from './run-service-boot'
 import { prepareRun, recordLifecycle, setStatus } from './run-manifest-writer'
+import { repoPathOverrideEnv } from './repo-path-env'
 
 // ─── Playwright + heal loop ────────────────────────────────────────────────
 //
@@ -49,6 +50,7 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
     cwd: inv.cwd,
     env: {
       ...ctx.playwrightEnv,
+      ...repoPathOverrideEnv(ctx.repoPathOverrides, ctx.playwrightEnv.NODE_OPTIONS ?? process.env.NODE_OPTIONS),
       // Per-run allocated ports, so tests can target the same dynamic port
       // the local service bound (CANARY_PORT_<shell-safe-slot>). Empty when no ports
       // were allocated, preserving the static envset target for remote runs.

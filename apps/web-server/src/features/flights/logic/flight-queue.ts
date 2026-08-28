@@ -3,7 +3,7 @@ import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type FlightManifest } from './
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { drive } from './flight-drive'
 import { FlightExistsError } from './flight-errors'
-import { bankStageActivity, defaultFlightId, driveControllers, freshStages, interruptStage } from './flight-stages'
+import { bankAllStageTimings, bankStageActivity, defaultFlightId, driveControllers, freshStages, interruptStage } from './flight-stages'
 import { agentJobStore } from '../../agent-sessions/logic/agent-jobs/store'
 import { FlightConductorDeps, StartFlightArgs, resumeFlight } from './conductor'
 
@@ -92,7 +92,7 @@ export function removeFlightRecordsForFeature(
   const records = store.list().filter((e) => e.feature === feature)
   const active = records.find((e) => isActiveFlightStatus(e.status))
   if (active) {
-    return { error: `flight ${active.flightId} is ${active.status} — pause it before deleting the feature`, removed: 0 }
+    return { error: `flight ${active.flightId} is ${active.status} — pause it before deleting the suite`, removed: 0 }
   }
   for (const record of records) store.remove(record.flightId)
   return { removed: records.length }
@@ -110,20 +110,21 @@ export async function abortFlight(flightId: string, deps: FlightConductorDeps): 
   const openStage = current.stages.find(
     (s) => s.status === 'running' || s.status === 'waiting-for-approval',
   )
+  const abortedAt = now()
   const manifest: FlightManifest = {
     ...current,
     status: 'aborted',
     pauseReason: undefined,
     currentStage: null,
-    updatedAt: now(),
-    endedAt: now(),
+    updatedAt: abortedAt,
+    endedAt: abortedAt,
     // Same open-stage settle as pause: a terminal record must not keep a live
     // checkpoint — the UI would render an answerable ask that can only 409.
     stages: current.stages.map((s) =>
       // Same clock close as pause — an aborted stage's banked work is still the
       // honest record of what it did before the stop.
       s.key === openStage?.key
-        ? { ...bankStageActivity(s, now()), status: 'pending' as const, checkpoint: undefined }
+        ? { ...bankAllStageTimings(bankStageActivity(s, abortedAt), abortedAt), status: 'pending' as const, checkpoint: undefined }
         : s,
     ),
   }

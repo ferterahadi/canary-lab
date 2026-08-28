@@ -535,13 +535,16 @@ describe('trailer model (R14–R18)', () => {
   it('R18/R21/R22: the rail speaks outcome language; plumbing rows are hidden', async () => {
     mocks.getFlight.mockResolvedValue(manifest())
     await render('fl_1')
-    expect(container.querySelector('[data-testid="stage-rail-portify"]')?.textContent).toContain('Parallel readiness')
+    expect(container.querySelector('[data-testid="stage-rail-portify"]')?.textContent).toContain('Parallel setup')
     expect(container.querySelector('[data-testid="stage-rail-scaffold"]')?.textContent).toContain('Suite setup')
     expect(container.querySelector('[data-testid="stage-rail-docs"]')?.textContent).toContain('Requirements')
-    expect(container.querySelector('[data-testid="stage-rail-evaluation-export"]')?.textContent).toContain('Evaluation report')
+    expect(container.querySelector('[data-testid="stage-rail-evaluation-export"]')?.textContent).toContain('Report')
     // Run + heal are one user step; similarity never shows unless it needs a
     // human; the pair companions (env-capture, prd-summary) fold into their rows.
-    expect(container.querySelector('[data-testid="stage-rail-run"]')?.textContent).toContain('Test run')
+    const runRow = container.querySelector('[data-testid="stage-rail-run"]')!
+    const parallelSetupRow = container.querySelector('[data-testid="stage-rail-portify"]')!
+    expect(runRow.textContent).toContain('Test run')
+    expect(runRow.compareDocumentPosition(parallelSetupRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(container.querySelector('[data-testid="stage-rail-heal"]')).toBeNull()
     expect(container.querySelector('[data-testid="stage-rail-similarity"]')).toBeNull()
     expect(container.querySelector('[data-testid="stage-rail-env-capture"]')).toBeNull()

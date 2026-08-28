@@ -93,7 +93,7 @@ describe('externalizable — choosing the executor', () => {
       kind: 'checkpoint',
       checkpoint: { kind: 'external-work', options: [...EXTERNAL_WORK_OPTIONS], data: { stage: 'scout', prompt: 'do the scout step' } },
     })
-    expect(logs.join('')).toContain('handed off to the external client')
+    expect(logs.join('')).toContain('handed off to the external agent session')
   })
 
   it('omits the context key entirely when the spec supplies none', async () => {

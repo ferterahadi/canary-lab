@@ -2,22 +2,22 @@
 
 Operational reference for environments, runs, repair, Flight, coverage, and
 evaluation export. See the [README](../README.md) for installation and the main
-workflow, and [FEATURES](FEATURES.md) for the feature-folder contract.
+workflow, and [FEATURES](FEATURES.md) for the suite-folder contract.
 
 ## Environment switching
 
-An envset is a named collection of files applied for one feature environment.
+An envset is a named collection of files applied for one suite environment.
 Canary Lab backs up each configured target, writes the selected values before
 the run, and restores the originals during teardown. Manage envsets in the UI;
 their source files live under `features/<feature>/envsets/`.
 
-Feature configuration can also make service startup environment-specific. A
-typical feature starts local services for `local` and skips them for
+Suite configuration can also make service startup environment-specific. A
+typical suite starts local services for `local` and skips them for
 `production`, where Playwright points at a deployed URL.
 
 ### Test a deployed URL
 
-To run the same feature against a deployed environment without booting its local
+To run the same suite against a deployed environment without booting its local
 services:
 
 1. Add the environment to `feature.config.cjs`, for example
@@ -63,16 +63,16 @@ when that part of the lifecycle runs.
 artifacts by run ID. Canary Lab does not automatically prune run evidence;
 removal and artifact trimming are explicit actions under **Cleanup → Runs**.
 
-## Evaluation report
+## Report
 
 Export a terminal run from its **Overview** tab. The archive contains
 `evaluation.html` plus captured media, with each declared test's flow, source,
 helpers, evidence, checks, and actual status. Failed, aborted, skipped, and
 never-run cases keep those states; export never rounds them into passes.
 
-When the feature has a PRD summary, the report separates two questions:
+When the suite has a PRD summary, the report separates two questions:
 
-- **Claimed coverage:** tags map a test to every required path and variant.
+- **Mapped coverage:** tags map a test to every required path and variant.
 - **Proven in this run:** the mapped test passed in the exported run.
 
 Canary Lab never borrows a result from another run for an export.
@@ -86,7 +86,7 @@ Both modes preserve the same roster and verdicts. External MCP exports use
 client-supplied wording; Canary Lab validates, stores, and renders it without
 rewriting it again.
 
-![Evaluation Report sample](assets/assertion-review.png)
+![Report sample](assets/assertion-review.png)
 
 ## Requirement coverage
 
@@ -135,7 +135,7 @@ hold repair edits; manage them under **Cleanup → Worktrees**.
 
 When a captured repair makes the run green and **Settings → GitHub → Open a
 draft PR when a run heals green** is enabled, Canary Lab updates a fix branch
-for the feature and product repository, then opens or updates a draft pull
+for the suite and product repository, then opens or updates a draft pull
 request. A GitHub failure is recorded on the manifest and does not change the
 test verdict. Red or abandoned repairs are never proposed.
 
@@ -193,22 +193,33 @@ repositories through one server-owned pipeline:
 
 ```text
 similarity → scout → scaffold → env capture → docs → PRD summary
-→ test authoring and coverage → portify → run → heal → evaluation export
+→ Tests & coverage → Test run → Auto-repair → Report → Parallel setup
 ```
 
-The server owns stage order, persistence, and every verdict. Judgment work can
+The serial Test run and downloadable Report finish before Parallel setup, so a
+large app produces its evaluation without first waiting for port-injection
+work. The Report is the end of the foreground journey: surface it as soon as it
+exists. Parallel setup remains a persisted, server-owned final stage that can
+finish, park, or be retried in the background without deleting the completed run
+or Report. The Flight page continues to show its live progress.
+
+The server owns stage priority, persistence, and every verdict. Judgment work can
 come from two producers:
 
 - **Internal** (default): Canary Lab spawns the selected local CLI for agentic
   stages.
 - **External** (MCP only): `start_flight(..., stage_producer: "external")`
   parks on `external-work` handoffs. The connected client performs scout, docs,
-  PRD summary, test authoring and mapping, Portify, the repair engagement, and a
-  localized export. Canary Lab still re-reads artifacts and computes the verdict.
+  PRD summary, test authoring and mapping, the repair engagement, and a localized
+  export. Canary Lab still re-reads artifacts and computes the verdict.
 
 Mechanical work—scaffold writes, env application, Playwright execution, and raw
-export—stays in Canary Lab in both modes. An external client can return one
-handoff to the internal agent with `choice: "run-internally"`.
+export—plus final Parallel setup stays in Canary Lab in both modes. Once
+`links.evaluationZip` appears, an external client reports that path and ends its
+turn; it does not keep polling while Parallel setup runs. An external client can
+return any earlier handoff to the internal agent with `choice: "run-internally"`.
+Flights persisted under the older client-owned Portify behavior use that same
+choice to migrate their final handoff back to Canary Lab.
 
 The Flight page remains live while an external client works. Its normal
 mutations are disabled, but an `external-work` card offers **Request takeover**.
@@ -218,7 +229,7 @@ client is gone, **Force takeover** is available behind a warning because Canary
 cannot interrupt file writes already happening in another process.
 
 The default coverage target is 100%. Portify proves injected-port readiness with
-a concurrent double boot. Skipping it leaves the feature serial; it does not
+a concurrent double boot. Skipping it leaves the suite serial; it does not
 make fixed ports safe for concurrent runs.
 
 ### Checkpoints and autopilot
@@ -232,11 +243,11 @@ Autopilot answers seven routine decisions by default and logs each answer as
 
 | Checkpoint | Decision | Autopilot |
 | --- | --- | --- |
-| `similarity-choice` | Rerun, enhance, or create a new feature when one already matches | Always asks |
+| `similarity-choice` | Rerun, enhance, or create a new suite when one already matches | Always asks |
 | `config-approval` | Accept the on-disk `feature.config.cjs` or re-scan | `approve` |
 | `prd-source` | Continue with docs, collect repo docs, or infer from the branch diff | `continue` with docs; otherwise `collect-repo-docs` |
 | `coverage-stuck` | Accept partial coverage or retry | `accept-partial` |
-| `portify-gate` | Run or skip parallel-readiness work | `run` |
+| `portify-gate` | Run or skip Parallel setup | `run` |
 | `portify-apply` | Apply, revise, or cancel the verified overlay | `apply` |
 | `run-failed` | Rerun or export the terminal non-green result | `export-as-is` |
 | `export-mode` | Raw or localized evaluation wording | `raw` internally; `localized` externally |
@@ -253,13 +264,15 @@ Markdown content or link a local file before choosing `continue`.
 
 ### Resume, redo, and queue
 
-One feature has one Flight record.
+One suite has one Flight record.
 
 - Recalling an active Flight follows it.
 - Recalling a paused Flight resumes its first open stage without deleting
   artifacts.
-- `from_stage` re-enters one stage after checking prerequisites and deletes that
-  stage's and every later stage's artifacts before rerunning them.
+- `from_stage` re-enters one stage after checking prerequisites. It normally
+  deletes that stage's and every later record stage's artifacts; re-entering
+  Parallel setup deletes only its own Portify attempt and preserves the run and
+  Report.
 - `redo: true` restarts from stage one and deletes all stage artifacts. A full
   redo may replace the stored repos and description; omit them to reuse the old
   values.
@@ -272,37 +285,35 @@ different: it stops live stage work and must not be resumed without the user's
 request.
 
 Deleting a Flight record is available only in the web UI. It removes Flight
-history but keeps the feature and its files.
+history but keeps the suite and its files.
 
-The web UI can split a broad description into several proposed features. After
+The web UI can split a broad description into several proposed suites. After
 confirmation, the first Flight starts and siblings sharing the same repositories
 queue. This planning surface is not available through the CLI or MCP.
 
 ## External authoring workflow
 
-The bare MCP server's default `lifecycle` profile combines six direct-tool
-workflows—repair, verify, author, coverage, export, and Flight—while leaving
-specialized Portify tools out. `setup` registers clients with `compact`: one
-always-loaded `exec` tool dispatches all 63 atomic commands, including Portify.
-Focused direct profiles and `full` remain available for debugging and rollback.
+The default MCP surface is `compact`: one always-loaded `exec` tool dispatches
+all 63 atomic commands, including Portify. Bare connections and `setup`-installed
+clients use the same profile. Focused direct profiles, `lifecycle`, and `full`
+remain opt-in surfaces for debugging and rollback.
 A client can use the following standalone flow without asking Canary Lab to
 author the content:
 
 The names below are exact `command` values inside `exec.arguments`; for example,
 `{"command":"create_feature","arguments":{...}}`.
 
-1. `create_feature` writes the feature config, Playwright config, and envset
+1. `create_feature` writes the suite config, Playwright config, and envset
    skeleton.
 2. `capture_feature_env_files` or `write_envset` adds environment files. Capture
    responses expose redacted key names only.
 3. The client authors Playwright specs, then records and applies them through
    `start_external_draft` → `update_external_draft_stage` →
    `apply_external_draft`.
-4. Under the `coverage` profile, add source docs, submit structured requirements,
-   map the tests, and read Canary Lab's computed ledger.
-5. Run and repair locally with the `repair` profile, or execute an observational
-   deployed check with `verify`.
-6. Export a terminal run through `start_external_evaluation_export` and
+4. Call the coverage commands through `exec` to add source docs, submit structured
+   requirements, map the tests, and read Canary Lab's computed ledger.
+5. Run and repair locally through `exec`, or execute an observational deployed check.
+6. Export a terminal run through `exec` with `start_external_evaluation_export` and
    `submit_external_evaluation_export`; its `archivePath` is the exact local zip
    to hand to the user (`evaluation.html` is inside it).
 

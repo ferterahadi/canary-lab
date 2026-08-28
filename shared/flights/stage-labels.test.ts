@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { FLIGHT_STAGE_KEYS } from './types'
-import { FLIGHT_STAGE_LABEL, flightStageLabel } from './stage-labels'
+import { FLIGHT_STAGE_LABEL, flightRailLabel, flightStageLabel } from './stage-labels'
 
 describe('flightStageLabel', () => {
   it('labels every stage key the pipeline defines', () => {
@@ -14,5 +14,12 @@ describe('flightStageLabel', () => {
     // Server and web can be one release apart mid-upgrade: a record written by
     // a newer build must still render as SOMETHING, not an empty label.
     expect(flightStageLabel('brand-new-stage')).toBe('brand-new-stage')
+  })
+
+  it('uses the same user-visible vocabulary as the Flight rail', () => {
+    expect(flightRailLabel('docs')).toBe('Requirements')
+    expect(flightRailLabel('specs-coverage')).toBe('Tests & coverage')
+    expect(flightRailLabel('portify')).toBe('Parallel setup')
+    expect(flightRailLabel('evaluation-export')).toBe('Report')
   })
 })

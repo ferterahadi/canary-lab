@@ -119,8 +119,8 @@ export function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
     <div data-testid="coverage-external-monitor">
       <ExternalAgentCard
         clientKind={clientKind}
-        eyebrow="External coverage session"
-        headline={clientKind === 'other' ? 'External Client' : clientLabel(clientKind)}
+        eyebrow="External agent session"
+        headline={clientLabel(clientKind)}
         subtitle={job.externalConversationName}
         statusPill={
           <ExternalStatusPill

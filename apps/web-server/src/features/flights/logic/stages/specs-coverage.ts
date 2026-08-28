@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
+import { createHash } from 'crypto'
 import { applyExternalCoverageMappings, buildCoverageMappingContext, computeFeatureCoverage, LEGACY_MAPPINGS_JSON, runCoverageEngine } from '../../../coverage/logic/coverage/service'
 import { IncompleteCoverageAnswerError, missingFromRoster, parseMappingSubmission } from '../../../coverage/logic/coverage/external-submissions'
 import { COVERAGE_STATE_JSON } from '../../../coverage/logic/coverage/run-state'
@@ -27,8 +28,10 @@ import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../types'
 // the harness-computed coverage meets the target (default 100% — no untested /
 // path-incomplete / variant-incomplete). Validation errors feed the NEXT
 // iteration's prompt so the agent repairs broken specs instead of the loop
-// silently burning rounds. Bounded: when the loop can't close the remaining
-// gaps it parks on coverage-stuck instead of spinning.
+// silently burning rounds. Bounded: an identical harness-computed gap result
+// across two mapped passes stops immediately; changing open cells can continue
+// up to the hard pass cap. Either case parks on coverage-stuck instead of
+// spinning.
 //
 // Under an external stageProducer BOTH agent jobs hand off, sequentially: the
 // authoring park releases into validation, and a validated batch parks a
@@ -42,6 +45,8 @@ const MAX_VALIDATION_ERROR_CHARS = 4 * 1024
 const PLAYWRIGHT_LIST_TIMEOUT_MS = 60_000
 const TSC_TIMEOUT_MS = 120_000
 
+type CoverageStopReason = 'no-progress' | 'max-passes'
+
 interface GapRow {
   id: string
   title: string
@@ -54,12 +59,57 @@ function gapRows(ledger: CoverageLedger): GapRow[] {
     .map((r) => ({ id: r.requirement.id, title: r.requirement.title, gap: r.gapType }))
 }
 
+/** Stable signature of what remains to cover. Coverage can stay at the same
+ *  whole-requirement percentage while a partial requirement gains a path or
+ *  variant cell, so the comparison includes those open cells rather than only
+ *  the headline number. Run-proof and test-strength fields are intentionally
+ *  absent: they do not change the authored-coverage gap this loop can close. */
+function coverageGapSignature(ledger: CoverageLedger): string {
+  const gaps = ledger.requirements
+    .filter((entry) => entry.gapType !== 'covered')
+    .map((entry) => ({
+      id: entry.requirement.id,
+      gapType: entry.gapType,
+      paths: (entry.pathCoverage ?? [])
+        .filter((cell) => !cell.covered)
+        .map((cell) => cell.path)
+        .sort(),
+      variants: (entry.variantCoverage ?? [])
+        .filter((cell) => cell.applicable !== false && !cell.covered)
+        .map((cell) => `${cell.path}:${cell.variant}`)
+        .sort(),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+  return createHash('sha256')
+    .update(JSON.stringify({ coveragePct: ledger.coveragePct, gaps }))
+    .digest('hex')
+}
+
 function targetMet(ledger: CoverageLedger, target: number): boolean {
   return ledger.coveragePct >= target
 }
 
-function ledgerEvidence(ledger: CoverageLedger): unknown {
+function ledgerEvidence(ledger: CoverageLedger) {
   return { coveragePct: ledger.coveragePct, totals: ledger.totals, gaps: gapRows(ledger) }
+}
+
+function coverageStuckOutcome(
+  ledger: CoverageLedger,
+  target: number,
+  reason: CoverageStopReason,
+): StageOutcome {
+  const message = reason === 'no-progress'
+    ? `Coverage stayed at ${ledger.coveragePct}% with the same ${gapRows(ledger).length} open gap(s) across two mapped passes. Accept the gaps that are left, or retry after changing the requirements or tests.`
+    : `After ${MAX_ITERATIONS} passes, coverage is ${ledger.coveragePct}% (target ${target}%). Accept the gaps that are left, or try another pass.`
+  return {
+    kind: 'checkpoint',
+    checkpoint: {
+      kind: 'coverage-stuck',
+      message,
+      options: [...CHECKPOINT_OPTIONS['coverage-stuck']],
+      data: { ...ledgerEvidence(ledger), stopReason: reason },
+    },
+  }
 }
 
 export function buildSpecsPrompt(args: {
@@ -177,6 +227,11 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     iteration: number
     validationErrors: string
     passes: SpecsCoveragePass[]
+    /** Last harness-computed post-mapping result, carried through external
+     *  checkpoints so local and client-produced passes converge identically. */
+    lastMappedGapSignature?: string
+    /** True only for the next runPass call after an identical mapped result. */
+    repeatedMappedGap?: boolean
   }
 
   const FIRST_PASS: PassState = { iteration: 1, validationErrors: '', passes: [] }
@@ -211,6 +266,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     state: PassState,
     phase: SpecsCoverageProgress['phase'],
   ): void => {
+    ctx.setTimingPhase?.(phase === 'validating' ? 'validation' : phase)
     ctx.setProgress({
       pass: state.iteration,
       maxPasses: MAX_ITERATIONS,
@@ -222,10 +278,44 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     } satisfies SpecsCoverageProgress)
   }
 
+  /** Preserve one immutable ref before the loop's mutable author/map sidecar is
+   *  repinned by a later pass. The manifest array is the ordered Activity model;
+   *  each entry's directory keeps the existing REST + WebSocket session-tail
+   *  paths reusable without teaching either transport a second ref format. */
+  const recordAgentSession = (
+    ctx: StageContext,
+    state: PassState,
+    phase: 'authoring' | 'mapping',
+    session: { agent: 'claude' | 'codex'; sessionId: string },
+    spawnedAt: string,
+  ): void => {
+    const stage = ctx.manifest().stages.find((candidate) => candidate.key === 'specs-coverage')
+    const sequence = (stage?.agentSessions?.length ?? 0) + 1
+    const sidecar = `specs-coverage-session-${String(sequence).padStart(3, '0')}`
+    const sessionDir = path.join(ctx.flightDir, sidecar)
+    writeWorkflowAgentRef(sessionDir, {
+      agent: session.agent,
+      cwd: deps.projectRoot,
+      spawnedAt,
+      sessionId: session.sessionId,
+    })
+    // writeWorkflowAgentRef is deliberately best-effort. Do not persist a
+    // pointer the viewer can never resolve when that write failed.
+    if (!fs.existsSync(path.join(sessionDir, 'agent-session.json'))) return
+    ctx.addAgentSession({
+      sidecar,
+      label: `Pass ${state.iteration} · ${phase === 'authoring' ? 'Authoring' : 'Mapping'}`,
+      startedAt: spawnedAt,
+      phase,
+      pass: state.iteration,
+    })
+  }
+
   const bumpPass = (state: PassState, over: Partial<PassState>): PassState => ({
+    ...state,
     iteration: state.iteration + 1,
     validationErrors: '',
-    passes: state.passes,
+    repeatedMappedGap: false,
     ...over,
   })
 
@@ -240,7 +330,12 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     const m = ctx.manifest()
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
     const mapped = compute(m.feature)
-    const next = bumpPass(state, { passes: [...state.passes, { pass: state.iteration, coveragePct: mapped.coveragePct, gapsOpen: gapRows(mapped).length }] })
+    const mappedGapSignature = coverageGapSignature(mapped)
+    const next = bumpPass(state, {
+      passes: [...state.passes, { pass: state.iteration, coveragePct: mapped.coveragePct, gapsOpen: gapRows(mapped).length }],
+      lastMappedGapSignature: mappedGapSignature,
+      repeatedMappedGap: state.lastMappedGapSignature === mappedGapSignature,
+    })
     // Settle the pass in the published shape (phase stays 'mapping' — the next
     // pass head flips it to 'authoring' if another one starts).
     publishProgress(ctx, mapped, prep.target, { ...state, passes: next.passes }, 'mapping')
@@ -253,12 +348,14 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     ctx: StageContext,
     prep: Extract<Prep, { ok: true }>,
     state: PassState,
+    requirementIds: string[],
   ): Promise<StageOutcome> => {
     const m = ctx.manifest()
     await runEngine({
       featuresDir: deps.featuresDir,
       logsDir: deps.logsDir,
       feature: m.feature,
+      requirementIds,
       adapter: m.opts.agent,
       cwd: deps.projectRoot,
       // The mapping half spawns its OWN agent, so it needs the signal as much as
@@ -273,12 +370,14 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       agentJob: { record: { jobId: `${m.flightId}:coverage-map`, flightId: m.flightId, feature: m.feature, stage: 'coverage-map', agent: m.opts.agent ?? 'claude' }, logsDir: deps.logsDir },
       onOutput: agentProgressSink(ctx),
       onAgentSession: (session) => {
+        const spawnedAt = new Date().toISOString()
         writeWorkflowAgentRef(path.join(ctx.flightDir, 'coverage-map'), {
           agent: session.agent,
           cwd: deps.projectRoot,
-          spawnedAt: new Date().toISOString(),
+          spawnedAt,
           sessionId: session.sessionId,
         })
+        recordAgentSession(ctx, state, 'mapping', session, spawnedAt)
       },
     })
     return settleMapped(ctx, prep, state)
@@ -295,9 +394,10 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     ctx: StageContext,
     prep: Extract<Prep, { ok: true }>,
     state: PassState,
+    requirementIds: string[],
   ): StageOutcome => {
-    const mappingContext = buildCoverageMappingContext({ featuresDir: deps.featuresDir, feature: ctx.manifest().feature })
-    ctx.appendLog(`[specs] pass ${state.iteration} mapping handed off to the external client\n`)
+    const mappingContext = buildCoverageMappingContext({ featuresDir: deps.featuresDir, feature: ctx.manifest().feature, requirementIds })
+    ctx.appendLog(`[specs] pass ${state.iteration} mapping handed off to the external agent session\n`)
     return externalWorkCheckpoint(ctx, 'specs-coverage', mappingContext.prompt, {
       message: `Map the tests onto the requirements in your own client (pass ${state.iteration}), then respond with { mappings[], unmappable[] } on \`data\` — every roster test must appear in one of them. Canary writes the tags itself and recomputes the ledger.`,
       context: { phase: 'mapping', pass: state, roster: mappingContext.tests.map((t) => t.testName), target: prep.target },
@@ -355,12 +455,19 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       )
     }
 
-    publishProgress(ctx, ledger, prep.target, state, 'mapping')
+    // Authoring may have closed some gaps or exposed regressions by rewriting a
+    // previously mapped test. Recompute before inference so this pass maps only
+    // the requirements that are actually open now. Existing tags for covered
+    // requirements stay untouched; the mapper still accounts for every test it
+    // receives, and Canary still derives the verdict from the resulting tags.
+    const mappingLedger = compute(m.feature)
+    const requirementIds = gapRows(mappingLedger).map((gap) => gap.id)
+    publishProgress(ctx, mappingLedger, prep.target, state, 'mapping')
     // The mapping half is a DIFFERENT agent job with its own standalone twin
     // (start_external_coverage), so under an external producer it becomes the
     // stage's second sequential hand-off rather than a local spawn.
-    if (!forceInternalMap && handsOffToClient(ctx)) return mappingHandOff(ctx, prep, state)
-    return mapInternally(ctx, prep, state)
+    if (!forceInternalMap && handsOffToClient(ctx)) return mappingHandOff(ctx, prep, state, requirementIds)
+    return mapInternally(ctx, prep, state, requirementIds)
   }
 
   /** One authoring pass, then recurse. Expressed recursively rather than as a
@@ -378,19 +485,12 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     if (!prep.ok) return prep.outcome
     const m = ctx.manifest()
     if (targetMet(ledger, prep.target)) return { kind: 'done', evidence: ledgerEvidence(ledger) }
+    if (state.repeatedMappedGap) {
+      ctx.appendLog(`[specs] stopping early: coverage and open gaps repeated after mapping (${ledger.coveragePct}%)\n`)
+      return coverageStuckOutcome(ledger, prep.target, 'no-progress')
+    }
     if (state.iteration > MAX_ITERATIONS) {
-      return {
-        kind: 'checkpoint',
-        checkpoint: {
-          kind: 'coverage-stuck',
-          // "passes", not "authoring rounds": the Passes card beside this
-          // checkpoint and the live state line both count the same loop in
-          // passes — one loop, one word.
-          message: `After ${MAX_ITERATIONS} passes, coverage is ${ledger.coveragePct}% (target ${prep.target}%). Accept the gaps that are left, or try another pass.`,
-          options: [...CHECKPOINT_OPTIONS['coverage-stuck']],
-          data: ledgerEvidence(ledger),
-        },
-      }
+      return coverageStuckOutcome(ledger, prep.target, 'max-passes')
     }
 
     ctx.appendLog(`[specs] iteration ${state.iteration}: ${ledger.coveragePct}% / ${prep.target}% — ${gapRows(ledger).length} gap(s)\n`)
@@ -407,7 +507,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     })
 
     if (!forceInternal && handsOffToClient(ctx)) {
-      ctx.appendLog(`[specs] iteration ${state.iteration} handed off to the external client\n`)
+      ctx.appendLog(`[specs] iteration ${state.iteration} handed off to the external agent session\n`)
       return externalWorkCheckpoint(ctx, 'specs-coverage', prompt, {
         message: `Write the spec files for pass ${state.iteration} in your own client (under ${prep.featureDir}/e2e), then respond. Canary re-reads what landed on disk, compiles it, and recomputes the ledger.`,
         context: { phase: 'authoring', pass: state, featureDir: prep.featureDir, gaps: gapRows(ledger), target: prep.target },
@@ -424,6 +524,9 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       onChunk: agentProgressSink(ctx),
       signal: ctx.signal,
       agent: m.opts.agent,
+      onAgentSession: (session) => {
+        recordAgentSession(ctx, state, 'authoring', session, session.spawnedAt)
+      },
     })
     return afterAuthoring(ctx, prep, state, ledger, forceInternal)
   }
@@ -455,7 +558,8 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
         if (handOff?.phase === 'mapping') {
           if (response.choice === 'run-internally') {
             ctx.appendLog(`[specs] client handed the pass ${state.iteration} mapping back — mapping here\n`)
-            return mapInternally(ctx, prep, state)
+            const ledger = compute(ctx.manifest().feature)
+            return mapInternally(ctx, prep, state, gapRows(ledger).map((gap) => gap.id))
           }
           const stale = rejectStaleSubmit(ctx, 'specs-coverage', response)
           if (stale) return stale

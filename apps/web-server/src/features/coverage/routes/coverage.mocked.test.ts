@@ -36,6 +36,8 @@ vi.mock('../../config/logic/feature-authoring', async (importOriginal) => {
 import Fastify, { type FastifyInstance } from 'fastify'
 import { coverageRoutes } from './coverage'
 import { computeFeatureCoverage, listFeatureDocs, clearPrdSummary, regeneratePrdSummary } from '../logic/coverage/service'
+import { computeDocsHash } from '../logic/coverage/docs-collection'
+import { writeCoverageRunState } from '../logic/coverage/run-state'
 import { writeFeatureDoc } from '../../config/logic/feature-authoring'
 import { extractPrdDocument } from '../logic/prd-document-extractor'
 
@@ -144,11 +146,8 @@ describe('coverage route re-throw branches', () => {
   })
 })
 
-describe('coverage/states — ?? null fallback branch (lines 196-198)', () => {
-  it('GET /api/coverage/states returns null fields when ledger has no state property', async () => {
-    // computeFeatureCoverage returns a ledger without the optional `state` field
-    // (state is undefined) → `ledger.state?.headline ?? null` takes the ?? fallback (→ null).
-    // This covers the TRUE (nullish) branch of all three ?? operators on lines 196-198.
+describe('coverage/states manifest scan', () => {
+  it('returns the exact setup-needed state without compiling specs when no summary exists', async () => {
     const featureDir = path.join(featuresDir, 'checkout')
     fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
     fs.writeFileSync(
@@ -156,25 +155,82 @@ describe('coverage/states — ?? null fallback branch (lines 196-198)', () => {
       `module.exports = { config: { name: 'checkout', description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname }], featureDir: __dirname } }`,
     )
 
-    vi.mocked(computeFeatureCoverage).mockImplementation(() => ({
+    const res = await app.inject({ method: 'GET', url: '/api/coverage/states' })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toContainEqual({
       feature: 'checkout',
-      requirements: [],
-      tests: [],
-      totals: { total: 0, covered: 0, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 },
+      headline: 'Setup needed',
+      summary: 'absent',
+      coverage: 'blocked',
       coveragePct: 0,
-      mappedPct: 0,
-      orphanRequirementIds: [],
-      orphanTestNames: [],
-      // state intentionally omitted — headline/summary/coverage will all be undefined
+    })
+    expect(computeFeatureCoverage).not.toHaveBeenCalled()
+  })
+
+  it('reads a cached exact percentage without invoking the full ledger', async () => {
+    const featureDir = path.join(featuresDir, 'checkout')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    fs.writeFileSync(
+      path.join(featureDir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'checkout', description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname }], featureDir: __dirname } }`,
+    )
+    fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'docs', '_prd-summary.json'), JSON.stringify({
+      requirements: [],
+      docsHash: computeDocsHash([]),
+      sourceDocs: [],
+      generatedAt: '2026-01-01T00:00:00Z',
+      requirementsHash: 'requirements-v1',
     }))
+    writeCoverageRunState(featureDir, {
+      requirementsHash: 'requirements-v1',
+      ranAt: '2026-01-02T00:00:00Z',
+      coveragePct: 75,
+    })
 
     const res = await app.inject({ method: 'GET', url: '/api/coverage/states' })
     expect(res.statusCode).toBe(200)
-    const states = res.json() as Array<{ feature: string; headline: string | null; summary: string | null; coverage: string | null }>
+    const states = res.json() as Array<{ feature: string; headline: string | null; summary: string | null; coverage: string | null; coveragePct: number | null }>
     const entry = states.find((s) => s.feature === 'checkout')
-    expect(entry).toBeTruthy()
-    expect(entry?.headline).toBeNull()
-    expect(entry?.summary).toBeNull()
-    expect(entry?.coverage).toBeNull()
+    expect(entry).toEqual({
+      feature: 'checkout',
+      headline: 'Covered 75%',
+      summary: 'fresh',
+      coverage: 'fresh',
+      coveragePct: 75,
+    })
+    expect(computeFeatureCoverage).not.toHaveBeenCalled()
+  })
+
+  it('keeps an older completed manifest truthful without inventing a percentage', async () => {
+    const featureDir = path.join(featuresDir, 'legacy')
+    fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
+    fs.writeFileSync(
+      path.join(featureDir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'legacy', description: 'd', envs: ['local'], repos: [], featureDir: __dirname } }`,
+    )
+    fs.writeFileSync(path.join(featureDir, 'docs', '_prd-summary.json'), JSON.stringify({
+      requirements: [],
+      docsHash: computeDocsHash([]),
+      sourceDocs: [],
+      generatedAt: '2026-01-01T00:00:00Z',
+      requirementsHash: 'requirements-v1',
+    }))
+    writeCoverageRunState(featureDir, {
+      requirementsHash: 'requirements-v1',
+      ranAt: '2026-01-02T00:00:00Z',
+    })
+
+    const states = (await app.inject({ method: 'GET', url: '/api/coverage/states' })).json() as Array<{
+      feature: string
+      headline: string | null
+      coveragePct: number | null
+    }>
+    expect(states.find((state) => state.feature === 'legacy')).toMatchObject({
+      headline: 'Covered',
+      coveragePct: null,
+    })
+    expect(computeFeatureCoverage).not.toHaveBeenCalled()
   })
 })

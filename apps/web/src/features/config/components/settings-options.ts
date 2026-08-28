@@ -8,8 +8,8 @@ export type VisibleHealAgentChoice = Extract<HealAgentChoice, 'external' | 'clau
 export const HEAL_AGENT_OPTIONS: { value: VisibleHealAgentChoice; label: string; description: string }[] = [
   {
     value: 'external',
-    label: 'External client',
-    description: 'Let Claude / Codex Desktop or CLI drive heal over MCP. Canary Lab waits for that client to claim and signal. New flights default to Claude.',
+    label: 'External agent session',
+    description: 'Let a Claude or Codex Desktop/CLI session drive heal over MCP. Canary Lab waits for that session to claim and signal. New flights default to Claude.',
   },
   {
     value: 'claude',

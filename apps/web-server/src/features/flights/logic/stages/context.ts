@@ -8,8 +8,10 @@ import { recoverClaudeAssistantText } from '../../../agent-sessions/logic/agent-
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import {
   claudeSessionLogPath,
+  resolveWorkflowAgentRef,
   writeWorkflowAgentRef,
 } from '../../../agent-sessions/logic/agent-session-log'
+import { loadFeatures } from '../../../../shared/feature-loader'
 import type { WorkspaceEventPublisher } from '../../../../shared/workspace-events'
 import type {
   computeFeatureCoverage,
@@ -46,6 +48,10 @@ export interface FlightAgentSpawnOpts {
   signal?: AbortSignal
   /** R79: which CLI to spawn (the flight's sticky opts.agent). Absent → claude. */
   agent?: 'claude' | 'codex'
+  /** Fired as soon as the CLI session is pinned, before the process starts
+   *  producing output. Multi-session stages use it to preserve an immutable
+   *  history ref while `stageDir` remains the mutable live/stop scope. */
+  onAgentSession?: (session: { agent: 'claude' | 'codex'; sessionId: string; spawnedAt: string }) => void
   /** Identifies the flight + stage this spawn belongs to, so the runner can write
    *  it a durable record. Absent → no record (the same forward-only rule as
    *  `signal` and `spawnScope`). */
@@ -93,6 +99,14 @@ export interface FlightStageDeps {
 
 export const FLIGHT_AGENT_IDLE_MS = 5 * 60 * 1000
 
+/** Read the last successfully completed Claude pass in this flight. The chain
+ * ref is separate from Activity sidecars because those are written at spawn
+ * time and can therefore point at a failed or cancelled partial session. */
+function latestFlightClaudeSession(stageDir: string): string | undefined {
+  const ref = resolveWorkflowAgentRef(path.join(path.dirname(stageDir), '.agent-context'))
+  return ref?.agent === 'claude' && ref.sessionId ? ref.sessionId : undefined
+}
+
 /** The one way a flight spawns judgment agents, via the shared runner.
  *  claude: session pinned so the JSONL both feeds the idle backstop and lets
  *  the UI attach an AgentSessionView to the stage. codex (R79, the flight's
@@ -102,12 +116,15 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
   if (opts.signal?.aborted) throw new StageCancelledError('agent spawn')
   const agent = opts.agent ?? 'claude'
   const sessionId = agent === 'claude' ? crypto.randomUUID() : undefined
+  const forkFromSessionId = agent === 'claude' ? latestFlightClaudeSession(opts.stageDir) : undefined
+  const spawnedAt = new Date().toISOString()
   writeWorkflowAgentRef(opts.stageDir, {
     agent,
     cwd: opts.cwd,
-    spawnedAt: new Date().toISOString(),
+    spawnedAt,
     sessionId: sessionId ?? '',
   })
+  opts.onAgentSession?.({ agent, sessionId: sessionId ?? '', spawnedAt })
   const handle = runAgentProcess({
     command: agent,
     ...(opts.job
@@ -129,7 +146,7 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
       : {}),
     args:
       agent === 'claude'
-        ? buildClaudeAgenticArgs(opts.prompt, { sessionId })
+        ? buildClaudeAgenticArgs(opts.prompt, { sessionId, forkFromSessionId })
         : ['exec', '--full-auto', '--skip-git-repo-check', '-'],
     cwd: opts.cwd,
     stdin: agent === 'codex' ? opts.prompt : undefined,
@@ -176,6 +193,14 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
       // that is thrown above as a stop. The old `?? 'null'` fallback became
       // unreachable with it.
       throw new Error(`agent exited with code ${result.code}${result.stderr ? `: ${result.stderr.slice(-400)}` : ''}`)
+    }
+    if (agent === 'claude' && sessionId) {
+      writeWorkflowAgentRef(path.join(path.dirname(opts.stageDir), '.agent-context'), {
+        agent,
+        cwd: opts.cwd,
+        spawnedAt,
+        sessionId,
+      })
     }
     return { text }
   } finally {
@@ -288,7 +313,12 @@ export function stageJobRef(
 }
 
 export function featureDirFor(deps: FlightStageDeps, feature: string): string {
-  return path.join(deps.featuresDir, feature)
+  // A suite rename changes config.name but deliberately leaves its directory in
+  // place because persisted run/coverage/portify records hold absolute paths.
+  // Once a config exists, its featureDir is therefore the authority. The join
+  // remains the pre-scaffold fallback, where there is no config to resolve yet.
+  return loadFeatures(deps.featuresDir).find((candidate) => candidate.name === feature)?.featureDir
+    ?? path.join(deps.featuresDir, feature)
 }
 
 /** The user's re-entry feedback ("what went wrong last time"), if it targets

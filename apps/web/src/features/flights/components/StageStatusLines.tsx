@@ -4,11 +4,11 @@ import type { FlightManifest, FlightStage } from '@/shared/api/client'
 import type { HealEnd } from '@/shared/api/types'
 import { derivedFlightFeature } from '../lib/derived-stages'
 import { plural } from './StageFacts'
-import { stageLabel } from './stage-meta'
 import { currentStageForPair, settledStageStatus } from './stage-metrics'
 import { EXTERNAL_WORK_COPY } from '../lib/external-work'
-import { MERGED_LABEL, stageRowKey } from './StageRail'
+import { stageRowKey } from './StageRail'
 import { PORTIFY_PHASE_LINE, evidenceOf, num, portifyProgress, specsCoverageProgress, str } from './stage-meta'
+import { flightRailLabel } from '@shared/flights/stage-labels'
 
 // ─── Auto-repair give-up reason (R80) ───────────────────────────────────────
 // The manifest's typed `healEnd` (from the run orchestrator) → plain language.
@@ -261,7 +261,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
       // Name it exactly as the rail row does — a merged pair reads "Requirements",
       // never the raw `prd-summary` key the rail never shows.
       const row = stageRowKey(blockers[0].key)
-      return `Waiting for ${MERGED_LABEL[row] ?? stageLabel(row)}.`
+      return `Waiting for ${flightRailLabel(row)}.`
     }
     // Nothing it depends on is outstanding — this step simply hasn't run. A
     // derived flight is never "paused by you": there is no record to have paused.
@@ -409,8 +409,8 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
         }
         if (mappingState === 'generating') return 'Matching tests to requirements…'
         if (mappingState === 'stale') return 'Tests are written, but coverage mapping is stale — run Coverage again.'
-        const of = covered != null && total != null ? ` — ${covered} of ${total} requirement${total === 1 ? '' : 's'} claimed` : ''
-        return `Tests written. Claimed coverage is ${pct ?? '?'}%${of}. Nothing has run yet.`
+        const of = covered != null && total != null ? ` — ${covered} of ${total} requirement${total === 1 ? '' : 's'} mapped` : ''
+        return `Tests written. Mapped coverage is ${pct ?? '?'}%${of}. Nothing has run yet.`
       }
       return `Coverage target met${pct != null ? ` — ${pct}%` : ''}.`
     }

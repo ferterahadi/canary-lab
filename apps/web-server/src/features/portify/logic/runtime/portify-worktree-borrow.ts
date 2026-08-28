@@ -92,7 +92,7 @@ export async function buildSiblingOverlayIndex(
 export function buildSeededNote(seededFrom: SeededFrom[]): string | undefined {
   if (seededFrom.length === 0) return undefined
   const from = seededFrom.map((s) => `"${s.feature}" (${s.repos.join(', ')})`).join('; ')
-  const note = `NOTE: the same app was already port-ified for another feature, so its port-injection patch from ${from} has been PRE-APPLIED to the worktree source — the listeners likely already read injected ports. Review the existing edits; you may only need to declare the matching \`ports\` slots in the feature config. A no-op source change is fine — the concurrent double-boot is what proves it.`
+  const note = `NOTE: the same app was already port-ified for another suite, so its port-injection patch from ${from} has been PRE-APPLIED to the worktree source — the listeners likely already read injected ports. Review the existing edits; you may only need to declare the matching \`ports\` slots in the suite configuration. A no-op source change is fine — the concurrent double-boot is what proves it.`
   const declared = describeSeededSlots(seededFrom)
   return declared ? `${note}\n\n${declared}` : note
 }
@@ -116,11 +116,11 @@ export function describeSeededSlots(seededFrom: SeededFrom[]): string | undefine
   }
   if (lines.length === 0) return undefined
   return (
-    'The source feature declared these `ports` slots for the seeded repo(s) — the patched source reads exactly these env vars, ' +
+    'The source suite declared these `ports` slots for the seeded repo(s) — the patched source reads exactly these env vars, ' +
     'so START from this list rather than re-deriving it from the diff:\n' +
     lines.join('\n') +
-    '\nConfirm each one against the start command(s) THIS feature boots, and add a slot for any listener those commands expose ' +
-    'that is missing here — a differently-booted stack can bind a port the source feature never did.'
+    '\nConfirm each one against the start command(s) THIS suite boots, and add a slot for any listener those commands expose ' +
+    'that is missing here — a differently-booted stack can bind a port the source suite never did.'
   )
 }
 
@@ -146,8 +146,8 @@ export function seededSlotsAlreadyDeclared(seededFrom: SeededFrom[], declared: P
  *  itself (see {@link seededSlotsAlreadyDeclared}) — the client must poll, not
  *  edit-and-submit, or it fights a verification already in flight. */
 export const SEEDED_AUTO_VERIFY_NOTE =
-  'NOTE: nothing to edit. The same app was already port-ified for another feature, its patch is PRE-APPLIED to the ' +
-  'worktree, and this feature already declares every matching `ports` slot — so the concurrent double-boot that proves ' +
+  'NOTE: nothing to edit. The same app was already port-ified for another suite, its patch is PRE-APPLIED to the ' +
+  'worktree, and this suite already declares every matching `ports` slot — so the concurrent double-boot that proves ' +
   'it is ALREADY RUNNING. Do NOT edit the worktree and do NOT call submit_external_portify (it returns 409 while the ' +
   'boot is in flight). Poll get_portify instead: `ready-to-save` means you are done — call save_portify. `editing` means ' +
   'the boot did NOT pass; `verification.failureDetail` says why, and you then fix the worktree and submit as usual.'

@@ -1,16 +1,23 @@
 // Pure utilities to map a Playwright test (extracted from the AST) onto its
-// final-state status from the e2e-summary.json. Per-step granularity is not
-// available yet — every step within a test inherits the test's overall
-// status. Once a per-step reporter lands we can refine `statusForStep` to take
-// the step path and look it up individually.
+// status and latest reporter-owned step location from e2e-summary.json. The
+// step location drives the live source highlight; verdict badges remain
+// test-level because Playwright reports the final outcome at that level.
 
 import type { RunSummary } from '@/shared/api/types'
 
 export type StepStatus = 'pending' | 'testing' | 'passed' | 'failed' | 'skipped' | 'timedout'
+export type TestExecutionHighlightKind = 'running' | 'failed'
+export interface TestExecutionLineHighlight {
+  kind: TestExecutionHighlightKind
+  bodyLine: number
+}
 export type RunningTestSummary = NonNullable<RunSummary['running']>
 export interface TestStatusIdentity {
   name: string
   id?: string
+  /** False when a modern known-test inventory exists but this card could not
+   *  be matched to one exact entry. In that case title-only matching is unsafe. */
+  allowNameFallback?: boolean
 }
 
 export interface StatusPresentation {
@@ -86,15 +93,16 @@ export function statusForTest(
   // entry for a test that is being re-run is still on disk while the test
   // is in flight. Checking `running` first lets the badge flip to "running"
   // instead of sticking on the stale "failed" label.
-  if (isRunActivelyTesting && runningTestForIdentity(summary, expected, identity.id)) return 'testing'
-  const failed = summary.failed.find((f) => matchesSummaryEntry(f, expected, identity.id))
+  if (isRunActivelyTesting && runningTestForTest(summary, identity)) return 'testing'
+  if (!identity.id && identity.allowNameFallback === false) return 'pending'
+  const failed = summaryEntryForIdentity(summary.failed, expected, identity.id, identity.allowNameFallback)
   if (failed) {
     const msg = failed.error?.message ?? ''
     if (/Test timeout of/i.test(msg)) return 'timedout'
     return 'failed'
   }
   if (identity.id && summary.skippedIds?.includes(identity.id)) return 'skipped'
-  if (summary.skippedNames?.includes(expected)) return 'skipped'
+  if ((!identity.id || !summary.skippedIds) && summary.skippedNames?.includes(expected)) return 'skipped'
   if (identity.id && summary.passedIds) {
     return summary.passedIds.includes(identity.id) ? 'passed' : 'pending'
   }
@@ -106,62 +114,95 @@ export function statusForTest(
   return 'pending'
 }
 
-export function activeBodyLineForTest(input: {
+interface TestExecutionLineInput {
   testName: string
+  testId?: string
+  allowNameFallback?: boolean
   testLine: number
+  /** First source line represented by bodySource. Defaults to testLine for
+   *  summaries created before the extractor exposed bodyLine. */
+  bodyLine?: number
   bodySource: string
   summary: RunSummary | undefined
   sourceFile?: string
-}): number | null {
+}
+
+export function executionLineHighlightForTest(
+  input: TestExecutionLineInput & { isRunActivelyTesting: boolean },
+): TestExecutionLineHighlight | null {
   const expectedName = summaryEntryName(input.testName)
-  const running = input.summary ? runningTestForSummaryName(input.summary, expectedName) : undefined
+  const running = input.isRunActivelyTesting && input.summary
+    ? runningTestForTest(input.summary, {
+        name: input.testName,
+        id: input.testId,
+        allowNameFallback: input.allowNameFallback,
+      })
+    : undefined
   const bodyLineCount = input.bodySource.split('\n').length
+  const bodyStartLine = input.bodyLine ?? input.testLine
   if (running) {
-    return bodyLineForLocations(
+    const bodyLine = bodyLineForLocations(
       running.step?.locations ?? (running.step?.location ? [running.step.location] : []),
-      input.testLine,
+      bodyStartLine,
       bodyLineCount,
       input.sourceFile,
     )
+    return bodyLine == null ? null : { kind: 'running', bodyLine }
   }
-  const failed = input.summary?.failed.find((entry) => entry.name === expectedName)
+  const failed = input.summary
+    ? summaryEntryForIdentity(
+        input.summary.failed,
+        expectedName,
+        input.testId,
+        input.allowNameFallback,
+      )
+    : undefined
   if (!failed) return null
-  return bodyLineForLocations(
+  const bodyLine = bodyLineForLocations(
     failed.locations?.length ? failed.locations : (failed.location ? [failed.location] : []),
-    input.testLine,
+    bodyStartLine,
     bodyLineCount,
     input.sourceFile,
   )
+  return bodyLine == null ? null : { kind: 'failed', bodyLine }
 }
 
-export function runningTestForSummaryName(
+export function activeBodyLineForTest(input: TestExecutionLineInput): number | null {
+  return executionLineHighlightForTest({ ...input, isRunActivelyTesting: true })?.bodyLine ?? null
+}
+
+export function runningTestForTest(
   summary: RunSummary,
-  summaryName: string,
+  test: TestStatusIdentity,
 ): RunningTestSummary | undefined {
-  return summary.runningTests?.find((entry) => entry.name === summaryName)
-    ?? (summary.running?.name === summaryName ? summary.running : undefined)
+  return summaryEntryForIdentity(
+    runningEntries(summary),
+    summaryEntryName(test.name),
+    test.id,
+    test.allowNameFallback,
+  )
 }
 
-function runningTestForIdentity(
-  summary: RunSummary,
+function runningEntries(summary: RunSummary): RunningTestSummary[] {
+  return [
+    ...(summary.runningTests ?? []),
+    ...(summary.running ? [summary.running] : []),
+  ]
+}
+
+function summaryEntryForIdentity<T extends { id?: string; name: string }>(
+  entries: T[],
   summaryName: string,
   id?: string,
-): RunningTestSummary | undefined {
-  if (id) {
-    const byId = summary.runningTests?.find((entry) => entry.id === id)
-      ?? (summary.running?.id === id ? summary.running : undefined)
-    if (byId) return byId
-  }
-  return runningTestForSummaryName(summary, summaryName)
-}
-
-function matchesSummaryEntry(
-  entry: { id?: string; name: string },
-  summaryName: string,
-  id?: string,
-): boolean {
-  if (id && entry.id) return entry.id === id
-  return entry.name === summaryName
+  allowNameFallback = true,
+): T | undefined {
+  const matchingNames = entries.filter((entry) => entry.name === summaryName)
+  if (!id) return allowNameFallback ? matchingNames[0] : undefined
+  const byId = matchingNames.find((entry) => entry.id === id)
+  if (byId) return byId
+  // Older summaries have no ids at all. Preserve their title fallback, but
+  // never let one identified sibling stand in for another duplicate title.
+  return matchingNames.some((entry) => entry.id) ? undefined : matchingNames[0]
 }
 
 function bodyLineForLocations(
@@ -213,11 +254,30 @@ function fileFromLocation(location: string): string | null {
   return file.length > 0 ? file : null
 }
 
-function sameSourceFile(a: string, b: string): boolean {
-  if (a === b) return true
-  const basenameA = a.slice(a.lastIndexOf('/') + 1)
-  const basenameB = b.slice(b.lastIndexOf('/') + 1)
-  return basenameA.length > 0 && basenameA === basenameB
+export function sameSourceFile(a: string, b: string): boolean {
+  const normalizedA = normalizedSourcePath(a)
+  const normalizedB = normalizedSourcePath(b)
+  if (normalizedA === normalizedB) return true
+
+  // Playwright and the tests endpoint can refer to the same feature through
+  // different checkout roots. Require a meaningful common suffix rather than
+  // basename-only equality: two unrelated suites commonly both contain
+  // `e2e/foo.spec.ts`, while `<feature>/e2e/foo.spec.ts` is stable across roots.
+  const segmentsA = normalizedA.split('/').filter(Boolean)
+  const segmentsB = normalizedB.split('/').filter(Boolean)
+  let commonSuffix = 0
+  while (
+    commonSuffix < segmentsA.length &&
+    commonSuffix < segmentsB.length &&
+    segmentsA[segmentsA.length - 1 - commonSuffix] === segmentsB[segmentsB.length - 1 - commonSuffix]
+  ) {
+    commonSuffix += 1
+  }
+  return commonSuffix >= 3
+}
+
+function normalizedSourcePath(file: string): string {
+  return file.replace(/\\/g, '/').replace(/^file:\/\//, '').replace(/\/{2,}/g, '/')
 }
 
 export function colorClassForStatus(status: StepStatus): string {

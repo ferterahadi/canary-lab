@@ -4,7 +4,7 @@ import * as api from '@/shared/api/client'
 import type { FlightStageKey } from '@/shared/api/client'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import { ChevronRightIcon, Modal, StatusDot, Textarea, Toggle } from '@/shared/ui/atoms'
-import { STAGE_BLURB, STAGE_ICON, STAGE_LABEL, stageStatusTone } from './stage-meta'
+import { FLIGHT_OVERVIEW, STAGE_BLURB, STAGE_ICON, STAGE_LABEL, stageStatusTone } from './stage-meta'
 import { RepoMultiPicker, type RepoOption } from './RepoMultiPicker'
 import { PlanningView, ProposalView, StageRow } from './FlightStartProposal'
 
@@ -334,7 +334,7 @@ export function FlightStartDialog({
           ? 'Change what this suite tests. It re-flies from the beginning.'
           : hasRecord
             ? 'Re-fly this suite — pick which step it restarts from.'
-            : 'One command from a bare repo to a green, covered, evaluated run.'
+            : FLIGHT_OVERVIEW
       }
       width={620}
       stableScrollGutter

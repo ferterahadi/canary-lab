@@ -96,6 +96,69 @@ describe('GET /api/features/:name/tests', () => {
     return `test('deep', async () => { const a = ${open}x${close} })\n`
   }
 
+  it('returns display-only formatted code with absolute source rows without mutating the spec', async () => {
+    const source = "test('formatted', async () => { const payload={kind:'retry',attempt:2}; /* keep this reason */ await send(payload) })\n"
+    const dir = writeFeature('formatted-code', { spec: source })
+    const specFile = path.join(dir, 'e2e', 'a.spec.ts')
+    const app = await build({ spawner: failingSpawner })
+
+    const res = await app.inject({ method: 'GET', url: '/api/features/formatted-code/tests' })
+
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as Array<{
+      tests: Array<{
+        codeDisplay: { code: string; lineMap: Array<{ sourceLine: number; sourceLines: number[] }> }
+      }>
+    }>
+    const display = body[0].tests[0].codeDisplay
+    expect(display.code).toContain("const payload = { kind: 'retry', attempt: 2 };")
+    expect(display.code).toContain('/* keep this reason */')
+    expect(display.code).toContain('await send(payload);')
+    expect(display.code.split('\n').length).toBeGreaterThan(1)
+    expect(display.lineMap).toHaveLength(display.code.split('\n').length)
+    expect(display.lineMap.every((line) => line.sourceLine === 1)).toBe(true)
+    expect(fs.readFileSync(specFile, 'utf8')).toBe(source)
+  })
+
+  it('applies feature semantic-rule configuration to the returned readable spans', async () => {
+    const dir = writeFeature('semantic-config', {
+      spec: `import api from '@company/api-client'
+import { test } from '@playwright/test'
+
+test('configured client', async () => {
+  await api.get('/health')
+  await unrelated.get('/health')
+})
+`,
+    })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: {
+        name: 'semantic-config',
+        description: 'desc',
+        envs: ['local'],
+        repos: [{ name: 'repo1', localPath: __dirname }],
+        semanticRules: { apiClients: ['@company/api-client'] },
+        featureDir: __dirname,
+      } }`,
+    )
+    const app = await build({ spawner: failingSpawner })
+    const res = await app.inject({ method: 'GET', url: '/api/features/semantic-config/tests' })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as Array<{
+      tests: Array<{
+        readable: {
+          nodes: Array<{ english?: { semanticCategories?: string[] } }>
+        }
+      }>
+    }>
+    expect(body[0].tests[0].readable.nodes.map((node) => node.english?.semanticCategories))
+      .toEqual([
+        ['external-api', 'async', 'function-call'],
+        ['async', 'function-call'],
+      ])
+  })
+
   it('surfaces parseError when Playwright returns no entries for the spec', async () => {
     writeFeature('deepnone', { spec: deepNestedSpec() })
     const spawner = jsonSpawner(() => ({ config: {}, suites: [] }))
@@ -117,8 +180,19 @@ describe('GET /api/features/:name/tests', () => {
     const app = await build({ spawner })
     const res = await app.inject({ method: 'GET', url: '/api/features/deepboth/tests' })
     expect(res.statusCode).toBe(200)
-    const body = res.json() as Array<{ tests: Array<{ name: string }>; parseError?: string }>
+    const body = res.json() as Array<{
+      tests: Array<{
+        name: string
+        readable: { title: string; completeness: string; nodes: unknown[] }
+      }>
+      parseError?: string
+    }>
     expect(body[0].tests[0].name).toBe('deep')
+    expect(body[0].tests[0].readable).toEqual(expect.objectContaining({
+      title: 'deep',
+      completeness: 'complete',
+      nodes: [],
+    }))
     expect(body[0].parseError).toBeTruthy()
   })
 
@@ -162,10 +236,12 @@ describe('GET /api/features/:name/tests', () => {
     const app = await build({ spawner })
     const res = await app.inject({ method: 'GET', url: '/api/features/sharedhelper/tests' })
     expect(res.statusCode).toBe(200)
-    const body = res.json() as Array<{ tests: Array<{ name: string; sourceFile?: string }> }>
+    const body = res.json() as Array<{ tests: Array<{ name: string; sourceFile?: string; readable: { title: string; nodes: unknown[] } }> }>
     expect(body[0].tests.map((t) => t.name)).toEqual(['first inner', 'second inner'])
     expect(body[0].tests[0].sourceFile).toBe(helperFile)
     expect(body[0].tests[1].sourceFile).toBe(helperFile)
+    expect(body[0].tests.map((test) => test.readable.title)).toEqual(['first inner', 'second inner'])
+    expect(body[0].tests.every((test) => test.readable.nodes.length === 0)).toBe(true)
   })
 
   it('returns an empty env (no envName) when the first feature env is undefined', async () => {

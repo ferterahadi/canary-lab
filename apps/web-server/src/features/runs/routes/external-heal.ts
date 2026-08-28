@@ -321,7 +321,7 @@ export async function externalHealRoutes(
       const transferred = deps.broker.transferTo(req.params.runId, 'auto')
       const guidance = typeof req.body?.guidance === 'string' && req.body.guidance.trim().length > 0
         ? req.body.guidance.trim()
-        : `Handing off heal from external client to ${to}.`
+        : `Handing off heal from external agent session to ${to}.`
       const restarted = await deps.restartLocalHeal(req.params.runId, guidance)
       if (!restarted.ok) {
         reply.code(restarted.reason === 'spawn-failed' ? 500 : 409)

@@ -39,7 +39,7 @@ export function registerExternalDraftTools(ctx: ToolGroupContext): void {
     const draftId = newDraftId()
     const record = createDraft(deps.store.logsDir, {
       draftId,
-      prdText: `External client is authoring tests for ${feature}.`,
+      prdText: `External agent session is authoring tests for ${feature}.`,
       prdDocuments: [],
       repos: (featureConfig.repos ?? []).map((repo) => ({
         name: repo.name,
@@ -64,7 +64,7 @@ export function registerExternalDraftTools(ctx: ToolGroupContext): void {
     return asJsonResult({
       ...externalDraftView(next),
       canaryLabBehavior: 'tracking-only',
-      statusMeaning: 'External client is authoring tests; Canary Lab is not running an internal wizard agent.',
+      statusMeaning: 'External agent session is authoring tests; Canary Lab is not running an internal wizard agent.',
       nextSteps: externalDraftAuthoringNextSteps(feature),
     })
   })

@@ -60,7 +60,7 @@ and never rename it to dodge a collision.
    ```ts
    import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
    ```
-5. Call `start_external_draft` with a stable `session_id` and a useful `conversation_name` (do not pass `client_kind` — the bridge auto-detects it). This only creates a visible Canary Lab task so the user sees that this external client is authoring tests; it does not start an internal wizard agent. Carry the `draftId` it returns into every subsequent `update_external_draft_stage` / `apply_external_draft` call for this draft. If it returns `type: "getting_started_busy"`, a Getting Started demo already owns the workspace — follow the active target it returns; do not start another workflow.
+5. Call `start_external_draft` with a stable `session_id` and a useful `conversation_name` (do not pass `client_kind` — the bridge auto-detects it). This only creates a visible Canary Lab task so the user sees that this external agent session is authoring tests; it does not start an internal wizard agent. Carry the `draftId` it returns into every subsequent `update_external_draft_stage` / `apply_external_draft` call for this draft. If it returns `type: "getting_started_busy"`, a Getting Started demo already owns the workspace — follow the active target it returns; do not start another workflow.
 6. After `start_external_draft` returns, tell the user you are authoring tests and they can follow along live in the Canary Lab UI: the suite's Flight page shows this work on its Test authoring & coverage stage (that view is read-only while this client drives — it monitors, you act here). Continue writing specs locally, then call `update_external_draft_stage(draftId, stage)` as work progresses: `scaffolding`, `authoring-tests`, `validating`, `ready`, `applied`, or `error`.
 7. Call `apply_external_draft` with `draftId`, `confirm: true`, and `files: [{path, content}, …]` for the externally authored files (omit `files` if you already wrote them directly under `<workspace>/features/<feature>/e2e/` — it then validates what's on disk), so Canary Lab validates and records the applied draft. Do not ask Canary Lab to spawn another Claude/Codex agent for MCP-created authoring. On a validation error, fix the named file and re-call `apply_external_draft`.
 8. `get_feature_repo_status` / `checkout_feature_repo_branch` inspect and switch the feature's bound repo branches when the user asks to test a different branch.
@@ -68,5 +68,11 @@ and never rename it to dodge a collision.
 ## Guardrails
 
 - Keep the same `session_id` for the whole conversation.
+- Test titles are read by non-engineers in the coverage ledger and exported
+  reports: write each as a plain-English sentence naming the user-visible
+  behavior — `user can reset their password after requesting a reset link`,
+  not `POST /reset-token returns 200`. Keep a technical term only when it is
+  the requirement's own vocabulary (an endpoint name in an API-contract
+  requirement stays technical).
 - Canary Lab never writes the test body for external authoring — this client does.
 - After authoring, the natural next steps live in sibling skills: map coverage (`canary-lab-coverage`), run + heal (`canary-lab-run`), export the evaluation (`canary-lab-export`). **Running the new test** needs `start_run`: on the setup/plugin `compact` connection, invoke it as the `exec` command and follow `canary-lab-run`. On an intentionally narrow direct `--profile author` connection it is unavailable; reconnect with `npx canary-lab mcp --profile compact` and then run.

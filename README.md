@@ -23,7 +23,7 @@ Canary Lab requires Node.js 22.12 or newer and npm 9 or newer.
 npx canary-lab init my-lab
 ```
 
-`init` creates a Canary Lab workspace, installs its dependencies and Chromium, and registers the skills and MCP connection for supported Claude and Codex clients. Restart your agent once so it discovers them.
+`init` creates a Canary Lab workspace, installs its dependencies and Chromium, and registers the skills plus one compact MCP connection (`exec`) for supported Claude and Codex clients. Restart your agent once so it discovers them.
 
 The connection starts the local Canary Lab service when the skill needs it. To open the interface yourself:
 
@@ -73,9 +73,9 @@ Use `/canary-lab` for the complete journey. Use a focused skill when you need on
 | Take a bare repo through a complete evaluation | `/canary-lab` |
 | Run an existing suite and repair application failures | `/canary-lab-run` |
 | Verify a running or deployed environment | `/canary-lab-verify` |
-| Create a feature and its Playwright tests | `/canary-lab-author` |
+| Create a suite and its Playwright tests | `/canary-lab-author` |
 | Build the requirement-to-test coverage ledger | `/canary-lab-coverage` |
-| Prepare a feature for concurrent runs | `/canary-lab-portify` |
+| Prepare a suite for concurrent runs | `/canary-lab-portify` |
 | Export a completed run as an evaluation | `/canary-lab-export` |
 
 The skills share the same workspace, runs, evidence, and UI. Work started in one surface appears in the others.
@@ -92,11 +92,13 @@ Use the CLI for shell automation or when you want Canary Lab to conduct the Flig
 
 The UI and MCP server share one configurable port, `7421` by default. Choose another during setup with `npx canary-lab init my-lab --port 8200`, or change it later in Project Settings. The `ui --port` option is not supported.
 
+Custom MCP clients should connect to `http://localhost:<port>/mcp?profile=compact`.
+
 ## Playwright Without a New Test Language
 
-Canary Lab features use normal Playwright tests plus a service configuration that names your existing development commands. Canary Lab assigns free ports, starts each service, waits for health checks, and tags the output so failures map back to the correct test.
+Canary Lab suites use normal Playwright tests plus a service configuration that names your existing development commands. Canary Lab assigns free ports, starts each service, waits for health checks, and tags the output so failures map back to the correct test.
 
-See [Feature Folders](docs/FEATURES.md) for the file structure and examples, or [Guide](docs/GUIDE.md) for the complete run and repair workflow.
+See [Suite Folders](docs/FEATURES.md) for the file structure and examples, or [Guide](docs/GUIDE.md) for the complete run and repair workflow.
 
 New workspaces include demonstrations for a prepared repair loop, a bare repo Flight, and focused coverage and authoring workflows. Delete the demo files after exploring them.
 
@@ -126,7 +128,7 @@ npm install --save-dev canary-lab@latest
 npx canary-lab upgrade
 ```
 
-Restart Canary Lab and connected agent apps afterwards so they load the refreshed skills and connection path. Existing feature folders and personal agent files are preserved.
+Restart Canary Lab and connected agent apps afterwards so they load the refreshed skills and connection path. Existing suite folders under `features/` and personal agent files are preserved.
 
 ## Requirements
 
@@ -151,7 +153,7 @@ Restart Canary Lab and connected agent apps afterwards so they load the refreshe
 | [Changelog](docs/CHANGELOG.md) | Release history. |
 | [Guide](docs/GUIDE.md) | Environment switching, run output, repairs, and evaluation reports. |
 | [Commands](docs/COMMANDS.md) | Full CLI and trigger-surface reference. |
-| [Feature Folders](docs/FEATURES.md) | Feature structure, configuration, and Playwright tests. |
+| [Suite Folders](docs/FEATURES.md) | Suite structure, configuration, and Playwright tests. |
 | [Architecture](docs/ARCHITECTURE.md) | Module map, run lifecycle, concurrency, healing, and MCP. |
 | [Product Requirements](docs/PRD.md) | Product intent, non-goals, and quality bars. |
 | [Design System](docs/DESIGN-SYSTEM.md) | Web UI tokens, primitives, and layout patterns. |

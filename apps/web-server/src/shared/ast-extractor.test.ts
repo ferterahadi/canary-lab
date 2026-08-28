@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
 
-import { extractTestsFromSource, parseTestAnnotations, parseTestTagList } from './ast-extractor'
+import {
+  extractTestMetadataFromSource,
+  extractTestsFromSource,
+  parseTestAnnotations,
+  parseTestTagList,
+} from './ast-extractor'
 
 describe('extractTestsFromSource', () => {
   it('returns empty array when no tests are present', () => {
@@ -33,6 +38,16 @@ describe('extractTestsFromSource', () => {
     expect(r.tests[0].name).toBe('hello world')
     expect(r.tests[0].steps).toEqual([])
     expect(r.tests[0].line).toBeGreaterThan(0)
+    expect(r.tests[0].readable).toEqual(expect.objectContaining({
+      version: 2,
+      title: 'hello world',
+      completeness: 'complete',
+      nodes: [expect.objectContaining({
+        kind: 'leaf',
+        role: 'syntax',
+        text: 'call:\n    property `toBe`\n    of:\n        call `expect`\n        with argument number 1\nwith argument number 1',
+      })],
+    }))
   })
 
   it('extracts flat test.step calls inside a test', () => {
@@ -76,10 +91,97 @@ describe('extractTestsFromSource', () => {
     expect(r.tests[0].bodySource).toContain('expect(x).toBe(1)')
   })
 
+  it('records the callback body line separately from a multiline test call', () => {
+    const src = [
+      'test(',
+      "  'multiline declaration',",
+      '  async () => {',
+      '    await page.reload()',
+      '  },',
+      ')',
+    ].join('\n')
+
+    const test = extractTestsFromSource('a.spec.ts', src).tests[0]
+    expect(test.line).toBe(1)
+    expect(test.bodyLine).toBe(3)
+    expect(test.readable.nodes[0].source.startLine).toBe(4)
+  })
+
+  it('translates from the existing AST and expands top-level local helpers', () => {
+    const src = [
+      'async function loginAs(page, email) {',
+      "  await page.getByLabel('Email').fill(email)",
+      '}',
+      '',
+      "test('logs in', async ({ page }) => {",
+      "  await loginAs(page, 'ada@example.com')",
+      "  await expect(page.getByText('Welcome')).toBeVisible()",
+      '})',
+    ].join('\n')
+    const readable = extractTestsFromSource('account.spec.ts', src).tests[0].readable
+
+    expect(readable.completeness).toBe('complete')
+    expect(readable.nodes).toEqual([
+      expect.objectContaining({
+        kind: 'group',
+        text: 'await:\n    call `loginAs`\n    with arguments:\n        `page`\n        string "ada@example.com"',
+        source: expect.objectContaining({ file: 'account.spec.ts', startLine: 6 }),
+        children: [expect.objectContaining({
+          text: expect.stringContaining('call property `getByLabel` of `page`'),
+          source: expect.objectContaining({ file: 'account.spec.ts', startLine: 2 }),
+        })],
+      }),
+      expect.objectContaining({
+        kind: 'leaf',
+        role: 'syntax',
+        text: expect.stringContaining('property `toBeVisible`'),
+        source: expect.objectContaining({ file: 'account.spec.ts', startLine: 7 }),
+      }),
+    ])
+  })
+
+  it('collects top-level arrow and function-expression helpers once', () => {
+    const src = [
+      'declare function declaredOnly(): void',
+      'export default function () {}',
+      "async function duplicate(page) { await page.getByText('First').click() }",
+      "async function duplicate(page) { await page.getByText('Ignored').click() }",
+      "const arrowHelper = async (page) => { await page.getByLabel('Email').fill('ada@example.com') }",
+      "const functionHelper = async function (page) { await page.getByRole('button', { name: 'Save' }).click() }",
+      'const [ignoredHelper] = [async () => {}]',
+      'const notAHelper = 42',
+      '',
+      "test('uses local helpers', async ({ page }) => {",
+      '  await duplicate(page)',
+      '  await arrowHelper(page)',
+      '  await functionHelper(page)',
+      '})',
+    ].join('\n')
+
+    const readable = extractTestsFromSource('helpers.spec.ts', src).tests[0].readable
+    expect(readable.nodes).toEqual([
+      expect.objectContaining({
+        kind: 'group',
+        text: 'await:\n    call `duplicate`\n    with argument `page`',
+        children: [expect.objectContaining({ text: expect.stringContaining('string "First"') })],
+      }),
+      expect.objectContaining({
+        kind: 'group',
+        text: 'await:\n    call `arrowHelper`\n    with argument `page`',
+        children: [expect.objectContaining({ text: expect.stringContaining('string "ada@example.com"') })],
+      }),
+      expect.objectContaining({
+        kind: 'group',
+        text: 'await:\n    call `functionHelper`\n    with argument `page`',
+        children: [expect.objectContaining({ text: expect.stringContaining('string "Save"') })],
+      }),
+    ])
+  })
+
   it('keeps bodySource line-for-line with the source so highlights map 1:1', () => {
-    // The live test view highlights the running line and resolves "open in
-    // editor" by adding a body-line offset to the test's start line, so body
-    // line N must correspond to source line N. A blank line between statements
+    // The live test view maps the latest located Playwright step and resolves
+    // "open in editor" by adding a body-line offset to the callback body's start
+    // line, so body line N must correspond to source line N. A blank line between statements
     // must therefore be preserved — re-printing the AST would drop it and
     // shift every subsequent line.
     const src = [
@@ -125,10 +227,21 @@ describe('extractTestsFromSource', () => {
     expect(r.tests[0].steps[0].label).toBe('tpl step')
   })
 
-  it('skips test calls whose first arg is not a string literal', () => {
-    const src = `const NAME='dyn'; test(NAME, async () => {})`
+  it('keeps a dynamic title when an inline callback proves this is a test declaration', () => {
+    const src = [
+      "const variant = { desc: 'dynamic title' }",
+      "test.beforeEach('named setup', async () => {})",
+      'test.afterEach(async () => {})',
+      "test.skip(!enabled, 'conditional setup')",
+      'test(variant.desc, async () => { expect(1).toBe(1) })',
+    ].join('\n')
     const r = extractTestsFromSource('a.spec.ts', src)
-    expect(r.tests).toEqual([])
+
+    // The callback is load-bearing: it distinguishes a dynamically-named test
+    // from conditional modifiers such as test.skip(condition, description).
+    expect(r.tests).toHaveLength(1)
+    expect(r.tests[0].name).toBe('variant.desc')
+    expect(r.tests[0].bodySource).toContain('expect(1).toBe(1)')
   })
 
   it('skips test.step calls with non-string label; allows missing body', () => {
@@ -163,6 +276,22 @@ describe('extractTestsFromSource', () => {
     expect(r.tests[0].name).toBe('plain title')
     expect(r.tests[0].bodySource).toBe('')
     expect(r.tests[0].steps).toEqual([])
+  })
+
+  it('translates an expression-bodied test callback from its exact source line', () => {
+    const r = extractTestsFromSource(
+      'a.spec.ts',
+      ["test('expression body',", "  async () => expect(1).toBe(1))"].join('\n'),
+    )
+
+    expect(r.tests[0].bodyLine).toBe(2)
+    expect(r.tests[0].bodySource).toBe('expect(1).toBe(1)')
+    expect(r.tests[0].readable.nodes[0]).toEqual(expect.objectContaining({
+      kind: 'leaf',
+      role: 'syntax',
+      text: 'call:\n    property `toBe`\n    of:\n        call `expect`\n        with argument number 1\nwith argument number 1',
+      source: expect.objectContaining({ startLine: 2, endLine: 2 }),
+    }))
   })
 
   it('stringifies a non-Error thrown during parsing', () => {
@@ -209,6 +338,50 @@ describe('extractTestsFromSource', () => {
     const r = extractTestsFromSource('bad.ts', undefined as unknown as string)
     expect(r.parseError).toBeTruthy()
     expect(r.tests).toEqual([])
+  })
+})
+
+describe('extractTestMetadataFromSource', () => {
+  it('returns only syntax-derived identity and body data for integrity checks', () => {
+    const source = [
+      "test('first', async () => { expect(1).toBe(1) })",
+      "test.skip('second', async () => { expect(2).toBe(2) })",
+    ].join('\n')
+
+    const result = extractTestMetadataFromSource('/workspace/e2e/example.spec.ts', source)
+
+    expect(result).toEqual({
+      file: '/workspace/e2e/example.spec.ts',
+      tests: [
+        {
+          name: 'first',
+          line: 1,
+          bodyLine: 1,
+          bodySource: '{ expect(1).toBe(1) }',
+        },
+        {
+          name: 'second',
+          line: 2,
+          bodyLine: 2,
+          bodySource: '{ expect(2).toBe(2) }',
+        },
+      ],
+    })
+    expect(result.tests.every((test) => !('readable' in test))).toBe(true)
+  })
+
+  it('keeps the extractor failure-safe without invoking the presentation path', () => {
+    const result = extractTestMetadataFromSource('bad.ts', undefined as unknown as string)
+    expect(result.tests).toEqual([])
+    expect(result.parseError).toBeTruthy()
+  })
+
+  it('stringifies a primitive syntax-parser failure', () => {
+    const hostile = { get length(): number { throw 'metadata parse failure' } }
+    const result = extractTestMetadataFromSource('bad.ts', hostile as unknown as string)
+
+    expect(result.tests).toEqual([])
+    expect(result.parseError).toBe('metadata parse failure')
   })
 })
 

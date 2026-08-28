@@ -27,6 +27,8 @@ import type {
   FlightStageKey,
   FlightStatus,
 } from '@shared/flights/types'
+import type { ReadableTest } from '@shared/readable-tests/types'
+import type { FormattedCodeDisplay } from '@shared/code-display-format'
 import type { ExternalHealClientKind } from './types-runs'
 
 export type { CleanupListing, CleanupOrphan, CleanupRunEntry, CleanupWorktree, PortifyCleanupEntry, PortifyCleanupListing } from './types-cleanup'
@@ -62,6 +64,34 @@ export type {
   VerificationRunMetadata,
   VerificationTarget,
 } from '@shared/verification'
+
+export type {
+  ReadableBranchNode,
+  ReadableBranchPath,
+  ReadableCompleteness,
+  ReadableEnglishBlock,
+  ReadableEnglishSpan,
+  ReadableFidelity,
+  ReadableGroupNode,
+  ReadableLeafNode,
+  ReadableLeafRole,
+  ReadableLoopKind,
+  ReadableLoopNode,
+  ReadableNode,
+  ReadableSemanticCategory,
+  ReadableSemanticRuleConfig,
+  ReadableSource,
+  ReadableSourceRange,
+  ReadableStoryFlow,
+  ReadableStoryFlowKind,
+  ReadableStoryItem,
+  ReadableStoryRole,
+  ReadableStorySpan,
+  ReadableStoryStep,
+  ReadableSyntaxCategory,
+  ReadableTest,
+  ReadableTestStory,
+} from '@shared/readable-tests/types'
 
 export interface FeatureRepo {
   name: string
@@ -160,7 +190,13 @@ export interface ExtractedTest {
   name: string
   line: number
   bodySource: string
+  /** First source line represented by bodySource. Older payloads omit it. */
+  bodyLine?: number
   steps: ExtractedStep[]
+  readable: ReadableTest
+  /** Server-formatted display code with absolute source rows. Optional for
+   *  compatibility with cached payloads from older Canary Lab versions. */
+  codeDisplay?: FormattedCodeDisplay
   // Set when the test is defined in a helper file (e.g. a factory) rather
   // than the spec file that owns it. Click-throughs in the UI prefer this
   // path so the code viewer lands at the actual definition site.

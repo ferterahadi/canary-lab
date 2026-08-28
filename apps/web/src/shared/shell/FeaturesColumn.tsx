@@ -154,9 +154,9 @@ export function FeaturesColumn({
   const [coverageHeadlines, setCoverageHeadlines] = useState<Record<string, string | null>>({})
   const featureKey = features.map((f) => f.name).join(',')
   // The effect only asks *whether* coverage is reachable, never calls the handler.
-  // Depending on the callback itself made every App re-render refetch all the
-  // features' coverage — App passes a fresh arrow each render, and one ledger
-  // recompute per feature is the most expensive route in the app.
+  // Depending on the callback itself made every App re-render refetch the same
+  // workspace status index — App passes a fresh arrow each render. The server
+  // scan is lightweight now, but duplicate requests are still needless work.
   const canOpenCoverage = Boolean(onOpenCoverage)
   useEffect(() => {
     if (!canOpenCoverage || features.length === 0) return
@@ -195,7 +195,7 @@ export function FeaturesColumn({
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-2 py-2" style={{ scrollbarGutter: 'stable' }}>
         {features.length === 0 ? (
-          <div className="px-2 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>No features detected.</div>
+          <div className="px-2 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>No suites detected.</div>
         ) : (
           <div className="flex flex-col gap-1">
             {ungrouped.length > 0 && (
