@@ -134,6 +134,9 @@ export interface BuildExternalFailureDetailInput {
 // result. Text is never cut either way — over-budget just defers to Read.
 const FAILURE_DETAIL_INLINE_MAX_BYTES = 8 * 1024
 
+const RUNNER_VERIFICATION_RULE =
+  'The signal requests runner verification; it is not a claim that the fix already passes. Do not start services or run Playwright, smoke, end-to-end, or other runtime checks yourself. Canary Lab owns affected-service restart, health checks, and targeted Playwright verification after the signal. If an edit command failed or syntax is uncertain, run at most one fast non-network static check before signalling.'
+
 // The needs-heal procedure, surfaced on the context (wait_for_heal_task →
 // needs_heal and get_heal_context) so skill-less clients read it exactly when a
 // heal is needed — keeping it OUT of the always-on MCP profile instructions.
@@ -151,7 +154,8 @@ export const EXTERNAL_HEAL_NEXT_STEPS: readonly string[] = [
   'Fix app/service code, not tests, unless a test is provably wrong. Never delete, skip, weaken, or loosen an assertion to turn the run green — a run that goes green because the test stopped checking is the exact failure Canary Lab exists to catch.',
   'Read context.healPrompt.startHere first. The packet is slim: context.healIndex / context.journal are PATHS (Read them when needed), and each context.failedTests[] entry carries a failureId plus pointer dirs (errorPath, traceDir, playwrightMcpDir).',
   'When SEVERAL tests fail, fan out the diagnosis AND the fix-drafting: spawn one read-only sub-agent per failure in a single parallel round (up to 5 at once), hand each the failureId, and have it call get_failure_detail(runId, failureId) to investigate just that slice in parallel and report back a hypothesis PLUS a concrete proposed patch (the exact file edits / unified diff) for its failure. The sub-agents are read-only — they must NOT touch the working tree or call signal_run; they only investigate and draft. A sub-agent that comes back empty has NOT cleared its failure — say so in the hypothesis or investigate that one yourself, rather than signalling as though its test were addressed.',
-  'Apply the drafted patches YOURSELF, serially — if two patches touch the same file, reconcile them by hand before applying. Then signal_run ONCE per cycle: kind:"rerun" for test-only/app-code fixes, "restart" when services or env must restart, with hypothesis + fixDescription. One accountable signal per cycle — only investigation + drafting fan out; applying, re-testing, and signalling stay single-threaded.',
+  'Apply the drafted patches YOURSELF, serially — if two patches touch the same file, reconcile them by hand before applying. Then signal_run ONCE per cycle: kind:"rerun" for test-only/app-code fixes, "restart" when services or env must restart, with hypothesis + fixDescription. One accountable signal per cycle — only investigation + drafting fan out; applying and signalling stay single-threaded.',
+  RUNNER_VERIFICATION_RULE,
   'Then call wait_for_heal_task again on the same runId + session_id (loop on still_waiting). Repeat until passed or terminal failure.',
   // Same reasoning as the repair rule above: this invariant lives at offset ~3549
   // of INSTRUCTIONS_BY_PROFILE.repair, i.e. past the CLI's 2048-char cut, so the
@@ -185,7 +189,8 @@ function bootFailureNextSteps(bf: RunBootFailure): readonly string[] {
   return [
     `No tests ran — service "${bf.service}" failed to start (${bf.detail}). Read its log at ${bf.logPath} (page large files with offset/limit) to find why it won't serve.`,
     'This is an app/service problem, not a test failure — fix the service/app code so it boots and passes its readiness probe. Do NOT edit tests.',
-    'Then signal_run ONCE with kind:"restart" (the services must restart), plus hypothesis + fixDescription. Canary Lab reboots the services and runs the suite.',
+    'Then signal_run ONCE with kind:"restart" (the services must restart), plus hypothesis + fixDescription.',
+    RUNNER_VERIFICATION_RULE,
     'Then call wait_for_heal_task again on the same runId + session_id (loop on still_waiting). Repeat until passed or terminal failure.',
   ]
 }
@@ -194,8 +199,11 @@ function bootFailureNextSteps(bf: RunBootFailure): readonly string[] {
 // healPrompt map. The procedure and resource map are STATIC across cycles, so
 // they go out once on cycle 1 (and on any explicit get_heal_context re-fetch);
 // later cycles only carry the changing failure packet plus this pointer.
-const REPEAT_HEAL_GUIDANCE =
-  'Repeat heal cycle — the heal procedure and resource map were sent on cycle 1. Investigate the failures below, apply the fixes yourself, then signal_run ONCE (rerun for test/app-code fixes, restart when services must restart) with hypothesis + fixDescription, and wait_for_heal_task again. Call get_heal_context if you need the full healPrompt resource map back.'
+const REPEAT_HEAL_GUIDANCE = [
+  'Repeat heal cycle — the heal procedure and resource map were sent on cycle 1. Investigate the failures below, apply the fixes yourself, then signal_run ONCE (rerun for test/app-code fixes, restart when services must restart) with hypothesis + fixDescription.',
+  RUNNER_VERIFICATION_RULE,
+  'Wait for heal again with wait_for_heal_task. Call get_heal_context if you need the full healPrompt resource map back.',
+].join(' ')
 
 // Strip the static guidance (nextSteps + healPrompt map) from a context for a
 // repeat heal cycle, leaving the per-cycle failure packet plus a one-line

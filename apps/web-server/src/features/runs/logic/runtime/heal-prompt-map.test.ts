@@ -373,11 +373,11 @@ describe('buildOrchestratorHealPrompt', () => {
     )
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
     const prompt = build({
-      cycle: 2, // becomes cycle 3 in the addendum after the +1 mapping
+      cycle: 2,
       outputDir: path.join(runDir, 'out'),
       consecutiveSameFailures: 3,
     })
-    expect(prompt).toContain('Escalation: cycle 3 — these tests have now failed 3 times in a row despite 2 fix attempts: test-a, test-b.')
+    expect(prompt).toContain('Escalation: cycle 2 — these tests have now failed 3 times in a row despite 2 fix attempts: test-a, test-b.')
     // The failedDir path the addendum embeds is the same one the static
     // template uses — confirms threading through buildHealAddendum.
     expect(prompt).toContain(`${path.join(runDir, 'failed')}/<slug>/trace-extract/snapshot-at-failure.txt`)

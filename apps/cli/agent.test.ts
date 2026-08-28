@@ -142,6 +142,8 @@ describe('canary-lab agent install', () => {
     for (const skillPath of mirrors('canary-lab-run')) {
       const body = fs.readFileSync(skillPath, 'utf-8')
       expect(body).toContain('never call `start_run` to verify')
+      expect(body).toContain('The signal requests runner verification')
+      expect(body).toContain('Do not start services or run Playwright')
       expect(body).toContain('Workspace Bootstrap')
       expect(body).toContain('~/.canary-lab/workspaces.json')
       expect(body).toContain('/mcp/health')

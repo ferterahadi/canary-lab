@@ -146,6 +146,10 @@ describe('buildExternalHealContext', () => {
     expect(context).not.toHaveProperty('artifactsBase')
     expect(context.counts).not.toHaveProperty('notRunNames')
     expect(JSON.stringify(context)).not.toContain('not run yet')
+    const nextSteps = (context.nextSteps ?? []).join('\n')
+    expect(nextSteps).toContain('The signal requests runner verification')
+    expect(nextSteps).toContain('Do not start services or run Playwright')
+    expect(nextSteps).toContain('targeted Playwright verification after the signal')
   })
 
   it('surfaces a boot failure (service log + restart-oriented nextSteps) when no tests ran', () => {
@@ -192,6 +196,7 @@ describe('buildExternalHealContext', () => {
     const nextSteps = (context.nextSteps ?? []).join('\n')
     expect(nextSteps).toContain(bootFailure.logPath)
     expect(nextSteps).toContain('restart')
+    expect(nextSteps).toContain('Do not start services or run Playwright')
     expect(nextSteps).not.toContain('failedTests[]')
   })
 
@@ -318,6 +323,7 @@ describe('slimRepeatHealContext', () => {
     expect(slim).not.toHaveProperty('nextSteps')
     expect(slim).not.toHaveProperty('healPrompt')
     expect(slim.guidance).toContain('get_heal_context')
+    expect(slim.guidance).toContain('Do not start services or run Playwright')
     // The per-cycle failure packet is preserved.
     expect(slim.failedTests).toEqual(full.failedTests)
     expect(slim.counts).toEqual(full.counts)
