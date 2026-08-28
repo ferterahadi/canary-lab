@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   activeBodyLineForTest,
+  executionLineHighlightForTest,
   slugify,
   summaryEntryName,
   statusForTest,
@@ -115,6 +116,38 @@ describe('activeBodyLineForTest', () => {
         ],
       },
     })).toBe(3)
+  })
+
+  it('uses the live step while testing and the persisted failure after testing stops', () => {
+    const transitioningSummary: RunSummary = {
+      complete: false,
+      total: 1,
+      passed: 0,
+      running: {
+        name: 'test-case-creates-a-todo',
+        location: '/todo.spec.ts:10',
+        step: {
+          title: 'send request',
+          category: 'pw:api',
+          location: '/todo.spec.ts:12',
+        },
+      },
+      failed: [{
+        name: 'test-case-creates-a-todo',
+        locations: ['/todo.spec.ts:11'],
+      }],
+    }
+    const input = {
+      testName: 'Creates a TODO',
+      testLine: 10,
+      bodySource: '{\n  await page.goto("/")\n  await sendRequest()\n}',
+      summary: transitioningSummary,
+    }
+
+    expect(executionLineHighlightForTest({ ...input, isRunActivelyTesting: true }))
+      .toEqual({ kind: 'running', bodyLine: 3 })
+    expect(executionLineHighlightForTest({ ...input, isRunActivelyTesting: false }))
+      .toEqual({ kind: 'failed', bodyLine: 2 })
   })
 
   it('falls back to the failed entry location when locations is absent entirely', () => {

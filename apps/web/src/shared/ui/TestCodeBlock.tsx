@@ -12,6 +12,7 @@ import {
   statusLabel,
   statusPillClassForStatus,
   type StepStatus,
+  type TestExecutionHighlightKind,
 } from '@/features/runs'
 
 interface SourceLocation {
@@ -26,38 +27,38 @@ interface ResolvedSourceLineMapping {
   sourceLines: readonly number[]
 }
 
+interface CodeLineHighlight {
+  kind: TestExecutionHighlightKind
+  lines: ReadonlySet<number>
+}
+
 // Renders syntax-highlighted code using Shiki. The `source` prop comes from
 // the feature's own spec files (server-side AST extraction), not untrusted
 // user input, so innerHTML is safe here.
 export function ShikiCode({
   source,
-  activeLine,
-  activeLines,
+  lineHighlight,
   sourceLocation,
   sourceLineMap,
-  runningHighlight,
   changedLines,
   showOpenButton = true,
   selectedSourceRange,
   storyLineNumbers,
 }: {
   source: string
-  activeLine?: number | null
-  activeLines?: ReadonlySet<number>
+  lineHighlight?: CodeLineHighlight
   sourceLocation?: SourceLocation
   /** Explicit display-row to absolute source-row mapping. When absent, rows
    *  retain the historical `startLine + displayRow - 1` mapping. */
   sourceLineMap?: readonly FormattedDisplayLine[]
-  runningHighlight?: boolean
   showOpenButton?: boolean
   selectedSourceRange?: { startLine: number; endLine: number }
   /** Absolute source line to the corresponding English story number. When
    * present, continuation and structural source rows intentionally stay blank. */
   storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>
-  /** 1-indexed body-relative line numbers (same convention as `activeLine`) to
-   *  tint as changed — the diff-against-HEAD cue for a dirty test's body. Takes
-   *  visual precedence over `activeLine`; the two aren't expected to co-occur
-   *  (one's for a live-running test, the other for a completed dirty one). */
+  /** 1-indexed displayed rows to tint as changed — the diff-against-HEAD cue
+   *  for a dirty test's body. This remains visually stronger than an execution
+   *  highlight when both refer to the same row. */
   changedLines?: Set<number>
 }) {
   const { resolved } = useTheme()
@@ -93,11 +94,9 @@ export function ShikiCode({
             <code>
               <FallbackCodeLines
                 source={source}
-                activeLine={activeLine}
-                activeLines={activeLines}
+                lineHighlight={lineHighlight}
                 startLine={sourceLocation?.startLine}
                 sourceLineMap={sourceLineMap}
-                runningHighlight={runningHighlight}
                 changedLines={changedLines}
                 selectedSourceRange={selectedSourceRange}
                 storyLineNumbers={storyLineNumbers}
@@ -118,7 +117,7 @@ export function ShikiCode({
           // Shiki has already escaped the source it highlighted; decorateShikiLines
           // only wraps those tokens in spans.
           // eslint-disable-next-line no-restricted-syntax
-          dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, activeLine, activeLines, sourceLocation?.startLine, sourceLineMap, runningHighlight, changedLines, selectedSourceRange, storyLineNumbers) }}
+          dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, lineHighlight, sourceLocation?.startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers) }}
         />
       )}
     </SourceOpenShell>
@@ -127,41 +126,34 @@ export function ShikiCode({
 
 function FallbackCodeLines({
   source,
-  activeLine,
-  activeLines,
+  lineHighlight,
   startLine,
   sourceLineMap,
-  runningHighlight,
   changedLines,
   selectedSourceRange,
   storyLineNumbers,
 }: {
   source: string
-  activeLine?: number | null
-  activeLines?: ReadonlySet<number>
+  lineHighlight?: CodeLineHighlight
   startLine?: number
   sourceLineMap?: readonly FormattedDisplayLine[]
-  runningHighlight?: boolean
   changedLines?: Set<number>
   selectedSourceRange?: { startLine: number; endLine: number }
   storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>
 }) {
   const shownStorySequences = new Set<string>()
-  const activeBackground = runningHighlight
-    ? 'color-mix(in srgb, var(--warning) 22%, transparent)'
-    : 'color-mix(in srgb, var(--running) 18%, transparent)'
-  const activeBar = runningHighlight ? 'var(--warning)' : 'var(--running)'
   return source.split('\n').map((line, index) => {
     const lineNumber = index + 1
     const mapped = sourceMappingForDisplayLine(lineNumber, startLine, sourceLineMap)
     const number = codeLineNumber(lineNumber, mapped.sourceLines, storyLineNumbers, shownStorySequences)
     const selected = sourceRangeIncludesAny(selectedSourceRange, mapped.sourceLines)
     const changed = changedLines?.has(lineNumber) === true
-    const active = activeLines?.has(lineNumber) === true || lineNumber === activeLine
+    const active = lineHighlight?.lines.has(lineNumber) === true
+    const highlightColors = lineHighlight ? codeLineHighlightColors(lineHighlight.kind) : undefined
     const style = changed
       ? { background: 'color-mix(in srgb, var(--danger) 16%, transparent)', boxShadow: 'inset 2px 0 0 var(--danger)' }
-      : active
-        ? { background: activeBackground, boxShadow: `inset 2px 0 0 ${activeBar}` }
+      : active && highlightColors
+        ? { background: highlightColors.background, boxShadow: `inset 2px 0 0 ${highlightColors.bar}` }
         : selected
           ? { background: 'color-mix(in srgb, var(--accent) 14%, transparent)', boxShadow: 'inset 2px 0 0 var(--accent)' }
           : undefined
@@ -176,6 +168,7 @@ function FallbackCodeLines({
         data-selected-line={selected ? 'true' : undefined}
         data-changed-line={changed ? 'true' : undefined}
         data-active-line={active ? 'true' : undefined}
+        data-execution-highlight={active ? lineHighlight?.kind : undefined}
         title={number.title}
         style={style}
       >
@@ -238,21 +231,15 @@ export function SourceOpenShell({
 
 function decorateShikiLines(
   html: string,
-  activeLine?: number | null,
-  activeLines?: ReadonlySet<number>,
+  lineHighlight?: CodeLineHighlight,
   startLine?: number,
   sourceLineMap?: readonly FormattedDisplayLine[],
-  runningHighlight?: boolean,
   changedLines?: Set<number>,
   selectedSourceRange?: { startLine: number; endLine: number },
   storyLineNumbers?: ReadonlyMap<number, StoryCodeLineNumber>,
 ): string {
   let lineNo = 0
   const shownStorySequences = new Set<string>()
-  const bg = runningHighlight
-    ? 'color-mix(in srgb, var(--warning) 22%, transparent)'
-    : 'color-mix(in srgb, var(--running) 18%, transparent)'
-  const bar = runningHighlight ? 'var(--warning)' : 'var(--running)'
   // Lines render as full-width blocks (`.shiki-block pre span.line`), so the
   // newline text nodes Shiki leaves between them must go — under pre-wrap each
   // would paint an extra blank row.
@@ -265,14 +252,21 @@ function decorateShikiLines(
     if (changedLines?.has(lineNo)) {
       return `<span class="line"${attrs} data-changed-line="true" style="background:color-mix(in srgb, var(--danger) 16%, transparent);box-shadow:inset 2px 0 0 var(--danger)"`
     }
-    if (activeLines?.has(lineNo) || lineNo === activeLine) {
-      return `<span class="line"${attrs} data-active-line="true" style="background:${bg};box-shadow:inset 2px 0 0 ${bar}"`
+    if (lineHighlight?.lines.has(lineNo)) {
+      const colors = codeLineHighlightColors(lineHighlight.kind)
+      return `<span class="line"${attrs} data-active-line="true" data-execution-highlight="${lineHighlight.kind}" style="background:${colors.background};box-shadow:inset 2px 0 0 ${colors.bar}"`
     }
     if (selected) {
       return `<span class="line"${attrs} style="background:color-mix(in srgb, var(--accent) 14%, transparent);box-shadow:inset 2px 0 0 var(--accent)"`
     }
     return `${match}${attrs}`
   })
+}
+
+function codeLineHighlightColors(kind: TestExecutionHighlightKind): { background: string; bar: string } {
+  return kind === 'failed'
+    ? { background: 'color-mix(in srgb, var(--danger) 18%, transparent)', bar: 'var(--danger)' }
+    : { background: 'color-mix(in srgb, var(--running) 18%, transparent)', bar: 'var(--running)' }
 }
 
 function codeLineNumber(
@@ -371,9 +365,10 @@ export function StepBlock({
         <div className="mt-1.5">
           <ShikiCode
             source={step.bodySource}
-            activeLine={activeLine}
+            lineHighlight={activeLine == null
+              ? undefined
+              : { kind: 'running', lines: new Set([activeLine]) }}
             sourceLocation={sourceFile ? { file: sourceFile, startLine: step.line } : undefined}
-            runningHighlight={isRunningStep}
           />
         </div>
       )}

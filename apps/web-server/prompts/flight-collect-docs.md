@@ -18,6 +18,9 @@ material; search it yourself before returning `NOTHING_FOUND`.
 
 How to work:
 - Search READMEs, docs, ADRs, API specs, route documentation, and behavior-revealing config. Read code when docs are thin; capture what users observe, not implementation.
+- Treat an explicit scope statement (for example, "these are the whole feature") as authoritative. Do not promote incidental code or config outside that scope into a behavior.
+- Keep service setup facts out of this requirements document: fixed or hardcoded ports, start commands, env-file or env-var loading (including their absence), process topology, and bootstrap wiring belong to Repo scan and Parallel setup, not the coverage ledger. Do not manufacture a user-visible happy path from successful startup to make one testable.
+- An absence found only in code or config (for example, no env file, database, or telemetry) describes the current implementation, not a requirement.
 - Keep ONLY material relevant to the intent. A repo's docs folder usually covers many unrelated subsystems — do not sweep them in. If a doc is 90% unrelated, extract the relevant 10%.
 - Write the result to exactly this path (create it, overwrite if present):
   {{outPath}}

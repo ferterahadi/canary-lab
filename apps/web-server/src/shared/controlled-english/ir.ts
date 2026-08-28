@@ -1,4 +1,4 @@
-// The intermediate representation between the TypeScript AST and rendered
+// The Intermediate Representation (IR) between the TypeScript AST and rendered
 // controlled English. Translation happens in two deterministic steps
 // (AST → EnglishNode → text) so consumers can re-render the same structure at
 // different layouts (block for the UI, first-line summaries for flowcharts)

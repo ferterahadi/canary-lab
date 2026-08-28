@@ -115,13 +115,13 @@ describe('readable test story', () => {
     expect(translated.nodes).toHaveLength(1)
   })
 
-  it('keeps an unsafe standard assertion out of the story', () => {
+  it('keeps a zero-argument computed assertion visible without claiming its implementation', () => {
     const translated = translateReadableTest({
       ...INPUT,
       bodySource: '{ expect(computeTotal()).toBe(2) }',
     })
 
-    expect(translated.story).toBeUndefined()
+    expect(textsFor(translated, 'check')).toEqual(['Check that compute total result equals 2'])
     expect(translated.nodes).toHaveLength(1)
   })
 
@@ -328,6 +328,27 @@ describe('readable test story', () => {
     ])
   })
 
+  it('keeps nested call results inside variables, properties, and request URLs', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  const params = { from: formatDate(day), signature: sign(raw) }
+  const audience = decodeToken(accessToken).aud
+  const claim = decodeToken(accessToken)[claimName]
+  const token = (await (await request.post(url, { data: payload })).json()).accessToken
+  await request.get(\`/links/nonexistent-\${crypto.randomBytes(8).toString('hex')}\`)
+}`,
+    })
+
+    expect(storyItems(translated).map((step) => step.text)).toEqual([
+      'Set params to an object with from set to format date result using day and signature set to sign result using raw',
+      'Set audience to decode token result using accessToken aud',
+      'Set claim to decode token result using accessToken at claimName',
+      'Set token to JSON result from post result from request using url and an object with data set to payload access token',
+      'Send a GET request to “/links/nonexistent-{to string result from random bytes result from crypto using 8 using \\“hex\\”}”',
+    ])
+  })
+
   it('keeps a nested URL builder and the following UI helper in authored order', () => {
     const translated = translateReadableTest({
       ...INPUT,
@@ -356,7 +377,7 @@ describe('readable test story', () => {
     ])
   })
 
-  it('preserves safe nested request options and omits unsupported object forms', () => {
+  it('preserves safe nested and computed request options while omitting executable object forms', () => {
     const translated = translateReadableTest({
       ...INPUT,
       bodySource: `{
@@ -375,6 +396,7 @@ describe('readable test story', () => {
 
     expect(storyItems(translated).map((step) => step.text)).toEqual([
       'Send a POST request to build URL result using ENTITY_ID with an object with headers set to build headers result using AUTH_TOKEN, x-header set to build header result using AUTH_TOKEN, retryCount, and everything in extraOptions, saving the result as response',
+      'Send a GET request to build URL result using entity identifier using an object with property named by header name set to header value',
     ])
   })
 
@@ -398,6 +420,7 @@ describe('readable test story', () => {
     expect(storyItems(translated).map((step) => step.text)).toEqual([
       'Find the first item in msgs where item pattern equals “SEND_MULTIPLE_EMAIL”, saving the result as sendMultiple',
       'Find the first item in msgs where item pattern equals “TRIGGER_EMAIL_BATCH”, saving the result as triggerBatch',
+      'Find the first item in msgs matching predicate, saving the result as unsafe',
       'Check that send multiple is defined',
       'Check that trigger batch is defined',
     ])

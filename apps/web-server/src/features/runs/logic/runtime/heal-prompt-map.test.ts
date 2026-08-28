@@ -160,7 +160,7 @@ describe('buildOrchestratorHealPrompt', () => {
 
   it('returns a buildCyclePrompt that writes the rendered run-scoped prompt', () => {
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
-    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const prompt = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     // Prompt file was written under runDir.
     const promptPath = path.join(runDir, 'heal-prompt.md')
     expect(fs.existsSync(promptPath)).toBe(true)
@@ -181,19 +181,22 @@ describe('buildOrchestratorHealPrompt', () => {
     // Regression: maxCycles was never threaded from the factory into the
     // addendum, so the PTY agent saw "Cycle N." with no budget to pace against.
     const dflt = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
-    expect(dflt({ cycle: 1, outputDir: path.join(runDir, 'out') })).toContain('Cycle 2 of 10.')
+    expect(dflt({ cycle: 1, outputDir: path.join(runDir, 'out') })).toContain('Cycle 1 of 10.')
     const capped = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir, maxCycles: 4 })
-    expect(capped({ cycle: 1, outputDir: path.join(runDir, 'out') })).toContain('Cycle 2 of 4.')
+    expect(capped({ cycle: 2, outputDir: path.join(runDir, 'out') })).toContain('Cycle 2 of 4.')
   })
 
   it('renders service-mode copy when manifest.repoPaths is non-empty', () => {
     writeRunManifest(runDir, { repoPaths: ['/some/repo'] })
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
-    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const prompt = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain('Fix service/app code, not tests.')
     expect(prompt).toContain('Do not read the test spec unless')
     expect(prompt).toContain('Do NOT Read the test spec file')
     expect(prompt).not.toContain('no editable service repos')
+    expect(prompt).toContain('The signal requests runner verification')
+    expect(prompt).toContain('Do not start services or run Playwright')
+    expect(prompt).toContain('targeted Playwright verification after the signal')
   })
 
   it('surfaces feature docs when the accepted feature has preserved context', () => {
@@ -205,7 +208,7 @@ describe('buildOrchestratorHealPrompt', () => {
       repoPaths: ['/some/repo'],
     })
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
-    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const prompt = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain('Feature context docs:')
     expect(prompt).toContain(path.join(featureDir, 'docs'))
     expect(prompt).toContain('uploaded Add Test documents and additional notes')
@@ -214,7 +217,7 @@ describe('buildOrchestratorHealPrompt', () => {
   it('renders test-mode copy when manifest.repoPaths is empty', () => {
     writeRunManifest(runDir, { repoPaths: [] })
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
-    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const prompt = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain('This feature has no editable service repos')
     expect(prompt).toContain('Read the failing test spec and its helpers')
     // The service-mode prohibition must be absent in test mode (both the
@@ -228,7 +231,7 @@ describe('buildOrchestratorHealPrompt', () => {
     // A transient I/O glitch or a test fixture without a manifest must not
     // silently flip to test-mode for a feature that does have editable repos.
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
-    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const prompt = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain('Fix service/app code, not tests.')
     expect(prompt).not.toContain('no editable service repos')
   })
@@ -243,7 +246,7 @@ describe('buildOrchestratorHealPrompt', () => {
 
   it('appends restart user guidance to the rendered heal prompt', () => {
     const build = buildOrchestratorHealPrompt({ agent: 'codex', projectRoot, runDir })
-    build({ cycle: 0, outputDir: path.join(runDir, 'out'), userGuidance: 'focus on the webhook fallback' })
+    build({ cycle: 1, outputDir: path.join(runDir, 'out'), userGuidance: 'focus on the webhook fallback' })
     const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
     expect(promptBody).toContain('User guidance for this restarted heal cycle')
     expect(promptBody).toContain('focus on the webhook fallback')
@@ -252,7 +255,7 @@ describe('buildOrchestratorHealPrompt', () => {
   it('appends prior cross-agent session context to the rendered heal prompt', () => {
     const build = buildOrchestratorHealPrompt({ agent: 'codex', projectRoot, runDir })
     build({
-      cycle: 0,
+      cycle: 1,
       outputDir: path.join(runDir, 'out'),
       priorAgentSessionContext: 'Previous claude session sid:\nASSISTANT: check CNS_V1_BASE_URL',
     })
@@ -270,7 +273,7 @@ describe('buildOrchestratorHealPrompt', () => {
       runDir,
       personalWikiPath: wiki,
     })
-    build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
     expect(promptBody).toContain(`- \`${wiki}\``)
     expect(promptBody).toContain('cross-linked markdown')
@@ -280,7 +283,7 @@ describe('buildOrchestratorHealPrompt', () => {
 
   it('omits personal wiki context when no wiki path is configured', () => {
     const build = buildOrchestratorHealPrompt({ agent: 'codex', projectRoot, runDir })
-    build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     const promptBody = fs.readFileSync(path.join(runDir, 'heal-prompt.md'), 'utf-8')
     expect(promptBody).not.toContain('cross-linked markdown')
     expect(promptBody).not.toContain('{{personalWikiMap}}')
@@ -288,7 +291,7 @@ describe('buildOrchestratorHealPrompt', () => {
 
   it('omits the playwright-mcp bullet when no failure dir has MCP artifacts', () => {
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
-    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const prompt = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     expect(prompt).not.toContain('playwright-mcp/')
     expect(prompt).not.toContain('browser captures (console / DOM snapshots / network)')
   })
@@ -298,7 +301,7 @@ describe('buildOrchestratorHealPrompt', () => {
     fs.mkdirSync(mcpDir, { recursive: true })
     fs.writeFileSync(path.join(mcpDir, 'snapshot.png'), 'fake')
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
-    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const prompt = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain('playwright-mcp/')
     expect(prompt).toContain('browser captures (console / DOM snapshots / network)')
   })
@@ -308,7 +311,7 @@ describe('buildOrchestratorHealPrompt', () => {
     fs.mkdirSync(mcpDir, { recursive: true })
     fs.writeFileSync(path.join(mcpDir, 'snapshot.png'), 'fake')
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
-    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const prompt = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain(`${mcpDir}/`)
     expect(prompt).toContain('new MCP captures land here too')
   })
@@ -318,13 +321,13 @@ describe('buildOrchestratorHealPrompt', () => {
     fs.mkdirSync(mcpDir, { recursive: true })
     fs.writeFileSync(path.join(mcpDir, '_attribution.json'), '[]')
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
-    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const prompt = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     expect(prompt).not.toContain('playwright-mcp/')
   })
 
   it('omits the trace-extract bullet when no failure dir has a failure-summary.md', () => {
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
-    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const prompt = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     expect(prompt).not.toContain('trace-extract/failure-summary.md')
   })
 
@@ -333,7 +336,7 @@ describe('buildOrchestratorHealPrompt', () => {
     fs.mkdirSync(traceDir, { recursive: true })
     fs.writeFileSync(path.join(traceDir, 'failure-summary.md'), '# Failure summary')
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
-    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const prompt = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain('trace-extract/failure-summary.md')
     expect(prompt).toContain('curated trace extract')
   })
@@ -342,9 +345,9 @@ describe('buildOrchestratorHealPrompt', () => {
     // The prompt is the conversation content; the agent flag only controls
     // the spawn command. Renderers must not branch on agent.
     const buildC = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
-    const promptC = buildC({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const promptC = buildC({ cycle: 1, outputDir: path.join(runDir, 'out') })
     const buildX = buildOrchestratorHealPrompt({ agent: 'codex', projectRoot, runDir })
-    const promptX = buildX({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const promptX = buildX({ cycle: 1, outputDir: path.join(runDir, 'out') })
     expect(promptC).toBe(promptX)
   })
 

@@ -52,9 +52,13 @@ describe('Playwright assertion edge cases', () => {
     const cases: Array<[string, string]> = [
       ['expect(isCleanExit(exit)).toBe(true)', 'Check that is clean exit result using exit equals true'],
       ['expect(consumer.logs()).toContain(DRAIN_COMPLETE_MARKER)', 'Check that logs result from consumer contains drain complete marker'],
-      ['expect(response.headers()).toBeDefined()', 'Check that headers result from response is defined'],
+      ['expect(response.headers()).toBeDefined()', 'Check that the headers of response is defined'],
       ['expect(service.read(id)).toBeDefined()', 'Check that read result from service using identifier is defined'],
       ['expect(response.status(1)).toBe(200)', 'Check that status result from response using 1 equals 200'],
+      ['expect(computeTotal()).toBe(2)', 'Check that compute total result equals 2'],
+      ['expect(await sequentialQueueDepth()).toBe(0)', 'Check that sequential queue depth result equals 0'],
+      ['expect(await tokenRowExists(token)).toBe(true)', 'Check that token row exists result using token equals true'],
+      ['expect(response.headers()["access-control-allow-origin"]).toBe("*")', 'Check that the headers of response access-control-allow-origin equals “*”'],
     ]
 
     for (const [source, text] of cases) {
@@ -62,7 +66,6 @@ describe('Playwright assertion edge cases', () => {
     }
 
     for (const source of [
-      'expect(computeTotal()).toBe(2)',
       'expect(factory().logs()).toBeDefined()',
       'expect(service.read(computeId())).toBeDefined()',
       'expect(service?.read(id)).toBeDefined()',
@@ -119,11 +122,18 @@ describe('Playwright assertion edge cases', () => {
   })
 
   it('uses exact source for unsupported or unsafe expectation semantics', () => {
+    expect(assertionFrom('expect(total).toBe(computeExpected())')).toEqual({
+      text: 'Check that total equals compute expected result',
+      fidelity: 'derived',
+      role: 'check',
+    })
+    expect(assertionFrom('expect(total).toBe(2, computeOptions())')).toEqual({
+      text: 'Check that total equals 2 using compute options result',
+      fidelity: 'derived',
+      role: 'check',
+    })
     const sources = [
       'expect(total).toBe()',
-      'expect(computeTotal()).toBe(2)',
-      'expect(total).toBe(computeExpected())',
-      'expect(total).toBe(2, computeOptions())',
     ]
 
     for (const source of sources) {
@@ -146,6 +156,8 @@ describe('Playwright assertion edge cases', () => {
       ['expect(requestPromise).rejects.toThrow(TypeError)', 'Check that the rejection from request promise is an error of type TypeError'],
       ['expect(callbackPromise).resolves.toThrow(TypeError)', 'Check that the resolved value of callback promise throws an error of type TypeError'],
       ['expect(callbackPromise).resolves.not.toThrow()', 'Check that the resolved value of callback promise does not throw an error'],
+      ['expect(computePromise()).rejects.toThrow()', 'Check that the rejection from compute promise result is an error'],
+      ['expect(computePromise()).resolves.toThrow()', 'Check that the resolved value of compute promise result throws an error'],
     ]
 
     for (const [source, text] of asynchronousCases) {
@@ -153,7 +165,12 @@ describe('Playwright assertion edge cases', () => {
     }
 
     expect(genericAssertionFrom('expect(order).toMatchRule(computeRule())')).toEqual({
-      text: 'expect(order).toMatchRule(computeRule())',
+      text: 'Check that order passes the “match rule” check using compute rule result',
+      fidelity: 'derived',
+      role: 'check',
+    })
+    expect(genericAssertionFrom('expect(factory().order).toMatchRule(rule)')).toEqual({
+      text: 'expect(factory().order).toMatchRule(rule)',
       fidelity: 'unresolved',
       role: 'check',
     })
@@ -172,8 +189,9 @@ describe('Playwright assertion edge cases', () => {
       'expect(() => computeService().run()).toThrow()',
       'expect(() => run(computeArgument())).toThrow()',
       'expect(() => service[method]()).toThrow()',
-      'expect(computePromise()).rejects.toThrow()',
-      'expect(computePromise()).resolves.toThrow()',
+      'expect(() => run()).toThrow(computeExpected().message)',
+      'expect(factory().promise).rejects.toThrow()',
+      'expect(factory().promise).resolves.toThrow()',
     ]) {
       expect(assertionFrom(source)).toEqual({ text: source, fidelity: 'unresolved', role: 'check' })
     }
@@ -267,6 +285,9 @@ describe('Playwright assertion edge cases', () => {
       ['expect(function () { run() }).toThrowError(/boom/i)', 'Check that calling run throws an error matching /boom/i'],
       ['expect(callback).toThrow()', 'Check that callback throws an error'],
       ['expect(() => { prepare(); run() }).toThrow()', 'Check that the provided operation throws an error'],
+      ["expect(computeAccount()).toHaveProperty('id')", 'Check that compute account result has property “id”'],
+      ['expect(account).toHaveProperty(computePath())', 'Check that account has property compute path result'],
+      ['expect(() => computeCall()).toThrow(computeExpected())', 'Check that calling compute call throws an error matching compute expected result'],
     ]
 
     for (const [source, text] of cases) {
@@ -276,9 +297,7 @@ describe('Playwright assertion edge cases', () => {
     for (const source of [
       'expect(account).toHaveProperty()',
       "expect(account).toHaveProperty('id', value, extra)",
-      'expect(computeAccount()).toHaveProperty(\'id\')',
-      'expect(account).toHaveProperty(computePath())',
-      'expect(() => computeCall()).toThrow(computeExpected())',
+      "expect(factory().account).toHaveProperty('id')",
       'expect(value.property).toThrow()',
       'expect(() => run()).toThrow(a, b)',
     ]) {

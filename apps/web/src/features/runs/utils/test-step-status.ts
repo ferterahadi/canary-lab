@@ -6,6 +6,11 @@
 import type { RunSummary } from '@/shared/api/types'
 
 export type StepStatus = 'pending' | 'testing' | 'passed' | 'failed' | 'skipped' | 'timedout'
+export type TestExecutionHighlightKind = 'running' | 'failed'
+export interface TestExecutionLineHighlight {
+  kind: TestExecutionHighlightKind
+  bodyLine: number
+}
 export type RunningTestSummary = NonNullable<RunSummary['running']>
 export interface TestStatusIdentity {
   name: string
@@ -109,7 +114,7 @@ export function statusForTest(
   return 'pending'
 }
 
-export function activeBodyLineForTest(input: {
+interface TestExecutionLineInput {
   testName: string
   testId?: string
   allowNameFallback?: boolean
@@ -120,9 +125,13 @@ export function activeBodyLineForTest(input: {
   bodySource: string
   summary: RunSummary | undefined
   sourceFile?: string
-}): number | null {
+}
+
+export function executionLineHighlightForTest(
+  input: TestExecutionLineInput & { isRunActivelyTesting: boolean },
+): TestExecutionLineHighlight | null {
   const expectedName = summaryEntryName(input.testName)
-  const running = input.summary
+  const running = input.isRunActivelyTesting && input.summary
     ? runningTestForTest(input.summary, {
         name: input.testName,
         id: input.testId,
@@ -132,12 +141,13 @@ export function activeBodyLineForTest(input: {
   const bodyLineCount = input.bodySource.split('\n').length
   const bodyStartLine = input.bodyLine ?? input.testLine
   if (running) {
-    return bodyLineForLocations(
+    const bodyLine = bodyLineForLocations(
       running.step?.locations ?? (running.step?.location ? [running.step.location] : []),
       bodyStartLine,
       bodyLineCount,
       input.sourceFile,
     )
+    return bodyLine == null ? null : { kind: 'running', bodyLine }
   }
   const failed = input.summary
     ? summaryEntryForIdentity(
@@ -148,12 +158,17 @@ export function activeBodyLineForTest(input: {
       )
     : undefined
   if (!failed) return null
-  return bodyLineForLocations(
+  const bodyLine = bodyLineForLocations(
     failed.locations?.length ? failed.locations : (failed.location ? [failed.location] : []),
     bodyStartLine,
     bodyLineCount,
     input.sourceFile,
   )
+  return bodyLine == null ? null : { kind: 'failed', bodyLine }
+}
+
+export function activeBodyLineForTest(input: TestExecutionLineInput): number | null {
+  return executionLineHighlightForTest({ ...input, isRunActivelyTesting: true })?.bodyLine ?? null
 }
 
 export function runningTestForTest(

@@ -225,20 +225,24 @@ describe('Playwright action edge cases', () => {
     ]) expect(actionFrom(source)).toBeUndefined()
   })
 
-  it('renders rethrows and authored error messages, leaving computed throws as source', () => {
+  it('renders rethrows and safely readable thrown values', () => {
     expect(actionFrom('throw error')).toEqual({ text: 'Rethrow the error', fidelity: 'derived', role: 'action' })
     expect(actionFrom("throw new Error('sync sql unreachable')"))
       .toEqual({ text: 'Fail with “sync sql unreachable”', fidelity: 'derived', role: 'action' })
 
-    for (const source of [
-      'throw new Error(`took ${elapsed}ms`)',
-      'throw new Error',
-      'throw new Error()',
-      "throw new Error('a', { cause })",
-      "throw new TypeError('x')",
-      'throw makeError()',
-      'throw payload.error',
-    ]) expect(actionFrom(source)).toBeUndefined()
+    const readableCases: Array<[string, string]> = [
+      ['throw new Error(`took ${elapsed}ms`)', 'Fail by throwing a new error using “took {elapsed}ms”'],
+      ['throw new Error', 'Fail by throwing a new error'],
+      ['throw new Error()', 'Fail by throwing a new error'],
+      ["throw new Error('a', { cause })", 'Fail by throwing a new error using “a” and an object with cause'],
+      ["throw new TypeError('x')", 'Fail by throwing a new type error using “x”'],
+      ['throw payload.error', 'Fail by throwing payload error'],
+      ['throw makeError()', 'Fail by throwing make error result'],
+    ]
+    for (const [source, text] of readableCases) {
+      expect(actionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'action' })
+    }
+
   })
 
   it('renders console output with every argument visible', () => {
@@ -267,6 +271,10 @@ describe('Playwright action edge cases', () => {
       ['const startedAt = Date.now()', 'Set started at to the current time'],
       ['const body = await res.json()', 'Set body to the JSON body of response'],
       ['const keys = Object.keys(account)', 'Set keys to the keys of account'],
+      ['const first = 1, second = 2', 'Set first to 1 and second to 2'],
+      ['let result', 'Declare result without an initial value'],
+      ['const created = new URL(url)', 'Set created to a new URL using url'],
+      ['const first = run(), second = run()', 'Set first to run result and second to run result'],
     ]
     for (const [source, text] of setupCases) {
       expect(actionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'setup' })
@@ -274,6 +282,7 @@ describe('Playwright action edge cases', () => {
 
     const actionCases: Array<[string, string]> = [
       ['state.messageId = messageId', 'Set state message identifier to message identifier'],
+      ['payload.from = computeSender()', 'Set payload from to compute sender result'],
       ['count += 1', 'Increase count by 1'],
       ['count -= step', 'Decrease count by step'],
       ['count *= 2', 'Multiply count by 2'],
@@ -298,6 +307,7 @@ describe('Playwright action edge cases', () => {
       ['return { res, elapsedMs }', 'Return an object with response, elapsed ms'],
       ['return total', 'Return total'],
       ['return res.text()', 'Return the text body of response'],
+      ['return', 'Return without a value'],
     ]
     for (const [source, text] of actionCases) {
       expect(actionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'action' })
@@ -306,24 +316,21 @@ describe('Playwright action edge cases', () => {
     const undefinedCases = [
       'const [first] = pair',
       'const method = methods[index++]',
+      'function helper() {}',
       'delete computePayload().from',
       'delete payload[computeKey()]',
       'delete value',
       '+count',
-      'payload.from = computeSender()',
       'computeTarget().enabled = true',
       'total',
-      'return',
       'return computeValue() + 1',
+      'throw computeError().message',
     ]
     for (const source of undefinedCases) expect(actionFrom(source)).toBeUndefined()
   })
 
   it('returns undefined for statements and receivers outside the rule table', () => {
     const sources = [
-      'const first = run(), second = run()',
-      'let result',
-      'const created = new URL(url)',
       'runScenario()',
       'service.findAccount()',
       "suite.skip(true, 'not a Playwright test control')",

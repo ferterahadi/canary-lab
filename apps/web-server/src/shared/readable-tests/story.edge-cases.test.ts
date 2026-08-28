@@ -204,6 +204,68 @@ describe('readable test story flow edge cases', () => {
     expect(items.map((item) => item.text).join('\n')).not.toContain('`')
   })
 
+  it('keeps legacy scope, comma sequences, debugger, and bare returns explicit', () => {
+    const translated = translate(`{
+  with (account) { submit(account) }
+  with (computeAccount()) { submit(account) }
+  with (account) {}
+  prepare(), execute(), verify()
+  debugger
+  const first = 1, second = 2
+  return
+}`)
+
+    const items = storyItems(translated.story?.steps)
+    expect(items.map((item) => item.text)).toEqual([
+      'Run these steps with account as the active scope',
+      'Send the request using account',
+      'Run these steps with the authored object as the active scope',
+      'Send the request using account',
+      'Run these steps in sequence',
+      'Prepare test data',
+      'Execute',
+      'Check the expected outcome',
+      'Pause at the debugger statement',
+      'Set first to 1 and second to 2',
+      'Return without a value',
+    ])
+    expect(items.map((item) => item.source)).toEqual([
+      expect.objectContaining({ startLine: 11, endLine: 11 }),
+      expect.objectContaining({ startLine: 11, endLine: 11 }),
+      expect.objectContaining({ startLine: 12, endLine: 12 }),
+      expect.objectContaining({ startLine: 12, endLine: 12 }),
+      expect.objectContaining({ startLine: 14, endLine: 14 }),
+      expect.objectContaining({ startLine: 14, endLine: 14 }),
+      expect.objectContaining({ startLine: 14, endLine: 14 }),
+      expect.objectContaining({ startLine: 14, endLine: 14 }),
+      expect.objectContaining({ startLine: 15, endLine: 15 }),
+      expect.objectContaining({ startLine: 16, endLine: 16 }),
+      expect.objectContaining({ startLine: 17, endLine: 17 }),
+    ])
+  })
+
+  it('keeps safe values inside an otherwise unresolved array argument', () => {
+    const translated = translate(`{
+  submit([computeValue(), ...extraValues])
+  submit([computeValue(), ...((value) => extraValues)])
+  submit({ regular: computeValue(), [field]: computeValue() })
+  const missing = computeItems().find(predicate)
+  const hiddenProperty = ((value) => value).result
+  const hiddenElementOwner = ((value) => value)[key]
+  const hiddenElementKey = account[(value) => value]
+  if (ready) {}
+  switch (mode) {}
+  expect(total).toBe()
+}`)
+
+    expect(storyItems(translated.story?.steps).map((item) => item.text)).toEqual([
+      'Send the request using a list containing compute value result, all items of extraValues',
+      'Send the request',
+      'Send the request using an object with regular set to compute value result and property named by field set to compute value result',
+      'Set missing to find result from compute items result using predicate',
+    ])
+  })
+
   it('covers mutation variants and conservative destructuring fallbacks', () => {
     const translated = translate(`{
   const tail = rows.pop()

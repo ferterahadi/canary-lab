@@ -5,10 +5,10 @@ export const TIMELINE_CSS = `
    same stack, so it is the one item allowed to read as primary. */
 .agentts-session-label{font-size:11px;font-weight:650;color:var(--text-primary);white-space:nowrap}
 .agentts-mode{display:inline-flex;align-items:center;gap:5px;min-height:18px;padding:1px 6px;border:1px solid var(--border-default);border-radius:var(--radius-sm);color:var(--text-muted);font-size:8.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;line-height:1}
-/* A settled segment is history by definition, and only the last segment is ever
-   live — so the "Live" pill alone carries the distinction. The word stays for a
-   screen reader; the pill leaves the layout rather than repeating the obvious. */
-.agentts-mode[data-live="false"]{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+/* One pill in two tempers, so the header always names what you are reading:
+   a settled segment rests in the muted base style with a still dot, and only the
+   live one takes the running hue and the pulse. */
+.agentts-mode[data-live="false"]{background:color-mix(in srgb,var(--text-muted) 5%,transparent)}
 .agentts-mode[data-live="true"]{border-color:color-mix(in srgb,var(--running) 32%,var(--border-default));color:var(--running);background:color-mix(in srgb,var(--running) 7%,transparent)}
 .agentts-statusdot{width:5px;height:5px;border-radius:var(--radius-sm);background:var(--text-muted);flex:none}
 .agentts-mode[data-live="true"] .agentts-statusdot{background:var(--running);box-shadow:0 0 7px color-mix(in srgb,var(--running) 65%,transparent);animation:agentts-pulse 1.8s ease-in-out infinite}

@@ -709,6 +709,51 @@ describe('specs-coverage mapping — external producer', () => {
     expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')).toContain('@req-R1')
   })
 
+  it('carries no-progress evidence across external authoring and mapping hand-offs', async () => {
+    fullFeature()
+    const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
+    const d = mapDeps({
+      coverage: {
+        compute: (() => ledger(0)) as unknown as never,
+        runEngine: (async () => { throw new Error('runEngine must not run for an external producer') }) as unknown as never,
+      },
+    })
+    const adapter = specsCoverageStage(d)
+
+    const authorOne = await adapter.run(ctx)
+    const authorOneCp = handOffOf(authorOne)
+    setStage('specs-coverage', { checkpoint: (authorOne as Extract<StageOutcome, { kind: 'checkpoint' }>).checkpoint })
+
+    const mapOne = await adapter.onCheckpointResponse!(ctx, { choice: 'submit', token: String(authorOneCp.data.handOffId) })
+    const mapOneCp = handOffOf(mapOne)
+    setStage('specs-coverage', { checkpoint: (mapOne as Extract<StageOutcome, { kind: 'checkpoint' }>).checkpoint })
+
+    const authorTwo = await adapter.onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      token: String(mapOneCp.data.handOffId),
+      data: { mappings: [], unmappable: [{ testName: TEST_NAME, reason: 'no observable requirement applies' }] },
+    })
+    const authorTwoCp = handOffOf(authorTwo)
+    const carriedPass = (authorTwoCp.data.context as { pass: { iteration: number; lastMappedGapSignature?: string } }).pass
+    expect(carriedPass.iteration).toBe(2)
+    expect(carriedPass.lastMappedGapSignature).toEqual(expect.any(String))
+    setStage('specs-coverage', { checkpoint: (authorTwo as Extract<StageOutcome, { kind: 'checkpoint' }>).checkpoint })
+
+    const mapTwo = await adapter.onCheckpointResponse!(ctx, { choice: 'submit', token: String(authorTwoCp.data.handOffId) })
+    const mapTwoCp = handOffOf(mapTwo)
+    setStage('specs-coverage', { checkpoint: (mapTwo as Extract<StageOutcome, { kind: 'checkpoint' }>).checkpoint })
+
+    const stopped = await adapter.onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      token: String(mapTwoCp.data.handOffId),
+      data: { mappings: [], unmappable: [{ testName: TEST_NAME, reason: 'no observable requirement applies' }] },
+    })
+    expect(stopped).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { kind: 'coverage-stuck', data: { stopReason: 'no-progress' } },
+    })
+  })
+
   // The regression that made an external flight unable to clear this step at all.
   // `data` is schema'd `z.unknown()`, so an MCP client may JSON-ENCODE its answer;
   // the prd-summary hand-off two stages earlier decoded that, this one did not, and

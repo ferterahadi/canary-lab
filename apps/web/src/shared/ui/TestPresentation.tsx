@@ -1,24 +1,23 @@
 import { useMemo, useState } from 'react'
 import type { FormattedCodeDisplay, FormattedDisplayLine } from '@shared/code-display-format'
 import type { ExtractedTest, ReadableSource } from '../api/types'
+import type { TestExecutionLineHighlight } from '@/features/runs'
 import { ReadableTestView, type ReadableSourceSelection } from './ReadableTestView'
 import { ShikiCode, SourceOpenShell } from './TestCodeBlock'
-import { storyCodeLineNumbers } from './readable-story-sequence'
+import { storyCodeLineNumbers, storyItemIdForSourceLine } from './readable-story-sequence'
 
 type PresentationMode = 'english' | 'code'
 
 export function TestPresentation({
   test,
   sourceFile,
-  activeLine,
-  runningHighlight,
+  executionHighlight,
   changedLines,
   showOpenButton = true,
 }: {
   test: ExtractedTest
   sourceFile: string
-  activeLine?: number | null
-  runningHighlight?: boolean
+  executionHighlight?: TestExecutionLineHighlight | null
   changedLines?: Set<number>
   showOpenButton?: boolean
 }) {
@@ -33,8 +32,12 @@ export function TestPresentation({
   const code = codeSelection(test, sourceFile, selectedSource?.source)
   const visibleRange = selectedSource?.source ?? code
   const fullTestRange = codeSelection(test, sourceFile, undefined)
-  const displayedActiveLines = showingFullTest
-    ? displayLinesForBodyLines(test, activeLine == null ? undefined : new Set([activeLine]), code.lineMap)
+  const displayedExecutionLines = showingFullTest
+    ? displayLinesForBodyLines(
+        test,
+        executionHighlight ? new Set([executionHighlight.bodyLine]) : undefined,
+        code.lineMap,
+      )
     : undefined
   const displayedChangedLines = showingFullTest
     ? displayLinesForBodyLines(test, changedLines, code.lineMap)
@@ -49,6 +52,12 @@ export function TestPresentation({
       code.endLine,
     )
   }, [code.endLine, code.file, code.startLine, test.readable.story?.steps])
+  const executionSourceLine = executionHighlight
+    ? testBodyLine(test) + executionHighlight.bodyLine - 1
+    : undefined
+  const executionStoryNodeId = executionSourceLine == null || !test.readable.story
+    ? undefined
+    : storyItemIdForSourceLine(test.readable.story.steps, sourceFile, executionSourceLine)
 
   return (
     <div data-testid="test-presentation">
@@ -123,6 +132,9 @@ export function TestPresentation({
               test={test.readable}
               sourceFile={sourceFile}
               selectedNodeId={selectedSource?.id}
+              executionHighlight={executionHighlight && executionStoryNodeId
+                ? { kind: executionHighlight.kind, nodeId: executionStoryNodeId }
+                : undefined}
               onSourceSelect={selectSource}
             />
           </SourceOpenShell>
@@ -132,10 +144,11 @@ export function TestPresentation({
           {code.source ? (
             <ShikiCode
               source={code.source}
-              activeLines={displayedActiveLines}
+              lineHighlight={executionHighlight && displayedExecutionLines
+                ? { kind: executionHighlight.kind, lines: displayedExecutionLines }
+                : undefined}
               sourceLocation={{ file: code.file, startLine: firstMappedSourceLine(code.lineMap) ?? code.startLine }}
               sourceLineMap={code.lineMap}
-              runningHighlight={showingFullTest ? runningHighlight : false}
               changedLines={displayedChangedLines}
               showOpenButton={showOpenButton}
               selectedSourceRange={selectedSource?.source}

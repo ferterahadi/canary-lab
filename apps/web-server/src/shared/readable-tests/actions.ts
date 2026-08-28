@@ -54,11 +54,26 @@ function isRequestReceiver(context: CallContext): boolean {
   return isRequestReceiverExpression(context.receiver)
 }
 
-function safeExpression(node: ts.Expression | undefined, sourceFile: ts.SourceFile): RenderedExpression | undefined {
+function safeExpression(
+  node: ts.Expression | undefined,
+  sourceFile: ts.SourceFile,
+  allowBareZeroArguments = false,
+): RenderedExpression | undefined {
   if (!node) return undefined
   const rendered = renderExpression(node, sourceFile)
-  if (rendered.fidelity !== 'unresolved' || !ts.isCallExpression(node)) return rendered
-  return renderNamedCallResult(node, sourceFile) ?? rendered
+  if (rendered.fidelity !== 'unresolved') return rendered
+  let unwrapped = node
+  while (
+    ts.isAwaitExpression(unwrapped)
+    || ts.isParenthesizedExpression(unwrapped)
+    || ts.isAsExpression(unwrapped)
+    || ts.isTypeAssertionExpression(unwrapped)
+    || ts.isNonNullExpression(unwrapped)
+    || ts.isSatisfiesExpression(unwrapped)
+  ) unwrapped = unwrapped.expression
+  return ts.isCallExpression(unwrapped)
+    ? renderNamedCallResult(unwrapped, sourceFile, { allowBareZeroArguments }) ?? rendered
+    : rendered
 }
 
 function safeOptions(call: ts.CallExpression, start: number, sourceFile: ts.SourceFile): string | null {
@@ -425,9 +440,9 @@ export function renderActionExpression(expression: ts.Expression, sourceFile: ts
   if (ts.isBinaryExpression(expression)) {
     const wording = CALL_FREE_ASSIGNMENT_TEXT.get(expression.operatorToken.kind)
     if (!wording) return undefined
-    const target = renderExpression(expression.left, sourceFile)
-    const value = renderExpression(expression.right, sourceFile)
-    if (target.fidelity === 'unresolved' || value.fidelity === 'unresolved') return undefined
+    const target = safeExpression(expression.left, sourceFile, true)
+    const value = safeExpression(expression.right, sourceFile, true)
+    if (!target || !value || target.fidelity === 'unresolved' || value.fidelity === 'unresolved') return undefined
     return action(wording.replace('{target}', target.text).replace('{value}', value.text))
   }
   return undefined
@@ -435,9 +450,9 @@ export function renderActionExpression(expression: ts.Expression, sourceFile: ts
 
 function renderCallFreeStatement(statement: ts.Statement, sourceFile: ts.SourceFile): RenderedAction | undefined {
   if (ts.isReturnStatement(statement)) {
-    if (!statement.expression) return undefined
-    const value = renderExpression(statement.expression, sourceFile)
-    if (value.fidelity === 'unresolved') return undefined
+    if (!statement.expression) return action('Return without a value')
+    const value = safeExpression(statement.expression, sourceFile, true)
+    if (!value || value.fidelity === 'unresolved') return undefined
     return action(`Return ${value.text}`)
   }
   if (ts.isThrowStatement(statement)) {
@@ -454,14 +469,24 @@ function renderCallFreeStatement(statement: ts.Statement, sourceFile: ts.SourceF
         return action(`Fail with ${renderExpression(message, sourceFile).text}`)
       }
     }
-    return undefined
+    const value = safeExpression(statement.expression, sourceFile, true)
+    return !value || value.fidelity === 'unresolved' ? undefined : action(`Fail by throwing ${value.text}`)
   }
-  if (ts.isVariableStatement(statement) && statement.declarationList.declarations.length === 1) {
-    const declaration = statement.declarationList.declarations[0]
-    if (!ts.isIdentifier(declaration.name) || !declaration.initializer) return undefined
-    const value = renderExpression(declaration.initializer, sourceFile)
-    if (value.fidelity === 'unresolved') return undefined
-    return setup(`Set ${humanizeIdentifier(declaration.name.text)} to ${value.text}`)
+  if (ts.isDebuggerStatement(statement)) return action('Pause at the debugger statement')
+  if (ts.isVariableStatement(statement)) {
+    const declarations = statement.declarationList.declarations.map((declaration) => {
+      if (!ts.isIdentifier(declaration.name)) return undefined
+      if (!declaration.initializer) return `declare ${humanizeIdentifier(declaration.name.text)} without an initial value`
+      const value = safeExpression(declaration.initializer, sourceFile, true)
+      return !value || value.fidelity === 'unresolved'
+        ? undefined
+        : `${humanizeIdentifier(declaration.name.text)} to ${value.text}`
+    })
+    if (declarations.some((declaration) => !declaration)) return undefined
+    if (declarations.length === 1 && declarations[0]?.startsWith('declare ')) {
+      return setup(declarations[0][0].toUpperCase() + declarations[0].slice(1))
+    }
+    return setup(`Set ${declarations.join(' and ')}`)
   }
   return ts.isExpressionStatement(statement)
     ? renderActionExpression(statement.expression, sourceFile)

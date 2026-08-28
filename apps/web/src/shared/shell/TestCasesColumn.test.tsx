@@ -364,7 +364,7 @@ describe('TestCasesColumn', () => {
     expect(container.querySelectorAll('.border-running\\/50')).toHaveLength(2)
   })
 
-  it('shows the amber running-line highlight inside the expanded Code view', async () => {
+  it('moves the runner-owned highlight from the current line to the last failed line in English and Code', async () => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {
         file: '/tmp/features/alpha/e2e/a.spec.ts',
@@ -374,7 +374,34 @@ describe('TestCasesColumn', () => {
             line: 3,
             bodyLine: 5,
             bodySource: "{\n  await test.step('send', async () => {\n    const payload = createPayload()\n    await send(payload)\n  })\n}",
-            readable: readableTest('sends message'),
+            readable: readableTest('sends message', [
+              {
+                id: 'create-payload',
+                kind: 'leaf',
+                role: 'setup',
+                text: 'Create the payload',
+                fidelity: 'derived',
+                source: {
+                  file: '/tmp/features/alpha/e2e/a.spec.ts',
+                  startLine: 7,
+                  endLine: 7,
+                  snippet: 'const payload = createPayload()',
+                },
+              },
+              {
+                id: 'send-payload',
+                kind: 'leaf',
+                role: 'action',
+                text: 'Send the payload',
+                fidelity: 'derived',
+                source: {
+                  file: '/tmp/features/alpha/e2e/a.spec.ts',
+                  startLine: 8,
+                  endLine: 8,
+                  snippet: 'await send(payload)',
+                },
+              },
+            ]),
             steps: [
               {
                 label: 'send',
@@ -413,6 +440,10 @@ describe('TestCasesColumn', () => {
       )
     })
 
+    const runningEnglish = container.querySelector<HTMLElement>('[data-execution-highlight="running"]')
+    expect(runningEnglish?.textContent).toContain('Send the payload')
+    expect(runningEnglish?.getAttribute('style')).toContain('var(--running)')
+
     await act(async () => {
       ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
     })
@@ -420,8 +451,9 @@ describe('TestCasesColumn', () => {
 
     const activeLine = container.querySelector<HTMLElement>('[data-active-line="true"]')
     expect(activeLine?.textContent).toContain('await send(payload)')
-    expect(activeLine?.getAttribute('style')).toContain('var(--warning)')
-    expect(container.textContent).toContain('Latest Playwright step · line 8 · test.step')
+    expect(activeLine?.dataset.executionHighlight).toBe('running')
+    expect(activeLine?.getAttribute('style')).toContain('var(--running)')
+    expect(container.textContent).toContain('Running now · line 8 · test.step')
 
     await act(async () => {
       root.render(
@@ -448,8 +480,42 @@ describe('TestCasesColumn', () => {
       )
     })
     await waitFor(() => container.querySelector('[data-active-line="true"]') === null)
-    expect(container.textContent).toContain('Latest Playwright step · pw:api · source line unavailable')
-    expect(container.textContent).not.toContain('Latest Playwright step · line 8')
+    expect(container.textContent).toContain('Running now · pw:api · source line unavailable')
+    expect(container.textContent).not.toContain('Running now · line 8')
+
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          activeRunStatus="healing"
+          activeRunSummary={{
+            complete: true,
+            total: 1,
+            passed: 0,
+            passedNames: [],
+            failed: [{
+              name: 'test-case-sends-message',
+              location: '/tmp/features/alpha/e2e/a.spec.ts:3:1',
+              locations: ['/tmp/features/alpha/e2e/a.spec.ts:7:5'],
+            }],
+          }}
+        />,
+      )
+    })
+    await waitFor(() => container.querySelector<HTMLElement>('[data-execution-highlight="failed"]')?.textContent?.includes('createPayload') === true)
+
+    const failedCode = container.querySelector<HTMLElement>('[data-execution-highlight="failed"]')
+    expect(failedCode?.dataset.activeLine).toBe('true')
+    expect(failedCode?.getAttribute('style')).toContain('var(--danger)')
+    expect(container.textContent).toContain('Last failed line · line 7')
+
+    await act(async () => {
+      ;(container.querySelector('[data-testid="test-presentation-english-tab"]') as HTMLButtonElement).click()
+    })
+    const failedEnglish = container.querySelector<HTMLElement>('[data-execution-highlight="failed"]')
+    expect(failedEnglish?.textContent).toContain('Create the payload')
+    expect(failedEnglish?.textContent).toContain('FAILED HERE')
+    expect(failedEnglish?.getAttribute('style')).toContain('var(--danger)')
   })
 
   it('rings only the test named in affectedTests, not every card in the spec', async () => {

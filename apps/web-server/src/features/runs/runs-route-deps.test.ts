@@ -821,7 +821,7 @@ describe('startRun — heal mode', () => {
 
     const paths = buildRunPaths(runDirFor(logsDir, runId))
     const prompt = (lastOpts().autoHeal as AutoHealWiring)
-      .buildCyclePrompt({ cycle: 0, outputDir: paths.failedDir })
+      .buildCyclePrompt({ cycle: 1, outputDir: paths.failedDir })
 
     // The repair rule is the product's core guarantee: this run has an editable
     // repo, so the agent must be told to fix the app, not the test.
@@ -849,7 +849,7 @@ describe('startRun — heal mode', () => {
 
     const paths = buildRunPaths(runDirFor(logsDir, runId))
     const prompt = (lastOpts().autoHeal as AutoHealWiring)
-      .buildCyclePrompt({ cycle: 0, outputDir: paths.failedDir })
+      .buildCyclePrompt({ cycle: 1, outputDir: paths.failedDir })
 
     expect(prompt).toContain(MODE_COPY.test.healingDirective)
     expect(prompt).not.toContain(MODE_COPY.service.healingDirective)
@@ -1291,7 +1291,7 @@ describe('restartRun — heal mode', () => {
     // A restarted run is the easiest place for the repair rule to go missing.
     // The seeded manifest carries editable repoPaths, so `service` mode here is
     // read off the run's own evidence.
-    const prompt = autoHeal.buildCyclePrompt({ cycle: 0, outputDir: paths.failedDir })
+    const prompt = autoHeal.buildCyclePrompt({ cycle: 1, outputDir: paths.failedDir })
     expect(prompt).toContain(MODE_COPY.service.healingDirective)
     expect(prompt).not.toContain(MODE_COPY.test.healingDirective)
     // And scoped to the run being restarted, not to some other directory.

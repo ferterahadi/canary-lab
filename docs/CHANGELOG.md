@@ -15,32 +15,31 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 2.1.0 — 2026-08-26
+## 2.1.0 — 2026-08-28
 
-- **[General]** **Playwright tests now open in plain English.** The Test Ledger renders authored steps, actions, checks, branches, helpers, and loops as a nested readable tree. Code remains one click away.
-- **[Coverage]** **Coverage uses the same readable test view.** Selecting any English node reveals its exact source file and line range without changing the ledger's requirement or latest-run evidence.
-- **[General]** **Readable Tests are fast and deterministic.** They are derived from the current JavaScript or TypeScript syntax without an LLM or stored translation. Existing tests gain the view automatically, and unsupported syntax stays visible as exact source instead of being guessed.
+> Run `npx canary-lab upgrade`, then restart connected agent apps, to refresh Canary Lab skills and switch existing connections to the compact profile.
+
+- **[General]** **Playwright tests now open in plain English.** The Test Ledger renders authored steps, actions, checks, helpers, branches, retries, and loops as a nested story derived locally without an LLM, with the original code one click away.
+- **[Coverage]** **Coverage uses the same source-linked test story.** Selecting an English step opens its exact code and editor location—even inside a helper file—while unsupported syntax stays visible as source instead of being guessed.
+- **[Coverage]** **Coverage passes focus on the gaps still open.** Flight validates each authored batch, asks the mapper only about requirements that remain uncovered, preserves every pass in Activity, and stores the exact coverage percentage for stable status updates.
+- **[General]** **Reports arrive before Parallel setup.** Flight runs the tests, repairs failures, and creates the downloadable report first; Parallel setup then finishes independently and can be retried without deleting that evidence.
+- **[General]** **Flight keeps the full agent-work timeline.** Activity separates every authoring and mapping session in order, retains earlier passes across reloads, and records work performed in an external Claude or Codex conversation.
+- **[General]** **Agent connections now load one compact tool.** The default `exec` connection keeps every Canary Lab command available while reducing the tool context carried in normal agent conversations.
 
 ---
 
-## 2.0.1 — 2026-08-25
-
-- **[General]** **Getting started now begins in Claude or Codex.** The README leads with `/canary-lab` and keeps npm commands for one-time setup and terminal automation.
-
----
-
-## 2.0.0 — 2026-08-25
+## 2.0.x — 2026-08-25
 
 > **Upgrading from 1.5.x:** install Node 22.12+, run `npm install --save-dev canary-lab@2 && npx canary-lab upgrade`, then restart Canary Lab and connected agent apps.
 
 - **[General]** **Flight is now the main workflow.** It guides a repo through seven steps: scan, setup, requirements, test authoring and coverage, parallel readiness, test run, and evaluation report.
   - Start from the UI by choosing repos and describing what to test, or run `npx canary-lab flight <repo...> "<what to test>"`.
   - Review the generated config, link requirement documents, and choose a fast or rewritten evaluation report.
-  - Pause, resume, stop, or restart a flight. Autopilot can answer routine checkpoints, while secrets and failed runs still require a decision.
-  - A broad request can create several queued flights. Features can also be grouped in the Flights list.
-  - Repos and the test description stay fixed after a flight starts. Delete the stopped flight to begin again with different inputs.
-- **[General]** **Flight replaces the standalone Add Test and Portify pages.** Test authoring and parallel setup now live inside the flight. The Flights view shows progress, evidence, checkpoints, agent activity, and run controls in one place.
-- **[General]** **Agents can manage flights through MCP.** Connected clients can start a flight, read its state, answer checkpoints, and link local requirement documents.
+  - Pause, resume, stop, or restart a Flight. Autopilot can answer routine checkpoints, while secrets and failed runs still require a decision.
+  - A broad request can create several queued Flights. Features can also be grouped in the Flights list.
+  - Repos and the test description stay fixed after a Flight starts. Delete the stopped Flight to begin again with different inputs.
+- **[General]** **Flight replaces the standalone Add Test and Portify pages.** Test authoring and parallel setup now live inside Flight. The Flights view shows progress, evidence, checkpoints, agent activity, and run controls in one place.
+- **[General]** **Agents can manage Flights through MCP.** Connected clients can start a Flight, read its state, answer checkpoints, and link local requirement documents.
 - **[Test Runner]** **Repairs no longer edit your checkout.** Each run uses a temporary Git worktree. Canary Lab saves the repair as a patch under `logs/runs/<runId>/fixes/`, then removes the temporary copy. Portified runs keep the worktree so you can review it from Cleanup.
 - **[Test Runner]** **Healing is safer when more than one Canary Lab process is open.** A second process no longer marks a live repair as aborted, and a repair stops cleanly if another process finishes the run.
 

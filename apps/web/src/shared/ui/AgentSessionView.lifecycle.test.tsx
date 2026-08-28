@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentSessionView, pendingWork } from './AgentSessionView'
+import { TIMELINE_CSS } from './agent-session-css'
 
 const mocks = vi.hoisted(() => ({
   getAgentSession: vi.fn(),
@@ -154,6 +155,10 @@ describe('AgentSessionView lifecycle presentation', () => {
     await render(false)
 
     expect(container.querySelector('[data-testid="agent-session-mode"]')?.textContent).toBe('History')
+    // The settled pill is on screen, not screen-reader-only: it is the only
+    // thing in the header that says whether you are watching or replaying.
+    expect(container.querySelector('[data-testid="agent-session-mode"] .agentts-statusdot')).not.toBeNull()
+    expect(TIMELINE_CSS).not.toMatch(/\.agentts-mode\[data-live="false"\][^}]*clip-path/)
     expect(container.querySelector('[data-testid="agent-session-live-tail"]')).toBeNull()
     expect(mocks.connectAgentSessionStream).not.toHaveBeenCalled()
   })

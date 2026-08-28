@@ -20,6 +20,8 @@ returning `NOTHING_FOUND`.
 How to work:
 - Run `git diff --stat <base>...HEAD`, then the full diff. Read complete files when needed.
 - Derive what the change set means for a USER of the feature: new behaviors, changed flows, new inputs/outputs, error paths, permissions. Skip refactors, formatting, and changes unrelated to the intent.
+- Treat an explicit scope statement (for example, "these are the whole feature") as authoritative. Do not promote incidental code or config outside that scope into a behavior.
+- Keep service setup facts out of this requirements document: fixed or hardcoded ports, start commands, env-file or env-var loading (including their absence), process topology, and bootstrap wiring belong to Repo scan and Parallel setup, not the coverage ledger. A diff that changes one is setup evidence, not a new E2E requirement.
 - Write the result to exactly this path (create it, overwrite if present):
   {{outPath}}
 - Shape the doc as requirement statements a test author can verify, grouped under short headings. Under each group, cite the changed files (repo-relative paths) the requirement was derived from.

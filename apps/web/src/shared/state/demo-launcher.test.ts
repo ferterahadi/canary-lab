@@ -6,6 +6,7 @@ import {
   DEMO_FLIGHT_STAGE,
   demoFlightLaunch,
   deriveDemoAvailability,
+  deriveGettingStartedRunSession,
   readDemoSeen,
   writeDemoSeen,
   type DemoInput,
@@ -127,6 +128,106 @@ describe('Getting Started Flight destinations', () => {
       kind: 'open',
       flightId: 'fl_1',
     })
+  })
+})
+
+describe('Getting Started Run state', () => {
+  const workflows = [
+    {
+      id: 'run',
+      internalAction: { kind: 'run', feature: 'storefront-journey' },
+    },
+    {
+      id: 'heal',
+      internalAction: { kind: 'heal', feature: 'workflow-workbench' },
+    },
+    {
+      id: 'coverage',
+      internalAction: { kind: 'coverage', feature: 'workflow-workbench' },
+    },
+    {
+      id: 'flight',
+      internalAction: null,
+    },
+  ] as OnboardingSamples['workflows']
+
+  it('recovers the latest completed result from the live run index', () => {
+    expect(deriveGettingStartedRunSession(
+      { active: null, completed: {} },
+      workflows,
+      [run({ runId: 'r-passed', status: 'passed', endedAt: '2026-08-11T00:01:00.000Z' })],
+    )).toEqual({
+      active: null,
+      completed: {
+        run: {
+          workflow: 'run',
+          owner: 'internal',
+          target: { kind: 'run', id: 'r-passed' },
+          status: 'passed',
+          startedAt: '2026-08-11T00:00:00.000Z',
+          endedAt: '2026-08-11T00:01:00.000Z',
+        },
+      },
+    })
+  })
+
+  it('shows the newest active catalogued suite and ignores non-run sessions', () => {
+    const session = deriveGettingStartedRunSession(
+      { active: null, completed: {} },
+      workflows,
+      [
+        run({ runId: 'r-old', status: 'running' }),
+        run({ runId: 'r-heal', feature: 'workflow-workbench', status: 'healing', startedAt: '2026-08-11T00:02:00.000Z' }),
+        run({ runId: 'r-verify', status: 'running', executionType: 'verify', startedAt: '2026-08-11T00:03:00.000Z' }),
+        run({ runId: 'r-boot', status: 'running', executionType: 'boot', startedAt: '2026-08-11T00:03:30.000Z' }),
+        run({ runId: 'r-other', feature: 'checkout', status: 'running', startedAt: '2026-08-11T00:04:00.000Z' }),
+      ],
+    )
+    expect(session.active).toMatchObject({
+      workflow: 'heal',
+      target: { kind: 'run', id: 'r-heal' },
+    })
+  })
+
+  it('settles a linked active card on the terminal run frame', () => {
+    const session = deriveGettingStartedRunSession(
+      {
+        active: {
+          sessionId: 'gs-1',
+          workflow: 'run',
+          owner: 'external',
+          target: { kind: 'run', id: 'r1' },
+          startedAt: '2026-08-11T00:00:00.000Z',
+          updatedAt: '2026-08-11T00:00:10.000Z',
+        },
+        completed: {},
+      },
+      workflows,
+      [run({ status: 'passed', endedAt: '2026-08-11T00:01:00.000Z' })],
+    )
+    expect(session.active).toBeNull()
+    expect(session.completed.run).toMatchObject({
+      owner: 'external',
+      status: 'passed',
+      target: { kind: 'run', id: 'r1' },
+    })
+  })
+
+  it('does not replace newer durable completion evidence with older history', () => {
+    const newer = {
+      workflow: 'run' as const,
+      owner: 'external' as const,
+      target: { kind: 'run' as const, id: 'r-newer' },
+      status: 'failed',
+      startedAt: '2026-08-11T00:05:00.000Z',
+      endedAt: '2026-08-11T00:06:00.000Z',
+    }
+    const session = deriveGettingStartedRunSession(
+      { active: null, completed: { run: newer } },
+      workflows,
+      [run({ status: 'passed', endedAt: '2026-08-11T00:01:00.000Z' })],
+    )
+    expect(session.completed.run).toBe(newer)
   })
 })
 

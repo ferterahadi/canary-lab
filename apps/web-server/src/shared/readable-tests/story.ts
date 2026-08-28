@@ -218,10 +218,15 @@ function storyObjectArgument(
   const properties: string[] = []
   for (const property of object.properties) {
     if (ts.isPropertyAssignment(property)) {
-      const name = propertyName(property.name)
+      const computedName = ts.isComputedPropertyName(property.name)
+        ? storyArgument(property.name.expression, sourceFile)
+        : undefined
+      const name = computedName
+        ? `property named by ${computedName}`
+        : propertyName(property.name)
       const value = storyArgument(property.initializer, sourceFile)
       if (!name || !value) return undefined
-      properties.push(`${ts.isIdentifier(property.name) ? humanizeIdentifier(name) : name} set to ${value}`)
+      properties.push(`${computedName || !ts.isIdentifier(property.name) ? name : humanizeIdentifier(name)} set to ${value}`)
       continue
     }
     if (ts.isShorthandPropertyAssignment(property)) {
@@ -263,6 +268,15 @@ function storyArgument(
     || ts.isNonNullExpression(expression)
     || ts.isSatisfiesExpression(expression)
   ) expression = expression.expression
+  if (ts.isPropertyAccessExpression(expression)) {
+    const owner = storyArgument(expression.expression, sourceFile)
+    return owner ? `${owner} ${humanizeIdentifier(expression.name.text)}` : undefined
+  }
+  if (ts.isElementAccessExpression(expression)) {
+    const owner = storyArgument(expression.expression, sourceFile)
+    const key = storyArgument(expression.argumentExpression, sourceFile)
+    return owner && key ? `${owner} at ${key}` : undefined
+  }
   if (ts.isCallExpression(expression)) {
     const rendered = renderExpression(expression, sourceFile)
     if (rendered.fidelity !== 'unresolved') return rendered.text
@@ -277,10 +291,34 @@ function storyArgument(
       const using = arguments_.length && arguments_.every((value): value is string => Boolean(value))
         ? ` using ${readableList(arguments_)}`
         : ''
-      return `${humanizeIdentifier(name)} result${using}`
+      const receiver = ts.isPropertyAccessExpression(expression.expression)
+        ? storyArgument(expression.expression.expression, sourceFile)
+        : undefined
+      return `${humanizeIdentifier(name)} result${receiver ? ` from ${receiver}` : ''}${using}`
     }
   }
   const rendered = renderExpression(argument, sourceFile)
+  if (rendered.fidelity === 'unresolved' && ts.isTemplateExpression(expression)) {
+    let text = expression.head.text
+    for (const span of expression.templateSpans) {
+      const value = storyArgument(span.expression, sourceFile)
+      if (!value) return undefined
+      text += `{${value}}${span.literal.text}`
+    }
+    return quoteReadableText(text)
+  }
+  if (rendered.fidelity === 'unresolved' && ts.isArrayLiteralExpression(expression)) {
+    const elements = expression.elements.map((element) => {
+      if (ts.isSpreadElement(element)) {
+        const spread = storyArgument(element.expression, sourceFile)
+        return spread ? `all items of ${spread}` : undefined
+      }
+      return storyArgument(element, sourceFile)
+    })
+    return elements.every((element): element is string => Boolean(element))
+      ? `a list containing ${elements.join(', ')}`
+      : undefined
+  }
   if (rendered.fidelity === 'unresolved' && ts.isObjectLiteralExpression(expression)) {
     return storyObjectArgument(expression, sourceFile)
   }
@@ -356,6 +394,23 @@ function variableTemplateDescription(
     text: `Set ${exactIdentifierText(declaration.name.text)} to text made from ${readableList(parts)}`,
     fidelity: 'derived',
   }
+}
+
+function variableValueDescription(
+  statement: ts.Statement,
+  sourceFile: ts.SourceFile,
+): StoryDescription | undefined {
+  if (!ts.isVariableStatement(statement) || statement.declarationList.declarations.length !== 1) return undefined
+  const declaration = statement.declarationList.declarations[0]
+  if (!ts.isIdentifier(declaration.name) || !declaration.initializer) return undefined
+  const value = storyArgument(declaration.initializer, sourceFile)
+  return value
+    ? {
+        role: 'setup',
+        text: `Set ${exactIdentifierText(declaration.name.text)} to ${value}`,
+        fidelity: 'derived',
+      }
+    : undefined
 }
 
 function collectionLookupDescription(
@@ -1144,6 +1199,33 @@ export function storyCandidates(
     }, children)
   }
 
+  function sequenceExpressionCandidate(
+    statement: ts.Statement,
+    path: number[],
+    options: WalkOptions,
+  ): StoryFlowCandidate | undefined {
+    if (!ts.isExpressionStatement(statement)) return undefined
+    const expressions: ts.Expression[] = []
+    const collect = (expression: ts.Expression): void => {
+      if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+        collect(expression.left)
+        collect(expression.right)
+        return
+      }
+      expressions.push(expression)
+    }
+    collect(statement.expression)
+    if (expressions.length < 2) return undefined
+    const children = expressions.flatMap((expression, index) => (
+      expressionCandidates(expression, [...path, index], options)
+    ))
+    return flowCandidate(statement, path, 'scope', {
+      role: 'action',
+      text: 'Run these steps in sequence',
+      fidelity: 'derived',
+    }, children)
+  }
+
   function conditionalExpressionCandidate(
     statement: ts.Statement,
     path: number[],
@@ -1244,6 +1326,18 @@ export function storyCandidates(
     }
     if (ts.isLabeledStatement(statement)) {
       return walkStatement(statement.statement, [...path, 0], options)
+    }
+    if (ts.isWithStatement(statement)) {
+      const scope = renderExpression(statement.expression, sourceFile)
+      const children = walkStatement(statement.statement, [...path, 0], options)
+      const flow = flowCandidate(statement, path, 'scope', {
+        role: 'action',
+        text: scope.fidelity === 'unresolved'
+          ? 'Run these steps with the authored object as the active scope'
+          : `Run these steps with ${scope.text} as the active scope`,
+        fidelity: 'derived',
+      }, children)
+      return flow ? [flow] : []
     }
     if (ts.isIfStatement(statement)) {
       const paths = [
@@ -1401,6 +1495,9 @@ export function storyCandidates(
     const conditional = conditionalExpressionCandidate(statement, path, options)
     if (conditional) return [conditional]
 
+    const sequence = sequenceExpressionCandidate(statement, path, options)
+    if (sequence) return [sequence]
+
     const shortCircuit = shortCircuitCandidate(statement, path, options)
     if (shortCircuit) return [shortCircuit]
 
@@ -1427,6 +1524,7 @@ export function storyCandidates(
     const mutation = call && collectionMutationDescription(statement, call, sourceFile)
     const destructuring = destructuringDescription(statement, sourceFile)
     const templateDescription = variableTemplateDescription(statement, sourceFile)
+    const valueDescription = variableValueDescription(statement, sourceFile)
     const description = mapping
       ?? templateDescription
       ?? lookupDescription
@@ -1435,6 +1533,7 @@ export function storyCandidates(
       ?? renderedDescription
       ?? requestDescription
       ?? genericDescription
+      ?? valueDescription
 
     if (call) {
       const callbacks = callbackArgumentsFor(call)

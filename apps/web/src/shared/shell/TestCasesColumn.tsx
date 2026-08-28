@@ -3,13 +3,14 @@ import * as api from '../api/client'
 import { useInvalidationKey } from '../state/invalidation'
 import type { DirtySpecSummary, ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
 import {
-  activeBodyLineForTest,
   colorClassForStatus,
+  executionLineHighlightForTest,
   runningTestForTest,
   sameSourceFile,
   sourceLineForBodyLine,
   statusForTest,
   type StepStatus,
+  type TestExecutionLineHighlight,
   type TestStatusIdentity,
   summaryEntryName,
 } from '@/features/runs'
@@ -21,6 +22,7 @@ import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../t
 import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
 
 type DirtyDiff = { name: string; changedLines: number[] }[]
+type TestCardExecutionHighlight = TestExecutionLineHighlight & { sourceLine: number }
 
 interface ExpandedTestSelection {
   feature: string
@@ -190,19 +192,23 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
                   : undefined
                 const isRunningTest = Boolean(runningTest)
                 const bodyStartLine = t.bodyLine ?? t.line
-                const activeLine = activeBodyLineForTest({
+                const executionLine = executionLineHighlightForTest({
                   testName: t.name,
                   testId: testIdentity.id,
                   allowNameFallback: testIdentity.allowNameFallback,
                   testLine: t.line,
                   bodyLine: bodyStartLine,
                   bodySource: t.bodySource,
-                  summary: isRunActivelyTesting ? activeRunSummary : undefined,
+                  summary: activeRunSummary,
                   sourceFile,
+                  isRunActivelyTesting,
                 })
-                const activeSourceLine = activeLine == null
-                  ? null
-                  : sourceLineForBodyLine(bodyStartLine, activeLine)
+                const executionHighlight: TestCardExecutionHighlight | undefined = executionLine
+                  ? {
+                      ...executionLine,
+                      sourceLine: sourceLineForBodyLine(bodyStartLine, executionLine.bodyLine),
+                    }
+                  : undefined
                 return (
                   <TestCard
                     key={key}
@@ -212,8 +218,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
                     status={statusForTest(testIdentity, activeRunSummary, isRunActivelyTesting)}
                     isRunningTest={isRunningTest}
                     runningStep={runningTest?.step}
-                    activeLine={activeLine}
-                    activeSourceLine={activeSourceLine}
+                    executionHighlight={executionHighlight}
                     expanded={isExpanded}
                     dirty={testDirty}
                     changedLines={changedLines}
@@ -277,8 +282,7 @@ function TestCard({
   status,
   isRunningTest,
   runningStep,
-  activeLine,
-  activeSourceLine,
+  executionHighlight,
   expanded,
   dirty = false,
   changedLines,
@@ -290,8 +294,7 @@ function TestCard({
   status: StepStatus
   isRunningTest: boolean
   runningStep?: RunSummaryRunningStep
-  activeLine?: number | null
-  activeSourceLine?: number | null
+  executionHighlight?: TestCardExecutionHighlight
   expanded: boolean
   dirty?: boolean
   /** Lines in `test.bodySource` that differ from the git HEAD version — see
@@ -299,6 +302,16 @@ function TestCard({
   changedLines?: Set<number>
   onToggle: () => void
 }) {
+  const lineColor = executionHighlight?.kind === 'failed' ? 'var(--danger)' : 'var(--running)'
+  const lineMessage = executionHighlight?.kind === 'failed'
+    ? `Last failed line · line ${executionHighlight.sourceLine}`
+    : executionHighlight
+      ? `Running now · line ${executionHighlight.sourceLine}${runningStep?.category ? ` · ${runningStep.category}` : ''}`
+      : isRunningTest
+        ? runningStep?.category
+          ? `Running now · ${runningStep.category} · source line unavailable`
+          : 'Running test · source line unavailable'
+        : undefined
   return (
     <div
       className={`cl-card cl-card-hover transition-all duration-150 ${colorClassForStatus(status)}`}
@@ -345,33 +358,27 @@ function TestCard({
       </button>
       {expanded && (
         <div className="space-y-2 px-3 pb-3">
-          {isRunningTest && (
+          {lineMessage && (
             <div
               className="rounded-md border px-2 py-1 text-[10px]"
               style={{
                 color: 'var(--text-secondary)',
-                borderColor: isRunningTest
-                  ? 'var(--warning)'
-                  : 'color-mix(in srgb, var(--accent) 40%, transparent)',
-                background: isRunningTest ? 'color-mix(in srgb, var(--warning) 15%, transparent)' : 'var(--accent-soft)',
+                borderColor: lineColor,
+                background: `color-mix(in srgb, ${lineColor} 14%, transparent)`,
                 fontFamily: 'var(--font-mono)',
               }}
             >
-              {activeSourceLine != null
-                ? `Latest Playwright step · line ${activeSourceLine}${runningStep?.category ? ` · ${runningStep.category}` : ''}`
-                : runningStep?.category
-                  ? `Latest Playwright step · ${runningStep.category} · source line unavailable`
-                  : 'Running test · source line unavailable'}
+              {lineMessage}
             </div>
           )}
           <div
             style={
-              isRunningTest && activeLine == null
+              isRunningTest && executionHighlight == null
                 ? {
                     borderRadius: 6,
                     padding: 2,
-                    background: 'color-mix(in srgb, var(--warning) 12%, transparent)',
-                    boxShadow: 'inset 0 0 0 1px var(--warning), inset 3px 0 0 var(--warning)',
+                    background: 'color-mix(in srgb, var(--running) 12%, transparent)',
+                    boxShadow: 'inset 0 0 0 1px var(--running), inset 3px 0 0 var(--running)',
                   }
                 : undefined
             }
@@ -379,8 +386,7 @@ function TestCard({
             <TestPresentation
               test={test}
               sourceFile={sourceFile}
-              activeLine={activeLine}
-              runningHighlight={isRunningTest}
+              executionHighlight={executionHighlight}
               changedLines={changedLines}
             />
           </div>

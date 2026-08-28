@@ -118,13 +118,28 @@ function parseExpectation(call: ts.CallExpression): Expectation | undefined {
   }
 }
 
+function renderCallAwareExpression(expression: ts.Expression, sourceFile: ts.SourceFile): RenderedExpression {
+  const rendered = renderExpression(expression, sourceFile)
+  if (rendered.fidelity !== 'unresolved') return rendered
+  let unwrapped = expression
+  while (
+    ts.isAwaitExpression(unwrapped)
+    || ts.isParenthesizedExpression(unwrapped)
+    || ts.isAsExpression(unwrapped)
+    || ts.isTypeAssertionExpression(unwrapped)
+    || ts.isNonNullExpression(unwrapped)
+    || ts.isSatisfiesExpression(unwrapped)
+  ) unwrapped = unwrapped.expression
+  return ts.isCallExpression(unwrapped)
+    ? renderNamedCallResult(unwrapped, sourceFile, { allowBareZeroArguments: true }) ?? rendered
+    : rendered
+}
+
 function renderSubject(actual: ts.Expression, sourceFile: ts.SourceFile): RenderedExpression {
   const locator = renderLocator(actual, sourceFile)
   if (locator) return locator
   if (ts.isIdentifier(actual) && actual.text === 'page') return { text: 'the page', fidelity: 'derived' }
-  const rendered = renderExpression(actual, sourceFile)
-  if (rendered.fidelity !== 'unresolved' || !ts.isCallExpression(actual)) return rendered
-  return renderNamedCallResult(actual, sourceFile) ?? rendered
+  return renderCallAwareExpression(actual, sourceFile)
 }
 
 function renderExpectationSubject(expectation: Expectation, sourceFile: ts.SourceFile): RenderedExpression {
@@ -167,9 +182,9 @@ function renderPropertyExpectation(
     return fallback(expectation.matcherCall, sourceFile)
   }
   const subject = renderExpectationSubject(expectation, sourceFile)
-  const property = renderExpression(expectation.matcherCall.arguments[0], sourceFile)
+  const property = renderCallAwareExpression(expectation.matcherCall.arguments[0], sourceFile)
   const expectedNode = expectation.matcherCall.arguments[1]
-  const expected = expectedNode && renderExpression(expectedNode, sourceFile)
+  const expected = expectedNode && renderCallAwareExpression(expectedNode, sourceFile)
   if (subject.fidelity === 'unresolved' || property.fidelity === 'unresolved' || expected?.fidelity === 'unresolved') {
     return fallback(expectation.matcherCall, sourceFile)
   }
@@ -238,7 +253,7 @@ function renderThrowExpectation(
   if (expectation.matcher !== 'toThrow' && expectation.matcher !== 'toThrowError') return undefined
   if (expectation.matcherCall.arguments.length > 1) return fallback(expectation.matcherCall, sourceFile)
   const expectedNode = expectation.matcherCall.arguments[0]
-  const expected = expectedNode && renderExpression(expectedNode, sourceFile)
+  const expected = expectedNode && renderCallAwareExpression(expectedNode, sourceFile)
   if (expected?.fidelity === 'unresolved') return fallback(expectation.matcherCall, sourceFile)
   const expectedText = expectedNode && ts.isIdentifier(expectedNode)
     ? ` of type ${expectedNode.text}`
@@ -277,7 +292,7 @@ function renderGenericExpectation(
   sourceFile: ts.SourceFile,
 ): RenderedAssertion {
   const subject = renderExpectationSubject(expectation, sourceFile)
-  const arguments_ = expectation.matcherCall.arguments.map((argument) => renderExpression(argument, sourceFile))
+  const arguments_ = expectation.matcherCall.arguments.map((argument) => renderCallAwareExpression(argument, sourceFile))
   if (subject.fidelity === 'unresolved' || arguments_.some((argument) => argument.fidelity === 'unresolved')) {
     return fallback(expectation.matcherCall, sourceFile)
   }
@@ -464,9 +479,9 @@ export function renderAssertionStatement(statement: ts.Statement, sourceFile: ts
   if (call.arguments.length < rule.expectedArguments) return fallback(call, sourceFile)
 
   const subject = renderExpectationSubject(expectation, sourceFile)
-  const expected = rule.expectedArguments === 1 ? renderExpression(call.arguments[0], sourceFile) : undefined
+  const expected = rule.expectedArguments === 1 ? renderCallAwareExpression(call.arguments[0], sourceFile) : undefined
   const optionStart = rule.expectedArguments
-  const options = call.arguments.slice(optionStart).map((argument) => renderExpression(argument, sourceFile))
+  const options = call.arguments.slice(optionStart).map((argument) => renderCallAwareExpression(argument, sourceFile))
   if (
     subject.fidelity === 'unresolved'
     || expected?.fidelity === 'unresolved'

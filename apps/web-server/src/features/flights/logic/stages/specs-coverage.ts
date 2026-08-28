@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
+import { createHash } from 'crypto'
 import { applyExternalCoverageMappings, buildCoverageMappingContext, computeFeatureCoverage, LEGACY_MAPPINGS_JSON, runCoverageEngine } from '../../../coverage/logic/coverage/service'
 import { IncompleteCoverageAnswerError, missingFromRoster, parseMappingSubmission } from '../../../coverage/logic/coverage/external-submissions'
 import { COVERAGE_STATE_JSON } from '../../../coverage/logic/coverage/run-state'
@@ -27,8 +28,10 @@ import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../types'
 // the harness-computed coverage meets the target (default 100% — no untested /
 // path-incomplete / variant-incomplete). Validation errors feed the NEXT
 // iteration's prompt so the agent repairs broken specs instead of the loop
-// silently burning rounds. Bounded: when the loop can't close the remaining
-// gaps it parks on coverage-stuck instead of spinning.
+// silently burning rounds. Bounded: an identical harness-computed gap result
+// across two mapped passes stops immediately; changing open cells can continue
+// up to the hard pass cap. Either case parks on coverage-stuck instead of
+// spinning.
 //
 // Under an external stageProducer BOTH agent jobs hand off, sequentially: the
 // authoring park releases into validation, and a validated batch parks a
@@ -42,6 +45,8 @@ const MAX_VALIDATION_ERROR_CHARS = 4 * 1024
 const PLAYWRIGHT_LIST_TIMEOUT_MS = 60_000
 const TSC_TIMEOUT_MS = 120_000
 
+type CoverageStopReason = 'no-progress' | 'max-passes'
+
 interface GapRow {
   id: string
   title: string
@@ -54,12 +59,57 @@ function gapRows(ledger: CoverageLedger): GapRow[] {
     .map((r) => ({ id: r.requirement.id, title: r.requirement.title, gap: r.gapType }))
 }
 
+/** Stable signature of what remains to cover. Coverage can stay at the same
+ *  whole-requirement percentage while a partial requirement gains a path or
+ *  variant cell, so the comparison includes those open cells rather than only
+ *  the headline number. Run-proof and test-strength fields are intentionally
+ *  absent: they do not change the authored-coverage gap this loop can close. */
+function coverageGapSignature(ledger: CoverageLedger): string {
+  const gaps = ledger.requirements
+    .filter((entry) => entry.gapType !== 'covered')
+    .map((entry) => ({
+      id: entry.requirement.id,
+      gapType: entry.gapType,
+      paths: (entry.pathCoverage ?? [])
+        .filter((cell) => !cell.covered)
+        .map((cell) => cell.path)
+        .sort(),
+      variants: (entry.variantCoverage ?? [])
+        .filter((cell) => cell.applicable !== false && !cell.covered)
+        .map((cell) => `${cell.path}:${cell.variant}`)
+        .sort(),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+  return createHash('sha256')
+    .update(JSON.stringify({ coveragePct: ledger.coveragePct, gaps }))
+    .digest('hex')
+}
+
 function targetMet(ledger: CoverageLedger, target: number): boolean {
   return ledger.coveragePct >= target
 }
 
-function ledgerEvidence(ledger: CoverageLedger): unknown {
+function ledgerEvidence(ledger: CoverageLedger) {
   return { coveragePct: ledger.coveragePct, totals: ledger.totals, gaps: gapRows(ledger) }
+}
+
+function coverageStuckOutcome(
+  ledger: CoverageLedger,
+  target: number,
+  reason: CoverageStopReason,
+): StageOutcome {
+  const message = reason === 'no-progress'
+    ? `Coverage stayed at ${ledger.coveragePct}% with the same ${gapRows(ledger).length} open gap(s) across two mapped passes. Accept the gaps that are left, or retry after changing the requirements or tests.`
+    : `After ${MAX_ITERATIONS} passes, coverage is ${ledger.coveragePct}% (target ${target}%). Accept the gaps that are left, or try another pass.`
+  return {
+    kind: 'checkpoint',
+    checkpoint: {
+      kind: 'coverage-stuck',
+      message,
+      options: [...CHECKPOINT_OPTIONS['coverage-stuck']],
+      data: { ...ledgerEvidence(ledger), stopReason: reason },
+    },
+  }
 }
 
 export function buildSpecsPrompt(args: {
@@ -177,6 +227,11 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     iteration: number
     validationErrors: string
     passes: SpecsCoveragePass[]
+    /** Last harness-computed post-mapping result, carried through external
+     *  checkpoints so local and client-produced passes converge identically. */
+    lastMappedGapSignature?: string
+    /** True only for the next runPass call after an identical mapped result. */
+    repeatedMappedGap?: boolean
   }
 
   const FIRST_PASS: PassState = { iteration: 1, validationErrors: '', passes: [] }
@@ -257,9 +312,10 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
   }
 
   const bumpPass = (state: PassState, over: Partial<PassState>): PassState => ({
+    ...state,
     iteration: state.iteration + 1,
     validationErrors: '',
-    passes: state.passes,
+    repeatedMappedGap: false,
     ...over,
   })
 
@@ -274,7 +330,12 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     const m = ctx.manifest()
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
     const mapped = compute(m.feature)
-    const next = bumpPass(state, { passes: [...state.passes, { pass: state.iteration, coveragePct: mapped.coveragePct, gapsOpen: gapRows(mapped).length }] })
+    const mappedGapSignature = coverageGapSignature(mapped)
+    const next = bumpPass(state, {
+      passes: [...state.passes, { pass: state.iteration, coveragePct: mapped.coveragePct, gapsOpen: gapRows(mapped).length }],
+      lastMappedGapSignature: mappedGapSignature,
+      repeatedMappedGap: state.lastMappedGapSignature === mappedGapSignature,
+    })
     // Settle the pass in the published shape (phase stays 'mapping' — the next
     // pass head flips it to 'authoring' if another one starts).
     publishProgress(ctx, mapped, prep.target, { ...state, passes: next.passes }, 'mapping')
@@ -424,19 +485,12 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     if (!prep.ok) return prep.outcome
     const m = ctx.manifest()
     if (targetMet(ledger, prep.target)) return { kind: 'done', evidence: ledgerEvidence(ledger) }
+    if (state.repeatedMappedGap) {
+      ctx.appendLog(`[specs] stopping early: coverage and open gaps repeated after mapping (${ledger.coveragePct}%)\n`)
+      return coverageStuckOutcome(ledger, prep.target, 'no-progress')
+    }
     if (state.iteration > MAX_ITERATIONS) {
-      return {
-        kind: 'checkpoint',
-        checkpoint: {
-          kind: 'coverage-stuck',
-          // "passes", not "authoring rounds": the Passes card beside this
-          // checkpoint and the live state line both count the same loop in
-          // passes — one loop, one word.
-          message: `After ${MAX_ITERATIONS} passes, coverage is ${ledger.coveragePct}% (target ${prep.target}%). Accept the gaps that are left, or try another pass.`,
-          options: [...CHECKPOINT_OPTIONS['coverage-stuck']],
-          data: ledgerEvidence(ledger),
-        },
-      }
+      return coverageStuckOutcome(ledger, prep.target, 'max-passes')
     }
 
     ctx.appendLog(`[specs] iteration ${state.iteration}: ${ledger.coveragePct}% / ${prep.target}% — ${gapRows(ledger).length} gap(s)\n`)

@@ -38,7 +38,7 @@ describe('auto-heal branch edge cases', () => {
   it('buildOrchestratorHealPrompt: runDirRel falls back to runDir when projectRoot === runDir', () => {
     const runDir = tmp
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot: runDir, runDir })
-    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const prompt = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     // Renders `<runDir> (`<runDir>` from the project root)` — RHS of the `||`.
     expect(prompt).toContain(`Run directory:\n- \`${runDir}\` (\`${runDir}\` from the project root)`)
   })
@@ -110,7 +110,7 @@ describe('auto-heal branch edge cases', () => {
       runDir,
       promptPath: templatePath,
     })
-    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const prompt = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain(`Run dir: ${runDir}`)
     expect(prompt).toContain('tail line')
     // The unknown-key placeholder line is kept, left verbatim.
@@ -181,7 +181,7 @@ describe('auto-heal branch edge cases', () => {
     fs.mkdirSync(runDir, { recursive: true })
     writeRunManifest(runDir, {})
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot: tmp, runDir })
-    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    const prompt = build({ cycle: 1, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain('This feature has no editable service repos')
   })
 })

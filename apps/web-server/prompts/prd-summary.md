@@ -23,11 +23,20 @@ Do not turn sections about **why** or **how** into requirements:
 - Open questions
 - Milestones / Timeline / Rollout
 - Success metrics
+- Service setup facts: fixed or hardcoded ports, start commands, env-file or
+  env-var loading (including their absence), process topology, and bootstrap
+  wiring. Repo scan and Parallel setup own these facts, not the coverage ledger.
 
 A heading is not a requirement. Judge its content.
 
 Still extract concrete expectations found in those sections. The test is: *could
 a Playwright test pass or fail against this statement?*
+
+That test is necessary but not sufficient: successful startup can make almost any
+setup fact look observable. Do not invent a happy path such as "the service starts
+on its hardcoded port" or "the service boots without an env file" to turn setup
+into coverage. If the source declares a bounded feature scope, that declaration
+wins over incidental behaviors found elsewhere in docs, code, or config.
 
 ## Completeness
 
@@ -37,6 +46,9 @@ paragraphs without inventing content.
 ## Grounding — extract, do NOT invent
 
 Every requirement must be **stated or directly implied by the source**.
+- "Directly implied" means a behavioral consequence inside the source's declared
+  feature scope. It never means an implementation absence inferred from code or
+  config.
 - **Do not invent requirements.** If the docs don't discuss it, it is not a
   requirement — no matter how standard or sensible it seems.
 - Never add generic non-functional boilerplate. If the source states none, emit none.

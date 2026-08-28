@@ -576,9 +576,8 @@ function SessionHeader({ state, live, label, embedded, showProvenance }: {
     <div className="agentts-head" data-sticky={embedded ? 'false' : 'true'} data-testid="agent-session-header">
       {label && <span className="agentts-session-label" data-testid="agent-session-label">{label}</span>}
       <span className="agentts-mode" data-live={live ? 'true' : 'false'} data-testid="agent-session-mode">
-        {live
-          ? <><span className="agentts-statusdot" aria-hidden="true" />Live</>
-          : 'History'}
+        <span className="agentts-statusdot" aria-hidden="true" />
+        {live ? 'Live' : 'History'}
       </span>
       <span className="agentts-headrule" aria-hidden="true" />
       <span className="agentts-provenance">

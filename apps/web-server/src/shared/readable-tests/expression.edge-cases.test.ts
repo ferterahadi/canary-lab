@@ -2,8 +2,11 @@ import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { renderExpression } from './expression'
 
-function expressionFrom(source: string): { expression: ts.Expression; sourceFile: ts.SourceFile } {
-  const sourceFile = ts.createSourceFile('expression.ts', `const result = ${source}`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+function expressionFrom(
+  source: string,
+  scriptKind: ts.ScriptKind = ts.ScriptKind.TS,
+): { expression: ts.Expression; sourceFile: ts.SourceFile } {
+  const sourceFile = ts.createSourceFile('expression.tsx', `const result = ${source}`, ts.ScriptTarget.Latest, true, scriptKind)
   const statement = sourceFile.statements[0]
   if (!ts.isVariableStatement(statement)) throw new Error('Expected a variable statement')
   const expression = statement.declarationList.declarations[0].initializer
@@ -16,10 +19,28 @@ function rendered(source: string) {
   return renderExpression(parsed.expression, parsed.sourceFile)
 }
 
+function renderedTsx(source: string) {
+  const parsed = expressionFrom(source, ts.ScriptKind.TSX)
+  return renderExpression(parsed.expression, parsed.sourceFile)
+}
+
+function renderedExpressionOfKind(source: string, kind: ts.SyntaxKind) {
+  const sourceFile = ts.createSourceFile('expression.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  let expression: ts.Expression | undefined
+  const visit = (node: ts.Node): void => {
+    if (!expression && node.kind === kind && ts.isExpression(node)) expression = node
+    if (!expression) ts.forEachChild(node, visit)
+  }
+  visit(sourceFile)
+  if (!expression) throw new Error(`Expected ${ts.SyntaxKind[kind]}`)
+  return renderExpression(expression, sourceFile)
+}
+
 describe('readable expression edge cases', () => {
   it('renders every literal and transparent TypeScript wrapper', () => {
     const cases: Array<[string, string, 'exact' | 'derived']> = [
       ['42', '42', 'exact'],
+      ['42n', '42n', 'exact'],
       ['/pay/i', '/pay/i', 'exact'],
       ['true', 'true', 'exact'],
       ['false', 'false', 'exact'],
@@ -33,6 +54,8 @@ describe('readable expression edge cases', () => {
       ['retryCount!', 'retry count', 'derived'],
       ['retryCount satisfies number', 'retry count', 'derived'],
       ['await retryCount', 'retry count', 'derived'],
+      ['this', 'the current object', 'derived'],
+      ['super.value', 'the parent object value', 'derived'],
     ]
 
     for (const [source, text, fidelity] of cases) {
@@ -45,7 +68,8 @@ describe('readable expression edge cases', () => {
       ['`hello ${name}`', '“hello {name}”'],
       ['[]', 'an empty list'],
       ['{}', 'an empty object'],
-      ["{ 'plan-name': 'team', 2: true, retryCount }", 'an object with plan-name set to “team”, 2 set to true, retry count'],
+      ["{ 'plan-name': 'team', 2: true, 3n: false, retryCount }", 'an object with plan-name set to “team”, 2 set to true, 3n set to false, retry count'],
+      ['{ [field]: value }', 'an object with property named by field set to value'],
       ['account.name', 'account name'],
       ['account?.name', 'account name, if available'],
       ["account['name']", 'account name'],
@@ -95,6 +119,13 @@ describe('readable expression edge cases', () => {
       ['left / right', 'left divided by right'],
       ['left % right', 'left modulo right'],
       ['left ** right', 'left raised to right'],
+      ['left << right', 'left shifted left by right'],
+      ['left >> right', 'left shifted right by right'],
+      ['left >>> right', 'left unsigned-shifted right by right'],
+      ['left & right', 'left bitwise AND right'],
+      ['left | right', 'left bitwise OR right'],
+      ['left ^ right', 'left bitwise XOR right'],
+      ['(left, right)', 'left then right'],
       ["'name' in account", '“name” is in account'],
       ['value instanceof Type', 'value is an instance of type'],
     ]
@@ -129,6 +160,16 @@ describe('readable expression edge cases', () => {
       ['decodeURI(target)', 'target decoded from a URL'],
       ['encodeURIComponent(senderId)', 'sender identifier encoded for a URL component'],
       ['decodeURIComponent(senderId)', 'sender identifier decoded from a URL component'],
+      ['String(value)', 'value as text'],
+      ['Number(value)', 'value as a number'],
+      ['Boolean(value)', 'value as a boolean'],
+      ['BigInt(value)', 'value as a big integer'],
+      ['Math.abs(value)', 'the absolute value of value'],
+      ['Math.ceil(value)', 'value rounded up'],
+      ['Math.floor(value)', 'value rounded down'],
+      ['Math.round(value)', 'value rounded to the nearest integer'],
+      ['Math.trunc(value)', 'the integer part of value'],
+      ["import('axios')", 'the module loaded from “axios”'],
       ['getBaseUrl()', 'the base url'],
       ['findOrder(orderId)', 'the order for order identifier'],
       ['fetchRows(table, limit)', 'the rows for table and limit'],
@@ -147,6 +188,7 @@ describe('readable expression edge cases', () => {
       ['res.status()', 'response status'],
       ['res.url()', 'response URL'],
       ['res.ok()', 'whether response is successful'],
+      ['res.headers()', 'the headers of response'],
       ['list.includes(item)', 'list contains item'],
       ['seen.has(key)', 'seen contains key'],
       ["name.startsWith('a')", 'name starts with “a”'],
@@ -155,6 +197,11 @@ describe('readable expression edge cases', () => {
       ['items.every((entry, index) => index > 0)', 'for every item in items, item index is greater than 0'],
       ["items.some((entry) => entry.tags.includes('urgent'))", 'for at least one item in items, item tags contains “urgent”'],
       ["items.find((entry) => entry.status === 'READY')", 'the first item in items where item status equals “READY”'],
+      ['items.find(predicate)', 'the first item in items matching predicate'],
+      ['items.every(predicate)', 'every item in items matches predicate'],
+      ['items.some(predicate)', 'at least one item in items matches predicate'],
+      ['items.filter(Boolean)', 'items filtered to keep truthy items'],
+      ['/approve/i.test(button.actionId)', 'button action identifier matches /approve/i'],
       ['items.some(function (entry) { return (entry as Row).id === targetId })', 'for at least one item in items, item identifier equals targetId'],
       ['items.map((entry) => entry.id)', 'items transformed so each item becomes item identifier'],
       ['items.map((entry, index) => entry.id + index)', 'items transformed so each item becomes item identifier plus item index'],
@@ -180,6 +227,16 @@ describe('readable expression edge cases', () => {
       ['new Date()', 'the current time'],
       ['new Date', 'the current time'],
       ['new Date(startedAt)', 'started at as a date'],
+      ['new URL(url)', 'a new URL using url'],
+      ['new Set(items)', 'a new set using items'],
+      ['new Client()', 'a new client'],
+      ['sql`select ${id}`', 'sql result using “select {identifier}”'],
+      ['void value', 'no value after evaluating value'],
+      ['yield value', 'value yielded'],
+      ['class Worker {}', 'the worker class definition'],
+      ['class {}', 'a class definition'],
+      ['import.meta', 'module metadata'],
+      ['new.target', 'the constructor target'],
       ['() => true', 'a function returning true'],
       ['() => count + 1', 'a function returning count plus 1'],
     ]
@@ -189,13 +246,42 @@ describe('readable expression edge cases', () => {
     }
   })
 
+  it('renders JSX structure and values without executing embedded expressions', () => {
+    expect(renderedTsx('<Panel disabled label="ready" {...props}>{id}<Child /></Panel>')).toEqual({
+      text: 'a panel UI element with disabled enabled, label set to “ready”, and everything in props and containing identifier, a child UI element',
+      fidelity: 'derived',
+    })
+    expect(renderedTsx('<Panel>   </Panel>')).toEqual({ text: 'a panel UI element', fidelity: 'derived' })
+    expect(renderedTsx('<></>')).toEqual({ text: 'an empty UI fragment', fidelity: 'derived' })
+    expect(renderedTsx('<>{/* authored note */}</>')).toEqual({ text: 'an empty UI fragment', fidelity: 'derived' })
+
+    for (const source of [
+      '<Panel>{computeValue()}</Panel>',
+      '<Panel><Child id={computeId()} /></Panel>',
+      '<Panel {...computeProps()} />',
+      '<Panel id={computeId()} />',
+      '<><Child id={computeId()} /></>',
+    ]) {
+      expect(renderedTsx(source)).toEqual({ text: source, fidelity: 'unresolved' })
+    }
+  })
+
+  it('renders generator yields without guessing effectful yielded values', () => {
+    expect(renderedExpressionOfKind('function* values() { yield }', ts.SyntaxKind.YieldExpression))
+      .toEqual({ text: 'no yielded value', fidelity: 'derived' })
+    expect(renderedExpressionOfKind('function* values() { yield* items }', ts.SyntaxKind.YieldExpression))
+      .toEqual({ text: 'all values from items yielded', fidelity: 'derived' })
+    expect(renderedExpressionOfKind('function* values() { yield computeValue() }', ts.SyntaxKind.YieldExpression))
+      .toEqual({ text: 'yield computeValue()', fidelity: 'unresolved' })
+  })
+
   it('keeps effectful, dynamic, and unsupported expression shapes unresolved', () => {
     const cases: Array<[string, string]> = [
       ['`hello ${computeName()}`', '“hello {computeName()}”'],
       ['[first, computeNext()]', '[first, computeNext()]'],
       ['[...computeItems()]', '[...computeItems()]'],
       ['{ ...computeAccount() }', '{ ...computeAccount() }'],
-      ['{ [field]: value }', '{ [field]: value }'],
+      ['{ [computeField()]: value }', '{ [computeField()]: value }'],
       ['await computeValue()', 'await computeValue()'],
       ['computeAccount().name', 'computeAccount().name'],
       ["computeAccount()['name']", "computeAccount()['name']"],
@@ -232,6 +318,14 @@ describe('readable expression edge cases', () => {
       ['Object.keys()', 'Object.keys()'],
       ['Object.keys(account, extra)', 'Object.keys(account, extra)'],
       ['Object.keys(computeAccount())', 'Object.keys(computeAccount())'],
+      ['import()', 'import()'],
+      ['import(computePath())', 'import(computePath())'],
+      ['String()', 'String()'],
+      ['String(value, extra)', 'String(value, extra)'],
+      ['String(computeValue())', 'String(computeValue())'],
+      ['Math.abs()', 'Math.abs()'],
+      ['Math.abs(value, extra)', 'Math.abs(value, extra)'],
+      ['Math.abs(computeValue())', 'Math.abs(computeValue())'],
       ['encodeURIComponent()', 'encodeURIComponent()'],
       ['encodeURIComponent(senderId, extra)', 'encodeURIComponent(senderId, extra)'],
       ['encodeURIComponent(computeSenderId())', 'encodeURIComponent(computeSenderId())'],
@@ -243,8 +337,9 @@ describe('readable expression edge cases', () => {
       ['list.includes()', 'list.includes()'],
       ['list.includes(computeItem())', 'list.includes(computeItem())'],
       ['computeList().includes(item)', 'computeList().includes(item)'],
-      ['items.every(predicate)', 'items.every(predicate)'],
-      ['items.find(predicate)', 'items.find(predicate)'],
+      ['/value/.test(computeValue())', '/value/.test(computeValue())'],
+      ['computePattern().test(value)', 'computePattern().test(value)'],
+      ['computeItems().find(predicate)', 'computeItems().find(predicate)'],
       ['items.filter(predicate)', 'items.filter(predicate)'],
       ['items.map()', 'items.map()'],
       ['items.map((item) => item, context)', 'items.map((item) => item, context)'],
@@ -281,7 +376,12 @@ describe('readable expression edge cases', () => {
       ['items.every((item) => { return })', 'items.every((item) => { return })'],
       ['new Date(year, month)', 'new Date(year, month)'],
       ['new Date(computeIso())', 'new Date(computeIso())'],
-      ['new URL(url)', 'new URL(url)'],
+      ['new URL(computeUrl())', 'new URL(computeUrl())'],
+      ['new (factory())()', 'new (factory())()'],
+      ['(factory())`value`', '(factory())`value`'],
+      ['sql`select ${computeId()}`', 'sql`select ${computeId()}`'],
+      ['void computeValue()', 'void computeValue()'],
+      ['yield computeValue()', 'yield computeValue()'],
       ['() => computeValue()', '() => computeValue()'],
       ['(value) => value', '(value) => value'],
       ['() => { return 1 }', '() => { return 1 }'],

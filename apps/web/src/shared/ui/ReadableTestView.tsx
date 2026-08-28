@@ -7,6 +7,7 @@ import type {
   ReadableStorySpan,
   ReadableTest,
 } from '../api/types'
+import type { TestExecutionHighlightKind } from '@/features/runs'
 import { useTheme } from '../lib/theme'
 import { codeThemeFor, getCodeHighlighter } from './code-highlighter'
 import { storyLocalSequenceLabel, storySequenceLabel } from './readable-story-sequence'
@@ -16,6 +17,11 @@ export interface ReadableSourceSelection {
   source: ReadableSource
 }
 
+interface ReadableExecutionHighlight {
+  kind: TestExecutionHighlightKind
+  nodeId: string
+}
+
 // English mode is one source-ordered test story. The role label remains on
 // every line, so setup/action/check meaning stays visible without moving steps
 // away from their authored execution position.
@@ -23,11 +29,13 @@ export function ReadableTestView({
   test,
   sourceFile,
   selectedNodeId,
+  executionHighlight,
   onSourceSelect,
 }: {
   test: ReadableTest
   sourceFile?: string
   selectedNodeId?: string | null
+  executionHighlight?: ReadableExecutionHighlight
   onSourceSelect?: (selection: ReadableSourceSelection) => void
 }) {
   const canvas = useCodeThemeColors()
@@ -44,6 +52,7 @@ export function ReadableTestView({
             steps={steps}
             sourceFile={sourceFile}
             selectedNodeId={selectedNodeId}
+            executionHighlight={executionHighlight}
             onSourceSelect={onSourceSelect}
           />
         ) : (
@@ -61,12 +70,14 @@ function StorySequence({
   parentSequence = [],
   sourceFile,
   selectedNodeId,
+  executionHighlight,
   onSourceSelect,
 }: {
   steps: ReadableStoryItem[]
   parentSequence?: number[]
   sourceFile?: string
   selectedNodeId?: string | null
+  executionHighlight?: ReadableExecutionHighlight
   onSourceSelect?: (selection: ReadableSourceSelection) => void
 }) {
   const nested = parentSequence.length > 0
@@ -86,6 +97,7 @@ function StorySequence({
           sequence={[...parentSequence, index + 1]}
           sourceFile={sourceFile}
           selectedNodeId={selectedNodeId}
+          executionHighlight={executionHighlight}
           onSourceSelect={onSourceSelect}
         />
       ))}
@@ -98,12 +110,14 @@ function StoryRow({
   sequence,
   sourceFile,
   selectedNodeId,
+  executionHighlight,
   onSourceSelect,
 }: {
   step: ReadableStoryItem
   sequence: number[]
   sourceFile?: string
   selectedNodeId?: string | null
+  executionHighlight?: ReadableExecutionHighlight
   onSourceSelect?: (selection: ReadableSourceSelection) => void
 }) {
   const fileNote = sourceFile && step.source.file !== sourceFile ? fileName(step.source.file) : undefined
@@ -111,6 +125,12 @@ function StoryRow({
   const localSequenceLabel = storyLocalSequenceLabel(sequence)
   const keyword = storyKeyword(step)
   const selected = selectedNodeId === step.id
+  const executionKind = executionHighlight?.nodeId === step.id
+    ? executionHighlight.kind
+    : undefined
+  const executionLabel = executionKind === 'running' ? 'RUNNING' : 'FAILED HERE'
+  const executionDescription = executionKind === 'running' ? 'Currently running' : 'Last failed here'
+  const executionColor = executionKind === 'failed' ? 'var(--danger)' : 'var(--running)'
   return (
     <li
       data-story-role={step.role}
@@ -122,14 +142,19 @@ function StoryRow({
         type="button"
         data-testid={`readable-story-item-${step.id}`}
         data-fidelity={step.fidelity}
+        data-execution-highlight={executionKind}
         aria-pressed={selected}
-        aria-label={`${sequenceLabel}. ${keyword}: ${step.text}. Show ${sourceLabel(step.source)}`}
-        title={`Step ${sequenceLabel} — ${sourceLabel(step.source)} — ${fidelityTitle(step.fidelity)}`}
+        aria-label={`${sequenceLabel}. ${keyword}: ${step.text}. ${executionKind ? `${executionDescription}. ` : ''}Show ${sourceLabel(step.source)}`}
+        title={`Step ${sequenceLabel} — ${sourceLabel(step.source)} — ${fidelityTitle(step.fidelity)}${executionKind ? ` — ${executionDescription}` : ''}`}
         onClick={() => onSourceSelect?.({ id: step.id, source: step.source })}
         className="grid w-full grid-cols-[2ch_8ch_minmax(0,1fr)] items-start gap-x-2 px-2 py-0 text-left leading-[1.65] transition-colors hover:bg-running/10"
         style={{
-          background: selected ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : undefined,
-          boxShadow: selected ? 'inset 2px 0 0 var(--accent)' : undefined,
+          background: executionKind
+            ? `color-mix(in srgb, ${executionColor} 18%, transparent)`
+            : selected ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : undefined,
+          boxShadow: executionKind
+            ? `inset 2px 0 0 ${executionColor}`
+            : selected ? 'inset 2px 0 0 var(--accent)' : undefined,
         }}
       >
         <span
@@ -149,6 +174,19 @@ function StoryRow({
         <span className="min-w-0 whitespace-pre-wrap break-words">
           {step.spans.map((span, index) => <StorySpan key={index} span={span} />)}
           {fileNote && <span style={{ color: 'var(--text-muted)' }}> {`// ${fileNote}`}</span>}
+          {executionKind && (
+            <span
+              className="ml-2 inline-flex rounded border px-1 text-[9px] font-semibold leading-[1.4]"
+              style={{
+                color: executionColor,
+                borderColor: `color-mix(in srgb, ${executionColor} 65%, transparent)`,
+                background: `color-mix(in srgb, ${executionColor} 10%, transparent)`,
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              {executionLabel}
+            </span>
+          )}
         </span>
       </button>
       {step.kind === 'flow' && step.children.length > 0 && (
@@ -157,6 +195,7 @@ function StoryRow({
           parentSequence={sequence}
           sourceFile={sourceFile}
           selectedNodeId={selectedNodeId}
+          executionHighlight={executionHighlight}
           onSourceSelect={onSourceSelect}
         />
       )}

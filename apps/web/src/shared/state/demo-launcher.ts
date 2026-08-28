@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { GettingStartedSessionState, OnboardingSamples, OnboardingWorkflow } from '@/shared/api/client'
+import type {
+  GettingStartedSessionState,
+  OnboardingSamples,
+  OnboardingWorkflow,
+} from '@/shared/api/client'
 import type { StartFlightBody } from '@/shared/api/flights'
 import type { RunIndexEntry } from '@/shared/api/types'
 import type { FlightEntryOptions, FlightIndexEntry, FlightStageKey } from '@shared/flights/types'
+import { isActiveRunStatus, isQueuedRunStatus, isTerminalRunStatus } from '@shared/run-state'
 import { useInvalidationKey } from './invalidation'
 
 // The Getting Started launcher: one guided path plus the specialized workflows
@@ -36,6 +41,112 @@ export const DEMO_FLIGHT_STAGE: Record<DemoFlightActionKind, FlightStageKey> = {
   export: 'evaluation-export',
   author: 'specs-coverage',
   portify: 'portify',
+}
+
+type GettingStartedRunWorkflow = 'run' | 'heal'
+
+/** Resolve a suite to the server-owned Getting Started run workflow that names
+ *  it. The run-index reader separately excludes boot, verify, and benchmark
+ *  sessions because those are not evidence that the workflow ran. */
+function gettingStartedWorkflowForFeature(
+  workflows: OnboardingWorkflow[],
+  feature: string,
+): GettingStartedRunWorkflow | undefined {
+  const action = workflows.find((workflow) => {
+    const candidate = workflow.internalAction
+    return candidate !== null
+      && (candidate.kind === 'run' || candidate.kind === 'heal')
+      && candidate.feature === feature
+  })?.internalAction
+  return action?.kind === 'run' || action?.kind === 'heal' ? action.kind : undefined
+}
+
+interface CatalogRun {
+  run: RunIndexEntry
+  workflow: GettingStartedRunWorkflow
+}
+
+function catalogRuns(workflows: OnboardingWorkflow[], runs: RunIndexEntry[]): CatalogRun[] {
+  return runs.flatMap((run) => {
+    // Older run indexes omit executionType; that shape also means a normal run.
+    if (run.executionType && run.executionType !== 'run') return []
+    const workflow = gettingStartedWorkflowForFeature(workflows, run.feature)
+    return workflow ? [{ run, workflow }] : []
+  })
+}
+
+/** Merge the durable Getting Started record with run-index evidence from the
+ *  live runs channel. This makes the run cards update on every run frame and
+ *  also recovers browser-started sample runs that predate attribution. */
+export function deriveGettingStartedRunSession(
+  session: GettingStartedSessionState,
+  workflows: OnboardingWorkflow[],
+  runs: RunIndexEntry[],
+): GettingStartedSessionState {
+  const relevant = catalogRuns(workflows, runs)
+  const completed = { ...session.completed }
+  let active = session.active
+
+  // The run stream can reach the browser before the workspace invalidation.
+  // Settle a linked run locally from that stronger evidence instead of leaving
+  // the card stale until the onboarding refetch arrives.
+  if (active?.target?.kind === 'run') {
+    const linked = runs.find((run) => run.runId === active?.target?.id)
+    if (linked?.endedAt && isTerminalRunStatus(linked.status)) {
+      const previous = completed[active.workflow]
+      if (!previous || linked.endedAt.localeCompare(previous.endedAt) > 0) {
+        completed[active.workflow] = {
+          workflow: active.workflow,
+          owner: active.owner,
+          target: active.target,
+          status: linked.status,
+          startedAt: active.startedAt,
+          endedAt: linked.endedAt,
+        }
+      }
+      active = null
+    }
+  }
+
+  // Keep the newest terminal result for each catalogued run workflow. A newer
+  // durable record wins, including one created by an external agent.
+  for (const { run, workflow } of relevant) {
+    if (!run.endedAt || !isTerminalRunStatus(run.status)) continue
+    const previous = completed[workflow]
+    if (previous && run.endedAt.localeCompare(previous.endedAt) <= 0) continue
+    completed[workflow] = {
+      workflow,
+      owner: 'internal',
+      target: { kind: 'run', id: run.runId },
+      status: run.status,
+      startedAt: run.startedAt,
+      endedAt: run.endedAt,
+    }
+  }
+
+  // A server-owned claim remains authoritative. Otherwise the newest live
+  // sample run becomes the active card, including queued runs.
+  if (!active) {
+    const newest = relevant
+      .filter(({ run }) => isActiveRunStatus(run.status) || isQueuedRunStatus(run.status))
+      .reduce<CatalogRun | null>((current, candidate) => (
+        !current || candidate.run.startedAt.localeCompare(current.run.startedAt) > 0
+          ? candidate
+          : current
+      ), null)
+    if (newest) {
+      active = {
+        sessionId: `run:${newest.run.runId}`,
+        workflow: newest.workflow,
+        owner: 'internal',
+        target: { kind: 'run', id: newest.run.runId },
+        startedAt: newest.run.startedAt,
+        updatedAt: newest.run.startedAt,
+      }
+    }
+  }
+
+  return { active, completed }
 }
 
 /** Build the same server-validated stage-entry request for every specialized
@@ -201,6 +312,14 @@ export function useDemoLauncher(runs: RunIndexEntry[], flights: FlightIndexEntry
     () => deriveDemoAvailability({ samples, runs, flights, seen, showDemo }),
     [samples, runs, flights, seen, showDemo],
   )
+  const session = useMemo(
+    () => deriveGettingStartedRunSession(
+      samples?.session ?? { active: null, completed: {} },
+      samples?.workflows ?? [],
+      runs,
+    ),
+    [samples, runs],
+  )
 
   const markSeen = useCallback(() => {
     writeDemoSeen()
@@ -216,7 +335,7 @@ export function useDemoLauncher(runs: RunIndexEntry[], flights: FlightIndexEntry
   return {
     ...availability,
     workflows: samples?.workflows ?? [],
-    session: samples?.session ?? { active: null, completed: {} },
+    session,
     suite: samples?.sampleSuite ?? null,
     markSeen,
     showDemo,

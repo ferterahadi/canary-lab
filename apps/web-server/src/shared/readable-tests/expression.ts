@@ -51,6 +51,7 @@ const ZERO_ARGUMENT_METHOD_TEXT = new Map<string, string>([
   ['status', '{owner} status'],
   ['url', '{owner} URL'],
   ['ok', 'whether {owner} is successful'],
+  ['headers', 'the headers of {owner}'],
 ])
 
 // One-argument membership/shape predicates common in test conditions.
@@ -88,6 +89,21 @@ const URI_CODEC_TEXT = new Map<string, string>([
   ['decodeURIComponent', '{value} decoded from a URL component'],
 ])
 
+const STANDARD_CONVERSION_TEXT = new Map<string, string>([
+  ['String', '{value} as text'],
+  ['Number', '{value} as a number'],
+  ['Boolean', '{value} as a boolean'],
+  ['BigInt', '{value} as a big integer'],
+])
+
+const MATH_CALL_TEXT = new Map<string, string>([
+  ['Math.abs', 'the absolute value of {value}'],
+  ['Math.ceil', '{value} rounded up'],
+  ['Math.floor', '{value} rounded down'],
+  ['Math.round', '{value} rounded to the nearest integer'],
+  ['Math.trunc', 'the integer part of {value}'],
+])
+
 // Read-style verbs whose call result is safely described as the thing read:
 // `getBaseUrl()` means "the base url" to a reader, not a procedure.
 const GETTER_VERBS = new Set(['get', 'read', 'fetch', 'load', 'query', 'find'])
@@ -110,6 +126,13 @@ const BINARY_OPERATORS = new Map<ts.SyntaxKind, string>([
   [ts.SyntaxKind.SlashToken, 'divided by'],
   [ts.SyntaxKind.PercentToken, 'modulo'],
   [ts.SyntaxKind.AsteriskAsteriskToken, 'raised to'],
+  [ts.SyntaxKind.LessThanLessThanToken, 'shifted left by'],
+  [ts.SyntaxKind.GreaterThanGreaterThanToken, 'shifted right by'],
+  [ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken, 'unsigned-shifted right by'],
+  [ts.SyntaxKind.AmpersandToken, 'bitwise AND'],
+  [ts.SyntaxKind.BarToken, 'bitwise OR'],
+  [ts.SyntaxKind.CaretToken, 'bitwise XOR'],
+  [ts.SyntaxKind.CommaToken, 'then'],
   [ts.SyntaxKind.InKeyword, 'is in'],
   [ts.SyntaxKind.InstanceOfKeyword, 'is an instance of'],
 ])
@@ -136,12 +159,22 @@ function childText(part: RenderedPart): string {
   return part.compound ? `(${part.text})` : part.text
 }
 
-function renderPropertyName(name: ts.PropertyName, sourceFile: ts.SourceFile): RenderedExpression {
+function renderPropertyName(
+  name: ts.PropertyName,
+  sourceFile: ts.SourceFile,
+  bindings: ExpressionBindings,
+): RenderedExpression {
   if (ts.isIdentifier(name) || ts.isPrivateIdentifier(name)) {
     return { text: humanizeIdentifier(name.text), fidelity: 'derived' }
   }
-  if (ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) {
+  if (ts.isStringLiteralLike(name) || ts.isNumericLiteral(name) || ts.isBigIntLiteral(name)) {
     return { text: name.text, fidelity: 'exact' }
+  }
+  // PropertyName has no remaining source-authored variant after the literal
+  // and identifier returns above, so TypeScript narrows this to computed.
+  const expression = renderPart(name.expression, sourceFile, bindings)
+  if (expression.fidelity !== 'unresolved') {
+    return { text: `property named by ${expression.text}`, fidelity: 'derived' }
   }
   return { text: formatSourceSnippetForDisplay(name.getText(sourceFile)), fidelity: 'unresolved' }
 }
@@ -195,7 +228,7 @@ function renderObject(
   const properties: RenderedExpression[] = []
   for (const property of node.properties) {
     if (ts.isPropertyAssignment(property)) {
-      const name = renderPropertyName(property.name, sourceFile)
+      const name = renderPropertyName(property.name, sourceFile, bindings)
       const value = renderPart(property.initializer, sourceFile, bindings)
       properties.push({
         text: `${name.text} set to ${value.text}`,
@@ -313,6 +346,17 @@ function renderCollectionPredicate(
   bindings: ExpressionBindings,
 ): RenderedPart | undefined {
   if ((method !== 'every' && method !== 'some' && method !== 'find') || node.arguments.length !== 1) return undefined
+  if (ts.isIdentifier(node.arguments[0])) {
+    const owner = renderPart(ownerExpression, sourceFile, bindings)
+    const predicate = renderPart(node.arguments[0], sourceFile, bindings)
+    if (owner.fidelity === 'unresolved' || predicate.fidelity === 'unresolved') return undefined
+    const text = method === 'find'
+      ? `the first item in ${childText(owner)} matching ${predicate.text}`
+      : method === 'every'
+        ? `every item in ${childText(owner)} matches ${predicate.text}`
+        : `at least one item in ${childText(owner)} matches ${predicate.text}`
+    return { text, fidelity: 'derived', compound: method !== 'find' }
+  }
   const callback = safeCallbackExpression(node.arguments[0], [1, 3])
   if (!callback) return undefined
   const owner = renderPart(ownerExpression, sourceFile, bindings)
@@ -346,6 +390,13 @@ function renderCollectionTransform(
 
   if (method === 'map' || method === 'flatMap' || method === 'filter' || method === 'findIndex') {
     if (node.arguments.length !== 1) return undefined
+    if (method === 'filter' && ts.isIdentifier(node.arguments[0]) && node.arguments[0].text === 'Boolean') {
+      return {
+        text: `${childText(owner)} filtered to keep truthy items`,
+        fidelity: 'derived',
+        compound: false,
+      }
+    }
     const callback = safeCallbackExpression(node.arguments[0], [1, 3])
     const result = callback && renderCallbackExpression(
       callback,
@@ -466,6 +517,13 @@ function renderCall(
   sourceFile: ts.SourceFile,
   bindings: ExpressionBindings,
 ): RenderedPart | undefined {
+  if (node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments.length === 1) {
+    const module = renderPart(node.arguments[0], sourceFile, bindings)
+    if (module.fidelity !== 'unresolved') {
+      return { text: `the module loaded from ${module.text}`, fidelity: 'derived', compound: false }
+    }
+  }
+
   const path = expressionPath(node.expression)
   if (path) {
     const generated = VALUE_GENERATOR_CALLS.get(path)
@@ -514,6 +572,22 @@ function renderCall(
       const value = renderPart(node.arguments[0], sourceFile, bindings)
       if (value.fidelity !== 'unresolved') {
         return { text: uriCodec.replace('{value}', childText(value)), fidelity: 'derived', compound: false }
+      }
+    }
+
+    const conversion = STANDARD_CONVERSION_TEXT.get(path)
+    if (conversion && node.arguments.length === 1) {
+      const value = renderPart(node.arguments[0], sourceFile, bindings)
+      if (value.fidelity !== 'unresolved') {
+        return { text: conversion.replace('{value}', childText(value)), fidelity: 'derived', compound: false }
+      }
+    }
+
+    const mathCall = MATH_CALL_TEXT.get(path)
+    if (mathCall && node.arguments.length === 1) {
+      const value = renderPart(node.arguments[0], sourceFile, bindings)
+      if (value.fidelity !== 'unresolved') {
+        return { text: mathCall.replace('{value}', childText(value)), fidelity: 'derived', compound: false }
       }
     }
   }
@@ -591,6 +665,17 @@ function renderCall(
         }
       }
     }
+    if (method === 'test' && node.arguments.length === 1) {
+      const pattern = renderPart(node.expression.expression, sourceFile, bindings)
+      const value = renderPart(node.arguments[0], sourceFile, bindings)
+      if (pattern.fidelity !== 'unresolved' && value.fidelity !== 'unresolved') {
+        return {
+          text: `${childText(value)} matches ${childText(pattern)}`,
+          fidelity: 'derived',
+          compound: true,
+        }
+      }
+    }
   }
 
   return undefined
@@ -601,12 +686,113 @@ function renderNew(
   sourceFile: ts.SourceFile,
   bindings: ExpressionBindings,
 ): RenderedPart | undefined {
-  if (!ts.isIdentifier(node.expression) || node.expression.text !== 'Date') return undefined
+  const constructor = expressionPath(node.expression)
+  if (!constructor) return undefined
   const callArguments = renderedArguments(node.arguments ?? [], sourceFile, bindings)
   if (!callArguments) return undefined
-  if (callArguments.length === 0) return { text: 'the current time', fidelity: 'derived', compound: false }
-  if (callArguments.length === 1) return { text: `${childText(callArguments[0])} as a date`, fidelity: 'derived', compound: false }
-  return undefined
+  if (constructor === 'Date') {
+    if (callArguments.length === 0) return { text: 'the current time', fidelity: 'derived', compound: false }
+    if (callArguments.length === 1) return { text: `${childText(callArguments[0])} as a date`, fidelity: 'derived', compound: false }
+    return undefined
+  }
+  const name = constructor.split('.').map((part) => (
+    /^[A-Z][A-Z0-9]*$/.test(part) ? part : humanizeIdentifier(part)
+  )).join(' ')
+  const using = callArguments.length ? ` using ${callArguments.map((argument) => argument.text).join(' and ')}` : ''
+  return { text: `a new ${name}${using}`, fidelity: 'derived', compound: false }
+}
+
+function renderTaggedTemplate(
+  node: ts.TaggedTemplateExpression,
+  sourceFile: ts.SourceFile,
+  bindings: ExpressionBindings,
+): RenderedPart | undefined {
+  const tag = expressionPath(node.tag)
+  if (!tag) return undefined
+  const template = renderPart(node.template, sourceFile, bindings)
+  if (template.fidelity === 'unresolved') return undefined
+  return {
+    text: `${tag.split('.').map(humanizeIdentifier).join(' ')} result using ${template.text}`,
+    fidelity: 'derived',
+    compound: false,
+  }
+}
+
+function renderJsxChildren(
+  children: readonly ts.JsxChild[],
+  sourceFile: ts.SourceFile,
+  bindings: ExpressionBindings,
+): RenderedPart[] | undefined {
+  const rendered: RenderedPart[] = []
+  for (const child of children) {
+    if (ts.isJsxText(child)) {
+      const text = child.text.replace(/\s+/g, ' ').trim()
+      if (text) rendered.push({ text: quoteReadableText(text), fidelity: 'exact', compound: false })
+      continue
+    }
+    if (ts.isJsxExpression(child)) {
+      if (!child.expression) continue
+      const expression = renderPart(child.expression, sourceFile, bindings)
+      if (expression.fidelity === 'unresolved') return undefined
+      rendered.push(expression)
+      continue
+    }
+    const element = renderPart(child, sourceFile, bindings)
+    if (element.fidelity === 'unresolved') return undefined
+    rendered.push(element)
+  }
+  return rendered
+}
+
+function renderJsxAttributes(
+  attributes: ts.JsxAttributes,
+  sourceFile: ts.SourceFile,
+  bindings: ExpressionBindings,
+): string[] | undefined {
+  const rendered: string[] = []
+  for (const property of attributes.properties) {
+    if (ts.isJsxSpreadAttribute(property)) {
+      const value = renderPart(property.expression, sourceFile, bindings)
+      if (value.fidelity === 'unresolved') return undefined
+      rendered.push(`everything in ${value.text}`)
+      continue
+    }
+    const name = humanizeIdentifier(property.name.getText(sourceFile))
+    if (!property.initializer) {
+      rendered.push(`${name} enabled`)
+      continue
+    }
+    const value = ts.isJsxExpression(property.initializer)
+      ? property.initializer.expression && renderPart(property.initializer.expression, sourceFile, bindings)
+      : renderPart(property.initializer, sourceFile, bindings)
+    if (!value || value.fidelity === 'unresolved') return undefined
+    rendered.push(`${name} set to ${value.text}`)
+  }
+  return rendered
+}
+
+function renderJsxElement(
+  node: ts.JsxElement | ts.JsxSelfClosingElement,
+  sourceFile: ts.SourceFile,
+  bindings: ExpressionBindings,
+): RenderedPart | undefined {
+  const opening = ts.isJsxElement(node) ? node.openingElement : node
+  const attributes = renderJsxAttributes(opening.attributes, sourceFile, bindings)
+  const children = ts.isJsxElement(node)
+    ? renderJsxChildren(node.children, sourceFile, bindings)
+    : []
+  if (!attributes || !children) return undefined
+  const details = [
+    attributes.length ? `with ${readableObjectDetails(attributes)}` : undefined,
+    children.length ? `containing ${children.map((child) => child.text).join(', ')}` : undefined,
+  ].filter((detail): detail is string => Boolean(detail)).join(' and ')
+  const tag = humanizeIdentifier(opening.tagName.getText(sourceFile))
+  return { text: `a ${tag} UI element${details ? ` ${details}` : ''}`, fidelity: 'derived', compound: false }
+}
+
+function readableObjectDetails(details: readonly string[]): string {
+  if (details.length < 2) return details.join('')
+  return `${details.slice(0, -1).join(', ')}, and ${details.at(-1)}`
 }
 
 function renderPart(
@@ -620,12 +806,17 @@ function renderPart(
   if (ts.isNumericLiteral(node)) {
     return { text: node.text, fidelity: 'exact', compound: false }
   }
+  if (ts.isBigIntLiteral(node)) {
+    return { text: node.text, fidelity: 'exact', compound: false }
+  }
   if (ts.isRegularExpressionLiteral(node)) {
     return { text: node.getText(sourceFile), fidelity: 'exact', compound: false }
   }
   if (node.kind === ts.SyntaxKind.TrueKeyword) return { text: 'true', fidelity: 'exact', compound: false }
   if (node.kind === ts.SyntaxKind.FalseKeyword) return { text: 'false', fidelity: 'exact', compound: false }
   if (node.kind === ts.SyntaxKind.NullKeyword) return { text: 'null', fidelity: 'exact', compound: false }
+  if (node.kind === ts.SyntaxKind.ThisKeyword) return { text: 'the current object', fidelity: 'derived', compound: false }
+  if (node.kind === ts.SyntaxKind.SuperKeyword) return { text: 'the parent object', fidelity: 'derived', compound: false }
   if (ts.isIdentifier(node)) {
     if (node.text === 'undefined') return { text: 'undefined', fidelity: 'exact', compound: false }
     const bound = bindings.get(node.text)
@@ -650,11 +841,29 @@ function renderPart(
   if (ts.isNewExpression(node)) {
     return renderNew(node, sourceFile, bindings) ?? unresolved(node, sourceFile)
   }
+  if (ts.isTaggedTemplateExpression(node)) {
+    return renderTaggedTemplate(node, sourceFile, bindings) ?? unresolved(node, sourceFile)
+  }
   if (ts.isArrowFunction(node) && node.parameters.length === 0 && !ts.isBlock(node.body)) {
     const body = renderPart(node.body, sourceFile, bindings)
     if (body.fidelity !== 'unresolved') {
       return { text: `a function returning ${body.text}`, fidelity: 'derived', compound: false }
     }
+  }
+  if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
+    return renderJsxElement(node, sourceFile, bindings) ?? unresolved(node, sourceFile)
+  }
+  if (ts.isJsxFragment(node)) {
+    const children = renderJsxChildren(node.children, sourceFile, bindings)
+    return children
+      ? {
+          text: children.length
+            ? `a UI fragment containing ${children.map((child) => child.text).join(', ')}`
+            : 'an empty UI fragment',
+          fidelity: 'derived',
+          compound: false,
+        }
+      : unresolved(node, sourceFile)
   }
   if (ts.isPropertyAccessExpression(node)) {
     const owner = renderPart(node.expression, sourceFile, bindings)
@@ -704,6 +913,36 @@ function renderPart(
       ? unresolved(node, sourceFile)
       : { text: `the type of ${childText(expression)}`, fidelity: 'derived', compound: true }
   }
+  if (ts.isVoidExpression(node)) {
+    const expression = renderPart(node.expression, sourceFile, bindings)
+    return expression.fidelity === 'unresolved'
+      ? unresolved(node, sourceFile)
+      : { text: `no value after evaluating ${childText(expression)}`, fidelity: 'derived', compound: false }
+  }
+  if (ts.isYieldExpression(node)) {
+    if (!node.expression) return { text: 'no yielded value', fidelity: 'derived', compound: false }
+    const expression = renderPart(node.expression, sourceFile, bindings)
+    if (expression.fidelity === 'unresolved') return unresolved(node, sourceFile)
+    return {
+      text: `${node.asteriskToken ? 'all values from ' : ''}${childText(expression)} yielded`,
+      fidelity: 'derived',
+      compound: false,
+    }
+  }
+  if (ts.isMetaProperty(node)) {
+    return {
+      text: node.keywordToken === ts.SyntaxKind.ImportKeyword ? 'module metadata' : 'the constructor target',
+      fidelity: 'derived',
+      compound: false,
+    }
+  }
+  if (ts.isClassExpression(node)) {
+    return {
+      text: node.name ? `the ${humanizeIdentifier(node.name.text)} class definition` : 'a class definition',
+      fidelity: 'derived',
+      compound: false,
+    }
+  }
   if (ts.isBinaryExpression(node)) {
     const operator = BINARY_OPERATORS.get(node.operatorToken.kind)
     if (!operator) return unresolved(node, sourceFile)
@@ -744,6 +983,7 @@ export function renderExpression(node: ts.Expression, sourceFile: ts.SourceFile)
 export function renderNamedCallResult(
   call: ts.CallExpression,
   sourceFile: ts.SourceFile,
+  options: { allowBareZeroArguments?: boolean } = {},
 ): RenderedExpression | undefined {
   if (call.questionDotToken) return undefined
   const arguments_ = call.arguments.map((argument) => renderExpression(argument, sourceFile))
@@ -755,7 +995,7 @@ export function renderNamedCallResult(
   if (ts.isIdentifier(call.expression)) {
     // A bare zero-argument call carries no inputs that explain its result.
     // Keep it as source instead of turning `computeURL()` into vague prose.
-    if (!arguments_.length) return undefined
+    if (!arguments_.length && !options.allowBareZeroArguments) return undefined
     return {
       text: `${humanizeIdentifier(call.expression.text)} result${using}`,
       fidelity: 'derived',

@@ -14,6 +14,11 @@ export interface StoryCodeLineNumber {
   label: string
 }
 
+interface StoryCandidate {
+  depth: number
+  sourceSpan: number
+}
+
 export function storySequenceLabel(sequence: readonly number[]): string {
   return sequence.map((part, index) => index === 0 ? String(part).padStart(2, '0') : String(part)).join('.')
 }
@@ -41,6 +46,33 @@ export function readableStorySequenceEntries(
   })
 }
 
+/** Return the most specific English row that owns one source line. Nested
+ * story rows can overlap their parent flow's range, so depth wins first and
+ * the narrower source range breaks ties. */
+export function storyItemIdForSourceLine(
+  steps: readonly ReadableStoryItem[],
+  file: string,
+  sourceLine: number,
+): string | undefined {
+  let best: (StoryCandidate & { id: string }) | undefined
+  for (const entry of readableStorySequenceEntries(steps)) {
+    const { source } = entry.item
+    if (
+      source.file !== file
+      || sourceLine < source.startLine
+      || sourceLine > source.endLine
+    ) continue
+
+    const candidate = {
+      id: entry.item.id,
+      depth: entry.sequence.length,
+      sourceSpan: source.endLine - source.startLine,
+    }
+    if (isMoreSpecificStoryCandidate(candidate, best)) best = candidate
+  }
+  return best?.id
+}
+
 /** Link each visible source line to its most specific English story row. A
  * parent flow and its first child can share a line in compact source; the child
  * wins because it describes that line more precisely, while both remain in the
@@ -51,10 +83,7 @@ export function storyCodeLineNumbers(
   visibleStartLine: number,
   visibleEndLine: number,
 ): ReadonlyMap<number, StoryCodeLineNumber> {
-  interface Candidate extends StoryCodeLineNumber {
-    depth: number
-    sourceSpan: number
-  }
+  type Candidate = StoryCodeLineNumber & StoryCandidate
 
   const candidates = new Map<number, Candidate>()
   for (const entry of readableStorySequenceEntries(steps)) {
@@ -75,11 +104,17 @@ export function storyCodeLineNumbers(
       sourceSpan: source.endLine - source.startLine,
     }
     const current = candidates.get(sourceLine)
-    const moreSpecific = !current
-      || candidate.depth > current.depth
-      || (candidate.depth === current.depth && candidate.sourceSpan < current.sourceSpan)
-    if (moreSpecific) candidates.set(sourceLine, candidate)
+    if (isMoreSpecificStoryCandidate(candidate, current)) candidates.set(sourceLine, candidate)
   }
 
   return new Map([...candidates].map(([line, { sequence, label }]) => [line, { sequence, label }]))
+}
+
+function isMoreSpecificStoryCandidate(
+  candidate: StoryCandidate,
+  current: StoryCandidate | undefined,
+): boolean {
+  return !current
+    || candidate.depth > current.depth
+    || (candidate.depth === current.depth && candidate.sourceSpan < current.sourceSpan)
 }

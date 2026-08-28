@@ -130,10 +130,10 @@ function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightMa
 describe('specs-coverage stage', () => {
   const SPEC = `import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'\n\ntest('checkout @req-R1 @path-happy', async ({ page }) => { expect(1).toBe(1) })\n`
 
-  function ledger(pct: number): CoverageLedger {
+  function ledger(pct: number, requirementId = 'R1'): CoverageLedger {
     return {
       feature: 'checkout',
-      requirements: pct >= 100 ? [] : [{ requirement: { id: 'R1', title: 't', text: 'x', pathTypes: ['happy'] }, annotatedTestNames: [], pathCoverage: [], gapType: 'untested', coverageStatus: 'uncovered' }],
+      requirements: pct >= 100 ? [] : [{ requirement: { id: requirementId, title: 't', text: 'x', pathTypes: ['happy'] }, annotatedTestNames: [], pathCoverage: [], gapType: 'untested', coverageStatus: 'uncovered' }],
       tests: [],
       totals: { total: 1, covered: pct >= 100 ? 1 : 0, pathIncomplete: 0, variantIncomplete: 0, untested: pct >= 100 ? 0 : 1, orphanTests: 0 },
       coveragePct: pct,
@@ -346,10 +346,18 @@ describe('specs-coverage stage', () => {
     })
   })
 
-  it('meets target on the very last post-iteration compute (post-loop check, not the top-of-loop one)', async () => {
-    // 1 initial compute + 5 end-of-iteration computes = 6 calls; only the 6th
-    // (last) meets target, so the for-loop runs out before its own top-of-loop
-    // check ever sees 100% — only the post-loop targetMet(...) check does.
+  it('meets target on the final allowed post-mapping compute before the pass cap parks', async () => {
+    // Entry + one pre-map scope and one post-map verdict for each of five
+    // passes = 11 calls. The open requirement changes after passes 1–4, so the
+    // no-progress guard correctly lets the loop reach its final allowed pass.
+    const ledgers = [
+      ledger(0, 'R0'),
+      ledger(0, 'R0'), ledger(0, 'R1'),
+      ledger(0, 'R1'), ledger(0, 'R2'),
+      ledger(0, 'R2'), ledger(0, 'R3'),
+      ledger(0, 'R3'), ledger(0, 'R4'),
+      ledger(0, 'R4'), ledger(100),
+    ]
     let calls = 0
     const d = deps({
       spawnAgent: writingSpawnAgent([]),
@@ -357,15 +365,14 @@ describe('specs-coverage stage', () => {
       coverage: {
         compute: ((() => {
           calls += 1
-          return calls >= 6 ? ledger(100) : ledger(0)
+          return ledgers.shift() ?? ledger(100)
         }) as unknown) as never,
         runEngine: (async () => ({}) as never) as never,
       },
     })
     const outcome = await specsCoverageStage(d).run(ctxFor(manifest()).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { coveragePct: 100 } })
-    // Entry + one live-gap scope and one post-map verdict per pass.
-    expect(calls).toBe(7)
+    expect(calls).toBe(11)
   })
 
   it('buildSpecsPrompt renders the edit-in-place contract and caps injected validation errors', () => {

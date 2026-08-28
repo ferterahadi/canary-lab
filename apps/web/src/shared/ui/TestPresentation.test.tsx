@@ -278,7 +278,18 @@ describe('TestPresentation', () => {
         },
       },
     }
-    act(() => root.render(<TestPresentation test={nested} sourceFile="/repo/e2e/checkout.spec.ts" />))
+    act(() => root.render(
+      <TestPresentation
+        test={nested}
+        sourceFile="/repo/e2e/checkout.spec.ts"
+        executionHighlight={{ kind: 'running', bodyLine: 4 }}
+      />,
+    ))
+
+    const activeEnglish = container.querySelector<HTMLElement>('[data-execution-highlight="running"]')
+    expect(activeEnglish?.textContent).toContain('Send item')
+    expect(container.querySelector('[data-testid="readable-story-item-connection-flow"]')?.getAttribute('data-execution-highlight')).toBeNull()
+    expect(container.querySelector('[data-testid="readable-story-item-item-loop"]')?.getAttribute('data-execution-highlight')).toBeNull()
 
     await act(async () => {
       ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
@@ -296,6 +307,7 @@ describe('TestPresentation', () => {
       '',
     ])
     expect(lines.map((line) => line.dataset.codeSequenceLabel)).toEqual(['01', '1', '1', '2', '', ''])
+    expect(lines[2].dataset.executionHighlight).toBe('running')
   })
 
   it('uses the server-formatted line map for numbering, highlights, selection, and editor navigation', async () => {
@@ -358,8 +370,7 @@ describe('TestPresentation', () => {
       <TestPresentation
         test={formatted}
         sourceFile="/repo/e2e/checkout.spec.ts"
-        activeLine={3}
-        runningHighlight
+        executionHighlight={{ kind: 'running', bodyLine: 3 }}
         changedLines={new Set([5])}
       />,
     ))
@@ -541,8 +552,7 @@ describe('TestPresentation', () => {
       <TestPresentation
         test={helperCollision}
         sourceFile="/repo/e2e/checkout.spec.ts"
-        activeLine={2}
-        runningHighlight
+        executionHighlight={{ kind: 'running', bodyLine: 2 }}
         changedLines={new Set([2])}
       />,
     ))
