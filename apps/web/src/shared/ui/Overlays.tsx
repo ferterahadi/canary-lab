@@ -78,6 +78,7 @@ export function Modal({
   meta,
   width = 480,
   height,
+  maxHeight,
   role = 'dialog',
   ariaLabel,
   testId,
@@ -108,6 +109,11 @@ export function Modal({
    *  stable as the active section's content amount changes. Omit to shrink-
    *  wrap content up to the default `max-h-[calc(100vh-2rem)]` cap. */
   height?: number | string
+  /** Tighter cap than the default `calc(100vh - 2rem)` — a dialog that should
+   *  float in the viewport rather than nearly fill it (e.g. `'70vh'` leaves an
+   *  even 15% band above and below). The dialog still shrink-wraps content
+   *  below the cap; only the ceiling moves. */
+  maxHeight?: number | string
   /** ARIA role for the dialog surface — `alertdialog` for error/confirmation
    *  interruptions, `dialog` (default) otherwise. */
   role?: 'dialog' | 'alertdialog'
@@ -155,6 +161,8 @@ export function Modal({
           width,
           maxWidth: '94vw',
           ...(height ? { height } : {}),
+          // Inline so it beats the class's own `max-h-[calc(100vh-2rem)]`.
+          ...(maxHeight ? { maxHeight } : {}),
           background: 'var(--bg-elevated)',
         }}
         onClick={(e) => e.stopPropagation()}

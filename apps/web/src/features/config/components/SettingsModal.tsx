@@ -3,18 +3,26 @@ import type { ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import type { ModelAgentKind, ProjectConfig } from '@/shared/api/client'
 import { EMPTY_AGENT_MODELS } from '@shared/agent-models'
-import { Modal, Section } from '@/shared/ui/atoms'
-import { OPTION_ROW_CLASS, OPTION_ROW_SECTION_BODY, optionRowStyle } from '@/shared/ui/OptionRow'
+import { HintIcon, Modal, Section, SlidersIcon } from '@/shared/ui/atoms'
+import { OPTION_ROW_CLASS, OPTION_ROW_COMPACT_CLASS, OPTION_ROW_SECTION_BODY, optionRowStyle } from '@/shared/ui/OptionRow'
 import { FolderPicker } from './FolderPicker'
 import { GitHubSection } from './GitHubSection'
 import { ModelMatrixDialog } from './ModelMatrixDialog'
 import { RestartPhase, RestartProgress, defaultRedirect } from './SettingsRestartProgress'
 import {
-  ASK_ON_LAUNCH_OPTIONS,
+  ASK_ON_LAUNCH_DESCRIPTION,
+  ASK_ON_LAUNCH_HELP,
+  ASK_ON_LAUNCH_LABEL,
+  DEFAULT_AGENT_HELP,
   DEFAULT_PORT,
   EDITOR_OPTIONS,
   HEAL_AGENT_OPTIONS,
-  INTERNAL_AGENTS_ONLY_COPY,
+  PORT_HELP,
+  PORT_SUMMARY,
+  SETTINGS_ACTION_CLASS,
+  WIKI_HELP,
+  WIKI_SUMMARY,
+  migrateLegacyEditor,
   migrateLegacyHealAgent,
   stagePlanSummary,
 } from './settings-options'
@@ -51,7 +59,7 @@ function Hint({ children }: { children: ReactNode }) {
  *  The native input stays the mark: it carries the keyboard and screen-reader
  *  behaviour of a real radio group for free, tinted to the app's accent the way
  *  the cleanup pages tint theirs. */
-function ChoiceRow({ type, name, value, checked, onChange, label, description, testId, divider }: {
+function ChoiceRow({ type, name, value, checked, onChange, label, description, help, helpLabel, testId, divider }: {
   type: 'radio' | 'checkbox'
   name?: string
   value?: string
@@ -59,6 +67,11 @@ function ChoiceRow({ type, name, value, checked, onChange, label, description, t
   onChange: (checked: boolean) => void
   label: string
   description: string
+  /** Secondary explanation, hung off a `ⓘ` beside the label — the row-level
+   *  twin of the `ⓘ` a section title carries. For scope and caveats that would
+   *  push the visible description past its one line. */
+  help?: string
+  helpLabel?: string
   testId?: string
   /** Hairline above the row — set on every row but the first, so a group reads
    *  as one connected list. */
@@ -89,10 +102,75 @@ function ChoiceRow({ type, name, value, checked, onChange, label, description, t
         {/* Option rows across the app are 12.5/medium over a 12px muted
             description — `text-sm` here matched the dialog title and left label
             and description a hair apart. */}
-        <span className="block text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>{label}</span>
+        <span className="flex items-center gap-1.5">
+          <span className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>{label}</span>
+          {help && <HintIcon hint={help} label={helpLabel} />}
+        </span>
         <span className="mt-0.5 block text-xs" style={{ color: 'var(--text-muted)' }}>{description}</span>
       </span>
     </label>
+  )
+}
+
+/** Default-agent rows carry their drill-through action on the same line. The
+ *  button is a sibling of the label rather than nested inside it: clicking
+ *  Configure must not also change the selected radio. */
+function AgentChoiceRow({ value, label, checked, summary, divider, onChange, onConfigure }: {
+  value: string
+  label: string
+  checked: boolean
+  summary: string | null
+  divider: boolean
+  onChange: () => void
+  onConfigure: () => void
+}) {
+  return (
+    <div
+      data-testid={`agent-choice-${value}`}
+      className={`${OPTION_ROW_COMPACT_CLASS} ${checked ? '' : 'cl-hover-row'} ${divider ? 'border-t' : ''}`}
+      style={optionRowStyle({ selected: checked, interactive: true })}
+    >
+      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+        <input
+          type="radio"
+          name="healAgent"
+          value={value}
+          checked={checked}
+          onChange={onChange}
+          className="h-[13px] w-[13px] shrink-0"
+          style={{ accentColor: 'var(--accent)' }}
+        />
+        <span className="shrink-0 text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>{label}</span>
+        {summary && (
+          // 12px muted — the one secondary-text size this dialog uses for a
+          // line that qualifies a label. At 11px it was a fourth type size on
+          // a card that already had three.
+          <span
+            data-testid={`model-summary-${value}`}
+            className="min-w-0 flex-1 truncate text-xs"
+            style={{ color: 'var(--text-muted)' }}
+            title={summary}
+          >
+            {summary}
+          </span>
+        )}
+      </label>
+      {/* An icon, not "Configure models →". The label repeated on every agent
+          row and out-measured the choice it qualified; the row's real content
+          is which agent and what its models are. Both agents keep their own
+          gear — a flight can be launched with the agent that isn't your
+          default, so its saved plans still matter. */}
+      <button
+        type="button"
+        data-testid={`configure-models-${value}`}
+        onClick={onConfigure}
+        aria-label={`Configure ${label} models`}
+        title={`Configure ${label} models`}
+        className="cl-icon-button h-6 w-6 shrink-0"
+      >
+        <SlidersIcon />
+      </button>
+    </div>
   )
 }
 
@@ -119,11 +197,15 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
     api.getProjectConfig()
       .then((c) => {
         if (cancelled) return
-        // Stash the as-loaded config for dirty comparison, but project the
-        // legacy `auto` value to `external` in the draft so the radio group
-        // shows a valid selection. Saving will persist the migrated value.
+        // Stash the as-loaded config for dirty comparison, but project retired
+        // choices onto their live UI values so every radio group has a valid
+        // selection. Saving through an older server persists the migration.
         setConfig(c)
-        setDraft({ ...c, healAgent: migrateLegacyHealAgent(c.healAgent) })
+        setDraft({
+          ...c,
+          healAgent: migrateLegacyHealAgent(c.healAgent),
+          editor: migrateLegacyEditor(c.editor),
+        })
         setPortInput(String(c.port ?? DEFAULT_PORT))
       })
       .catch((e: unknown) => {
@@ -198,6 +280,11 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
       onClose={onClose}
       title="Project Settings"
       ariaLabel="Project Settings"
+      // Floats in the viewport with an even 15% band above and below, instead
+      // of running to within 1rem of both edges. Settings is a long list of
+      // small cards: at full height it read as a page rather than a dialog,
+      // and the scroll had no visible end.
+      maxHeight="70vh"
       // The body grows and shrinks with the port confirmation, the restart
       // progress and the gh remediation block — without a reserved gutter the
       // appearing scrollbar shifts every card sideways.
@@ -237,7 +324,14 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
             </div>
           ) : (
             <>
-              <Section title="Port">
+              <Section
+                title={
+                  <span className="inline-flex items-center gap-1.5">
+                    Port
+                    <HintIcon hint={PORT_HELP} label="Port help" />
+                  </span>
+                }
+              >
                 <div className="flex items-center gap-2">
                   <input
                     name="port"
@@ -256,22 +350,34 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
                     type="button"
                     onClick={() => { void submitPort(false) }}
                     disabled={portBusy || restarting}
-                    className="cl-button px-3 py-1 text-xs"
+                    className={SETTINGS_ACTION_CLASS}
                   >
                     Change port
                   </button>
                 </div>
-                <Hint>
-                  The UI and MCP server bind this port (default {DEFAULT_PORT}). Changing it restarts Canary Lab; your MCP client may need to reconnect (restart it or toggle the connector) if it doesn&apos;t reconnect on its own.
-                </Hint>
+                <Hint>{PORT_SUMMARY}</Hint>
+                {/* The app's notice-with-a-remedy shape (the model matrix's
+                    probe warning): a tinted, hairline-bordered block whose
+                    action sits at its right edge — not a red sentence with a
+                    button spliced mid-line. The hue stays danger: what it
+                    warns about is losing active runs. */}
                 {pendingConfirm != null && (
-                  <div className="mt-2 text-xs" style={{ color: 'var(--danger)' }}>
-                    {pendingConfirm} active run{pendingConfirm === 1 ? '' : 's'} will be aborted by the restart.{' '}
+                  <div
+                    className="mt-2 flex items-start gap-2 rounded-md px-2.5 py-2 text-xs"
+                    style={{
+                      color: 'var(--text-primary)',
+                      border: '1px solid color-mix(in srgb, var(--danger) 35%, transparent)',
+                      background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
+                    }}
+                  >
+                    <span className="min-w-0 flex-1">
+                      {pendingConfirm} active run{pendingConfirm === 1 ? '' : 's'} will be aborted by the restart.
+                    </span>
                     <button
                       type="button"
                       onClick={() => { void submitPort(true) }}
                       disabled={portBusy || restarting}
-                      className="cl-button px-2 py-0.5 text-xs"
+                      className={`${SETTINGS_ACTION_CLASS} shrink-0`}
                     >
                       Restart anyway
                     </button>
@@ -290,7 +396,14 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
                 )}
               </Section>
 
-              <Section title="Personal wiki">
+              <Section
+                title={
+                  <span className="inline-flex items-center gap-1.5">
+                    Personal wiki
+                    <HintIcon hint={WIKI_HELP} label="Personal wiki help" />
+                  </span>
+                }
+              >
                 <FolderPicker
                   value={draft.personalWikiPath}
                   onChange={(p) => setDraft({ ...draft, personalWikiPath: p.trim() ? p : null })}
@@ -298,82 +411,51 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
                   title="Select personal wiki folder"
                   confirmLabel="Use wiki folder"
                 />
-                <Hint>
-                  Optional Karpathy-style personal wiki folder for distilled agent notes. Auto-heal receives the path and reads only relevant notes.
-                </Hint>
+                <Hint>{WIKI_SUMMARY}</Hint>
               </Section>
 
+              {/* One card, because it is one subject: which agent Canary Lab
+                  starts, what models that agent gets, and whether a launch
+                  stops to confirm them. As two cards the pair read as two
+                  unrelated settings that happened to look alike — the same
+                  header band, the same two radio rows, twice — and cost four
+                  rows plus a second header to carry three facts. */}
               <Section
                 title={
-                  <span className="flex items-center gap-2">
-                    Default agent
-                    {/* Scope chip: this section governs Canary's OWN spawns only.
-                        External-agent work (MCP) runs on the client's model. */}
-                    <span
-                      title={INTERNAL_AGENTS_ONLY_COPY}
-                      className="rounded-md px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal"
-                      style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
-                    >
-                      internal agents only
-                    </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    Agent
+                    <HintIcon hint={DEFAULT_AGENT_HELP} label="Default agent help" />
                   </span>
                 }
                 bodyClassName={OPTION_ROW_SECTION_BODY}
               >
                 {HEAL_AGENT_OPTIONS.map((opt, index) => (
-                  <div key={opt.value} className={index > 0 ? 'border-t' : ''} style={index > 0 ? { borderColor: 'var(--border-default)' } : undefined}>
-                    <ChoiceRow
-                      type="radio"
-                      name="healAgent"
-                      value={opt.value}
-                      checked={draft.healAgent === opt.value}
-                      onChange={() => setDraft({ ...draft, healAgent: opt.value })}
-                      label={opt.label}
-                      description={opt.description}
-                    />
-                    {/* The agent's effective per-stage plan at a glance, with the
-                        matrix as the drill-through — indented to the row's label
-                        column so it reads as part of the option. */}
-                    <div className="flex items-center gap-2 pb-2 pl-[41px] pr-3">
-                      <span
-                        data-testid={`model-summary-${opt.value}`}
-                        className="min-w-0 flex-1 truncate text-[11px]"
-                        style={{ color: 'var(--text-muted)' }}
-                        title={stagePlanSummary(draft.agentModels?.[opt.value])}
-                      >
-                        {stagePlanSummary(draft.agentModels?.[opt.value])}
-                      </span>
-                      <button
-                        type="button"
-                        data-testid={`configure-models-${opt.value}`}
-                        onClick={() => setMatrixAgent(opt.value)}
-                        className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
-                      >
-                        Configure models →
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                <div className="px-3.5 pb-2 pt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  {INTERNAL_AGENTS_ONLY_COPY}
-                </div>
-              </Section>
-
-              <Section title="At launch" bodyClassName={OPTION_ROW_SECTION_BODY}>
-                {ASK_ON_LAUNCH_OPTIONS.map((opt, index) => (
-                  <ChoiceRow
-                    key={String(opt.value)}
-                    type="radio"
-                    name="askModelsOnLaunch"
-                    value={String(opt.value)}
-                    testId={`settings-ask-models-${opt.value}`}
-                    checked={(draft.askModelsOnLaunch === true) === opt.value}
-                    onChange={() => setDraft({ ...draft, askModelsOnLaunch: opt.value })}
+                  <AgentChoiceRow
+                    key={opt.value}
+                    value={opt.value}
                     label={opt.label}
-                    description={opt.description}
+                    checked={draft.healAgent === opt.value}
+                    summary={stagePlanSummary(draft.agentModels?.[opt.value])}
                     divider={index > 0}
+                    onChange={() => setDraft({ ...draft, healAgent: opt.value })}
+                    onConfigure={() => setMatrixAgent(opt.value)}
                   />
                 ))}
+                {/* A checkbox on the same geometry as the Onboarding and
+                    auto-PR rows, not a switch: it is the dialog's third
+                    standalone on/off setting, and the other two are checkboxes.
+                    One row shape for one kind of decision. */}
+                <ChoiceRow
+                  type="checkbox"
+                  testId="settings-ask-models"
+                  label={ASK_ON_LAUNCH_LABEL}
+                  description={ASK_ON_LAUNCH_DESCRIPTION}
+                  help={ASK_ON_LAUNCH_HELP}
+                  helpLabel="At launch help"
+                  checked={draft.askModelsOnLaunch === true}
+                  onChange={(askModelsOnLaunch) => setDraft({ ...draft, askModelsOnLaunch })}
+                  divider
+                />
               </Section>
 
               <Section title="Editor" bodyClassName={OPTION_ROW_SECTION_BODY}>
@@ -418,8 +500,8 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
                   testId="settings-auto-propose-pr"
                   checked={draft.autoProposePr !== false}
                   onChange={(autoProposePr) => setDraft({ ...draft, autoProposePr })}
-                  label="Open a draft PR when a run heals green"
-                  description="One pull request per suite, force-pushed to the same branch each time so it always carries the newest fix. Nothing is pushed for a run that failed or gave up."
+                  label="Open a draft PR when a repair succeeds"
+                  description="Creates one draft PR per suite and keeps it updated with the latest fix. Failed repairs are never pushed."
                 />
                 <GitHubSection divider />
               </Section>

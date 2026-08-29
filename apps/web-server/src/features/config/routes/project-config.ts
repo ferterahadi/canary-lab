@@ -7,6 +7,7 @@ import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../sh
 import {
   isValidPort,
   loadProjectConfig,
+  normalizeEditor,
   normalizeHealAgent,
   normalizePersonalWikiPath,
   resolveProjectPort,
@@ -42,18 +43,20 @@ export async function projectConfigRoutes(
   })
 
   app.put<{ Body: Partial<ProjectConfig> }>('/api/project-config', async (req, reply) => {
-    // Normalized rather than membership-checked: the retired `external` maps to
-    // `claude` silently, so a stale client's PUT keeps working (2.2.0 migration).
+    // Normalized rather than membership-checked: retired choices map to their
+    // current meanings, so a stale client's PUT keeps working.
     const incomingHealAgent = req.body?.healAgent === undefined
       ? undefined
       : normalizeHealAgent(req.body.healAgent)
-    const incomingEditor = req.body?.editor
+    const incomingEditor = req.body?.editor === undefined
+      ? undefined
+      : normalizeEditor(req.body.editor)
     const incomingPersonalWikiPath = req.body?.personalWikiPath
     if (req.body?.healAgent !== undefined && incomingHealAgent === undefined) {
       reply.code(400)
       return { error: `healAgent must be one of: ${HEAL_AGENT_VALUES.join(', ')}` }
     }
-    if (incomingEditor !== undefined && !EDITOR_VALUES.includes(incomingEditor)) {
+    if (req.body?.editor !== undefined && incomingEditor === undefined) {
       reply.code(400)
       return { error: `editor must be one of: ${EDITOR_VALUES.join(', ')}` }
     }

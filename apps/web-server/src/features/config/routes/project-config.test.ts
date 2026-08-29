@@ -201,6 +201,19 @@ describe('PUT /api/project-config', () => {
         fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
       )
       expect(written).toEqual({ ...DEFAULTS, editor: 'cursor' })
+
+      // Older clients may still submit the retired explicit system choice.
+      // It now means Auto-detect, whose final fallback is the system opener.
+      const migrated = await app.inject({
+        method: 'PUT',
+        url: '/api/project-config',
+        payload: { editor: 'system' },
+      })
+      expect(migrated.statusCode).toBe(200)
+      expect(migrated.json()).toEqual(DEFAULTS)
+      expect(JSON.parse(
+        fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
+      )).toEqual(DEFAULTS)
     } finally {
       await app.close()
     }

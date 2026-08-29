@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 export { ComplexValueBadge, FieldRow, NumberInput, Segmented, Select, TextInput, Textarea, Toggle } from './FormFields'
-export { ChevronRightIcon, CloseIcon, DownloadIcon, FolderIcon, HintIcon, MinusIcon, PlusIcon, TrashIcon } from './Icons'
+export { ChevronRightIcon, CloseIcon, DownloadIcon, FolderIcon, HintIcon, MinusIcon, PlusIcon, RefreshIcon, SlidersIcon, TrashIcon } from './Icons'
 export { ConfirmModal, Modal, SlideOverPanel, useEscapeToClose } from './Overlays'
 export { CopyField } from './CopyField'
 export { ToastHost } from './Toasts'

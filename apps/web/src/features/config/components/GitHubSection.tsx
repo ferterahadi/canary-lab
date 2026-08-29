@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { GhStatus } from '@/shared/api/client'
+import { RefreshIcon } from '@/shared/ui/atoms'
 import { OPTION_ROW_CLASS, optionRowStyle } from '@/shared/ui/OptionRow'
 
 // Read-only "which GitHub account is connected" surface (R80). Detect-and-
@@ -59,8 +60,19 @@ export function GitHubSection({ divider }: {
                 ? `Connected${status.account ? ` as ${status.account}` : ''}${status.host && status.host !== 'github.com' ? ` (${status.host})` : ''}`
                 : status?.installed ? 'Not signed in' : 'GitHub CLI not installed'}
           </span>
-          <button type="button" data-testid="settings-github-refresh" onClick={load} className="cl-button ml-auto shrink-0 px-2 py-0.5 text-xs">
-            Refresh
+          {/* An icon on the same `cl-icon-button` skin as the agent rows'
+              configure gear. "Refresh" was the widest thing on a row whose
+              content is WHO is connected; the glyph says re-check without
+              competing with the account name. */}
+          <button
+            type="button"
+            data-testid="settings-github-refresh"
+            onClick={load}
+            aria-label="Re-check GitHub sign-in"
+            title="Re-check GitHub sign-in"
+            className="cl-icon-button ml-auto h-6 w-6 shrink-0"
+          >
+            <RefreshIcon />
           </button>
         </span>
         {remediation && (
@@ -74,7 +86,7 @@ export function GitHubSection({ divider }: {
         {/* Same size as the modal's other option descriptions — this line plays
             exactly that role for the status above it. */}
         <span className="mt-0.5 block text-xs" style={{ color: 'var(--text-muted)' }}>
-          Canary only reads this — it never signs in for you or handles your token.
+          Signed in through GitHub CLI. Canary Lab does not store or manage your token.
         </span>
       </span>
     </div>

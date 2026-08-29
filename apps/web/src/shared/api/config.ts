@@ -309,6 +309,8 @@ export function putEnvsetSlot(
 // `external` was retired in 2.2.0 — the server migrates a stored value to
 // `claude` on load, so this mirror never sees it.
 export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual'
+// `system` remains a launch result and an older-server compatibility value;
+// the settings UI exposes only auto/vscode/cursor.
 export type EditorChoice = 'auto' | 'vscode' | 'cursor' | 'system'
 
 // Not a mirror: the model-cockpit vocabulary has ONE home in

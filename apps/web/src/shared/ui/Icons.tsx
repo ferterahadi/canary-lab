@@ -161,3 +161,30 @@ export function ChevronRightIcon() {
     </svg>
   )
 }
+
+/** Tuning sliders — the "configure the models behind this" action. An icon
+ *  rather than a labelled button: it repeats once per agent row, and a text
+ *  button that wide made the row's real choice (which agent) compete with an
+ *  action that only qualifies it. */
+export function SlidersIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="4" y1="8" x2="20" y2="8" />
+      <line x1="4" y1="16" x2="20" y2="16" />
+      <circle cx="9" cy="8" r="2.25" />
+      <circle cx="15" cy="16" r="2.25" />
+    </svg>
+  )
+}
+
+/** Circular arrow — "check this again". Used where a readout reflects state
+ *  that changes outside the app (the GitHub sign-in), so the action is a
+ *  re-read rather than something the row's label needs to spell out. */
+export function RefreshIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <polyline points="21 3 21 9 15 9" />
+    </svg>
+  )
+}

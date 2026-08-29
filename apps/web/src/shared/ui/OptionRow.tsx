@@ -25,8 +25,14 @@ export const OPTION_ROW_CLASS = 'flex items-start gap-3 px-3.5 py-2.5 text-left'
 /** The one-line variant: a row whose whole choice fits on its label line, so
  *  the mark centres on it instead of hanging at the top of a paragraph. A
  *  separate constant rather than an override — appending `py-1.5` to the class
- *  above would leave two padding utilities fighting over stylesheet order. */
-export const OPTION_ROW_COMPACT_CLASS = 'flex min-h-[40px] items-center gap-2.5 px-3 py-1.5 text-left'
+ *  above would leave two padding utilities fighting over stylesheet order.
+ *
+ *  Only the VERTICAL rhythm differs from `OPTION_ROW_CLASS`. The horizontal
+ *  inset and mark gap are deliberately identical (`px-3.5`, `gap-3`): a dialog
+ *  that mixes both variants — Project Settings mixes them in adjacent cards —
+ *  otherwise gets two label columns 4px apart, which reads as a misalignment
+ *  rather than as two kinds of row. */
+export const OPTION_ROW_COMPACT_CLASS = 'flex min-h-[40px] items-center gap-3 px-3.5 py-1.5 text-left'
 
 export function optionRowStyle({ selected, disabled, interactive }: {
   selected: boolean

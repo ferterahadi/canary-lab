@@ -41,4 +41,13 @@ describe('optionRowStyle', () => {
     expect(OPTION_ROW_COMPACT_CLASS).toContain('py-1.5')
     expect(OPTION_ROW_COMPACT_CLASS).not.toContain('py-2.5')
   })
+
+  it('puts both variants on one label column — only the vertical rhythm differs', () => {
+    // A dialog that mixes them (Project Settings does, in adjacent cards) must
+    // not end up with two left edges 4px apart.
+    for (const utility of ['px-3.5', 'gap-3']) {
+      expect(OPTION_ROW_CLASS).toContain(utility)
+      expect(OPTION_ROW_COMPACT_CLASS).toContain(utility)
+    }
+  })
 })

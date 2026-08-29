@@ -80,6 +80,14 @@ function isEditorChoice(v: unknown): v is EditorChoice {
   return v === 'auto' || v === 'vscode' || v === 'cursor' || v === 'system'
 }
 
+/** `system` used to be a saved preference. It now belongs to auto-detection as
+ *  the final fallback, so old config files and clients migrate to `auto` while
+ *  launch results can still report that the system opener was actually used. */
+export function normalizeEditor(v: unknown): EditorChoice | undefined {
+  if (v === 'system') return 'auto'
+  return isEditorChoice(v) ? v : undefined
+}
+
 export function normalizePersonalWikiPath(value: unknown): string | null {
   if (value === null || value === undefined) return null
   if (typeof value !== 'string') return null
@@ -111,7 +119,7 @@ export function loadProjectConfig(projectRoot: string): ProjectConfig {
     const port = normalizePort(json?.port)
     return {
       healAgent: normalizeHealAgent(json?.healAgent) ?? DEFAULT.healAgent,
-      editor: isEditorChoice(json?.editor) ? json.editor : DEFAULT.editor,
+      editor: normalizeEditor(json?.editor) ?? DEFAULT.editor,
       agentModels: normalizeAgentModels(json?.agentModels),
       askModelsOnLaunch: json?.askModelsOnLaunch === true,
       personalWikiPath: normalizePersonalWikiPath(json?.personalWikiPath),
@@ -128,7 +136,7 @@ export function saveProjectConfig(projectRoot: string, config: ProjectConfig): v
   const port = normalizePort(config.port)
   const next: ProjectConfig = {
     healAgent: normalizeHealAgent(config.healAgent) ?? DEFAULT.healAgent,
-    editor: isEditorChoice(config.editor) ? config.editor : DEFAULT.editor,
+    editor: normalizeEditor(config.editor) ?? DEFAULT.editor,
     agentModels: normalizeAgentModels(config.agentModels),
     askModelsOnLaunch: config.askModelsOnLaunch === true,
     personalWikiPath: normalizePersonalWikiPath(config.personalWikiPath),

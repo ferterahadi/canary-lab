@@ -5,6 +5,7 @@ import path from 'path'
 import {
   DEFAULT_PORT,
   loadProjectConfig,
+  normalizeEditor,
   normalizeHealAgent,
   normalizePersonalWikiPath,
   projectConfigPath,
@@ -79,7 +80,7 @@ describe('project config', () => {
     expect(normalizeHealAgent(undefined)).toBeUndefined()
   })
 
-  it('loads valid editor values and falls back for unknown values', () => {
+  it('loads live editor values, migrates system to auto, and falls back for unknown values', () => {
     const projectRoot = mkProject()
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'vscode' }))
     expect(loadProjectConfig(projectRoot)).toEqual({ ...DEFAULTS, editor: 'vscode' })
@@ -88,10 +89,18 @@ describe('project config', () => {
     expect(loadProjectConfig(projectRoot)).toEqual({ ...DEFAULTS, editor: 'cursor' })
 
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'system' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ ...DEFAULTS, editor: 'system' })
+    expect(loadProjectConfig(projectRoot)).toEqual(DEFAULTS)
 
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'vim' }))
     expect(loadProjectConfig(projectRoot)).toEqual(DEFAULTS)
+  })
+
+  it('normalizes the retired system preference into auto-detect', () => {
+    expect(normalizeEditor('system')).toBe('auto')
+    expect(normalizeEditor('auto')).toBe('auto')
+    expect(normalizeEditor('cursor')).toBe('cursor')
+    expect(normalizeEditor('vscode')).toBe('vscode')
+    expect(normalizeEditor('vim')).toBeUndefined()
   })
 
   it('persists only supported healAgent values', () => {
@@ -110,6 +119,9 @@ describe('project config', () => {
 
     saveProjectConfig(projectRoot, { ...DEFAULTS, healAgent: 'auto', editor: 'other' as never })
     expect(loadProjectConfig(projectRoot)).toEqual({ ...DEFAULTS, healAgent: 'auto' })
+
+    saveProjectConfig(projectRoot, { ...DEFAULTS, editor: 'system' })
+    expect(JSON.parse(fs.readFileSync(projectConfigPath(projectRoot), 'utf-8')).editor).toBe('auto')
   })
 
   it('round-trips agentModels and drops junk stages/efforts on the way through', () => {
