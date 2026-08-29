@@ -11,5 +11,6 @@ export type {
   CoverageJobStatus,
   CoverageJobResult,
   CoverageJobManifest,
+  CoverageJobModels,
   CoverageJobIndexEntry,
 } from '../../../../../../../../shared/coverage/types'

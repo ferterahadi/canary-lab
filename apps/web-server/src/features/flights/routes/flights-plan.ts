@@ -14,7 +14,7 @@ import { abortFlight, drainQueuedFlights } from '../logic/conductor'
 import { deriveFeatureSlug, type PlannedFeature, type PlanFeaturesTask } from '../../../../../../shared/flights/types'
 import { startPlanFeatures } from '../logic/plan-features'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
-import { executePlannedLaunch, expandHome } from './flight-route-support'
+import { executePlannedLaunch, expandHome, resolveFlightModels } from './flight-route-support'
 
 export async function registerFlightPlanRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
   const { store, planStore, conductorDeps } = ctx
@@ -66,6 +66,9 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
                 yolo: false,
                 ...(settled.autopilot === false ? { autopilot: false } : {}),
                 ...(settled.agent ? { agent: settled.agent } : {}),
+                // No launch gate on the backgrounded auto-launch — the plan is
+                // the workspace defaults, resolved for the conducting agent.
+                models: resolveFlightModels(deps.projectRoot, settled.agent ?? 'claude', undefined),
               },
               { store, featuresDir: deps.featuresDir, conductorDeps, workspaceEvents: deps.workspaceEvents },
             ),
@@ -126,6 +129,9 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
           autopilot?: boolean
           /** Absent = the task's stored choice. */
           agent?: string
+          /** Launch-gate override for every launched flight, laid over the
+           *  workspace config exactly like the single-flight start route. */
+          models?: unknown
         }
       | undefined
   }>('/api/flights/plan-features/:taskId/launch', async (req, reply) => {
@@ -171,6 +177,11 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
         ...((body.agent ?? task.agent) === 'claude' || (body.agent ?? task.agent) === 'codex'
           ? { agent: (body.agent ?? task.agent) as 'claude' | 'codex' }
           : {}),
+        models: resolveFlightModels(
+          deps.projectRoot,
+          (body.agent ?? task.agent) === 'codex' ? 'codex' : 'claude',
+          body.models,
+        ),
       },
       { store, featuresDir: deps.featuresDir, conductorDeps, workspaceEvents: deps.workspaceEvents },
     )

@@ -336,6 +336,10 @@ describe('RunsProvider', () => {
     expect(api.startRun).toHaveBeenLastCalledWith('feat', { isolation: 'queue' })
     await act(async () => { await runsApi!.startRun('feat') })
     expect(api.startRun).toHaveBeenLastCalledWith('feat', undefined)
+    // A models-gate answer rides the body on its own — no env/isolation needed.
+    const models = { heal: { model: 'opus', effort: 'high' } }
+    await act(async () => { await runsApi!.startRun('feat', undefined, undefined, undefined, models) })
+    expect(api.startRun).toHaveBeenLastCalledWith('feat', { models })
   })
 
   it('startRun forwards boot mode (and combines with env)', async () => {

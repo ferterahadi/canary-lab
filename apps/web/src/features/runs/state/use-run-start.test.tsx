@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   benchmarkPreflight: vi.fn(),
   checkoutRepoBranch: vi.fn(),
   pinFeatureBranchesToCurrent: vi.fn(),
+  getProjectConfig: vi.fn(),
 }))
 vi.mock('@/shared/api/client', () => ({
   asRepoCollision: mocks.asRepoCollision,
@@ -18,6 +19,7 @@ vi.mock('@/shared/api/client', () => ({
   benchmarkPreflight: mocks.benchmarkPreflight,
   checkoutRepoBranch: mocks.checkoutRepoBranch,
   pinFeatureBranchesToCurrent: mocks.pinFeatureBranchesToCurrent,
+  getProjectConfig: mocks.getProjectConfig,
 }))
 
 let hook: UseRunStart
@@ -56,6 +58,8 @@ beforeEach(() => {
   mocks.benchmarkPreflight.mockReset().mockResolvedValue({ portsConfigured: true })
   mocks.checkoutRepoBranch.mockReset().mockResolvedValue(undefined)
   mocks.pinFeatureBranchesToCurrent.mockReset().mockResolvedValue(undefined)
+  // The models gate probes the config before a test run — defaults disarm it.
+  mocks.getProjectConfig.mockReset().mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
 })
 afterEach(() => {
   act(() => root.unmount())
@@ -66,7 +70,7 @@ describe('handleStartRun', () => {
   it('selects the started run on success', async () => {
     mount()
     await act(async () => { await hook.handleStartRun('local') })
-    expect(startRun).toHaveBeenCalledWith('checkout', 'local', undefined, 'test')
+    expect(startRun).toHaveBeenCalledWith('checkout', 'local', undefined, 'test', undefined)
     expect(onRunStarted).toHaveBeenCalledWith('run-1')
     expect(hook.collisionPrompt).toBeNull()
     expect(hook.startError).toBeNull()
@@ -75,7 +79,7 @@ describe('handleStartRun', () => {
   it('does NOT select a boot run (Services overlay owns it)', async () => {
     mount()
     await act(async () => { await hook.handleStartRun('local', 'boot') })
-    expect(startRun).toHaveBeenCalledWith('checkout', 'local', undefined, 'boot')
+    expect(startRun).toHaveBeenCalledWith('checkout', 'local', undefined, 'boot', undefined)
     expect(onRunStarted).not.toHaveBeenCalled()
   })
 
@@ -125,7 +129,7 @@ describe('resolveCollision', () => {
     expect(hook.collisionPrompt).not.toBeNull()
 
     await act(async () => { await hook.resolveCollision('worktree') })
-    expect(startRun).toHaveBeenLastCalledWith('checkout', 'local', 'worktree', 'test')
+    expect(startRun).toHaveBeenLastCalledWith('checkout', 'local', 'worktree', 'test', undefined)
     expect(onRunStarted).toHaveBeenCalledWith('run-1')
     expect(hook.collisionPrompt).toBeNull()
   })
@@ -153,7 +157,7 @@ describe('resolveCollision', () => {
 
     await act(async () => { await hook.resolveCollision('queue') })
 
-    expect(startRun).toHaveBeenLastCalledWith('checkout', 'local', 'queue', 'boot')
+    expect(startRun).toHaveBeenLastCalledWith('checkout', 'local', 'queue', 'boot', undefined)
     expect(onRunStarted).not.toHaveBeenCalled()
   })
 
@@ -180,7 +184,7 @@ describe('branch-mismatch recovery', () => {
     await act(async () => { await hook.switchBranchesAndRun() })
     expect(mocks.checkoutRepoBranch).toHaveBeenCalledWith('checkout', 'shop', 'main')
     expect(mocks.checkoutRepoBranch).toHaveBeenCalledWith('checkout', 'api', 'dev')
-    expect(startRun).toHaveBeenLastCalledWith('checkout', 'local', undefined, 'test')
+    expect(startRun).toHaveBeenLastCalledWith('checkout', 'local', undefined, 'test', undefined)
     expect(hook.startError).toBeNull()
   })
 
@@ -191,7 +195,7 @@ describe('branch-mismatch recovery', () => {
 
     await act(async () => { await hook.pinCurrentAndRun() })
     expect(mocks.pinFeatureBranchesToCurrent).toHaveBeenCalledWith('checkout')
-    expect(startRun).toHaveBeenLastCalledWith('checkout', 'local', undefined, 'test')
+    expect(startRun).toHaveBeenLastCalledWith('checkout', 'local', undefined, 'test', undefined)
     expect(hook.startError).toBeNull()
   })
 
@@ -238,5 +242,106 @@ describe('handleStartVerification', () => {
     await act(async () => { await hook.handleStartVerification({ configId: 'cfg-1' }) })
 
     expect(startVerification).not.toHaveBeenCalled()
+  })
+})
+
+describe('models gate (askModelsOnLaunch)', () => {
+  const armed = { healAgent: 'claude' as const, editor: 'auto' as const, personalWikiPath: null, askModelsOnLaunch: true, agentModels: { claude: { heal: { model: 'opus', effort: 'high' } }, codex: {} } }
+
+  it('parks a test run on the gate instead of starting, in the heal agent\'s vocabulary', async () => {
+    mocks.getProjectConfig.mockResolvedValue({ ...armed, healAgent: 'codex' })
+    mount()
+    await act(async () => { await hook.handleStartRun('local') })
+    expect(startRun).not.toHaveBeenCalled()
+    expect(hook.modelsPrompt).toMatchObject({ feature: 'checkout', env: 'local', mode: 'test', agent: 'codex' })
+    expect(hook.modelsPrompt?.agentModels).toEqual(armed.agentModels)
+  })
+
+  it('maps every non-codex healAgent to the claude vocabulary', async () => {
+    mocks.getProjectConfig.mockResolvedValue({ ...armed, healAgent: 'auto' })
+    mount()
+    await act(async () => { await hook.handleStartRun() })
+    expect(hook.modelsPrompt?.agent).toBe('claude')
+  })
+
+  it('a config with no agentModels block gates with empty plans (pre-2.2.0 workspace)', async () => {
+    mocks.getProjectConfig.mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null, askModelsOnLaunch: true })
+    mount()
+    await act(async () => { await hook.handleStartRun() })
+    expect(hook.modelsPrompt?.agentModels).toEqual({ claude: {}, codex: {} })
+  })
+
+  it('boot runs skip the gate — they spawn no heal/commit agents', async () => {
+    mocks.getProjectConfig.mockResolvedValue(armed)
+    mount()
+    await act(async () => { await hook.handleStartRun('local', 'boot') })
+    expect(mocks.getProjectConfig).not.toHaveBeenCalled()
+    expect(hook.modelsPrompt).toBeNull()
+    expect(startRun).toHaveBeenCalledWith('checkout', 'local', undefined, 'boot', undefined)
+  })
+
+  it('starts with defaults when the config probe fails — the gate never blocks a run', async () => {
+    mocks.getProjectConfig.mockRejectedValue(new Error('down'))
+    mount()
+    await act(async () => { await hook.handleStartRun('local') })
+    expect(hook.modelsPrompt).toBeNull()
+    expect(startRun).toHaveBeenCalledWith('checkout', 'local', undefined, 'test', undefined)
+  })
+
+  it('confirming the defaults card sends NO models — the server resolves config', async () => {
+    mocks.getProjectConfig.mockResolvedValue(armed)
+    mount()
+    await act(async () => { await hook.handleStartRun('local') })
+    await act(async () => { await hook.resolveModelsPrompt(null) })
+    expect(hook.modelsPrompt).toBeNull()
+    expect(startRun).toHaveBeenCalledWith('checkout', 'local', undefined, 'test', undefined)
+    expect(onRunStarted).toHaveBeenCalledWith('run-1')
+  })
+
+  it('confirming a customized plan rides it on the start', async () => {
+    mocks.getProjectConfig.mockResolvedValue(armed)
+    mount()
+    await act(async () => { await hook.handleStartRun('local') })
+    const plan = { heal: { model: 'haiku', effort: 'low' } }
+    await act(async () => { await hook.resolveModelsPrompt(plan) })
+    expect(startRun).toHaveBeenCalledWith('checkout', 'local', undefined, 'test', plan)
+  })
+
+  it('resolveModelsPrompt without a parked prompt is a no-op', async () => {
+    mount()
+    await act(async () => { await hook.resolveModelsPrompt(null) })
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('the gate answer survives a collision retry — the user is not re-asked', async () => {
+    mocks.getProjectConfig.mockResolvedValue(armed)
+    const plan = { heal: { model: 'haiku', effort: 'low' } }
+    mount()
+    await act(async () => { await hook.handleStartRun('local') })
+    startRun.mockRejectedValueOnce(new Error('409'))
+    mocks.asRepoCollision.mockReturnValueOnce({ repo: 'shop' })
+    await act(async () => { await hook.resolveModelsPrompt(plan) })
+    expect(hook.collisionPrompt).toMatchObject({ feature: 'checkout', models: plan })
+    await act(async () => { await hook.resolveCollision('worktree') })
+    expect(startRun).toHaveBeenLastCalledWith('checkout', 'local', 'worktree', 'test', plan)
+  })
+
+  it('retryStartError replays the exact failed start — feature and gate answer included', async () => {
+    mocks.getProjectConfig.mockResolvedValue(armed)
+    const plan = { heal: { model: 'haiku', effort: 'low' } }
+    mount()
+    await act(async () => { await hook.handleStartRun('local') })
+    startRun.mockRejectedValueOnce(new Error('500'))
+    await act(async () => { await hook.resolveModelsPrompt(plan) })
+    expect(hook.startError).toMatchObject({ feature: 'checkout', models: plan })
+    await act(async () => { await hook.retryStartError() })
+    expect(startRun).toHaveBeenLastCalledWith('checkout', 'local', undefined, 'test', plan)
+    expect(hook.startError).toBeNull()
+  })
+
+  it('retryStartError without a start error is a no-op', async () => {
+    mount()
+    await act(async () => { await hook.retryStartError() })
+    expect(startRun).not.toHaveBeenCalled()
   })
 })

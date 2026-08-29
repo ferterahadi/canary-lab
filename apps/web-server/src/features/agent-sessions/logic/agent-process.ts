@@ -1,6 +1,6 @@
 import fs from 'fs'
 import { spawn as nodeSpawn, type ChildProcess } from 'child_process'
-import { modelArgs } from './agent-models'
+import { effortArgs, modelArgs } from './agent-models'
 import { startIdleTimer, type IdleTimer } from './agent-idle-timer'
 import { resolveAgentBinary, isAgentKind, type HealAgent } from './agent-binary'
 import { internalAgentContextArgs } from './agent-context-policy'
@@ -49,6 +49,8 @@ export function buildClaudeAgenticArgs(
   prompt: string,
   opts: {
     model?: string | null
+    /** Reasoning effort (`--effort`), null/absent for the CLI's default. */
+    effort?: string | null
     sessionId?: string
     resume?: boolean
     /** Resume prior context into `sessionId` without appending this pass to the
@@ -75,6 +77,7 @@ export function buildClaudeAgenticArgs(
     '--include-partial-messages',
     '--verbose',
     ...modelArgs(opts.model ?? null),
+    ...effortArgs('claude', opts.effort ?? null),
     ...(opts.forkFromSessionId && opts.sessionId
       ? ['--resume', opts.forkFromSessionId, '--fork-session', '--session-id', opts.sessionId]
       : opts.sessionId

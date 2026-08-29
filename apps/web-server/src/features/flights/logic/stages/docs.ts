@@ -8,7 +8,7 @@ import { renderPrompt } from '../../../../shared/prompts'
 import { detectBaseBranch } from '../../../../shared/git-repo'
 import type { PrdSourceAttempt } from '../types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { defaultSpawnAgent, featureDirFor, stageFeedback, type FlightStageDeps, stageJobRef } from './context'
+import { defaultSpawnAgent, featureDirFor, stageFeedback, stageModels, type FlightStageDeps, stageJobRef } from './context'
 import { agentSpawnJob } from './stage-jobs'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { agentProgressSink } from './agent-progress'
@@ -384,6 +384,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       onChunk: agentProgressSink(ctx),
       signal: ctx.signal,
       agent: m.opts.agent,
+      models: stageModels(m, 'docs'),
     })
     return settleCollected(ctx, mode, plan, text)
   }

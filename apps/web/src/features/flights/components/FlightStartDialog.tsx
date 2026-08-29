@@ -7,6 +7,8 @@ import { ChevronRightIcon, Modal, StatusDot, Textarea, Toggle } from '@/shared/u
 import { FLIGHT_OVERVIEW, STAGE_BLURB, STAGE_ICON, STAGE_LABEL, stageStatusTone } from './stage-meta'
 import { RepoMultiPicker, type RepoOption } from './RepoMultiPicker'
 import { PlanningView, ProposalView, StageRow } from './FlightStartProposal'
+import { ModelLaunchGate } from '@/features/config'
+import { EMPTY_AGENT_MODELS, MODEL_STAGE_KEYS } from '@shared/agent-models'
 
 // R25/R40/R54/R63: the UI's flight launcher — THE entry point for flights.
 // Two modes off one dialog:
@@ -176,6 +178,10 @@ export function FlightStartDialog({
     launchProposal,
     stopAndStartFresh,
     start,
+    projectConfig,
+    modelsGate,
+    setModelsGate,
+    confirmLaunchModels,
   } = useFlightStartDialog({ feature, intent, fromStage, resumePlanTaskId, newFlightPrefill, onOpenFlight, onClose })
 
   // The number of automated steps behind a full flight (every pickable stage
@@ -313,6 +319,22 @@ export function FlightStartDialog({
       </button>
     </>
   )
+
+  // The models gate stacks over the launcher (same layering as the matrix over
+  // Settings): the launcher keeps every picked value; cancel returns to it.
+  if (modelsGate !== null) {
+    return (
+      <ModelLaunchGate
+        launchNoun="flight"
+        agent={agent}
+        stages={MODEL_STAGE_KEYS}
+        config={projectConfig?.agentModels ?? EMPTY_AGENT_MODELS}
+        onCancel={() => setModelsGate(null)}
+        onConfirm={confirmLaunchModels}
+        confirmLabel="Start flight"
+      />
+    )
+  }
 
   return (
     <Modal

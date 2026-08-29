@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import type { CoverageLedger, ProposedMapping, Requirement } from '../../../../../../../shared/coverage/types'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
+import type { PerAgentStageChoices } from '../../../agent-sessions/logic/agent-models'
 import { hasNegativeAssertion } from './strength'
 import {
   buildAnnotatePrompt,
@@ -53,6 +54,9 @@ export interface RunCoverageEngineArgs {
   agentJob?: { record: AgentJobRecordRef; logsDir: string }
   onOutput?: (chunk: string) => void
   onAgentSession?: (session: CoverageAgentSession) => void
+  /** Resolved model+effort for this launch, forwarded to the mapper. Same
+   *  forward-only rule as `signal` and `spawnScope`. */
+  models?: PerAgentStageChoices
 }
 
 export interface RunCoverageEngineResult {
@@ -175,7 +179,7 @@ export async function runCoverageEngine(
   }
 
   const proposals = await propose(
-    { requirements: candidateRequirements, variantDimension: summary?.variantDimension, tests: engineInputs, adapter: args.adapter, featureDir, cwd: args.cwd, signal: args.signal, spawnScope: args.spawnScope, agentJob: args.agentJob, onOutput: args.onOutput, onSession: args.onAgentSession },
+    { requirements: candidateRequirements, variantDimension: summary?.variantDimension, tests: engineInputs, adapter: args.adapter, featureDir, cwd: args.cwd, signal: args.signal, spawnScope: args.spawnScope, agentJob: args.agentJob, onOutput: args.onOutput, onSession: args.onAgentSession, models: args.models },
   )
 
   // No review gate (R16): every inferred mapping's `covers` tag is written now.

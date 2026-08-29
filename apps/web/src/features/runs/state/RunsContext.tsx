@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react'
 import * as api from '@/shared/api/client'
+import type { StageModelChoice } from '@/shared/api/client'
 import type {
   DisplayStatus,
   RunDetail,
@@ -32,6 +33,10 @@ export type { ConnectionState } from './runs-state'
 
 // ─── Context ─────────────────────────────────────────────────────────────
 
+/** The run-scoped model plan riding a launch: the two stages a suite run
+ *  spawns. Locked into the run's manifest at start (see RunModelPlan). */
+export type RunStartModels = { heal?: StageModelChoice; commit?: StageModelChoice }
+
 interface RunsContextValue {
   state: RunsState
   /** One-shot HTTP refresh of the runs index. Used as a fallback when the
@@ -41,7 +46,7 @@ interface RunsContextValue {
    *  with the run's initial detail, so the row appears immediately. Returns
    *  the new runId, or throws on failure. `isolation` resolves a same-repo
    *  collision: 'worktree' isolates + runs now, 'queue' waits. */
-  startRun: (feature: string, env?: string, isolation?: 'worktree' | 'queue', mode?: 'test' | 'boot') => Promise<string>
+  startRun: (feature: string, env?: string, isolation?: 'worktree' | 'queue', mode?: 'test' | 'boot', models?: RunStartModels) => Promise<string>
   startVerification: (
     feature: string,
     input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string; gettingStartedSource?: 'internal' | 'external' },
@@ -161,10 +166,10 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     [refresh, state.connection],
   )
 
-  const startRun = useCallback(async (feature: string, env?: string, isolation?: 'worktree' | 'queue', mode?: 'test' | 'boot'): Promise<string> => {
+  const startRun = useCallback(async (feature: string, env?: string, isolation?: 'worktree' | 'queue', mode?: 'test' | 'boot', models?: RunStartModels): Promise<string> => {
     const boot = mode === 'boot'
-    const opts = env || isolation || boot
-      ? { ...(env ? { env } : {}), ...(isolation ? { isolation } : {}), ...(boot ? { mode: 'boot' as const } : {}) }
+    const opts = env || isolation || boot || models
+      ? { ...(env ? { env } : {}), ...(isolation ? { isolation } : {}), ...(boot ? { mode: 'boot' as const } : {}), ...(models ? { models } : {}) }
       : undefined
     const { runId } = await api.startRun(feature, opts)
     if (state.connection !== 'live') await refresh()
@@ -241,7 +246,7 @@ export interface UseRunsResult {
    *  in disconnected mode; consumers usually don't need to call this. */
   refresh: () => Promise<void>
   /** Start a new run. `isolation` resolves a same-repo collision. */
-  startRun: (feature: string, env?: string, isolation?: 'worktree' | 'queue', mode?: 'test' | 'boot') => Promise<string>
+  startRun: (feature: string, env?: string, isolation?: 'worktree' | 'queue', mode?: 'test' | 'boot', models?: RunStartModels) => Promise<string>
   /** Start a deployment verification. */
   startVerification: (
     feature: string,

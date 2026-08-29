@@ -310,6 +310,35 @@ describe('buildAgentSpawnCommand', () => {
       HEAL_MODELS.claude = prev
     }
   })
+
+  it('splices the run plan\'s model + effort, each CLI in its own spelling', () => {
+    const models = { model: 'opus', effort: 'high' }
+    const claude = buildAgentSpawnCommand('claude', { sessionId: 'x', models })
+    expect(claude).toContain('--model "opus"')
+    expect(claude).toContain('"--effort" "high"')
+
+    const codex = buildAgentSpawnCommand('codex', { models: { model: 'o5', effort: 'xhigh' } })
+    expect(codex).toContain('--model "o5"')
+    expect(codex).toContain('"-c" "model_reasoning_effort=xhigh"')
+
+    // Effort-only plan: no --model flag at all.
+    const effortOnly = buildAgentSpawnCommand('claude', { models: { model: null, effort: 'low' } })
+    expect(effortOnly).not.toContain('--model')
+    expect(effortOnly).toContain('"--effort" "low"')
+  })
+
+  it('the CANARY_LAB_HEAL_MODEL env pin beats the run plan\'s MODEL, never its effort', () => {
+    const prev = HEAL_MODELS.claude
+    try {
+      HEAL_MODELS.claude = 'demo-pin'
+      const cmd = buildAgentSpawnCommand('claude', { models: { model: 'opus', effort: 'high' } })
+      expect(cmd).toContain('--model "demo-pin"')
+      expect(cmd).not.toContain('"opus"')
+      expect(cmd).toContain('"--effort" "high"')
+    } finally {
+      HEAL_MODELS.claude = prev
+    }
+  })
 })
 
 describe('makeAgentSpawnCommandBuilder', () => {

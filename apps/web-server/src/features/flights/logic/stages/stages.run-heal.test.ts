@@ -137,6 +137,21 @@ describe('run + heal stages', () => {
     expect(current().links?.runId).toBe('run-1')
   })
 
+  it("forwards the flight's stored stage plan on the run start payload", async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-1' } }
+      if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 0, services: [] } } }
+      return undefined
+    }, calls)
+    const models = { heal: { model: 'opus', effort: 'high' as const }, commit: { model: 'haiku', effort: null } }
+    const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, models } })
+    const outcome = await runStage(deps({ inject })).run(ctxFor(m).ctx)
+    expect(outcome).toMatchObject({ kind: 'done' })
+    const start = calls.find((c) => c.method === 'POST' && c.url === '/api/runs')
+    expect(start?.payload).toMatchObject({ feature: 'checkout', models })
+  })
+
   // R82: the score rides in the evidence so the flight stage's one-sentence
   // state line can report the outcome. Read off the summary artifact the verdict
   // poll already fetched — NEVER derived, because a test missing from every

@@ -15,12 +15,13 @@ describe('editorLabel', () => {
 })
 
 describe('migrateLegacyHealAgent', () => {
-  it('reads the retired choices as the modern default', () => {
-    expect(migrateLegacyHealAgent('auto')).toBe('external')
-    expect(migrateLegacyHealAgent('manual')).toBe('external')
+  it('reads the retired choices as the shipped default', () => {
+    expect(migrateLegacyHealAgent('auto')).toBe('claude')
+    expect(migrateLegacyHealAgent('manual')).toBe('claude')
   })
 
   it('leaves a current choice alone', () => {
     expect(migrateLegacyHealAgent('claude')).toBe('claude')
+    expect(migrateLegacyHealAgent('codex')).toBe('codex')
   })
 })

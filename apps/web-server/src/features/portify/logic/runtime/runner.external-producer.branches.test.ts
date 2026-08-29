@@ -248,6 +248,7 @@ it('envset hydration: worktree carries the captured envset during the double-boo
         ptyFactory: fakePtyFactory,
         loadFeatures: () => loadFeatures(featuresDir),
         pickAgent: () => 'claude',
+        resolveModels: () => ({ model: null, effort: null }),
         now: () => '2026-06-07T00:00:00.000Z',
         // Observe the worktree copy WHILE the double-boot runs — the health
         // probe fires inside verifyDoubleBoot, i.e. inside the boot window.

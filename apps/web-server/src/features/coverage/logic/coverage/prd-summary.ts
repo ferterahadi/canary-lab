@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import { PRD_SUMMARY_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
+import { AGENT_DEFAULT_CHOICE, agentModelArgs, type PerAgentStageChoices, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import type { CoverageAgentSession } from './annotate-engine'
 import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
@@ -51,6 +51,10 @@ export interface SummarizePrdArgs {
   onOutput?: (chunk: string) => void
   /** Fired when an agent spawns with a pinned session (R17 — see annotate-engine). */
   onSession?: (session: CoverageAgentSession) => void
+  /** Per-agent model+effort choices for this launch — the engine falls back
+   *  across CLIs, and each spawn takes its own agent's entry (a claude effort
+   *  is not codex vocabulary). Forward-only, like `signal` and `spawnScope`. */
+  models?: PerAgentStageChoices
   /** Injectable ISO timestamp for deterministic tests. */
   now?: string
 }
@@ -67,6 +71,8 @@ interface RunAgentOpts {
   agentJob?: { record: AgentJobRecordRef; logsDir: string }
   onOutput?: (chunk: string) => void
   onSession?: (session: CoverageAgentSession) => void
+  /** Resolved model+effort for this launch; absent → agent default. */
+  models?: StageModelChoice
 }
 
 // ---------------------------------------------------------------------------
@@ -119,13 +125,13 @@ function defaultResolveAgents(adapter: SummarizeAdapter): HealAgent[] {
   return [...new Set(agents)]
 }
 
-function codexArgs(outputPath: string): string[] {
+function codexArgs(outputPath: string, models: StageModelChoice): string[] {
   return [
     'exec',
     '--skip-git-repo-check',
     '--sandbox',
     'read-only',
-    ...modelArgs(PRD_SUMMARY_MODELS.codex),
+    ...agentModelArgs('codex', models),
     '--output-last-message',
     outputPath,
     '--output-schema',
@@ -145,12 +151,13 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
   // Agentic spawn via the shared runner. claude: stream-json for liveness +
   // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
   // from stdin (`-`) and writes the final message to --output-last-message.
+  const models = opts.models ?? AGENT_DEFAULT_CHOICE
   const args = agent === 'claude'
     // `readOnly` matches what the codex arm below already declares with
     // `--sandbox read-only`: this agent reads docs and answers with JSON, so it
     // has no business holding a write tool on either arm.
-    ? buildClaudeAgenticArgs(prompt, { model: PRD_SUMMARY_MODELS.claude, sessionId: claudeSessionId, readOnly: true })
-    : codexArgs(outputPath!)
+    ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
+    : codexArgs(outputPath!, models)
   opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
 
   let idled = false
@@ -240,6 +247,7 @@ export async function summarizePrd(
           agentJob: args.agentJob,
           onOutput: args.onOutput,
           onSession: args.onSession,
+          models: args.models?.[agent],
         })
         const dimension = parseVariantDimension(output)
         const parsed = parsePrdSummaryOutput(output, dimension)

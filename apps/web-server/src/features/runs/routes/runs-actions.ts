@@ -28,6 +28,11 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       // Playwright. Stop the run (POST /api/runs/:runId/abort) to tear down +
       // revert env. Defaults to a normal test run.
       mode?: 'test' | 'boot'
+      /** Per-stage model+effort override for the run's own agent spawns (heal,
+       *  commit message) — `{ heal?, commit? }` in the `agentModels` stage-plan
+       *  shape. Sent by launch surfaces and by a flight's run stage forwarding
+       *  its stored plan; normalized server-side, so junk degrades to config. */
+      models?: unknown
       gettingStartedSource?: GettingStartedOwner
       gettingStartedWorkflow?: GettingStartedRunWorkflow
     }
@@ -131,7 +136,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       : undefined
     const executionType: ExecutionType = req.body?.mode === 'boot' ? 'boot' : 'run'
     try {
-      const outcome = await deps.startRun(feature, env, externalRunReq, isolation, executionType)
+      const outcome = await deps.startRun(feature, env, externalRunReq, isolation, executionType, req.body?.models)
       if (outcome.kind === 'collision') {
         if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
         // Same-repo collision and the caller didn't choose how to handle it.

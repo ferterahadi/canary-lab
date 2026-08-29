@@ -93,6 +93,7 @@ export function makeRunner(
     ptyFactory: fakePtyFactory,
     loadFeatures: loadFeaturesFn ?? (() => loadFeatures(featuresDir)),
     pickAgent: () => agent,
+    resolveModels: () => ({ model: null, effort: null }),
     now: () => '2026-06-07T00:00:00.000Z',
     healthCheck: async () => healthy,
     healthPollIntervalMs: 5,

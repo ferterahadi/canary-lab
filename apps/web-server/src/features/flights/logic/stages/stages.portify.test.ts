@@ -284,6 +284,21 @@ describe('portify stage', () => {
     expect(outcome).toMatchObject({ kind: 'done', evidence: { workflowId: 'wf1', edits: true } })
   })
 
+  it("the flight's stored portify model choice rides the start payload", async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
+      if (call.method === 'GET') return { statusCode: 200, body: { status: 'saved', diff: '--- a/x\n+++ b/x' } }
+      if (call.url.endsWith('/save')) { markPortified(); return { statusCode: 200, body: {} } }
+      return undefined
+    }, calls)
+    const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, models: { portify: { model: 'opus', effort: 'high' } } } })
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(m))
+    expect(outcome).toMatchObject({ kind: 'done' })
+    const start = calls.find((c) => c.method === 'POST' && c.url === '/api/portify')
+    expect(start?.payload).toEqual({ feature: 'checkout', models: { model: 'opus', effort: 'high' } })
+  })
+
   it('fails when the workflow settles failed with a reason', async () => {
     const inject = makeInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }

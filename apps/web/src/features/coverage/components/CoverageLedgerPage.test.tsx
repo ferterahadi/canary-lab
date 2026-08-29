@@ -48,6 +48,7 @@ vi.mock('@/shared/api/client', async () => {
     listFeatureDocs: vi.fn(),
     regeneratePrdSummary: vi.fn(),
     startCoverageJob: vi.fn(),
+    getProjectConfig: vi.fn(),
     getCoverageJob: vi.fn(),
     listCoverageJobs: vi.fn(),
     getFeatureTests: vi.fn(),
@@ -103,6 +104,8 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
+  // The Generate gate probes the config first — defaults keep it disarmed.
+  vi.mocked(api.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)

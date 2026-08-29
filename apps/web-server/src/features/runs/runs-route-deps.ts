@@ -19,6 +19,7 @@ import { detectRepoCollision, normalizeRepoPaths } from './logic/runtime/repo-co
 import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from './logic/runtime/repo-worktree'
 import { overlayExists as portifyOverlayExists } from '../portify/logic/runtime/overlay'
 import { buildOrchestratorHealPrompt, makeAgentSpawnCommandBuilder, resolveAgentBinary } from './logic/runtime/auto-heal'
+import { resolveRunModelPlan, reuseRunModelPlan, type RunModelPlan } from './logic/runtime/run-model-plan'
 import { loadProjectConfig } from './logic/runtime/launcher/project-config'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
 import { RunnerLog } from './logic/runtime/runner-log'
@@ -81,6 +82,7 @@ export function buildRunsRouteDeps(
       healAgentReq?: { kind: 'external'; sessionId: string; clientKind: ClientKind; clientVersion?: string; conversationName?: string; claimable?: boolean },
       isolation?: 'worktree' | 'queue',
       executionType: ExecutionType = 'run',
+      modelsOverride?: unknown,
     ): Promise<StartRunOutcome> => {
       const isBoot = executionType === 'boot'
       const features = loadFeatures(featuresDir)
@@ -188,10 +190,14 @@ export function buildRunsRouteDeps(
         )
       } else if (projectConfig.healAgent === 'manual') {
         runnerLog.info('Auto-heal disabled: project config is set to "manual" — the run will pause for hand-driven fixes.')
-      } else if (projectConfig.healAgent === 'external') {
-        runnerLog.info('Auto-heal disabled: project config is set to "external" — the run will wait for an external agent session to claim heal.')
       }
+      // Resolved once here (launch override → workspace config → agent
+      // default), bound into the spawn builder, and persisted on the manifest
+      // via the orchestrator — so a config edit mid-run can't change the model
+      // a running agent uses, and a restart reuses what the run started with.
+      let models: RunModelPlan | undefined
       if (agentChoice) {
+        models = resolveRunModelPlan(agentChoice, projectConfig.agentModels, modelsOverride)
         // Resolve the absolute binary path once so the agent spawns even under
         // a restricted PATH (e.g. a Desktop-launched UI server).
         const agentBinary = resolveAgentBinary(agentChoice) ?? undefined
@@ -201,6 +207,7 @@ export function buildRunsRouteDeps(
             buildSpawnCommand: makeAgentSpawnCommandBuilder(agentChoice, {
               mcpConfigFile: path.join(runDir, 'mcp-config.json'),
               binaryPath: agentBinary,
+              models: models.heal,
             }),
             buildCyclePrompt: buildOrchestratorHealPrompt({
               agent: agentChoice,
@@ -271,9 +278,12 @@ export function buildRunsRouteDeps(
           // A boot-only session never runs tests, so it never heals — force all
           // heal modes off regardless of project config.
           autoHeal: isBoot ? undefined : autoHeal,
+          ...(models ? { models } : {}),
           manualHeal:
             !isBoot && !externalOrigin && projectConfig.healAgent === 'manual',
-          externalHeal: !isBoot && (externalOrigin || projectConfig.healAgent === 'external'),
+          // External heal is an MCP-origin fact, not a workspace setting: the
+          // retired `external` config value migrates to `claude` on load.
+          externalHeal: !isBoot && externalOrigin,
           externalHealSession,
           repoBranchSnapshots,
           // Route every manifest/index write through RunStore so its event
@@ -391,10 +401,14 @@ export function buildRunsRouteDeps(
       const preserveExternal = manifest.healMode === 'external'
       const preserveManual = manifest.healMode === 'manual'
       let autoHeal: AutoHealConfig | undefined
+      // A restart honors the launch-time lock: same agent → the persisted plan
+      // verbatim; agent changed or pre-2.2.0 record → re-resolve from config.
+      let models: RunModelPlan | undefined = manifest.models
 
       if (!preserveExternal && !preserveManual) {
         const agentChoice = pickConfiguredHealAgent(projectConfig.healAgent, manifest.healAgent)
         if (agentChoice) {
+          models = reuseRunModelPlan(agentChoice, manifest, projectConfig.agentModels)
           const agentBinary = resolveAgentBinary(agentChoice) ?? undefined
           try {
             autoHeal = {
@@ -402,6 +416,7 @@ export function buildRunsRouteDeps(
               buildSpawnCommand: makeAgentSpawnCommandBuilder(agentChoice, {
                 mcpConfigFile: path.join(runDir, 'mcp-config.json'),
                 binaryPath: agentBinary,
+                models: models.heal,
               }),
               buildCyclePrompt: buildOrchestratorHealPrompt({
                 agent: agentChoice,
@@ -432,6 +447,7 @@ export function buildRunsRouteDeps(
           manualHeal: preserveManual,
           externalHeal: preserveExternal,
           externalHealSession: preserveExternal ? manifest.externalHealSession : undefined,
+          ...(models ? { models } : {}),
           repoBranchSnapshots,
           initialHealCycles: manifest.healCycles,
           runStateSink: runStore,

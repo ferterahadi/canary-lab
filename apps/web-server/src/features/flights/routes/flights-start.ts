@@ -8,7 +8,7 @@ import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
 import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightStageEntryError, startFlight, type FlightEntryMode } from '../logic/conductor'
 import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from '../logic/types'
-import { expandHome, parseFlightExternalAgentSession, reclaimGettingStartedFlight } from './flight-route-support'
+import { expandHome, parseFlightExternalAgentSession, reclaimGettingStartedFlight, resolveFlightModels } from './flight-route-support'
 import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedWorkflow } from '../../config/logic/getting-started-session'
 
 /** The author/portify/export demos launch a flight pinned to their stage, so
@@ -23,6 +23,12 @@ function claimWorkflowFor(value: string | undefined): GettingStartedWorkflow {
 
 export async function registerFlightStartRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
   const { store, planStore, conductorDeps } = ctx
+
+  /** The stored record's conducting agent (index rows don't carry opts). */
+  const storedAgentFor = (feature: string): 'claude' | 'codex' | undefined => {
+    const latest = store.latestForFeature(feature)
+    return latest ? store.get(latest.flightId)?.opts.agent : undefined
+  }
 
   app.post<{
     Body:
@@ -44,6 +50,12 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
            *  flight. Sticky per record. Absent → internal. A GUI start never
            *  sends it — there is no MCP client to hand work to. */
           stageProducer?: string
+          /** Launch-gate override: this flight's per-stage model+effort plan
+           *  for the conducting agent, laid over the workspace `agentModels`
+           *  config. The merged plan is persisted on the record at start
+           *  (sticky like `agent`); the override itself is never written back
+           *  to config. */
+          models?: unknown
           /** The Claude/Codex conversation driving an external Flight. */
           externalAgentSession?: unknown
           /** continue | redo | jump — required when the feature already has a
@@ -125,17 +137,31 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
       }
     }
 
+    const agent = body.agent === 'claude' || body.agent === 'codex' ? body.agent : undefined
     const opts: FlightOptions = {
       env: body.env ?? 'local',
       coverageTarget,
       ...(body.base ? { base: body.base } : {}),
       yolo: body.yolo === true,
       ...(body.autopilot === false ? { autopilot: false } : {}),
-      ...(body.agent === 'claude' || body.agent === 'codex' ? { agent: body.agent } : {}),
+      ...(agent ? { agent } : {}),
       // Unknown values are dropped rather than rejected, matching `agent` above:
       // an older client sending nonsense degrades to the internal default instead
       // of failing a flight start.
       ...(body.stageProducer === 'internal' || body.stageProducer === 'external' ? { stageProducer: body.stageProducer } : {}),
+      // Resolved NOW and persisted on the record: launch override → workspace
+      // config → agent default, snapshotted so a later config edit cannot
+      // change a flight mid-pipeline (the conductor keeps it sticky like
+      // `agent`; a redo re-resolves). Always set, `{}` included — an absent
+      // plan is what a pre-2.2.0 record looks like. A mode-carrying call may
+      // omit `agent`, so the stored record supplies the agent whose plan to
+      // resolve — resolving for the wrong CLI would persist efforts the other
+      // CLI's vocabulary rejects.
+      models: resolveFlightModels(
+        deps.projectRoot,
+        agent ?? (hasMode ? storedAgentFor(body.feature.trim()) : undefined) ?? 'claude',
+        body.models,
+      ),
     }
 
     let gettingStartedSession: string | null = null

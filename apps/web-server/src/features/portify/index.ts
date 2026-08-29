@@ -6,6 +6,8 @@ import { createPortifyRunner } from './logic/runtime/runner'
 import { portifyDir } from './logic/runtime/paths'
 import { loadFeatures } from '../../shared/feature-loader'
 import { pickAvailableHealAgent } from '../runs/logic/runtime/auto-heal'
+import { loadProjectConfig } from '../runs/logic/runtime/launcher/project-config'
+import { normalizeStageChoice, resolveStageChoice } from '../agent-sessions/logic/agent-models'
 import {
   resolveWorkflowAgentRef,
   buildAgentSessionResponse,
@@ -36,6 +38,8 @@ export async function register(app: FastifyInstance, ctx: ServerContext): Promis
     ptyFactory: ctx.ptyFactory,
     loadFeatures: () => loadFeatures(ctx.featuresDir),
     pickAgent: (preferred) => pickAvailableHealAgent(preferred),
+    resolveModels: (agent, override) =>
+      resolveStageChoice(agent, loadProjectConfig(ctx.projectRoot).agentModels, 'portify', normalizeStageChoice(agent, override) ?? null),
     now: () => new Date().toISOString(),
   })
 

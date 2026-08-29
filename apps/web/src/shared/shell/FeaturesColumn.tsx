@@ -9,6 +9,7 @@ import { VersionUpdateButton } from './VersionUpdateButton'
 import { ChevronRightIcon } from '@/shared/ui/atoms'
 import { Tooltip } from '../ui/Tooltip'
 import { useInvalidationKey } from '../state/invalidation'
+import type { ModelsAgent } from '../lib/workspace-view-state'
 
 interface Props {
   features: Feature[]
@@ -48,6 +49,10 @@ interface Props {
    *  Verify dialog uses. */
   settingsOpen?: boolean
   onSettingsOpenChange?: (open: boolean) => void
+  /** The model matrix stacked over settings (`?models=…`) — controlled by App
+   *  alongside settingsOpen; omitted → SettingsModal's own internal state. */
+  modelsFor?: ModelsAgent | null
+  onModelsFor?: (agent: ModelsAgent | null) => void
 }
 
 // Colour the Coverage icon by the derived headline (R8). Neutral (inherit) for
@@ -135,6 +140,8 @@ export function FeaturesColumn({
   onOpenPortify,
   settingsOpen,
   onSettingsOpenChange,
+  modelsFor,
+  onModelsFor,
 }: Props) {
   const { gatePromo } = useMcpPromo()
   // Coverage headlines re-fetch when a coverage job finishes (`coverage-changed`).
@@ -255,7 +262,13 @@ export function FeaturesColumn({
           </button>
         </div>
       </div>
-      {settingsDialogOpen && <SettingsModal onClose={() => setSettingsDialogOpen(false)} />}
+      {settingsDialogOpen && (
+        <SettingsModal
+          onClose={() => setSettingsDialogOpen(false)}
+          {...(modelsFor === undefined ? {} : { modelsFor })}
+          {...(onModelsFor ? { onModelsFor } : {})}
+        />
+      )}
 
       {configFor && (
         <FeatureConfigEditor

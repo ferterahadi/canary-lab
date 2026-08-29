@@ -186,6 +186,37 @@ The hidden `manual` and `auto` heal-agent values remain valid in
 workspaces. `manual` waits for explicit signals; `auto` selects an available
 local CLI.
 
+## Models per stage
+
+Every agent Canary Lab spawns itself — repo scan, doc collection, requirements
+summary, test authoring, coverage mapping, auto-repair, parallel setup, report,
+and commit message — can run on a chosen model and reasoning effort. Open
+**Settings → Default agent → Configure models** to set the plan per agent (Claude and
+Codex hold separate plans). **Agent default** passes no flags, so the CLI runs
+on its own configuration; ✦ marks the shipped recommendation for each stage. A
+custom model id is accepted verbatim for models the dropdown does not list.
+
+The settings dialog probes the selected CLI and warns when it is missing or
+signed out. The warning never blocks: choices still save and apply once the CLI
+works.
+
+**Ask at launch** (Settings → At launch) adds a per-launch checkpoint: starting
+a flight, running a suite, or generating coverage first asks "use defaults or
+customize?". A customized answer applies to that launch only and never changes
+the saved defaults. Leave the setting on **Use defaults silently** (the
+default) and nothing is ever asked.
+
+The resolved plan is **locked when execution starts**: it is persisted on the
+run, flight, or coverage record and cannot change mid-execution, so a
+mid-flight settings edit applies to future launches only. Redoing a stage
+re-resolves against current settings. Record surfaces (run overview, flight
+summary, coverage progress) show the locked choices whenever any stage deviates
+from agent default.
+
+This applies to internal agents only. External MCP clients run on their own
+model configuration, and `CANARY_LAB_HEAL_MODEL` (a server-wide demo pin) still
+overrides the repair stage above all of it.
+
 ## Flight (`canary-lab flight`)
 
 `npx canary-lab flight <repo...> "<what to test>"` takes one or more product

@@ -13,6 +13,7 @@
 // (Flights pill + flight detail view), so they live in `shared/`.
 
 import type { ClientKind } from '../run-mode'
+import type { AgentStagePlans } from '../agent-models'
 
 /** Canonical stage-record order. This stays stable for persisted manifests and
  *  restart/jump semantics; normal drive priority lives in
@@ -398,6 +399,13 @@ export interface FlightOptions {
    *  playwright execution, a raw export) have no thinking to move and ignore
    *  it. */
   stageProducer?: 'internal' | 'external'
+  /** Per-stage model+effort plan for this flight's internal agent spawns,
+   *  resolved against workspace config (plus any launch-gate override) at
+   *  start and STICKY like `agent`: the whole flight runs on one plan, and
+   *  only a full redo re-resolves it. Keys are ModelStageKeys; absent stages
+   *  (and an absent plan) run on the agent default. External stage work
+   *  ignores it — the client's own harness owns those models. */
+  models?: AgentStagePlans
   /** Base branch for diff-inferred requirements (auto-detected when absent). */
   base?: string
   /** Skip every checkpoint except missing-env. */

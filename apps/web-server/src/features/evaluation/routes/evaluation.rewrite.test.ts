@@ -426,12 +426,13 @@ describe('recoverStaleEvaluationExports race condition — patchEvaluationExport
   })
 })
 
-// Which voice writes the report is decided from the project's `healAgent`, and
-// that field answers a different question — who drives REPAIR. `external` (the
-// shipped default) used to map straight to `deterministic`, so on a default
-// workspace "Localized output" handed back raw wording and said nothing about
-// it. These pin the mapping, because the symptom is silent: you get a report
-// either way, just not the one you asked for.
+// Which voice writes the report is decided from the project's `healAgent`.
+// The retired `external` value once mapped straight to `deterministic`, so a
+// default workspace's "Localized output" handed back raw wording and said
+// nothing about it. Since 2.2.0 the value itself migrates to `claude` on load,
+// which resolves the same silent symptom one level earlier. These pin the
+// mapping, because the symptom is silent: you get a report either way, just
+// not the one you asked for.
 describe('localized export — which voice writes the report', () => {
   const writeConfig = (root: string, healAgent: string) => {
     fs.mkdirSync(root, { recursive: true })
@@ -461,12 +462,18 @@ describe('localized export — which voice writes the report', () => {
     return seen[0]
   }
 
-  it('looks for a local CLI when repair is driven externally — the default workspace', async () => {
-    // NOT 'deterministic': `external` means an outside MCP client heals this
-    // workspace, which says nothing about whether a claude/codex CLI is on the
-    // machine. `auto` lets the resolver look; only a machine with neither CLI
-    // falls back to raw wording, and that is a fact about the machine.
-    expect(await adapterFor('external', 'r-adapter-external')).toBe('auto')
+  it('speaks as claude when the config still stores the retired `external` value', async () => {
+    // NOT 'deterministic': the stored `external` migrates to `claude` on load
+    // (2.2.0), so a 2.1.x workspace's localized export gets a real voice
+    // instead of quietly shipping raw wording.
+    expect(await adapterFor('external', 'r-adapter-external')).toBe('claude')
+  })
+
+  it('lets the resolver look for any local CLI when the project is set to auto', async () => {
+    // `auto` says nothing about which CLI is on the machine; only a machine
+    // with neither CLI falls back to raw wording, and that is a fact about the
+    // machine.
+    expect(await adapterFor('auto', 'r-adapter-auto')).toBe('auto')
   })
 
   it('honours an explicitly configured agent', async () => {

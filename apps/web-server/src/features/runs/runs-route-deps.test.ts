@@ -911,17 +911,20 @@ describe('startRun — heal mode', () => {
     expect(runnerLogText(runId)).toContain('project config is set to "manual"')
   })
 
-  it('waits for a client to claim heal when the project is set to external', async () => {
+  it('heals internally when the config still stores the retired `external` value', async () => {
+    // 2.2.0 retired the `external` config choice: whether a run parks for an
+    // outside client is an MCP-origin fact, never a workspace setting. A config
+    // written by 2.1.x migrates to claude silently, so a GUI-started run on
+    // that workspace self-heals instead of waiting for a claim forever.
     writeProjectConfig('external')
     writeFeature('demo')
     const h = harness()
 
-    const runId = await startOk(h, 'demo')
+    await startOk(h, 'demo')
 
-    expect(lastOpts().externalHeal).toBe(true)
+    expect(lastOpts().externalHeal).toBe(false)
     expect(lastOpts().manualHeal).toBe(false)
-    expect(agentProbe.asked).toEqual([])
-    expect(runnerLogText(runId)).toContain('project config is set to "external"')
+    expect((lastOpts().autoHeal as AutoHealWiring).agent).toBe('claude')
   })
 })
 

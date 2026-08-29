@@ -23,7 +23,7 @@ vi.mock('../lib/workspace-view-state', () => viewState)
 function persisted(over: Partial<PersistedView> = {}): PersistedView {
   return {
     view: 'workspace', feature: null, run: null, dialog: null, flight: null,
-    flightStage: null, configTab: null, focusTest: null,
+    flightStage: null, configTab: null, modelsAgent: null, focusTest: null,
     runTab: null, returnFlight: null,
     ...over,
   }
@@ -162,6 +162,21 @@ describe('useWorkspaceNavigation — dialog openers', () => {
     expect(nav.portifyTarget).toEqual({ kind: 'new', feature: 'checkout' })
     // flight-new outranks demo and verify in the z-order.
     expect(nav.routedDialog).toBe('flight-new')
+  })
+
+  it('closing settings also drops the stacked model matrix (the setConfigFor rule)', async () => {
+    await mount()
+
+    await act(async () => { nav.setSettingsOpen(true) })
+    await act(async () => { nav.setModelsFor('codex') })
+    expect([nav.settingsOpen, nav.modelsFor]).toEqual([true, 'codex'])
+
+    await act(async () => { nav.setSettingsOpen(false) })
+    expect([nav.settingsOpen, nav.modelsFor]).toEqual([false, null])
+
+    // A later open cannot inherit the matrix a previous visit left behind.
+    await act(async () => { nav.setSettingsOpen(true) })
+    expect(nav.modelsFor).toBeNull()
   })
 })
 

@@ -18,6 +18,7 @@ import type {
 } from '../../../../../../../shared/verification'
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 import type { ExternalSessionMeta } from '../../../../../../../shared/run-mode'
+import type { RunModelPlan } from './run-model-plan'
 export type {
   HealEnd,
   QueueReason,
@@ -170,6 +171,11 @@ export interface RunManifest {
   /** Resolved local CLI used for auto-heal. Locks the run to the agent that
    *  was chosen when the run started, even if project settings change later. */
   healAgent?: LocalHealAgent
+  /** Model+effort plan for the run's own agent spawns (heal REPL, commit
+   *  message), resolved at launch for `healAgent` and locked like it — restart
+   *  reuses this instead of re-reading config. Absent on pre-2.2.0 records and
+   *  on runs that never chose a local agent (external / manual / boot). */
+  models?: RunModelPlan
   /** Populated when `healMode === 'external'`. Tracks the single external
    *  client that holds the heal claim for this run. */
   externalHealSession?: ExternalHealSession

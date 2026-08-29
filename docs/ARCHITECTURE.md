@@ -84,6 +84,7 @@ entry. The three places that must agree for the web aliases are
 | `shared/e2e-runner/` | Playwright fixture support (`log-marker-fixture`, summary reporter) |
 | `shared/configs/` | Base Playwright config and env loader |
 | `shared/readable-tests/types.ts` | Shared Readable Test wire contract used by the server extractor and web UI |
+| `shared/agent-models.ts` | Model-cockpit vocabulary shared by the web UI and server: stage keys, effort levels, curated models, recommendation tiers, normalization, and choice resolution (see [Heal System](#heal-system)) |
 | `shared/runtime/` | Shared project-root resolver |
 | `templates/project/` | Files copied into initialized workspaces. The storefront sample exercises Run and Heal, `flight-app/` starts without a suite so Flight has real onboarding work, and `workflow-app/` plus `features/workflow-workbench/` exercises Coverage, Author, Portify, and Verify. |
 | `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, the demo PRD-summary generators, `clean-dist`, `prepare-assets`, `smoke-pack`, `smoke-demo`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the repo gates. `tools/fixtures/` holds contributor-only fixtures; the storefront and workflow-workbench suites ship in the scaffold under `templates/project/features/`. |
@@ -448,12 +449,19 @@ prompt for the project root — see the [invariants table](#keep-in-sync-invaria
 The repair agent is the only one canary spawns on an interactive TTY, so it is the
 only one that prompt can stop, and under autopilot nobody is there to answer it.
 
-The model is the agent's own default. `CANARY_LAB_HEAL_MODEL` pins it for one server
-(`healModelsFromEnv`, `agent-sessions/logic/agent-models.ts`) — read once at boot.
-That override exists to **demonstrate** the loop: on the strongest model the repair
-agent reads the whole service and fixes every defect in one pass, which is a good
-outcome that shows none of the try / rerun / try again the loop is for. The default
-must stay agent-default — repair is the product.
+The model resolves through the model cockpit (2.2.0): launch override (persisted
+on the run/flight/job record at start — immutable mid-execution) → workspace
+config (`agentModels` in `canary-lab.config.json`) → agent default (no flags).
+The vocabulary and resolution live in `shared/agent-models.ts` (one home for the
+web UI and server); the argv builders in
+`agent-sessions/logic/agent-models.ts`. This governs **internal spawns only** —
+external MCP clients run on their own model setup, and no server-side process
+exists there. `CANARY_LAB_HEAL_MODEL` still pins the repair stage above all of
+it for one server (`healModelsFromEnv`, read once at boot). That override exists
+to **demonstrate** the loop: on the strongest model the repair agent reads the
+whole service and fixes every defect in one pass, which is a good outcome that
+shows none of the try / rerun / try again the loop is for. The shipped default
+stays agent-default — repair is the product.
 
 ### External heal
 

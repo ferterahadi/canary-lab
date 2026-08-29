@@ -95,6 +95,7 @@ export function writeInitialManifest(ctx: RunContext, serviceStatus: ServiceMani
           ? 'manual'
           : undefined,
     ...(ctx.autoHeal ? { healAgent: ctx.autoHeal.agent } : {}),
+    ...(ctx.models ? { models: ctx.models } : {}),
     ...(ctx.externalHealSession ? { externalHealSession: ctx.externalHealSession } : {}),
     lifecycle: {
       phase: 'starting-services',

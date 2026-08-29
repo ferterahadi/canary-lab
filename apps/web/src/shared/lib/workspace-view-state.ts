@@ -55,6 +55,13 @@ export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-f
  *  tabs inside the dialog is a place you can come back to. */
 export type ConfigTab = 'general' | 'repos' | 'ports' | 'envsets' | 'playwright'
 
+/** The per-agent model matrix stacked over Project Settings — the `models`
+ *  qualifier for `dialog=settings` (same drop-unless-active gate as `tab`).
+ *  Routed because it rebuilds entirely from GET /api/project-config + the agent
+ *  probe, so a cold load is coherent. Mirrors ModelAgentKind; kept local so this
+ *  URL module stays dependency-free. */
+export type ModelsAgent = 'claude' | 'codex'
+
 /** Which tab the run detail should OPEN on when another view links into a run —
  *  the `runtab` qualifier for `run`. Only cross-view arrivals are listed, not the
  *  whole tab set: a flight's Test Run stage reports the repairs a run captured
@@ -94,6 +101,10 @@ export interface PersistedView {
   /** Tab qualifier for `dialog: 'config'` — which config tab is open
    *  (URL only; dropped unless the config dialog is the open one). */
   configTab: ConfigTab | null
+  /** Agent qualifier for `dialog: 'settings'` — which agent's model matrix is
+   *  stacked over Project Settings (URL only; dropped unless settings is the
+   *  open dialog, and an unknown agent name reads as closed). */
+  modelsAgent: ModelsAgent | null
   /** Test qualifier for `run` — WHICH failing test the run detail should land on
    *  (URL only; dropped unless a run is selected). R82: a flight's Test Run stage
    *  lists the failures as a summary and clicking one opens it here, so the
@@ -125,6 +136,7 @@ const VIEWS: WorkspaceView[] = ['workspace', 'cleanup', 'coverage', 'flights']
 const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-fresh', 'flight-new', 'demo', 'settings']
 const CONFIG_TABS: ConfigTab[] = ['general', 'repos', 'ports', 'envsets', 'playwright']
 const RUN_ARRIVAL_TABS: RunArrivalTab[] = ['changes']
+const MODELS_AGENTS: ModelsAgent[] = ['claude', 'codex']
 
 function isView(v: string | null): v is WorkspaceView {
   return v != null && (VIEWS as string[]).includes(v)
@@ -142,12 +154,16 @@ function parseRunArrivalTab(v: string | null): RunArrivalTab | null {
   return v != null && (RUN_ARRIVAL_TABS as string[]).includes(v) ? (v as RunArrivalTab) : null
 }
 
+function parseModelsAgent(v: string | null): ModelsAgent | null {
+  return v != null && (MODELS_AGENTS as string[]).includes(v) ? (v as ModelsAgent) : null
+}
+
 function setOrDelete(params: URLSearchParams, key: string, value: string | null): void {
   if (value) params.set(key, value)
   else params.delete(key)
 }
 
-const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null, flightStage: null, configTab: null, focusTest: null, runTab: null, returnFlight: null }
+const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null, flightStage: null, configTab: null, modelsAgent: null, focusTest: null, runTab: null, returnFlight: null }
 
 /** Read the persisted view, URL first (authoritative on load), then localStorage
  *  (durable tier only — run/dialog are never mirrored there). */
@@ -168,6 +184,9 @@ export function readPersistedView(): PersistedView {
     // `tab` only qualifies the config dialog — dropped elsewhere, and an
     // unknown tab name is ignored (falls back to the entry point's default).
     const configTab = dialog === 'config' ? parseConfigTab(params.get('tab')) : null
+    // `models` only qualifies the settings dialog — dropped elsewhere, and an
+    // unknown agent name reads as closed (settings opens without the matrix).
+    const modelsAgent = dialog === 'settings' ? parseModelsAgent(params.get('models')) : null
     // `test` only qualifies a selected run — dropped elsewhere.
     const focusTest = run ? params.get('test') || null : null
     // `runtab` qualifies a selected run too — an unknown tab name is ignored, so
@@ -178,8 +197,8 @@ export function readPersistedView(): PersistedView {
     const returnFlight = v === 'flights' ? null : params.get('from') || null
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.
-    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, focusTest, runTab, returnFlight }
-    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, focusTest, runTab, returnFlight }
+    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, modelsAgent, focusTest, runTab, returnFlight }
+    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, modelsAgent, focusTest, runTab, returnFlight }
   } catch { /* ignore */ }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -217,6 +236,9 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'stage', state.view === 'flights' && state.flight ? state.flightStage : null)
     // `tab` only qualifies the config dialog — drop it otherwise.
     setOrDelete(params, 'tab', state.dialog === 'config' ? state.configTab : null)
+    // `models` only qualifies the settings dialog — drop it otherwise, so a
+    // matrix pick can't outlive the settings dialog it was stacked over.
+    setOrDelete(params, 'models', state.dialog === 'settings' ? state.modelsAgent : null)
     // `test` only qualifies a selected run — drop it otherwise, so switching runs
     // can't leave a previous run's failure pinned in the URL.
     setOrDelete(params, 'test', state.run ? state.focusTest : null)

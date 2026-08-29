@@ -7,7 +7,7 @@ import { writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-sessi
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { agentSpawnJob } from './stage-jobs'
-import { decodeSubmission, featureDirFor, type FlightStageDeps } from './context'
+import { decodeSubmission, featureDirFor, stageModelPlan, type FlightStageDeps } from './context'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { agentProgressSink } from './agent-progress'
 
@@ -76,6 +76,7 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
       // one value identifies this stage's spawn everywhere.
       spawnScope: stageDir,
       agentJob: { record: { jobId: `${m.flightId}:prd-summary`, flightId: m.flightId, feature: m.feature, stage: 'prd-summary', agent: m.opts.agent ?? 'claude' }, logsDir: deps.logsDir },
+      models: stageModelPlan(m, 'prd'),
       onOutput: agentProgressSink(ctx),
       onAgentSession: (session) => {
         writeWorkflowAgentRef(stageDir, {

@@ -23,6 +23,7 @@ const base: NavState = {
   flightStartNew: false,
   demoOpen: false,
   settingsOpen: false,
+  modelsFor: null,
   resumePlanTaskId: null,
   portifyTarget: null,
   focusTest: null,
@@ -38,6 +39,7 @@ const persisted = (over: Partial<PersistedView> = {}): PersistedView => ({
   flight: null,
   flightStage: null,
   configTab: null,
+  modelsAgent: null,
   focusTest: null,
   runTab: null,
   returnFlight: null,
@@ -72,6 +74,16 @@ describe('initialNavState', () => {
     expect(s.configTab).toBe('ports')
     // A tab that outlived its dialog is dropped, not carried onto another one.
     expect(initialNavState(persisted({ dialog: 'verification', configTab: 'ports' })).configTab).toBeNull()
+  })
+
+  it('stacks the model matrix over settings only when settings itself is routed', () => {
+    const s = initialNavState(persisted({ dialog: 'settings', modelsAgent: 'codex' }))
+    expect([s.settingsOpen, s.modelsFor]).toEqual([true, 'codex'])
+    expect(navToPersistedView(s).modelsAgent).toBe('codex')
+    // A matrix qualifier that outlived its dialog is dropped, same as configTab.
+    expect(initialNavState(persisted({ dialog: 'demo', modelsAgent: 'codex' })).modelsFor).toBeNull()
+    // And the write side drops it once settings is closed.
+    expect(navToPersistedView({ ...s, settingsOpen: false }).modelsAgent).toBeNull()
   })
 
   it('opens the config dialog on the persisted feature', () => {
@@ -206,7 +218,7 @@ describe('routedDialog precedence (z-order)', () => {
 describe('navToPersistedView', () => {
   it('projects the routable fields + the winning dialog', () => {
     const s: NavState = { ...base, view: 'flights', feature: 'checkout', run: 'run-1', flight: 'fl_1', configFor: 'checkout', configTab: 'ports' }
-    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', flightStage: null, configTab: 'ports', focusTest: null, runTab: null, returnFlight: null })
+    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', flightStage: null, configTab: 'ports', modelsAgent: null, focusTest: null, runTab: null, returnFlight: null })
   })
 })
 

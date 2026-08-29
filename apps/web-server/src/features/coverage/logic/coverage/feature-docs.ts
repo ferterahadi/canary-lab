@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { loadFeatures, listSpecFiles } from '../../../../shared/feature-loader'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
+import type { PerAgentStageChoices } from '../../../agent-sessions/logic/agent-models'
 import type { PrdSummary, VariantDimension } from '../../../../../../../shared/coverage/types'
 import { type CoverageAgentSession } from './annotate-engine'
 import { stripCoverageTags } from './tag-writer'
@@ -205,6 +206,9 @@ export interface RegeneratePrdSummaryArgs {
   agentJob?: { record: AgentJobRecordRef; logsDir: string }
   onOutput?: (chunk: string) => void
   onAgentSession?: (session: CoverageAgentSession) => void
+  /** Resolved model+effort for this launch, forwarded to the summarizer. Same
+   *  forward-only rule as `signal` and `spawnScope`. */
+  models?: PerAgentStageChoices
 }
 
 export interface RegeneratePrdSummaryResult {
@@ -246,6 +250,7 @@ export async function regeneratePrdSummary(
     agentJob: args.agentJob,
     onOutput: args.onOutput,
     onSession: args.onAgentSession,
+    models: args.models,
   })
   const written = writePrdSummary(featureDir, found.name, summary)
   return {

@@ -2,6 +2,7 @@
 // Split out of client.ts; see that barrel for the shared surface.
 
 import type { FeatureTests } from './types'
+import type { AgentModelsConfig } from '@shared/agent-models'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
 
 export function getFeatureTests(name: string, opts?: ClientOptions): Promise<FeatureTests> {
@@ -305,12 +306,30 @@ export function putEnvsetSlot(
 
 // ─── project config ───────────────────────────────────────────────────────
 
-export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual' | 'external'
+// `external` was retired in 2.2.0 — the server migrates a stored value to
+// `claude` on load, so this mirror never sees it.
+export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual'
 export type EditorChoice = 'auto' | 'vscode' | 'cursor' | 'system'
+
+// Not a mirror: the model-cockpit vocabulary has ONE home in
+// shared/agent-models.ts, imported by this client and the server alike.
+export type {
+  AgentModelsConfig,
+  AgentStagePlans,
+  ModelAgentKind,
+  ModelStageKey,
+  StageModelChoice,
+} from '@shared/agent-models'
 
 export interface ProjectConfig {
   healAgent: HealAgentChoice
   editor: EditorChoice
+  /** Optional for the same reason `autoProposePr` is: an older server omits
+   *  them, and every reader falls back (empty plans / false). */
+  agentModels?: AgentModelsConfig
+  /** Ask which models to use at every launch instead of applying
+   *  `agentModels` silently. */
+  askModelsOnLaunch?: boolean
   personalWikiPath: string | null
   /** Open a draft PR automatically when a run heals green. Declared here because
    *  SettingsModal has always read and written it — the field was live on the
@@ -414,6 +433,36 @@ export interface PortChangeResult {
 export function getProjectConfig(opts?: ClientOptions): Promise<ProjectConfig> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<ProjectConfig>(`${baseUrl}/api/project-config`, { method: 'GET' }, fetchImpl)
+}
+
+// Mirrors agent-sessions/logic/agent-probe.ts (the module itself shells out,
+// so the client mirrors the shapes). Informational only — no launch blocks on
+// it; the remedy line feeds the warning strip.
+export type AgentProbeState = 'ok' | 'auth' | 'missing'
+
+export interface AgentProbe {
+  agent: 'claude' | 'codex'
+  state: AgentProbeState
+  binaryPath: string | null
+  version: string | null
+  remedy: string | null
+}
+
+export interface AgentProbeSnapshot {
+  probedAt: string
+  claude: AgentProbe
+  codex: AgentProbe
+}
+
+/** CLI presence/auth/version behind the model-cockpit surfaces. `fresh` skips
+ *  the server's 30s cache — the explicit re-check button. */
+export function getAgentProbe(fresh = false, opts?: ClientOptions): Promise<AgentProbeSnapshot> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<AgentProbeSnapshot>(
+    `${baseUrl}/api/agent-probe${fresh ? '?fresh=1' : ''}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
 }
 
 /** What `init`'s own demonstration still looks like on disk — the first-run

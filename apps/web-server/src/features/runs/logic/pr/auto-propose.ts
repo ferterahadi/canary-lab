@@ -1,5 +1,6 @@
 import { buildPrPreflight } from './pr-preflight'
 import { proposeFixesForRun } from './propose-fixes'
+import { commitModelPlans } from '../runtime/run-model-plan'
 import { loadProjectConfig } from '../runtime/launcher/project-config'
 import type { RunContext } from '../runtime/run-context'
 import type { RunFixCapture, RunManifest, RunPrAttempt, RunProposedPr } from '../runtime/manifest'
@@ -60,13 +61,13 @@ export async function autoProposeFixes(opts: {
   // No project root means no config to read, and the setting is the user's
   // consent to push — absent consent, do nothing.
   if (!ctx.projectRoot) return
-  const enabled = loadConfig(ctx.projectRoot).autoProposePr
+  const config = loadConfig(ctx.projectRoot)
   if (!shouldAutoPropose({
     capture,
     finalStatus: opts.finalStatus,
     executionType: ctx.executionType,
     healCycles: ctx.healCycles,
-    autoProposePr: enabled,
+    autoProposePr: config.autoProposePr,
   })) return
 
   const fixCapture = capture as RunFixCapture
@@ -77,6 +78,12 @@ export async function autoProposeFixes(opts: {
     fixCapture,
     preflight,
     draft: true,
+    // Commit-stage choices per agent, with the run's launch-resolved choice
+    // laid over the agent the run locked to.
+    models: commitModelPlans(
+      config.agentModels,
+      ctx.models && ctx.autoHeal ? { agent: ctx.autoHeal.agent, choice: ctx.models.commit } : undefined,
+    ),
   })
 
   const opened: RunProposedPr[] = results.flatMap((r) => (r.ok && r.pr ? [r.pr] : []))

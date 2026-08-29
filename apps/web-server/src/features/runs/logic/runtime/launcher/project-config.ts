@@ -1,13 +1,28 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import {
+  normalizeAgentModels,
+  type AgentModelsConfig,
+} from '../../../../agent-sessions/logic/agent-models'
 
-export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual' | 'external'
+// `external` was retired in 2.2.0: whether a run parks for an external client
+// is decided by the request's MCP origin, not by workspace config, so the
+// config row only ever chose that GUI-started runs should wait. Stored
+// `external` values migrate to `claude` silently on load.
+export type HealAgentChoice = 'auto' | 'claude' | 'codex' | 'manual'
 export type EditorChoice = 'auto' | 'vscode' | 'cursor' | 'system'
 
 export interface ProjectConfig {
   healAgent: HealAgentChoice
   editor: EditorChoice
+  /** Per-agent, per-stage model + reasoning-effort defaults for every internal
+   *  agent spawn. Absent stages run on the agent's own default. External-agent
+   *  work is out of scope by design: no server-side process exists there. */
+  agentModels: AgentModelsConfig
+  /** Ask which models to use at every launch (flight / suite run / coverage)
+   *  instead of applying `agentModels` silently. */
+  askModelsOnLaunch: boolean
   personalWikiPath: string | null
   /** Open a draft pull request automatically when a run heals green. On by
    *  default: an unattended repair should leave something to review. Turn it
@@ -24,10 +39,10 @@ export interface ProjectConfig {
   port?: number
 }
 
-// Default to `external` — the modern Claude/Codex via MCP flow. `auto` is
-// still accepted by the validator for backwards compatibility with older
-// configs, but new installs and the settings UI prefer external.
-const DEFAULT: ProjectConfig = { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true }
+// Default to `claude` — GUI-started runs self-heal internally. `auto`/`manual`
+// are still accepted by the validator for backwards compatibility with older
+// configs; MCP-origin runs park for the external client regardless of this.
+const DEFAULT: ProjectConfig = { healAgent: 'claude', editor: 'auto', agentModels: { claude: {}, codex: {} }, askModelsOnLaunch: false, personalWikiPath: null, autoProposePr: true, showDemo: true }
 const FILENAME = 'canary-lab.config.json'
 
 // The historical fixed port. Used whenever a project does not pin its own.
@@ -50,13 +65,15 @@ export function projectConfigPath(projectRoot: string): string {
 }
 
 function isHealAgentChoice(v: unknown): v is HealAgentChoice {
-  return (
-    v === 'auto' ||
-    v === 'claude' ||
-    v === 'codex' ||
-    v === 'manual' ||
-    v === 'external'
-  )
+  return v === 'auto' || v === 'claude' || v === 'codex' || v === 'manual'
+}
+
+/** A usable heal-agent value out of untrusted input, or undefined. The retired
+ *  `external` maps to `claude` silently (2.2.0 migration) so old config files
+ *  and old clients keep working without a notice. */
+export function normalizeHealAgent(v: unknown): HealAgentChoice | undefined {
+  if (v === 'external') return 'claude'
+  return isHealAgentChoice(v) ? v : undefined
 }
 
 function isEditorChoice(v: unknown): v is EditorChoice {
@@ -93,8 +110,10 @@ export function loadProjectConfig(projectRoot: string): ProjectConfig {
     const json = JSON.parse(fs.readFileSync(file, 'utf-8'))
     const port = normalizePort(json?.port)
     return {
-      healAgent: isHealAgentChoice(json?.healAgent) ? json.healAgent : DEFAULT.healAgent,
+      healAgent: normalizeHealAgent(json?.healAgent) ?? DEFAULT.healAgent,
       editor: isEditorChoice(json?.editor) ? json.editor : DEFAULT.editor,
+      agentModels: normalizeAgentModels(json?.agentModels),
+      askModelsOnLaunch: json?.askModelsOnLaunch === true,
       personalWikiPath: normalizePersonalWikiPath(json?.personalWikiPath),
       autoProposePr: json?.autoProposePr !== false,
       showDemo: json?.showDemo !== false,
@@ -108,8 +127,10 @@ export function loadProjectConfig(projectRoot: string): ProjectConfig {
 export function saveProjectConfig(projectRoot: string, config: ProjectConfig): void {
   const port = normalizePort(config.port)
   const next: ProjectConfig = {
-    healAgent: isHealAgentChoice(config.healAgent) ? config.healAgent : DEFAULT.healAgent,
+    healAgent: normalizeHealAgent(config.healAgent) ?? DEFAULT.healAgent,
     editor: isEditorChoice(config.editor) ? config.editor : DEFAULT.editor,
+    agentModels: normalizeAgentModels(config.agentModels),
+    askModelsOnLaunch: config.askModelsOnLaunch === true,
     personalWikiPath: normalizePersonalWikiPath(config.personalWikiPath),
     autoProposePr: config.autoProposePr !== false,
     showDemo: config.showDemo !== false,

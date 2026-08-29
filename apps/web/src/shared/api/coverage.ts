@@ -1,6 +1,7 @@
 // Requirement coverage: ledgers, PRD summaries, coverage jobs, feature docs.
 // Split out of client.ts; see that barrel for the shared surface.
 
+import type { StageModelChoice } from '@shared/agent-models'
 import type {
   CoverageLedger,
   CoverageJobIndexEntry,
@@ -115,12 +116,20 @@ export function regeneratePrdSummary(
 export function startCoverageJob(
   feature: string,
   kind: CoverageJobKind,
-  opts?: ClientOptions & { adapter?: 'auto' | 'claude' | 'codex' | 'deterministic'; gettingStartedSource?: 'internal' | 'external' },
+  opts?: ClientOptions & {
+    adapter?: 'auto' | 'claude' | 'codex' | 'deterministic'
+    gettingStartedSource?: 'internal' | 'external'
+    /** Launch-gate override for the job's PRD + mapping spawns — send `adapter`
+     *  alongside it so the server resolves it for the same agent the gate
+     *  showed. Resolved and locked on the job record at start. */
+    models?: { prd?: StageModelChoice; mapping?: StageModelChoice }
+  },
 ): Promise<CoverageJobManifest> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   const body: Record<string, unknown> = { kind }
   if (opts?.adapter) body.adapter = opts.adapter
   if (opts?.gettingStartedSource) body.gettingStartedSource = opts.gettingStartedSource
+  if (opts?.models) body.models = opts.models
   return request<CoverageJobManifest>(
     `${baseUrl}/api/features/${encodeURIComponent(feature)}/coverage/jobs`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },

@@ -12,6 +12,7 @@ import { loadFeatures } from '../../shared/feature-loader'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
 import { RunOrchestrator } from './logic/runtime/orchestrator'
 import { buildOrchestratorHealPrompt, makeAgentSpawnCommandBuilder } from './logic/runtime/auto-heal'
+import { reuseRunModelPlan } from './logic/runtime/run-model-plan'
 import { loadProjectConfig } from './logic/runtime/launcher/project-config'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
 import { RunnerLog } from './logic/runtime/runner-log'
@@ -67,6 +68,9 @@ export function makeRestartLocalHeal(
         runnerLog.warn('Heal restart failed: no `claude` or `codex` CLI on PATH.')
         return { ok: false, reason: 'spawn-failed' as const }
       }
+      // Same lock as a full run restart: keep the persisted plan when the
+      // agent is unchanged; re-resolve only when it isn't (or never was).
+      const models = reuseRunModelPlan(agentChoice, manifest, projectConfig.agentModels)
 
       const env = manifest.env ?? feature.envs?.[0]
       if (!manifest.env && env) {
@@ -108,6 +112,7 @@ export function makeRestartLocalHeal(
             agent: agentChoice,
             buildSpawnCommand: makeAgentSpawnCommandBuilder(agentChoice, {
               mcpConfigFile: path.join(runDir, 'mcp-config.json'),
+              models: models.heal,
             }),
             buildCyclePrompt: buildOrchestratorHealPrompt({
               agent: agentChoice,
@@ -116,6 +121,7 @@ export function makeRestartLocalHeal(
               personalWikiPath: projectConfig.personalWikiPath,
             }),
           },
+          models,
           repoBranchSnapshots,
           initialHealCycles: manifest.healCycles,
           runStateSink: runStore,

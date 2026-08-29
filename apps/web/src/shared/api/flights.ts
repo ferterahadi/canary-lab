@@ -10,6 +10,7 @@ import type {
   PlannedFeature as PlannedFeatureT,
   PlanFeaturesTask as PlanFeaturesTaskT,
 } from '@shared/flights/types'
+import type { AgentStagePlans as AgentStagePlansT } from '@shared/agent-models'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
 import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
@@ -48,6 +49,10 @@ export interface StartFlightBody {
   /** R79: which CLI conducts the flight's stage agents. Sticky per record —
    *  jump/continue reuse the stored one. Absent = claude. */
   agent?: 'claude' | 'codex'
+  /** Launch-gate override: this flight's per-stage model+effort plan for the
+   *  conducting agent. Laid over the workspace config and persisted on the
+   *  record at start; never written back to config. Absent = defaults. */
+  models?: AgentStagePlansT
   /** MCP-owned flights only; the web launcher leaves this absent. */
   externalAgentSession?: FlightManifestT['externalAgentSession']
   /** Marks a Getting Started demo start; ordinary flights omit it. */
@@ -304,7 +309,7 @@ export function listPlanFeatures(opts?: ClientOptions): Promise<{ tasks: PlanFea
  *  `feature_name_conflicts` lists names already in use (nothing created). */
 export function launchPlannedFeatures(
   taskId: string,
-  body: { features: PlannedFeatureT[]; env?: string; coverageTarget?: number; yolo?: boolean; autopilot?: boolean; agent?: 'claude' | 'codex' },
+  body: { features: PlannedFeatureT[]; env?: string; coverageTarget?: number; yolo?: boolean; autopilot?: boolean; agent?: 'claude' | 'codex'; models?: AgentStagePlansT },
   opts?: ClientOptions,
 ): Promise<{ flightIds: string[] }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)

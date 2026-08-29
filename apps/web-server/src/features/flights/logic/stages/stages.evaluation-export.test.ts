@@ -179,6 +179,45 @@ describe('evaluation-export stage', () => {
     expect(start?.payload).toMatchObject({ mode: 'localized' })
   })
 
+  // The stage plan rides the start payload keyed by the CONDUCTING agent, so
+  // the run route's per-agent normalization drops it for the other CLI instead
+  // of applying the wrong vocabulary's efforts.
+  it.each([
+    ['codex', 'codex'],
+    [undefined, 'claude'], // pre-R79 record with no stored agent → claude
+  ] as const)('the report model plan rides the export payload keyed by the conducting agent (%s)', async (agent, expectKey) => {
+    const calls: InjectCall[] = []
+    const taskDir = path.join(logsDir, 'evaluation-exports', 'eval-task-m')
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) {
+        writeEvaluationExportTask(logsDir, {
+          taskId: 'eval-task-m',
+          runId: 'run-1',
+          feature: 'checkout',
+          mode: 'raw',
+          status: 'completed',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+          downloadReady: true,
+          archiveBase: 'canary-lab-evaluation-checkout-run-1',
+        } as never)
+        fs.writeFileSync(path.join(taskDir, 'export.zip'), 'PK')
+        return { statusCode: 202, body: { taskId: 'eval-task-m' } }
+      }
+      return undefined
+    }, calls)
+    const adapter = evaluationExportStage(deps({ inject }))
+    const opts = { env: 'local', coverageTarget: 100, yolo: false, models: { report: { model: 'haiku', effort: 'low' as const } }, ...(agent ? { agent } : {}) }
+    const { ctx, setStage } = ctxFor(manifest({ links: { runId: 'run-1' }, opts }))
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('evaluation-export', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'raw' })
+    expect(outcome).toMatchObject({ kind: 'done' })
+    const start = calls.find((c) => c.url.endsWith('/evaluation-export'))
+    expect(start?.payload).toEqual({ mode: 'raw', models: { [expectKey]: { model: 'haiku', effort: 'low' } } })
+  })
+
   it('an unrecognized export-mode choice re-parks', async () => {
     const adapter = evaluationExportStage(deps())
     const { ctx, setStage } = ctxFor(manifest({ links: { runId: 'run-1' } }))

@@ -39,6 +39,10 @@ interface StartBody {
   feature?: string
   agent?: string
   maxAttempts?: number
+  /** Model+effort override for the spawned agent (`{ model?, effort? }`) —
+   *  normalized by the runner, so junk degrades to workspace config. Ignored
+   *  for an external producer (the client's own model setup applies). */
+  models?: unknown
   /** `external` = the caller's own client edits the worktree; no local agent.
    *  Requires `sessionId` (an MCP session id, or `flight:<id>`). */
   producer?: string
@@ -81,7 +85,7 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
         // not a detected MCP connection — 'other' is the honest kind.
         return await deps.startExternalPortify({ feature, clientKind: 'other', sessionId })
       }
-      return await deps.startPortify({ feature, agent, maxAttempts })
+      return await deps.startPortify({ feature, agent, maxAttempts, models: body.models })
     } catch (err) {
       reply.code((err as { statusCode?: number }).statusCode ?? 500)
       return { error: err instanceof Error ? err.message : String(err) }

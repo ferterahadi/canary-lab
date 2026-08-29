@@ -130,6 +130,7 @@ function makeRunner(
     ptyFactory: fakePtyFactory,
     loadFeatures: loadFeaturesFn ?? (() => loadFeatures(featuresDir)),
     pickAgent: () => agent,
+    resolveModels: () => ({ model: null, effort: null }),
     now: () => '2026-06-07T00:00:00.000Z',
     healthCheck: async () => healthy,
     healthPollIntervalMs: 5,
@@ -243,7 +244,7 @@ describe('createPortifyRunner (integration)', () => {
       const store = new PortifyRunStore(path.join(root, 'logs'))
       return createPortifyRunner({
         logsDir: path.join(root, 'logs'), store, ptyFactory: fakePtyFactory,
-        loadFeatures: () => features, pickAgent, now: () => 'now',
+        loadFeatures: () => features, pickAgent, resolveModels: () => ({ model: null, effort: null }), now: () => 'now',
       })
     }
     const feat = (over: Partial<FeatureConfig>): FeatureConfig =>

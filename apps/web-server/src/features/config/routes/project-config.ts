@@ -7,6 +7,7 @@ import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../sh
 import {
   isValidPort,
   loadProjectConfig,
+  normalizeHealAgent,
   normalizePersonalWikiPath,
   resolveProjectPort,
   saveProjectConfig,
@@ -14,6 +15,7 @@ import {
   type HealAgentChoice,
   type ProjectConfig,
 } from '../../runs/logic/runtime/launcher/project-config'
+import { normalizeAgentModels } from '../../agent-sessions/logic/agent-models'
 
 export interface ProjectConfigRouteDeps {
   projectRoot: string
@@ -28,7 +30,7 @@ export interface ProjectConfigRouteDeps {
   workspaceEvents?: WorkspaceEventPublisher
 }
 
-const HEAL_AGENT_VALUES: HealAgentChoice[] = ['auto', 'claude', 'codex', 'manual', 'external']
+const HEAL_AGENT_VALUES: HealAgentChoice[] = ['auto', 'claude', 'codex', 'manual']
 const EDITOR_VALUES: EditorChoice[] = ['auto', 'vscode', 'cursor', 'system']
 
 export async function projectConfigRoutes(
@@ -40,10 +42,14 @@ export async function projectConfigRoutes(
   })
 
   app.put<{ Body: Partial<ProjectConfig> }>('/api/project-config', async (req, reply) => {
-    const incomingHealAgent = req.body?.healAgent
+    // Normalized rather than membership-checked: the retired `external` maps to
+    // `claude` silently, so a stale client's PUT keeps working (2.2.0 migration).
+    const incomingHealAgent = req.body?.healAgent === undefined
+      ? undefined
+      : normalizeHealAgent(req.body.healAgent)
     const incomingEditor = req.body?.editor
     const incomingPersonalWikiPath = req.body?.personalWikiPath
-    if (incomingHealAgent !== undefined && !HEAL_AGENT_VALUES.includes(incomingHealAgent)) {
+    if (req.body?.healAgent !== undefined && incomingHealAgent === undefined) {
       reply.code(400)
       return { error: `healAgent must be one of: ${HEAL_AGENT_VALUES.join(', ')}` }
     }
@@ -66,10 +72,24 @@ export async function projectConfigRoutes(
       reply.code(400)
       return { error: 'showDemo must be a boolean' }
     }
+    const incomingAskModels = req.body?.askModelsOnLaunch
+    if (incomingAskModels !== undefined && typeof incomingAskModels !== 'boolean') {
+      reply.code(400)
+      return { error: 'askModelsOnLaunch must be a boolean' }
+    }
+    // agentModels is normalized rather than rejected: unknown stages and
+    // invalid efforts drop out, and whatever survives is exactly what a spawn
+    // would resolve. A shape so broken it normalizes to empty is still a valid
+    // "everything agent default" plan.
+    const incomingAgentModels = req.body?.agentModels === undefined
+      ? undefined
+      : normalizeAgentModels(req.body.agentModels)
     const current = loadProjectConfig(deps.projectRoot)
     const next: ProjectConfig = {
       healAgent: incomingHealAgent ?? current.healAgent,
       editor: incomingEditor ?? current.editor,
+      agentModels: incomingAgentModels ?? current.agentModels,
+      askModelsOnLaunch: incomingAskModels ?? current.askModelsOnLaunch,
       personalWikiPath: incomingPersonalWikiPath !== undefined
         ? personalWikiPath!
         : current.personalWikiPath,

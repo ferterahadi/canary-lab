@@ -1,3 +1,4 @@
+import { pinnedPlanSummary } from '@shared/agent-models'
 import { useEffect, useMemo, useState } from 'react'
 import type { AuditEntry, RepoBranchSnapshot, ServiceManifestEntry, RunManifest, RunStatus, RunSummary } from '@/shared/api/types'
 import { getRunAudit } from '@/shared/api/client'
@@ -103,6 +104,14 @@ export function RunOverviewTab({
             <dt className="cl-rubric self-center">Heal agent</dt>
             <dd className="truncate" style={{ color: 'var(--text-secondary)' }} title={healAgentOverviewLabel(manifest) ?? undefined}>
               {healAgentOverviewLabel(manifest)}
+            </dd>
+          </>
+        )}
+        {pinnedPlanSummary(manifest.models) && (
+          <>
+            <dt className="cl-rubric self-center">Models</dt>
+            <dd className="truncate" style={{ color: 'var(--text-secondary)' }} title={pinnedPlanSummary(manifest.models) ?? undefined}>
+              {pinnedPlanSummary(manifest.models)}
             </dd>
           </>
         )}

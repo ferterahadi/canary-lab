@@ -19,6 +19,7 @@ import {
   readDotenvFile,
   putEnvsetSlot,
   getOnboardingSamples,
+  getAgentProbe,
   getProjectConfig,
   putProjectConfig,
   changeProjectPort,
@@ -157,6 +158,20 @@ describe('config api', () => {
     const r = await getProjectConfig({ fetchImpl })
     expect(r).toEqual({ healAgent: 'auto', editor: 'auto', personalWikiPath: null })
     expect(fetchImpl).toHaveBeenCalledWith('/api/project-config', { method: 'GET' })
+  })
+
+  it('getAgentProbe GETs /api/agent-probe, with ?fresh=1 only when forced', async () => {
+    const snap = {
+      probedAt: 'now',
+      claude: { agent: 'claude', state: 'ok', binaryPath: '/bin/claude', version: '1', remedy: null },
+      codex: { agent: 'codex', state: 'missing', binaryPath: null, version: null, remedy: 'install' },
+    }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(snap))
+    await expect(getAgentProbe(false, { fetchImpl })).resolves.toEqual(snap)
+    expect(fetchImpl).toHaveBeenLastCalledWith('/api/agent-probe', { method: 'GET' })
+    fetchImpl.mockResolvedValue(ok(snap))
+    await getAgentProbe(true, { fetchImpl })
+    expect(fetchImpl).toHaveBeenLastCalledWith('/api/agent-probe?fresh=1', { method: 'GET' })
   })
 
   it('getOnboardingSamples GETs /api/onboarding', async () => {

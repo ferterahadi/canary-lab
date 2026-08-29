@@ -129,6 +129,14 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       ...(mode === 'redo'
         ? { stageProducer: args.opts.stageProducer ?? existing.opts.stageProducer }
         : { stageProducer: existing.opts.stageProducer ?? 'internal' }),
+      // The model plan is sticky exactly like `agent` (2.2.0): jump/continue
+      // run the remaining stages on the plan the earlier evidence was produced
+      // under; only a full redo re-resolves it against today's config.
+      ...(mode === 'redo'
+        ? { models: args.opts.models ?? existing.opts.models }
+        : existing.opts.models
+          ? { models: existing.opts.models }
+          : {}),
     }
     const nextExternalAgentSession = nextOpts.stageProducer === 'external'
       ? args.externalAgentSession ?? existing.externalAgentSession
@@ -369,6 +377,9 @@ export function redoFlight(
     fromStage?: FlightStageKey
     /** "What went wrong last time" — scoped to the entry stage's agent prompt. */
     feedback?: string
+    /** Today's re-resolved model plan (route-supplied). Applied only on a full
+     *  redo — a jump keeps the stored plan its surviving evidence ran under. */
+    models?: FlightOptions['models']
   } = {},
 ): StartFlightResult {
   const current = deps.store.get(flightId)
@@ -381,7 +392,9 @@ export function redoFlight(
       feature: current.feature,
       repoPaths: current.repoPaths,
       description: current.description,
-      opts: current.opts,
+      opts: !opts.fromStage && opts.models !== undefined
+        ? { ...current.opts, models: opts.models }
+        : current.opts,
       mode: opts.fromStage ? 'jump' : 'redo',
       fromStage: opts.fromStage,
       feedback: opts.feedback,

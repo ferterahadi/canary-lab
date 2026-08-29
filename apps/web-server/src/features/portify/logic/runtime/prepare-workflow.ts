@@ -10,6 +10,7 @@ import { type ChildProcess } from 'child_process'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../../../shared/launcher/types'
 import { runGit, resolveRepoPath, snapshotWorkingTree, getGitRoot } from '../../../../shared/git-repo'
 import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
+import type { StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import { generateRunId } from '../../../runs/logic/runtime/run-id'
 import { hydrateEnvsetIntoWorktrees } from '../../../runs/logic/runtime/env-switcher/worktree-hydrate'
 import { PortifyOrchestrator } from './orchestrator'
@@ -61,7 +62,7 @@ export async function prepareWorkflow(
   ctx: PrepareWorkflowContext,
   feature: FeatureConfig,
   agent: HealAgent,
-  opts: { maxAttempts?: number; producer: PortifyProducer; external?: PortifyExternalSession },
+  opts: { maxAttempts?: number; producer: PortifyProducer; external?: PortifyExternalSession; models?: StageModelChoice },
 ): Promise<{ workflowId: string; state: ActiveWorkflow; orchestrator: PortifyOrchestrator }> {
   const { deps, active, healthDeadlineMs } = ctx
   const repos: RepoPrerequisite[] = feature.repos ?? []
@@ -129,6 +130,7 @@ export async function prepareWorkflow(
     repos: repos.map((r) => ({ name: r.name, path: r.localPath })),
     env,
     agent,
+    ...(opts.models ? { models: opts.models } : {}),
     producer: opts.producer,
     ...(opts.external ? { external: opts.external } : {}),
     branch,
@@ -166,7 +168,9 @@ export async function prepareWorkflow(
   const runAgentWithPrompt = async (prompt: string, resume: boolean): Promise<void> => {
     const cwd = state.groups[0].handle!.worktreeRoot
     if (sessionId) writePortifyClaudeRef(dir, cwd, sessionId)
-    await runPortifyAgent({ agent, prompt, cwd, logPath: paths.agentLogPath, children, sessionId, resume })
+    // Plain pass-through: the internal caller always resolved a choice, and
+    // runPortifyAgent itself defaults an absent one to the agent default.
+    await runPortifyAgent({ agent, prompt, cwd, logPath: paths.agentLogPath, children, sessionId, resume, models: opts.models })
   }
 
   const orchestrator = new PortifyOrchestrator({

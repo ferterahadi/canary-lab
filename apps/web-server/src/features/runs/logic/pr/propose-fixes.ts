@@ -62,6 +62,9 @@ export async function proposeFixesForRun(opts: {
   /** Failing tests from the run, passed through to the message agent as the
    *  evidence for WHY the repair happened. */
   failed?: RunSummaryFailedEntry[]
+  /** Per-agent commit-message model+effort choices, passed through to the
+   *  message agent (which picks its CLI by availability). */
+  models?: FixCommitMessageInput['models']
   deps?: ProposeDeps
 }): Promise<ProposeResult[]> {
   const git = opts.deps?.git ?? realRunGit
@@ -98,6 +101,7 @@ export async function proposeFixesForRun(opts: {
       patchPath: fixRepo.patchPath,
       ...(fixRepo.fileNames ? { fileNames: fixRepo.fileNames } : {}),
       ...(opts.failed ? { failed: opts.failed } : {}),
+      ...(opts.models ? { models: opts.models } : {}),
       cwd: repoRoot,
     }).catch(() => null)
     try {

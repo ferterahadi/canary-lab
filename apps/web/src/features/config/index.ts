@@ -16,4 +16,5 @@ export {
   FolderPickerModal,
 } from './components/FolderPicker'
 export { SettingsModal } from './components/SettingsModal'
+export { ModelLaunchGate } from './components/ModelLaunchGate'
 export { editorLabel } from './components/settings-options'

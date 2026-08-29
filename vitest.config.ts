@@ -145,6 +145,7 @@ export default defineConfig({
         'shared/launcher/**/*.ts',
         'shared/lib/**/*.ts',
         'shared/runtime/**/*.ts',
+        'shared/agent-models.ts',
         'shared/code-display-format.ts',
         'shared/feature-scaffold.ts',
         'shared/portify-overlay.ts',

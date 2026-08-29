@@ -124,6 +124,7 @@ function makeRunner(
   healthy = true,
   agent: 'claude' | 'codex' = 'claude',
   loadFeaturesFn?: () => FeatureConfig[],
+  resolveModels: () => { model: string | null; effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null } = () => ({ model: null, effort: null }),
 ) {
   const store = new PortifyRunStore(logsDir)
   const runner = createPortifyRunner({
@@ -132,6 +133,7 @@ function makeRunner(
     ptyFactory: fakePtyFactory,
     loadFeatures: loadFeaturesFn ?? (() => loadFeatures(featuresDir)),
     pickAgent: () => agent,
+    resolveModels,
     now: () => '2026-06-07T00:00:00.000Z',
     healthCheck: async () => healthy,
     healthPollIntervalMs: 5,
@@ -180,6 +182,18 @@ describe('createPortifyRunner (integration)', () => {
     expect(ready.verification?.ok).toBe(true)
     expect(ready.verification?.instances).toHaveLength(2)
     expect(ready.diff).toContain('port made injectable by agent')
+  })
+
+  it('hands the resolved model choice to the spawned agent and persists it on the manifest', async () => {
+    const { featuresDir, logsDir } = await singleFixture()
+    const choice = { model: 'opus', effort: 'high' as const }
+    const { store, runner } = makeRunner(featuresDir, logsDir, true, 'claude', undefined, () => choice)
+
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
+
+    expect(vi.mocked(runPortifyAgent).mock.lastCall![0]).toMatchObject({ models: choice })
+    expect(store.get(workflowId)!.models).toEqual(choice)
   })
 
   it('save() captures the verified edits as an ephemeral overlay and discards the scratch worktree', async () => {

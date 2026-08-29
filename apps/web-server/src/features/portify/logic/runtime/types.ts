@@ -1,4 +1,5 @@
 import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
+import type { StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import type { ClientKind, ExternalSessionMeta, RunProducer } from '../../../../../../../shared/run-mode'
 
 // Port-ification workflow: rewrite a feature's apps so their listen ports are
@@ -79,6 +80,11 @@ export interface PortifyManifest {
   repos: PortifyRepoState[]
   env?: string
   agent: HealAgent
+  /** Model+effort the spawned agent runs with, resolved at start (launch
+   *  override → workspace `agentModels.portify` → agent default) and locked to
+   *  this workflow. Absent on pre-2.2.0 records and external-producer
+   *  workflows (the client's own model setup applies there). */
+  models?: StageModelChoice
   /** Defaults to `internal` (legacy manifests have no field). `external` means the
    *  agent runs in the user's own client and edits the worktree in place. */
   producer?: PortifyProducer
@@ -123,6 +129,10 @@ export interface StartPortifyInput {
   feature: string
   agent?: HealAgent
   maxAttempts?: number
+  /** Launch-gate model+effort override for the spawned agent — a raw
+   *  `{ model?, effort? }` from the request body, normalized by the runner's
+   *  `resolveModels` before it can win over workspace config. */
+  models?: unknown
 }
 
 export interface StartPortifyResult {

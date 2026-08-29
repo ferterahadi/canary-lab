@@ -8,7 +8,7 @@ import {
 import type { AnnotateAdapter } from '../annotate-engine'
 import type { SummarizeAdapter } from '../prd-summary'
 import type { CoverageJobStore } from './store'
-import type { CoverageJobKind, CoverageJobManifest } from './types'
+import type { CoverageJobKind, CoverageJobManifest, CoverageJobModels } from './types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
 
 // Background driver + single-flight gate for coverage jobs. The start path
@@ -31,6 +31,10 @@ export interface StartCoverageJobArgs {
   kind: CoverageJobKind
   adapter?: SummarizeAdapter & AnnotateAdapter
   cwd?: string
+  /** Resolved model+effort choices per engine stage, per agent — resolved by
+   *  the route (launch override → workspace config → default) and persisted on
+   *  the job record; the summary→coverage chain carries them forward. */
+  models?: CoverageJobModels
   /** Internal: set when this job was auto-spawned by a finishing summary job so
    *  the chain doesn't recurse. Not part of the public start contract. */
   chainedFromJobId?: string
@@ -72,6 +76,7 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
     feature: args.feature,
     kind: args.kind,
     ...(args.chainedFromJobId ? { chainedFromJobId: args.chainedFromJobId } : {}),
+    ...(args.models ? { models: args.models } : {}),
     status: 'running',
     startedAt: now(),
     log: '',
@@ -107,6 +112,7 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
           feature: args.feature,
           adapter: args.adapter,
           cwd: args.cwd,
+          models: args.models?.prd,
           onOutput: append,
           onAgentSession,
         })
@@ -118,7 +124,7 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
         try {
           append('\n[chain] summary done — starting coverage engine…\n')
           const chained = startCoverageJob(
-            { featuresDir: args.featuresDir, logsDir: args.logsDir, feature: args.feature, kind: 'coverage', adapter: args.adapter, cwd: args.cwd, chainedFromJobId: jobId },
+            { featuresDir: args.featuresDir, logsDir: args.logsDir, feature: args.feature, kind: 'coverage', adapter: args.adapter, cwd: args.cwd, models: args.models, chainedFromJobId: jobId },
             deps,
           )
           chainedJobId = chained.manifest.jobId
@@ -133,6 +139,7 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
           feature: args.feature,
           adapter: args.adapter,
           cwd: args.cwd,
+          models: args.models?.mapping,
           onOutput: append,
           onAgentSession,
         })

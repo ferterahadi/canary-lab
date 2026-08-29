@@ -8,7 +8,8 @@ import { PaneBroker, type PaneSubscriber } from '../../runs/logic/pane-broker'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 import { buildAgentSessionResponse, resolveManifestSessionRef } from '../../agent-sessions/logic/agent-session-log'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
-import { generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../logic/test-review-export'
+import { generateEvaluationRewriteWithAgent, type EvaluationRewrite, type EvaluationRewriteAgentOptions } from '../logic/test-review-export'
+import { normalizePerAgentChoices, perAgentStageChoices } from '../../agent-sessions/logic/agent-models'
 import { buildEvaluationExportArchive, type EvaluationArchiveContents } from '../logic/evaluation-export-archive'
 import {
   appendEvaluationExportLog,
@@ -56,6 +57,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     log?: (chunk: string) => void,
     signal?: AbortSignal,
     onSession?: (session: { agent: 'claude' | 'codex'; sessionId: string }) => void,
+    modelsOverride?: unknown,
   ): Promise<{ archiveBase: string; zip: Buffer; contents: EvaluationArchiveContents }> => {
     throwIfAborted(signal)
     log?.(`[evaluation] preparing ${mode === 'raw' ? 'raw output' : 'localized output'} export\n`)
@@ -67,14 +69,24 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     // claude/codex CLI; with neither installed it still returns none and the
     // deterministic fallback applies, but now that is a fact about the machine
     // rather than about a config field that meant something else.
-    const projectHealAgent = mode === 'localized' && deps.projectRoot
-      ? loadProjectConfig(deps.projectRoot).healAgent
-      : 'deterministic'
+    const projectConfig = mode === 'localized' && deps.projectRoot
+      ? loadProjectConfig(deps.projectRoot)
+      : undefined
     const audienceAdapter: 'auto' | 'claude' | 'codex' | 'manual' | 'deterministic' =
-      projectHealAgent === 'external' ? 'auto' : projectHealAgent
+      projectConfig?.healAgent ?? 'deterministic'
     const runDir = runDirFor(deps.store.logsDir, detail.runId)
     const rewrite = mode === 'localized'
-      ? await loadEvaluationRewrite(detail, runDir, audienceAdapter, deps.projectRoot, deps.generateEvaluationRewrite, app.log, log, signal, onSession)
+      ? await loadEvaluationRewrite(detail, runDir, audienceAdapter, deps.projectRoot, deps.generateEvaluationRewrite, {
+          log: app.log,
+          onOutput: log,
+          signal,
+          onSession,
+          // Report-stage choices per agent — the rewrite tries a CLI fallback
+          // chain, and each spawn takes its own agent's resolved choice. A
+          // forwarded flight plan (untrusted payload) overlays the config map
+          // only at the agent keys it actually carries.
+          models: { ...perAgentStageChoices(projectConfig?.agentModels, 'report'), ...normalizePerAgentChoices(modelsOverride) },
+        })
       : undefined
     throwIfAborted(signal)
     const built = await buildEvaluationExportArchive(detail, {
@@ -122,7 +134,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     }
   }
 
-  const startEvaluationExportTask = (detail: RunDetail, mode: EvaluationExportMode) => {
+  const startEvaluationExportTask = (detail: RunDetail, mode: EvaluationExportMode, modelsOverride?: unknown) => {
     const now = new Date().toISOString()
     const task: EvaluationExportTaskRecord = {
       taskId: `eval-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -156,7 +168,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     push(`[evaluation] task ${task.taskId} started\n`)
     void (async () => {
       try {
-        const built = await buildEvaluationZip(detail, mode, push, active.abortController.signal, onSession)
+        const built = await buildEvaluationZip(detail, mode, push, active.abortController.signal, onSession, modelsOverride)
         if (!readEvaluationExportTask(deps.store.logsDir, task.taskId)) return
         writeEvaluationExportZip(deps.store.logsDir, task.taskId, built.zip)
         const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
@@ -196,7 +208,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     return sendEvaluationExport(req.params.runId, reply)
   })
 
-  app.post<{ Params: { runId: string }; Body: { mode?: string } }>('/api/runs/:runId/evaluation-export', async (req, reply) => {
+  app.post<{ Params: { runId: string }; Body: { mode?: string; models?: unknown } }>('/api/runs/:runId/evaluation-export', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
     if (!detail) {
       reply.code(404)
@@ -212,7 +224,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
       return { error: 'mode must be "raw" or "localized"' }
     }
     reply.code(202)
-    return startEvaluationExportTask(detail, mode)
+    return startEvaluationExportTask(detail, mode, req.body?.models)
   })
 
   app.get<{ Querystring: { runId?: string } }>('/api/evaluation-exports', async (req) => {
@@ -360,11 +372,15 @@ async function loadEvaluationRewrite(
   audienceAdapter: Parameters<typeof generateEvaluationRewriteWithAgent>[1],
   projectRoot: string | undefined,
   generate: EvaluationRoutesDeps['generateEvaluationRewrite'],
-  log?: Pick<FastifyInstance['log'], 'warn'>,
-  onOutput?: (chunk: string) => void,
-  signal?: AbortSignal,
-  onSession?: (session: { agent: 'claude' | 'codex'; sessionId: string }) => void,
+  opts: {
+    log?: Pick<FastifyInstance['log'], 'warn'>
+    onOutput?: (chunk: string) => void
+    signal?: AbortSignal
+    onSession?: (session: { agent: 'claude' | 'codex'; sessionId: string }) => void
+    models?: EvaluationRewriteAgentOptions['models']
+  } = {},
 ): Promise<EvaluationRewrite | undefined> {
+  const { log, onOutput, signal, onSession, models } = opts
   throwIfAborted(signal)
   const cached = readCachedEvaluationRewrite(runDir)
   if (cached) {
@@ -373,7 +389,7 @@ async function loadEvaluationRewrite(
   }
   try {
     onOutput?.('[evaluation] generating localized wording\n')
-    const generated = await (generate ?? generateEvaluationRewriteWithAgent)(detail, audienceAdapter, projectRoot, { onOutput, signal, onSession })
+    const generated = await (generate ?? generateEvaluationRewriteWithAgent)(detail, audienceAdapter, projectRoot, { onOutput, signal, onSession, models })
     throwIfAborted(signal)
     if (generated) {
       clearEvaluationRewriteError(runDir)

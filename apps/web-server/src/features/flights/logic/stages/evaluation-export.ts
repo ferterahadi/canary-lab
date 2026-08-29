@@ -6,7 +6,7 @@ import { buildTestReviewPacket, deterministicEvaluationRewrite } from '../../../
 import { buildEvaluationRewritePrompt, resolveRewriteOutput } from '../../../evaluation/logic/test-review/rewrite-agent'
 import { getRunDetail } from '../../../runs/logic/run-store'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { pollUntil, type FlightStageDeps } from './context'
+import { pollUntil, stageModelPlan, type FlightStageDeps } from './context'
 import { evaluationExportJob } from './stage-jobs'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { CHECKPOINT_OPTIONS } from '../types'
@@ -129,10 +129,11 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
       }
     }
 
+    const reportModels = stageModelPlan(m, 'report')
     const started = await deps.inject({
       method: 'POST',
       url: `/api/runs/${encodeURIComponent(runId)}/evaluation-export`,
-      payload: { mode },
+      payload: { mode, ...(reportModels ? { models: reportModels } : {}) },
     })
     const body = started.json() as { taskId?: string; error?: string }
     if (started.statusCode !== 202 || !body.taskId) {

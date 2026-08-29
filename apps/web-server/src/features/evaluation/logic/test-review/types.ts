@@ -1,4 +1,5 @@
 import { type HealAgent } from '../../../runs/logic/runtime/auto-heal'
+import type { StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 
 export type AssertionQuality = 'strict' | 'moderate' | 'shallow' | 'unknown'
@@ -68,6 +69,10 @@ export interface EvaluationRewriteAgentOptions {
    *  the caller can persist it and stream the agent's JSONL via AgentSessionView
    *  (claude: a pinned --session-id UUID; codex: '' — located by cwd + start). */
   onSession?: (session: { agent: HealAgent; sessionId: string }) => void
+  /** Resolved model+effort per agent — the rewrite tries a fallback CHAIN of
+   *  CLIs, and each spawn takes its own agent's choice (a claude effort is not
+   *  codex vocabulary). Absent (or an absent key) → that agent's default. */
+  models?: Partial<Record<HealAgent, StageModelChoice>>
 }
 
 export interface EvaluationRewriteFlowStep {

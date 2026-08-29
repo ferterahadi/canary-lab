@@ -128,6 +128,51 @@ describe('autoProposeFixes', () => {
     expect(warnings.some((m) => m.includes('unknown reason'))).toBe(true)
   })
 
+  it('hands the commit-stage model plan to propose, run lock laid over the locked agent only', async () => {
+    const { ctx } = mkCtx({
+      models: { heal: { model: null, effort: null }, commit: { model: 'run-locked', effort: 'low' } },
+      autoHeal: { agent: 'claude' },
+    } as never)
+    let sawModels: unknown
+    await autoProposeFixes({
+      ctx,
+      capture,
+      finalStatus: 'passed',
+      deps: {
+        loadConfig: () => ({ ...config, agentModels: { claude: { commit: { model: 'cfg', effort: null } }, codex: { commit: { model: null, effort: 'high' } } } }),
+        preflight: async () => preflight,
+        propose: async (o) => { sawModels = o.models; return [] },
+        now: () => 'T',
+      },
+    })
+    // claude carries the run's locked choice, codex keeps today's config.
+    expect(sawModels).toEqual({
+      claude: { model: 'run-locked', effort: 'low' },
+      codex: { model: null, effort: 'high' },
+    })
+  })
+
+  it('a run with no locked plan (pre-2.2.0) or no local agent proposes on config alone', async () => {
+    const { ctx } = mkCtx({ models: { heal: { model: null, effort: null }, commit: { model: 'locked', effort: null } } } as never)
+    let sawModels: unknown
+    await autoProposeFixes({
+      ctx,
+      capture,
+      finalStatus: 'passed',
+      deps: {
+        loadConfig: () => config,
+        preflight: async () => preflight,
+        propose: async (o) => { sawModels = o.models; return [] },
+        now: () => 'T',
+      },
+    })
+    // models present but autoHeal absent (external repair): no lock overlay.
+    expect(sawModels).toEqual({
+      claude: { model: null, effort: null },
+      codex: { model: null, effort: null },
+    })
+  })
+
   it('does nothing when the workspace turned auto-PR off', async () => {
     const { ctx, patches } = mkCtx()
     let proposed = false

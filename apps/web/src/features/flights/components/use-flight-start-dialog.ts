@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type {
+  AgentStagePlans,
   FlightEntryOptions,
   FlightStageEntryOption,
   FlightStageKey,
@@ -66,11 +67,25 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
   // codex pick rides the body. Sticky server-side once the flight exists.
   const [agent, setAgent] = useState<'claude' | 'codex'>('claude')
   const agentBody = agent === 'codex' ? { agent: 'codex' as const } : {}
+  // The whole config is kept (not just the default-agent bit): the models gate
+  // below needs askModelsOnLaunch + agentModels. Unreachable → null, and the
+  // gate never arms (launching beats blocking on a settings probe).
+  const [projectConfig, setProjectConfig] = useState<api.ProjectConfig | null>(null)
   useEffect(() => {
     api.getProjectConfig()
-      .then((c) => { if (c.healAgent === 'codex') setAgent('codex') })
+      .then((c) => {
+        setProjectConfig(c)
+        if (c.healAgent === 'codex') setAgent('codex')
+      })
       .catch(() => {})
   }, [])
+
+  // The models gate (2.2.0): when the workspace armed askModelsOnLaunch, the
+  // three explicit launch actions park on "use defaults or customize?" first.
+  // Holds WHICH action to replay on confirm. The plan-first path (planFlight)
+  // is deliberately ungated — its launch is server-driven and takes the saved
+  // defaults; the proposal confirm (launchProposal) is the gated moment.
+  const [modelsGate, setModelsGate] = useState<'start' | 'single' | 'proposal' | null>(null)
 
   // R54 plan flow state. Resuming a backgrounded pre-flight opens straight in
   // the planning view (the resume effect attaches the task; the settle effect
@@ -253,8 +268,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
   }
 
   /** The planning escape hatch — one flight for the whole intent, no agent. */
-  const startSingleFlight = (): void => {
-    if (busy) return
+  const beginSingleFlight = (models: AgentStagePlans | null): void => {
     setBusy(true)
     setStartError(null)
     api.startFlight({
@@ -263,14 +277,20 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       description: description.trim(),
       ...autopilotBody,
       ...agentBody,
+      ...(models ? { models } : {}),
     })
       .then((manifest) => onOpenFlight(manifest.flightId))
       .catch(openFlightFail)
   }
+  const startSingleFlight = (): void => {
+    if (busy) return
+    if (projectConfig?.askModelsOnLaunch === true) { setModelsGate('single'); return }
+    beginSingleFlight(null)
+  }
 
   /** Proposal confirm: one flight per card, sequentially queued (R54). */
-  const launchProposal = (): void => {
-    if (busy || !planTask) return
+  const beginLaunchProposal = (models: AgentStagePlans | null): void => {
+    if (!planTask) return
     setBusy(true)
     setStartError(null)
     setConflicts([])
@@ -278,9 +298,14 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       ...f,
       ...(sharedGroup.trim() ? { group: sharedGroup.trim() } : {}),
     }))
-    api.launchPlannedFeatures(planTask.taskId, { features, ...autopilotBody, ...agentBody })
+    api.launchPlannedFeatures(planTask.taskId, { features, ...autopilotBody, ...agentBody, ...(models ? { models } : {}) })
       .then(({ flightIds }) => onOpenFlight(flightIds[0]))
       .catch(applyLaunchFailure)
+  }
+  const launchProposal = (): void => {
+    if (busy || !planTask) return
+    if (projectConfig?.askModelsOnLaunch === true) { setModelsGate('proposal'); return }
+    beginLaunchProposal(null)
   }
 
   /** R80: the fresh-intent dead-end's way forward. A flying suite can't take new
@@ -302,9 +327,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
       })
   }
 
-  const start = (): void => {
-    if (busy) return
-    if (newFlight) { planFlight(); return }
+  const beginStart = (models: AgentStagePlans | null): void => {
     if (!entry || picked === null) return
     setBusy(true)
     setStartError(null)
@@ -324,11 +347,29 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
           : { ...(hasRecord ? { mode: 'jump' as const } : {}), fromStage: picked }),
       ...autopilotBody,
       ...agentBody,
+      ...(models ? { models } : {}),
     }
     api.startFlight(body)
       .then((manifest) => onOpenFlight(manifest.flightId))
       .catch(openFlightFail)
   }
+  const start = (): void => {
+    if (busy) return
+    if (newFlight) { planFlight(); return }
+    if (!entry || picked === null) return
+    if (projectConfig?.askModelsOnLaunch === true) { setModelsGate('start'); return }
+    beginStart(null)
+  }
 
-  return { resolvedFeature, entry, loadError, description, setDescription, repoPaths, setRepoPaths, picked, setPicked, busy, startError, showSteps, setShowSteps, autopilot, setAutopilot, agent, phase, planTask, proposal, setProposal, sharedGroup, setSharedGroup, conflicts, newFlight, byKey, lastStatus, hasRecord, editableInputs, inputsRequired, freshMode, canSubmit, startSingleFlight, launchProposal, stopAndStartFresh, start }
+  /** The models gate's confirm — replays the parked action with the answer
+   *  (null = defaults: send nothing, the server resolves the saved config). */
+  const confirmLaunchModels = (models: AgentStagePlans | null): void => {
+    const kind = modelsGate
+    setModelsGate(null)
+    if (kind === 'start') beginStart(models)
+    else if (kind === 'single') beginSingleFlight(models)
+    else if (kind === 'proposal') beginLaunchProposal(models)
+  }
+
+  return { resolvedFeature, entry, loadError, projectConfig, modelsGate, setModelsGate, confirmLaunchModels, description, setDescription, repoPaths, setRepoPaths, picked, setPicked, busy, startError, showSteps, setShowSteps, autopilot, setAutopilot, agent, phase, planTask, proposal, setProposal, sharedGroup, setSharedGroup, conflicts, newFlight, byKey, lastStatus, hasRecord, editableInputs, inputsRequired, freshMode, canSubmit, startSingleFlight, launchProposal, stopAndStartFresh, start }
 }

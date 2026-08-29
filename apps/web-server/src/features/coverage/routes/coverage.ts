@@ -10,7 +10,10 @@ import {
 import type { SummarizeAdapter } from '../logic/coverage/prd-summary'
 import { coverageJobStore, type CoverageJobStore } from '../logic/coverage/jobs/store'
 import { startCoverageJob, CoverageJobConflictError } from '../logic/coverage/jobs/runner'
-import type { CoverageJobKind } from '../logic/coverage/jobs/types'
+import type { CoverageJobKind, CoverageJobModels } from '../logic/coverage/jobs/types'
+import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
+import { pickAvailableHealAgent } from '../../runs/logic/runtime/heal-agent-spawn'
+import { normalizeStagePlans, perAgentStageChoices, resolveStageChoice } from '../../agent-sessions/logic/agent-models'
 import { readPrdSummary } from '../logic/coverage/prd-summary'
 import { deriveCoverageStateView } from '../logic/coverage/state'
 import { readCoverageRunState } from '../logic/coverage/run-state'
@@ -348,7 +351,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
     return buildAgentSessionResponse(located)
   })
 
-  app.post<{ Params: { name: string }; Body: { kind?: CoverageJobKind; adapter?: SummarizeAdapter; gettingStartedSource?: GettingStartedOwner } | undefined }>(
+  app.post<{ Params: { name: string }; Body: { kind?: CoverageJobKind; adapter?: SummarizeAdapter; models?: unknown; gettingStartedSource?: GettingStartedOwner } | undefined }>(
     '/api/features/:name/coverage/jobs',
     async (req, reply) => {
       const kind = req.body?.kind
@@ -383,6 +386,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
             // Run the agent in the project root so its session log + cwd-based
             // codex session location resolve (R17).
             cwd: deps.projectRoot,
+            models: resolveCoverageJobModels(deps.projectRoot, req.body?.adapter, req.body?.models),
           },
           { store: jobStore, workspaceEvents: deps.workspaceEvents },
         )
@@ -401,4 +405,23 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
       }
     },
   )
+}
+
+/** The job's model+effort plan: both agents get their config-resolved entry
+ *  (the engines fall back across CLIs), and a launch override applies to the
+ *  PREFERRED agent — the chain's head, which is who the override was chosen
+ *  for. Exported for the route tests. */
+export function resolveCoverageJobModels(
+  projectRoot: string,
+  adapter: SummarizeAdapter | undefined,
+  override: unknown,
+): CoverageJobModels {
+  const config = loadProjectConfig(projectRoot).agentModels
+  const preferred: 'claude' | 'codex' =
+    adapter === 'codex' ? 'codex' : adapter === 'claude' ? 'claude' : pickAvailableHealAgent() ?? 'claude'
+  const requested = normalizeStagePlans(preferred, override)
+  return {
+    prd: { ...perAgentStageChoices(config, 'prd'), [preferred]: resolveStageChoice(preferred, config, 'prd', requested.prd ?? null) },
+    mapping: { ...perAgentStageChoices(config, 'mapping'), [preferred]: resolveStageChoice(preferred, config, 'mapping', requested.mapping ?? null) },
+  }
 }

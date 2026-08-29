@@ -30,7 +30,7 @@ vi.mock('../logic/coverage/annotate-engine', async (importActual) => {
   return { ...actual, proposeCoverageMappings: fakePropose }
 })
 
-import { coverageRoutes } from './coverage'
+import { coverageRoutes, resolveCoverageJobModels } from './coverage'
 
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
 
@@ -469,5 +469,90 @@ describe('coverage routes', () => {
       payload: { kind: 'coverage' },
     })
     expect(res.statusCode).toBe(500)
+  })
+})
+
+// Direct unit tests for the launch-time model resolution the POST route locks
+// onto every job manifest. Real config file in a tmp projectRoot; the
+// availability probe is steered through its own env overrides so no test
+// depends on what happens to be installed on the machine running it.
+describe('resolveCoverageJobModels', () => {
+  const AGENT_MODELS = {
+    claude: { prd: { model: 'sonnet', effort: 'medium' }, mapping: { model: 'haiku', effort: null } },
+    codex: { prd: { model: null, effort: 'high' } },
+  }
+  let projectRoot: string
+  const savedEnv: Record<string, string | undefined> = {}
+
+  beforeEach(() => {
+    projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-cov-models-'))
+    fs.writeFileSync(path.join(projectRoot, 'canary-lab.config.json'), JSON.stringify({ agentModels: AGENT_MODELS }))
+    for (const key of ['CANARY_LAB_HEAL_AGENT', 'CANARY_LAB_CLAUDE_BIN', 'CANARY_LAB_CODEX_BIN']) {
+      savedEnv[key] = process.env[key]
+      delete process.env[key]
+    }
+  })
+
+  afterEach(() => {
+    fs.rmSync(projectRoot, { recursive: true, force: true })
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+
+  it('lays the gate override over the PREFERRED agent only; the other keeps its config row', () => {
+    const models = resolveCoverageJobModels(projectRoot, 'claude', { prd: { model: 'opus', effort: 'max' } })
+    expect(models).toEqual({
+      prd: {
+        claude: { model: 'opus', effort: 'max' },
+        codex: { model: null, effort: 'high' },
+      },
+      mapping: {
+        claude: { model: 'haiku', effort: null },
+        codex: { model: null, effort: null },
+      },
+    })
+  })
+
+  it('adapter codex pins the override to the codex entry, in codex vocabulary', () => {
+    const models = resolveCoverageJobModels(projectRoot, 'codex', { mapping: { model: null, effort: 'xhigh' } })
+    expect(models.mapping).toEqual({
+      claude: { model: 'haiku', effort: null },
+      codex: { model: null, effort: 'xhigh' },
+    })
+    // The prd override was not sent — codex keeps its config row.
+    expect(models.prd?.codex).toEqual({ model: null, effort: 'high' })
+  })
+
+  it('a non-CLI adapter asks the availability probe, and claude wins when it answers', () => {
+    // A guaranteed-executable stand-in: the probe honors CANARY_LAB_CLAUDE_BIN
+    // before touching PATH, so this test never depends on an installed CLI.
+    const bin = path.join(projectRoot, 'claude-stub')
+    fs.writeFileSync(bin, '#!/bin/sh\n', { mode: 0o755 })
+    process.env.CANARY_LAB_CLAUDE_BIN = bin
+    const models = resolveCoverageJobModels(projectRoot, 'deterministic', { prd: { model: 'opus', effort: null } })
+    expect(models.prd?.claude).toEqual({ model: 'opus', effort: null })
+  })
+
+  it('falls back to claude when the probe finds no agent at all', () => {
+    // An unrecognized pin makes the probe return null instead of touching PATH.
+    process.env.CANARY_LAB_HEAL_AGENT = 'not-a-real-agent'
+    const models = resolveCoverageJobModels(projectRoot, undefined, { mapping: { model: 'opus', effort: null } })
+    expect(models.mapping?.claude).toEqual({ model: 'opus', effort: null })
+  })
+
+  it('junk overrides degrade to the config rows instead of failing the launch', () => {
+    const models = resolveCoverageJobModels(projectRoot, 'claude', 'nonsense')
+    expect(models).toEqual({
+      prd: {
+        claude: { model: 'sonnet', effort: 'medium' },
+        codex: { model: null, effort: 'high' },
+      },
+      mapping: {
+        claude: { model: 'haiku', effort: null },
+        codex: { model: null, effort: null },
+      },
+    })
   })
 })

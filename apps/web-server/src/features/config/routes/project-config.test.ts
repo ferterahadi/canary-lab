@@ -23,6 +23,17 @@ vi.mock('child_process', async (importOriginal) => {
 
 const { projectConfigRoutes } = await import('./project-config')
 
+// The shipped defaults as they cross the wire, spread into per-test variants.
+const DEFAULTS = {
+  healAgent: 'claude',
+  editor: 'auto',
+  agentModels: { claude: {}, codex: {} },
+  askModelsOnLaunch: false,
+  personalWikiPath: null,
+  autoProposePr: true,
+  showDemo: true,
+}
+
 let projectRoot: string
 
 async function makeApp(
@@ -54,7 +65,7 @@ describe('GET /api/project-config', () => {
     try {
       const r = await app.inject({ method: 'GET', url: '/api/project-config' })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null , autoProposePr: true, showDemo: true})
+      expect(r.json()).toEqual(DEFAULTS)
     } finally {
       await app.close()
     }
@@ -68,7 +79,7 @@ describe('GET /api/project-config', () => {
     const app = await makeApp()
     try {
       const r = await app.inject({ method: 'GET', url: '/api/project-config' })
-      expect(r.json()).toEqual({ healAgent: 'manual', editor: 'auto', personalWikiPath: null , autoProposePr: true, showDemo: true})
+      expect(r.json()).toEqual({ ...DEFAULTS, healAgent: 'manual' })
     } finally {
       await app.close()
     }
@@ -82,13 +93,34 @@ describe('PUT /api/project-config', () => {
       const r = await app.inject({
         method: 'PUT',
         url: '/api/project-config',
-        payload: { healAgent: 'claude' },
+        payload: { healAgent: 'codex' },
       })
       expect(r.statusCode).toBe(200)
       const written = JSON.parse(
         fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
       )
-      expect(written).toEqual({ healAgent: 'claude', editor: 'auto', personalWikiPath: null , autoProposePr: true, showDemo: true})
+      expect(written).toEqual({ ...DEFAULTS, healAgent: 'codex' })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('maps a stale client\'s `external` healAgent to claude silently (2.2.0)', async () => {
+    // The retired value is a 200, not a 400: an old browser tab PUTting its
+    // cached choice keeps working and lands on the migrated value.
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/project-config',
+        payload: { healAgent: 'external' },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json().healAgent).toBe('claude')
+      const written = JSON.parse(
+        fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
+      )
+      expect(written.healAgent).toBe('claude')
     } finally {
       await app.close()
     }
@@ -107,7 +139,7 @@ describe('PUT /api/project-config', () => {
         payload: {},
       })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'codex', editor: 'auto', personalWikiPath: null , autoProposePr: true, showDemo: true})
+      expect(r.json()).toEqual({ ...DEFAULTS, healAgent: 'codex' })
     } finally {
       await app.close()
     }
@@ -116,7 +148,7 @@ describe('PUT /api/project-config', () => {
   it('preserves a pinned port when an unrelated setting changes', async () => {
     fs.writeFileSync(
       path.join(projectRoot, 'canary-lab.config.json'),
-      JSON.stringify({ healAgent: 'external', port: 7420 }),
+      JSON.stringify({ healAgent: 'codex', port: 7420 }),
     )
     const app = await makeApp()
     try {
@@ -164,11 +196,11 @@ describe('PUT /api/project-config', () => {
         payload: { editor: 'cursor' },
       })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null , autoProposePr: true, showDemo: true})
+      expect(r.json()).toEqual({ ...DEFAULTS, editor: 'cursor' })
       const written = JSON.parse(
         fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
       )
-      expect(written).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null , autoProposePr: true, showDemo: true})
+      expect(written).toEqual({ ...DEFAULTS, editor: 'cursor' })
     } finally {
       await app.close()
     }
@@ -228,6 +260,52 @@ describe('PUT /api/project-config', () => {
     }
   })
 
+  it('normalizes agentModels on write instead of rejecting — junk drops out', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/project-config',
+        payload: {
+          agentModels: {
+            claude: { heal: { model: 'opus', effort: 'high' }, warp: { model: 'x' } },
+            codex: { commit: { model: null, effort: 'low' } },
+          },
+        },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json().agentModels).toEqual({
+        claude: { heal: { model: 'opus', effort: 'high' } },
+        codex: { commit: { model: null, effort: 'low' } },
+      })
+
+      // Omitting it preserves the stored plan rather than resetting every
+      // stage back to agent default.
+      const other = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { editor: 'vscode' } })
+      expect(other.json().agentModels.claude.heal).toEqual({ model: 'opus', effort: 'high' })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('writes the ask-on-launch preference and rejects a non-boolean', async () => {
+    const app = await makeApp()
+    try {
+      const on = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { askModelsOnLaunch: true } })
+      expect(on.statusCode).toBe(200)
+      expect(on.json().askModelsOnLaunch).toBe(true)
+
+      const other = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { editor: 'vscode' } })
+      expect(other.json().askModelsOnLaunch).toBe(true)
+
+      const bad = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { askModelsOnLaunch: 'yes' } })
+      expect(bad.statusCode).toBe(400)
+      expect(bad.json()).toEqual({ error: 'askModelsOnLaunch must be a boolean' })
+    } finally {
+      await app.close()
+    }
+  })
+
   it('announces a persisted write so every open client refetches', async () => {
     const publish = vi.fn()
     const app = await makeApp({ workspaceEvents: { publish } })
@@ -262,13 +340,7 @@ describe('PUT /api/project-config', () => {
         payload: { personalWikiPath: wiki },
       })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({
-        healAgent: 'external',
-        editor: 'auto',
-        personalWikiPath: fs.realpathSync(wiki),
-        autoProposePr: true,
-        showDemo: true,
-      })
+      expect(r.json()).toEqual({ ...DEFAULTS, personalWikiPath: fs.realpathSync(wiki) })
     } finally {
       await app.close()
     }

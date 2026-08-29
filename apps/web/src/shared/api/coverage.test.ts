@@ -130,6 +130,14 @@ describe('coverage api', () => {
     expect(JSON.parse((fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string)).toEqual({ kind: 'coverage' })
   })
 
+  it('startCoverageJob rides the launch-gate model plan (with its adapter pin) in the body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ jobId: 'j9' }))
+    const models = { prd: { model: 'opus', effort: 'max' }, mapping: { model: null, effort: 'low' } }
+    await startCoverageJob('checkout', 'summary', { baseUrl: 'http://x', fetchImpl, adapter: 'claude', models })
+    const [, init] = fetchImpl.mock.calls[0]
+    expect(JSON.parse((init as { body: string }).body)).toEqual({ kind: 'summary', adapter: 'claude', models })
+  })
+
   it('startCoverageJob carries the Getting Started source so the demo claim rides the same POST', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ jobId: 'j3' }, 202))
     await startCoverageJob('checkout', 'summary', { baseUrl: 'http://x', fetchImpl, gettingStartedSource: 'internal' })

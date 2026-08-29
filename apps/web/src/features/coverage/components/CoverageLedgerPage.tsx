@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { CoverageJobKind, CoverageJobManifest, CoverageLedger, ExtractedTest, FeatureTests, GapType, TestCoverage, TestStrength } from '@/shared/api/types'
-import type { FlightStageKey, FlightStageStatus } from '@/shared/api/client'
+import type { AgentModelsConfig, AgentStagePlans, FlightStageKey, FlightStageStatus, ModelAgentKind, ModelStageKey } from '@/shared/api/client'
+import { EMPTY_AGENT_MODELS } from '@shared/agent-models'
+import { ModelLaunchGate } from '@/features/config'
 import { StageStatusChip, stageLabel } from '@/features/flights/components/stage-meta'
 import { CoverageDocsRail } from './CoverageDocsRail'
 import { CoverageGeneratingPane } from './CoverageGeneratingPane'
@@ -10,6 +12,10 @@ import { useInvalidationKey } from '@/shared/state/invalidation'
 import { Hovered, RequirementCard, STATUS_RANK, TestCard, TestCardSkeleton, statusOf, testColor } from './CoverageCards'
 import { CoverageEmptyMain, CoverageHeader, HeadlinePill, readRailPref, writeRailPref } from './CoverageHeader'
 import { COVERAGE_CSS } from './coverage-ledger-css'
+
+// The two stages a coverage generation spawns (the summary job chains the
+// mapping engine) — the models gate scopes its rows to them.
+const COVERAGE_MODEL_STAGES: readonly ModelStageKey[] = ['prd', 'mapping']
 
 interface Props {
   feature: string
@@ -117,9 +123,16 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
     tick()
   }, [refresh])
 
-  const startJob = useCallback((kind: CoverageJobKind) => {
+  // The models gate (2.2.0): Generate parks on "use defaults or customize?"
+  // when the workspace armed askModelsOnLaunch. Holds the parked kind plus the
+  // config snapshot the gate previews (fetched at click time, not page load).
+  const [modelsGate, setModelsGate] = useState<{ kind: CoverageJobKind; agent: ModelAgentKind; agentModels: AgentModelsConfig } | null>(null)
+
+  const beginJob = useCallback((kind: CoverageJobKind, launch?: { agent: ModelAgentKind; models: AgentStagePlans }) => {
     setActionError(null)
-    api.startCoverageJob(feature, kind)
+    // A customized launch pins `adapter` to the agent the gate showed, so the
+    // server resolves the override for the same agent's vocabulary.
+    api.startCoverageJob(feature, kind, launch ? { adapter: launch.agent, models: launch.models } : undefined)
       .then((m) => { setJob(m); pollJob(m.jobId) })
       .catch((e: unknown) => {
         // A 409 means a job is already running (e.g. started from another tab/
@@ -131,6 +144,25 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
         setActionError(e instanceof Error ? e.message : String(e))
       })
   }, [feature, pollJob])
+
+  const startJob = useCallback((kind: CoverageJobKind) => {
+    setActionError(null)
+    // Config unreachable → generate with defaults rather than dead-ending the
+    // button on a settings probe (the gate is best-effort, launching is not).
+    api.getProjectConfig()
+      .then((config) => {
+        if (config.askModelsOnLaunch === true) {
+          setModelsGate({
+            kind,
+            agent: config.healAgent === 'codex' ? 'codex' : 'claude',
+            agentModels: config.agentModels ?? EMPTY_AGENT_MODELS,
+          })
+          return
+        }
+        beginJob(kind)
+      })
+      .catch(() => beginJob(kind))
+  }, [beginJob])
 
   // R18: a generation job is durable server-side, so on mount (incl. after a
   // refresh) re-attach to the newest running job and resume the Generating
@@ -376,6 +408,21 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   return (
     <div className="clcov-root fixed inset-0 z-[60] flex flex-col" style={{ background: 'var(--bg-base)' }} data-testid="coverage-ledger">
       <style>{COVERAGE_CSS}</style>
+      {modelsGate && (
+        <ModelLaunchGate
+          launchNoun="coverage generation"
+          agent={modelsGate.agent}
+          stages={COVERAGE_MODEL_STAGES}
+          config={modelsGate.agentModels}
+          onCancel={() => setModelsGate(null)}
+          onConfirm={(models) => {
+            const gate = modelsGate
+            setModelsGate(null)
+            beginJob(gate.kind, models ? { agent: gate.agent, models } : undefined)
+          }}
+          confirmLabel="Generate"
+        />
+      )}
       <header className="clcov-head" data-generating={generating ? 'true' : 'false'}>
         <div className="clcov-title">
           <span className="clcov-eyebrow">Semantic Coverage</span>

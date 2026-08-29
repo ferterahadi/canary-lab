@@ -244,6 +244,14 @@ describe('flights api', () => {
     )
   })
 
+  it('launchPlannedFeatures rides the launch-gate model plan in the body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ flightIds: ['fl-m'] }))
+    const models = { heal: { model: 'opus', effort: 'high' } }
+    await launchPlannedFeatures('t1', { features: [], models }, { baseUrl: 'http://x', fetchImpl })
+    const [, init] = fetchImpl.mock.calls[0]
+    expect(JSON.parse((init as { body: string }).body)).toEqual({ features: [], models })
+  })
+
   it('launchPlannedFeatures POSTs the confirmed proposal and returns the created flight ids', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ flightIds: ['fl_1', 'fl_2'] }))
     const body = {

@@ -1,3 +1,4 @@
+import { pinnedPlanSummary } from '@shared/agent-models'
 import { useEffect, useState } from 'react'
 import type { CoverageJobManifest } from '@/shared/api/types'
 import { formatElapsedSeconds } from '@/shared/lib/format'
@@ -37,6 +38,18 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
   // monitor-only (client metadata + tracked log) instead of AgentSessionView.
   const isExternal = job.producer === 'external'
 
+  // The model plan locked on this job at start (2.2.0), shown for the agent
+  // that is actually running it. The plan is stored per agent (each engine can
+  // fall back across CLIs), so until the session pins which CLI won there is
+  // no single truthful line to print — the seconds-long gap is honest.
+  const agent = job.sessionRef?.agent
+  const modelsLine = agent
+    ? pinnedPlanSummary({
+        ...(job.models?.prd?.[agent] ? { prd: job.models.prd[agent] } : {}),
+        ...(job.models?.mapping?.[agent] ? { mapping: job.models.mapping[agent] } : {}),
+      })
+    : null
+
   // Elapsed timer — a constant liveness signal even before the agent pins its
   // session and the timeline starts streaming, so the screen never reads frozen.
   const [elapsed, setElapsed] = useState(0)
@@ -61,9 +74,15 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
         <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', margin: '6px 0 4px' }}>
           {job.kind === 'summary' ? 'Summarizing & mapping coverage' : 'Mapping coverage'}
         </h2>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 22 }}>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: modelsLine ? 6 : 22 }}>
           Summary and coverage run as one exercise for <strong style={{ color: 'var(--text-primary)' }}>{feature}</strong>. Keeps running if you close this view.
         </p>
+        {modelsLine && (
+          <p data-testid="generating-models" style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 22px' }}>
+            <span className="cl-rubric" style={{ marginRight: 6 }}>Models</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>{modelsLine}</span>
+          </p>
+        )}
 
         {/* Phase stepper — current phase pulses, earlier phases are done. */}
         <div aria-live="polite" data-testid="generating-phases">

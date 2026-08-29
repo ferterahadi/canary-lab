@@ -20,6 +20,7 @@ import type { WorkspaceEventPublisher } from '../../shared/workspace-events'
 import { featuresRoutes } from './routes/features'
 import { featureConfigRoutes } from './routes/feature-config'
 import { projectConfigRoutes } from './routes/project-config'
+import { agentProbeRoutes } from './routes/agent-probe'
 import { onboardingRoutes } from './routes/onboarding'
 import type { ServerContext } from '../../server-context'
 import { register } from './index'
@@ -154,13 +155,14 @@ async function renameDeps(): Promise<{
 }
 
 describe('config feature registrar', () => {
-  it('mounts the four configuration surfaces with the stores each one reads', async () => {
+  it('mounts the five configuration surfaces with the stores each one reads', async () => {
     const registrations = await registerFeature()
 
     expect(registrations.map((r) => r.plugin)).toEqual([
       featuresRoutes,
       featureConfigRoutes,
       projectConfigRoutes,
+      agentProbeRoutes,
       onboardingRoutes,
     ])
     expect(registrations[0].opts).toEqual({ featuresDir, logsDir, dirtySpecStore })
@@ -170,7 +172,7 @@ describe('config feature registrar', () => {
     // fixture comment for what an omission silently costs.
     expect(registrations[1].opts.workspaceEvents).toBe(workspaceEvents)
     expect(registrations[2].opts.workspaceEvents).toBe(workspaceEvents)
-    expect(registrations[3].opts).toMatchObject({ projectRoot: tmpDir, featuresDir, sessionStore: gettingStarted })
+    expect(registrations[4].opts).toMatchObject({ projectRoot: tmpDir, featuresDir, sessionStore: gettingStarted })
 
     const res = await app.inject({ method: 'GET', url: '/api/features' })
     expect(res.statusCode).toBe(200)

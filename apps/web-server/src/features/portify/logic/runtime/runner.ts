@@ -3,6 +3,7 @@ import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import type { PtyFactory } from '../../../runs/logic/runtime/pty-spawner'
 import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
+import type { StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import { prepareWorkflow as prepare } from './prepare-workflow'
 import { PortifyRunStore } from './store'
 import { PortifyOrchestrator } from './orchestrator'
@@ -36,6 +37,10 @@ export interface PortifyRunnerDeps {
   ptyFactory: PtyFactory
   loadFeatures: () => FeatureConfig[]
   pickAgent: (preferred?: HealAgent) => HealAgent | null
+  /** Resolve the spawned agent's model+effort: launch override → workspace
+   *  `agentModels.portify` → agent default. Injected so the runner never reads
+   *  project config itself (mirrors `pickAgent`). */
+  resolveModels: (agent: HealAgent, override?: unknown) => StageModelChoice
   now: () => string
   /** Per-service health deadline for the verification boots (ms). */
   healthDeadlineMs?: number
@@ -108,7 +113,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
   const prepareWorkflow = (
     feature: FeatureConfig,
     agent: HealAgent,
-    opts: { maxAttempts?: number; producer: PortifyProducer; external?: PortifyExternalSession },
+    opts: { maxAttempts?: number; producer: PortifyProducer; external?: PortifyExternalSession; models?: StageModelChoice },
   ) => prepare({ deps, active, healthDeadlineMs }, feature, agent, opts)
 
   async function startPortify(input: StartPortifyInput): Promise<StartPortifyResult> {
@@ -123,6 +128,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     const { workflowId, orchestrator } = await prepareWorkflow(feature, agent, {
       maxAttempts: input.maxAttempts,
       producer: 'internal',
+      models: deps.resolveModels(agent, input.models),
     })
     // Fire-and-forget; the UI polls the manifest. orchestrator.run() handles all
     // its own errors internally (persisting 'failed' + cleanup), so it never

@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { HEAL_MODELS } from '../../../agent-sessions/logic/agent-models'
+import { HEAL_MODELS, effortArgs, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import { resolveAgentBinary, isAgentCliAvailable, type HealAgent, type AgentResolveDeps } from '../../../agent-sessions/logic/agent-binary'
 import { internalAgentContextShellFlags } from '../../../agent-sessions/logic/agent-context-policy'
 
@@ -112,9 +112,14 @@ export interface AgentSpawnArgs {
    *  silently run hooks the user has not reviewed. Ignored by Claude, whose
    *  trust store has a separate pre-spawn helper. */
   workspaceRoot?: string
+  /** The run's heal-stage model+effort plan, resolved and persisted at launch.
+   *  The `CANARY_LAB_HEAL_MODEL` env pin still wins the MODEL half — it exists
+   *  to demonstrate the repair loop on one server regardless of workspace
+   *  config. Absent → the env pin alone, then agent default. */
+  models?: StageModelChoice
 }
 
-export type AgentSpawnCommandDefaults = Pick<AgentSpawnArgs, 'mcpConfigFile' | 'binaryPath'>
+export type AgentSpawnCommandDefaults = Pick<AgentSpawnArgs, 'mcpConfigFile' | 'binaryPath' | 'models'>
 
 /**
  * Bind the run-specific spawn defaults once while forwarding every
@@ -216,10 +221,15 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
   const head = args.binaryPath ? JSON.stringify(args.binaryPath) : agent
 
   // Optional `--model` — placed right after the binary so it reads as a global
-  // flag for both claude and codex (before codex's `resume` subcommand). Empty
-  // string when the feature runs on the agent default (HEAL_MODELS).
-  const model = HEAL_MODELS[agent]
+  // flag for both claude and codex (before codex's `resume` subcommand). The
+  // env pin wins over the run's persisted plan (see AgentSpawnArgs.models);
+  // empty string when the stage runs on the agent default. Effort has no env
+  // pin — it comes from the plan alone, spelled in each CLI's own knob.
+  const model = HEAL_MODELS[agent] ?? args.models?.model ?? null
   const modelFlag = model ? ` --model ${JSON.stringify(model)}` : ''
+  const effortFlag = effortArgs(agent, args.models?.effort ?? null)
+    .map((arg) => ` ${JSON.stringify(arg)}`)
+    .join('')
   const contextFlags = internalAgentContextShellFlags(agent)
 
   // Both CLIs spell it `--add-dir`. Claude also gets the suite as read-only
@@ -251,7 +261,7 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
     }
     // Still not `--dangerously-skip-permissions`: `auto` keeps Claude Code's
     // background safety classifier in the loop, which the blanket bypass drops.
-    return `${head}${modelFlag}${contextFlags}${isolation} --permission-mode auto${addDirs}${sid}${mcp}${promptArg}`
+    return `${head}${modelFlag}${effortFlag}${contextFlags}${isolation} --permission-mode auto${addDirs}${sid}${mcp}${promptArg}`
   }
   // codex interactive REPL. `-a never` is codex's spelling of the same posture:
   // it never asks for approval, and a command the sandbox refuses comes back to
@@ -265,7 +275,7 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
   // `--session-id` analogue, so the first run starts normally. Once the
   // orchestrator discovers Codex's persisted session id, Restart Heal can use
   // `codex resume <id>`.
-  const codexAuto = `${contextFlags} -a never --sandbox workspace-write${codexWorkspaceTrustFlag(args.workspaceRoot)}${addDirs}`
+  const codexAuto = `${effortFlag}${contextFlags} -a never --sandbox workspace-write${codexWorkspaceTrustFlag(args.workspaceRoot)}${addDirs}`
   if (args.resume && args.sessionId) {
     return `${head}${modelFlag}${codexAuto} resume ${JSON.stringify(args.sessionId)}${promptArg}`
   }

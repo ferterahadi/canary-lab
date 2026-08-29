@@ -12,6 +12,8 @@ import { findBootProof, hasAuthoredSpecs, hasCapturedEnvset, hasPrdSummary } fro
 import { listRuns } from '../../runs/logic/run-store'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { isGettingStartedFlightStart } from '../../config/routes/onboarding'
+import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
+import { normalizeStagePlans, type AgentStagePlans, type ModelAgentKind } from '../../agent-sessions/logic/agent-models'
 import { MCP_ORIGIN_HEADER } from './flight-decision-origin'
 import { type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
@@ -145,6 +147,20 @@ export function buildStageEntryLinkResolver(logsDir?: string) {
 
 /** Expand a leading `~` the way the entry prefill does — feature configs (and
  *  therefore the dialog's repo picker) may declare repos home-relative. */
+/** The plan a new flight (or a redo) runs its internal stage spawns on:
+ *  launch-gate override entries laid over the workspace `agentModels` config
+ *  for the conducting agent. Callers persist the result on the record, so a
+ *  later config edit never changes a flight mid-pipeline. `{}` is a real
+ *  answer — every stage on the agent default. */
+export function resolveFlightModels(
+  projectRoot: string,
+  agent: ModelAgentKind,
+  override: unknown,
+): AgentStagePlans {
+  const configured = loadProjectConfig(projectRoot).agentModels[agent]
+  return { ...configured, ...normalizeStagePlans(agent, override) }
+}
+
 export function expandHome(p: string): string {
   return p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p
 }
@@ -202,6 +218,10 @@ export function executePlannedLaunch(
     autopilot?: boolean
     /** R79: the CLI conducting every launched flight. Absent = claude. */
     agent?: 'claude' | 'codex'
+    /** The resolved per-stage model plan every launched flight persists —
+     *  callers resolve it (resolveFlightModels) for the SAME agent they pass
+     *  above, exactly like the single-flight start route. */
+    models: AgentStagePlans
   },
   deps: PlannedLaunchDeps,
 ): PlanAutoLaunchOutcome {
@@ -223,6 +243,7 @@ export function executePlannedLaunch(
     // The proposal step already answered "new feature over this repo?" for
     // every sibling — similarity must not re-ask (or yolo-rerun the first).
     plannedSplit: true,
+    models: args.models,
     ...(f.group ? { group: f.group } : {}),
   })
   const flightIds: string[] = []

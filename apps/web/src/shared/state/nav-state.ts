@@ -1,4 +1,4 @@
-import type { ConfigTab, PersistedView, RouteDialog, RunArrivalTab, WorkspaceView } from '../lib/workspace-view-state'
+import type { ConfigTab, ModelsAgent, PersistedView, RouteDialog, RunArrivalTab, WorkspaceView } from '../lib/workspace-view-state'
 import { ACTIVITY_STAGE, derivedFlightToken, stageRowKey, type FeatureActivity } from '@/features/flights'
 import type { FlightIndexEntry, FlightStageKey } from '../api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
@@ -61,6 +61,9 @@ export interface NavState {
   /** Project Settings (routed ?dialog=settings) — the features column's gear.
    *  Workspace-scoped, so it needs no id qualifier. */
   settingsOpen: boolean
+  /** Which agent's model matrix is stacked over Project Settings (routed as the
+   *  ?models qualifier on dialog=settings); null = settings alone. */
+  modelsFor: ModelsAgent | null
   /** The pre-flight a pill row reopened the new-flight dialog onto. */
   resumePlanTaskId: string | null
   /** The embedded portify workflow, if open. */
@@ -106,6 +109,7 @@ export function initialNavState(persisted: PersistedView): NavState {
     flightStartNew: persisted.dialog === 'flight-new',
     demoOpen: persisted.dialog === 'demo',
     settingsOpen: persisted.dialog === 'settings',
+    modelsFor: persisted.dialog === 'settings' ? persisted.modelsAgent : null,
     resumePlanTaskId: null,
     portifyTarget: null,
     focusTest: persisted.run && persisted.focusTest
@@ -151,6 +155,9 @@ export function navToPersistedView(state: NavState): PersistedView {
     flight: state.flight,
     flightStage: state.flightStage,
     configTab: state.configTab,
+    // Same drop-unless-active gate as configTab: the matrix belongs to an OPEN
+    // settings dialog, so closing settings drops it from the URL too.
+    modelsAgent: state.settingsOpen ? state.modelsFor : null,
     // Only the CURRENT run's focus reaches the URL — a stale pair from a
     // previously-selected run is dropped rather than pinned.
     focusTest: state.focusTest?.runId === state.run ? state.focusTest.test : null,

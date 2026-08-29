@@ -6,6 +6,7 @@ import { DemoDialog } from './shared/shell/DemoDialog'
 import { DEMO_FLIGHT_STAGE, demoFlightLaunch, useDemoLauncher } from './shared/state/demo-launcher'
 import { RunDetailColumn } from './features/runs/components/RunDetailColumn'
 import { FeatureConfigEditor } from './features/config/components/FeatureConfigEditor'
+import { ModelLaunchGate } from './features/config'
 import { ResizablePanels } from './shared/ui/ResizablePanels'
 import { VerticalSplit } from './shared/ui/VerticalSplit'
 import { GlobalStatusBar } from './shared/shell/GlobalStatusBar'
@@ -33,7 +34,10 @@ import { useWorkspaceNavigation } from './shared/state/use-workspace-navigation'
 import { useWorkspaceData } from './shared/state/use-workspace-data'
 import { resolveActivityTarget } from './shared/state/nav-state'
 import * as api from './shared/api/client'
-import type { GettingStartedTarget, OnboardingWorkflowAction } from './shared/api/client'
+import type { GettingStartedTarget, ModelStageKey, OnboardingWorkflowAction } from './shared/api/client'
+
+// The two stages a suite run spawns — the models gate scopes its rows to them.
+const RUN_MODEL_STAGES: readonly ModelStageKey[] = ['heal', 'commit']
 
 export function App() {
   const [specTotalTests, setSpecTotalTests] = useState(0)
@@ -52,7 +56,7 @@ export function App() {
     flightStartFor, flightStartFresh, flightStartStage, setFlightStartFor,
     flightStartNew, setFlightStartNew,
     demoOpen, setDemoOpen,
-    settingsOpen, setSettingsOpen,
+    settingsOpen, setSettingsOpen, modelsFor, setModelsFor,
     resumePlanTaskId, setResumePlanTaskId,
     portifyTarget, setPortifyTarget,
     focusTest, runTab,
@@ -210,7 +214,8 @@ export function App() {
   const {
     collisionPrompt, setCollisionPrompt,
     startError, setStartError,
-    handleStartRun, resolveCollision, switchBranchesAndRun, pinCurrentAndRun,
+    modelsPrompt, setModelsPrompt, resolveModelsPrompt,
+    handleStartRun, resolveCollision, retryStartError, switchBranchesAndRun, pinCurrentAndRun,
     handleStartVerification,
   } = useRunStart({
     selectedFeature,
@@ -412,6 +417,8 @@ export function App() {
           onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
           settingsOpen={settingsOpen}
           onSettingsOpenChange={setSettingsOpen}
+          modelsFor={modelsFor}
+          onModelsFor={setModelsFor}
         />
       ),
     },
@@ -631,6 +638,17 @@ export function App() {
           }}
         />
       )}
+      {modelsPrompt && (
+        <ModelLaunchGate
+          launchNoun="run"
+          agent={modelsPrompt.agent}
+          stages={RUN_MODEL_STAGES}
+          config={modelsPrompt.agentModels}
+          onCancel={() => setModelsPrompt(null)}
+          onConfirm={(models) => { void resolveModelsPrompt(models) }}
+          confirmLabel="Start run"
+        />
+      )}
       {collisionPrompt && (
         <CollisionConfirmDialog
           info={collisionPrompt.info}
@@ -645,11 +663,7 @@ export function App() {
         <RunStartErrorDialog
           error={startError.error}
           feature={startError.feature}
-          onRetry={() => {
-            const { env, mode } = startError
-            setStartError(null)
-            void handleStartRun(env, mode)
-          }}
+          onRetry={() => { void retryStartError() }}
           onSwitchBranches={switchBranchesAndRun}
           onPinCurrent={pinCurrentAndRun}
           onClose={() => setStartError(null)}

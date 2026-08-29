@@ -3,7 +3,7 @@ import path from 'path'
 import os from 'os'
 import crypto from 'crypto'
 import { pickAvailableHealAgent, type HealAgent } from '../runtime/auto-heal'
-import { COMMIT_MESSAGE_MODELS, modelArgs, modelFor } from '../../../agent-sessions/logic/agent-models'
+import { AGENT_DEFAULT_CHOICE, agentModelArgs, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
@@ -60,6 +60,10 @@ export interface FixCommitMessageInput {
   /** Working directory for the spawn. The repo itself, so a read-only agent can
    *  open the files the diff names for context it cannot get from the hunks. */
   cwd?: string
+  /** Per-agent commit-stage model+effort choices (see `commitModelPlans`).
+   *  Keyed by agent because THIS function picks the CLI by availability — the
+   *  choice applied is whichever entry matches the pick. Absent → defaults. */
+  models?: Partial<Record<HealAgent, StageModelChoice>>
   signal?: AbortSignal
 }
 
@@ -89,7 +93,7 @@ export async function writeFixCommitMessage(input: FixCommitMessageInput): Promi
   })
 
   try {
-    const output = await runCommitMessageAgent(agent, prompt, input.cwd, input.signal)
+    const output = await runCommitMessageAgent(agent, prompt, input.cwd, input.signal, input.models?.[agent])
     return parseFixCommitMessage(output)
   } catch {
     return null
@@ -153,12 +157,12 @@ function isFilled(v: unknown): v is string {
 /** Codex argv. Takes the answer-file path rather than re-deriving it, so the
  *  "codex arm ⇒ there is an output file" pairing is a parameter rather than a
  *  guard the caller has to keep true. */
-function codexArgs(outputPath: string): string[] {
+function codexArgs(outputPath: string, models: StageModelChoice): string[] {
   return [
     'exec',
     '--skip-git-repo-check',
     '--sandbox', 'read-only',
-    ...modelArgs(modelFor(COMMIT_MESSAGE_MODELS, 'codex')),
+    ...agentModelArgs('codex', models),
     '--output-last-message', outputPath,
     '--output-schema', COMMIT_MESSAGE_SCHEMA_PATH,
     '-',
@@ -170,13 +174,14 @@ export function runCommitMessageAgent(
   prompt: string,
   cwd?: string,
   signal?: AbortSignal,
+  models: StageModelChoice = AGENT_DEFAULT_CHOICE,
 ): Promise<string> {
   const outputDir = agent === 'codex' ? fs.mkdtempSync(path.join(os.tmpdir(), 'canary-commit-msg-')) : undefined
   const outputPath = outputDir ? path.join(outputDir, 'last-message.txt') : undefined
   const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
   const args = agent === 'claude'
-    ? buildClaudeAgenticArgs(prompt, { model: COMMIT_MESSAGE_MODELS.claude, sessionId: claudeSessionId, readOnly: true })
-    : codexArgs(outputPath!)
+    ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
+    : codexArgs(outputPath!, models)
 
   let idled = false
   const handle = runAgentProcess({

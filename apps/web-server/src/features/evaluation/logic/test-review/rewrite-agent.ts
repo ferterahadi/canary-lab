@@ -5,7 +5,7 @@ import crypto from 'crypto'
 import ts from 'typescript'
 import type { RunDetail } from '../../../runs/logic/run-store'
 import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import { EVALUATION_REWRITE_MODELS, modelArgs, modelFor } from '../../../agent-sessions/logic/agent-models'
+import { AGENT_DEFAULT_CHOICE, agentModelArgs, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
@@ -37,9 +37,10 @@ export async function generateEvaluationRewriteWithAgent(
       const handoff = nextAgent ? ` — falling back to ${nextAgent}` : ''
       options.onOutput?.(`[agent:${agent}] rewrite failed: ${reason}${handoff}\n`)
     }
+    const models = options.models?.[agent] ?? AGENT_DEFAULT_CHOICE
     try {
-      options.onOutput?.(`[agent:${agent}] starting localized rewrite (model: ${evaluationAgentModel(agent) ?? 'agent default'})\n`)
-      const output = await runEvaluationAgent(agent, prompt, cwd, options.onOutput, options.signal, options.onSession)
+      options.onOutput?.(`[agent:${agent}] starting localized rewrite (model: ${evaluationAgentModel(models) ?? 'agent default'})\n`)
+      const output = await runEvaluationAgent(agent, prompt, cwd, options.onOutput, options.signal, options.onSession, models)
       const rewrite = resolveRewriteOutput(output, packet, fallback)
       if (rewrite) {
         options.onOutput?.(`[agent:${agent}] localized rewrite completed\n`)
@@ -70,8 +71,8 @@ export function resolveEvaluationAgents(adapter: AssertionHtmlOptions['audienceA
   return [...new Set(agents)]
 }
 
-export function evaluationAgentModel(agent: HealAgent): string | null {
-  return modelFor(EVALUATION_REWRITE_MODELS, agent)
+export function evaluationAgentModel(models: StageModelChoice): string | null {
+  return models.model
 }
 
 // Idle (inactivity) window: the rewrite agent is killed only after this long
@@ -85,6 +86,7 @@ export function runEvaluationAgent(
   onOutput?: (chunk: string) => void,
   signal?: AbortSignal,
   onSession?: (session: { agent: HealAgent; sessionId: string }) => void,
+  models: StageModelChoice = AGENT_DEFAULT_CHOICE,
 ): Promise<string> {
   const outputDir = agent === 'codex' ? fs.mkdtempSync(path.join(os.tmpdir(), 'canary-evaluation-rewrite-')) : undefined
   const outputPath = outputDir ? path.join(outputDir, 'last-message.txt') : undefined
@@ -99,8 +101,8 @@ export function runEvaluationAgent(
     // `readOnly` matches the codex arm's `--sandbox read-only`. It matters most
     // here: this agent rewrites the wording of a finished run's report, and a
     // report that could edit the evidence it describes would not be evidence.
-    ? buildClaudeAgenticArgs(prompt, { model: EVALUATION_REWRITE_MODELS.claude, sessionId: claudeSessionId, readOnly: true })
-    : evaluationCodexArgs('-', outputPath, EVALUATION_REWRITE_SCHEMA_PATH)
+    ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
+    : evaluationCodexArgs('-', outputPath, EVALUATION_REWRITE_SCHEMA_PATH, models)
   onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
 
   let idled = false
@@ -161,13 +163,13 @@ export function runEvaluationAgent(
   })
 }
 
-export function evaluationCodexArgs(prompt: string, outputPath?: string, outputSchemaPath?: string): string[] {
+export function evaluationCodexArgs(prompt: string, outputPath?: string, outputSchemaPath?: string, models: StageModelChoice = AGENT_DEFAULT_CHOICE): string[] {
   return [
     'exec',
     '--skip-git-repo-check',
     '--sandbox',
     'read-only',
-    ...modelArgs(EVALUATION_REWRITE_MODELS.codex),
+    ...agentModelArgs('codex', models),
     ...(outputPath ? ['--output-last-message', outputPath] : []),
     ...(outputSchemaPath ? ['--output-schema', outputSchemaPath] : []),
     prompt,

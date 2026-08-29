@@ -14,7 +14,7 @@ import { renderPrompt } from '../../../../shared/prompts'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 import type { SpecsCoveragePass, SpecsCoverageProgress } from '../../../../../../../shared/flights/types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { decodeSubmission, defaultSpawnAgent, featureDirFor, type FlightSpecsValidator, type FlightStageDeps, stageJobRef } from './context'
+import { decodeSubmission, defaultSpawnAgent, featureDirFor, stageModelPlan, stageModels, type FlightSpecsValidator, type FlightStageDeps, stageJobRef } from './context'
 import { agentSpawnJob } from './stage-jobs'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { agentProgressSink } from './agent-progress'
@@ -368,6 +368,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       // both, so a teardown stops whichever half is live.
       spawnScope: path.join(ctx.flightDir, 'coverage-map'),
       agentJob: { record: { jobId: `${m.flightId}:coverage-map`, flightId: m.flightId, feature: m.feature, stage: 'coverage-map', agent: m.opts.agent ?? 'claude' }, logsDir: deps.logsDir },
+      models: stageModelPlan(m, 'mapping'),
       onOutput: agentProgressSink(ctx),
       onAgentSession: (session) => {
         const spawnedAt = new Date().toISOString()
@@ -524,6 +525,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       onChunk: agentProgressSink(ctx),
       signal: ctx.signal,
       agent: m.opts.agent,
+      models: stageModels(m, 'gen'),
       onAgentSession: (session) => {
         recordAgentSession(ctx, state, 'authoring', session, session.spawnedAt)
       },

@@ -4,7 +4,7 @@ import { revertPortification } from '../../../portify/logic/runtime/unportify'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { PortifyStageProgress } from '../../../../../../../shared/flights/types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { featureDirFor, pollUntil, type FlightStageDeps } from './context'
+import { featureDirFor, pollUntil, stageModels, type FlightStageDeps } from './context'
 import { editFingerprint } from '../../../portify/logic/runtime/git-ops'
 import { portifyJob } from './stage-jobs'
 import { externalWorkCheckpoint, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
@@ -189,7 +189,10 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
   // AFTER the portify-gate is answered 'run' (or auto-answered/yolo).
   const startAndFollow = async (ctx: StageContext): Promise<StageOutcome> => {
     const m = ctx.manifest()
-    const started = await deps.inject({ method: 'POST', url: '/api/portify', payload: { feature: m.feature } })
+    // The flight's stored portify choice rides the start payload; the runner
+    // re-normalizes it against ITS picked CLI before it can win over config.
+    const models = stageModels(m, 'portify')
+    const started = await deps.inject({ method: 'POST', url: '/api/portify', payload: { feature: m.feature, ...(models ? { models } : {}) } })
     const body = started.json() as { workflowId?: string; error?: string }
     if (started.statusCode >= 300 || !body.workflowId) {
       return { kind: 'failed', error: `portify start rejected (${started.statusCode}): ${body.error ?? 'unknown'}` }

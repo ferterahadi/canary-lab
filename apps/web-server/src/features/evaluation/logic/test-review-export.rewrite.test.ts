@@ -119,8 +119,8 @@ describe('test review export', () => {
     expect(__testReviewExportInternals.previewAgentOutput('')).toBe('<empty output>')
     expect(__testReviewExportInternals.previewAgentOutput('x'.repeat(510))).toBe(`${'x'.repeat(500)}...`)
     expect(__testReviewExportInternals.renderPromptTemplate('{{known}} {{missing}}', { known: 'yes' })).toBe('yes {{missing}}')
-    expect(__testReviewExportInternals.evaluationAgentModel('claude')).toBeNull()
-    expect(__testReviewExportInternals.evaluationAgentModel('codex')).toBeNull()
+    expect(__testReviewExportInternals.evaluationAgentModel({ model: null, effort: null })).toBeNull()
+    expect(__testReviewExportInternals.evaluationAgentModel({ model: 'opus', effort: 'high' })).toBe('opus')
 
     expect(__testReviewExportInternals.normalizeEvaluationRewrite(undefined, packet)).toBeNull()
     expect(__testReviewExportInternals.normalizeEvaluationRewrite({ summary: 'x', cases: [] }, packet)).toBeNull()

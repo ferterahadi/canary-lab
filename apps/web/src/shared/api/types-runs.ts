@@ -2,6 +2,7 @@
 // shapes in apps/web-server/lib/{run-store,feature-loader,journal-store}.ts.
 // Run-state primitives are shared with the server so recovery behavior has one
 // semantic model; feature/journal/wizard shapes remain web-local API mirrors.
+import type { StageModelChoice } from '@shared/agent-models'
 import type { HealEnd, RunBootFailure, RunFixCapture, RunPrAttempt, RunProposedPr, RunLifecycleEvent, RunLifecycleSnapshot, RunStatus, ServiceStatus } from '@shared/run-state'
 import type { ExecutionType, VerificationRunMetadata } from '@shared/verification'
 import type { ClientKind } from '@shared/run-mode'
@@ -108,6 +109,10 @@ export interface RunManifest {
   signalPaths?: { rerun: string; restart: string }
   healMode?: 'auto' | 'manual' | 'external'
   healAgent?: 'claude' | 'codex'
+  /** Model+effort choices this run's agent spawns were locked to at start
+   *  (2.2.0) — heal cycles + the commit-message pass. Absent on pre-2.2.0
+   *  records. */
+  models?: { heal?: StageModelChoice; commit?: StageModelChoice }
   externalHealSession?: ExternalHealSession
   lifecycle?: RunLifecycleSnapshot
   /** Set when a service failed to come up, so the run was declared failed and

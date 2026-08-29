@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import { ANNOTATE_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
+import { AGENT_DEFAULT_CHOICE, agentModelArgs, type PerAgentStageChoices, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
@@ -66,6 +66,9 @@ export interface ProposeMappingsArgs {
   /** Fired when an agent spawns with a pinned session — lets the job persist a
    *  ref the Generating screen streams via AgentSessionView (R17). */
   onSession?: (session: CoverageAgentSession) => void
+  /** Per-agent model+effort choices — the engine falls back across CLIs, and
+   *  each spawn takes its own agent's entry. Forward-only, like `signal`. */
+  models?: PerAgentStageChoices
 }
 
 export interface ProposeMappingsDeps {
@@ -80,6 +83,8 @@ interface RunAgentOpts {
   agentJob?: { record: AgentJobRecordRef; logsDir: string }
   onOutput?: (chunk: string) => void
   onSession?: (session: CoverageAgentSession) => void
+  /** Resolved model+effort for this launch; absent → agent default. */
+  models?: StageModelChoice
 }
 
 // ---------------------------------------------------------------------------
@@ -260,10 +265,10 @@ function defaultResolveAgents(adapter: AnnotateAdapter): HealAgent[] {
   return [...new Set(agents)]
 }
 
-function codexArgs(outputPath: string): string[] {
+function codexArgs(outputPath: string, models: StageModelChoice): string[] {
   return [
     'exec', '--skip-git-repo-check', '--sandbox', 'read-only',
-    ...modelArgs(ANNOTATE_MODELS.codex),
+    ...agentModelArgs('codex', models),
     '--output-last-message', outputPath,
     '--output-schema', ANNOTATE_SCHEMA_PATH,
     '-',
@@ -281,12 +286,13 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
   // Agentic spawn via the shared runner. claude: stream-json for liveness +
   // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
   // from stdin (`-`) and writes the final message to --output-last-message.
+  const models = opts.models ?? AGENT_DEFAULT_CHOICE
   const args = agent === 'claude'
     // `readOnly` matches the codex arm's `--sandbox read-only`: the annotator
     // returns the edits it wants as data for canary to apply, so it must not be
     // able to reach into the spec files itself.
-    ? buildClaudeAgenticArgs(prompt, { model: ANNOTATE_MODELS.claude, sessionId: claudeSessionId, readOnly: true })
-    : codexArgs(outputPath!)
+    ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
+    : codexArgs(outputPath!, models)
   opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
 
   let idled = false
@@ -400,6 +406,7 @@ export async function proposeCoverageMappings(
           agentJob: args.agentJob,
           onOutput: args.onOutput,
           onSession: args.onSession,
+          models: args.models?.[agent],
         })
         const answer = parseAnnotateAnswer(output, knownIds, knownVariants)
         if (answer) {

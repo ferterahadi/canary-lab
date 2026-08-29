@@ -29,6 +29,11 @@ export interface RunsRouteDeps {
     healAgent?: ExternalHealAgentRequest,
     isolation?: 'worktree' | 'queue',
     executionType?: ExecutionType,
+    /** Launch-gate model+effort override for the run's own agent spawns (heal
+     *  REPL, commit message). Untrusted request-body shape — the factory
+     *  normalizes it against the chosen agent's vocabulary before resolving
+     *  override → workspace config → agent default. */
+    models?: unknown,
   ): Promise<StartRunOutcome>
   /** Cancel a run still waiting in the admission queue (no orchestrator yet).
    *  Returns true when it was queued and is now aborted. */

@@ -198,6 +198,29 @@ describe('GitHub / PR routes (R80)', () => {
     )
   })
 
+  it('POST propose-pr resolves commit models from workspace config, run lock over the locked agent', async () => {
+    writeManifestWithCapture('r1', undefined, {
+      healAgent: 'claude',
+      models: { heal: { model: null, effort: null }, commit: { model: 'run-locked', effort: 'low' } },
+    })
+    fs.writeFileSync(
+      path.join(tmpDir, 'canary-lab.config.json'),
+      JSON.stringify({ agentModels: { claude: { commit: { model: 'cfg', effort: null } }, codex: { commit: { model: null, effort: 'high' } } } }),
+    )
+    prMocks.buildPrPreflight.mockResolvedValueOnce(PREFLIGHT_PUSHABLE)
+    prMocks.proposeFixesForRun.mockResolvedValueOnce([])
+    const { app } = await build({ projectRoot: tmpDir })
+    await app.inject({ method: 'POST', url: '/api/runs/r1/propose-pr' })
+    expect(prMocks.proposeFixesForRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        models: {
+          claude: { model: 'run-locked', effort: 'low' },
+          codex: { model: null, effort: 'high' },
+        },
+      }),
+    )
+  })
+
   it('POST propose-pr sends no failures when a healed run no longer lists any', async () => {
     writeManifestWithCapture('r1')
     prMocks.buildPrPreflight.mockResolvedValueOnce(PREFLIGHT_PUSHABLE)

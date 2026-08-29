@@ -10,6 +10,7 @@
 // so they live in `shared/`. The headline numbers are always evidence-based math
 // computed by canary from the tags/annotations — never an agent's opinion (see
 // docs/PRD.md).
+import type { StageModelChoice } from '../agent-models'
 
 /** Path types a requirement implies / a test exercises. */
 export type PathType = 'happy' | 'sad' | 'edge'
@@ -336,6 +337,15 @@ export interface CoverageJobResult {
   applied?: number
 }
 
+/** Per-engine-stage, per-agent model+effort choices for a coverage job: the
+ *  `summary` phase distills the PRD (`prd`), the chained `coverage` phase maps
+ *  tests to requirements (`mapping`). Per-agent because each engine falls back
+ *  across CLIs and each spawn takes its own agent's entry. */
+export interface CoverageJobModels {
+  prd?: Partial<Record<'claude' | 'codex', StageModelChoice>>
+  mapping?: Partial<Record<'claude' | 'codex', StageModelChoice>>
+}
+
 export interface CoverageJobManifest {
   jobId: string
   feature: string
@@ -362,6 +372,10 @@ export interface CoverageJobManifest {
    *  itself (offload model) and Canary only tracks + recomputes the ledger; such
    *  a job has NO sessionRef, so the Generating screen renders it monitor-only. */
   producer?: 'internal' | 'external'
+  /** Model+effort choices the job's agent spawns run with (2.2.0) — resolved at
+   *  launch per engine stage, per agent, and persisted here so the record says
+   *  what actually ran. Absent on pre-2.2.0 records and external jobs. */
+  models?: CoverageJobModels
   /** The exact test names handed to an external client at start, so submit can
    *  check the answer accounts for every one of them. Absent on jobs written
    *  before the roster check existed (and on internal jobs, which check against

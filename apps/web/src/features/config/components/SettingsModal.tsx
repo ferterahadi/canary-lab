@@ -1,18 +1,33 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import * as api from '@/shared/api/client'
-import type { ProjectConfig } from '@/shared/api/client'
+import type { ModelAgentKind, ProjectConfig } from '@/shared/api/client'
+import { EMPTY_AGENT_MODELS } from '@shared/agent-models'
 import { Modal, Section } from '@/shared/ui/atoms'
 import { OPTION_ROW_CLASS, OPTION_ROW_SECTION_BODY, optionRowStyle } from '@/shared/ui/OptionRow'
 import { FolderPicker } from './FolderPicker'
 import { GitHubSection } from './GitHubSection'
+import { ModelMatrixDialog } from './ModelMatrixDialog'
 import { RestartPhase, RestartProgress, defaultRedirect } from './SettingsRestartProgress'
-import { DEFAULT_PORT, EDITOR_OPTIONS, HEAL_AGENT_OPTIONS, migrateLegacyHealAgent } from './settings-options'
+import {
+  ASK_ON_LAUNCH_OPTIONS,
+  DEFAULT_PORT,
+  EDITOR_OPTIONS,
+  HEAL_AGENT_OPTIONS,
+  INTERNAL_AGENTS_ONLY_COPY,
+  migrateLegacyHealAgent,
+  stagePlanSummary,
+} from './settings-options'
 
 interface Props {
   onClose: () => void
   // Injected in tests; production polls the new origin then navigates the tab.
   onRedirect?: (url: string, onProgress?: (phase: RestartPhase, attempt: number) => void) => void
+  /** The per-agent model matrix stacked over this dialog. Route-driven
+   *  (`?dialog=settings&models=…`) when supplied — controlled by App. Omitted
+   *  (e.g. in unit tests) → internal open-state, the FeaturesColumn hybrid. */
+  modelsFor?: ModelAgentKind | null
+  onModelsFor?: (agent: ModelAgentKind | null) => void
 }
 
 /** Section-level help: what a control does, hung under the control at the
@@ -81,9 +96,13 @@ function ChoiceRow({ type, name, value, checked, onChange, label, description, t
   )
 }
 
-export function SettingsModal({ onClose, onRedirect }: Props) {
+export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: Props) {
   const [config, setConfig] = useState<ProjectConfig | null>(null)
   const [draft, setDraft] = useState<ProjectConfig | null>(null)
+  // Controlled when App routes it; uncontrolled otherwise (unit tests).
+  const [modelsForInternal, setModelsForInternal] = useState<ModelAgentKind | null>(null)
+  const matrixAgent = modelsFor !== undefined ? modelsFor : modelsForInternal
+  const setMatrixAgent = onModelsFor ?? setModelsForInternal
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [portInput, setPortInput] = useState('')
@@ -121,6 +140,7 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
       || (draft.personalWikiPath ?? '') !== (config.personalWikiPath ?? '')
       || (draft.autoProposePr !== false) !== (config.autoProposePr !== false)
       || (draft.showDemo !== false) !== (config.showDemo !== false)
+      || (draft.askModelsOnLaunch === true) !== (config.askModelsOnLaunch === true)
     )
 
   const onSave = async (): Promise<void> => {
@@ -172,6 +192,7 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
   }
 
   return (
+    <>
     <Modal
       open
       onClose={onClose}
@@ -282,15 +303,72 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
                 </Hint>
               </Section>
 
-              <Section title="Default agent" bodyClassName={OPTION_ROW_SECTION_BODY}>
+              <Section
+                title={
+                  <span className="flex items-center gap-2">
+                    Default agent
+                    {/* Scope chip: this section governs Canary's OWN spawns only.
+                        External-agent work (MCP) runs on the client's model. */}
+                    <span
+                      title={INTERNAL_AGENTS_ONLY_COPY}
+                      className="rounded-md px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal"
+                      style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+                    >
+                      internal agents only
+                    </span>
+                  </span>
+                }
+                bodyClassName={OPTION_ROW_SECTION_BODY}
+              >
                 {HEAL_AGENT_OPTIONS.map((opt, index) => (
+                  <div key={opt.value} className={index > 0 ? 'border-t' : ''} style={index > 0 ? { borderColor: 'var(--border-default)' } : undefined}>
+                    <ChoiceRow
+                      type="radio"
+                      name="healAgent"
+                      value={opt.value}
+                      checked={draft.healAgent === opt.value}
+                      onChange={() => setDraft({ ...draft, healAgent: opt.value })}
+                      label={opt.label}
+                      description={opt.description}
+                    />
+                    {/* The agent's effective per-stage plan at a glance, with the
+                        matrix as the drill-through — indented to the row's label
+                        column so it reads as part of the option. */}
+                    <div className="flex items-center gap-2 pb-2 pl-[41px] pr-3">
+                      <span
+                        data-testid={`model-summary-${opt.value}`}
+                        className="min-w-0 flex-1 truncate text-[11px]"
+                        style={{ color: 'var(--text-muted)' }}
+                        title={stagePlanSummary(draft.agentModels?.[opt.value])}
+                      >
+                        {stagePlanSummary(draft.agentModels?.[opt.value])}
+                      </span>
+                      <button
+                        type="button"
+                        data-testid={`configure-models-${opt.value}`}
+                        onClick={() => setMatrixAgent(opt.value)}
+                        className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
+                      >
+                        Configure models →
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <div className="px-3.5 pb-2 pt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  {INTERNAL_AGENTS_ONLY_COPY}
+                </div>
+              </Section>
+
+              <Section title="At launch" bodyClassName={OPTION_ROW_SECTION_BODY}>
+                {ASK_ON_LAUNCH_OPTIONS.map((opt, index) => (
                   <ChoiceRow
-                    key={opt.value}
+                    key={String(opt.value)}
                     type="radio"
-                    name="healAgent"
-                    value={opt.value}
-                    checked={draft.healAgent === opt.value}
-                    onChange={() => setDraft({ ...draft, healAgent: opt.value })}
+                    name="askModelsOnLaunch"
+                    value={String(opt.value)}
+                    testId={`settings-ask-models-${opt.value}`}
+                    checked={(draft.askModelsOnLaunch === true) === opt.value}
+                    onChange={() => setDraft({ ...draft, askModelsOnLaunch: opt.value })}
                     label={opt.label}
                     description={opt.description}
                     divider={index > 0}
@@ -349,5 +427,23 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
           )}
         </div>
     </Modal>
+    {/* Stacked over settings (Escape closes it first — the layered stack).
+        Saves only the agentModels block itself; the settings draft behind
+        keeps its unsaved edits and just refreshes its summary lines. */}
+    {matrixAgent != null && draft != null && (
+      <ModelMatrixDialog
+        agent={matrixAgent}
+        agentModels={draft.agentModels ?? EMPTY_AGENT_MODELS}
+        onClose={() => setMatrixAgent(null)}
+        onSaved={(next) => {
+          // The server always echoes the block; the guard is the optional-field
+          // type (an older server omits it), not a real runtime case.
+          const saved = next.agentModels ?? EMPTY_AGENT_MODELS
+          setConfig((prev) => (prev ? { ...prev, agentModels: saved } : prev))
+          setDraft((prev) => (prev ? { ...prev, agentModels: saved } : prev))
+        }}
+      />
+    )}
+    </>
   )
 }

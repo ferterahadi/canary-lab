@@ -11,6 +11,8 @@ import { launchEditorDir } from '../../../shared/editor-launch'
 import { loadProjectConfig } from '../logic/runtime/launcher/project-config'
 import { buildPrPreflight } from '../logic/pr/pr-preflight'
 import { proposeFixesForRun } from '../logic/pr/propose-fixes'
+import { commitModelPlans } from '../logic/runtime/run-model-plan'
+import { EMPTY_AGENT_MODELS } from '../../agent-sessions/logic/agent-models'
 import { detectGhStatus } from '../../../shared/gh-cli'
 import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
 import {
@@ -190,6 +192,14 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       // The failures the repair answered — the message agent's evidence for
       // WHY the diff exists. Empty on a run whose summary no longer lists any.
       ...(detail.summary?.failed?.length ? { failed: detail.summary.failed } : {}),
+      // Commit-stage choices per agent from today's config, with the run's
+      // launch-resolved choice laid over the agent the run locked to.
+      models: commitModelPlans(
+        deps.projectRoot ? loadProjectConfig(deps.projectRoot).agentModels : EMPTY_AGENT_MODELS,
+        detail.manifest.models && detail.manifest.healAgent
+          ? { agent: detail.manifest.healAgent, choice: detail.manifest.models.commit }
+          : undefined,
+      ),
     })
     // Merge the freshly-opened PRs into the manifest by repo name (idempotent),
     // and record the attempt either way — the Changes tab reads the same

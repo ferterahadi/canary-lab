@@ -182,6 +182,27 @@ describe('portify feature registrar', () => {
     expect((deps.now as () => string)()).toMatch(/^\d{4}-\d{2}-\d{2}T/)
   })
 
+  it('resolves the portify stage model per call: override → workspace config → agent default', async () => {
+    await registerFeature()
+    const resolveModels = runnerBuild.deps[0].resolveModels as
+      (agent: 'claude' | 'codex', override?: unknown) => { model: string | null; effort: string | null }
+
+    // No canary-lab.config.json in the workspace yet → agent default.
+    expect(resolveModels('claude')).toEqual({ model: null, effort: null })
+
+    // Config is re-read per call, like loadFeatures: a settings save applies to
+    // the next portify run without a server restart.
+    fs.writeFileSync(
+      path.join(tmpDir, 'canary-lab.config.json'),
+      JSON.stringify({ agentModels: { claude: { portify: { model: 'opus', effort: 'high' } } } }),
+    )
+    expect(resolveModels('claude')).toEqual({ model: 'opus', effort: 'high' })
+
+    // A launch override beats config; junk falls through to config.
+    expect(resolveModels('claude', { model: 'sonnet' })).toEqual({ model: 'sonnet', effort: null })
+    expect(resolveModels('claude', { model: '  ' })).toEqual({ model: 'opus', effort: 'high' })
+  })
+
   it('serves a workflow\'s agent transcript only once a session ref exists', async () => {
     const { registrations } = await registerFeature()
     const loadAgentSession = registrations[0].opts.loadAgentSession as

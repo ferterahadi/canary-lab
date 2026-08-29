@@ -4,6 +4,7 @@ import {
   persistView,
   readPersistedView,
   type ConfigTab,
+  type ModelsAgent,
   type RouteDialog,
   type RunOpenTarget,
   type WorkspaceView,
@@ -50,6 +51,9 @@ export interface WorkspaceNavigation {
   demoOpen: boolean
   /** Whether Project Settings is open (routed ?dialog=settings). */
   settingsOpen: boolean
+  /** Which agent's model matrix is stacked over Project Settings (routed
+   *  ?models=…), or null. */
+  modelsFor: ModelsAgent | null
   resumePlanTaskId: string | null
   portifyTarget: PortifyTarget | null
   routedDialog: RouteDialog | null
@@ -77,8 +81,11 @@ export interface WorkspaceNavigation {
   setFlightStartNew: (open: boolean) => void
   /** Open / close the Getting Started guide. */
   setDemoOpen: (open: boolean) => void
-  /** Open / close Project Settings. */
+  /** Open / close Project Settings. Closing also drops the stacked model
+   *  matrix, so a later open can't inherit one a previous visit left behind. */
   setSettingsOpen: (open: boolean) => void
+  /** Open (agent) / close (null) the model matrix stacked over settings. */
+  setModelsFor: (agent: ModelsAgent | null) => void
   setResumePlanTaskId: (id: string | null) => void
   setPortifyTarget: (t: PortifyTarget | null) => void
   /** Open a flight's detail (null = the flights landing list). */
@@ -139,7 +146,14 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setFlightStartStage(f !== null ? fromStage : null)
   }, [])
   const [demoOpen, setDemoOpen] = useState<boolean>(SEED.demoOpen)
-  const [settingsOpen, setSettingsOpen] = useState<boolean>(SEED.settingsOpen)
+  const [settingsOpen, setSettingsOpenState] = useState<boolean>(SEED.settingsOpen)
+  const [modelsFor, setModelsFor] = useState<ModelsAgent | null>(SEED.modelsFor)
+  // One closer for the dialog + its stacked matrix, so the matrix can never
+  // outlive the settings dialog it was opened over (the setConfigFor rule).
+  const setSettingsOpen = useCallback((open: boolean) => {
+    setSettingsOpenState(open)
+    if (!open) setModelsFor(null)
+  }, [])
   const [resumePlanTaskId, setResumePlanTaskId] = useState<string | null>(SEED.resumePlanTaskId)
   const [portifyTarget, setPortifyTarget] = useState<PortifyTarget | null>(SEED.portifyTarget)
   const [focusTest, setFocusTest] = useState<NavState['focusTest']>(SEED.focusTest)
@@ -170,6 +184,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     flightStartNew,
     demoOpen,
     settingsOpen,
+    modelsFor,
     resumePlanTaskId,
     portifyTarget,
     focusTest,
@@ -192,7 +207,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // same while the focused test changes, so keying on selectedRunId alone
     // would leave the URL's `test` param stale. runTab is the same case —
     // re-opening the SAME run on a different tab must rewrite `runtab`.
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, configTab, focusTest, runTab, returnFlight])
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, configTab, modelsFor, focusTest, runTab, returnFlight])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -256,6 +271,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     flightStartNew,
     demoOpen,
     settingsOpen,
+    modelsFor,
     resumePlanTaskId,
     portifyTarget,
     focusTest,
@@ -272,6 +288,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setFlightStartNew,
     setDemoOpen,
     setSettingsOpen,
+    setModelsFor,
     setResumePlanTaskId,
     setPortifyTarget,
     openFlight,

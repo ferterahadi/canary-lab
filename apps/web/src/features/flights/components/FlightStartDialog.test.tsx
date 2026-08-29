@@ -49,7 +49,7 @@ let root: Root
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mocks.getProjectConfig.mockResolvedValue({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
+  mocks.getProjectConfig.mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)

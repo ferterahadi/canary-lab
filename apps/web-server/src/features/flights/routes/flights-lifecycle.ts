@@ -8,7 +8,7 @@ import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
 import { FlightNotParkedError, FlightStageEntryError, FlightTakeoverRequestedError, forceFlightTakeover, requestFlightTakeover, resumeFlight, setFlightAutopilot, respondToFlightCheckpoint, pauseFlight, redoFlight, deleteFlight } from '../logic/conductor'
 import { rejectForeignFlightDecision } from './flight-decision-origin'
-import { parseFlightExternalAgentSession, reclaimGettingStartedFlight } from './flight-route-support'
+import { parseFlightExternalAgentSession, reclaimGettingStartedFlight, resolveFlightModels } from './flight-route-support'
 import { GettingStartedBusyError } from '../../config/logic/getting-started-session'
 import { type FlightCheckpointResponse, type FlightStageKey } from '../logic/types'
 
@@ -191,6 +191,12 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
         const { manifest } = redoFlight(req.params.id, conductorDeps, {
           fromStage: req.body?.fromStage as FlightStageKey | undefined,
           feedback: req.body?.feedback,
+          // A full redo re-resolves the model plan against today's config
+          // (D9); redoFlight itself ignores this on a jump, where the stored
+          // plan matches the surviving stage evidence.
+          ...(record
+            ? { models: resolveFlightModels(deps.projectRoot, record.opts.agent ?? 'claude', undefined) }
+            : {}),
         })
         if (gettingStartedSession) {
           deps.gettingStarted?.attach(gettingStartedSession, { kind: 'flight', id: manifest.flightId })

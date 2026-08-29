@@ -37,6 +37,7 @@ import type {
 } from './manifest'
 import type { VerificationRunMetadata, ExecutionType as ExecutionType } from '../../../../../../../shared/verification'
 import type { PlaywrightSpawner } from './run-spawn'
+import type { RunModelPlan } from './run-model-plan'
 
 /** The orchestrator's own `emit`, handed to the modules so they can report
  *  progress without holding a reference back to the class. */
@@ -82,6 +83,10 @@ export interface RunContext {
   readonly healthPollIntervalMs: number
   readonly healthDeadlineMs: number
   readonly autoHeal?: AutoHealConfig
+  /** The launch-resolved model+effort plan, written onto the manifest so the
+   *  UI can show it and a restart can reuse it. Spawning reads the copy bound
+   *  into `autoHeal.buildSpawnCommand`, not this. */
+  readonly models?: RunModelPlan
   readonly manualHeal: boolean
   readonly externalHeal: boolean
   readonly externalHealSession: ExternalHealSession | undefined
@@ -212,6 +217,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     healthPollIntervalMs,
     healthDeadlineMs: opts.healthDeadlineMs ?? 60_000,
     autoHeal: opts.autoHeal,
+    ...(opts.models === undefined ? {} : { models: opts.models }),
     manualHeal: opts.manualHeal ?? false,
     externalHeal: opts.externalHeal ?? false,
     externalHealSession: opts.externalHealSession,

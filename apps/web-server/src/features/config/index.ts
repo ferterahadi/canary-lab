@@ -3,6 +3,7 @@ import { isActiveRunStatus } from '../../../../../shared/run-state'
 import { featuresRoutes } from './routes/features'
 import { featureConfigRoutes } from './routes/feature-config'
 import { projectConfigRoutes } from './routes/project-config'
+import { agentProbeRoutes } from './routes/agent-probe'
 import { onboardingRoutes } from './routes/onboarding'
 import { runsRoutes, type ExternalHealAgentRequest } from '../runs/routes/runs'
 import { testsDraftRoutes, type TestsDraftRouteDeps } from '../wizard/routes/tests-draft'
@@ -109,5 +110,6 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     onPortChange: opts.onPortChange,
     workspaceEvents,
   })
+  await app.register(agentProbeRoutes)
   await app.register(onboardingRoutes, { projectRoot, featuresDir, sessionStore: ctx.gettingStarted })
 }

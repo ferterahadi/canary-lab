@@ -344,6 +344,20 @@ describe('proposeFixesForRun — agent-written wording', () => {
     expect(seen[0]).toMatchObject({ fileNames: ['server.ts'], failed: [{ name: 'deletes a product' }] })
   })
 
+  it('hands the message agent the commit-stage model plan when one is given', async () => {
+    const h = harness()
+    const seen: FixCommitMessageInput[] = []
+    const models = { claude: { model: 'haiku', effort: 'low' } }
+    await proposeFixesForRun({
+      runId: 'run-9', feature: 'fnb', fixCapture, preflight, models,
+      deps: {
+        git: h.git.run, gh: h.gh, now: () => 'T', tmpWorktreeDir: () => '/tmp/wt',
+        writeMessage: async (input) => { seen.push(input); return written },
+      },
+    })
+    expect(seen[0]).toMatchObject({ models })
+  })
+
   it('omits both when the capture and summary carry neither', async () => {
     const h = harness()
     const seen: FixCommitMessageInput[] = []

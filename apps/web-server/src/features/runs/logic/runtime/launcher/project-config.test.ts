@@ -5,10 +5,12 @@ import path from 'path'
 import {
   DEFAULT_PORT,
   loadProjectConfig,
+  normalizeHealAgent,
   normalizePersonalWikiPath,
   projectConfigPath,
   resolveProjectPort,
   saveProjectConfig,
+  type ProjectConfig,
 } from './project-config'
 
 const tmpDirs: string[] = []
@@ -17,6 +19,18 @@ function mkProject(): string {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-project-config-')))
   tmpDirs.push(dir)
   return dir
+}
+
+// The shipped defaults, spread into per-test variants so a new config field
+// changes exactly one place.
+const DEFAULTS: ProjectConfig = {
+  healAgent: 'claude',
+  editor: 'auto',
+  agentModels: { claude: {}, codex: {} },
+  askModelsOnLaunch: false,
+  personalWikiPath: null,
+  autoProposePr: true,
+  showDemo: true,
 }
 
 afterEach(() => {
@@ -28,54 +42,116 @@ afterEach(() => {
 describe('project config', () => {
   it('returns defaults when the config file is missing or unreadable JSON', () => {
     const projectRoot = mkProject()
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
+    expect(loadProjectConfig(projectRoot)).toEqual(DEFAULTS)
 
     fs.writeFileSync(projectConfigPath(projectRoot), '{not json')
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
+    expect(loadProjectConfig(projectRoot)).toEqual(DEFAULTS)
   })
 
   it('loads valid healAgent values and falls back for unknown values', () => {
     const projectRoot = mkProject()
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ healAgent: 'manual' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'manual', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
+    expect(loadProjectConfig(projectRoot)).toEqual({ ...DEFAULTS, healAgent: 'manual' })
 
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ healAgent: 'wizard' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
+    expect(loadProjectConfig(projectRoot)).toEqual(DEFAULTS)
+  })
+
+  it('migrates a stored `external` healAgent to claude silently (2.2.0)', () => {
+    // The retired value must not error, warn, or survive: a workspace saved on
+    // 2.1.x loads as claude, and the next save persists the migrated value.
+    const projectRoot = mkProject()
+    fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ healAgent: 'external' }))
+    const loaded = loadProjectConfig(projectRoot)
+    expect(loaded.healAgent).toBe('claude')
+
+    saveProjectConfig(projectRoot, loaded)
+    expect(JSON.parse(fs.readFileSync(projectConfigPath(projectRoot), 'utf-8')).healAgent).toBe('claude')
+  })
+
+  it('normalizeHealAgent maps external to claude, passes live values, rejects junk', () => {
+    expect(normalizeHealAgent('external')).toBe('claude')
+    expect(normalizeHealAgent('claude')).toBe('claude')
+    expect(normalizeHealAgent('codex')).toBe('codex')
+    expect(normalizeHealAgent('auto')).toBe('auto')
+    expect(normalizeHealAgent('manual')).toBe('manual')
+    expect(normalizeHealAgent('wizard')).toBeUndefined()
+    expect(normalizeHealAgent(undefined)).toBeUndefined()
   })
 
   it('loads valid editor values and falls back for unknown values', () => {
     const projectRoot = mkProject()
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'vscode' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'vscode', personalWikiPath: null, autoProposePr: true, showDemo: true })
+    expect(loadProjectConfig(projectRoot)).toEqual({ ...DEFAULTS, editor: 'vscode' })
 
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'cursor' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null, autoProposePr: true, showDemo: true })
+    expect(loadProjectConfig(projectRoot)).toEqual({ ...DEFAULTS, editor: 'cursor' })
 
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'system' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'system', personalWikiPath: null, autoProposePr: true, showDemo: true })
+    expect(loadProjectConfig(projectRoot)).toEqual({ ...DEFAULTS, editor: 'system' })
 
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'vim' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
+    expect(loadProjectConfig(projectRoot)).toEqual(DEFAULTS)
   })
 
   it('persists only supported healAgent values', () => {
     const projectRoot = mkProject()
-    saveProjectConfig(projectRoot, { healAgent: 'codex', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
-    expect(fs.readFileSync(projectConfigPath(projectRoot), 'utf-8')).toBe(
-      '{\n  "healAgent": "codex",\n  "editor": "auto",\n  "personalWikiPath": null,\n  "autoProposePr": true,\n  "showDemo": true\n}\n',
-    )
+    saveProjectConfig(projectRoot, { ...DEFAULTS, healAgent: 'codex' })
+    expect(JSON.parse(fs.readFileSync(projectConfigPath(projectRoot), 'utf-8')).healAgent).toBe('codex')
 
-    saveProjectConfig(projectRoot, { healAgent: 'other' as never, editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
+    saveProjectConfig(projectRoot, { ...DEFAULTS, healAgent: 'other' as never })
+    expect(loadProjectConfig(projectRoot)).toEqual(DEFAULTS)
   })
 
   it('persists only supported editor values', () => {
     const projectRoot = mkProject()
-    saveProjectConfig(projectRoot, { healAgent: 'auto', editor: 'cursor', personalWikiPath: null, autoProposePr: true, showDemo: true })
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'cursor', personalWikiPath: null, autoProposePr: true, showDemo: true })
+    saveProjectConfig(projectRoot, { ...DEFAULTS, healAgent: 'auto', editor: 'cursor' })
+    expect(loadProjectConfig(projectRoot)).toEqual({ ...DEFAULTS, healAgent: 'auto', editor: 'cursor' })
 
-    saveProjectConfig(projectRoot, { healAgent: 'auto', editor: 'other' as never, personalWikiPath: null, autoProposePr: true, showDemo: true })
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
+    saveProjectConfig(projectRoot, { ...DEFAULTS, healAgent: 'auto', editor: 'other' as never })
+    expect(loadProjectConfig(projectRoot)).toEqual({ ...DEFAULTS, healAgent: 'auto' })
+  })
+
+  it('round-trips agentModels and drops junk stages/efforts on the way through', () => {
+    const projectRoot = mkProject()
+    saveProjectConfig(projectRoot, {
+      ...DEFAULTS,
+      agentModels: {
+        claude: { heal: { model: 'opus', effort: 'high' }, prd: { model: 'sonnet', effort: null } },
+        codex: { heal: { model: null, effort: 'xhigh' } },
+      },
+    })
+    expect(loadProjectConfig(projectRoot).agentModels).toEqual({
+      claude: { heal: { model: 'opus', effort: 'high' }, prd: { model: 'sonnet', effort: null } },
+      codex: { heal: { model: null, effort: 'xhigh' } },
+    })
+
+    // Hand-edited junk in the file: unknown stage, effort from the wrong CLI's
+    // vocabulary, an all-default entry — all normalize away rather than erroring.
+    fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({
+      agentModels: {
+        claude: { warp: { model: 'opus' }, heal: { model: 'opus', effort: 'minimal' }, docs: { model: null, effort: null } },
+        codex: 'nope',
+      },
+    }))
+    expect(loadProjectConfig(projectRoot).agentModels).toEqual({
+      claude: { heal: { model: 'opus', effort: null } },
+      codex: {},
+    })
+  })
+
+  it('askModelsOnLaunch is opt-in: only a literal true arms the launch gate', () => {
+    const projectRoot = mkProject()
+    fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ askModelsOnLaunch: true }))
+    expect(loadProjectConfig(projectRoot).askModelsOnLaunch).toBe(true)
+
+    for (const loose of [undefined, 'yes', 1, null, false]) {
+      fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ askModelsOnLaunch: loose }))
+      expect(loadProjectConfig(projectRoot).askModelsOnLaunch).toBe(false)
+    }
+
+    saveProjectConfig(projectRoot, { ...DEFAULTS, askModelsOnLaunch: true })
+    expect(loadProjectConfig(projectRoot).askModelsOnLaunch).toBe(true)
   })
 
   it('treats auto-PR as on unless the config explicitly turns it off', () => {
@@ -91,7 +167,7 @@ describe('project config', () => {
       expect(loadProjectConfig(projectRoot).autoProposePr).toBe(true)
     }
 
-    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: false, showDemo: true })
+    saveProjectConfig(projectRoot, { ...DEFAULTS, autoProposePr: false })
     expect(loadProjectConfig(projectRoot).autoProposePr).toBe(false)
   })
 
@@ -107,7 +183,7 @@ describe('project config', () => {
       expect(loadProjectConfig(projectRoot).showDemo).toBe(true)
     }
 
-    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: false })
+    saveProjectConfig(projectRoot, { ...DEFAULTS, showDemo: false })
     expect(loadProjectConfig(projectRoot).showDemo).toBe(false)
   })
 
@@ -146,7 +222,7 @@ describe('project config', () => {
   it('loads missing or invalid stored personal wiki paths as null', () => {
     const projectRoot = mkProject()
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ personalWikiPath: path.join(projectRoot, 'missing') }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
+    expect(loadProjectConfig(projectRoot)).toEqual(DEFAULTS)
   })
 
   it('loads a valid port and omits invalid or out-of-range ports', () => {
@@ -162,24 +238,24 @@ describe('project config', () => {
 
   it('does not add a port key to config files that omit it', () => {
     const projectRoot = mkProject()
-    saveProjectConfig(projectRoot, { healAgent: 'codex', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
-    expect(fs.readFileSync(projectConfigPath(projectRoot), 'utf-8')).toBe(
-      '{\n  "healAgent": "codex",\n  "editor": "auto",\n  "personalWikiPath": null,\n  "autoProposePr": true,\n  "showDemo": true\n}\n',
-    )
+    saveProjectConfig(projectRoot, { ...DEFAULTS, healAgent: 'codex' })
+    const written = JSON.parse(fs.readFileSync(projectConfigPath(projectRoot), 'utf-8'))
+    expect('port' in written).toBe(false)
+    expect(written.healAgent).toBe('codex')
   })
 
   it('persists a valid port and drops invalid ones', () => {
     const projectRoot = mkProject()
-    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true, port: 8080 })
+    saveProjectConfig(projectRoot, { ...DEFAULTS, port: 8080 })
     expect(loadProjectConfig(projectRoot).port).toBe(8080)
 
-    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true, port: 99999 })
+    saveProjectConfig(projectRoot, { ...DEFAULTS, port: 99999 })
     expect(loadProjectConfig(projectRoot).port).toBeUndefined()
   })
 
   it('resolves the configured port or falls back to the default', () => {
-    expect(resolveProjectPort({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true, port: 8000 })).toBe(8000)
-    expect(resolveProjectPort({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })).toBe(DEFAULT_PORT)
+    expect(resolveProjectPort({ ...DEFAULTS, port: 8000 })).toBe(8000)
+    expect(resolveProjectPort(DEFAULTS)).toBe(DEFAULT_PORT)
     expect(DEFAULT_PORT).toBe(7421)
   })
 })

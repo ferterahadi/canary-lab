@@ -2,7 +2,7 @@ import path from 'path'
 import { readFeatureConfig } from '../../../../shared/config-ast'
 import { renderPrompt } from '../../../../shared/prompts'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { decodeSubmission, extractJson, stageFeedback, type FlightStageDeps, defaultSpawnAgent, stageJobRef } from './context'
+import { decodeSubmission, extractJson, stageFeedback, stageModels, type FlightStageDeps, defaultSpawnAgent, stageJobRef } from './context'
 import { agentSpawnJob } from './stage-jobs'
 import { externalizable, externalWorkCheckpoint } from './externalizable'
 import { agentProgressSink } from './agent-progress'
@@ -88,6 +88,7 @@ export function scoutStage(deps: FlightStageDeps): StageAdapter {
       onChunk: agentProgressSink(ctx),
       signal: ctx.signal,
       agent: m.opts.agent,
+      models: stageModels(m, 'scout'),
     })
     return settleDraft(extractJson<ScoutDraft>(text))
   }

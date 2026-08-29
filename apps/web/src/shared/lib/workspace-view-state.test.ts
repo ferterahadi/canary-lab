@@ -7,7 +7,7 @@ const KEY = 'cl.workspace.view'
 
 /** Build a full PersistedView with sensible defaults for the fields under test. */
 function view(partial: Partial<PersistedView>): PersistedView {
-  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, flightStage: null, configTab: null, focusTest: null, runTab: null, returnFlight: null, ...partial }
+  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, flightStage: null, configTab: null, modelsAgent: null, focusTest: null, runTab: null, returnFlight: null, ...partial }
 }
 
 beforeEach(() => {
@@ -427,5 +427,36 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     persistView(view({ feature: 'checkout', dialog: 'config', configTab: 'ports' }))
     persistView(view({ feature: 'checkout', dialog: null }))
     expect(window.location.search).not.toContain('tab=')
+  })
+
+  // The model matrix stacked over Project Settings — the `models` qualifier
+  // on dialog=settings, same drop-unless-active gate as `tab` on config.
+  it('round-trips the settings dialog + its models qualifier (URL-only, not mirrored)', () => {
+    persistView(view({ dialog: 'settings', modelsAgent: 'claude' }))
+    expect(window.location.search).toContain('dialog=settings')
+    expect(window.location.search).toContain('models=claude')
+    expect(readPersistedView()).toEqual(view({ dialog: 'settings', modelsAgent: 'claude' }))
+    expect(localStorage.getItem(KEY)).not.toContain('claude')
+  })
+
+  it('reads settings with no models param as the dialog alone', () => {
+    window.history.replaceState(null, '', '/?dialog=settings')
+    expect(readPersistedView()).toEqual(view({ dialog: 'settings', modelsAgent: null }))
+  })
+
+  it('ignores an unknown models agent name', () => {
+    window.history.replaceState(null, '', '/?dialog=settings&models=gemini')
+    expect(readPersistedView()).toEqual(view({ dialog: 'settings', modelsAgent: null }))
+  })
+
+  it('drops a models param found in the URL when the dialog is not settings', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&dialog=config&models=claude')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config' }))
+  })
+
+  it('drops the models param on close', () => {
+    persistView(view({ dialog: 'settings', modelsAgent: 'codex' }))
+    persistView(view({ dialog: null }))
+    expect(window.location.search).not.toContain('models=')
   })
 })

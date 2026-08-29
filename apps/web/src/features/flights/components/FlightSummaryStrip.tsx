@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FlightManifest, FlightStageKey } from '@/shared/api/client'
 import { capitalizeFirst } from '@/shared/lib/format'
+import { pinnedPlanSummary } from '@shared/agent-models'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { formatDuration, num, specsCoverageProgress, stageLabel, stageStatusTone, type StageFact } from './stage-meta'
 import { asRecord } from './StageDetail'
@@ -66,6 +67,16 @@ export function FlightSummaryStrip({
       value: agent === 'codex' ? 'Codex' : 'Claude',
       title: "The coding agent conducting this flight's steps — chosen at start, fixed for the record",
     })
+    // The model plan locked at start (2.2.0) — only pinned stages are worth a
+    // fact; an all-default plan is the norm, not information.
+    const plan = pinnedPlanSummary(flight.opts.models)
+    if (plan) {
+      items.push({
+        label: 'Models',
+        value: plan,
+        title: 'Model + effort per step, locked when this flight started — the other steps run on the agent default',
+      })
+    }
   }
 
   // Coverage came only from the authoring LOOP's pass records, which just one

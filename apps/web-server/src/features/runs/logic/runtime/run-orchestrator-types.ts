@@ -9,6 +9,7 @@ import type { BuildHealCyclePrompt } from './auto-heal'
 import type { RunnerLog } from './runner-log'
 import { type WorktreeHandle } from './repo-worktree'
 import type { PlaywrightSpawner } from './run-spawn'
+import type { RunModelPlan } from './run-model-plan'
 
 export interface ServiceSpec {
   repoName: string
@@ -58,6 +59,11 @@ export interface OrchestratorOptions {
   playwrightSpawner?: PlaywrightSpawner
   // Auto-heal configuration. Omit to disable the heal loop.
   autoHeal?: AutoHealConfig
+  // The run's resolved model+effort plan (heal REPL + commit-message pass),
+  // persisted onto the manifest so restarts reuse it. The heal half must ALSO
+  // ride in `autoHeal.buildSpawnCommand`'s bound defaults — this field only
+  // records; the builder is what spawns.
+  models?: RunModelPlan
   // Manual heal mode: when true and `autoHeal` is omitted, a failing run
   // transitions to 'healing' and waits for the user to write the signal
   // file by hand (no agent process spawned). When false (default), failing

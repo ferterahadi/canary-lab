@@ -4,7 +4,7 @@ import { type ChildProcess } from 'child_process'
 import { claudeSessionLogPath } from '../../../agent-sessions/logic/agent-session-log'
 import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { type HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import { PORTIFY_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
+import { AGENT_DEFAULT_CHOICE, agentModelArgs, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 
 // Idle window: kill a wedged port-ify agent after this long with NO activity
@@ -46,13 +46,16 @@ export function runPortifyAgent(opts: {
   sessionId?: string
   /** true on a retry: resume the prior claude session instead of starting one. */
   resume?: boolean
+  /** Resolved model+effort for this launch (persisted on the record at start);
+   *  absent → agent default. */
+  models?: StageModelChoice
 }): Promise<void> {
-  const { agent, prompt, cwd, logPath, children, sessionId, resume } = opts
+  const { agent, prompt, cwd, logPath, children, sessionId, resume, models = AGENT_DEFAULT_CHOICE } = opts
   // Shared agent-process runner (spawn + tee + idle). claude gets stream-json for
   // liveness; the double-boot verifier judges the result, so we don't parse output.
   const args = agent === 'claude'
-    ? buildClaudeAgenticArgs(prompt, { model: PORTIFY_MODELS.claude, sessionId, resume })
-    : ['exec', '--full-auto', ...modelArgs(PORTIFY_MODELS.codex), prompt]
+    ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId, resume })
+    : ['exec', '--full-auto', ...agentModelArgs('codex', models), prompt]
   let out: number | null = null
   if (logPath) {
     try { out = fs.openSync(logPath, 'a') } catch { out = null }

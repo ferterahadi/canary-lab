@@ -4,6 +4,7 @@ import {
   runAgentProcess,
   buildClaudeAgenticArgs,
 } from '../../../agent-sessions/logic/agent-process'
+import { agentModelArgs, type AgentStagePlans, type ModelStageKey, type PerAgentStageChoices, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import { recoverClaudeAssistantText } from '../../../agent-sessions/logic/agent-stream'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import {
@@ -48,6 +49,9 @@ export interface FlightAgentSpawnOpts {
   signal?: AbortSignal
   /** R79: which CLI to spawn (the flight's sticky opts.agent). Absent → claude. */
   agent?: 'claude' | 'codex'
+  /** The stage's model+effort, resolved and persisted on the flight at launch
+   *  (2.2.0). Absent → agent default, no flags. */
+  models?: StageModelChoice
   /** Fired as soon as the CLI session is pinned, before the process starts
    *  producing output. Multi-session stages use it to preserve an immutable
    *  history ref while `stageDir` remains the mutable live/stop scope. */
@@ -146,8 +150,20 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
       : {}),
     args:
       agent === 'claude'
-        ? buildClaudeAgenticArgs(opts.prompt, { sessionId, forkFromSessionId })
-        : ['exec', '--full-auto', '--skip-git-repo-check', '-'],
+        ? buildClaudeAgenticArgs(opts.prompt, {
+            sessionId,
+            forkFromSessionId,
+            model: opts.models?.model ?? null,
+            effort: opts.models?.effort ?? null,
+          })
+        : [
+            'exec',
+            '--full-auto',
+            '--skip-git-repo-check',
+            // Model/effort ride as exec options, before the stdin marker.
+            ...agentModelArgs('codex', opts.models ?? { model: null, effort: null }),
+            '-',
+          ],
     cwd: opts.cwd,
     stdin: agent === 'codex' ? opts.prompt : undefined,
     captureStdout: true,
@@ -319,6 +335,28 @@ export function featureDirFor(deps: FlightStageDeps, feature: string): string {
   // remains the pre-scaffold fallback, where there is no config to resolve yet.
   return loadFeatures(deps.featuresDir).find((candidate) => candidate.name === feature)?.featureDir
     ?? path.join(deps.featuresDir, feature)
+}
+
+/** The flight's persisted model+effort choice for one spawn (2.2.0). Undefined
+ *  when the plan has no entry — the spawn then runs on the agent default. */
+export function stageModels(
+  m: { opts: { models?: AgentStagePlans } },
+  key: ModelStageKey,
+): StageModelChoice | undefined {
+  return m.opts.models?.[key]
+}
+
+/** The same choice as a per-agent map, keyed by the CONDUCTING agent — for the
+ *  coverage engines, whose CLI fallback chain takes each agent's own entry.
+ *  The flight's plan was resolved for its conductor, so only that key is set;
+ *  a fallback CLI (the conductor's CLI died mid-flight) runs on its default
+ *  rather than on efforts from the wrong vocabulary. */
+export function stageModelPlan(
+  m: { opts: { agent?: 'claude' | 'codex'; models?: AgentStagePlans } },
+  key: ModelStageKey,
+): PerAgentStageChoices | undefined {
+  const choice = stageModels(m, key)
+  return choice ? { [m.opts.agent ?? 'claude']: choice } : undefined
 }
 
 /** The user's re-entry feedback ("what went wrong last time"), if it targets

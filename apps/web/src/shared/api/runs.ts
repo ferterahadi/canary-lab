@@ -1,6 +1,7 @@
 // Test runs and the heal loop: start, pause, heal, fixes, PRs, journal.
 // Split out of client.ts; see that barrel for the shared surface.
 
+import type { StageModelChoice } from '@shared/agent-models'
 import type { AuditList, RunIndexEntry, RunDetail, JournalEntry, RunProposedPr } from './types'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
 
@@ -102,6 +103,9 @@ export function startRun(
     mode?: 'test' | 'boot'
     gettingStartedSource?: 'internal' | 'external'
     gettingStartedWorkflow?: 'run' | 'heal'
+    /** Launch-gate override for the run's heal + commit spawns, resolved and
+     *  locked on the run record at start. Absent = workspace defaults. */
+    models?: { heal?: StageModelChoice; commit?: StageModelChoice }
   },
 ): Promise<{ runId: string }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
@@ -109,6 +113,7 @@ export function startRun(
   if (opts?.env) body.env = opts.env
   if (opts?.isolation) body.isolation = opts.isolation
   if (opts?.mode === 'boot') body.mode = 'boot'
+  if (opts?.models) body.models = opts.models
   if (opts?.gettingStartedSource) body.gettingStartedSource = opts.gettingStartedSource
   if (opts?.gettingStartedWorkflow) body.gettingStartedWorkflow = opts.gettingStartedWorkflow
   return request<{ runId: string }>(

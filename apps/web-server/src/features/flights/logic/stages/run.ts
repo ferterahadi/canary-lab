@@ -161,6 +161,12 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
     const payload = {
       feature: m.feature,
       env: m.opts.env,
+      // Forward the flight's stored stage plan so the run's heal REPL and
+      // commit-message pass honor the flight's launch-time choices. The runs
+      // route re-normalizes it against ITS chosen agent (workspace healAgent
+      // config), which may differ from the flight's conducting agent — the
+      // wrong CLI's efforts are dropped there, never passed through.
+      ...(m.opts.models ? { models: m.opts.models } : {}),
       ...(external
         ? {
             healAgent: {
