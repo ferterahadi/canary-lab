@@ -326,11 +326,21 @@ function commitProductRepo(dir, message) {
 async function provision() {
   say('Preparing an isolated workspace')
   let tarballPath
+  let initCliPath
   if (noBuild) {
     const existing = fs.readdirSync(repoRoot).find((entry) => entry.endsWith('.tgz'))
     if (!existing) throw new Error('--no-build needs a packed .tgz in the repository root')
     tarballPath = path.join(repoRoot, existing)
     complete(`Using ${existing}`)
+
+    // `--no-build` promises to exercise the existing tarball, which may not
+    // match this checkout's dist/. Keep its isolated harness install so init
+    // comes from that exact package rather than mixing two builds.
+    run('npm', ['init', '-y'], demoRoot, { quiet: true })
+    setupTask('Installing Canary Lab locally', 'Canary Lab installed', () => (
+      run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `file:${tarballPath}`], demoRoot, { quiet: interactive })
+    ))
+    initCliPath = path.join(demoRoot, 'node_modules', 'canary-lab', 'dist', 'apps', 'cli', 'cli.js')
   } else {
     // `npm pack` runs the package's prepack hook, which already performs the
     // full build. Running build separately doubles demo startup time.
@@ -340,14 +350,13 @@ async function provision() {
     const tarball = fs.readdirSync(demoRoot).find((entry) => entry.endsWith('.tgz'))
     if (!tarball) throw new Error('npm pack did not produce a tarball')
     tarballPath = path.join(demoRoot, tarball)
+    // prepack just rebuilt this entrypoint. Running it directly avoids a full
+    // throwaway install before the retained project installs the same tarball.
+    initCliPath = path.join(repoRoot, 'dist', 'apps', 'cli', 'cli.js')
   }
 
-  run('npm', ['init', '-y'], demoRoot, { quiet: true })
-  setupTask('Installing Canary Lab locally', 'Canary Lab installed', () => (
-    run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `file:${tarballPath}`], demoRoot, { quiet: interactive })
-  ))
   setupTask('Creating the demo project', 'Demo project created', () => (
-    run('npx', ['canary-lab', 'init', 'demo-project', '--package-spec', `file:${tarballPath}`, '--no-install'], demoRoot, { quiet: interactive })
+    run(process.execPath, [initCliPath, 'init', 'demo-project', '--package-spec', `file:${tarballPath}`, '--no-install'], demoRoot, { quiet: interactive })
   ))
   setupTask('Installing project dependencies', 'Dependencies installed', () => (
     run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false'], projectDir, { quiet: interactive })

@@ -43,8 +43,8 @@ describe('buildClaudeMcpConfigArg', () => {
 })
 
 describe('buildAgentSpawnCommand', () => {
-  it('enforces the 258K context and auto-compaction policy on both REPLs', () => {
-    expect(buildAgentSpawnCommand('claude')).toContain('--autocompact 258k')
+  it('enforces each REPL context and auto-compaction policy', () => {
+    expect(buildAgentSpawnCommand('claude')).toContain('--autocompact 350k')
     for (const cmd of [
       buildAgentSpawnCommand('codex'),
       buildAgentSpawnCommand('codex', { sessionId: 'sid', resume: true }),

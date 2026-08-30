@@ -6,6 +6,7 @@ import { Modal } from '@/shared/ui/atoms'
 import { OPTION_ROW_CLASS, optionRowStyle } from '@/shared/ui/OptionRow'
 import { StageChoiceGrid } from './ModelMatrixDialog'
 import { agentTitle } from './settings-options'
+import { useAgentModelOptions } from './use-agent-model-options'
 
 // The launch gate (2.2.0 model cockpit): "use defaults or customize?" asked at
 // the three GUI spawn points — flight start, suite run, coverage generate —
@@ -39,6 +40,7 @@ function choiceLabel(choice: StageModelChoice): string {
 
 export function ModelLaunchGate({ launchNoun, agent, stages, config, onCancel, onConfirm, confirmLabel }: ModelLaunchGateProps) {
   const [customize, setCustomize] = useState(false)
+  const { modelOptions } = useAgentModelOptions(agent, customize)
   // The customize card edits a per-launch copy seeded from the resolved
   // defaults — Project Settings stays untouched either way.
   const [plans, setPlans] = useState<AgentStagePlans>(() => {
@@ -142,6 +144,7 @@ export function ModelLaunchGate({ launchNoun, agent, stages, config, onCancel, o
             agent={agent}
             stages={stages}
             plans={plans}
+            modelOptions={modelOptions}
             onChange={(stage, choice) => setPlans((prev) => ({ ...prev, [stage]: choice }))}
           />
         )}

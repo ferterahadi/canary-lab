@@ -7,9 +7,8 @@
  *
  * Effort maps to each CLI's own knob — verified live against claude 2.1.250
  * (`--effort low|medium|high|xhigh|max`) and codex 0.149.0
- * (`-c model_reasoning_effort=minimal|low|medium|high|xhigh`). Neither CLI can
- * enumerate its models headlessly, so KNOWN_MODELS is curated last-known data
- * (any custom id string is accepted and passed to `--model` verbatim).
+ * (`-c model_reasoning_effort=minimal|low|medium|high|xhigh`). The dropdown
+ * fallback is curated data; any custom id is passed to `--model` verbatim.
  */
 export type ModelAgentKind = 'claude' | 'codex'
 
@@ -73,51 +72,108 @@ export const EFFORT_LEVELS = {
   codex: ['minimal', 'low', 'medium', 'high', 'xhigh'],
 } as const satisfies Record<ModelAgentKind, readonly string[]>
 
-/** Curated last-known model options per CLI, for the settings dropdowns.
- *  claude aliases are documented by `claude --help`; codex publishes no stable
- *  alias list, so its dropdown is agent-default + custom id only. Data, not
- *  behavior: a custom id always passes through verbatim. */
-export const KNOWN_MODELS: Record<ModelAgentKind, readonly string[]> = {
-  claude: ['fable', 'opus', 'sonnet', 'haiku'],
+export interface KnownModelOption {
+  /** The exact value passed to the agent CLI. */
+  value: string
+  /** Display copy may explain alias behavior without changing that value. */
+  label: string
+}
+
+/** Curated fallback options for the model dropdowns. Claude documents these as
+ *  aliases for its latest model; say so in the label instead of presenting an
+ *  unversioned family name as though it were pinned. Codex options come from
+ *  its installed CLI at runtime, so its fallback remains Agent default +
+ *  Custom id when discovery is unavailable. */
+export const KNOWN_MODEL_OPTIONS: Record<ModelAgentKind, readonly KnownModelOption[]> = {
+  claude: [
+    { value: 'fable', label: 'Fable (latest)' },
+    { value: 'opus', label: 'Opus (latest)' },
+    { value: 'sonnet', label: 'Sonnet (latest)' },
+    { value: 'haiku', label: 'Haiku (latest)' },
+  ],
   codex: [],
 }
 
-// ── Recommendation policy ────────────────────────────────────────────────────
-// Stages ship a *tier*, not a model id, so recommendations survive model
-// releases: the UI resolves the tier against whatever models exist at render
-// time. Repair-adjacent stages recommend the strongest model — repair is the
-// product, and a weaker model there is a worse product for everyone.
-export type ModelTier = 'strongest' | 'balanced' | 'fastest'
-
-export const STAGE_TIERS: Record<ModelStageKey, ModelTier> = {
-  scout: 'balanced',
-  docs: 'balanced',
-  prd: 'balanced',
-  gen: 'strongest',
-  mapping: 'balanced',
-  heal: 'strongest',
-  portify: 'strongest',
-  report: 'fastest',
-  commit: 'fastest',
+/** Values used for recognition and recommendation validation. Derived from the
+ *  display catalog so label and CLI value cannot drift into separate lists. */
+export const KNOWN_MODELS: Record<ModelAgentKind, readonly string[]> = {
+  claude: KNOWN_MODEL_OPTIONS.claude.map(({ value }) => value),
+  codex: KNOWN_MODEL_OPTIONS.codex.map(({ value }) => value),
 }
 
-/** What each tier resolves to today. Codex recommends effort only (its model
- *  ids aren't stable enough to curate); claude recommends documented aliases. */
+// ── Recommendation policy ────────────────────────────────────────────────────
+// Stages ship a workload tier, not a versioned model id. Claude's stable aliases
+// resolve to the latest family member; Codex resolves Sol/Terra/Luna roles from
+// the installed CLI catalog, so a new version does not require a Canary update.
+export type ModelTier = 'frontier' | 'agentic' | 'balanced' | 'fastest'
+
+export const STAGE_TIERS: Record<ModelStageKey, ModelTier> = {
+  scout: 'agentic',
+  docs: 'balanced',
+  prd: 'agentic',
+  gen: 'agentic',
+  mapping: 'agentic',
+  heal: 'frontier',
+  portify: 'frontier',
+  report: 'fastest',
+  commit: 'balanced',
+}
+
+/** Why a stage gets its tier. These are the failure-cost inputs to the policy,
+ *  not claims that a model was benchmarked on Canary's workload. */
+export const STAGE_RECOMMENDATION_REASON: Record<ModelStageKey, string> = {
+  scout: 'Repository analysis writes the configuration every later stage depends on.',
+  docs: 'Document collection is bounded and read-only, but must retain relevant requirements.',
+  prd: 'The requirements summary becomes the stable source of truth for coverage.',
+  gen: 'Test authoring turns coverage gaps into executable verification code.',
+  mapping: 'Semantic mapping must avoid both missed tests and false coverage claims.',
+  heal: 'Auto-repair edits application code, so correctness matters more than latency.',
+  portify: 'Parallel setup rewrites cross-service port wiring and concurrency behavior.',
+  report: 'Report rewriting is a bounded evidence-to-copy transformation.',
+  commit: 'Commit and PR copy needs faithful diff analysis but does not modify product code.',
+}
+
+/** Provider-specific knobs for each workload tier. Codex models stay null here
+ *  because their versioned ids come from the runtime catalog below. Haiku does
+ *  not support Claude's effort control, so fastest deliberately passes no
+ *  effort flag. */
 export const RECOMMENDED_BY_TIER: Record<ModelAgentKind, Record<ModelTier, StageModelChoice>> = {
   claude: {
-    strongest: { model: 'opus', effort: 'high' },
+    frontier: { model: 'fable', effort: 'high' },
+    agentic: { model: 'opus', effort: 'high' },
     balanced: { model: 'sonnet', effort: 'medium' },
-    fastest: { model: 'haiku', effort: 'low' },
+    fastest: { model: 'haiku', effort: null },
   },
   codex: {
-    strongest: { model: null, effort: 'xhigh' },
+    frontier: { model: null, effort: 'xhigh' },
+    agentic: { model: null, effort: 'high' },
     balanced: { model: null, effort: 'medium' },
     fastest: { model: null, effort: 'low' },
   },
 }
 
-export function recommendedChoice(agent: ModelAgentKind, stage: ModelStageKey): StageModelChoice {
-  return RECOMMENDED_BY_TIER[agent][STAGE_TIERS[stage]]
+const CODEX_MODEL_ROLE_SUFFIX: Record<ModelTier, string> = {
+  frontier: '-sol',
+  agentic: '-sol',
+  balanced: '-terra',
+  fastest: '-luna',
+}
+
+export function recommendedChoice(
+  agent: ModelAgentKind,
+  stage: ModelStageKey,
+  availableModels: readonly KnownModelOption[] = KNOWN_MODEL_OPTIONS[agent],
+): StageModelChoice {
+  const tier = STAGE_TIERS[stage]
+  const base = RECOMMENDED_BY_TIER[agent][tier]
+  if (agent === 'claude') return base
+
+  // The Sol/Terra/Luna role names are stable while the version prefix changes.
+  // If a future catalog no longer exposes that role, keep the safe effort-only
+  // recommendation rather than pinning an unrelated model by list position.
+  const suffix = CODEX_MODEL_ROLE_SUFFIX[tier]
+  const model = availableModels.find(({ value }) => value.toLowerCase().endsWith(suffix))?.value ?? null
+  return { ...base, model }
 }
 
 // ── Normalization (the JSON/config boundary) ─────────────────────────────────

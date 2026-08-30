@@ -10,8 +10,9 @@ export interface AgentProbeRouteDeps {
 }
 
 /**
- * CLI presence/auth/version for the model-cockpit surfaces (settings matrix +
- * launch gate warning strip). Informational only — no launch consults it.
+ * CLI presence/auth/version plus discoverable models for the model-cockpit
+ * surfaces (settings matrix + launch gate). Informational only — no launch is
+ * blocked when probing or catalog discovery fails.
  */
 export async function agentProbeRoutes(
   app: FastifyInstance,

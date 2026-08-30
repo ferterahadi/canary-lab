@@ -6,6 +6,7 @@ import {
   KNOWN_MODELS,
   MODEL_STAGE_KEYS,
   RECOMMENDED_BY_TIER,
+  STAGE_RECOMMENDATION_REASON,
   STAGE_TIERS,
   agentModelArgs,
   effortArgs,
@@ -126,9 +127,10 @@ describe('recommendation policy', () => {
   it('covers every stage with a tier and every tier with a per-agent choice', () => {
     for (const stage of MODEL_STAGE_KEYS) {
       expect(STAGE_TIERS[stage]).toBeDefined()
+      expect(STAGE_RECOMMENDATION_REASON[stage]).not.toHaveLength(0)
       for (const agent of ['claude', 'codex'] as const) {
         const rec = recommendedChoice(agent, stage)
-        expect(rec).toBe(RECOMMENDED_BY_TIER[agent][STAGE_TIERS[stage]])
+        expect(rec).toEqual(RECOMMENDED_BY_TIER[agent][STAGE_TIERS[stage]])
         // A recommended effort must be speakable in that CLI's own vocabulary.
         if (rec.effort !== null) {
           expect(EFFORT_LEVELS[agent]).toContain(rec.effort)
@@ -137,23 +139,47 @@ describe('recommendation policy', () => {
     }
   })
 
-  it('repair-adjacent stages recommend the strongest tier — repair is the product', () => {
-    expect(STAGE_TIERS.heal).toBe('strongest')
-    expect(STAGE_TIERS.gen).toBe('strongest')
-    expect(STAGE_TIERS.portify).toBe('strongest')
+  it('assigns tiers by failure cost and task complexity', () => {
+    expect(STAGE_TIERS).toEqual({
+      scout: 'agentic',
+      docs: 'balanced',
+      prd: 'agentic',
+      gen: 'agentic',
+      mapping: 'agentic',
+      heal: 'frontier',
+      portify: 'frontier',
+      report: 'fastest',
+      commit: 'balanced',
+    })
   })
 
-  it('codex recommendations are effort-only (no curated model ids exist)', () => {
+  it('resolves Codex roles from a new CLI catalog without hardcoding the model version', () => {
+    const catalog = [
+      { value: 'gpt-5.7-sol', label: 'GPT-5.7-Sol' },
+      { value: 'gpt-5.7-terra', label: 'GPT-5.7-Terra' },
+      { value: 'gpt-5.7-luna', label: 'GPT-5.7-Luna' },
+    ]
+
+    expect(recommendedChoice('codex', 'heal', catalog)).toEqual({ model: 'gpt-5.7-sol', effort: 'xhigh' })
+    expect(recommendedChoice('codex', 'scout', catalog)).toEqual({ model: 'gpt-5.7-sol', effort: 'high' })
+    expect(recommendedChoice('codex', 'docs', catalog)).toEqual({ model: 'gpt-5.7-terra', effort: 'medium' })
+    expect(recommendedChoice('codex', 'report', catalog)).toEqual({ model: 'gpt-5.7-luna', effort: 'low' })
+  })
+
+  it('falls back to effort-only Codex recommendations when discovery has no matching roles', () => {
     expect(KNOWN_MODELS.codex).toEqual([])
-    for (const tier of ['strongest', 'balanced', 'fastest'] as const) {
+    for (const tier of ['frontier', 'agentic', 'balanced', 'fastest'] as const) {
       expect(RECOMMENDED_BY_TIER.codex[tier].model).toBeNull()
     }
+    expect(recommendedChoice('codex', 'heal', [{ value: 'other-model', label: 'Other model' }]))
+      .toEqual({ model: null, effort: 'xhigh' })
   })
 
   it('claude recommendations name only curated aliases', () => {
-    for (const tier of ['strongest', 'balanced', 'fastest'] as const) {
+    for (const tier of ['frontier', 'agentic', 'balanced', 'fastest'] as const) {
       expect(KNOWN_MODELS.claude).toContain(RECOMMENDED_BY_TIER.claude[tier].model)
     }
+    expect(RECOMMENDED_BY_TIER.claude.fastest).toEqual({ model: 'haiku', effort: null })
   })
 })
 

@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { AgentModelsConfig, AgentProbeSnapshot, AgentStagePlans, ModelAgentKind, ModelStageKey, StageModelChoice } from '@/shared/api/client'
 import {
   AGENT_DEFAULT_CHOICE,
   EFFORT_LEVELS,
-  KNOWN_MODELS,
+  KNOWN_MODEL_OPTIONS,
   MODEL_STAGE_KEYS,
   MODEL_STAGE_LABEL,
+  STAGE_RECOMMENDATION_REASON,
   STAGE_TIERS,
+  type KnownModelOption,
   recommendedChoice,
 } from '@shared/agent-models'
 import { Modal } from '@/shared/ui/atoms'
 import { agentTitle } from './settings-options'
+import { useAgentModelOptions } from './use-agent-model-options'
 
 // The per-agent model matrix (2.2.0 model cockpit): one row per internal-agent
 // stage, each with a model + reasoning-effort select. Stacked over Project
@@ -45,8 +48,13 @@ function rowChoice(plans: AgentStagePlans, stage: ModelStageKey): StageModelChoi
 
 /** Row status: matches the shipped recommendation (✦), sits on agent default
  *  (quiet), or deviates (custom — amber chip + reset). */
-function rowState(agent: ModelAgentKind, stage: ModelStageKey, choice: StageModelChoice): 'recommended' | 'default' | 'custom' {
-  if (sameChoice(choice, recommendedChoice(agent, stage))) return 'recommended'
+function rowState(
+  agent: ModelAgentKind,
+  stage: ModelStageKey,
+  choice: StageModelChoice,
+  modelOptions: readonly KnownModelOption[],
+): 'recommended' | 'default' | 'custom' {
+  if (sameChoice(choice, recommendedChoice(agent, stage, modelOptions))) return 'recommended'
   if (sameChoice(choice, AGENT_DEFAULT_CHOICE)) return 'default'
   return 'custom'
 }
@@ -108,14 +116,18 @@ function ProbeStrip({ agent, probe, busy, onRetry }: {
 /** The per-stage model+effort rows — the matrix body, reused by the launch
  *  gate's "customize" card with a scoped stage subset. Controlled: the caller
  *  owns the plans object. */
-export function StageChoiceGrid({ agent, stages, plans, onChange }: {
+export function StageChoiceGrid({ agent, stages, plans, modelOptions, onChange }: {
   agent: ModelAgentKind
   stages: readonly ModelStageKey[]
   plans: AgentStagePlans
+  /** Runtime-discovered options when available; omitted means the curated
+   *  fallback, which always retains Agent default + Custom id. */
+  modelOptions?: readonly KnownModelOption[]
   onChange: (stage: ModelStageKey, choice: StageModelChoice) => void
 }) {
   const efforts = EFFORT_LEVELS[agent]
-  const knownModels = KNOWN_MODELS[agent]
+  const knownModelOptions = modelOptions ?? KNOWN_MODEL_OPTIONS[agent]
+  const knownModels = new Set(knownModelOptions.map(({ value }) => value))
   return (
     <div className="overflow-hidden rounded-lg" style={{ border: '1px solid var(--border-default)' }}>
       {/* Header band + one grid row per stage — label, model, effort, state. */}
@@ -130,8 +142,9 @@ export function StageChoiceGrid({ agent, stages, plans, onChange }: {
       </div>
       {stages.map((stage, index) => {
         const choice = rowChoice(plans, stage)
-        const state = rowState(agent, stage, choice)
-        const isCustomModel = choice.model !== null && !knownModels.includes(choice.model)
+        const recommendation = recommendedChoice(agent, stage, knownModelOptions)
+        const state = rowState(agent, stage, choice, knownModelOptions)
+        const isCustomModel = choice.model !== null && !knownModels.has(choice.model)
         return (
           <div
             key={stage}
@@ -158,8 +171,8 @@ export function StageChoiceGrid({ agent, stages, plans, onChange }: {
                 }}
               >
                 <option value="">Agent default</option>
-                {knownModels.map((m) => (
-                  <option key={m} value={m}>{m}</option>
+                {knownModelOptions.map(({ value, label }) => (
+                  <option key={value} value={value}>{label}</option>
                 ))}
                 <option value={CUSTOM}>Custom id…</option>
               </select>
@@ -193,7 +206,7 @@ export function StageChoiceGrid({ agent, stages, plans, onChange }: {
               {state === 'recommended' && (
                 <span
                   className="rounded-md px-1.5 py-0.5 text-[10px] font-medium"
-                  title={`The shipped recommendation for this stage (${STAGE_TIERS[stage]} tier).`}
+                  title={`${STAGE_TIERS[stage]} recommendation. ${STAGE_RECOMMENDATION_REASON[stage]}`}
                   style={{ color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)' }}
                 >
                   ✦ rec
@@ -212,7 +225,7 @@ export function StageChoiceGrid({ agent, stages, plans, onChange }: {
                     type="button"
                     aria-label={`Reset ${MODEL_STAGE_LABEL[stage]} to recommended`}
                     title="Reset to recommended"
-                    onClick={() => onChange(stage, recommendedChoice(agent, stage))}
+                    onClick={() => onChange(stage, recommendation)}
                     className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
                     style={{ color: 'var(--text-muted)' }}
                   >
@@ -230,25 +243,9 @@ export function StageChoiceGrid({ agent, stages, plans, onChange }: {
 
 export function ModelMatrixDialog({ agent, agentModels, onClose, onSaved }: Props) {
   const [plans, setPlans] = useState<AgentStagePlans>(() => ({ ...agentModels[agent] }))
-  const [probe, setProbe] = useState<AgentProbeSnapshot | null>(null)
-  const [probeBusy, setProbeBusy] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const loadProbe = (fresh: boolean): void => {
-    setProbeBusy(true)
-    api.getAgentProbe(fresh)
-      .then(setProbe)
-      // Probe failure warns, never blocks — the strip renders its quiet
-      // fallback and the matrix stays fully editable.
-      .catch(() => {})
-      .finally(() => setProbeBusy(false))
-  }
-  // The probe is a read of the machine, keyed to nothing in props.
-  useEffect(() => { loadProbe(false) }, [])
-
-  const efforts = EFFORT_LEVELS[agent]
-  const knownModels = KNOWN_MODELS[agent]
+  const { probe, probeBusy, retryProbe, modelOptions } = useAgentModelOptions(agent)
 
   const setRow = (stage: ModelStageKey, choice: StageModelChoice): void => {
     setPlans((prev) => {
@@ -298,7 +295,7 @@ export function ModelMatrixDialog({ agent, agentModels, onClose, onSaved }: Prop
         <>
           <button
             type="button"
-            onClick={() => setPlans(Object.fromEntries(MODEL_STAGE_KEYS.map((s) => [s, recommendedChoice(agent, s)])))}
+            onClick={() => setPlans(Object.fromEntries(MODEL_STAGE_KEYS.map((s) => [s, recommendedChoice(agent, s, modelOptions)])))}
             className="cl-button mr-auto px-3 py-1 text-xs"
           >
             Reset all to recommended
@@ -327,13 +324,13 @@ export function ModelMatrixDialog({ agent, agentModels, onClose, onSaved }: Prop
       }
     >
       <div className="flex flex-col gap-3 p-3">
-        <ProbeStrip agent={agent} probe={probe} busy={probeBusy} onRetry={() => loadProbe(true)} />
+        <ProbeStrip agent={agent} probe={probe} busy={probeBusy} onRetry={retryProbe} />
         <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
           Model and reasoning effort per stage, for the agents Canary Lab spawns itself. Agent default passes no
           flags — the CLI runs on its own configuration. ✦ marks the shipped recommendation for the stage.
         </div>
 
-        <StageChoiceGrid agent={agent} stages={MODEL_STAGE_KEYS} plans={plans} onChange={setRow} />
+        <StageChoiceGrid agent={agent} stages={MODEL_STAGE_KEYS} plans={plans} modelOptions={modelOptions} onChange={setRow} />
       </div>
     </Modal>
   )

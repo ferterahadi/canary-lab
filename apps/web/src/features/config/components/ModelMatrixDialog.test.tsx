@@ -18,9 +18,19 @@ vi.mock('@/shared/api/client', async () => {
 })
 
 const OK_PROBE = (agent: 'claude' | 'codex', over: Partial<AgentProbe> = {}): AgentProbe => ({
-  agent, state: 'ok', binaryPath: `/usr/local/bin/${agent}`, version: '9.9.9', remedy: null, ...over,
+  agent, state: 'ok', binaryPath: `/usr/local/bin/${agent}`, version: '9.9.9', models: [], remedy: null, ...over,
 })
-const SNAPSHOT = { probedAt: '2026-08-28T00:00:00Z', claude: OK_PROBE('claude'), codex: OK_PROBE('codex') }
+const SNAPSHOT = {
+  probedAt: '2026-08-28T00:00:00Z',
+  claude: OK_PROBE('claude'),
+  codex: OK_PROBE('codex', {
+    models: [
+      { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' },
+      { value: 'gpt-5.6-terra', label: 'GPT-5.6-Terra' },
+      { value: 'gpt-5.6-luna', label: 'GPT-5.6-Luna' },
+    ],
+  }),
+}
 
 let container: HTMLDivElement
 let root: Root
@@ -74,6 +84,38 @@ describe('ModelMatrixDialog', () => {
     expect(document.querySelector('[data-testid="model-matrix-dialog"]')?.textContent).toContain('claude CLI found — 9.9.9')
   })
 
+  it('labels Claude aliases as latest while keeping the raw CLI values', async () => {
+    await mount()
+    const options = [...select('Repo scan model').options]
+      .map((option) => [option.value, option.textContent])
+    expect(options).toEqual([
+      ['', 'Agent default'],
+      ['fable', 'Fable (latest)'],
+      ['opus', 'Opus (latest)'],
+      ['sonnet', 'Sonnet (latest)'],
+      ['haiku', 'Haiku (latest)'],
+      ['__custom', 'Custom id…'],
+    ])
+  })
+
+  it('shows the installed Codex CLI catalog and treats its ids as selectable models', async () => {
+    await mount({
+      agent: 'codex',
+      agentModels: { claude: {}, codex: { scout: { model: 'gpt-5.6-sol', effort: null } } },
+    })
+    const options = [...select('Repo scan model').options]
+      .map((option) => [option.value, option.textContent])
+    expect(options).toEqual([
+      ['', 'Agent default'],
+      ['gpt-5.6-sol', 'GPT-5.6-Sol'],
+      ['gpt-5.6-terra', 'GPT-5.6-Terra'],
+      ['gpt-5.6-luna', 'GPT-5.6-Luna'],
+      ['__custom', 'Custom id…'],
+    ])
+    expect(select('Repo scan model').value).toBe('gpt-5.6-sol')
+    expect(document.querySelector('input[aria-label="Repo scan custom model id"]')).toBeNull()
+  })
+
   it('saves ONLY the agentModels block, this agent replaced and the other kept', async () => {
     const codexPlans = { heal: { model: null, effort: 'xhigh' } }
     const saved = { healAgent: 'claude' as const, editor: 'auto' as const, personalWikiPath: null, agentModels: { claude: { heal: { model: 'opus', effort: 'high' } }, codex: codexPlans } }
@@ -116,7 +158,10 @@ describe('ModelMatrixDialog', () => {
     const rec = recommendedChoice('claude', 'heal')
     setSelect(select('Auto-repair model'), rec.model!)
     setSelect(select('Auto-repair reasoning effort'), rec.effort!)
-    expect(document.querySelector('[data-testid="model-row-heal"]')?.textContent).toContain('✦ rec')
+    const recommendedRow = document.querySelector('[data-testid="model-row-heal"]')!
+    expect(recommendedRow.textContent).toContain('✦ rec')
+    expect(recommendedRow.querySelector<HTMLElement>('span[title]')?.title)
+      .toContain('Auto-repair edits application code')
 
     setSelect(select('Auto-repair reasoning effort'), 'low')
     const row = document.querySelector('[data-testid="model-row-heal"]')!
@@ -144,6 +189,21 @@ describe('ModelMatrixDialog', () => {
     expect(select('Auto-repair model').value).toBe(recommendedChoice('claude', 'heal').model)
     expect(select('Commit message model').value).toBe(recommendedChoice('claude', 'commit').model)
     expect(document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.disabled).toBe(false)
+  })
+
+  it('Reset all resolves Codex recommendations from the installed model roles', async () => {
+    await mount({ agent: 'codex' })
+    const buttons = [...document.querySelectorAll('button')]
+    await act(async () => { buttons.find((b) => b.textContent === 'Reset all to recommended')!.click() })
+
+    expect(select('Repo scan model').value).toBe('gpt-5.6-sol')
+    expect(select('Repo scan reasoning effort').value).toBe('high')
+    expect(select('Doc collection model').value).toBe('gpt-5.6-terra')
+    expect(select('Doc collection reasoning effort').value).toBe('medium')
+    expect(select('Auto-repair model').value).toBe('gpt-5.6-sol')
+    expect(select('Auto-repair reasoning effort').value).toBe('xhigh')
+    expect(select('Report model').value).toBe('gpt-5.6-luna')
+    expect(select('Report reasoning effort').value).toBe('low')
   })
 
   it('an auth-failed probe warns with the remedy and Retry re-probes fresh — nothing is disabled', async () => {
@@ -189,7 +249,7 @@ describe('StageChoiceGrid (standalone, as the launch gate embeds it)', () => {
     })
     expect(document.querySelector('[data-testid="model-row-heal"]')).toBeTruthy()
     expect(document.querySelector('[data-testid="model-row-scout"]')).toBeNull()
-    // Codex has no curated model list — the dropdown is default + custom only.
+    // Without a discovered catalog, Codex falls back to default + custom.
     const modelSelect = select('Auto-repair model')
     expect([...modelSelect.options].map((o) => o.value)).toEqual(['', '__custom'])
     setSelect(select('Auto-repair reasoning effort'), 'xhigh')

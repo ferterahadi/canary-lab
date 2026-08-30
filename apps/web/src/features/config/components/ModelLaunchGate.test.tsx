@@ -22,12 +22,18 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  // The customize card embeds StageChoiceGrid whose parent dialog probes — the
-  // gate itself never calls it, but keep it deterministic anyway.
+  // The gate defers this cached read until Customize is opened.
   vi.mocked(api.getAgentProbe).mockReset().mockResolvedValue({
     probedAt: 'now',
-    claude: { agent: 'claude', state: 'ok', binaryPath: '/bin/claude', version: '1', remedy: null },
-    codex: { agent: 'codex', state: 'ok', binaryPath: '/bin/codex', version: '1', remedy: null },
+    claude: { agent: 'claude', state: 'ok', binaryPath: '/bin/claude', version: '1', models: [], remedy: null },
+    codex: {
+      agent: 'codex', state: 'ok', binaryPath: '/bin/codex', version: '1', remedy: null,
+      models: [
+        { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' },
+        { value: 'gpt-5.6-terra', label: 'GPT-5.6-Terra' },
+        { value: 'gpt-5.6-luna', label: 'GPT-5.6-Luna' },
+      ],
+    },
   })
   vi.mocked(api.putProjectConfig).mockReset().mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
 })
@@ -105,6 +111,22 @@ describe('ModelLaunchGate', () => {
       heal: { model: 'opus', effort: 'max' },
       commit: { model: 'haiku', effort: null },
     })
+  })
+
+  it('loads the installed Codex model catalog only when Customize is opened', async () => {
+    await mount({ agent: 'codex', stages: ['heal'], config: { claude: {}, codex: {} } })
+    expect(api.getAgentProbe).not.toHaveBeenCalled()
+    await act(async () => { byTestId<HTMLButtonElement>('gate-customize').click() })
+    await act(async () => {})
+    expect(api.getAgentProbe).toHaveBeenCalledWith(false)
+    expect([...document.querySelector<HTMLSelectElement>('select[aria-label="Auto-repair model"]')!.options]
+      .map((option) => [option.value, option.textContent])).toEqual([
+      ['', 'Agent default'],
+      ['gpt-5.6-sol', 'GPT-5.6-Sol'],
+      ['gpt-5.6-terra', 'GPT-5.6-Terra'],
+      ['gpt-5.6-luna', 'GPT-5.6-Luna'],
+      ['__custom', 'Custom id…'],
+    ])
   })
 
   it("don't-ask-again writes the master switch off the moment it is toggled — not on confirm", async () => {

@@ -141,6 +141,12 @@ export function findStaleCanaryLabMcp(deps: {
   homeDir?: string
   exists?: (candidate: string) => boolean
 } = {}): StaleMcpRegistration[] {
+  // The demo and package smoke harnesses explicitly opt out of client MCP
+  // access. Refresh already honours that boundary above; the follow-up stale
+  // read must do the same or it still shells out to both clients during the
+  // scaffold postinstall, adding their full command timeouts to npm install.
+  if (process.env.CANARY_LAB_SKIP_CLIENT_MCP === '1') return []
+
   const read = deps.readRegisteredCliPath ?? registeredCliPath
   const readDesktop = deps.readDesktopCliPath
     ?? (() => registeredDesktopCliPath(claudeDesktopConfigPath(deps.homeDir)))

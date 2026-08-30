@@ -163,8 +163,8 @@ describe('config api', () => {
   it('getAgentProbe GETs /api/agent-probe, with ?fresh=1 only when forced', async () => {
     const snap = {
       probedAt: 'now',
-      claude: { agent: 'claude', state: 'ok', binaryPath: '/bin/claude', version: '1', remedy: null },
-      codex: { agent: 'codex', state: 'missing', binaryPath: null, version: null, remedy: 'install' },
+      claude: { agent: 'claude', state: 'ok', binaryPath: '/bin/claude', version: '1', models: [], remedy: null },
+      codex: { agent: 'codex', state: 'missing', binaryPath: null, version: null, models: [], remedy: 'install' },
     }
     const fetchImpl = vi.fn().mockResolvedValue(ok(snap))
     await expect(getAgentProbe(false, { fetchImpl })).resolves.toEqual(snap)

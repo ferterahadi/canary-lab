@@ -2,7 +2,7 @@
 // Split out of client.ts; see that barrel for the shared surface.
 
 import type { FeatureTests } from './types'
-import type { AgentModelsConfig } from '@shared/agent-models'
+import type { AgentModelsConfig, KnownModelOption } from '@shared/agent-models'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
 
 export function getFeatureTests(name: string, opts?: ClientOptions): Promise<FeatureTests> {
@@ -447,6 +447,9 @@ export interface AgentProbe {
   state: AgentProbeState
   binaryPath: string | null
   version: string | null
+  /** Optional for compatibility with Canary Lab servers from before runtime
+   *  model discovery. Empty means the UI keeps its curated fallback. */
+  models?: readonly KnownModelOption[]
   remedy: string | null
 }
 
@@ -456,8 +459,8 @@ export interface AgentProbeSnapshot {
   codex: AgentProbe
 }
 
-/** CLI presence/auth/version behind the model-cockpit surfaces. `fresh` skips
- *  the server's 30s cache — the explicit re-check button. */
+/** CLI presence/auth/version and discoverable models behind the model-cockpit
+ *  surfaces. `fresh` skips the server's 30s cache. */
 export function getAgentProbe(fresh = false, opts?: ClientOptions): Promise<AgentProbeSnapshot> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<AgentProbeSnapshot>(

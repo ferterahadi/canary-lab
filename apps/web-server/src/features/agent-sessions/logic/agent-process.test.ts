@@ -133,12 +133,12 @@ describe('runAgentProcess', () => {
     expect(spawn.calls[0].command).toBe('claude')
   })
 
-  it('gives every claude child a 258K auto-compaction window', async () => {
+  it('gives every claude child a 350K auto-compaction window', async () => {
     const child = new FakeChild()
     const spawn = fakeSpawn(child)
     runAgentProcess({ command: 'claude', args: ['-p', 'hi'], idleMs: 1000, spawnImpl: spawn.impl, resolveBinary: () => null })
     child.close(0)
-    expect(spawn.calls[0].args).toEqual(['--autocompact', '258k', '-p', 'hi'])
+    expect(spawn.calls[0].args).toEqual(['--autocompact', '350k', '-p', 'hi'])
   })
 
   it('gives every codex child a 258K window with auto-compaction enabled', async () => {
@@ -291,7 +291,7 @@ describe('runAgentProcess', () => {
     child.close(0)
     const res = await h.done
     expect(res.code).toBe(0)
-    expect(mockNodeSpawn).toHaveBeenCalledWith('claude', ['--autocompact', '258k', '-p', 'hi'], expect.anything())
+    expect(mockNodeSpawn).toHaveBeenCalledWith('claude', ['--autocompact', '350k', '-p', 'hi'], expect.anything())
   })
 
   it('resolves a bare agent kind to the absolute path before spawning', async () => {

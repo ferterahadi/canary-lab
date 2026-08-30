@@ -5,8 +5,8 @@ import type { AgentProbeSnapshot } from '../../agent-sessions/logic/agent-probe'
 
 const snapshot: AgentProbeSnapshot = {
   probedAt: '2026-08-28T00:00:00.000Z',
-  claude: { agent: 'claude', state: 'ok', binaryPath: '/opt/bin/claude', version: '2.1.250', remedy: null },
-  codex: { agent: 'codex', state: 'missing', binaryPath: null, version: null, remedy: 'Install the Codex CLI (`codex`), or point CANARY_LAB_CODEX_BIN at it.' },
+  claude: { agent: 'claude', state: 'ok', binaryPath: '/opt/bin/claude', version: '2.1.250', models: [], remedy: null },
+  codex: { agent: 'codex', state: 'missing', binaryPath: null, version: null, models: [], remedy: 'Install the Codex CLI (`codex`), or point CANARY_LAB_CODEX_BIN at it.' },
 }
 
 describe('GET /api/agent-probe', () => {

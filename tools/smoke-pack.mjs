@@ -343,6 +343,15 @@ const scaffoldPaths = [
 // stage1/stage2 prompts used to stand in here; the flight pipeline's scout and
 // specs-coverage cover the same ground now.)
 const installedPackagePaths = [
+  // The public feature-support exports keep their declarations and the two
+  // declarations those surfaces reference. Internal declarations are omitted
+  // below because consumers cannot import those paths through package exports.
+  'node_modules/canary-lab/dist/shared/configs/loadEnv.d.ts',
+  'node_modules/canary-lab/dist/shared/configs/playwright.base.d.ts',
+  'node_modules/canary-lab/dist/shared/e2e-runner/log-marker-fixture.d.ts',
+  'node_modules/canary-lab/dist/shared/e2e-runner/repo-path-overrides.d.ts',
+  'node_modules/canary-lab/dist/shared/launcher/types.d.ts',
+  'node_modules/canary-lab/dist/shared/readable-tests/types.d.ts',
   'node_modules/canary-lab/dist/apps/web-server/prompts/scout.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/specs-coverage.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/portify.md',
@@ -420,6 +429,21 @@ for (const relPath of installedPackagePaths) {
   const fullPath = path.join(projectDir, relPath)
   if (!fs.existsSync(fullPath)) {
     throw new Error(`Smoke test failed: missing ${relPath}`)
+  }
+}
+
+for (const relPath of [
+  // Browser-only libraries are already compiled into dist/apps/web/dist; a
+  // consumer install must not fetch a second copy and its dependency graph.
+  'node_modules/react-markdown',
+  'node_modules/remark-gfm',
+  // Representative private declarations pin the npm ignore boundary without
+  // coupling the smoke gate to every internal source file.
+  'node_modules/canary-lab/dist/apps/cli/cli.d.ts',
+  'node_modules/canary-lab/dist/apps/web-server/src/server.d.ts',
+]) {
+  if (fs.existsSync(path.join(projectDir, relPath))) {
+    throw new Error(`Smoke test failed: package-only path should be omitted: ${relPath}`)
   }
 }
 

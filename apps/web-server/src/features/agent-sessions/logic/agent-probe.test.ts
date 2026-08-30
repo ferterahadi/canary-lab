@@ -23,6 +23,18 @@ function resolveDeps(found: { claude?: boolean; codex?: boolean } = {}): AgentPr
 
 const loggedInExec: ProbeExec = async (binary, args) => {
   if (args[0] === '--version') return { ok: true, stdout: `${binary.includes('claude') ? '2.1.250' : 'codex-cli 0.149.0'}\n` }
+  if (args[0] === 'debug') {
+    return {
+      ok: true,
+      stdout: JSON.stringify({
+        models: [
+          { slug: 'gpt-5.6-sol', display_name: 'GPT-5.6-Sol', visibility: 'list' },
+          { slug: 'gpt-5.6-terra', display_name: 'GPT-5.6-Terra', visibility: 'list' },
+          { slug: 'gpt-5.6-luna', display_name: 'GPT-5.6-Luna', visibility: 'list' },
+        ],
+      }),
+    }
+  }
   if (binary.includes('claude')) return { ok: true, stdout: '{"loggedIn": true, "authMethod": "claude.ai"}' }
   return { ok: true, stdout: 'Logged in using ChatGPT' }
 }
@@ -36,11 +48,54 @@ describe('probeAgents', () => {
     })
     expect(snap.probedAt).toBe('2026-08-28T00:00:00.000Z')
     expect(snap.claude).toEqual({
-      agent: 'claude', state: 'ok', binaryPath: '/opt/bin/claude', version: '2.1.250', remedy: null,
+      agent: 'claude', state: 'ok', binaryPath: '/opt/bin/claude', version: '2.1.250', models: [], remedy: null,
     })
     expect(snap.codex).toEqual({
-      agent: 'codex', state: 'ok', binaryPath: '/opt/bin/codex', version: 'codex-cli 0.149.0', remedy: null,
+      agent: 'codex', state: 'ok', binaryPath: '/opt/bin/codex', version: 'codex-cli 0.149.0',
+      models: [
+        { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' },
+        { value: 'gpt-5.6-terra', label: 'GPT-5.6-Terra' },
+        { value: 'gpt-5.6-luna', label: 'GPT-5.6-Luna' },
+      ],
+      remedy: null,
     })
+  })
+
+  it('keeps only unique visible Codex models and degrades malformed catalog entries safely', async () => {
+    const exec: ProbeExec = async (bin, args) => {
+      if (args[0] !== 'debug') return loggedInExec(bin, args)
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          models: [
+            null,
+            'not-an-object',
+            {},
+            { slug: 56, display_name: 'Wrong slug type', visibility: 'list' },
+            { slug: 'blank-label', display_name: '   ', visibility: 'list' },
+            { slug: 'internal', display_name: 'Internal', visibility: 'hide' },
+            { slug: ' gpt-5.6-sol ', display_name: ' GPT-5.6-Sol ', visibility: 'list' },
+            { slug: 'gpt-5.6-sol', display_name: 'Duplicate', visibility: 'list' },
+          ],
+        }),
+      }
+    }
+    const snap = await probeAgents({ exec, resolve: resolveDeps({ claude: false }) })
+    expect(snap.codex.models).toEqual([{ value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' }])
+  })
+
+  it('leaves the Codex probe healthy with no curated models when catalog discovery fails or changes shape', async () => {
+    for (const catalog of [
+      { ok: false, stdout: '' },
+      { ok: true, stdout: 'not json' },
+      { ok: true, stdout: '{}' },
+      { ok: true, stdout: '{"models": {}}' },
+    ]) {
+      const exec: ProbeExec = async (bin, args) => args[0] === 'debug' ? catalog : loggedInExec(bin, args)
+      const snap = await probeAgents({ exec, resolve: resolveDeps({ claude: false }) })
+      expect(snap.codex.state).toBe('ok')
+      expect(snap.codex.models).toEqual([])
+    }
   })
 
   it('reports missing with an install remedy when the binary is not found', async () => {
@@ -109,7 +164,7 @@ describe('probeAgents', () => {
     const snap = await probeAgents({
       resolve: { which: () => null, isExecutable: () => true, env: { CANARY_LAB_CLAUDE_BIN: good, CANARY_LAB_CODEX_BIN: bad }, homedir: () => dir },
     })
-    expect(snap.claude).toEqual({ agent: 'claude', state: 'ok', binaryPath: good, version: '9.9.9', remedy: null })
+    expect(snap.claude).toEqual({ agent: 'claude', state: 'ok', binaryPath: good, version: '9.9.9', models: [], remedy: null })
     // Every invocation of the bad stub fails → no version, signed-out verdict.
     expect(snap.codex.state).toBe('auth')
     expect(snap.codex.version).toBeNull()
@@ -136,12 +191,12 @@ describe('createAgentProbeService', () => {
     const service = createAgentProbeService(h.deps)
     const first = await service.snapshot()
     expect(await service.snapshot()).toBe(first)
-    expect(h.execCalls()).toBe(2) // one auth check per agent
+    expect(h.execCalls()).toBe(3) // one auth check per agent + the Codex catalog
 
     h.advance(30_001)
     const second = await service.snapshot()
     expect(second).not.toBe(first)
-    expect(h.execCalls()).toBe(4)
+    expect(h.execCalls()).toBe(6)
   })
 
   it('force skips a fresh cache — the UI re-check button', async () => {
@@ -149,7 +204,7 @@ describe('createAgentProbeService', () => {
     const service = createAgentProbeService(h.deps)
     await service.snapshot()
     await service.snapshot(true)
-    expect(h.execCalls()).toBe(4)
+    expect(h.execCalls()).toBe(6)
   })
 
   it('concurrent cold opens share one probe instead of stacking subprocesses', async () => {
@@ -157,7 +212,7 @@ describe('createAgentProbeService', () => {
     const service = createAgentProbeService(h.deps)
     const [a, b] = await Promise.all([service.snapshot(), service.snapshot()])
     expect(a).toBe(b)
-    expect(h.execCalls()).toBe(2)
+    expect(h.execCalls()).toBe(3)
   })
 
   it('defaults ttl and clock when not injected — the production construction', async () => {
@@ -166,7 +221,7 @@ describe('createAgentProbeService', () => {
     const first = await service.snapshot()
     // A real-clock second call lands inside the 30s default TTL.
     expect(await service.snapshot()).toBe(first)
-    expect(h.execCalls()).toBe(2)
+    expect(h.execCalls()).toBe(3)
     expect(Date.parse(first.probedAt)).toBeGreaterThan(0)
   })
 })

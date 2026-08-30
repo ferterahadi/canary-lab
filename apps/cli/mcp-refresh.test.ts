@@ -158,6 +158,18 @@ describe('refreshCanaryLabMcp', () => {
 })
 
 describe('findStaleCanaryLabMcp', () => {
+  it('CANARY_LAB_SKIP_CLIENT_MCP short-circuits before reading any client', () => {
+    process.env.CANARY_LAB_SKIP_CLIENT_MCP = '1'
+    const readRegisteredCliPath = vi.fn(() => '/gone/cli.js')
+    const readDesktopCliPath = vi.fn(() => '/gone/desktop/cli.js')
+    const exists = vi.fn(() => false)
+
+    expect(findStaleCanaryLabMcp({ readRegisteredCliPath, readDesktopCliPath, exists })).toEqual([])
+    expect(readRegisteredCliPath).not.toHaveBeenCalled()
+    expect(readDesktopCliPath).not.toHaveBeenCalled()
+    expect(exists).not.toHaveBeenCalled()
+  })
+
   // The point of this check: every failure path in the refresh is quiet, so the
   // only reliable signal that a client is broken is the registered path itself
   // no longer existing on disk.

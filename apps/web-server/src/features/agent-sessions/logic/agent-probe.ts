@@ -1,4 +1,5 @@
 import { execFile } from 'child_process'
+import type { KnownModelOption } from '../../../../../../shared/agent-models'
 import { resolveAgentBinary, type AgentResolveDeps, type HealAgent } from './agent-binary'
 
 /**
@@ -6,10 +7,10 @@ import { resolveAgentBinary, type AgentResolveDeps, type HealAgent } from './age
  *
  * Informational only, never a gate: a launch proceeds whatever this reports —
  * the probe exists so a warning strip can say *why* a spawn is about to run on
- * a broken CLI and what fixes it. Neither CLI can enumerate its models
- * headlessly (verified against claude 2.1.250 / codex 0.149.0), so the probe
- * reports presence, auth, and version — the model dropdowns are curated data
- * in agent-models.ts.
+ * a broken CLI and what fixes it. Codex also exposes its current visible model
+ * catalog through `codex debug models`; the same cached probe keeps that list
+ * current without baking release ids into Canary Lab. Claude's documented
+ * aliases remain curated fallback data in agent-models.ts.
  */
 
 export type AgentProbeState = 'ok' | 'auth' | 'missing'
@@ -19,6 +20,10 @@ export interface AgentProbe {
   state: AgentProbeState
   binaryPath: string | null
   version: string | null
+  /** Models this installed CLI currently exposes to users. Empty when the CLI
+   *  has no discovery command or discovery fails; configuring remains usable
+   *  through Agent default and Custom id. */
+  models: readonly KnownModelOption[]
   /** One-line fix for the warning strip; null when state is `ok`. */
   remedy: string | null
 }
@@ -39,7 +44,7 @@ function defaultExec(binary: string, args: string[]): Promise<{ ok: boolean; std
   return new Promise((resolve) => {
     // With `encoding: 'utf-8'` the callback's stdout is always a string —
     // Node passes '' on spawn failure — so no null-guard is needed.
-    execFile(binary, args, { encoding: 'utf-8', timeout: EXEC_TIMEOUT_MS }, (err, stdout) => {
+    execFile(binary, args, { encoding: 'utf-8', timeout: EXEC_TIMEOUT_MS, maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
       resolve({ ok: !err, stdout })
     })
   })
@@ -73,24 +78,58 @@ function claudeLoggedIn(result: { ok: boolean; stdout: string }): boolean {
   }
 }
 
+/** Keep the wire-format parser deliberately narrow: only models the CLI marks
+ *  visible enter the UI, and malformed/changed output degrades to the existing
+ *  Agent default + Custom id escape hatch instead of breaking Settings. */
+function codexModelOptions(result: { ok: boolean; stdout: string }): KnownModelOption[] {
+  if (!result.ok) return []
+  let raw: unknown
+  try {
+    raw = JSON.parse(result.stdout)
+  } catch {
+    return []
+  }
+  if (!raw || typeof raw !== 'object' || !('models' in raw) || !Array.isArray(raw.models)) return []
+
+  const seen = new Set<string>()
+  const options: KnownModelOption[] = []
+  for (const model of raw.models) {
+    if (!model || typeof model !== 'object') continue
+    const slug = 'slug' in model && typeof model.slug === 'string' ? model.slug.trim() : ''
+    const label = 'display_name' in model && typeof model.display_name === 'string'
+      ? model.display_name.trim()
+      : ''
+    const visible = 'visibility' in model && model.visibility === 'list'
+    if (!slug || !label || !visible || seen.has(slug)) continue
+    seen.add(slug)
+    options.push({ value: slug, label })
+  }
+  return options
+}
+
 async function probeOne(agent: HealAgent, deps: AgentProbeDeps): Promise<AgentProbe> {
   const exec = deps.exec ?? defaultExec
   const binaryPath = resolveAgentBinary(agent, deps.resolve)
   if (!binaryPath) {
-    return { agent, state: 'missing', binaryPath: null, version: null, remedy: REMEDY.missing[agent] }
+    return { agent, state: 'missing', binaryPath: null, version: null, models: [], remedy: REMEDY.missing[agent] }
   }
 
-  // Auth + version probe in parallel — independent invocations of the same CLI.
-  const [auth, versionOut] = await Promise.all([
+  // Auth, version, and the Codex catalog are independent CLI invocations. Run
+  // them together so a cold catalog refresh does not add serial latency.
+  const [auth, versionOut, modelOut] = await Promise.all([
     agent === 'claude' ? exec(binaryPath, ['auth', 'status']) : exec(binaryPath, ['login', 'status']),
     exec(binaryPath, ['--version']),
+    agent === 'codex'
+      ? exec(binaryPath, ['debug', 'models'])
+      : Promise.resolve({ ok: false, stdout: '' }),
   ])
   const loggedIn = agent === 'claude' ? claudeLoggedIn(auth) : auth.ok
   const version = versionOut.ok ? versionOut.stdout.trim().split('\n')[0] || null : null
+  const models = agent === 'codex' ? codexModelOptions(modelOut) : []
   if (!loggedIn) {
-    return { agent, state: 'auth', binaryPath, version, remedy: REMEDY.auth[agent] }
+    return { agent, state: 'auth', binaryPath, version, models, remedy: REMEDY.auth[agent] }
   }
-  return { agent, state: 'ok', binaryPath, version, remedy: null }
+  return { agent, state: 'ok', binaryPath, version, models, remedy: null }
 }
 
 export async function probeAgents(deps: AgentProbeDeps = {}): Promise<AgentProbeSnapshot> {
