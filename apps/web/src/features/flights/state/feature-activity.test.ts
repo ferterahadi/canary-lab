@@ -276,6 +276,141 @@ describe('deriveFeatureExternalHistory', () => {
     expect(history.get('report')?.['evaluation-export']?.current).toMatchObject({ status: 'done', resourceId: 't1' })
   })
 
+  it('retains every persisted external-session handle and keeps equal-time passes in input order', () => {
+    const timestamp = '2026-01-01T00:05:00Z'
+    const history = deriveFeatureExternalHistory({
+      runs: [run({
+        feature: 'run', runId: 'r1', healMode: 'external', endedAt: timestamp,
+      })],
+      runDetails: {
+        r1: {
+          manifest: {
+            externalHealSession: {
+              clientKind: 'codex', sessionId: 'run-session', conversationName: 'Fix checkout', sessionUrl: 'codex://session/run',
+            },
+          },
+        },
+      } as never,
+      portifyWorkflows: [portify({ feature: 'portify', producer: 'external' })],
+      portifyDetails: {
+        wf1: {
+          workflowId: 'wf1', feature: 'portify', producer: 'external', status: 'editing', startedAt: timestamp,
+          external: { clientKind: 'codex', sessionId: 'portify-session', conversationName: 'Wire services', sessionUrl: 'codex://session/portify' },
+        },
+      } as never,
+      draftRecords: [],
+      coverageJobs: [
+        {
+          jobId: 'j-first', feature: 'coverage', kind: 'coverage', status: 'done', producer: 'external',
+          startedAt: timestamp, endedAt: timestamp, externalClientKind: 'claude', externalSessionId: 'coverage-one',
+          externalConversationName: 'Map tests', externalSessionUrl: 'claude://session/coverage-one',
+        },
+        {
+          jobId: 'j-second', feature: 'coverage', kind: 'coverage', status: 'done', producer: 'external',
+          startedAt: timestamp, endedAt: timestamp,
+        },
+      ],
+      exportTasks: [{
+        taskId: 't1', runId: 'r-export', feature: 'export', mode: 'raw', producer: 'external', status: 'completed',
+        createdAt: timestamp, updatedAt: timestamp, downloadReady: true, clientKind: 'claude', sessionId: 'export-session',
+        conversationName: 'Publish report', externalSessionUrl: 'claude://session/export',
+      }] as EvaluationExportTask[],
+    })
+
+    expect(history.get('coverage')?.['specs-coverage']?.traces.map((trace) => trace.resourceId))
+      .toEqual(['j-first', 'j-second'])
+    expect(history.get('coverage')?.['specs-coverage']?.current).toMatchObject({
+      resourceId: 'j-second',
+    })
+    expect(history.get('portify')?.portify?.current).toMatchObject({
+      conversationName: 'Wire services', sessionUrl: 'codex://session/portify',
+    })
+    expect(history.get('export')?.['evaluation-export']?.current).toMatchObject({
+      sessionUrl: 'claude://session/export',
+    })
+    expect(history.get('run')?.run?.current).toMatchObject({
+      clientKind: 'codex', sessionId: 'run-session', conversationName: 'Fix checkout', sessionUrl: 'codex://session/run',
+    })
+  })
+
+  it('keeps external traces linkless when persisted ownership metadata is absent', () => {
+    const history = deriveFeatureExternalHistory({
+      runs: [run({ runId: 'r-linkless', feature: 'run-linkless', status: 'passed', healMode: 'external', endedAt: '2026-01-01T00:09:00Z' })],
+      runDetails: { 'r-linkless': { manifest: { externalHealSession: {} } } } as never,
+      portifyWorkflows: [portify({ feature: 'port-linkless', status: 'saved', producer: 'external', endedAt: '2026-01-01T00:07:00Z' })],
+      portifyDetails: { wf1: { workflowId: 'wf1', feature: 'port-linkless', producer: 'external', status: 'saved', startedAt: '2026-01-01T00:00:00Z', external: {} } } as never,
+      draftRecords: [],
+      coverageJobs: [{
+        jobId: 'j-linkless', feature: 'coverage-linkless', kind: 'coverage', status: 'done', producer: 'external',
+        startedAt: '2026-01-01T00:00:00Z', endedAt: '2026-01-01T00:04:00Z',
+      }],
+      exportTasks: [{
+        taskId: 't-linkless', runId: 'r-linkless', feature: 'export-linkless', mode: 'raw', producer: 'external',
+        status: 'completed', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:08:00Z', downloadReady: true,
+      }] as EvaluationExportTask[],
+    })
+    for (const trace of [
+      history.get('coverage-linkless')?.['specs-coverage']?.current,
+      history.get('port-linkless')?.portify?.current,
+      history.get('run-linkless')?.run?.current,
+      history.get('export-linkless')?.['evaluation-export']?.current,
+    ]) {
+      expect(trace).toBeTruthy()
+      expect(trace).not.toHaveProperty('clientKind')
+      expect(trace).not.toHaveProperty('sessionId')
+      expect(trace).not.toHaveProperty('conversationName')
+      expect(trace).not.toHaveProperty('sessionUrl')
+    }
+  })
+
+  it('preserves every external session link, including ties in persisted history', () => {
+    const history = deriveFeatureExternalHistory({
+      runs: [run({ runId: 'r-linked', feature: 'run-linked', status: 'passed', healMode: 'external', endedAt: '2026-01-01T00:09:00Z' })],
+      runDetails: {
+        'r-linked': {
+          manifest: {
+            externalHealSession: {
+              clientKind: 'codex', sessionId: 'run-session', conversationName: 'Run repair', sessionUrl: 'codex://run',
+            },
+          },
+        },
+      } as never,
+      portifyWorkflows: [portify({ feature: 'port-linked', status: 'saved', producer: 'external', endedAt: '2026-01-01T00:07:00Z' })],
+      portifyDetails: {
+        wf1: {
+          workflowId: 'wf1', feature: 'port-linked', producer: 'external', status: 'saved', startedAt: '2026-01-01T00:00:00Z',
+          external: { clientKind: 'codex', sessionId: 'port-session', conversationName: 'Portify', sessionUrl: 'codex://portify' },
+        },
+      } as never,
+      draftRecords: [],
+      coverageJobs: [
+        {
+          jobId: 'j-linked-first', feature: 'coverage-linked', kind: 'coverage', status: 'done', producer: 'external',
+          startedAt: '2026-01-01T00:00:00Z', endedAt: '2026-01-01T00:04:00Z', externalClientKind: 'claude', externalSessionId: 'coverage-session', externalConversationName: 'Coverage', externalSessionUrl: 'claude://coverage',
+        },
+        {
+          jobId: 'j-linked-second', feature: 'coverage-linked', kind: 'coverage', status: 'done', producer: 'external',
+          startedAt: '2026-01-01T00:01:00Z', endedAt: '2026-01-01T00:04:00Z', externalClientKind: 'claude', externalSessionId: 'coverage-session-2', externalConversationName: 'Coverage again', externalSessionUrl: 'claude://coverage-2',
+        },
+      ],
+      exportTasks: [{
+        taskId: 't-linked', runId: 'r-linked', feature: 'export-linked', mode: 'raw', producer: 'external',
+        status: 'completed', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:08:00Z', downloadReady: true,
+        clientKind: 'claude', sessionId: 'export-session', conversationName: 'Export', externalSessionUrl: 'claude://export',
+      }] as EvaluationExportTask[],
+    })
+    expect(history.get('coverage-linked')?.['specs-coverage']?.traces.map((trace) => trace.resourceId))
+      .toEqual(['j-linked-first', 'j-linked-second'])
+    for (const trace of [
+      history.get('coverage-linked')?.['specs-coverage']?.current,
+      history.get('port-linked')?.portify?.current,
+      history.get('run-linked')?.run?.current,
+      history.get('export-linked')?.['evaluation-export']?.current,
+    ]) {
+      expect(trace).toMatchObject({ clientKind: expect.any(String), sessionId: expect.any(String), conversationName: expect.any(String), sessionUrl: expect.any(String) })
+    }
+  })
+
   it('normalizes every persisted status without losing external ownership', () => {
     const history = deriveFeatureExternalHistory({
       runs: [

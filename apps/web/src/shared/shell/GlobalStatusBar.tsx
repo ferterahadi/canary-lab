@@ -53,6 +53,8 @@ interface Props {
   onOpenActivity?: (feature: string, activity: FeatureActivity) => void
   /** Open the flight launcher for a never-flown picker row (R49). */
   onStartFlight?: (feature: string) => void
+  /** Open a feature's Flight directly at Parallel setup. */
+  onOpenPortify?: (feature: string) => void
   /** Open a run's detail (the Deploy-check pill's click-through) — App routes it. */
   onNavigateToRun?: (feature: string, runId: string) => void
   /** R83: the flight a stage drill-through left, or null. A flight's drill-through
@@ -83,7 +85,7 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight }: Props) {
+export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onOpenPortify, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight }: Props) {
   const { connection } = useRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Deployed-env verification runs (record-only) get their own pill (R27) —
@@ -322,7 +324,15 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
       </div>
       {servicesOpen && <ServicesDialog onClose={() => setServicesOpen(false)} />}
       {dirtyReviewOpen && <DirtyReviewDialog features={features} onClose={() => setDirtyReviewOpen(false)} />}
-      {benchmarkOpen && <BenchmarkWindow onClose={() => setBenchmarkOpen(false)} />}
+      {benchmarkOpen && (
+        <BenchmarkWindow
+          onClose={() => setBenchmarkOpen(false)}
+          onOpenPortify={(feature) => {
+            setBenchmarkOpen(false)
+            onOpenPortify?.(feature)
+          }}
+        />
+      )}
     </div>
   )
 }

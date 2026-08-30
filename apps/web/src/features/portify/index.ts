@@ -5,7 +5,7 @@
 // this feature's contract, so add one deliberately.
 
 export { ExternalPortifyPanel } from './components/ExternalPortifyPanel'
-export { PortifyWizard } from './components/PortifyWizard'
+export { PortifyWorkflowControls } from './components/PortifyWorkflowControls'
 export { SavedOverlayPanel } from './components/SavedOverlayPanel'
 export { usePortify, usePortifyWorkflow } from './state/PortifyContext'
 export {

@@ -12,8 +12,8 @@ interface Props {
   // Opens a run in the workspace (selects its feature + run, leaves cleanup).
   // Absent for orphans, which have no manifest/feature to open.
   onNavigateToRun?: (feature: string, runId: string) => void
-  // Opens a port-ification workflow in the wizard (leaves cleanup).
-  onNavigateToPortify?: (workflowId: string) => void
+  // Opens the workflow's feature at Flight → Parallel setup (leaves cleanup).
+  onNavigateToPortify?: (feature: string) => void
 }
 
 export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }: Props) {

@@ -397,4 +397,23 @@ describe('specs-coverage stage', () => {
     expect(withErrors).toContain('xxxx')
     expect(withErrors).not.toContain('OVERFLOW-MARKER')
   })
+
+  it('accepts a user-approved partial ledger without restarting the authoring pass', async () => {
+    // The only trustworthy partial completion is an explicit checkpoint answer:
+    // the adapter re-reads the harness ledger and records that acceptance next
+    // to the actual gaps, rather than trusting an agent's claim of coverage.
+    const d = deps({
+      coverage: { compute: (() => ledger(40)) as never },
+    })
+
+    const outcome = await specsCoverageStage(d).onCheckpointResponse!(
+      ctxFor(manifest()).ctx,
+      { choice: 'accept-partial' },
+    )
+
+    expect(outcome).toMatchObject({
+      kind: 'done',
+      evidence: { coveragePct: 40, acceptedPartial: true, totals: { covered: 0 } },
+    })
+  })
 })

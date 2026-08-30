@@ -201,6 +201,32 @@ describe('start_flight — what it sends', () => {
     })
   })
 
+  it('does not attach an external session when Canary owns the stage work', async () => {
+    const { call, requests } = flightHarness({ reply: startRoutes({ create: created }) })
+
+    await call('start_flight', {
+      repoPaths: ['/repo/shop'], description: 'checkout', stage_producer: 'internal',
+      session_id: 'irrelevant-session', client_kind: 'codex',
+    })
+
+    expect(requests.at(-1)?.payload).toMatchObject({ stageProducer: 'internal' })
+    expect(requests.at(-1)?.payload).not.toHaveProperty('externalAgentSession')
+  })
+
+  it('resumes an internal flight without forwarding external-session metadata', async () => {
+    const { call, requests } = flightHarness({
+      reply: startRoutes({
+        flights: [{ flightId: 'fl-paused', feature: 'checkout', status: 'paused' }],
+        resume: { statusCode: 200, body: plainFlight('running') },
+      }),
+    })
+
+    await call('start_flight', { feature: 'checkout', stage_producer: 'internal' })
+
+    expect(requests.at(-1)).toMatchObject({ method: 'POST', url: '/api/flights/fl-paused/resume' })
+    expect(requests.at(-1)?.payload).toBeUndefined()
+  })
+
   it('omits the frozen inputs on a jump so the stored ones are reused', async () => {
     const { call, requests } = flightHarness({ reply: startRoutes({ create: created }) })
 
@@ -734,6 +760,18 @@ describe('get_flight — steering per checkpoint kind', () => {
     expect(next).not.toContain('Do the work with your tools now')
   })
 
+  it('keeps the Report path visible on the final Parallel setup decisions', async () => {
+    for (const kind of ['portify-gate', 'portify-apply']) {
+      const next = await nextFor({
+        ...parkedOn(kind),
+        currentStage: 'portify',
+        links: { evaluationZip: '/runs/evaluation.zip' },
+      })
+      expect(next).toContain('Report is ready')
+      expect(next).toContain('/runs/evaluation.zip')
+    }
+  })
+
   it('keeps an exported Report usable when background Parallel setup pauses', async () => {
     const next = await nextFor({
       flightId: 'fl-1', feature: 'checkout', status: 'paused', pauseReason: 'stage-failed',
@@ -742,6 +780,17 @@ describe('get_flight — steering per checkpoint kind', () => {
 
     expect(next).toContain('Report is ready')
     expect(next).toContain('Parallel setup did not invalidate it')
+  })
+
+  it('puts the Report path first when queued or user-paused Parallel setup is read', async () => {
+    for (const pauseReason of ['queued', 'user']) {
+      const next = await nextFor({
+        flightId: 'fl-1', feature: 'checkout', status: 'paused', pauseReason,
+        currentStage: 'portify', links: { evaluationZip: '/runs/evaluation.zip' }, stages: [],
+      })
+      expect(next).toContain('Report is ready')
+      expect(next).toContain('/runs/evaluation.zip')
+    }
   })
 
   for (const [kind, marker] of [

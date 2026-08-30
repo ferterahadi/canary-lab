@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EvaluationExportTask, Feature, RunIndexEntry } from '@/shared/api/types'
+import type { PortifyIndexEntry } from '@/shared/api/client'
 import type { FeatureExternalHistory } from '../state/feature-activity'
 
 // The two stores this hook reads own a WebSocket and a fetch loop apiece, which
@@ -12,9 +13,15 @@ import type { FeatureExternalHistory } from '../state/feature-activity'
 // dropping features with no evidence — runs for real against these values.
 const runsValue: { runs: RunIndexEntry[] } = { runs: [] }
 const exportsValue: { tasks: EvaluationExportTask[] } = { tasks: [] }
+const portifyValue: { workflows: PortifyIndexEntry[] } = { workflows: [] }
 
 vi.mock('@/features/runs', () => ({ useRuns: () => runsValue }))
 vi.mock('@/features/evaluation', () => ({ useEvaluationExports: () => exportsValue }))
+vi.mock('@/features/portify', () => ({
+  isActivePortify: (status: PortifyIndexEntry['status']) =>
+    status === 'planning' || status === 'editing' || status === 'verifying' || status === 'ready-to-save',
+  usePortify: () => portifyValue,
+}))
 
 const { useDerivedFeatureStages } = await import('./derived-stages')
 
@@ -28,6 +35,7 @@ beforeEach(() => {
   root = createRoot(container)
   runsValue.runs = []
   exportsValue.tasks = []
+  portifyValue.workflows = []
 })
 
 afterEach(() => {
@@ -136,5 +144,31 @@ describe('useDerivedFeatureStages', () => {
     expect(statusOf('checkout', 'portify')).toBe('done')
     expect(seen.get('checkout')?.find((stage) => stage.key === 'portify')?.evidence)
       .toEqual({ workflowId: 'wf-live' })
+  })
+
+  it('pins a standalone Portify workflow so Flight can hydrate its stage', () => {
+    portifyValue.workflows = [{
+      workflowId: 'wf-review',
+      feature: 'checkout',
+      status: 'ready-to-save',
+      startedAt: '2026-08-25T00:00:00Z',
+    }]
+    render([feature({ portified: false })])
+    expect(statusOf('checkout', 'portify')).toBe('pending')
+    expect(seen.get('checkout')?.find((stage) => stage.key === 'portify')?.evidence)
+      .toEqual({ workflowId: 'wf-review' })
+  })
+
+  it('marks a saved standalone Portify workflow done', () => {
+    portifyValue.workflows = [{
+      workflowId: 'wf-saved',
+      feature: 'checkout',
+      status: 'saved',
+      startedAt: '2026-08-25T00:00:00Z',
+    }]
+    render([feature({ portified: false })])
+    expect(statusOf('checkout', 'portify')).toBe('done')
+    expect(seen.get('checkout')?.find((stage) => stage.key === 'portify')?.evidence)
+      .toEqual({ workflowId: 'wf-saved' })
   })
 })

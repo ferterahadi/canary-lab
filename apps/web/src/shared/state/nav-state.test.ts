@@ -25,7 +25,6 @@ const base: NavState = {
   settingsOpen: false,
   modelsFor: null,
   resumePlanTaskId: null,
-  portifyTarget: null,
   focusTest: null,
   runTab: null,
   returnFlight: null,
@@ -256,9 +255,9 @@ describe('resolveActivityTarget', () => {
       .toEqual({ kind: 'flight', flightId: 'feature:other', stage: 'evaluation-export' })
   })
 
-  it('portifying → the portify workflow', () => {
+  it('portifying → the feature flight at its Parallel setup stage', () => {
     expect(resolveActivityTarget('checkout', { kind: 'portifying', workflowId: 'wf_1' }, flights))
-      .toEqual({ kind: 'portify', workflowId: 'wf_1' })
+      .toEqual({ kind: 'flight', flightId: 'fl_1', stage: 'portify' })
   })
 
   it('authoring → the flight at its specs stage (the routed draft dialog is retired)', () => {

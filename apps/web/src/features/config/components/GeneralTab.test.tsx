@@ -35,6 +35,18 @@ afterEach(() => {
 })
 
 describe('GeneralTab', () => {
+  it('names and fills the suite intent consistently with the Flight input', async () => {
+    vi.mocked(getFeatureConfigDoc).mockResolvedValue(doc('feat'))
+
+    await act(async () => {
+      root.render(<GeneralTab feature="feat" />)
+    })
+
+    expect(container.textContent).toContain('Intent · what to test')
+    expect(container.textContent).not.toContain('Description')
+    expect(container.querySelector('textarea')?.value).toBe('desc')
+  })
+
   it('notifies the parent when saving changes the feature name', async () => {
     const onFeatureRenamed = vi.fn()
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(doc('old_feature'))

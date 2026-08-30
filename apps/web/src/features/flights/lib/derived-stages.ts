@@ -1,13 +1,14 @@
 import { useMemo } from 'react'
 import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
-import type { FlightStageKey, FlightStageStatus } from '@/shared/api/client'
+import type { FlightStageKey, FlightStageStatus, PortifyIndexEntry } from '@/shared/api/client'
 import type { EvaluationExportTask, Feature, RunIndexEntry } from '@/shared/api/types'
 import { useEvaluationExports } from '@/features/evaluation'
 import { useRuns } from '@/features/runs'
+import { isActivePortify, usePortify } from '@/features/portify'
 import type { FeatureExternalHistory, StageExternalHistory } from '../state/feature-activity'
 
 // Evidence-derived stage rail for a feature with NO flight record: what has
-// actually been done to this suite, regardless of who did it (flight, wizard,
+// actually been done to this suite, regardless of who did it (flight, standalone UI,
 // MCP, standalone runs). The flight record stays the pipeline journal — rows
 // that have one keep rendering its stages; this fills the resting flightless
 // rows so real progress doesn't read as an untouched feature.
@@ -34,6 +35,7 @@ export function deriveFeatureStages(
   latestRun?: RunIndexEntry,
   hasExport?: boolean,
   externalStages?: Partial<Record<FlightStageKey, StageExternalHistory>>,
+  portifyWorkflow?: PortifyIndexEntry,
 ): DerivedStage[] | null {
   const ev = feature.evidence
   if (!ev) return null
@@ -52,8 +54,9 @@ export function deriveFeatureStages(
   const externalPortify = externalStages?.portify?.current?.kind === 'portifying'
     ? externalStages.portify.current
     : undefined
-  const portifyEvidence = externalPortify?.resourceId
-    ? { workflowId: externalPortify.resourceId }
+  const portifyWorkflowId = externalPortify?.resourceId ?? portifyWorkflow?.workflowId
+  const portifyEvidence = portifyWorkflowId
+    ? { workflowId: portifyWorkflowId }
     : undefined
   const statusFor: Record<FlightStageKey, FlightStageStatus> = {
     // The feature exists in the workspace at all → it was (implicitly or
@@ -85,6 +88,7 @@ export function deriveFeatureStages(
     'portify': feature.portified
       || ev.portInjectability === 'declared'
       || externalPortify?.status === 'done'
+      || portifyWorkflow?.status === 'saved'
       ? 'done'
       : 'pending',
     'run': runStatus,
@@ -223,6 +227,7 @@ export function useDerivedFeatureStages(
 ): Map<string, DerivedStage[]> {
   const { runs } = useRuns()
   const { tasks } = useEvaluationExports()
+  const { workflows: portifyWorkflows } = usePortify()
   return useMemo(() => {
     const latest = latestTerminalRunByFeature(runs)
     const map = new Map<string, DerivedStage[]>()
@@ -232,9 +237,13 @@ export function useDerivedFeatureStages(
         latest.get(f.name),
         hasDoneExport(tasks, f.name),
         externalHistory?.get(f.name),
+        portifyWorkflows.find((workflow) =>
+          workflow.feature === f.name
+          && (isActivePortify(workflow.status) || workflow.status === 'saved'),
+        ),
       )
       if (stages) map.set(f.name, stages)
     }
     return map
-  }, [features, runs, tasks, externalHistory])
+  }, [features, runs, tasks, portifyWorkflows, externalHistory])
 }

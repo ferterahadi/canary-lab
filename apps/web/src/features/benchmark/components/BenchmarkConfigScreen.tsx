@@ -3,7 +3,6 @@ import * as api from '@/shared/api/client'
 import type { Feature } from '@/shared/api/types'
 import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
 import { useBenchmark, useBenchmarks } from '../state/BenchmarkContext'
-import { PortifyWizard } from '@/features/portify'
 import { ArmComparisonPage, badgeStyle } from './BenchmarkArmMatrix'
 import { BenchmarkHeader } from './BenchmarkHeader'
 
@@ -14,11 +13,13 @@ export function ConfigScreen({
   onStarted,
   startBenchmark,
   blocked,
+  onOpenPortify,
 }: {
   onClose: () => void
   onStarted: (id: string) => void
   startBenchmark: ReturnType<typeof useBenchmarks>['startBenchmark']
   blocked: boolean
+  onOpenPortify?: (feature: string) => void
 }) {
   const [features, setFeatures] = useState<Feature[]>([])
   const [feature, setFeature] = useState<string>('')
@@ -33,7 +34,6 @@ export function ConfigScreen({
   // the benchmark would clash on a hardcoded port (both arms boot it at once).
   // We park the start here and offer the port-ification workflow.
   const [gate, setGate] = useState<api.BenchmarkPreflight | null>(null)
-  const [portifyOpen, setPortifyOpen] = useState(false)
 
   useEffect(() => {
     api.listFeatures().then((f) => {
@@ -216,20 +216,12 @@ export function ConfigScreen({
         </div>
       </div>
 
-      {gate && !portifyOpen && (
+      {gate && (
         <DynamicPortsGate
           feature={feature}
           preflight={gate}
-          onSetup={() => setPortifyOpen(true)}
+          onSetup={() => onOpenPortify?.(feature)}
           onCancel={() => setGate(null)}
-        />
-      )}
-      {portifyOpen && (
-        <PortifyWizard
-          feature={feature}
-          agent={agent}
-          onClose={() => setPortifyOpen(false)}
-          onSaved={() => { setPortifyOpen(false); setGate(null) }}
         />
       )}
     </>

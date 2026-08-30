@@ -15,7 +15,6 @@ import {
   routedDialog,
   type FlightLauncherIntent,
   type NavState,
-  type PortifyTarget,
 } from './nav-state'
 import type { FlightStageKey } from '../api/client'
 
@@ -55,7 +54,6 @@ export interface WorkspaceNavigation {
    *  ?models=…), or null. */
   modelsFor: ModelsAgent | null
   resumePlanTaskId: string | null
-  portifyTarget: PortifyTarget | null
   routedDialog: RouteDialog | null
   setView: (v: WorkspaceView) => void
   setSelectedFeature: (f: string | null) => void
@@ -87,7 +85,6 @@ export interface WorkspaceNavigation {
   /** Open (agent) / close (null) the model matrix stacked over settings. */
   setModelsFor: (agent: ModelsAgent | null) => void
   setResumePlanTaskId: (id: string | null) => void
-  setPortifyTarget: (t: PortifyTarget | null) => void
   /** Open a flight's detail (null = the flights landing list). */
   openFlight: (flightId: string | null) => void
   /** Select a run in the workspace (clears any pending selection guard).
@@ -155,7 +152,6 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     if (!open) setModelsFor(null)
   }, [])
   const [resumePlanTaskId, setResumePlanTaskId] = useState<string | null>(SEED.resumePlanTaskId)
-  const [portifyTarget, setPortifyTarget] = useState<PortifyTarget | null>(SEED.portifyTarget)
   const [focusTest, setFocusTest] = useState<NavState['focusTest']>(SEED.focusTest)
   const [runTab, setRunTab] = useState<NavState['runTab']>(SEED.runTab)
   const [returnFlight, setReturnFlight] = useState<string | null>(SEED.returnFlight)
@@ -186,7 +182,6 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     settingsOpen,
     modelsFor,
     resumePlanTaskId,
-    portifyTarget,
     focusTest,
     runTab,
     returnFlight,
@@ -273,7 +268,6 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     settingsOpen,
     modelsFor,
     resumePlanTaskId,
-    portifyTarget,
     focusTest,
     runTab,
     routedDialog: dialog,
@@ -290,7 +284,6 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setSettingsOpen,
     setModelsFor,
     setResumePlanTaskId,
-    setPortifyTarget,
     openFlight,
     navigateToRun,
     navigateToCoverage,

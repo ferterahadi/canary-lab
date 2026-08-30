@@ -3,7 +3,7 @@ import React from 'react'
 /** Unified-diff block with per-line colouring (+ green, − red, `# ` section
  *  headers accent, @@ hunks muted) — the one diff renderer for every surface
  *  that shows a captured patch (Portify wizard review, flight portify-apply
- *  checkpoint). Extracted from PortifyWizard so the flight checkpoint stopped
+ *  checkpoint). Extracted from the legacy Portify overlay so Flight stopped
  *  rendering the same diff as an uncoloured wall of text. */
 export function DiffView({ diff, onOpenInEditor, openTitle = 'Open project in editor' }: { diff: string; onOpenInEditor?: () => void; openTitle?: string }) {
   if (!diff.trim()) return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>(no diff captured)</div>

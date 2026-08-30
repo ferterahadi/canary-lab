@@ -58,6 +58,22 @@ describe('readFeatureConfig', () => {
     expect(v.flag).toBe(true)
   })
 
+  it('resolves string-only concatenation without evaluating other binary expressions', () => {
+    const r = readFeatureConfig(`module.exports.config = {
+      description: 'Prove the services ' + 'agree on one order.',
+      dynamicLeft: suffix + 'text',
+      dynamicRight: 'text' + suffix,
+      otherOperator: 'left' - 'right',
+    }`)
+    const v = r.value as Record<string, ConfigValue>
+
+    expect(v.description).toBe('Prove the services agree on one order.')
+    expect(r.complexFields).not.toContain('description')
+    expect((v.dynamicLeft as { $expr: string }).$expr).toContain("suffix + 'text'")
+    expect((v.dynamicRight as { $expr: string }).$expr).toContain("'text' + suffix")
+    expect((v.otherOperator as { $expr: string }).$expr).toContain("'left' - 'right'")
+  })
+
   it('throws on unrecognized source', () => {
     expect(() => readFeatureConfig('console.log("hi")')).toThrow(
       /Unable to locate feature config/,
@@ -79,6 +95,19 @@ describe('writeFeatureConfig', () => {
     const out = writeFeatureConfig(FEATURE_PATTERN_A, next)
     expect(out).toContain('// keep me')
     expect(out).toContain("'two'")
+  })
+
+  it('preserves an untouched concatenated intent while saving another field', () => {
+    const src = `module.exports.config = {
+      name: 'before',
+      description: 'Prove the services ' + 'agree.',
+    }`
+    const r = readFeatureConfig(src)
+    const next = { ...(r.value as Record<string, ConfigValue>), name: 'after' }
+    const out = writeFeatureConfig(src, next)
+
+    expect(out).toContain("description: 'Prove the services ' + 'agree.'")
+    expect(out).toContain("name: 'after'")
   })
 
   it('appends new keys', () => {

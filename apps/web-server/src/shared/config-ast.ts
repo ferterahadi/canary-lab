@@ -143,6 +143,12 @@ function nodeToValue(
       )
     case 'ObjectExpression':
       return objectNodeToValue(node, complex, path)
+    case 'BinaryExpression': {
+      const value = staticStringValue(node)
+      if (value !== undefined) return value
+      complex.push(path)
+      return { [EXPR]: recast.print(node).code }
+    }
     case 'UnaryExpression': {
       const u = node as N.UnaryExpression
       if (u.operator === '-' && u.argument.type === 'NumericLiteral') {
@@ -182,6 +188,17 @@ function objectNodeToValue(
     )
   }
   return out
+}
+
+/** Resolve only concatenations whose complete tree is made of string literals.
+ *  This keeps authored wrapping such as `'first ' + 'second'` editable without
+ *  evaluating identifiers, calls, coercions, or any other executable config. */
+function staticStringValue(node: K.ExpressionKind): string | undefined {
+  if (node.type === 'StringLiteral') return node.value
+  if (node.type !== 'BinaryExpression' || node.operator !== '+') return undefined
+  const left = staticStringValue(node.left as K.ExpressionKind)
+  const right = staticStringValue(node.right as K.ExpressionKind)
+  return left === undefined || right === undefined ? undefined : left + right
 }
 
 /** Build a Babel AST node from a ConfigValue tree. `$expr` placeholders

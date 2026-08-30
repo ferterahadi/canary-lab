@@ -9,10 +9,9 @@ import { FlightDetail } from './FlightDetail'
 export { configDigestFacts } from './FlightSummaryStrip'
 
 /** Drill-through targets: each stage view is a LENS onto the real underlying
- *  surface — the actual run detail, coverage ledger, ports config — never a
- *  re-implementation of them (R6). Parallel readiness has no entry here: it
- *  drills through `onOpenConfig` to the Ports tab, so FlightPage never opens
- *  the portify wizard itself. */
+ *  surface — the actual run detail, coverage ledger, or supporting config —
+ *  never a re-implementation of them (R6). Parallel readiness itself stays in
+ *  Flight; its optional drill opens Ports only as supporting configuration. */
 export interface FlightDrillThroughs {
   /** `target` says where in the run detail to land — a failing test (Playwright)
    *  or a named tab (the run's captured fixes go to Changes). */

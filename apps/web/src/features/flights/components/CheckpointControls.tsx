@@ -150,7 +150,7 @@ export function CheckpointControls({
         </p>
       )}
 
-      {/* Same renderer as the Portify wizard's review screen — the checkpoint
+      {/* Same renderer as the standalone Portify review — the checkpoint
           shows the identical captured patch, so it gets the identical
           per-line-coloured diff block, not a plain wall of text. */}
       {diff && <DiffView diff={diff} />}

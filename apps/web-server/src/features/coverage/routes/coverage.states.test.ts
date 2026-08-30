@@ -34,10 +34,12 @@ import { coverageRoutes } from './coverage'
 
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
 
-import type { CoverageLedger, PrdSummary } from '../../../../../../shared/coverage/types'
+import type { CoverageJobManifest, CoverageLedger, PrdSummary } from '../../../../../../shared/coverage/types'
 
 import { bridgeStoreEvents } from '../../../shared/store-event-bridge'
 import { FlightRunStore } from '../../flights/logic/store'
+
+import { coverageJobStore } from '../logic/coverage/jobs/store'
 
 import { FLIGHT_STAGE_KEYS } from '../../flights/logic/types'
 
@@ -150,6 +152,37 @@ describe('coverage routes', () => {
     const entry = states.find((s) => s.feature === 'checkout')
     expect(entry).toBeTruthy()
     expect(entry?.headline).toBe('Setup needed') // no summary yet
+  })
+
+  it('reports the active summary job over a concurrent mapper and ignores settled jobs', async () => {
+    writeFeature('checkout', SPEC)
+    const store = coverageJobStore(logsDir)
+    const job = (jobId: string, kind: CoverageJobManifest['kind'], status: CoverageJobManifest['status']): CoverageJobManifest => ({
+      jobId,
+      feature: 'checkout',
+      kind,
+      status,
+      startedAt: '2026-01-01T00:00:00Z',
+      log: '',
+    })
+    // A corrupt legacy index can hold both phases at once. Summary has the
+    // same precedence here as in the full ledger; a completed row is history,
+    // never live activity.
+    store.save(job('settled-summary', 'summary', 'done'))
+    store.save(job('active-summary', 'summary', 'running'))
+    store.save(job('active-coverage', 'coverage', 'running'))
+
+    const states = (await app.inject({ method: 'GET', url: '/api/coverage/states' })).json() as Array<{
+      feature: string
+      headline: string | null
+      summary: string | null
+      coverage: string | null
+    }>
+    expect(states.find((state) => state.feature === 'checkout')).toMatchObject({
+      headline: 'Generating',
+      summary: 'generating',
+      coverage: 'blocked',
+    })
   })
 
   it('/api/coverage/states degrades to { headline: null } when computeFeatureCoverage throws (FeatureNotFoundError)', async () => {

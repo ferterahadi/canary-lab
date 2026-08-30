@@ -19,6 +19,7 @@ import {
   getFlightAgentSession,
   planFeatures,
   getPlanFeaturesTask,
+  cancelPlanFeatures,
   listPlanFeatures,
   launchPlannedFeatures,
   getFlightPlanAgentSession,
@@ -223,6 +224,16 @@ describe('flights api', () => {
     expect(fetchImpl).toHaveBeenCalledWith(
       'http://x/api/flights/plan-features/t1',
       { method: 'GET' },
+    )
+  })
+
+  it('cancelPlanFeatures POSTs the stop request and returns the cancelled task', async () => {
+    const task = { taskId: 't1', status: 'cancelled' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(task))
+    await expect(cancelPlanFeatures('t1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(task)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/flights/plan-features/t1/cancel',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
     )
   })
 

@@ -68,4 +68,23 @@ describe('createExternalEvaluationExportTask', () => {
     // Persisted, not just returned — the flight's re-adopt reads it back.
     expect(readEvaluationExportTask(logsDir, 'eval-fixed')).toMatchObject({ sessionId: 'sess-1' })
   })
+
+  it('does not persist blank optional external-session fields', () => {
+    const task = createExternalEvaluationExportTask({
+      logsDir,
+      detail: detail({ featureDir: tmpDir }),
+      sessionId: 'sess-2',
+      clientKind: undefined,
+      conversationName: '',
+      language: '',
+      sessionUrl: '',
+      now: () => '2026-01-01T00:00:00Z',
+      newTaskId: () => 'eval-minimal',
+    })
+    expect(task).toMatchObject({ taskId: 'eval-minimal', sessionId: 'sess-2' })
+    expect(task).not.toHaveProperty('clientKind')
+    expect(task).not.toHaveProperty('conversationName')
+    expect(task).not.toHaveProperty('language')
+    expect(task).not.toHaveProperty('externalSessionUrl')
+  })
 })

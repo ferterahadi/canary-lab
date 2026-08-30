@@ -39,10 +39,8 @@ interface Props {
   /** Current-vs-latest version + self-update job state. Drives the footer
    *  "update available" indicator; null until the registry check resolves. */
   versionStatus?: VersionStatus | null
-  /** Launch the port-ification wizard for a feature (config dialog → Ports tab). */
-  onStartPortify?: (feature: string) => void
-  /** Reopen a past/active port-ification workflow (by id) in the wizard. */
-  onOpenPortify?: (workflowId: string) => void
+  /** Open the feature's Flight at Parallel setup (config dialog → Ports tab). */
+  onOpenPortify?: (feature: string) => void
   /** Project Settings is route-driven (`?dialog=settings`) when these are
    *  supplied — controlled by App. Omitted (e.g. in unit tests) → the column
    *  falls back to its own internal open-state. Same hybrid the runs column's
@@ -136,7 +134,6 @@ export function FeaturesColumn({
   onOpenFlight,
   flightAction,
   versionStatus,
-  onStartPortify,
   onOpenPortify,
   settingsOpen,
   onSettingsOpenChange,
@@ -274,7 +271,6 @@ export function FeaturesColumn({
         <FeatureConfigEditor
           feature={configFor}
           portified={features.find((f) => f.name === configFor)?.portified ?? false}
-          onStartPortify={onStartPortify}
           onOpenPortify={onOpenPortify}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {

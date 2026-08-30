@@ -291,6 +291,21 @@ describe('runCoverageEngine — no PRD summary (summary null branch)', () => {
 })
 
 describe('runCoverageEngine — reconcile-by-delta (R10)', () => {
+  it('does not create a run-state record when a first delta run has no requirements', async () => {
+    const dir = writeFeature('empty-delta')
+    await seedSummary('empty-delta')
+    const summaryPath = path.join(dir, 'docs', '_prd-summary.json')
+    const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8'))
+    summary.requirements = []
+    fs.writeFileSync(summaryPath, JSON.stringify(summary))
+
+    const delta = await runCoverageEngine({ featuresDir, logsDir, feature: 'empty-delta', mode: 'delta' })
+
+    expect(delta.reconciledRequirementIds).toEqual([])
+    expect(delta.applied).toEqual([])
+    expect(fs.existsSync(path.join(dir, 'docs', '_coverage-run.json'))).toBe(false)
+  })
+
   it('no-ops when the requirements set is unchanged since the last run', async () => {
     writeFeature('checkout')
     await seedSummary('checkout')

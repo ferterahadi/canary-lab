@@ -163,6 +163,20 @@ describe('startUpdateJob default installer (real spawn path)', () => {
     expect(store.current()?.error).toContain('code 1')
   })
 
+  it('settles once when an error is followed by the child close event', async () => {
+    const store = new UpdateJobStore(logsDir)
+    const child = new FakeChild()
+    spawnMock.mockReturnValue(child)
+    const { completion } = startUpdateJob(
+      { projectRoot: logsDir, packageName: 'canary-lab', targetVersion: '1.4.2' },
+      { store },
+    )
+    child.emit('error', new Error('npm not found'))
+    child.emit('close', 0)
+    await completion
+    expect(store.current()?.status).toBe('failed')
+  })
+
   it('fails instead of claiming completion when the installed CLI cannot be resolved', async () => {
     const store = new UpdateJobStore(logsDir)
     const child = new FakeChild()
@@ -175,6 +189,76 @@ describe('startUpdateJob default installer (real spawn path)', () => {
     await completion
     expect(store.current()?.status).toBe('failed')
     expect(store.current()?.log).toContain('could not find the installed canary-lab CLI')
+  })
+
+  it('fails when the installed package has no usable bin declaration', async () => {
+    const store = new UpdateJobStore(logsDir)
+    const packageRoot = path.join(logsDir, 'node_modules', 'canary-lab')
+    fs.mkdirSync(packageRoot, { recursive: true })
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ bin: null }))
+    const child = new FakeChild()
+    spawnMock.mockReturnValue(child)
+
+    const { completion } = startUpdateJob(
+      { projectRoot: logsDir, packageName: 'canary-lab', targetVersion: '1.4.2' },
+      { store },
+    )
+    child.emit('close', 0)
+    await completion
+    expect(store.current()?.status).toBe('failed')
+    expect(store.current()?.log).toContain('could not find the installed canary-lab CLI')
+  })
+
+  it('runs a package CLI declared as a direct bin string', async () => {
+    const store = new UpdateJobStore(logsDir)
+    const packageRoot = path.join(logsDir, 'node_modules', 'canary-lab')
+    const cliPath = path.join(packageRoot, 'bin', 'cli.js')
+    fs.mkdirSync(path.dirname(cliPath), { recursive: true })
+    fs.writeFileSync(cliPath, '')
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ bin: 'bin/cli.js' }))
+    const installChild = new FakeChild()
+    const upgradeChild = new FakeChild()
+    spawnMock.mockReturnValueOnce(installChild).mockReturnValueOnce(upgradeChild)
+
+    const { completion } = startUpdateJob(
+      { projectRoot: logsDir, packageName: 'canary-lab', targetVersion: '1.4.2' },
+      { store },
+    )
+    installChild.emit('close', 0)
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2))
+    expect(spawnMock).toHaveBeenLastCalledWith(process.execPath, [cliPath, 'upgrade', '--silent'], {
+      cwd: logsDir,
+      env: process.env,
+    })
+    upgradeChild.emit('close', 0)
+    await completion
+    expect(store.current()?.status).toBe('done')
+  })
+
+  it('uses another string bin entry when the package has no canary-lab key', async () => {
+    const store = new UpdateJobStore(logsDir)
+    const packageRoot = path.join(logsDir, 'node_modules', 'canary-lab')
+    const cliPath = path.join(packageRoot, 'bin', 'alternate.js')
+    fs.mkdirSync(path.dirname(cliPath), { recursive: true })
+    fs.writeFileSync(cliPath, '')
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ bin: { ignored: 3, alternate: 'bin/alternate.js' } }))
+    const installChild = new FakeChild()
+    const upgradeChild = new FakeChild()
+    spawnMock.mockReturnValueOnce(installChild).mockReturnValueOnce(upgradeChild)
+
+    const { completion } = startUpdateJob(
+      { projectRoot: logsDir, packageName: 'canary-lab', targetVersion: '1.4.2' },
+      { store },
+    )
+    installChild.emit('close', 0)
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2))
+    expect(spawnMock).toHaveBeenLastCalledWith(process.execPath, [cliPath, 'upgrade', '--silent'], {
+      cwd: logsDir,
+      env: process.env,
+    })
+    upgradeChild.emit('close', 0)
+    await completion
+    expect(store.current()?.status).toBe('done')
   })
 
   it('fails when workspace migration fails after a successful package install', async () => {

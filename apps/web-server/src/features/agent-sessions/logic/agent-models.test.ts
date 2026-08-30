@@ -5,7 +5,7 @@ import {
   HEAL_MODELS,
   KNOWN_MODELS,
   MODEL_STAGE_KEYS,
-  RECOMMENDED_BY_TIER,
+  RECOMMENDED_BY_STAGE,
   STAGE_RECOMMENDATION_REASON,
   STAGE_TIERS,
   agentModelArgs,
@@ -124,13 +124,13 @@ describe('resolveStageChoice', () => {
 })
 
 describe('recommendation policy', () => {
-  it('covers every stage with a tier and every tier with a per-agent choice', () => {
+  it('covers every stage with a tier, rationale, and valid per-agent choice', () => {
     for (const stage of MODEL_STAGE_KEYS) {
       expect(STAGE_TIERS[stage]).toBeDefined()
       expect(STAGE_RECOMMENDATION_REASON[stage]).not.toHaveLength(0)
       for (const agent of ['claude', 'codex'] as const) {
         const rec = recommendedChoice(agent, stage)
-        expect(rec).toEqual(RECOMMENDED_BY_TIER[agent][STAGE_TIERS[stage]])
+        expect(rec).toEqual(RECOMMENDED_BY_STAGE[agent][stage])
         // A recommended effort must be speakable in that CLI's own vocabulary.
         if (rec.effort !== null) {
           expect(EFFORT_LEVELS[agent]).toContain(rec.effort)
@@ -139,17 +139,44 @@ describe('recommendation policy', () => {
     }
   })
 
-  it('assigns tiers by failure cost and task complexity', () => {
+  it('keeps capability tiers descriptive instead of encoding provider effort combinations', () => {
     expect(STAGE_TIERS).toEqual({
-      scout: 'agentic',
+      scout: 'balanced',
       docs: 'balanced',
       prd: 'agentic',
-      gen: 'agentic',
+      gen: 'frontier',
       mapping: 'agentic',
       heal: 'frontier',
-      portify: 'frontier',
-      report: 'fastest',
+      portify: 'balanced',
+      report: 'balanced',
       commit: 'balanced',
+    })
+  })
+
+  it('pins the requested provider recommendation for every stage', () => {
+    expect(RECOMMENDED_BY_STAGE).toEqual({
+      claude: {
+        scout: { model: 'sonnet', effort: 'high' },
+        docs: { model: 'sonnet', effort: 'medium' },
+        prd: { model: 'opus', effort: 'high' },
+        gen: { model: 'opus', effort: 'max' },
+        mapping: { model: 'opus', effort: 'high' },
+        heal: { model: 'opus', effort: 'max' },
+        portify: { model: 'sonnet', effort: 'high' },
+        report: { model: 'sonnet', effort: 'high' },
+        commit: { model: 'sonnet', effort: 'medium' },
+      },
+      codex: {
+        scout: { model: null, effort: 'high' },
+        docs: { model: null, effort: 'medium' },
+        prd: { model: null, effort: 'high' },
+        gen: { model: null, effort: 'high' },
+        mapping: { model: null, effort: 'medium' },
+        heal: { model: null, effort: 'high' },
+        portify: { model: null, effort: 'high' },
+        report: { model: null, effort: 'high' },
+        commit: { model: null, effort: 'medium' },
+      },
     })
   })
 
@@ -160,26 +187,33 @@ describe('recommendation policy', () => {
       { value: 'gpt-5.7-luna', label: 'GPT-5.7-Luna' },
     ]
 
-    expect(recommendedChoice('codex', 'heal', catalog)).toEqual({ model: 'gpt-5.7-sol', effort: 'xhigh' })
-    expect(recommendedChoice('codex', 'scout', catalog)).toEqual({ model: 'gpt-5.7-sol', effort: 'high' })
-    expect(recommendedChoice('codex', 'docs', catalog)).toEqual({ model: 'gpt-5.7-terra', effort: 'medium' })
-    expect(recommendedChoice('codex', 'report', catalog)).toEqual({ model: 'gpt-5.7-luna', effort: 'low' })
+    expect(Object.fromEntries(MODEL_STAGE_KEYS.map((stage) => [stage, recommendedChoice('codex', stage, catalog)])))
+      .toEqual({
+        scout: { model: 'gpt-5.7-terra', effort: 'high' },
+        docs: { model: 'gpt-5.7-terra', effort: 'medium' },
+        prd: { model: 'gpt-5.7-sol', effort: 'high' },
+        gen: { model: 'gpt-5.7-sol', effort: 'high' },
+        mapping: { model: 'gpt-5.7-sol', effort: 'medium' },
+        heal: { model: 'gpt-5.7-sol', effort: 'high' },
+        portify: { model: 'gpt-5.7-terra', effort: 'high' },
+        report: { model: 'gpt-5.7-terra', effort: 'high' },
+        commit: { model: 'gpt-5.7-terra', effort: 'medium' },
+      })
   })
 
   it('falls back to effort-only Codex recommendations when discovery has no matching roles', () => {
     expect(KNOWN_MODELS.codex).toEqual([])
-    for (const tier of ['frontier', 'agentic', 'balanced', 'fastest'] as const) {
-      expect(RECOMMENDED_BY_TIER.codex[tier].model).toBeNull()
+    for (const stage of MODEL_STAGE_KEYS) {
+      expect(RECOMMENDED_BY_STAGE.codex[stage].model).toBeNull()
     }
     expect(recommendedChoice('codex', 'heal', [{ value: 'other-model', label: 'Other model' }]))
-      .toEqual({ model: null, effort: 'xhigh' })
+      .toEqual({ model: null, effort: 'high' })
   })
 
   it('claude recommendations name only curated aliases', () => {
-    for (const tier of ['frontier', 'agentic', 'balanced', 'fastest'] as const) {
-      expect(KNOWN_MODELS.claude).toContain(RECOMMENDED_BY_TIER.claude[tier].model)
+    for (const stage of MODEL_STAGE_KEYS) {
+      expect(KNOWN_MODELS.claude).toContain(RECOMMENDED_BY_STAGE.claude[stage].model)
     }
-    expect(RECOMMENDED_BY_TIER.claude.fastest).toEqual({ model: 'haiku', effort: null })
   })
 })
 

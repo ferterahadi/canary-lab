@@ -120,12 +120,11 @@ describe('PortsTab', () => {
 
   it('verified state: portified headline + Remove only — no Portify button, no re-run', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
-    const onStartPortify = vi.fn()
     await act(async () => {
       // portified=true (a saved overlay exists) → verified headline. Overlay
       // presence, NOT the declared-slot count. Re-portify is the sanctioned
       // two-step (Remove → Portify), so no start button renders here.
-      root.render(<PortsTab feature="cns_exactly_once_fallback" portified onStartPortify={onStartPortify} />)
+      root.render(<PortsTab feature="cns_exactly_once_fallback" portified />)
     })
     expect(container.textContent).toContain('Portified — boots concurrently')
     expect(container.textContent).toContain('Rewritten by the agent')
@@ -167,42 +166,42 @@ describe('PortsTab', () => {
     expect(removeButton?.className).toContain('whitespace-nowrap')
   })
 
-  it('none state: Not injectable headline, accent Portify launches directly', async () => {
+  it('none state: Not injectable headline, accent Flight entry opens Parallel setup', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docNoPorts())
-    const onStartPortify = vi.fn()
+    const onOpenPortify = vi.fn()
     await act(async () => {
       // No overlay, no slots anywhere → not injectable; Portify is the way in.
-      root.render(<PortsTab feature="np_feature" onStartPortify={onStartPortify} />)
+      root.render(<PortsTab feature="np_feature" onOpenPortify={onOpenPortify} />)
     })
     expect(container.textContent).toContain('Not injectable — no port slots declared')
     // The per-command empty state is a single neutral status — no repeated pitch,
     // no per-card CTA (the band carries the one Portify action).
     expect(container.textContent).toContain('No port slots declared')
-    await act(async () => clickButton('Portify'))
-    expect(onStartPortify).toHaveBeenCalledWith('np_feature')
+    await act(async () => clickButton('Open in Flight'))
+    expect(onOpenPortify).toHaveBeenCalledWith('np_feature')
   })
 
-  it('declared state: all commands slotted without overlay → Injectable headline + demoted optional Portify, no danger actions', async () => {
+  it('declared state: all commands slotted without overlay → Injectable headline + demoted optional Flight entry, no danger actions', async () => {
     // The mpass-oauth-support case: services natively read PORT from env, slots
     // hand-declared in config, no overlay. Concurrency-ready — the band must
     // NOT pitch a clash or offer any destructive action.
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
-    const onStartPortify = vi.fn()
+    const onOpenPortify = vi.fn()
     await act(async () => {
-      root.render(<PortsTab feature="cns_exactly_once_fallback" onStartPortify={onStartPortify} />)
+      root.render(<PortsTab feature="cns_exactly_once_fallback" onOpenPortify={onOpenPortify} />)
     })
     expect(container.textContent).toContain('Injectable — declared in config')
     expect(container.textContent).toContain('not agent-verified')
     const buttons = [...container.querySelectorAll('button')]
     expect(buttons.some((b) => b.getAttribute('aria-label') === 'Clear port slots')).toBe(false)
     expect(buttons.some((b) => b.getAttribute('aria-label') === 'Remove portification')).toBe(false)
-    const portify = buttons.find((b) => b.textContent?.trim() === 'Portify')!
+    const portify = buttons.find((b) => b.textContent?.trim() === 'Open in Flight')!
     expect(portify.getAttribute('title')).toContain('Optional')
     await act(async () => portify.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    expect(onStartPortify).toHaveBeenCalledWith('cns_exactly_once_fallback')
+    expect(onOpenPortify).toHaveBeenCalledWith('cns_exactly_once_fallback')
   })
 
-  it('partial state: some commands slotted → Partially injectable count + accent Portify', async () => {
+  it('partial state: some commands slotted → Partially injectable count + Flight entry', async () => {
     const doc = docWithPorts()
     doc.parsed.value = {
       ...(doc.parsed.value as Record<string, unknown>),
@@ -219,10 +218,10 @@ describe('PortsTab', () => {
     }
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(doc)
     await act(async () => {
-      root.render(<PortsTab feature="cns_exactly_once_fallback" onStartPortify={vi.fn()} />)
+      root.render(<PortsTab feature="cns_exactly_once_fallback" onOpenPortify={vi.fn()} />)
     })
     expect(container.textContent).toContain('Partially injectable — 1 of 2 start commands have slots')
-    const portify = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Portify')!
+    const portify = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Open in Flight')!
     expect(portify.getAttribute('title')).not.toContain('Optional')
   })
 
@@ -288,7 +287,7 @@ describe('PortsTab', () => {
   it('strips all edit chrome when portified — no "(optional)" label, no "=" twin', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
     await act(async () => {
-      root.render(<PortsTab feature="cns_exactly_once_fallback" portified onStartPortify={vi.fn()} />)
+      root.render(<PortsTab feature="cns_exactly_once_fallback" portified />)
     })
     expect(container.textContent).toContain('${port.api}')
     // Edit-mode chrome is gone: no "(optional)" label, no "=" twin glyph.
@@ -301,7 +300,7 @@ describe('PortsTab', () => {
     // so the in-place refetch returns the pre-Portify (no-ports) doc.
     vi.mocked(getFeatureConfigDoc).mockResolvedValueOnce(docWithPorts()).mockResolvedValue(docNoPorts())
     await act(async () => {
-      root.render(<PortsTab feature="cns_exactly_once_fallback" portified onStartPortify={vi.fn()} />)
+      root.render(<PortsTab feature="cns_exactly_once_fallback" portified />)
     })
     expect(getFeatureConfigDoc).toHaveBeenCalledTimes(1)
 
@@ -320,13 +319,12 @@ describe('PortsTab', () => {
     expect(getFeatureConfigDoc).toHaveBeenCalledTimes(2)
   })
 
-  it('shows the in-progress band for an active workflow on this feature — View progress opens it, start/remove actions hidden', async () => {
+  it('shows the in-progress band for an active workflow on this feature — View in Flight opens it, start/remove actions hidden', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
     mockWorkflows = [{ workflowId: 'wf_live', feature: 'cns_exactly_once_fallback', status: 'verifying', startedAt: '2026-01-01T00:00:00Z' }]
-    const onStartPortify = vi.fn()
     const onOpenPortify = vi.fn()
     await act(async () => {
-      root.render(<PortsTab feature="cns_exactly_once_fallback" onStartPortify={onStartPortify} onOpenPortify={onOpenPortify} />)
+      root.render(<PortsTab feature="cns_exactly_once_fallback" onOpenPortify={onOpenPortify} />)
     })
     // The active workflow owns the band regardless of how it was started
     // (this dialog, a flight stage, or an agent over MCP — same shared index).
@@ -335,38 +333,37 @@ describe('PortsTab', () => {
     expect(buttons.some((b) => b.textContent?.includes('Portify') && !b.textContent.includes('progress'))).toBe(false)
     expect(buttons.some((b) => b.getAttribute('aria-label') === 'Clear port slots')).toBe(false)
 
-    await act(async () => clickButton('View progress'))
-    expect(onOpenPortify).toHaveBeenCalledWith('wf_live')
-    expect(onStartPortify).not.toHaveBeenCalled()
+    await act(async () => clickButton('View in Flight'))
+    expect(onOpenPortify).toHaveBeenCalledWith('cns_exactly_once_fallback')
   })
 
-  it('labels a parked ready-to-save workflow "Review & save"', async () => {
+  it('labels a parked ready-to-save workflow "Review in Flight"', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
     mockWorkflows = [{ workflowId: 'wf_parked', feature: 'cns_exactly_once_fallback', status: 'ready-to-save', startedAt: '2026-01-01T00:00:00Z' }]
     const onOpenPortify = vi.fn()
     await act(async () => {
-      root.render(<PortsTab feature="cns_exactly_once_fallback" onStartPortify={vi.fn()} onOpenPortify={onOpenPortify} />)
+      root.render(<PortsTab feature="cns_exactly_once_fallback" onOpenPortify={onOpenPortify} />)
     })
     expect(container.textContent).toContain('ready to save')
-    await act(async () => clickButton('Review & save'))
-    expect(onOpenPortify).toHaveBeenCalledWith('wf_parked')
+    await act(async () => clickButton('Review in Flight'))
+    expect(onOpenPortify).toHaveBeenCalledWith('cns_exactly_once_fallback')
   })
 
   it('disables Portify while another feature portifies (single-flight)', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docNoPorts())
     mockWorkflows = [{ workflowId: 'wf_other', feature: 'other_feature', status: 'editing', startedAt: '2026-01-01T00:00:00Z' }]
-    const onStartPortify = vi.fn()
+    const onOpenPortify = vi.fn()
     await act(async () => {
-      root.render(<PortsTab feature="np_feature" onStartPortify={onStartPortify} />)
+      root.render(<PortsTab feature="np_feature" onOpenPortify={onOpenPortify} />)
     })
     // Not this feature's workflow → normal band, but the start button is
     // blocked and says why.
     expect(container.textContent).toContain('Not injectable')
-    const btn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('Portify'))!
+    const btn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('Open in Flight'))!
     expect((btn as HTMLButtonElement).disabled).toBe(true)
     expect(btn.getAttribute('title')).toContain('other_feature')
     await act(async () => btn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    expect(onStartPortify).not.toHaveBeenCalled()
+    expect(onOpenPortify).not.toHaveBeenCalled()
   })
 
   it('renders the saved overlay INLINE for a portified feature — collapsed diff, folded stored-in path, double-boot proof; no wizard click-out', async () => {
@@ -375,7 +372,7 @@ describe('PortsTab', () => {
     mockWorkflows = [{ workflowId: 'wf_saved', feature: 'cns_exactly_once_fallback', status: 'saved', startedAt: '2026-01-01T00:00:00Z' }]
     const onOpenPortify = vi.fn()
     await act(async () => {
-      root.render(<PortsTab feature="cns_exactly_once_fallback" portified onStartPortify={vi.fn()} onOpenPortify={onOpenPortify} />)
+      root.render(<PortsTab feature="cns_exactly_once_fallback" portified onOpenPortify={onOpenPortify} />)
     })
     await flush()
 

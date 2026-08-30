@@ -12,7 +12,6 @@ import { VerticalSplit } from './shared/ui/VerticalSplit'
 import { GlobalStatusBar } from './shared/shell/GlobalStatusBar'
 import { CollisionConfirmDialog } from './features/runs/components/CollisionConfirmDialog'
 import { RunStartErrorDialog } from './features/runs/components/RunStartErrorDialog'
-import { PortifyWizard } from './features/portify/components/PortifyWizard'
 // The three routed full-screen views load lazily: none of them is needed for
 // the workspace's first paint, and together (the flight detail tree above all)
 // they were a large slice of the single main chunk every cold load downloaded.
@@ -24,7 +23,7 @@ import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsC
 import { useRunStart } from './features/runs/state/use-run-start'
 import { useFeatureWorkState, type FeatureActivity } from './features/flights/state/feature-activity'
 import { presentedIndexStages, resolveFeatureFlightAction } from './features/flights'
-import { derivedFlightFeature, useDerivedFeatureStages } from './features/flights/lib/derived-stages'
+import { derivedFlightFeature, derivedFlightToken, useDerivedFeatureStages } from './features/flights/lib/derived-stages'
 import { derivePendingFeatures } from './features/flights/lib/pending-features'
 import type { RepoOption } from './features/flights/components/RepoMultiPicker'
 import { ToastHost } from '@/shared/ui/atoms'
@@ -58,7 +57,6 @@ export function App() {
     demoOpen, setDemoOpen,
     settingsOpen, setSettingsOpen, modelsFor, setModelsFor,
     resumePlanTaskId, setResumePlanTaskId,
-    portifyTarget, setPortifyTarget,
     focusTest, runTab,
     openFlight, navigateToRun, navigateToCoverage, returnFlight, selectStartedRun,
     flightStage, setFlightStage,
@@ -135,6 +133,17 @@ export function App() {
     navigateToCoverage(feature)
   }, [navigateToCoverage])
 
+  // Portify is a Flight stage, regardless of whether a conductor record exists.
+  // Every entry point resolves the feature's recorded flight or its evidence-
+  // derived token, then pins Parallel setup in the routed stage selection.
+  const openPortifyStage = useCallback((feature: string): void => {
+    const flight = flightsRef.current.find((entry) => entry.feature === feature)
+    setConfigFor(null)
+    setSelectedFeature(feature)
+    openFlight(flight ? flight.flightId : derivedFlightToken(feature))
+    setFlightStage('portify')
+  }, [flightsRef, openFlight, setConfigFor, setFlightStage, setSelectedFeature])
+
   // R83: what the return chip says. The origin is whatever `flight` held — a
   // recorded id (name it from the index) or a `feature:<name>` derived token
   // (the name IS the token). An id the index no longer carries still gets a
@@ -154,13 +163,12 @@ export function App() {
   const openActivity = useCallback((feature: string, activity: FeatureActivity) => {
     const target = resolveActivityTarget(feature, activity, flightsRef.current)
     if (target.kind === 'run') navigateToRun(target.feature, target.runId)
-    else if (target.kind === 'flight') {
+    else {
       openFlight(target.flightId)
       // openFlight clears the stage when the flight changes, so pin it after.
       if (target.stage) setFlightStage(target.stage)
     }
-    else setPortifyTarget({ kind: 'revisit', workflowId: target.workflowId })
-  }, [navigateToRun, openFlight, setFlightStage, setPortifyTarget, flightsRef])
+  }, [navigateToRun, openFlight, setFlightStage, flightsRef])
 
   // Column 3 lists runs scoped to the currently-selected feature. Boot-only
   // sessions are excluded — they're not test runs and live in the global
@@ -413,8 +421,7 @@ export function App() {
           onStartNewFlight={() => setFlightStartNew(true)}
           onOpenFlight={openFlight}
           flightAction={flightAction}
-          onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
-          onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
+          onOpenPortify={openPortifyStage}
           settingsOpen={settingsOpen}
           onSettingsOpenChange={setSettingsOpen}
           modelsFor={modelsFor}
@@ -507,6 +514,7 @@ export function App() {
         }}
         onOpenActivity={openActivity}
         onStartFlight={(feature) => { setSelectedFeature(feature); setFlightStartFor(feature) }}
+        onOpenPortify={openPortifyStage}
         onNavigateToRun={(feature, runId) => navigateToRun(feature, runId)}
         returnFlight={returnFlight}
         returnFlightLabel={returnFlightLabel}
@@ -520,10 +528,7 @@ export function App() {
           ? <LogCleanupPage
               onClose={() => setView('workspace')}
               onNavigateToRun={(feature, runId) => navigateToRun(feature, runId)}
-              onNavigateToPortify={(workflowId) => {
-                setView('workspace')
-                setPortifyTarget({ kind: 'revisit', workflowId })
-              }}
+              onNavigateToPortify={openPortifyStage}
             />
           : view === 'coverage' && selectedFeature
           ? <CoverageLedgerPage
@@ -618,8 +623,7 @@ export function App() {
           tab={configTab ?? 'playwright'}
           onTabChange={setConfigTab}
           portified={features.find((f) => f.name === configFor)?.portified ?? false}
-          onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
-          onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
+          onOpenPortify={openPortifyStage}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {
             // refreshFeatures(nextFeature) refetches the list and re-selects the
@@ -654,7 +658,7 @@ export function App() {
           info={collisionPrompt.info}
           feature={collisionPrompt.feature}
           portsConfigured={collisionPrompt.portsConfigured}
-          onPortify={() => { const f = collisionPrompt.feature; setCollisionPrompt(null); setPortifyTarget({ kind: 'new', feature: f }) }}
+          onPortify={() => { const f = collisionPrompt.feature; setCollisionPrompt(null); openPortifyStage(f) }}
           onChoose={resolveCollision}
           onCancel={() => setCollisionPrompt(null)}
         />
@@ -667,29 +671,6 @@ export function App() {
           onSwitchBranches={switchBranchesAndRun}
           onPinCurrent={pinCurrentAndRun}
           onClose={() => setStartError(null)}
-        />
-      )}
-      {portifyTarget && (
-        <PortifyWizard
-          // Key on the target identity so switching new→revisit (e.g. the blocked
-          // Plan screen's "Open running workflow") remounts with fresh state —
-          // workflowId is seeded from a prop via useState, which only runs at mount.
-          key={portifyTarget.kind === 'new' ? `new:${portifyTarget.feature}` : `revisit:${portifyTarget.workflowId}`}
-          {...(portifyTarget.kind === 'new'
-            ? { feature: portifyTarget.feature, agent: 'claude' as const }
-            : { workflowId: portifyTarget.workflowId })}
-          onOpenActive={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
-          onClose={() => setPortifyTarget(null)}
-          onSaved={() => {
-            setPortifyTarget(null)
-            // The overlay now exists — refresh /api/features so the "Portified"
-            // badge + Ports-tab indicator reflect it immediately.
-            refreshFeatures(selectedFeatureRef.current)
-            // The overlay also rewrote the port slots; invalidate so the open
-            // Ports tab refetches its config doc instead of waiting for a tab
-            // switch / refresh. (features-changed alone only refreshes the list.)
-            invalidate('ports')
-          }}
         />
       )}
     </div>

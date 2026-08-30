@@ -9,15 +9,6 @@ import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 // and unit-tested, and the state + URL persistence live in one hook
 // (use-workspace-navigation) instead of a dozen useState in the 800-line shell.
 
-/** The port-ification workflow view — an EMBEDDED surface (the Ports tab's
- *  active-workflow button, collision recovery, benchmark), never routed. The
- *  flight is NOT one of these any more: Parallel readiness drills to the Ports
- *  tab instead. 'new' starts a fresh workflow for a feature; 'revisit' reopens
- *  one by id. */
-export type PortifyTarget =
-  | { kind: 'new'; feature: string }
-  | { kind: 'revisit'; workflowId: string }
-
 /** R76: which job the flight launcher is open for. 're-fly' asks "where does the
  *  pipeline restart?" (the stage-entry picker); 'fresh' asks "what should this
  *  flight test?" — editable intent + repos, always a full restart. They're
@@ -66,8 +57,6 @@ export interface NavState {
   modelsFor: ModelsAgent | null
   /** The pre-flight a pill row reopened the new-flight dialog onto. */
   resumePlanTaskId: string | null
-  /** The embedded portify workflow, if open. */
-  portifyTarget: PortifyTarget | null
   /** R82: which failing test the run detail should land on, paired with the run
    *  it belongs to. Stored as a PAIR so selecting a different run makes the focus
    *  inert automatically — no clearing effect to keep in sync, and the run detail
@@ -111,7 +100,6 @@ export function initialNavState(persisted: PersistedView): NavState {
     settingsOpen: persisted.dialog === 'settings',
     modelsFor: persisted.dialog === 'settings' ? persisted.modelsAgent : null,
     resumePlanTaskId: null,
-    portifyTarget: null,
     focusTest: persisted.run && persisted.focusTest
       ? { runId: persisted.run, test: persisted.focusTest }
       : null,
@@ -174,7 +162,6 @@ export function navToPersistedView(state: NavState): PersistedView {
 export type ActivityTarget =
   | { kind: 'run'; feature: string; runId: string }
   | { kind: 'flight'; flightId: string; stage?: FlightStageKey }
-  | { kind: 'portify'; workflowId: string }
 
 export function resolveActivityTarget(
   feature: string,
@@ -197,15 +184,7 @@ export function resolveActivityTarget(
     const flight = flights.find((f) => f.feature === feature)
     return { kind: 'flight', flightId: flight ? flight.flightId : derivedFlightToken(feature), stage }
   }
-  // An INTERNAL portify keeps the embedded workflow view — the app's own agent
-  // is editing a scratch worktree and that view carries its controls. An
-  // external one has nothing to control here (the agent runs in the user's own
-  // client), so it monitors like everything else: the flight's portify stage,
-  // which shows the hand-off card + live status.
-  if (activity.kind === 'portifying' && activity.workflowId && !activity.external) {
-    return { kind: 'portify', workflowId: activity.workflowId }
-  }
-  // Every remaining case — authoring, coverage jobs, exports, runs, or a verb
+  // Every case — authoring, coverage jobs, exports, runs, portify, or a verb
   // whose own id is missing (an older server, or a job caught mid-write) —
   // opens the flight at the stage that verb belongs to. Skills the user invokes
   // and GUI-started jobs monitor in the SAME place: the FlightPage stage.

@@ -438,7 +438,7 @@ describe('stage summary + drill-through (R6)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-portify"]')?.click()
     })
-    // The Ports tab, NOT the portify wizard — FlightPage never opens the wizard.
+    // The Ports tab is supporting config; Portify workflow ownership stays here.
     expect(onOpenConfig).toHaveBeenCalledWith('checkout', 'ports')
   })
 

@@ -227,11 +227,11 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
     workflowId: string,
     instructions: string,
     context: Record<string, unknown>,
-    note?: string,
+    note: string,
   ): StageOutcome =>
     externalWorkCheckpoint(ctx, 'portify', instructions, {
       message:
-        `${note ? `${note}\n\n` : ''}Port-ify in your own client: edit the worktree paths in context.targets so every listener reads an injected port and declare the matching \`ports\` slots in context.configPath, then drive the standalone loop — submit_external_portify("${workflowId}"), poll get_portify, re-edit on a failed verify. STOP at status "ready-to-save" and respond submit here (no data needed — Canary re-reads the workflow and the overlay mark). Do NOT call save_portify or cancel_portify: this flight owns the save decision. Answer run-internally to hand the whole job to Canary's own agent.`,
+        `${note}\n\nPort-ify in your own client: edit the worktree paths in context.targets so every listener reads an injected port and declare the matching \`ports\` slots in context.configPath, then drive the standalone loop — submit_external_portify("${workflowId}"), poll get_portify, re-edit on a failed verify. STOP at status "ready-to-save" and respond submit here (no data needed — Canary re-reads the workflow and the overlay mark). Do NOT call save_portify or cancel_portify: this flight owns the save decision. Answer run-internally to hand the whole job to Canary's own agent.`,
       context: { workflowId, ...context },
     })
 

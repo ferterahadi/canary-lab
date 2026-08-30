@@ -349,6 +349,100 @@ describe('plan-features (R54)', () => {
     expect((list.json() as { flights: Array<{ feature: string }> }).flights.map((f) => f.feature)).toContain('solo-feature')
   })
 
+  it('cancelling a stale planning frame aborts the flight that won the auto-launch race', async () => {
+    let releaseScout: (() => void) | null = null
+    const adapters = allDone()
+    adapters.scout = {
+      run: async () => {
+        await new Promise<void>((resolve) => { releaseScout = resolve })
+        return { kind: 'done' as const }
+      },
+    }
+    app = await buildApp(adapters, undefined, agentReturning(planText([
+      { name: 'race-winner', description: 'test the whole thing' },
+    ])))
+    const task = await planAndWait(app)
+    expect(task.status).toBe('launched')
+    const flightId = task.launchedFlightIds![0]
+
+    const cancelled = await app.inject({ method: 'POST', url: `/api/flights/plan-features/${task.taskId}/cancel` })
+    expect(cancelled.statusCode).toBe(200)
+    expect((cancelled.json() as PlanFeaturesTask).status).toBe('cancelled')
+    const flight = await app.inject({ method: 'GET', url: `/api/flights/${flightId}` })
+    expect((flight.json() as { status: string }).status).toBe('aborted')
+
+    releaseScout!()
+  })
+
+  it('cancels every launched descendant without letting a queued sibling start between aborts', async () => {
+    let releaseScout: (() => void) | null = null
+    const adapters = allDone()
+    adapters.scout = {
+      run: async () => {
+        await new Promise<void>((resolve) => { releaseScout = resolve })
+        return { kind: 'done' as const }
+      },
+    }
+    app = await buildApp(adapters, undefined, agentReturning(planText([
+      { name: 'batch-one', description: 'test one' },
+      { name: 'batch-two', description: 'test two' },
+    ])))
+    const task = await planAndWait(app)
+    const launched = await app.inject({
+      method: 'POST',
+      url: `/api/flights/plan-features/${task.taskId}/launch`,
+      body: { features: task.result!.features },
+    })
+    const { flightIds } = launched.json() as { flightIds: string[] }
+    expect(flightIds).toHaveLength(2)
+    const deadline = Date.now() + 3000
+    while (releaseScout === null) {
+      if (Date.now() > deadline) throw new Error('first descendant never reached scout')
+      await new Promise((r) => setTimeout(r, 10))
+    }
+
+    const cancelled = await app.inject({ method: 'POST', url: `/api/flights/plan-features/${task.taskId}/cancel` })
+    expect(cancelled.statusCode).toBe(200)
+    for (const flightId of flightIds) {
+      const flight = await app.inject({ method: 'GET', url: `/api/flights/${flightId}` })
+      expect((flight.json() as { status: string }).status).toBe('aborted')
+    }
+
+    releaseScout!()
+  })
+
+  it('cancels a checkpointed descendant before its queued sibling can start', async () => {
+    const adapters = allDone()
+    adapters.scout = {
+      run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
+    }
+    app = await buildApp(adapters, undefined, agentReturning(planText([
+      { name: 'checkpointed', description: 'test checkpointed' },
+      { name: 'queued', description: 'test queued' },
+    ])))
+    const task = await planAndWait(app)
+    const launched = await app.inject({
+      method: 'POST',
+      url: `/api/flights/plan-features/${task.taskId}/launch`,
+      body: { features: task.result!.features },
+    })
+    const { flightIds } = launched.json() as { flightIds: string[] }
+    const deadline = Date.now() + 3000
+    for (;;) {
+      const first = (await app.inject({ method: 'GET', url: `/api/flights/${flightIds[0]}` })).json() as { status: string }
+      if (first.status === 'waiting-for-approval') break
+      if (Date.now() > deadline) throw new Error('first descendant never reached its checkpoint')
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+
+    const cancelled = await app.inject({ method: 'POST', url: `/api/flights/plan-features/${task.taskId}/cancel` })
+    expect(cancelled.statusCode).toBe(200)
+    for (const flightId of flightIds) {
+      const flight = await app.inject({ method: 'GET', url: `/api/flights/${flightId}` })
+      expect((flight.json() as { status: string }).status).toBe('aborted')
+    }
+  })
+
   it('a single-feature plan whose name clashes stays done with the conflict recorded', async () => {
     app = await buildApp(allDone(), undefined, agentReturning(planText([
       { name: 'checkout', description: 'test checkout' },

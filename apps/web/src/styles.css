@@ -1358,18 +1358,21 @@ body {
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-popover);
   animation: fm-fade-up 180ms ease-out;
+  /* Every dialog keeps a 10% viewport band above and below; individual
+     surfaces may be shorter, but none may grow into that reserved space. */
+  max-height: 80vh;
 }
 
 .cl-mcp-promo-modal {
   width: min(880px, calc(100vw - 2rem));
-  max-height: 88vh;
+  max-height: 80vh;
   display: flex;
   flex-direction: column;
   position: relative;
 }
 
 .cl-mcp-promo-backdrop {
-  padding-block: 6vh;
+  padding-block: 10vh;
   padding-inline: 1rem;
 }
 

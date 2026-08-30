@@ -45,6 +45,29 @@ describe('repo path overrides', () => {
     expect(original.config.repos[0].localPath).toBe('/source/app')
   })
 
+  it('leaves malformed config shapes and unsupported repo entries unchanged', () => {
+    expect(parseRepoPathOverrides(undefined)).toEqual({})
+    expect(parseRepoPathOverrides(JSON.stringify(['not', 'a config']))).toEqual({})
+    expect(parseRepoPathOverrides(JSON.stringify(null))).toEqual({})
+
+    const noRepos = { config: { title: 'feature' } }
+    expect(applyRepoPathOverridesToFeatureConfig(noRepos, { app: '/worktree/app' })).toEqual(noRepos)
+    expect(applyRepoPathOverridesToFeatureConfig({ config: null }, { app: '/worktree/app' })).toEqual({ config: null })
+    expect(applyRepoPathOverridesToFeatureConfig(null, { app: '/worktree/app' })).toBeNull()
+
+    const config = {
+      default: {
+        repos: [null, 'not-a-repo', [], { name: 7, localPath: '/source/number' }, { name: 'app', localPath: '/source/app' }],
+      },
+    }
+    expect(applyRepoPathOverridesToFeatureConfig(config, { app: '/worktree/app' })).toEqual({
+      default: {
+        repos: [null, 'not-a-repo', [], { name: 7, localPath: '/source/number' }, { name: 'app', localPath: '/worktree/app' }],
+      },
+    })
+    expect(applyRepoPathOverridesToFeatureConfig({ repos: [] }, { app: '/worktree/app' })).toEqual({ repos: [] })
+  })
+
   it('rewrites only feature config loads and restores the original loader', () => {
     const originalLoad = () => ({ config: { repos: [{ name: 'app', localPath: '/source/app' }] } })
     const loader = {
@@ -61,6 +84,35 @@ describe('repo path overrides', () => {
     expect(loader._load('/suite/helper.cjs', null, false)).toEqual({
       config: { repos: [{ name: 'app', localPath: '/source/app' }] },
     })
+    restore()
+    expect(loader._load).toBe(originalLoad)
+  })
+
+  it('keeps a later loader hook in place and returns unchanged modules when resolution fails', () => {
+    const originalLoad = () => ({ config: { repos: [{ name: 'app', localPath: '/source/app' }] } })
+    const replacementLoad = () => ({ replacement: true })
+    const loader = {
+      _load: originalLoad,
+      _resolveFilename: () => { throw new Error('unresolved') },
+    }
+    const restore = installRepoPathOverridePreload(loader, {
+      [REPO_PATH_OVERRIDES_ENV]: JSON.stringify({ app: '/worktree/app' }),
+    })
+
+    expect(loader._load('/suite/feature.config.cjs', null, false)).toEqual({
+      config: { repos: [{ name: 'app', localPath: '/source/app' }] },
+    })
+    loader._load = replacementLoad
+    restore()
+    expect(loader._load).toBe(replacementLoad)
+  })
+
+  it('does not install a hook when no repo override is configured', () => {
+    const originalLoad = () => ({ config: { repos: [] } })
+    const loader = { _load: originalLoad, _resolveFilename: (request: string) => request }
+
+    const restore = installRepoPathOverridePreload(loader, {})
+
     restore()
     expect(loader._load).toBe(originalLoad)
   })

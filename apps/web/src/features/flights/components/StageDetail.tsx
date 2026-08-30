@@ -7,6 +7,7 @@ import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
 import { evaluationTaskId, FactsGrid, StageColumn, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageRowKey, stageStateLine, type StageRailRow } from './stage-meta'
 import { useEvaluationExports } from '@/features/evaluation'
+import { PortifyWorkflowControls } from '@/features/portify'
 import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
 import type { FlightDrillThroughs } from './FlightPage'
@@ -213,11 +214,13 @@ export function StageDetail({
   // Derived Flights learn external task identity from the task's own live
   // stream before the workspace evidence probe catches up. Feed that identity
   // through the normal stage-band path so the result lands without a refresh.
-  const externalPortifyId = externalTrace?.kind === 'portifying'
-    ? externalTrace.resourceId
-    : undefined
-  const dataStage: FlightStage = stage.key === 'portify' && externalPortifyId && !portifyWorkflowId(stage)
-    ? { ...stage, evidence: { ...(stage.evidence ?? {}), workflowId: externalPortifyId } }
+  const livePortifyId = activity?.kind === 'portifying'
+    ? activity.workflowId
+    : externalTrace?.kind === 'portifying'
+      ? externalTrace.resourceId
+      : undefined
+  const dataStage: FlightStage = stage.key === 'portify' && livePortifyId
+    ? { ...stage, evidence: { ...(stage.evidence ?? {}), workflowId: livePortifyId } }
     : stage
   // The Evaluation Report's deliverable: one resolved export task feeds both the
   // facts (run · report mode · archive name) and the activity rail below, so the
@@ -326,10 +329,18 @@ export function StageDetail({
   // timeline, a raw export has none and shows only its system rows). Agentless
   // stages pass no source and render system rows alone.
   // Portify's agent lives under the WORKFLOW dir (logs/portify/<wf>), not a
-  // flight sidecar — tail it through the portify source the wizard already
-  // uses, keyed by the id the adapter pins as live progress. Without this the
+  // flight sidecar — tail it through the Portify workflow source, keyed by the
+  // id the adapter pins as live progress. Without this the
   // stage's longest phase (the agent editing) shows an empty rail.
   const portifyId = portifyWorkflowId(dataStage)
+  const recordedPortifyId = portifyWorkflowId(stage)
+  const flightOwnsPortify = portifyId != null
+    && recordedPortifyId === portifyId
+    && (flight.status === 'running' || checkpointStage?.checkpoint?.kind === 'portify-apply')
+  const standalonePortifyActionable = band.portify?.status === 'ready-to-save'
+    || band.portify?.status === 'planning'
+    || band.portify?.status === 'editing'
+    || band.portify?.status === 'verifying'
   const localActivitySource: AgentSessionSource | undefined =
     evalTaskId ? { kind: 'evaluation', taskId: evalTaskId, live }
     : portifyId ? { kind: 'portify', workflowId: portifyId, live }
@@ -587,6 +598,13 @@ export function StageDetail({
         <>
           <DoubleBootPanel portify={band.portify ?? null} awaiting={awaitingData} />
           <OverlayPanel portify={band.portify ?? null} awaiting={awaitingData} />
+          {band.portify && standalonePortifyActionable && !flightOwnsPortify && (
+            <StageColumn>
+              <div className="cl-frame p-4">
+                <PortifyWorkflowControls manifest={band.portify} onChanged={onResponded} />
+              </div>
+            </StageColumn>
+          )}
         </>
       )}
 

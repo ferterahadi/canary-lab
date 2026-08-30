@@ -14,7 +14,7 @@ vi.mock('../../runs/logic/run-store', async (importOriginal) => {
 
 const { buildStageEntryValidator } = await import('./flights')
 // Not re-exported from the barrel — the conductor context is its only consumer.
-const { buildStageEntryLinkResolver } = await import('./flight-route-support')
+const { buildStageEntryLinkResolver, parseFlightExternalAgentSession } = await import('./flight-route-support')
 
 // `evaluation-export` is the only stage whose prerequisite is a *run*, so it's
 // the entry point that consults the standalone-run fallback. Every earlier
@@ -191,5 +191,25 @@ describe('buildStageEntryLinkResolver', () => {
   it('resolves nothing for any other entry stage', () => {
     useRealIndex([runRow({ runId: 'r7', status: 'passed' })])
     expect(buildStageEntryLinkResolver(logsDir)({ feature: FEATURE, fromStage: 'run' })).toBeUndefined()
+  })
+})
+
+describe('parseFlightExternalAgentSession', () => {
+  it('retains each optional session handle after trimming it for the persisted Flight record', () => {
+    expect(parseFlightExternalAgentSession({
+      clientKind: 'codex',
+      sessionId: ' session-1 ',
+      conversationName: ' Checkout flight ',
+      sessionUrl: ' https://chatgpt.com/codex/tasks/1 ',
+    })).toEqual({
+      clientKind: 'codex',
+      sessionId: 'session-1',
+      conversationName: 'Checkout flight',
+      sessionUrl: 'https://chatgpt.com/codex/tasks/1',
+    })
+  })
+
+  it('leaves optional session handles absent when the external client did not provide them', () => {
+    expect(parseFlightExternalAgentSession({ clientKind: 'claude' })).toEqual({ clientKind: 'claude' })
   })
 })

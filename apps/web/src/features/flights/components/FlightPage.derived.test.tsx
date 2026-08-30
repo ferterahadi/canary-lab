@@ -454,6 +454,40 @@ describe('derived flights (R81)', () => {
     expect(container.querySelector('[data-testid="overlay-panel"]')?.textContent).toContain('server.ts')
   })
 
+  it('opens a standalone internal Portify review inside the Flight stage', async () => {
+    mocks.portifyWorkflow.mockReturnValue({
+      workflowId: 'wf-review',
+      feature: 'go-smoke',
+      repos: [{ name: 'workflow-app', path: '/repo', worktreePath: '/worktree' }],
+      agent: 'claude',
+      branch: 'canary/portify',
+      status: 'ready-to-save',
+      attempt: 1,
+      maxAttempts: 3,
+      startedAt: '2026-08-25T00:00:00Z',
+      verification: {
+        ok: true,
+        instances: [
+          { ok: true, ports: { web: 4001 } },
+          { ok: true, ports: { web: 4002 } },
+        ],
+      },
+      diff: '+listen(process.env.PORT)',
+    })
+    await render('feature:go-smoke', {
+      derivedStages: new Map([['go-smoke', allDone().map((entry) =>
+        entry.key === 'portify' ? { ...entry, status: 'pending' as const } : entry,
+      )]]),
+      activity: new Map([['go-smoke', { kind: 'portifying', workflowId: 'wf-review' }]]),
+      stage: 'portify',
+      onSelectStage: vi.fn(),
+    })
+
+    expect(mocks.portifyWorkflow).toHaveBeenCalledWith('wf-review')
+    expect(container.querySelector('[data-testid="portify-workflow-review"]')).not.toBeNull()
+    expect(container.textContent).toContain('Review & save')
+  })
+
   it('retains the latest terminal run in the derived Test run pane', async () => {
     const stages = allDone().map((stage) => stage.key === 'run'
       ? { ...stage, evidence: { runId: 'run-latest', status: 'passed' } }

@@ -152,14 +152,12 @@ describe('useWorkspaceNavigation — dialog openers', () => {
       nav.setFlightStartNew(true)
       nav.setDemoOpen(true)
       nav.setResumePlanTaskId('plan-1')
-      nav.setPortifyTarget({ kind: 'new', feature: 'checkout' })
     })
 
     expect(nav.verifyOpen).toBe(true)
     expect(nav.flightStartNew).toBe(true)
     expect(nav.demoOpen).toBe(true)
     expect(nav.resumePlanTaskId).toBe('plan-1')
-    expect(nav.portifyTarget).toEqual({ kind: 'new', feature: 'checkout' })
     // flight-new outranks demo and verify in the z-order.
     expect(nav.routedDialog).toBe('flight-new')
   })

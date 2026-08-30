@@ -193,7 +193,7 @@ export function Phase({ label, active, done }: { label: string; active?: boolean
   )
 }
 
-export function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m: PortifyManifest; busy: boolean; saved: boolean; onSave: () => void; onRequestChanges: () => void; onDone: () => void }) {
+export function ReviewScreen({ m, busy, saved, canRequestChanges = true, onSave, onRequestChanges, onDone }: { m: PortifyManifest; busy: boolean; saved: boolean; canRequestChanges?: boolean; onSave: () => void; onRequestChanges: () => void; onDone: () => void }) {
   const rounds = m.feedbackRounds ?? 0
   // At ready-to-save verification is always set; a prior revise round may have
   // left it failed — in that case the diff isn't proven and can't be saved.
@@ -252,7 +252,7 @@ export function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone 
           : <DiffView diff="" onOpenInEditor={openProject} />}
       {(
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, marginTop: 16 }}>
-          <button
+          {canRequestChanges && <button
             type="button"
             onClick={onRequestChanges}
             disabled={busy}
@@ -264,7 +264,7 @@ export function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone 
             }}
           >
             Request changes
-          </button>
+          </button>}
           <button
             type="button"
             className="cl-button-primary"
@@ -347,7 +347,8 @@ export function FeedbackModal({ busy, onSend, onClose }: { busy: boolean; onSend
         role="dialog"
         aria-modal="true"
         aria-label="Ask the agent for changes"
-        style={{ width: 'min(560px, 92%)', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', padding: 20 }}
+        className="cl-modal"
+        style={{ width: 'min(560px, 92%)', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', padding: 20, overflowY: 'auto' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>Ask the agent for changes</div>

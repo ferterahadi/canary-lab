@@ -44,16 +44,16 @@ function PortsFrame({ children }: { children: ReactNode }) {
 }
 
 /**
- * Read-only view of a feature's injectable port slots, and the home for Portify.
+ * Read-only view of a feature's injectable port slots, with a route to the
+ * Flight stage that owns Portify.
  * Slots are authored in the feature config file (services that read a port from
  * env) or by Portify (hardcoded-port services it rewrites) — never hand-edited
- * here. This tab shows them grouped by service → command and launches / removes
- * Portify.
+ * here. This tab shows them grouped by service → command and removes a saved
+ * overlay; workflow actions route back to Flight.
  */
 export function PortsTab({
   feature,
   portified = false,
-  onStartPortify,
   onOpenPortify,
 }: {
   feature: string
@@ -61,9 +61,8 @@ export function PortsTab({
    *  (the `overlayExists` check, via /api/features), NOT the declared-slot
    *  count. This is what "Portified" means: a verified overlay is on disk. */
   portified?: boolean
-  onStartPortify?: (feature: string) => void
-  /** Reopen a past/active port-ification workflow (by id) in the wizard. */
-  onOpenPortify?: (workflowId: string) => void
+  /** Open this feature's Flight at Parallel setup. */
+  onOpenPortify?: (feature: string) => void
 }) {
   // Bumped when a portify overlay is saved so the slot table refetches the
   // rewritten config doc in place — without it the tab kept the pre-portify
@@ -218,16 +217,16 @@ export function PortsTab({
           }
           right={
             <div className="mr-[14px] flex shrink-0 items-center gap-2">
-            {/* An active workflow owns the whole action area: one button that
-                opens it in the wizard (follow progress / review & save). The
-                start/remove actions return once it settles. */}
+            {/* Portify is owned by the Flight stage. An active workflow keeps
+                the same one-click entry, but it lands on Parallel setup where
+                progress and review live with the rest of the pipeline. */}
             {activeHere && onOpenPortify && (
               <button
                 type="button"
-                onClick={() => onOpenPortify(activeHere.workflowId)}
+                onClick={() => onOpenPortify(feature)}
                 title={activeHere.status === 'ready-to-save'
                   ? 'Open the parked review — inspect the rewrite diff and save the overlay.'
-                  : 'Open the running port-ification in the wizard to follow its progress.'}
+                  : 'Open Parallel setup in Flight to follow its progress.'}
                 className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-[11px] font-medium transition-colors duration-150"
                 style={{
                   color: 'var(--running)',
@@ -235,13 +234,11 @@ export function PortsTab({
                   background: 'color-mix(in srgb, var(--running) 8%, transparent)',
                 }}
               >
-                {activeHere.status === 'ready-to-save' ? 'Review & save' : 'View progress'}
+                {activeHere.status === 'ready-to-save' ? 'Review in Flight' : 'View in Flight'}
               </button>
             )}
-            {/* The saved overlay itself now renders inline below the band
-                (SavedOverlayPanel) — no button to open the wizard just to see
-                the diff. `onOpenPortify` stays for the active-workflow button
-                above (follow progress / review & save). */}
+            {/* The saved overlay stays inline below the band for configuration
+                reference. Workflow ownership and actions live in Flight. */}
             {/* Verified → undo the whole port-ification (overlay + config).
                 Re-portifying is the sanctioned two-step: Remove, then the band
                 offers Portify again. (No "Clear port slots": the UI can't tell
@@ -268,17 +265,17 @@ export function PortsTab({
                 partial). A fully declared feature keeps a demoted ghost —
                 optional, but the recovery door if a service ignores its env
                 var. Verified features have no start button at all. */}
-            {!activeHere && bandState !== 'verified' && onStartPortify && (
+            {!activeHere && bandState !== 'verified' && onOpenPortify && (
               <button
                 type="button"
-                onClick={() => onStartPortify(feature)}
+                onClick={() => onOpenPortify(feature)}
                 disabled={blockedBy != null}
                 className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-[11px] font-medium transition-colors duration-150"
                 title={blockedBy
                   ? `Portify runs one workflow at a time — ${blockedBy.feature} is currently portifying.`
                   : bandState === 'declared'
                   ? 'Optional — slots are already declared. Run it if a service ignores its env var and needs its listener rewritten.'
-                  : 'Rewrite every listener to an injectable port so the suite can boot concurrently.'}
+                  : 'Open Parallel setup in Flight to make the suite concurrency-ready.'}
                 style={bandState === 'declared'
                   ? {
                       color: 'var(--text-secondary)',
@@ -295,7 +292,7 @@ export function PortsTab({
                       cursor: blockedBy ? 'not-allowed' : undefined,
                     }}
               >
-                Portify
+                Open in Flight
               </button>
             )}
             </div>

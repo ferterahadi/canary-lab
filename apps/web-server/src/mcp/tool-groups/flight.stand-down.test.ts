@@ -208,6 +208,21 @@ describe('get_flight — steering after a stop', () => {
     expect(out.handOffIdle).toBeUndefined()
   })
 
+  it('keeps the Report path in a takeover of legacy external Parallel setup', async () => {
+    const flight = parkedFlight({ currentStage: 'portify', links: { evaluationZip: '/runs/evaluation.zip' } })
+    flight.stages[0].checkpoint.data = {
+      ...flight.stages[0].checkpoint.data,
+      stage: 'portify',
+      takeoverRequestedAt: '2026-08-25T01:00:00.000Z',
+    }
+    const { call } = harness({ reply: { statusCode: 200, body: flight } })
+    const next = String((await call('get_flight', { flightId: 'fl-1' })).next)
+
+    expect(next).toContain('TAKEOVER REQUESTED')
+    expect(next).toContain('Report is ready')
+    expect(next).toContain('/runs/evaluation.zip')
+  })
+
   it('keeps the hand-off id when an oversized prompt is trimmed out of the view', async () => {
     // Without the id the client cannot submit at all, so it is structural — it has
     // to survive the same trim that drops the prompt.

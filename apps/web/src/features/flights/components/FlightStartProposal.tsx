@@ -16,11 +16,13 @@ export function PlanningView({
   busy,
   error,
   onSkip,
+  onCancel,
 }: {
   task: PlanFeaturesTask | null
   busy: boolean
   error: ReactNode
   onSkip: () => void
+  onCancel: (taskId: string) => void
 }) {
   const failed = task?.status === 'failed'
   return (
@@ -55,12 +57,26 @@ export function PlanningView({
           </button>
         </div>
       ) : (
-        <div className="flex items-center gap-1.5 text-[11px]" data-testid="flight-plan-background-hint" style={{ color: 'var(--text-muted)' }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
-            <path d="M22 2 11 13" />
-            <path d="M22 2 15 22l-4-9-9-4Z" />
-          </svg>
-          Close anytime — planning keeps running and waits for you in the Flights pill.
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-1.5 text-[11px]" data-testid="flight-plan-background-hint" style={{ color: 'var(--text-muted)' }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+              <path d="M22 2 11 13" />
+              <path d="M22 2 15 22l-4-9-9-4Z" />
+            </svg>
+            <span>Close anytime — planning keeps running and waits for you in the Flights pill.</span>
+          </div>
+          {task?.status === 'running' && (
+            <button
+              type="button"
+              data-testid="flight-plan-cancel"
+              disabled={busy}
+              onClick={() => onCancel(task.taskId)}
+              className="cl-button shrink-0 px-2.5 py-1 text-xs"
+              style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
+            >
+              {busy ? 'Stopping…' : 'Stop planning'}
+            </button>
+          )}
         </div>
       )}
     </div>

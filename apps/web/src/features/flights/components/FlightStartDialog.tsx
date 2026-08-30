@@ -175,6 +175,7 @@ export function FlightStartDialog({
     freshMode,
     canSubmit,
     startSingleFlight,
+    cancelPlanning,
     launchProposal,
     stopAndStartFresh,
     start,
@@ -342,7 +343,7 @@ export function FlightStartDialog({
       onClose={onClose}
       // Both form flavours carry the step-list disclosure, so both pin their
       // height and scroll the body instead of resizing the whole dialog.
-      height={formView ? 'min(608px, calc(100vh - 2rem))' : undefined}
+      height={formView ? 'min(608px, 80vh)' : undefined}
       footer={formView ? formFooter : undefined}
       icon={
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -422,6 +423,7 @@ export function FlightStartDialog({
             busy={busy}
             error={errorBlock}
             onSkip={startSingleFlight}
+            onCancel={cancelPlanning}
           />
         ) : newFlight && phase === 'proposal' ? (
           <ProposalView

@@ -5,6 +5,9 @@ import { useActivePortify } from '../state/PortifyContext'
 import { BlockedScreen, ErrorBanner, ExerciseScreen, FailedScreen, FeedbackModal, NotFoundScreen, PlanScreen, ReviewScreen, mono } from './PortifyScreens'
 import { Stepper, ghostBtn, isNavigable, isSaved, isTerminalOrParked, stepIndexFor } from './PortifyStepper'
 
+/** @deprecated Workflow navigation now lands on Flight → Parallel setup.
+ *  Kept temporarily as a compatibility reference while its remaining screen
+ *  pieces are moved into the stage-owned surface. */
 export function PortifyWizard({
   feature,
   agent = 'claude',

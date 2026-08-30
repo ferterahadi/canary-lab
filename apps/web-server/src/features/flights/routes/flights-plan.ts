@@ -11,8 +11,8 @@ import {
   resolveWorkflowAgentRef,
 } from '../../agent-sessions/logic/agent-session-log'
 import { abortFlight, drainQueuedFlights } from '../logic/conductor'
-import { deriveFeatureSlug, type PlannedFeature, type PlanFeaturesTask } from '../../../../../../shared/flights/types'
-import { startPlanFeatures } from '../logic/plan-features'
+import { deriveFeatureSlug, isTerminalFlightStatus, type PlannedFeature, type PlanFeaturesTask } from '../../../../../../shared/flights/types'
+import { cancelPlanFeatures, startPlanFeatures } from '../logic/plan-features'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { executePlannedLaunch, expandHome, resolveFlightModels } from './flight-route-support'
 
@@ -102,6 +102,33 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
         return { error: `plan task not found: ${req.params.taskId}` }
       }
       return task
+    },
+  )
+
+  app.post<{ Params: { taskId: string } }>(
+    '/api/flights/plan-features/:taskId/cancel',
+    async (req, reply) => {
+      try {
+        const task = await cancelPlanFeatures(req.params.taskId, planStore)
+        // A stale planning frame can lose the last-millisecond race to the
+        // server's single-feature auto-launch. Stop queued siblings first so
+        // aborting the active flight cannot drain and start one between calls.
+        const descendants = (task.launchedFlightIds ?? [])
+          .map((flightId) => store.get(flightId))
+          .filter((flight): flight is NonNullable<typeof flight> =>
+            flight !== null && !isTerminalFlightStatus(flight.status))
+          .sort((a, b) => Number(a.status === 'running' || a.status === 'waiting-for-approval')
+            - Number(b.status === 'running' || b.status === 'waiting-for-approval'))
+        for (const flight of descendants) await abortFlight(flight.flightId, conductorDeps)
+        return planStore.get(req.params.taskId) ?? task
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        const statusCode = err instanceof Error && 'statusCode' in err
+          ? Number((err as Error & { statusCode: number }).statusCode)
+          : 500
+        reply.code(statusCode)
+        return { error: message }
+      }
     },
   )
 

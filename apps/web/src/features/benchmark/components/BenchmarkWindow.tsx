@@ -3,7 +3,7 @@ import { useBenchmark, useBenchmarks } from '../state/BenchmarkContext'
 import { ConfigScreen } from './BenchmarkConfigScreen'
 import { BenchmarkDetail } from './BenchmarkDetail'
 
-export function BenchmarkWindow({ onClose }: { onClose: () => void }) {
+export function BenchmarkWindow({ onClose, onOpenPortify }: { onClose: () => void; onOpenPortify?: (feature: string) => void }) {
   const { startBenchmark, benchmarks } = useBenchmarks()
   // Resume ONLY a live benchmark (so you don't lose a run in progress); when
   // nothing is running, open on the config/sabotage screen — clicking Benchmark
@@ -22,7 +22,7 @@ export function BenchmarkWindow({ onClose }: { onClose: () => void }) {
       {activeId ? (
         <BenchmarkDetail id={activeId} onClose={onClose} onNew={() => setActiveId(null)} />
       ) : (
-        <ConfigScreen onClose={onClose} onStarted={setActiveId} startBenchmark={startBenchmark} blocked={blocked} />
+        <ConfigScreen onClose={onClose} onStarted={setActiveId} startBenchmark={startBenchmark} blocked={blocked} onOpenPortify={onOpenPortify} />
       )}
     </div>
   )

@@ -213,6 +213,36 @@ describe('Getting Started Run state', () => {
     })
   })
 
+  it('keeps a linked active card while its run is still non-terminal', () => {
+    const active = {
+      sessionId: 'gs-1',
+      workflow: 'run' as const,
+      owner: 'external' as const,
+      target: { kind: 'run' as const, id: 'r1' },
+      startedAt: '2026-08-11T00:00:00.000Z',
+      updatedAt: '2026-08-11T00:00:10.000Z',
+    }
+    const session = deriveGettingStartedRunSession(
+      { active, completed: {} },
+      workflows,
+      [run({ status: 'running' })],
+    )
+    expect(session.active).toBe(active)
+    expect(session.completed).toEqual({})
+  })
+
+  it('keeps the first active catalogued run when later history is older', () => {
+    const session = deriveGettingStartedRunSession(
+      { active: null, completed: {} },
+      workflows,
+      [
+        run({ runId: 'r-new', status: 'running', startedAt: '2026-08-11T00:03:00.000Z' }),
+        run({ runId: 'r-old', status: 'running', startedAt: '2026-08-11T00:01:00.000Z' }),
+      ],
+    )
+    expect(session.active?.target).toEqual({ kind: 'run', id: 'r-new' })
+  })
+
   it('does not replace newer durable completion evidence with older history', () => {
     const newer = {
       workflow: 'run' as const,
@@ -227,6 +257,30 @@ describe('Getting Started Run state', () => {
       workflows,
       [run({ status: 'passed', endedAt: '2026-08-11T00:01:00.000Z' })],
     )
+    expect(session.completed.run).toBe(newer)
+  })
+
+  it('settles an active card without replacing newer durable evidence', () => {
+    const newer = {
+      workflow: 'run' as const,
+      owner: 'external' as const,
+      target: { kind: 'run' as const, id: 'r-newer' },
+      status: 'passed',
+      startedAt: '2026-08-11T00:05:00.000Z',
+      endedAt: '2026-08-11T00:06:00.000Z',
+    }
+    const session = deriveGettingStartedRunSession(
+      {
+        active: {
+          sessionId: 'gs-1', workflow: 'run', owner: 'external', target: { kind: 'run', id: 'r1' },
+          startedAt: '2026-08-11T00:00:00.000Z', updatedAt: '2026-08-11T00:00:10.000Z',
+        },
+        completed: { run: newer },
+      },
+      workflows,
+      [run({ status: 'passed', endedAt: '2026-08-11T00:01:00.000Z' })],
+    )
+    expect(session.active).toBeNull()
     expect(session.completed.run).toBe(newer)
   })
 })

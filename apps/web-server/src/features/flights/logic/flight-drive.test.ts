@@ -68,6 +68,28 @@ function args(repo = '/repo/a') {
   return { feature: 'checkout', repoPaths: [repo], description: 'checkout flow', opts: OPTS }
 }
 
+describe('external-work timing', () => {
+  it.each(['authoring', 'mapping'] as const)('keeps the live %s timer running while the client owns the checkpoint', async (phase) => {
+    const adapters = allDone()
+    adapters.docs = {
+      run: async (ctx) => {
+        ctx.setTimingPhase?.(phase)
+        return {
+          kind: 'checkpoint',
+          checkpoint: { kind: 'external-work', message: 'continue externally', data: { context: { phase } } },
+        }
+      },
+    }
+    const started = startFlight(args(`/repo/external-${phase}`), deps(adapters))
+    await started.completion
+
+    const docs = store.get(started.manifest.flightId)!.stages.find((stage) => stage.key === 'docs')!
+    expect(docs.status).toBe('waiting-for-approval')
+    expect(docs.timings?.[phase]).toEqual({ elapsedMs: 0, since: now() })
+    expect(docs.timings?.['checkpoint-wait']).toEqual({ elapsedMs: 0, since: now() })
+  })
+})
+
 describe('autopilot (R71/W4)', () => {
   type Kind = import('./types').FlightCheckpointKind
 

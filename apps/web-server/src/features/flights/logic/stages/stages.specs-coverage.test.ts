@@ -100,7 +100,7 @@ function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   }
 }
 
-function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[] } {
+function ctxFor(m: FlightManifest, flightDir = path.join(logsDir, 'flights', m.flightId)): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[] } {
   const state = { m }
   const progressLog: unknown[] = []
   const setStage = (key: FlightStageKey, patch: Partial<FlightStage>): void => {
@@ -110,7 +110,7 @@ function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightMa
     progressLog,
     ctx: stageContextStub({
       manifest: () => state.m,
-      flightDir: path.join(logsDir, 'flights', state.m.flightId),
+      flightDir,
       setProgress: (progress) => { progressLog.push(progress) },
       addAgentSession: (session) => {
         const stage = state.m.stages.find((candidate) => candidate.key === 'specs-coverage')
@@ -154,12 +154,44 @@ describe('specs-coverage stage', () => {
         requirement: { id: 'R1', title: 't', text: 'x', pathTypes: [...paths] },
         annotatedTestNames: ['mapped test'],
         pathCoverage: paths.map((pathType) => ({ path: pathType, covered: covered.includes(pathType) })),
+        // A variant can be intentionally inapplicable; its false `covered`
+        // value must not keep a requirement open, while an applicable variant
+        // remains part of the no-progress signature.
+        variantCoverage: [
+          { path: 'happy', variant: 'desktop', applicable: false, covered: false },
+          { path: 'happy', variant: 'mobile', applicable: true, covered: covered.includes('happy') },
+          { path: 'sad', variant: 'retry', applicable: true, covered: false },
+        ],
         gapType: complete ? 'covered' : 'path-incomplete',
         coverageStatus: complete ? 'covered' : 'partial',
       }],
       tests: [],
       totals: { total: 1, covered: complete ? 1 : 0, pathIncomplete: complete ? 0 : 1, variantIncomplete: 0, untested: 0, orphanTests: 0 },
       coveragePct: complete ? 100 : 0,
+      mappedPct: 100,
+      orphanRequirementIds: [],
+      orphanTestNames: [],
+    }
+  }
+
+  function multiVariantGapLedger(reverse = false): CoverageLedger {
+    const requirement = (id: string): CoverageLedger['requirements'][number] => ({
+      requirement: { id, title: id, text: 'x', pathTypes: ['happy'] },
+      annotatedTestNames: [],
+      pathCoverage: [],
+      variantCoverage: [
+        { path: 'happy', variant: 'desktop', applicable: true, covered: false },
+        { path: 'happy', variant: 'mobile', applicable: true, covered: false },
+      ],
+      gapType: 'variant-incomplete',
+      coverageStatus: 'partial',
+    })
+    return {
+      feature: 'checkout',
+      requirements: reverse ? [requirement('R2'), requirement('R1')] : [requirement('R1'), requirement('R2')],
+      tests: [],
+      totals: { total: 2, covered: 0, pathIncomplete: 0, variantIncomplete: 2, untested: 0, orphanTests: 0 },
+      coveragePct: 0,
       mappedPct: 100,
       orphanRequirementIds: [],
       orphanTestNames: [],
@@ -418,6 +450,32 @@ describe('specs-coverage stage', () => {
     expect(prompts).toHaveLength(2)
   })
 
+  it('recognizes reordered open variant gaps as the same mapped result', async () => {
+    const ledgers = [
+      multiVariantGapLedger(), // first authoring pass enters mapping
+      multiVariantGapLedger(), // first mapping roster
+      multiVariantGapLedger(), // first post-map signature
+      multiVariantGapLedger(true), // second mapping roster, reversed source order
+      multiVariantGapLedger(true), // second post-map signature must match the first
+    ]
+    let engineRuns = 0
+    const d = deps({
+      spawnAgent: writingSpawnAgent([]),
+      validateSpecs: async () => ({ ok: true }),
+      coverage: {
+        compute: (() => ledgers.shift() ?? ledger(100)) as never,
+        runEngine: (async () => {
+          engineRuns += 1
+          return {}
+        }) as never,
+      },
+    })
+
+    const outcome = await specsCoverageStage(d).run(ctxFor(manifest()).ctx)
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'coverage-stuck' } })
+    expect(engineRuns).toBe(2)
+  })
+
   it('wires up all real default deps (no overrides) and fails fast when there is no PRD summary', async () => {
     // No spawnAgent/validateSpecs/coverage overrides — exercises every `?? default`
     // fallback in specsCoverageStage's factory body for real. The loop fails
@@ -429,6 +487,10 @@ describe('specs-coverage stage', () => {
 
   it('pins every authoring and mapping session in pass order', async () => {
     fs.mkdirSync(path.join(logsDir, 'flights', 'fl-test', 'coverage-map'), { recursive: true })
+    // The authoring callback owns a distinct session sidecar. Pre-create it so
+    // this test proves the post-write `existsSync` guard accepts a durable ref,
+    // then asserts that the session was actually published onto the stage.
+    fs.mkdirSync(path.join(logsDir, 'flights', 'fl-test', 'specs-coverage-session-001'), { recursive: true })
     const ledgers = [ledger(0), ledger(0), ledger(40), ledger(40), ledger(100)]
     let mapSession = 0
     const d = deps({
@@ -485,6 +547,28 @@ describe('specs-coverage stage', () => {
     expect(laterMapRef.sessions.claude.sessionId).toBe('map-sess-2')
   })
 
+  it('does not publish a session whose durable sidecar write failed', async () => {
+    const blockedParent = path.join(tmpDir, 'not-a-directory')
+    fs.writeFileSync(blockedParent, 'blocked')
+    const ledgers = [ledger(0), ledger(0), ledger(100)]
+    const d = deps({
+      spawnAgent: writingSpawnAgent([]),
+      validateSpecs: async () => ({ ok: true }),
+      coverage: {
+        compute: (() => ledgers.shift() ?? ledger(100)) as never,
+        runEngine: (async (args: { onAgentSession?: (s: { agent: 'claude' | 'codex'; sessionId: string }) => void }) => {
+          args.onAgentSession?.({ agent: 'claude', sessionId: 'map-session' })
+          return {}
+        }) as never,
+      },
+    })
+    const { ctx, current } = ctxFor(manifest(), path.join(blockedParent, 'flight'))
+
+    const outcome = await specsCoverageStage(d).run(ctx)
+    expect(outcome).toMatchObject({ kind: 'done' })
+    expect(current().stages.find((stage) => stage.key === 'specs-coverage')?.agentSessions).toBeUndefined()
+  })
+
   it('checkpoint response: retry re-enters the loop (not just accept-partial)', async () => {
     let met = false
     const d = deps({
@@ -504,5 +588,43 @@ describe('specs-coverage stage', () => {
     met = true
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'retry' })
     expect(outcome).toMatchObject({ kind: 'done', evidence: { coveragePct: 100 } })
+  })
+
+  it('takes a client-held mapping pass back internally and settles from the recomputed ledger', async () => {
+    const engineCalls: Array<{ requirementIds?: string[] }> = []
+    const ledgers = [ledger(0), ledger(100)]
+    const d = deps({
+      coverage: {
+        compute: (() => ledgers.shift() ?? ledger(100)) as never,
+        runEngine: (async (args: { requirementIds?: string[] }) => {
+          engineCalls.push(args)
+          return {} as never
+        }) as never,
+      },
+    })
+    const state = { iteration: 2, passes: [], validationErrors: '', repeatedMappedGap: false }
+    const m = manifest({
+      opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => key === 'specs-coverage'
+        ? {
+            key,
+            status: 'waiting-for-approval' as const,
+            checkpoint: {
+              kind: 'external-work',
+              message: 'map externally',
+              data: { context: { phase: 'mapping', pass: state, roster: ['checkout test'] } },
+            },
+          }
+        : { key, status: 'pending' as const }),
+    })
+
+    const outcome = await specsCoverageStage(d).onCheckpointResponse!(
+      ctxFor(m).ctx,
+      { choice: 'run-internally' },
+    )
+
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { coveragePct: 100 } })
+    expect(engineCalls).toHaveLength(1)
+    expect(engineCalls[0].requirementIds).toEqual(['R1'])
   })
 })

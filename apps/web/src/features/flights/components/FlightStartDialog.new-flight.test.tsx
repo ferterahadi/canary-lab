@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   startFlight: vi.fn(),
   planFeatures: vi.fn(),
   getPlanFeaturesTask: vi.fn(),
+  cancelPlanFeatures: vi.fn(),
   launchPlannedFeatures: vi.fn(),
   listWorkspaceDirs: vi.fn(),
   getProjectConfig: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('@/shared/api/client', async (importOriginal) => ({
   startFlight: mocks.startFlight,
   planFeatures: mocks.planFeatures,
   getPlanFeaturesTask: mocks.getPlanFeaturesTask,
+  cancelPlanFeatures: mocks.cancelPlanFeatures,
   launchPlannedFeatures: mocks.launchPlannedFeatures,
   getProjectConfig: mocks.getProjectConfig,
   abortFlight: mocks.abortFlight,
@@ -182,12 +184,49 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     expect(mocks.planFeatures).toHaveBeenCalledWith({ repoPaths: ['/repo/Acme Shop'], description: 'test the checkout flow' })
     expect(mocks.startFlight).not.toHaveBeenCalled()
     // The planning view: live agent timeline. While it's thinking there is no
-    // skip button (don't invite bailing on the default) and no footer close
-    // button (the modal ✕ handles that) — just the background hint.
+    // skip button (don't bypass the planning result) and no footer close button
+    // (the modal ✕ backgrounds it). Stop is a distinct server-side cancellation.
     expect(byTestId('flight-plan-view')).toBeTruthy()
     expect(byTestId('agent-session-view')?.getAttribute('data-kind')).toBe('flight-plan')
     expect(byTestId('flight-plan-background-hint')).toBeTruthy()
+    expect(byTestId('flight-plan-cancel')?.textContent).toBe('Stop planning')
     expect(byTestId('flight-plan-skip')).toBeNull()
+  })
+
+  it('stops the durable plan and closes only after the server confirms the agent tree is gone', async () => {
+    mocks.getPlanFeaturesTask.mockResolvedValue({ taskId: 't7', status: 'running', repoPaths: ['/repo/shop'], description: 'test the checkout flow' })
+    let confirmStop: ((task: unknown) => void) | null = null
+    mocks.cancelPlanFeatures.mockReturnValue(new Promise((resolve) => { confirmStop = resolve }))
+    const { onClose } = await render({ feature: null, resumePlanTaskId: 't7' })
+
+    click(byTestId('flight-plan-cancel')!)
+    expect(mocks.cancelPlanFeatures).toHaveBeenCalledWith('t7')
+    expect(byTestId('flight-plan-cancel')?.textContent).toBe('Stopping…')
+    expect((byTestId('flight-plan-cancel') as HTMLButtonElement).disabled).toBe(true)
+    expect(onClose).not.toHaveBeenCalled()
+
+    confirmStop!({ taskId: 't7', status: 'cancelled' })
+    await flush()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the planning view open and surfaces a cancellation failure', async () => {
+    mocks.getPlanFeaturesTask.mockResolvedValue({ taskId: 't7', status: 'running', repoPaths: ['/repo/shop'], description: 'test the checkout flow' })
+    mocks.cancelPlanFeatures.mockRejectedValue(new Error('could not stop the agent tree'))
+    const { onClose } = await render({ feature: null, resumePlanTaskId: 't7' })
+
+    click(byTestId('flight-plan-cancel')!)
+    await flush()
+
+    expect(byTestId('flight-start-error')?.textContent).toContain('could not stop the agent tree')
+    expect(onClose).not.toHaveBeenCalled()
+    expect(byTestId('flight-plan-cancel')?.textContent).toBe('Stop planning')
+  })
+
+  it('closes an attached planning view when another client has cancelled it', async () => {
+    mocks.getPlanFeaturesTask.mockResolvedValue({ taskId: 't7', status: 'cancelled', repoPaths: ['/repo/shop'], description: 'test the checkout flow' })
+    const { onClose } = await render({ feature: null, resumePlanTaskId: 't7' })
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it('R54: planning failure surfaces the single-flight recovery', async () => {

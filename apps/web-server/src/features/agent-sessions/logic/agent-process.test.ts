@@ -8,8 +8,8 @@ import { buildClaudeAgenticArgs, runAgentProcess, stopAgentProcesses, stopAllAge
 import { agentJobStore } from './agent-jobs/store'
 
 // hoisted so the factory can reference mockNodeSpawn before imports resolve
-const { mockNodeSpawn } = vi.hoisted(() => ({ mockNodeSpawn: vi.fn() }))
-vi.mock('child_process', () => ({ spawn: mockNodeSpawn }))
+const { mockNodeSpawn, mockSpawnSync } = vi.hoisted(() => ({ mockNodeSpawn: vi.fn(), mockSpawnSync: vi.fn() }))
+vi.mock('child_process', () => ({ spawn: mockNodeSpawn, spawnSync: mockSpawnSync }))
 
 class FakeChild extends EventEmitter {
   pid = 4242
@@ -35,6 +35,12 @@ function fakeSpawn(child: FakeChild) {
   }) as never
   return { impl, calls }
 }
+
+beforeEach(() => {
+  // Fake pids must never signal a real process group. Throwing models the group
+  // not existing, so the production helper safely falls back to FakeChild.kill.
+  vi.spyOn(process, 'kill').mockImplementation(() => { throw new Error('ESRCH') })
+})
 
 afterEach(() => {
   vi.useRealTimers()
@@ -131,6 +137,7 @@ describe('runAgentProcess', () => {
     expect(res).toMatchObject({ code: 0, stdout: 'hello world', stderr: 'warn' })
     expect(chunks).toEqual(['hello ', 'warn', 'world'])
     expect(spawn.calls[0].command).toBe('claude')
+    expect((spawn.calls[0].opts as { detached: boolean }).detached).toBe(process.platform !== 'win32')
   })
 
   it('gives every claude child a 350K auto-compaction window', async () => {
@@ -400,6 +407,79 @@ describe('stopAgentProcesses / stopAllAgentProcesses', () => {
     await stopped
     expect(wedged.signals).toEqual(['SIGTERM', 'SIGKILL'])
     await expect(h.done).resolves.toMatchObject({ signal: 'SIGKILL' })
+  })
+
+  it('SIGKILLs the process group when the parent exits but a descendant survives SIGTERM', async () => {
+    const parent = new SignalableChild()
+    let descendantsAlive = true
+    const kill = vi.mocked(process.kill).mockImplementation((pid, signal) => {
+      if (pid !== -parent.pid) throw new Error('unexpected pid')
+      if (signal === 'SIGTERM') {
+        parent.close(null, 'SIGTERM')
+        return true
+      }
+      if (signal === 0) {
+        if (descendantsAlive) return true
+        throw new Error('ESRCH')
+      }
+      if (signal === 'SIGKILL') {
+        descendantsAlive = false
+        return true
+      }
+      return true
+    })
+    const h = spawnScoped(parent, '/flight-plans/fp_1')
+
+    await stopAgentProcesses('/flight-plans/fp_1', { graceMs: 0, by: 'user' })
+
+    expect(kill).toHaveBeenCalledWith(-parent.pid, 'SIGTERM')
+    expect(kill).toHaveBeenCalledWith(-parent.pid, 0)
+    expect(kill).toHaveBeenCalledWith(-parent.pid, 'SIGKILL')
+    expect(parent.signals).toEqual([])
+    await expect(h.done).resolves.toMatchObject({ stopped: 'user' })
+  })
+
+  it('waits for a descendant that exits during the grace window without SIGKILLing it', async () => {
+    vi.useFakeTimers()
+    const parent = new SignalableChild()
+    let descendantsAlive = true
+    const kill = vi.mocked(process.kill).mockImplementation((_pid, signal) => {
+      if (signal === 'SIGTERM') {
+        parent.close(null, 'SIGTERM')
+        return true
+      }
+      if (signal === 0) {
+        if (descendantsAlive) return true
+        throw new Error('ESRCH')
+      }
+      return true
+    })
+    spawnScoped(parent, '/flight-plans/fp_graceful')
+
+    const stopped = stopAgentProcesses('/flight-plans/fp_graceful', { graceMs: 100 })
+    await vi.advanceTimersByTimeAsync(50)
+    descendantsAlive = false
+    await vi.advanceTimersByTimeAsync(25)
+    await stopped
+
+    expect(kill.mock.calls.some(([, signal]) => signal === 'SIGKILL')).toBe(false)
+  })
+
+  it('does not escalate after the parent and its process group both exit at the deadline', async () => {
+    const parent = new SignalableChild()
+    const kill = vi.mocked(process.kill).mockImplementation((_pid, signal) => {
+      if (signal === 'SIGTERM') {
+        parent.close(null, 'SIGTERM')
+        return true
+      }
+      if (signal === 0) throw new Error('ESRCH')
+      return true
+    })
+    spawnScoped(parent, '/flight-plans/fp_done')
+
+    await stopAgentProcesses('/flight-plans/fp_done', { graceMs: 0 })
+
+    expect(kill.mock.calls.some(([, signal]) => signal === 'SIGKILL')).toBe(false)
   })
 
   it('sweeps every live child on shutdown, scoped or not', async () => {

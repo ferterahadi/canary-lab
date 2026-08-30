@@ -160,6 +160,10 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
   // once it flips the task to `launched`, jump straight into the new flight.
   useEffect(() => {
     if (!planTask) return
+    if (planTask.status === 'cancelled') {
+      onClose()
+      return
+    }
     if (planTask.status === 'launched' && planTask.launchedFlightIds && planTask.launchedFlightIds.length > 0) {
       if (autoLaunched.current) return
       autoLaunched.current = true
@@ -196,7 +200,7 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
         setSharedGroup(features[0]?.group ?? '')
         setPhase('proposal')
       })
-  }, [planTask, onOpenFlight])
+  }, [planTask, onOpenFlight, onClose])
 
   const applyLaunchFailure = (err: unknown): void => {
     const body = err instanceof api.ApiError
@@ -288,6 +292,20 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     beginSingleFlight(null)
   }
 
+  /** Stop is distinct from closing: it settles the durable task server-side,
+   *  waits for the whole agent tree, then lets every UI surface drop the now-
+   *  terminal pre-flight through the store's live event. */
+  const cancelPlanning = (taskId: string): void => {
+    setBusy(true)
+    setStartError(null)
+    api.cancelPlanFeatures(taskId)
+      .then(() => onClose())
+      .catch((err: unknown) => {
+        setStartError(err instanceof Error ? err.message : String(err))
+        setBusy(false)
+      })
+  }
+
   /** Proposal confirm: one flight per card, sequentially queued (R54). */
   const beginLaunchProposal = (models: AgentStagePlans | null): void => {
     if (!planTask) return
@@ -371,5 +389,5 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
     else if (kind === 'proposal') beginLaunchProposal(models)
   }
 
-  return { resolvedFeature, entry, loadError, projectConfig, modelsGate, setModelsGate, confirmLaunchModels, description, setDescription, repoPaths, setRepoPaths, picked, setPicked, busy, startError, showSteps, setShowSteps, autopilot, setAutopilot, agent, phase, planTask, proposal, setProposal, sharedGroup, setSharedGroup, conflicts, newFlight, byKey, lastStatus, hasRecord, editableInputs, inputsRequired, freshMode, canSubmit, startSingleFlight, launchProposal, stopAndStartFresh, start }
+  return { resolvedFeature, entry, loadError, projectConfig, modelsGate, setModelsGate, confirmLaunchModels, description, setDescription, repoPaths, setRepoPaths, picked, setPicked, busy, startError, showSteps, setShowSteps, autopilot, setAutopilot, agent, phase, planTask, proposal, setProposal, sharedGroup, setSharedGroup, conflicts, newFlight, byKey, lastStatus, hasRecord, editableInputs, inputsRequired, freshMode, canSubmit, startSingleFlight, cancelPlanning, launchProposal, stopAndStartFresh, start }
 }

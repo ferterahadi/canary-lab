@@ -27,13 +27,11 @@ interface Props {
    *  passes neither and keeps the internal state. */
   tab?: Tab
   onTabChange?: (tab: Tab) => void
-  /** Launch the port-ification wizard for this feature (from the Ports tab). */
-  onStartPortify?: (feature: string) => void
-  /** Reopen a past/active port-ification workflow (by id) from the Ports tab. */
-  onOpenPortify?: (workflowId: string) => void
+  /** Open this feature's Flight at Parallel setup (from the Ports tab). */
+  onOpenPortify?: (feature: string) => void
 }
 
-export function FeatureConfigEditor({ feature, portified = false, onClose, onDeleted, onRenamed, initialTab = 'general', tab: tabProp, onTabChange, onStartPortify, onOpenPortify }: Props) {
+export function FeatureConfigEditor({ feature, portified = false, onClose, onDeleted, onRenamed, initialTab = 'general', tab: tabProp, onTabChange, onOpenPortify }: Props) {
   const [internalTab, setInternalTab] = useState<Tab>(initialTab)
   const tab = tabProp ?? internalTab
   const setTab = (next: Tab) => { setInternalTab(next); onTabChange?.(next) }
@@ -49,7 +47,7 @@ export function FeatureConfigEditor({ feature, portified = false, onClose, onDel
         eyebrow="Suite configuration"
         title={feature}
         width={960}
-        height="88vh"
+        height="80vh"
         headerActions={
           <button
             type="button"
@@ -77,7 +75,7 @@ export function FeatureConfigEditor({ feature, portified = false, onClose, onDel
             <div className="flex-1 min-h-0">
               {tab === 'general' && <GeneralTab feature={feature} onFeatureRenamed={(nextFeature) => onRenamed?.(feature, nextFeature)} />}
               {tab === 'repos' && <ReposTab feature={feature} />}
-              {tab === 'ports' && <PortsTab feature={feature} portified={portified} onStartPortify={onStartPortify} onOpenPortify={onOpenPortify} />}
+              {tab === 'ports' && <PortsTab feature={feature} portified={portified} onOpenPortify={onOpenPortify} />}
               {tab === 'envsets' && <EnvsetsTab feature={feature} />}
               {tab === 'playwright' && <PlaywrightTab feature={feature} />}
             </div>

@@ -28,6 +28,14 @@ import {
 } from './conductor'
 
 import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from './types'
+import {
+  bankStageActivity,
+  buildStageContext,
+  checkStageEntry,
+  firstOpenStageIndex,
+  resetStagesForRestart,
+  startStageTiming,
+} from './flight-stages'
 
 let tmpDir: string
 
@@ -67,6 +75,88 @@ function deps(adapters: StageAdapters): FlightConductorDeps {
 function args(repo = '/repo/a') {
   return { feature: 'checkout', repoPaths: [repo], description: 'checkout flow', opts: OPTS }
 }
+
+describe('stage selection and entry validation', () => {
+  it('prefers a live stage, then an explicit current stage, then execution order', () => {
+    const stages = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const }))
+    const base = { ...args(), flightId: 'fl-selection', status: 'running' as const, stages, createdAt: now(), updatedAt: now() }
+
+    expect(firstOpenStageIndex({ ...base, currentStage: 'run', stages: stages.map((stage) => stage.key === 'docs' ? { ...stage, status: 'waiting-for-approval' as const } : stage) })).toBe(FLIGHT_STAGE_KEYS.indexOf('docs'))
+    expect(firstOpenStageIndex({ ...base, currentStage: 'portify' })).toBe(FLIGHT_STAGE_KEYS.indexOf('portify'))
+    expect(firstOpenStageIndex({ ...base, currentStage: null })).toBe(FLIGHT_STAGE_KEYS.indexOf('similarity'))
+    expect(firstOpenStageIndex({ ...base, currentStage: null, stages: stages.map((stage) => ({ ...stage, status: 'done' as const })) })).toBe(-1)
+  })
+
+  it('banks only positive active work and leaves a parked stage unchanged', () => {
+    const running = { key: 'docs' as const, status: 'running' as const, activeSince: '2026-01-01T00:00:10Z', activeMs: 50 }
+    expect(bankStageActivity(running, '2026-01-01T00:00:13Z')).toMatchObject({ activeMs: 3050, activeSince: undefined })
+    expect(bankStageActivity(running, '2026-01-01T00:00:09Z')).toMatchObject({ activeMs: 50 })
+    const parked = { key: 'docs' as const, status: 'waiting-for-approval' as const }
+    expect(bankStageActivity(parked, now())).toBe(parked)
+  })
+
+  it('does not restart an already-running timing phase', () => {
+    const timing = { key: 'docs' as const, status: 'running' as const, timings: { authoring: { elapsedMs: 75, since: '2026-01-01T00:00:00Z' } } }
+    expect(startStageTiming(timing, 'authoring', '2026-01-01T01:00:00Z')).toBe(timing)
+  })
+
+  it('deduplicates immutable activity sessions and merges only supplied flight links', async () => {
+    const started = startFlight(args('/repo/activity'), deps(allDone()))
+    await started.completion
+    const ctx = buildStageContext(started.manifest.flightId, 'docs', new AbortController().signal, deps(allDone()))
+    const session = { sidecar: 'docs-session-001', label: 'Requirements', startedAt: now() }
+
+    ctx.addAgentSession(session)
+    ctx.addAgentSession({ ...session, label: 'duplicate must not replace the original' })
+    ctx.patchFlight({ links: { runId: 'run_123' } })
+    ctx.patchFlight({ links: { evaluationTaskId: 'eval_456' } })
+
+    const saved = store.get(started.manifest.flightId)!
+    expect(saved.stages.find((stage) => stage.key === 'docs')?.agentSessions).toEqual([session])
+    expect(saved.links).toEqual({ runId: 'run_123', evaluationTaskId: 'eval_456' })
+  })
+
+  it('resets an incomplete legacy stage list without attempting to read missing session history', async () => {
+    const started = startFlight(args('/repo/legacy-reset'), deps(allDone()))
+    await started.completion
+    const prior = store.get(started.manifest.flightId)!
+    const legacy = {
+      ...prior,
+      stages: prior.stages
+        .filter((stage) => stage.key !== 'docs')
+        .map((stage) => stage.key === 'run'
+          ? { ...stage, agentSessions: [{ sidecar: 'run-attempt-001', label: 'old run', startedAt: now() }] }
+          : stage),
+    }
+    const adapters = allDone()
+    adapters.docs = {
+      run: async () => ({ kind: 'done' }),
+      reset: async (ctx) => {
+        // Reset contexts intentionally absorb activity writes: no discarded
+        // session may leak back into the record being replaced.
+        ctx.addAgentSession({ sidecar: 'discarded-docs-session', label: 'discarded', startedAt: now() })
+      },
+    }
+
+    await resetStagesForRestart(legacy, 'docs', deps(adapters))
+  })
+
+  it('rejects unsupported and unknown entries, while forwarding validated entry links', () => {
+    const plainDeps = deps(allDone())
+    expect(() => checkStageEntry({ ...args(), fromStage: 'not-a-stage' as FlightStageKey }, plainDeps, null)).toThrow('unknown stage')
+    expect(checkStageEntry({ ...args(), fromStage: 'similarity' }, plainDeps, null)).toBeUndefined()
+    expect(() => checkStageEntry({ ...args(), fromStage: 'docs' }, plainDeps, null)).toThrow('stage entry is not supported')
+
+    const existing = { ...args(), flightId: 'fl-existing', status: 'done' as const, currentStage: null, stages: [], createdAt: now(), updatedAt: now() }
+    const validated = {
+      ...plainDeps,
+      validateStageEntry: () => null,
+      resolveStageEntryLinks: () => ({ runId: 'run_123' }),
+    }
+    expect(checkStageEntry({ ...args(), fromStage: 'docs' }, validated, existing)).toEqual({ runId: 'run_123' })
+    expect(() => checkStageEntry({ ...args(), fromStage: 'docs' }, { ...validated, validateStageEntry: () => 'requirements missing' }, existing)).toThrow('requirements missing')
+  })
+})
 
 describe('jump', () => {
   it('jumps forward without evidence (no evidence field is written)', async () => {

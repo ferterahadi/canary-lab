@@ -229,6 +229,70 @@ describe('spawnHealAgentRepl', () => {
     expect(settings.sandbox.filesystem.denyWrite).toContain(featureDir)
   })
 
+  it('uses a declared repository path when the run has no worktree override', () => {
+    const sourceRoot = path.join(tmpDir, 'source-only')
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(sourceRoot, { recursive: true })
+    fs.mkdirSync(featureDir, { recursive: true })
+    const buildSpawnCommand = vi.fn(() => 'codex')
+    const { factory } = fakePtyFactory()
+    const { ctx } = ctxFor({
+      feature: {
+        name: 'demo', description: 'demo', envs: ['local'], featureDir,
+        repos: [{ name: 'api', localPath: sourceRoot, startCommands: [] }],
+      },
+      repoPathOverrides: {},
+    }, {
+      ptyFactory: factory,
+      autoHeal: { agent: 'codex', maxCycles: 1, buildSpawnCommand },
+    })
+
+    spawnHealAgentRepl(ctx)
+
+    expect(buildSpawnCommand).toHaveBeenCalledWith(expect.objectContaining({ writableDirs: [sourceRoot] }))
+  })
+
+  it('mixes overridden and declared repository paths in one real heal workspace', () => {
+    const sourceRoot = path.join(tmpDir, 'source')
+    const worktreeRoot = path.join(tmpDir, 'worktree')
+    const featureDir = path.join(tmpDir, 'features', 'mixed')
+    fs.mkdirSync(sourceRoot, { recursive: true })
+    fs.mkdirSync(worktreeRoot, { recursive: true })
+    fs.mkdirSync(featureDir, { recursive: true })
+    const buildSpawnCommand = vi.fn(() => 'codex')
+    const { factory } = fakePtyFactory()
+    const { ctx } = ctxFor({
+      feature: {
+        name: 'mixed', description: 'mixed', envs: ['local'], featureDir,
+        repos: [
+          { name: 'overridden', localPath: sourceRoot, startCommands: [] },
+          { name: 'declared', localPath: sourceRoot, startCommands: [] },
+        ],
+      },
+      repoPathOverrides: { overridden: worktreeRoot },
+    }, { ptyFactory: factory, autoHeal: { agent: 'codex', maxCycles: 1, buildSpawnCommand } })
+
+    spawnHealAgentRepl(ctx)
+
+    expect(buildSpawnCommand).toHaveBeenCalledWith(expect.objectContaining({
+      writableDirs: [worktreeRoot, sourceRoot],
+    }))
+  })
+
+  it('falls back to the feature directory for a repo-less test-only feature', () => {
+    const featureDir = path.join(tmpDir, 'features', 'repo-less')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const buildSpawnCommand = vi.fn(() => 'codex')
+    const { factory } = fakePtyFactory()
+    const { ctx } = ctxFor({
+      feature: { name: 'repo-less', description: 'repo-less', envs: ['local'], featureDir, repos: undefined },
+    }, { ptyFactory: factory, autoHeal: { agent: 'codex', maxCycles: 1, buildSpawnCommand } })
+
+    spawnHealAgentRepl(ctx)
+
+    expect(buildSpawnCommand).toHaveBeenCalledWith(expect.objectContaining({ writableDirs: [featureDir] }))
+  })
+
   it('clears the handle and reports the exit when its own REPL dies', () => {
     const { factory, made } = fakePtyFactory()
     const { ctx, events } = ctxFor({}, {

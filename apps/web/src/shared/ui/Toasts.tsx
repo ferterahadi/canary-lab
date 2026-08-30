@@ -46,7 +46,7 @@ export function ToastHost({ toasts, onDismiss }: { toasts: ToastItem[]; onDismis
   }, [toasts.map((t) => `${t.id}:${t.sticky ? 1 : 0}`).join(',')])
 
   if (toasts.length === 0) return null
-  // z-[90] sits above PortifyWizard (z-[80]) and LogCleanup/McpPromo (z-[70])
+  // z-[90] sits above routed dialogs and LogCleanup/McpPromo (z-[70])
   // so an attention toast is never buried under an open workflow surface.
   return (
     <div className="fixed bottom-4 right-4 z-[90] flex w-80 flex-col gap-2" data-testid="toast-host">

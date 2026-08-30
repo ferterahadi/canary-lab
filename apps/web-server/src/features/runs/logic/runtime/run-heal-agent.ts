@@ -530,7 +530,10 @@ export function spawnHealAgentRepl(ctx: RunContext): PtyHandle {
   try {
     const editableRepoDirs = (ctx.feature.repos ?? [])
       .filter((repo) => enabledForEnv(repo.envs, ctx.env))
-      .map((repo) => ctx.repoPathOverrides[repo.name] ?? resolvePath(repo.localPath))
+      .map((repo) => {
+        const worktreePath = ctx.repoPathOverrides[repo.name]
+        return worktreePath === undefined ? resolvePath(repo.localPath) : worktreePath
+      })
       .filter((candidate) => fs.existsSync(candidate))
     const serviceMode = editableRepoDirs.length > 0
     const writableDirs = [...new Set(serviceMode ? editableRepoDirs : [ctx.feature.featureDir])]

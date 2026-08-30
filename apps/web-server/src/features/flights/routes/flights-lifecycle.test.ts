@@ -77,6 +77,19 @@ async function waitForStatus(flightId: string, statuses: string[], timeoutMs = 3
 }
 
 describe('flight entry modes (continue / redo / jump)', () => {
+  it('rejects malformed external-session metadata before attempting a resume', async () => {
+    app = await buildApp(allDone())
+
+    const resumed = await app.inject({
+      method: 'POST',
+      url: '/api/flights/fl_missing/resume',
+      payload: { externalAgentSession: { clientKind: 'unknown' } },
+    })
+
+    expect(resumed.statusCode).toBe(400)
+    expect(resumed.json()).toMatchObject({ error: 'externalAgentSession.clientKind is invalid' })
+  })
+
   it('400s an invalid mode and an invalid fromStage', async () => {
     app = await buildApp(allDone())
     const badMode = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ mode: 'sideways' }) })

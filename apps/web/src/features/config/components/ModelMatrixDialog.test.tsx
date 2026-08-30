@@ -182,7 +182,7 @@ describe('ModelMatrixDialog', () => {
     expect(document.querySelector('input[aria-label="Report custom model id"]')).toBeNull()
   })
 
-  it('Reset all to recommended pins every stage to its tier choice', async () => {
+  it('Reset all to recommended pins every stage to its explicit choice', async () => {
     await mount()
     const buttons = [...document.querySelectorAll('button')]
     await act(async () => { buttons.find((b) => b.textContent === 'Reset all to recommended')!.click() })
@@ -196,14 +196,14 @@ describe('ModelMatrixDialog', () => {
     const buttons = [...document.querySelectorAll('button')]
     await act(async () => { buttons.find((b) => b.textContent === 'Reset all to recommended')!.click() })
 
-    expect(select('Repo scan model').value).toBe('gpt-5.6-sol')
+    expect(select('Repo scan model').value).toBe('gpt-5.6-terra')
     expect(select('Repo scan reasoning effort').value).toBe('high')
     expect(select('Doc collection model').value).toBe('gpt-5.6-terra')
     expect(select('Doc collection reasoning effort').value).toBe('medium')
     expect(select('Auto-repair model').value).toBe('gpt-5.6-sol')
-    expect(select('Auto-repair reasoning effort').value).toBe('xhigh')
-    expect(select('Report model').value).toBe('gpt-5.6-luna')
-    expect(select('Report reasoning effort').value).toBe('low')
+    expect(select('Auto-repair reasoning effort').value).toBe('high')
+    expect(select('Report model').value).toBe('gpt-5.6-terra')
+    expect(select('Report reasoning effort').value).toBe('high')
   })
 
   it('an auth-failed probe warns with the remedy and Retry re-probes fresh — nothing is disabled', async () => {

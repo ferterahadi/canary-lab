@@ -688,9 +688,9 @@ export interface PlanFeaturesResult {
   features: PlannedFeature[]
 }
 
-/** `launched` = the proposal was confirmed and its flights exist — a terminal
- *  state that keeps a second launch from double-creating them. */
-export type PlanFeaturesTaskStatus = 'running' | 'done' | 'failed' | 'launched'
+/** `launched` = the proposal was confirmed and its flights exist; `cancelled`
+ *  keeps a stopped task durable without leaving it in the active Flights list. */
+export type PlanFeaturesTaskStatus = 'running' | 'done' | 'failed' | 'launched' | 'cancelled'
 
 /** File-backed record of one plan-features agent run (the pre-flight intent
  *  breakdown behind the new-flight dialog). */
@@ -714,6 +714,9 @@ export interface PlanFeaturesTask {
   conflicts?: string[]
   /** Flights created by the launch, in queue order (first one is running). */
   launchedFlightIds?: string[]
+  /** User-requested terminal time. The plan record/session stay on disk for an
+   *  honest history; only the active UI row disappears. */
+  cancelledAt?: string
   createdAt: string
   updatedAt: string
 }

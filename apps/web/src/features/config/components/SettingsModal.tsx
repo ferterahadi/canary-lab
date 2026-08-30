@@ -280,11 +280,6 @@ export function SettingsModal({ onClose, onRedirect, modelsFor, onModelsFor }: P
       onClose={onClose}
       title="Project Settings"
       ariaLabel="Project Settings"
-      // Floats in the viewport with an even 15% band above and below, instead
-      // of running to within 1rem of both edges. Settings is a long list of
-      // small cards: at full height it read as a page rather than a dialog,
-      // and the scroll had no visible end.
-      maxHeight="70vh"
       // The body grows and shrinks with the port confirmation, the restart
       // progress and the gh remediation block — without a reserved gutter the
       // appearing scrollbar shifts every card sideways.

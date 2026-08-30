@@ -14,6 +14,7 @@ import {
 import { renderPrompt } from '../../../shared/prompts'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { defaultSpawnAgent, extractJson, type FlightAgentSpawner } from './stages/context'
+import { stopAgentProcesses } from '../../agent-sessions/logic/agent-process'
 
 /** Outcome of the server's single-feature auto-launch attempt. A name clash
  *  leaves the plan `done` (the dialog reopens on the proposal to rename). */
@@ -169,6 +170,40 @@ export function startPlanFeatures(
   store.save(task)
   void runPlanAgent(task, store, deps)
   return task
+}
+
+/** Settle first, stop second: once the record is `cancelled`, the detached
+ *  agent's completion path cannot publish a result or auto-launch a flight. The
+ *  scoped stop then waits for the top-level CLI and every descendant to exit. */
+export async function cancelPlanFeatures(
+  taskId: string,
+  store: PlanFeaturesStore,
+  deps: {
+    now?: () => string
+    stopProcesses?: typeof stopAgentProcesses
+  } = {},
+): Promise<PlanFeaturesTask> {
+  const current = store.get(taskId)
+  if (!current) {
+    throw Object.assign(new Error(`plan task not found: ${taskId}`), { statusCode: 404 })
+  }
+  if (current.status === 'cancelled') return current
+  if (current.status === 'failed') {
+    throw Object.assign(new Error('Planning already failed — nothing is running to cancel.'), { statusCode: 409 })
+  }
+  const now = deps.now ?? (() => new Date().toISOString())
+  const cancelledAt = now()
+  const cancelled: PlanFeaturesTask = {
+    ...current,
+    status: 'cancelled',
+    cancelledAt,
+    updatedAt: cancelledAt,
+  }
+  store.save(cancelled)
+  if (current.status === 'running') {
+    await (deps.stopProcesses ?? stopAgentProcesses)(store.recordDir(taskId), { by: 'user' })
+  }
+  return store.get(taskId) ?? cancelled
 }
 
 async function runPlanAgent(

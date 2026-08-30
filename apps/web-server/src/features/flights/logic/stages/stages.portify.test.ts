@@ -255,6 +255,29 @@ describe('portify stage', () => {
     expect(progressLog.filter((p) => (p as { status?: string }).status === 'ready-to-save')).toHaveLength(1)
   })
 
+  it('marks a verifying poll as service-readiness before the workflow reaches review', async () => {
+    let reads = 0
+    const timingPhases: Array<string | null> = []
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify') return { statusCode: 200, body: [] }
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf-ready' } }
+      if (call.url === '/api/portify/wf-ready') {
+        reads += 1
+        return reads === 1
+          ? { statusCode: 200, body: { status: 'verifying', attempt: 1, maxAttempts: 2 } }
+          : { statusCode: 200, body: { status: 'ready-to-save', attempt: 1, maxAttempts: 2, diff: '--- a/server.js' } }
+      }
+      return undefined
+    })
+    const ctxObj = ctxFor(manifest())
+    ctxObj.ctx.setTimingPhase = (phase) => { timingPhases.push(phase) }
+
+    await expect(runPastGate(portifyStage(deps({ inject })), ctxObj)).resolves.toMatchObject({
+      kind: 'checkpoint', checkpoint: { kind: 'portify-apply' },
+    })
+    expect(timingPhases).toEqual(['service-readiness', null])
+  })
+
   it('fails when the portify start request is rejected', async () => {
     const inject = makeInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 400, body: { error: 'no repos' } }

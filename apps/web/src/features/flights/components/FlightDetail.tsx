@@ -717,13 +717,9 @@ export function stageDrillThrough(
     const open = drill.onOpenCoverage
     return { label: 'Open test coverage →', onClick: () => open(flight.feature) }
   }
-  // Parallel readiness drills to the feature's Ports tab — the resting surface
-  // that OWNS injectability: the saved overlay (diff + double-boot proof), the
-  // per-service patch paths, the slot ↔ env-var map, and the remove control.
-  // Not the portify wizard: FlightPage doesn't open it any more. A workflow
-  // still mid-flight is reachable from that tab's own Review & save / View
-  // progress button, so nothing is stranded — and the wizard stays one
-  // surface's business instead of two.
+  // Flight owns the Parallel-readiness workflow, including live work, review
+  // and save. This drill is only a supporting-config lens: the Ports tab holds
+  // the slot ↔ env-var map and remove control, then routes back here for work.
   // Unlocks once the stage has been touched at all — settled, skipped, or
   // parked. `pending` alone isn't "never ran": an interrupted stage reverts to
   // pending and keeps its startedAt, and that's exactly when you want the tab.

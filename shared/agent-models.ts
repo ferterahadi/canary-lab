@@ -98,24 +98,26 @@ export const KNOWN_MODEL_OPTIONS: Record<ModelAgentKind, readonly KnownModelOpti
  *  display catalog so label and CLI value cannot drift into separate lists. */
 export const KNOWN_MODELS: Record<ModelAgentKind, readonly string[]> = {
   claude: KNOWN_MODEL_OPTIONS.claude.map(({ value }) => value),
-  codex: KNOWN_MODEL_OPTIONS.codex.map(({ value }) => value),
+  codex: [],
 }
 
 // ── Recommendation policy ────────────────────────────────────────────────────
-// Stages ship a workload tier, not a versioned model id. Claude's stable aliases
-// resolve to the latest family member; Codex resolves Sol/Terra/Luna roles from
-// the installed CLI catalog, so a new version does not require a Canary update.
-export type ModelTier = 'frontier' | 'agentic' | 'balanced' | 'fastest'
+// The tier is explanatory UI copy; the actual provider knobs are explicit per
+// stage below because equal-capability models can need different effort levels.
+// Claude's stable aliases resolve to the latest family member. Codex resolves a
+// Sol/Terra role from the installed CLI catalog, so version releases do not
+// require a Canary update.
+export type ModelTier = 'frontier' | 'agentic' | 'balanced'
 
 export const STAGE_TIERS: Record<ModelStageKey, ModelTier> = {
-  scout: 'agentic',
+  scout: 'balanced',
   docs: 'balanced',
   prd: 'agentic',
-  gen: 'agentic',
+  gen: 'frontier',
   mapping: 'agentic',
   heal: 'frontier',
-  portify: 'frontier',
-  report: 'fastest',
+  portify: 'balanced',
+  report: 'balanced',
   commit: 'balanced',
 }
 
@@ -129,34 +131,47 @@ export const STAGE_RECOMMENDATION_REASON: Record<ModelStageKey, string> = {
   mapping: 'Semantic mapping must avoid both missed tests and false coverage claims.',
   heal: 'Auto-repair edits application code, so correctness matters more than latency.',
   portify: 'Parallel setup rewrites cross-service port wiring and concurrency behavior.',
-  report: 'Report rewriting is a bounded evidence-to-copy transformation.',
+  report: 'The report turns run evidence into user-facing conclusions and must preserve the verdict.',
   commit: 'Commit and PR copy needs faithful diff analysis but does not modify product code.',
 }
 
-/** Provider-specific knobs for each workload tier. Codex models stay null here
- *  because their versioned ids come from the runtime catalog below. Haiku does
- *  not support Claude's effort control, so fastest deliberately passes no
- *  effort flag. */
-export const RECOMMENDED_BY_TIER: Record<ModelAgentKind, Record<ModelTier, StageModelChoice>> = {
+/** Provider-specific knobs per stage. Codex models stay null here because their
+ *  versioned ids are resolved from the runtime catalog below. */
+export const RECOMMENDED_BY_STAGE: Record<ModelAgentKind, Record<ModelStageKey, StageModelChoice>> = {
   claude: {
-    frontier: { model: 'fable', effort: 'high' },
-    agentic: { model: 'opus', effort: 'high' },
-    balanced: { model: 'sonnet', effort: 'medium' },
-    fastest: { model: 'haiku', effort: null },
+    scout: { model: 'sonnet', effort: 'high' },
+    docs: { model: 'sonnet', effort: 'medium' },
+    prd: { model: 'opus', effort: 'high' },
+    gen: { model: 'opus', effort: 'max' },
+    mapping: { model: 'opus', effort: 'high' },
+    heal: { model: 'opus', effort: 'max' },
+    portify: { model: 'sonnet', effort: 'high' },
+    report: { model: 'sonnet', effort: 'high' },
+    commit: { model: 'sonnet', effort: 'medium' },
   },
   codex: {
-    frontier: { model: null, effort: 'xhigh' },
-    agentic: { model: null, effort: 'high' },
-    balanced: { model: null, effort: 'medium' },
-    fastest: { model: null, effort: 'low' },
+    scout: { model: null, effort: 'high' },
+    docs: { model: null, effort: 'medium' },
+    prd: { model: null, effort: 'high' },
+    gen: { model: null, effort: 'high' },
+    mapping: { model: null, effort: 'medium' },
+    heal: { model: null, effort: 'high' },
+    portify: { model: null, effort: 'high' },
+    report: { model: null, effort: 'high' },
+    commit: { model: null, effort: 'medium' },
   },
 }
 
-const CODEX_MODEL_ROLE_SUFFIX: Record<ModelTier, string> = {
-  frontier: '-sol',
-  agentic: '-sol',
-  balanced: '-terra',
-  fastest: '-luna',
+const CODEX_MODEL_ROLE_BY_STAGE: Record<ModelStageKey, 'sol' | 'terra'> = {
+  scout: 'terra',
+  docs: 'terra',
+  prd: 'sol',
+  gen: 'sol',
+  mapping: 'sol',
+  heal: 'sol',
+  portify: 'terra',
+  report: 'terra',
+  commit: 'terra',
 }
 
 export function recommendedChoice(
@@ -164,14 +179,13 @@ export function recommendedChoice(
   stage: ModelStageKey,
   availableModels: readonly KnownModelOption[] = KNOWN_MODEL_OPTIONS[agent],
 ): StageModelChoice {
-  const tier = STAGE_TIERS[stage]
-  const base = RECOMMENDED_BY_TIER[agent][tier]
+  const base = RECOMMENDED_BY_STAGE[agent][stage]
   if (agent === 'claude') return base
 
-  // The Sol/Terra/Luna role names are stable while the version prefix changes.
+  // The Sol/Terra role names are stable while the version prefix changes.
   // If a future catalog no longer exposes that role, keep the safe effort-only
   // recommendation rather than pinning an unrelated model by list position.
-  const suffix = CODEX_MODEL_ROLE_SUFFIX[tier]
+  const suffix = `-${CODEX_MODEL_ROLE_BY_STAGE[stage]}`
   const model = availableModels.find(({ value }) => value.toLowerCase().endsWith(suffix))?.value ?? null
   return { ...base, model }
 }

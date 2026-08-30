@@ -6,6 +6,7 @@ import { resolveAgentBinary, isAgentKind, type HealAgent } from './agent-binary'
 import { internalAgentContextArgs } from './agent-context-policy'
 import { agentJobStore } from './agent-jobs/store'
 import type { AgentJobRecordRef, AgentJobStatus } from './agent-jobs/types'
+import { processGroupAlive, signalProcessTree } from '../../../shared/process-tree'
 
 // One home for spawning an agent CLI (the Portify model): pipe stdout/stderr,
 // reset the idle clock on every chunk (the liveness signal), kill on a genuine
@@ -178,6 +179,9 @@ interface LiveAgentProcess {
   child: ChildProcess
   scope: string | undefined
   done: Promise<AgentProcessResult>
+  /** Unix agents run in their own process group so a scoped stop reaches any
+   *  subagents or shell children they started. Windows uses taskkill /T. */
+  detachedProcessGroup: boolean
   /** Set when a stop was requested, so the record settles `stopped` rather than
    *  `failed` — "someone asked it to stop" and "it fell over" are different
    *  endings, and a reader of the row cannot tell them apart from an exit code. */
@@ -195,19 +199,43 @@ const liveAgentProcesses = new Map<ChildProcess, LiveAgentProcess>()
 
 async function terminate(entry: LiveAgentProcess, graceMs: number, by: 'user' | 'flight' = 'flight'): Promise<void> {
   entry.stopRequestedBy = by
-  try { entry.child.kill('SIGTERM') } catch { /* already dead */ }
-  const escalate = setTimeout(() => {
-    try { entry.child.kill('SIGKILL') } catch { /* already dead */ }
-  }, graceMs)
+  signalProcessTree(entry.child, 'SIGTERM', { detachedProcessGroup: entry.detachedProcessGroup })
+  let parentDone = false
+  const done = entry.done.then(
+    () => { parentDone = true },
+    () => {
+      // `done` rejects only on a spawn 'error' — the process never ran, so there
+      // is nothing left to wait for.
+      parentDone = true
+    },
+  )
+  // A cooperative CLI can close synchronously in response to SIGTERM. Let its
+  // completion handler publish that fact before a zero-length grace window
+  // decides whether escalation is still necessary.
+  await Promise.resolve()
   try {
-    // Awaiting `done` is the whole point: the caller promised the work stopped,
-    // so it must not return while the child is still exiting.
-    await entry.done
-  } catch {
-    // `done` rejects only on a spawn 'error' — the process never ran, so there
-    // is nothing left to wait for.
+    const deadline = Date.now() + graceMs
+    while (Date.now() < deadline) {
+      const descendantsAlive = entry.detachedProcessGroup
+        && processGroupAlive(entry.child.pid)
+      if (parentDone && !descendantsAlive) return
+      const tick = new Promise<void>((resolve) =>
+        setTimeout(resolve, Math.min(25, Math.max(0, deadline - Date.now()))),
+      )
+      if (parentDone) await tick
+      else await Promise.race([done, tick])
+    }
+    // The parent may have exited cleanly while a subagent ignored SIGTERM. The
+    // process-group probe keeps the escalation alive for that exact case.
+    const descendantsAlive = entry.detachedProcessGroup
+      && processGroupAlive(entry.child.pid)
+    if (!parentDone || descendantsAlive) {
+      signalProcessTree(entry.child, 'SIGKILL', { detachedProcessGroup: entry.detachedProcessGroup })
+    }
   } finally {
-    clearTimeout(escalate)
+    // Awaiting `done` is the whole point: the caller promised the work stopped,
+    // so it must not return while the top-level CLI is still exiting.
+    await done
   }
 }
 
@@ -242,7 +270,7 @@ export async function stopAllAgentProcesses(): Promise<void> {
 // bridge's `inferMcpClientKind`, so this wins over process-lineage sniffing.
 function runnerAgentKind(requestedCommand: string, resolvedCommand: string): HealAgent | null {
   if (isAgentKind(requestedCommand)) return requestedCommand
-  const base = resolvedCommand.split(/[\\/]/).pop()?.replace(/\.exe$/i, '').toLowerCase() ?? ''
+  const base = resolvedCommand.replace(/^.*[\\/]/, '').replace(/\.exe$/i, '').toLowerCase()
   return isAgentKind(base) ? base : null
 }
 
@@ -256,12 +284,16 @@ export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
   const command = isAgentKind(opts.command) ? (resolveBinary(opts.command) ?? opts.command) : opts.command
   const agent = runnerAgentKind(opts.command, command)
   const ptyKind = agent ? `${agent}-pty` as const : null
+  // A fresh Unix process group makes the CLI and every subagent it starts one
+  // cancellable unit. Windows reaches the same tree through taskkill /T.
+  const detachedProcessGroup = process.platform !== 'win32'
   // This is the final common boundary for every non-interactive Canary-owned
   // agent. Feature-specific builders cannot accidentally omit the context and
   // auto-compaction policy, and arbitrary non-agent commands stay untouched.
   const args = agent ? [...internalAgentContextArgs(agent), ...opts.args] : opts.args
   const child = spawnImpl(command, args, {
     cwd: opts.cwd,
+    detached: detachedProcessGroup,
     stdio: [useStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     env: ptyKind
       ? { ...process.env, CANARY_LAB_MCP_CLIENT_KIND: ptyKind }
@@ -340,7 +372,10 @@ export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
         ? () => { try { return fs.statSync(opts.activityPath!).size } catch { return 0 } }
         : undefined,
       onTick: opts.onTick,
-      onIdle: () => { opts.onIdle?.(); try { child.kill('SIGTERM') } catch { /* already dead */ } },
+      onIdle: () => {
+        opts.onIdle?.()
+        signalProcessTree(child, 'SIGTERM', { detachedProcessGroup })
+      },
     })
   })
 
@@ -348,13 +383,15 @@ export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
   // paths to `finish` are the child's own 'close'/'error' events and the idle
   // timer, and the timer is a setInterval — so the earliest any of them can fire
   // is a later tick, by which point this entry exists for `finish` to delete.
-  liveAgentProcesses.set(child, { child, scope: opts.spawnScope, done })
+  liveAgentProcesses.set(child, { child, scope: opts.spawnScope, done, detachedProcessGroup })
 
   try { child.stdin?.end(useStdin ? opts.stdin : undefined) } catch { /* ignore */ }
 
   return {
     child,
     done,
-    stop: (signal: NodeJS.Signals = 'SIGTERM') => { try { child.kill(signal) } catch { /* already dead */ } },
+    stop: (signal: NodeJS.Signals = 'SIGTERM') => {
+      signalProcessTree(child, signal, { detachedProcessGroup })
+    },
   }
 }

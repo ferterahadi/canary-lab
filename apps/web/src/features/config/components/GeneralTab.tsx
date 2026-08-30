@@ -76,7 +76,7 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
             <FieldRow label="Name">
               <TextInput value={ed.draft.name} onChange={(name) => ed.setDraft((d) => ({ ...d, name }))} />
             </FieldRow>
-            <FieldRow label="Description">
+            <FieldRow label="Intent · what to test">
               <Textarea
                 minRows={6}
                 maxRows={14}

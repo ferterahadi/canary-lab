@@ -50,8 +50,19 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-async function mount(onNavigateToRun?: (feature: string, runId: string) => void): Promise<void> {
-  await act(async () => { root.render(<LogCleanupPage onClose={() => {}} onNavigateToRun={onNavigateToRun} />) })
+async function mount(
+  onNavigateToRun?: (feature: string, runId: string) => void,
+  onNavigateToPortify?: (feature: string) => void,
+): Promise<void> {
+  await act(async () => {
+    root.render(
+      <LogCleanupPage
+        onClose={() => {}}
+        onNavigateToRun={onNavigateToRun}
+        onNavigateToPortify={onNavigateToPortify}
+      />,
+    )
+  })
   // flush the cleanupRuns().then
   await act(async () => { await Promise.resolve() })
 }
@@ -152,6 +163,15 @@ describe('LogCleanupPage', () => {
     await act(async () => { await Promise.resolve() })
     expect(api.removePortify).toHaveBeenCalledWith('portify-2026-05-01T1000-x1')
     expect(api.removePortify).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens Portify history in the feature Flight stage', async () => {
+    const onNavigateToPortify = vi.fn()
+    await mount(undefined, onNavigateToPortify)
+    await act(async () => { buttonByText('Portify')?.click() })
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { buttonByText('Open in Flight')?.click() })
+    expect(onNavigateToPortify).toHaveBeenCalledWith('shop')
   })
 
   it('portify confirm cancel removes nothing', async () => {

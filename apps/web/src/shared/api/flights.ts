@@ -292,6 +292,17 @@ export function getPlanFeaturesTask(taskId: string, opts?: ClientOptions): Promi
   )
 }
 
+/** Stop the planning agent tree and cancel any flight that won the auto-launch
+ *  race before this request reached the server. */
+export function cancelPlanFeatures(taskId: string, opts?: ClientOptions): Promise<PlanFeaturesTaskT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PlanFeaturesTaskT>(
+    `${baseUrl}/api/flights/plan-features/${encodeURIComponent(taskId)}/cancel`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    fetchImpl,
+  )
+}
+
 /** Pre-flight tasks still needing continuation (running) or the user's
  *  confirmation (done) — the Flights pill's pre-flight rows. Refetched on the
  *  `pre-flight-changed` WorkspaceEvent. */

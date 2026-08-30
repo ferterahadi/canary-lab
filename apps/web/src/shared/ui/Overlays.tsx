@@ -78,7 +78,6 @@ export function Modal({
   meta,
   width = 480,
   height,
-  maxHeight,
   role = 'dialog',
   ariaLabel,
   testId,
@@ -104,16 +103,11 @@ export function Modal({
   /** Optional metadata content rendered as a 2-col grid under the title. */
   meta?: ReactNode
   width?: number
-  /** Fixed height (e.g. `'88vh'` or a px number) instead of shrinking to fit
-   *  content — for a multi-tab/paginated dialog whose body height should stay
-   *  stable as the active section's content amount changes. Omit to shrink-
-   *  wrap content up to the default `max-h-[calc(100vh-2rem)]` cap. */
+  /** Fixed height (or a px number) instead of shrinking to fit content — for a
+   *  multi-tab/paginated dialog whose body height should stay stable as the
+   *  active section's content amount changes. Every dialog remains constrained
+   *  to the shared 80vh viewport cap. */
   height?: number | string
-  /** Tighter cap than the default `calc(100vh - 2rem)` — a dialog that should
-   *  float in the viewport rather than nearly fill it (e.g. `'70vh'` leaves an
-   *  even 15% band above and below). The dialog still shrink-wraps content
-   *  below the cap; only the ceiling moves. */
-  maxHeight?: number | string
   /** ARIA role for the dialog surface — `alertdialog` for error/confirmation
    *  interruptions, `dialog` (default) otherwise. */
   role?: 'dialog' | 'alertdialog'
@@ -148,7 +142,7 @@ export function Modal({
   const hasHeader = Boolean(title || eyebrow || meta || status || icon || description)
   return (
     <div
-      className="cl-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="cl-modal-backdrop fixed inset-0 z-50 flex items-center justify-center px-4 py-[10vh]"
       onClick={onClose}
     >
       <div
@@ -156,13 +150,11 @@ export function Modal({
         aria-label={ariaLabel ?? title}
         aria-modal="true"
         data-testid={testId}
-        className="cl-modal relative flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg"
+        className="cl-modal relative flex max-h-[80vh] flex-col overflow-hidden rounded-lg"
         style={{
           width,
           maxWidth: '94vw',
           ...(height ? { height } : {}),
-          // Inline so it beats the class's own `max-h-[calc(100vh-2rem)]`.
-          ...(maxHeight ? { maxHeight } : {}),
           background: 'var(--bg-elevated)',
         }}
         onClick={(e) => e.stopPropagation()}
@@ -331,13 +323,13 @@ export function SlideOverPanel({
 }) {
   useEscapeToClose(onClose)
   const node = (
-    <div className="fixed inset-0 z-[60] flex items-start justify-end p-6" style={{ background: 'var(--overlay-backdrop)' }} onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-start justify-end px-6 py-[10vh]" style={{ background: 'var(--overlay-backdrop)' }} onClick={onClose}>
       <section
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}
         data-testid={testId}
-        className="flex max-h-[calc(100vh-3rem)] flex-col rounded-lg border"
+        className="flex max-h-[80vh] flex-col rounded-lg border"
         style={{
           width: `min(${width}px, calc(100vw - 3rem))`,
           borderColor: 'var(--border-default)',

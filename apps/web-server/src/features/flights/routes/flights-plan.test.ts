@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 import fs from 'fs'
 
@@ -20,7 +20,7 @@ import { FLIGHT_STAGE_KEYS } from '../logic/types'
 
 import type { PlanFeaturesTask, PlannedFeature } from '../../../../../../shared/flights/types'
 
-import { PlanFeaturesStore, startPlanFeatures, normalizePlanResult } from '../logic/plan-features'
+import { PlanFeaturesStore, cancelPlanFeatures, startPlanFeatures, normalizePlanResult } from '../logic/plan-features'
 
 let tmpDir: string
 
@@ -38,6 +38,7 @@ async function buildApp(
   adapters: StageAdapters,
   flightStore?: FlightStore,
   planAgent?: FlightAgentSpawner,
+  planStore?: PlanFeaturesStore,
 ): Promise<FastifyInstance> {
   const instance = Fastify({ logger: false })
   await instance.register(flightsRoutes, {
@@ -47,6 +48,7 @@ async function buildApp(
     adapters,
     ...(flightStore ? { flightStore } : {}),
     ...(planAgent ? { planAgent } : {}),
+    ...(planStore ? { planStore } : {}),
   })
   return instance
 }
@@ -151,6 +153,96 @@ describe('plan-features (R54)', () => {
     release!()
   })
 
+  it('cancels a running plan before stopping its agent and never resurrects its late result', async () => {
+    let release: (() => void) | null = null
+    const gated: FlightAgentSpawner = async () => {
+      await new Promise<void>((resolve) => { release = resolve })
+      return { text: planText([{ name: 'too-late', description: 'must not launch' }]) }
+    }
+    app = await buildApp(allDone(), undefined, gated)
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/flights/plan-features',
+      body: { repoPaths: [repoDir], description: 'cancel this plan' },
+    })
+    const taskId = (started.json() as { taskId: string }).taskId
+
+    const cancelled = await app.inject({ method: 'POST', url: `/api/flights/plan-features/${taskId}/cancel` })
+    expect(cancelled.statusCode).toBe(200)
+    expect(cancelled.json()).toMatchObject({ taskId, status: 'cancelled', cancelledAt: expect.any(String) })
+    const listed = await app.inject({ method: 'GET', url: '/api/flights/plan-features' })
+    expect((listed.json() as { tasks: PlanFeaturesTask[] }).tasks).toEqual([])
+
+    release!()
+    await new Promise((r) => setTimeout(r, 25))
+    const after = await app.inject({ method: 'GET', url: `/api/flights/plan-features/${taskId}` })
+    expect((after.json() as PlanFeaturesTask).status).toBe('cancelled')
+    const flights = await app.inject({ method: 'GET', url: '/api/flights' })
+    expect((flights.json() as { flights: unknown[] }).flights).toEqual([])
+  })
+
+  it('is idempotent for an already-cancelled plan and rejects missing or failed tasks', async () => {
+    app = await buildApp(allDone(), undefined, agentReturning('not json'))
+    const failed = await planAndWait(app)
+    const failedCancel = await app.inject({ method: 'POST', url: `/api/flights/plan-features/${failed.taskId}/cancel` })
+    expect(failedCancel.statusCode).toBe(409)
+
+    const missing = await app.inject({ method: 'POST', url: '/api/flights/plan-features/fp_nope/cancel' })
+    expect(missing.statusCode).toBe(404)
+
+    const store = new PlanFeaturesStore(tmpDir)
+    const stamp = '2026-08-30T10:00:00.000Z'
+    store.save({ taskId: 'fp_cancelled', repoPaths: [repoDir], description: 'd', status: 'cancelled', cancelledAt: stamp, createdAt: stamp, updatedAt: stamp })
+    const again = await app.inject({ method: 'POST', url: '/api/flights/plan-features/fp_cancelled/cancel' })
+    expect(again.statusCode).toBe(200)
+    expect((again.json() as PlanFeaturesTask).cancelledAt).toBe(stamp)
+  })
+
+  it('returns the cancellation snapshot when another cleanup removes its record', async () => {
+    const planStore = new PlanFeaturesStore(tmpDir)
+    const stamp = '2026-08-30T10:00:00.000Z'
+    const taskId = 'fp_route_removed'
+    planStore.save({
+      taskId,
+      repoPaths: [repoDir],
+      description: 'remove after cancel',
+      status: 'done',
+      createdAt: stamp,
+      updatedAt: stamp,
+    })
+    let removed = false
+    planStore.onEvent(() => {
+      const current = planStore.get(taskId)
+      if (current?.status !== 'cancelled' || removed) return
+      removed = true
+      fs.rmSync(path.join(planStore.recordDir(taskId), 'plan.json'))
+    })
+    app = await buildApp(allDone(), undefined, undefined, planStore)
+
+    const response = await app.inject({ method: 'POST', url: `/api/flights/plan-features/${taskId}/cancel` })
+
+    // The endpoint must still send a stable cancellation response if retention
+    // cleanup wins between the cancelling operation and its final read.
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ taskId, status: 'cancelled' })
+  })
+
+  it('reports a non-Error storage failure from cancellation as a 500 response', async () => {
+    // Route dependencies allow a shared persistent store. If that adapter
+    // reports a non-Error failure, keep the HTTP error readable instead of
+    // losing it to an empty `err.message` assumption.
+    const brokenPlanStore = {
+      onEvent: () => {},
+      get: () => { throw 'plan storage unavailable' },
+    } as unknown as PlanFeaturesStore
+    app = await buildApp(allDone(), undefined, undefined, brokenPlanStore)
+
+    const response = await app.inject({ method: 'POST', url: '/api/flights/plan-features/fp_broken/cancel' })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({ error: 'plan storage unavailable' })
+  })
+
   it('defaults an undefined plan-features POST body to {} and 400s on missing repoPaths', async () => {
     app = await buildApp(allDone())
     const resp = await app.inject({ method: 'POST', url: '/api/flights/plan-features' })
@@ -237,6 +329,36 @@ describe('plan-features (R54)', () => {
 })
 
 describe('plan-features.ts direct unit coverage (paths no route surface reaches)', () => {
+  it('writes cancelled before asking the scoped process runner to stop', async () => {
+    const store = new PlanFeaturesStore(tmpDir)
+    const stamp = '2026-08-30T10:00:00.000Z'
+    store.save({ taskId: 'fp_running', repoPaths: [repoDir], description: 'd', status: 'running', createdAt: stamp, updatedAt: stamp })
+    const stopProcesses = vi.fn(async (scope: string) => {
+      expect(store.get('fp_running')?.status).toBe('cancelled')
+      expect(scope).toBe(store.recordDir('fp_running'))
+    })
+
+    const task = await cancelPlanFeatures('fp_running', store, { now: () => stamp, stopProcesses })
+
+    expect(task.status).toBe('cancelled')
+    expect(stopProcesses).toHaveBeenCalledWith(store.recordDir('fp_running'), { by: 'user' })
+  })
+
+  it('returns the cancelled snapshot when the record is removed during process teardown', async () => {
+    const store = new PlanFeaturesStore(tmpDir)
+    const stamp = '2026-08-30T10:00:00.000Z'
+    store.save({ taskId: 'fp_removed', repoPaths: [repoDir], description: 'd', status: 'running', createdAt: stamp, updatedAt: stamp })
+
+    const task = await cancelPlanFeatures('fp_removed', store, {
+      now: () => stamp,
+      stopProcesses: async () => {
+        fs.rmSync(path.join(store.recordDir('fp_removed'), 'plan.json'), { force: true })
+      },
+    })
+
+    expect(task).toMatchObject({ taskId: 'fp_removed', status: 'cancelled', cancelledAt: stamp })
+  })
+
   it('normalizePlanResult rejects zero suites, a missing description, and duplicate names', () => {
     expect(() => normalizePlanResult({ split: false, features: [] })).toThrow(/no suites/)
     expect(() =>

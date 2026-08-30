@@ -96,6 +96,27 @@ describe('coverage api', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2)
   })
 
+  it('does not clear a newer coverage-state request when an older request settles', async () => {
+    const states = [{ feature: 'checkout', headline: 'Covered 100%', summary: 'fresh', coverage: 'fresh', coveragePct: 100 }]
+    let settleFirst: ((response: Response) => void) | undefined
+    let settleSecond: ((response: Response) => void) | undefined
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { settleFirst = resolve }))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { settleSecond = resolve }))
+
+    const older = listCoverageStates({ baseUrl: 'http://one', fetchImpl })
+    const newer = listCoverageStates({ baseUrl: 'http://two', fetchImpl })
+    settleFirst?.(ok(states))
+    await older
+
+    // The old request's finally runs after `coverageStatesInFlight` moved to the
+    // second request. It must not erase that newer in-flight record.
+    expect(listCoverageStates({ baseUrl: 'http://two', fetchImpl })).toBe(newer)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    settleSecond?.(ok(states))
+    await expect(newer).resolves.toEqual(states)
+  })
+
   it('regeneratePrdSummary POSTs with adapter when provided', async () => {
     const payload = { feature: 'checkout', summary: {}, written: [] }
     const fetchImpl = vi.fn().mockResolvedValue(ok(payload))

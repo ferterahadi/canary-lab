@@ -192,6 +192,7 @@ describe('legacy terminal-stage repair', () => {
       stages: FLIGHT_STAGE_KEYS.map((key) => ({
         key,
         status: key === 'similarity' ? 'done' as const : key === 'scout' ? 'running' as const : 'pending' as const,
+        timings: key === 'scout' ? { authoring: { elapsedMs: 240, since: '2026-01-01T00:00:00Z' } } : undefined,
       })),
       createdAt: now(),
       updatedAt: now(),
@@ -202,7 +203,34 @@ describe('legacy terminal-stage repair', () => {
     const reopened = new FlightRunStore(tmpDir)
     const repaired = reopened.get(stale.flightId)!
     expect(repaired.stages.find((stage) => stage.key === 'scout')?.status).toBe('pending')
+    expect(repaired.stages.find((stage) => stage.key === 'scout')?.timings).toEqual({ authoring: { elapsedMs: 240 } })
     expect(reopened.list().find((entry) => entry.flightId === stale.flightId)?.stages?.find((stage) => stage.key === 'scout')?.status).toBe('pending')
+  })
+
+  it('gives a repaired legacy stage with no timings an empty timings record', () => {
+    const stale = {
+      flightId: 'fl-legacy-no-timings',
+      feature: 'checkout',
+      repoPaths: ['/repo/a'],
+      description: 'checkout flow',
+      opts: OPTS,
+      status: 'aborted' as const,
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'scout' ? 'running' as const : 'pending' as const,
+      })),
+      createdAt: now(),
+      updatedAt: now(),
+      endedAt: now(),
+    }
+    store.save(stale)
+
+    const repaired = new FlightRunStore(tmpDir).get(stale.flightId)!
+    expect(repaired.stages.find((stage) => stage.key === 'scout')).toMatchObject({
+      status: 'pending',
+      timings: {},
+    })
   })
 })
 

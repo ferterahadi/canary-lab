@@ -8,11 +8,11 @@ import { PORTIFY_STATUS_COLOR, SEVEN_DAYS_MS } from './cleanup-rows'
 // Self-contained port-ification record inventory: every workflow under
 // <logs>/portify/<id> with its disk size. This is the home for pruning stale
 // portify records (the × that used to live in the Ports-tab history) — Open
-// reopens a record in the wizard, Delete drops it from history. The scratch
+// opens its feature at Flight → Parallel setup; Delete drops it from history. The scratch
 // worktrees these spawned are reclaimed on the Worktrees tab (PORTIFY owner).
 export function PortifySection({ now, onNavigateToPortify }: {
   now: number
-  onNavigateToPortify?: (workflowId: string) => void
+  onNavigateToPortify?: (feature: string) => void
 }) {
   const [workflows, setWorkflows] = useState<PortifyCleanupEntry[] | null>(null)
   const [loading, setLoading] = useState(true)
@@ -107,7 +107,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
         <CleanupEmptyState
           icon={<FolderGlyph />}
           title="No Portify records"
-          hint="Port-ification workflows show up here once you run Portify — prune saved/failed/cancelled records to reclaim disk. Open reopens one in the wizard."
+          hint="Port-ification workflows show up here once you run Portify — prune saved/failed/cancelled records to reclaim disk. Open returns to Parallel setup in Flight."
         />
       )}
       {!loading && !err && sorted.length > 0 && (
@@ -141,7 +141,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
                 <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{formatBytes(w.folderBytes)}</td>
                 <td className="py-1 pl-3 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   {onNavigateToPortify && (
-                    <button type="button" onClick={() => onNavigateToPortify(w.workflowId)} disabled={bulkBusy} className="cl-button px-1.5 py-0.5" style={{ fontSize: 11 }}>Open</button>
+                    <button type="button" onClick={() => onNavigateToPortify(w.feature)} disabled={bulkBusy} className="cl-button px-1.5 py-0.5" style={{ fontSize: 11 }}>Open in Flight</button>
                   )}
                   <button
                     type="button"
