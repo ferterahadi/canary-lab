@@ -87,7 +87,7 @@ export function ShikiCode({
       <SourceOpenShell sourceLocation={sourceLocation} showOpenButton={showOpenButton}>
         {(openAt) => (
           <pre
-            className={`cl-numbered-code cl-code-shell overflow-x-auto overflow-y-hidden whitespace-pre break-normal rounded-md p-2 text-[11px] leading-[1.65] ${sourceLocation ? 'cursor-pointer' : ''}`}
+            className={`cl-numbered-code cl-code-shell overflow-hidden whitespace-pre-wrap break-words rounded-md p-2 text-[11px] leading-[1.65] ${sourceLocation ? 'cursor-pointer' : ''}`}
             style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
             onClick={(event) => openClickedLine(event.target, openAt)}
           >
@@ -112,10 +112,10 @@ export function ShikiCode({
     <SourceOpenShell sourceLocation={sourceLocation} showOpenButton={showOpenButton}>
       {(openAt) => (
         <div
-          className={`shiki-block cl-numbered-code cl-code-shell overflow-x-auto overflow-y-hidden rounded-md text-[11px] leading-[1.65] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-running/10' : ''}`}
+          className={`shiki-block cl-numbered-code cl-code-shell overflow-hidden rounded-md text-[11px] leading-[1.65] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-running/10' : ''}`}
           onClick={(event) => openClickedLine(event.target, openAt)}
-          // Shiki has already escaped the source it highlighted; decorateShikiLines
-          // only wraps those tokens in spans.
+          // Shiki has already escaped the source it highlighted;
+          // decorateShikiLines only adds metadata and presentation wrappers.
           // eslint-disable-next-line no-restricted-syntax
           dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, lineHighlight, sourceLocation?.startLine, sourceLineMap, changedLines, selectedSourceRange, storyLineNumbers) }}
         />
@@ -172,7 +172,7 @@ function FallbackCodeLines({
         title={number.title}
         style={style}
       >
-        {line}
+        <span className="cl-code-line-content">{line}</span>
       </span>
     )
   })
@@ -240,10 +240,7 @@ function decorateShikiLines(
 ): string {
   let lineNo = 0
   const shownStorySequences = new Set<string>()
-  // Lines render as full-width blocks (`.shiki-block pre span.line`), so the
-  // newline text nodes Shiki leaves between them must go — under pre-wrap each
-  // would paint an extra blank row.
-  return html.replace(/\n(?=<span class="line")/g, '').replace(/<span class="line"/g, (match) => {
+  const decorated = html.replace(/<span class="line"/g, (match) => {
     lineNo += 1
     const mapped = sourceMappingForDisplayLine(lineNo, startLine, sourceLineMap)
     const number = codeLineNumber(lineNo, mapped.sourceLines, storyLineNumbers, shownStorySequences)
@@ -261,6 +258,14 @@ function decorateShikiLines(
     }
     return `${match}${attrs}`
   })
+  // A dedicated content cell keeps wrapped source aligned after the number
+  // gutter. Shiki keeps each source line on one HTML line, so the final closing
+  // span before its newline (or </code>) is the line wrapper, not a token span.
+  return decorated
+    .replace(/(<span class="line"[^>]*>)(.*)(<\/span>)(?=\n|<\/code>)/g, '$1<span class="cl-code-line-content">$2</span>$3')
+    // Grid rows make Shiki's separator newlines visible under pre-wrap; the
+    // source rows themselves already preserve every authored newline.
+    .replace(/\n(?=<span class="line")/g, '')
 }
 
 function codeLineHighlightColors(kind: TestExecutionHighlightKind): { background: string; bar: string } {

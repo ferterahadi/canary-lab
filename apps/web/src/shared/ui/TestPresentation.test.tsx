@@ -179,11 +179,13 @@ describe('TestPresentation', () => {
     expect(displayedLines[0].dataset.codeSequenceLabel).toBe('02')
     expect(displayedLines[0].title).toBe('English step 02')
     expect(displayedLines[0].textContent).toBe("await page.goto('/checkout')")
+    const codeContent = displayedLines[0].querySelector(':scope > .cl-code-line-content')
+    expect(codeContent?.textContent).toBe("await page.goto('/checkout')")
     expect(container.querySelector('[data-testid="test-presentation-code"] button[aria-label="Open in editor"]')).not.toBeNull()
-    const codeScroller = container.querySelector<HTMLElement>('.cl-numbered-code')
-    expect(codeScroller?.classList.contains('overflow-x-auto')).toBe(true)
-    expect(codeScroller?.classList.contains('overflow-y-hidden')).toBe(true)
-    expect(codeScroller?.classList.contains('overflow-hidden')).toBe(false)
+    const codeBlock = container.querySelector<HTMLElement>('.cl-numbered-code')
+    expect(codeBlock?.classList.contains('overflow-hidden')).toBe(true)
+    expect(codeBlock?.classList.contains('overflow-x-auto')).toBe(false)
+    expect(codeBlock?.classList.contains('overflow-y-hidden')).toBe(false)
   })
 
   it('reveals a helper snippet in Code when its English node is selected', async () => {
@@ -307,6 +309,7 @@ describe('TestPresentation', () => {
       '',
     ])
     expect(lines.map((line) => line.dataset.codeSequenceLabel)).toEqual(['01', '1', '1', '2', '', ''])
+    expect(lines.every((line) => line.querySelector(':scope > .cl-code-line-content') !== null)).toBe(true)
     expect(lines[2].dataset.executionHighlight).toBe('running')
   })
 
