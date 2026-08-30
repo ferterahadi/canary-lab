@@ -140,7 +140,7 @@ describe('portify stage', () => {
 
   // Every non-yolo run() parks the upfront portify-gate first. Answer it
   // 'run' to reach the workflow flow a test actually exercises; non-gate
-  // outcomes (already-portified skip, adopted review) pass through untouched.
+  // outcomes (already-portified skip, adopted workflow) pass through untouched.
   async function runPastGate(
     adapter: ReturnType<typeof portifyStage>,
     ctxObj: ReturnType<typeof ctxFor>,
@@ -384,6 +384,65 @@ describe('portify stage', () => {
     // No new workflow was started; the drill-through pin points at the adopted one.
     expect(calls.some((c) => c.method === 'POST' && c.url === '/api/portify')).toBe(false)
     expect(progressLog).toContainEqual({ workflowId: 'wf9' })
+  })
+
+  it('adopts an independently started workflow before it reaches review', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify') {
+        return { statusCode: 200, body: [{ workflowId: 'wf-live', feature: 'checkout', status: 'editing' }] }
+      }
+      // The independent job advanced between the index read and the detail
+      // read. Its active index status is what proves the Flight can discover
+      // it before the old ready-to-save-only adoption point.
+      if (call.method === 'GET' && call.url === '/api/portify/wf-live') {
+        return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/x' } }
+      }
+      return undefined
+    }, calls)
+    const ctxObj = ctxFor(manifest())
+
+    const parked = await runPastGate(portifyStage(deps({ inject })), ctxObj)
+
+    expect(parked).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { kind: 'portify-apply', data: { workflowId: 'wf-live' } },
+    })
+    expect(calls.some((call) => call.method === 'POST' && call.url === '/api/portify')).toBe(false)
+    expect(ctxObj.progressLog).toContainEqual({ workflowId: 'wf-live' })
+  })
+
+  it('adopts the independent workflow when its start wins the same-instant race', async () => {
+    const calls: InjectCall[] = []
+    let listReads = 0
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify') {
+        listReads += 1
+        return {
+          statusCode: 200,
+          body: listReads === 1
+            ? []
+            : [{ workflowId: 'wf-race', feature: 'checkout', status: 'ready-to-save' }],
+        }
+      }
+      if (call.method === 'POST' && call.url === '/api/portify') {
+        return { statusCode: 409, body: { error: 'workflow already active' } }
+      }
+      if (call.method === 'GET' && call.url === '/api/portify/wf-race') {
+        return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/x' } }
+      }
+      return undefined
+    }, calls)
+    const ctxObj = ctxFor(manifest())
+
+    const parked = await runPastGate(portifyStage(deps({ inject })), ctxObj)
+
+    expect(parked).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { kind: 'portify-apply', data: { workflowId: 'wf-race' } },
+    })
+    expect(calls.filter((call) => call.method === 'POST' && call.url === '/api/portify')).toHaveLength(1)
+    expect(ctxObj.progressLog).toContainEqual({ workflowId: 'wf-race' })
   })
 
   it('settles the save-poll via a "failed" status (not just "saved") and still checks the overlay mark', async () => {

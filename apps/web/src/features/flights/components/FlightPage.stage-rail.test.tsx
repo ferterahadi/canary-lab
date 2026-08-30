@@ -302,6 +302,12 @@ describe('trailer model (R14–R18)', () => {
       .map((row) => row.dataset.testid)
     expect(railIds.indexOf('stage-rail-evaluation-export'))
       .toBeLessThan(railIds.indexOf('stage-rail-portify'))
+    const report = container.querySelector('[data-testid="stage-rail-evaluation-export"]')
+    const divider = container.querySelector('[data-testid="parallel-setup-divider"]')
+    const parallelSetup = container.querySelector('[data-testid="stage-rail-portify"]')
+    expect(divider?.textContent).toContain('Independent')
+    expect(report?.nextElementSibling).toBe(divider)
+    expect(divider?.nextElementSibling).toBe(parallelSetup)
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')?.click()

@@ -61,8 +61,15 @@ describe('FactPlaceholder — always a dash, never a bar or a sweep', () => {
     expect(struck.getAttribute('aria-label')).toBe('not measured — the step failed')
   })
 
+  it('names settled missing evidence without making it look pending', () => {
+    const unavailable = slot(renderWith(fact, 'unavailable'))
+    expect(unavailable.textContent).toBe('—')
+    expect(unavailable.dataset.awaiting).toBe('unavailable')
+    expect(unavailable.getAttribute('aria-label')).toBe('not recorded for this flight')
+  })
+
   it('keeps the tile height the figure will need, in every state', () => {
-    for (const awaiting of ['live', 'idle', 'failed'] as const) {
+    for (const awaiting of ['live', 'idle', 'failed', 'unavailable'] as const) {
       expect(slot(renderWith(fact, awaiting)).className).toContain('h-[22px]')
     }
   })
@@ -129,6 +136,11 @@ describe('FactTile second line', () => {
     // number that isn't coming.
     const tile = renderWith({ label: 'Services booted', value: '', awaiting: true }, 'failed')
     expect(subOf(tile)).toBe('not measured')
+  })
+
+  it('says the evidence was not recorded once the step is settled', () => {
+    const tile = renderWith({ label: 'Services booted', value: '', awaiting: true }, 'unavailable')
+    expect(subOf(tile)).toBe('not recorded')
   })
 
   it('leaves an identity tile two lines — a gloss under a filename is noise', () => {

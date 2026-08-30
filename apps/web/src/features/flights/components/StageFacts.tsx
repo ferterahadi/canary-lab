@@ -6,7 +6,7 @@ import { PanelCard } from '@/shared/ui/PanelCard'
 import { type AwaitingState } from '@/shared/ui/Skeleton'
 import { Tooltip, TOOLTIP_ANCHOR_ATTR } from '@/shared/ui/Tooltip'
 import { STAGE_COLUMN, evidenceOf, num, specsCoverageProgress, str } from './stage-meta'
-import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, overlayDiffStat, stageHasEvidence, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
+import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, overlayDiffStat, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
 
 // ─── Stage facts (R20) ──────────────────────────────────────────────────────
 // One uniform template for every stage: the 2–4 things the user cares about at
@@ -165,10 +165,10 @@ export function evaluationTaskId(stage: FlightStage, flight: FlightManifest): st
   return str(evidenceOf(stage), 'taskId') ?? flight.links?.evaluationTaskId
 }
 
-/** The tiles a stage WILL show once it settles, in the order it shows them
- *  (R83). Labels must match the ones the stage's own branch emits exactly — the
- *  point of the list is that a value lands in the slot its placeholder held, so
- *  nothing moves under the reader when the stage finishes.
+/** The tile slots a stage owns, in their permanent order (R83). A slot can name
+ *  a semantic alias used by an older or reduced evidence shape; for example,
+ *  measured source text occupies the Source docs slot instead of growing a
+ *  fourth tile beside it.
  *
  *  Three stages are deliberately absent. `run`/`heal` render as the Test Run
  *  hero, which owns every number (R80) — a band of placeholders above it would
@@ -176,22 +176,30 @@ export function evaluationTaskId(stage: FlightStage, flight: FlightManifest): st
  *  unless it parks or fails, and its one tile names a matched suite, which most
  *  flights never have: a placeholder would announce a match as if one were
  *  coming. */
-const AWAITED_FACT_LABELS: Partial<Record<FlightStageKey, readonly string[]>> = {
-  'scout': ['Repos scanned', 'Services found', 'Port slots drafted'],
-  'scaffold': ['Services booted', 'Boot time', 'Env files'],
-  'env-capture': ['Env files', 'Boot check'],
-  'docs': ['Source docs', 'Requirements inferred', 'Distilled to'],
-  'prd-summary': ['Requirements'],
-  'specs-coverage': ['Mapped coverage', 'Requirements', 'Tests written'],
-  'portify': ['Services injectable', 'Files edited', 'Instances proven'],
-  'evaluation-export': ['Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven'],
+interface FactSlot {
+  label: string
+  aliases?: readonly string[]
 }
 
-/** Settled = it has produced everything it ever will, so a placeholder there
- *  would promise more. `failed` is NOT settled: the step stopped short, and the
- *  tiles it never filled are exactly what a retry would fill. */
-function stageSettled(stage: FlightStage): boolean {
-  return stage.status === 'done' || stage.status === 'skipped'
+const slots = (...labels: string[]): readonly FactSlot[] => labels.map((label) => ({ label }))
+
+const FACT_SLOTS: Partial<Record<FlightStageKey, readonly FactSlot[]>> = {
+  'scout': slots('Repos scanned', 'Services found', 'Port slots drafted'),
+  'scaffold': slots('Services booted', 'Boot time', 'Env files'),
+  'env-capture': slots('Env files', 'Boot check'),
+  'docs': [
+    { label: 'Source docs', aliases: ['Source text'] },
+    { label: 'Requirements inferred' },
+    { label: 'Distilled to' },
+  ],
+  'prd-summary': slots('Requirements'),
+  'specs-coverage': [
+    { label: 'Mapped coverage' },
+    { label: 'Requirements', aliases: ['Coverage gaps'] },
+    { label: 'Tests written' },
+  ],
+  'portify': slots('Services injectable', 'Files edited', 'Instances proven'),
+  'evaluation-export': slots('Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven'),
 }
 
 /** A tile whose value the stage hasn't produced yet. The empty `value` is never
@@ -206,18 +214,13 @@ export function awaitingFact(label: string): StageFact {
   return { label, value: '', awaiting: true }
 }
 
-/** Fill the tiles the stage will have but hasn't measured yet (R83), so a
- *  pending / running / failed stage shows the SHAPE of its evidence instead of
- *  an empty pane — the layout the user already reads on a settled stage, with
- *  placeholders where the figures go.
+/** Fill every canonical slot the stage has not measured (R83). The placeholder
+ *  style says whether its value is idle, live, failed, or simply unavailable;
+ *  status no longer removes the slot and turns one Flight into a different
+ *  layout from another.
  *
- *  A settled stage is returned untouched: `done` and `skipped` have produced
- *  everything they ever will, so a placeholder there would claim a value is
- *  still coming.
- *
- *  The awaited list is the WHOLE band, not a floor under it: a stage that
- *  declares one shows those tiles in that order in every state, and a fact
- *  outside the list is DROPPED while the stage works rather than led with. A
+ *  The slot list is the WHOLE band: a stage that declares one shows those tiles
+ *  in that order in every state. A
  *  running band used to carry extra tiles nothing settled ever shows — the live
  *  agent phase, the authoring pass, portify's attempt and phase — so the band
  *  the user learned to read at rest was a different band from the one in front
@@ -225,32 +228,42 @@ export function awaitingFact(label: string): StageFact {
  *  transient tiles came and went. Those live facts all have a home of their own
  *  further down the pane (the passes card, the state line, the Activity panel);
  *  the band's job is the settled shape, with placeholders where figures land. */
-export function withAwaitingTiles(
+export function withCanonicalFactSlots(
   stage: FlightStage,
-  companion: FlightStage | undefined,
   known: StageFact[],
-  /** A band source has not been READ yet (`StageBandData.pending`). A settled
-   *  stage keeps its placeholders while this holds: the tiles fed by the flight
-   *  record are ready a fetch before the ones fed by the ledger, boot run or
-   *  config, and dropping the latter meanwhile re-widths every tile in the grid
-   *  the moment they land. It also stops the fallback tile a stage substitutes
-   *  for a missing source (`Coverage gaps` for `Requirements`) from taking a
-   *  slot for one frame and being relabelled in the next. */
+  /** While a pane source is still loading, only exact labels may land. A
+   *  fallback such as Coverage gaps must not occupy the Requirements slot for
+   *  one frame and then get relabelled when the ledger arrives. */
   pending = false,
 ): StageFact[] {
-  // A merged row settles when BOTH halves do. Reading the primary alone told the
-  // Suite setup row it was finished while its env capture had not started — the
-  // row said `pending`, and its band showed one lonely tile where the two the
-  // capture still owes belong.
-  if (stageSettled(stage) && (!companion || stageSettled(companion)) && !pending) return known
-  const awaited = AWAITED_FACT_LABELS[stage.key]
-  if (!awaited) return known
-  const byLabel = new Map(known.map((f) => [f.label, f]))
-  return awaited.map((label) => byLabel.get(label) ?? awaitingFact(label))
+  const stageSlots = FACT_SLOTS[stage.key]
+  if (!stageSlots) return known
+
+  // Evaluation has two honest final shapes: evidence reconciliation when a
+  // ledger exists, or report identity when it does not. Identity facts are not
+  // substitutes for proof metrics, so keep that complete reduced shape rather
+  // than placing "From run" under "Requirements with tests" by position.
+  const slotNames = new Set(stageSlots.flatMap((slot) => [slot.label, ...(slot.aliases ?? [])]))
+  if (stage.key === 'evaluation-export' && known.length > 0 && !known.some((fact) => slotNames.has(fact.label))) {
+    return known
+  }
+
+  const unused = [...known]
+  const settled = stage.status === 'done' || stage.status === 'skipped'
+  const filled = stageSlots.map((slot) => {
+    const index = unused.findIndex((fact) => fact.label === slot.label || (settled && !pending && slot.aliases?.includes(fact.label)))
+    if (index < 0) return awaitingFact(slot.label)
+    return unused.splice(index, 1)[0]!
+  })
+  // A pending source may have left a temporary fallback in `unused`; showing it
+  // beside the slot it must not occupy would still produce the one-frame extra
+  // tile this hold exists to prevent. Once reads settle, preserve every unknown
+  // evidence fact — dropping evidence is worse than a one-off extra tile.
+  return pending || !settled ? filled : [...filled, ...unused]
 }
 
 /** The band is the stage's SETTLED tile set in every state — see
- *  `withAwaitingTiles`. The live agent's phase (thinking / writing / a tool
+ *  `withCanonicalFactSlots`. The live agent's phase (thinking / writing / a tool
  *  call) is not part of it: it belongs to the state line under the stage title
  *  (`StageStatusLines`) and to the Activity panel, both of which show it with
  *  more detail and without displacing a figure the user is waiting on. */
@@ -258,15 +271,15 @@ export function stageFacts(
   stage: FlightStage,
   flight: FlightManifest,
   companion?: FlightStage,
-  /** Sources outside the flight record (see StageBandData). Absent fields drop
-   *  their tile — the band never pads itself to a fixed width. */
+  /** Sources outside the flight record (see StageBandData). Absent fields leave
+   *  their canonical slot unfilled rather than changing the band's width. */
   band: StageBandData = {},
 ): StageFact[] {
-  return withAwaitingTiles(stage, companion, measuredStageFacts(stage, flight, companion, band), band.pending)
+  return withCanonicalFactSlots(stage, measuredStageFacts(stage, flight, companion, band), band.pending)
 }
 
 /** What the stage has actually measured — evidence, live progress and the band's
- *  outside sources. Absent values drop their tile here; `withAwaitingTiles` is
+ *  outside sources. Absent values drop their tile here; `withCanonicalFactSlots` is
  *  what turns those holes into placeholders. */
 function measuredStageFacts(
   stage: FlightStage,
@@ -463,7 +476,10 @@ function measuredStageFacts(
         // Its own second line, not the label's gloss: "what the documents asked
         // for" under "None mapped yet" reads as a contradiction, when the truth
         // is there were no documents to ask.
-        return [{ label: 'Requirements', value: 'None yet', sub: 'no requirement docs for this suite' }]
+        return [
+          { label: 'Mapped coverage', value: '—', sub: 'no requirements to map' },
+          { label: 'Requirements', value: 'None yet', sub: 'no requirement docs for this suite' },
+        ]
       }
       // An authored test is visible evidence, but its 0% ledger is not a
       // measurement until coverage mapping runs. Keep the three settled tiles
@@ -522,7 +538,7 @@ function measuredStageFacts(
         // yet. Their DEPTH is on the
         // composition card; the spec-file count stays as the sub for a suite with
         // no requirements, which has no composition card to fall back to.
-        ...(band.ledger && band.ledger.tests.length > 0
+        ...(band.ledger
           ? [{
               label: 'Tests written',
               value: String(band.ledger.tests.length),
@@ -538,15 +554,6 @@ function measuredStageFacts(
     }
     case 'portify': {
       // R35: verdict → proof → what changed, in that order.
-      // Skipped with nothing to show is the whole statement. Skipped with
-      // evidence is not: resuming a flight mid-pipeline marks every earlier
-      // stage skipped, so this sentence replaced a fully-populated band —
-      // injectable count, double-boot proof, port changes — the moment the user
-      // continued from a later step. Evidence outranks the skip; the rail draws
-      // the same distinction (see railStatus).
-      if (stage.status === 'skipped' && !stageHasEvidence(stage.evidence)) {
-        return [{ label: 'Parallel', value: 'Already checked — safe to run two at once', tone: 'good' }]
-      }
       // No live attempt/phase tiles while running: neither survives into the
       // settled band, and the same two facts are already on the state line and
       // the embedded portify timeline below. The band holds its three awaited
@@ -904,7 +911,7 @@ function strengthBreakdown(strength: StrengthCounts, omit: (typeof STRENGTH_TIER
 // ─── What a tile MEANS, keyed by its label ──────────────────────────────────
 // Two maps, both keyed on the tile's label rather than threaded through the 30
 // branch sites above. The label is already this file's identity key — it is what
-// `AWAITED_FACT_LABELS` matches a placeholder to its eventual value on — so
+// `FACT_SLOTS` matches a placeholder to its eventual value on — so
 // keying here means a tile that has not been measured yet still carries its
 // explanation and its second line, which nothing passed per-branch could give.
 //
@@ -971,7 +978,7 @@ export const FACT_HELP: Record<string, string> = {
  *  and the sentence-valued ones (`Matches`, `Parallel`): their value already
  *  reads as a phrase, and a gloss under a filename is noise.
  *
- *  Every label in `AWAITED_FACT_LABELS` MUST have an entry: the gloss is what
+ *  Every primary label in `FACT_SLOTS` MUST have an entry: the gloss is what
  *  keeps a row of placeholder tiles the same height (the equal-height invariant
  *  on `StageFact.sub`), and a hole here is a band whose tiles sit at three
  *  different heights while the stage works. `Boot check` is sentence-valued but
@@ -1021,6 +1028,11 @@ export const FACT_TONE: Record<NonNullable<StageFact['tone']>, string> = {
  *  muted while it is merely held open, `--danger` once the step stopped short
  *  of filling it. */
 export function FactPlaceholder({ awaiting }: { awaiting: AwaitingState }) {
+  const label = awaiting === 'failed'
+    ? 'not measured — the step failed'
+    : awaiting === 'unavailable'
+      ? 'not recorded for this flight'
+      : 'not measured yet'
   return (
     <div
       className="mt-1 flex h-[22px] items-center"
@@ -1030,7 +1042,7 @@ export function FactPlaceholder({ awaiting }: { awaiting: AwaitingState }) {
       // assistive tech, so the placeholder's meaning never actually reached a
       // screen reader.
       role="img"
-      aria-label={awaiting === 'failed' ? 'not measured — the step failed' : 'not measured yet'}
+      aria-label={label}
     >
       <span
         className="text-[22px] font-normal leading-none"
@@ -1079,9 +1091,9 @@ function FactHelpMark() {
  *  only way to reach it. */
 export function FactTile({ fact: f, awaiting = 'idle' }: {
   fact: StageFact
-  /** Why this tile's placeholder is empty (R86) — a live stage gets a sweeping
-   *  bar, a parked one a muted dash, a failed one a danger dash. Only read when
-   *  the fact itself is `awaiting`; a tile with a value ignores it. */
+  /** Why this tile's placeholder is empty (R86) — a live stage is working, a
+   *  parked one is idle, a failed one stopped short, and an unavailable one
+   *  settled without recording the figure. Only read for awaiting facts. */
   awaiting?: AwaitingState
 }) {
   const toneColor = f.tone ? FACT_TONE[f.tone] : null
@@ -1091,9 +1103,12 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
   // nothing shifts when the stage settles. A failed placeholder overrides it:
   // the gloss describes a figure ("things the app must do") that this tile is
   // now never going to hold, so it says what happened instead.
-  const sub = f.awaiting && awaiting === 'failed'
+  const emptySub = awaiting === 'failed'
     ? 'not measured'
-    : f.sub ?? FACT_GLOSS[f.label]
+    : awaiting === 'unavailable'
+      ? 'not recorded'
+      : undefined
+  const sub = f.awaiting && emptySub ? emptySub : f.sub ?? FACT_GLOSS[f.label]
   const tile = (
     <div className="group/fact min-w-0 rounded-md px-3 py-2.5 bg-elevated" data-testid="fact-tile">
       {/* Sentence case, NOT the uppercase `.cl-rubric` the card kickers use. A

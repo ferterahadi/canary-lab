@@ -141,7 +141,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
                 <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{formatBytes(w.folderBytes)}</td>
                 <td className="py-1 pl-3 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   {onNavigateToPortify && (
-                    <button type="button" onClick={() => onNavigateToPortify(w.feature)} disabled={bulkBusy} className="cl-button px-1.5 py-0.5" style={{ fontSize: 11 }}>Open in Flight</button>
+                    <button type="button" onClick={() => onNavigateToPortify(w.feature)} disabled={bulkBusy} className="cl-button px-1.5 py-0.5" style={{ fontSize: 11 }}>Portify</button>
                   )}
                   <button
                     type="button"

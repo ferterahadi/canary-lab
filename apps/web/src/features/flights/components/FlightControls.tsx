@@ -4,12 +4,13 @@ import type { FlightManifest, FlightStageKey, FlightStageStatus } from '@/shared
 import { Modal, useEscapeToClose } from '@/shared/ui/atoms'
 import { OPTION_ROW_CLASS, optionRowStyle } from '@/shared/ui/OptionRow'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
-import { DeleteSuiteConfirm } from '@/features/config'
+import { DeleteSuiteConfirm, ModelLaunchGate } from '@/features/config'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import { START_FRESH_BLURB, START_FRESH_LABEL } from './FlightStartDialog'
 import { STAGE_BLURB, STAGE_ICON, stageRowKey, stageStatusTone } from './stage-meta'
 import { FLIGHT_EXECUTION_ORDER } from '@shared/flights/types'
 import { flightRailLabel } from '@shared/flights/stage-labels'
+import { EMPTY_AGENT_MODELS, MODEL_STAGE_KEYS } from '@shared/agent-models'
 import { externalMutationTooltip, type ExternalMutationOwner } from '../lib/external-work'
 
 /** The stages Continue → "from a step…" offers — the user-facing rail rows
@@ -57,14 +58,15 @@ export function resumeTargetLabel(flight: FlightManifest): string | null {
   return REDO_STAGES.find(({ key }) => key === rowKey)?.label ?? null
 }
 
-/** R74: ONE Continue control for every settled flight state. Paused → a small
- *  menu (Resume at <stage> / From a step…); everything else goes straight to
- *  the centered re-run dialog. */
+/** R74/R81: ONE Continue control for a resumable flight. A persisted pause and
+ *  a recordless evidence-derived flight share the same menu: Resume performs
+ *  the already-named next action; From a step… opens the deliberate picker. */
 export function ContinueMenu({
   flight,
   onAction,
   onStartFlight,
   externalMutationOwner,
+  recordlessEntry,
 }: {
   flight: FlightManifest
   onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
@@ -72,12 +74,55 @@ export function ContinueMenu({
   onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
   /** External ownership keeps the internal control visible but inert. */
   externalMutationOwner?: ExternalMutationOwner
+  /** A derived flight has evidence but no persisted record. Resume mints that
+   *  first record directly at this stage instead of reopening the launcher. */
+  recordlessEntry?: FlightStageKey
 }) {
   const [open, setOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [preparing, setPreparing] = useState(false)
+  const [modelsGate, setModelsGate] = useState<{
+    body: api.StartFlightBody
+    agent: 'claude' | 'codex'
+    config: api.ProjectConfig
+  } | null>(null)
   const ref = useRef<HTMLDivElement | null>(null)
-  const paused = flight.status === 'paused'
+  const menuMode = flight.status === 'paused' || recordlessEntry !== undefined
   const resumeTarget = resumeTargetLabel(flight)
+
+  const startRecordless = (fromStage: FlightStageKey, feedback?: string): void => {
+    if (preparing) return
+    setPreparing(true)
+    Promise.all([
+      api.getFlightEntryOptions(flight.feature, flight.opts.env),
+      // This read is part of the launch decision, not optional decoration: if
+      // it fails, starting anyway could bypass Ask before launch.
+      api.getProjectConfig(),
+    ])
+      .then(([entry, config]) => {
+        const agent = config.healAgent === 'codex' ? 'codex' : 'claude'
+        const body: api.StartFlightBody = {
+          feature: flight.feature,
+          repoPaths: entry.prefill.repoPaths,
+          description: entry.prefill.description,
+          env: entry.prefill.env,
+          coverageTarget: entry.prefill.coverageTarget,
+          fromStage,
+          ...(feedback ? { feedback } : {}),
+          ...(agent === 'codex' ? { agent } : {}),
+        }
+        setPreparing(false)
+        if (config.askModelsOnLaunch === true) {
+          setModelsGate({ body, agent, config })
+          return
+        }
+        onAction(() => api.startFlight(body))
+      })
+      .catch((err: unknown) => {
+        setPreparing(false)
+        onAction(() => Promise.reject(err))
+      })
+  }
 
   useEffect(() => {
     if (!open) return
@@ -97,10 +142,10 @@ export function ContinueMenu({
         <button
           type="button"
           data-testid="flight-continue"
-          aria-haspopup={paused ? 'menu' : 'dialog'}
-          aria-expanded={paused ? open : dialogOpen}
-          onClick={() => (paused ? setOpen((v) => !v) : setDialogOpen(true))}
-          disabled={externalMutationOwner != null}
+          aria-haspopup={menuMode ? 'menu' : 'dialog'}
+          aria-expanded={menuMode ? open : dialogOpen}
+          onClick={() => (menuMode ? setOpen((v) => !v) : setDialogOpen(true))}
+          disabled={externalMutationOwner != null || preparing}
           title={externalMutationOwner
             ? externalMutationTooltip(externalMutationOwner, 'continue or repeat this flight')
             : undefined}
@@ -118,7 +163,11 @@ export function ContinueMenu({
             type="button"
             role="menuitem"
             data-testid="flight-resume"
-            onClick={() => { setOpen(false); onAction(() => api.resumeFlight(flight.flightId)) }}
+            onClick={() => {
+              setOpen(false)
+              if (recordlessEntry) startRecordless(recordlessEntry)
+              else onAction(() => api.resumeFlight(flight.flightId))
+            }}
             className="cl-hover-row rounded px-2 py-1.5 text-left transition-colors"
           >
             <span className="block text-xs font-medium">
@@ -148,6 +197,25 @@ export function ContinueMenu({
           onAction={onAction}
           onClose={() => setDialogOpen(false)}
           onStartFresh={onStartFlight ? () => { setDialogOpen(false); onStartFlight(flight.feature, 'fresh') } : undefined}
+          onRedo={recordlessEntry ? startRecordless : undefined}
+        />
+      )}
+      {modelsGate && (
+        <ModelLaunchGate
+          launchNoun="flight"
+          agent={modelsGate.agent}
+          stages={MODEL_STAGE_KEYS}
+          config={modelsGate.config.agentModels ?? EMPTY_AGENT_MODELS}
+          onCancel={() => setModelsGate(null)}
+          onConfirm={(models) => {
+            const pending = modelsGate
+            setModelsGate(null)
+            onAction(() => api.startFlight({
+              ...pending.body,
+              ...(models ? { models } : {}),
+            }))
+          }}
+          confirmLabel="Start flight"
         />
       )}
     </div>
@@ -163,6 +231,7 @@ export function RedoFlightDialog({
   onAction,
   onClose,
   onStartFresh,
+  onRedo,
 }: {
   flight: FlightManifest
   onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
@@ -170,6 +239,9 @@ export function RedoFlightDialog({
   /** R75: hands off to the launcher (prefilled, editable inputs) — the one
    *  home for "change what this flight tests"; this dialog never edits them. */
   onStartFresh?: () => void
+  /** A recordless flight starts through POST /api/flights; recorded flights
+   *  keep using their id-scoped redo endpoint. */
+  onRedo?: (fromStage: FlightStageKey, feedback?: string) => void
 }) {
   const [entry, setEntry] = useState<Awaited<ReturnType<typeof api.getFlightEntryOptions>> | null>(null)
   const [entryFailed, setEntryFailed] = useState(false)
@@ -213,11 +285,10 @@ export function RedoFlightDialog({
             onClick={() => {
               const stage = fromStage
               if (!stage) return
+              const note = feedback.trim() || undefined
               onClose()
-              onAction(() => api.redoFlight(flight.flightId, {
-                fromStage: stage,
-                feedback: feedback.trim() || undefined,
-              }))
+              if (onRedo) onRedo(stage, note)
+              else onAction(() => api.redoFlight(flight.flightId, { fromStage: stage, feedback: note }))
             }}
             className="cl-button-primary px-3 py-1.5 text-xs"
           >

@@ -121,10 +121,8 @@ export function FlightStartDialog({
    *  intent/repo set is valid for. Ignored in new-flight mode, which is already
    *  intent-first. */
   intent?: FlightLauncherIntent
-  /** R81: pre-pick this entry stage — the handoff from a DERIVED flight's
-   *  "Continue from <stage>", where the stage was computed from on-disk
-   *  evidence (the first step with nothing to show for it). The server's
-   *  stage-entry validator still has the final say at submit. */
+  /** Pre-pick an entry stage when a caller has already chosen where to re-enter.
+   *  The server's stage-entry validator still has the final say at submit. */
   fromStage?: FlightStageKey | null
   /** Reopen attached to a backgrounded pre-flight (plan-features) task — a
    *  Flights-pill pre-flight row routes this. New-flight mode only; the dialog

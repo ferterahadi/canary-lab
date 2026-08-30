@@ -161,6 +161,14 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
       </span>
       <ConnectionBadge state={connection} />
       <McpHealthBadge />
+      {services.length > 0 && (
+        <div className="shrink-0">
+          <StatusChip
+            label={`${services.length} service${services.length > 1 ? 's' : ''}`}
+            state={servicesActive ? 'running' : 'idle'}
+          />
+        </div>
+      )}
       {/* R83: the way back to the flight a stage drill-through left. Only the
           run detail actually needs it (it's a workspace column, so it has no
           close of its own — the coverage ledger fixes its own Close instead),
@@ -177,14 +185,6 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
           >
           ← {returnFlightLabel ?? 'Flight'}
         </button>
-      )}
-      {services.length > 0 && (
-        <div className="shrink-0">
-          <StatusChip
-            label={`${services.length} service${services.length > 1 ? 's' : ''}`}
-            state={servicesActive ? 'running' : 'idle'}
-          />
-        </div>
       )}
       {dirtyFeatureCount > 0 && (
         <div className="shrink-0">

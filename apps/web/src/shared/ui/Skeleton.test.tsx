@@ -7,17 +7,16 @@ import { SkeletonBar, SkeletonLines, SkeletonPanel, SkeletonRows, awaitingFor } 
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-describe('awaitingFor — a settled stage never promises more', () => {
-  it('is undefined once the stage has produced everything it will', () => {
-    expect(awaitingFor('done', false)).toBeUndefined()
-    expect(awaitingFor('skipped', false)).toBeUndefined()
-    // Even a `live` flag cannot resurrect a placeholder on a settled stage —
-    // the merged run/heal row can read `running` while its primary is done, and
-    // a skeleton there would claim a second set of results is coming.
-    expect(awaitingFor('done', true)).toBeUndefined()
+describe('awaitingFor — every lifecycle keeps the same evidence slots', () => {
+  it('marks an unfilled settled slot unavailable instead of removing it', () => {
+    expect(awaitingFor('done', false)).toBe('unavailable')
+    expect(awaitingFor('skipped', false)).toBe('unavailable')
+    // Even a stale `live` flag cannot turn a settled slot back into a promise —
+    // the merged run/heal row can read live while its primary is already done.
+    expect(awaitingFor('done', true)).toBe('unavailable')
   })
 
-  it('separates the three reasons a slot is empty (R86)', () => {
+  it('separates the four reasons a slot is empty (R86)', () => {
     expect(awaitingFor('running', true)).toBe('live')
     // Parked: nothing is coming until the user acts.
     expect(awaitingFor('pending', false)).toBe('idle')
@@ -44,7 +43,7 @@ describe('Skeleton primitives', () => {
     container.remove()
   })
 
-  it('the FILL says why the slot is empty, so the three states differ with motion off', () => {
+  it('the FILL says why the slot is empty, so the four states differ with motion off', () => {
     const bar = () => container.querySelector<HTMLElement>('[data-testid="skeleton-bar"]')!
     // Live: the only FILLED bar — a bar is the promise of a value.
     act(() => root.render(<SkeletonBar awaiting="live" />))
@@ -58,6 +57,13 @@ describe('Skeleton primitives', () => {
     expect(bar().style.border).toContain('solid')
     expect(bar().style.background).toBe('')
     expect(bar().dataset.awaiting).toBe('idle')
+    // Unavailable: settled evidence was not recorded. It holds the same shape
+    // without the stronger outline that tells an idle user to act.
+    act(() => root.render(<SkeletonBar awaiting="unavailable" />))
+    expect(bar().className).not.toContain('cl-skeleton')
+    expect(bar().style.border).toContain('solid')
+    expect(bar().style.background).toBe('')
+    expect(bar().dataset.awaiting).toBe('unavailable')
     // Failed: the same held-open outline, hued danger and struck through — never
     // a fill that could be mistaken for a value about to land.
     act(() => root.render(<SkeletonBar awaiting="failed" />))
@@ -76,6 +82,8 @@ describe('Skeleton primitives', () => {
     expect(bead().style.borderColor).toBe('var(--danger)')
     act(() => root.render(<SkeletonRows awaiting="idle" rows={1} />))
     expect(bead().style.borderColor).toBe('var(--border-strong)')
+    act(() => root.render(<SkeletonRows awaiting="unavailable" rows={1} />))
+    expect(bead().style.borderColor).toBe('var(--border-default)')
   })
 
   it('line widths repeat deterministically, so a re-render never reshuffles the card', () => {

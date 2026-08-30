@@ -992,16 +992,16 @@ describe('R83 — every stage pane wears the settled layout, with placeholders f
     expect(container.querySelector('[data-testid="repo-card-shop"] .bg-danger')).not.toBeNull()
   })
 
-  it('a settled stage never shows a placeholder — done and skipped have produced everything they will', async () => {
+  it('a settled stage keeps real values and reserves every value it did not record', async () => {
     mocks.getFlight.mockResolvedValue(scoutFlight('done', { envFiles: ['/repo/shop/.env'] }))
     await openScout()
-    expect(container.querySelectorAll('[data-testid="fact-awaiting"]')).toHaveLength(0)
+    expect(container.querySelectorAll('[data-testid="fact-awaiting"][data-awaiting="unavailable"]')).toHaveLength(2)
     expect(container.querySelector('[data-testid="repo-card-shop"] svg')).not.toBeNull()
 
     mocks.getFlight.mockResolvedValue(scoutFlight('skipped'))
     await openScout()
-    expect(container.querySelectorAll('[data-testid="fact-awaiting"]')).toHaveLength(0)
-    // A skipped scan is settled too: the row reads as resolved, not as pending.
+    expect(container.querySelectorAll('[data-testid="fact-awaiting"][data-awaiting="unavailable"]')).toHaveLength(2)
+    // The rail remains settled; only the unrecorded evidence slots stay visible.
     expect(container.querySelector('[data-testid="repo-card-shop"] svg')).not.toBeNull()
   })
 })
@@ -1030,6 +1030,43 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     expect(container.querySelector('[data-testid="setup-playwright-skeleton"]')?.textContent).toContain('Playwright')
   })
 
+  it('Suite setup: a completed derived flight keeps boot slots that were never recorded', async () => {
+    mocks.getFeatureConfigDoc.mockResolvedValue({
+      parsed: {
+        value: {
+          repos: [{
+            name: 'workflow-app',
+            localPath: '/repo/workflow-app',
+            startCommands: [{ name: 'workflow-app', command: 'npm run dev' }],
+          }],
+        },
+      },
+    })
+    mocks.getPlaywrightConfig.mockResolvedValue({
+      parsed: { value: { workers: 1, use: { video: 'off', trace: 'retain-on-failure', screenshot: 'only-on-failure' } } },
+    })
+    await open('scaffold', manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'scaffold' || key === 'env-capture' ? ('done' as const) : ('pending' as const),
+        ...(key === 'env-capture'
+          ? { evidence: { captured: 1 }, evidenceSource: 'workspace' as const }
+          : {}),
+      })),
+    }))
+
+    const facts = container.querySelector('[data-testid="stage-facts"]')
+    expect(facts?.textContent).toContain('Services booted')
+    expect(facts?.textContent).toContain('Boot time')
+    expect(facts?.textContent).toContain('Env files')
+    expect(facts?.querySelectorAll('[data-testid="fact-awaiting"][data-awaiting="unavailable"]')).toHaveLength(2)
+    expect(container.querySelector('[data-testid="boot-check-skeleton"] [data-awaiting="unavailable"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="feature-setup-panel"]')?.textContent).toContain('workflow-app')
+    expect(container.querySelector('[data-testid="feature-setup-skeleton"]')).toBeNull()
+  })
+
   it('Requirements: both halves render — source docs and the distilled output', async () => {
     await open('docs')
     const panel = container.querySelector('[data-testid="flight-docs-panel"]')
@@ -1051,6 +1088,26 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     await open('portify')
     expect(container.querySelector('[data-testid="double-boot-skeleton"]')?.textContent).toContain('Side-by-side proof')
     expect(container.querySelector('[data-testid="overlay-skeleton"]')?.textContent).toContain('Port changes')
+  })
+
+  it('Parallel readiness: an empty skipped stage keeps the complete evidence layout', async () => {
+    await open('portify', manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'portify' ? ('skipped' as const) : ('done' as const),
+      })),
+    }))
+
+    const facts = container.querySelector('[data-testid="stage-facts"]')
+    expect(facts?.textContent).toContain('Services injectable')
+    expect(facts?.textContent).toContain('Files edited')
+    expect(facts?.textContent).toContain('Instances proven')
+    expect(facts?.textContent).not.toContain('Already checked')
+    expect(facts?.querySelectorAll('[data-testid="fact-awaiting"][data-awaiting="unavailable"]')).toHaveLength(3)
+    expect(container.querySelector('[data-testid="double-boot-skeleton"] [data-awaiting="unavailable"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="overlay-skeleton"] [data-awaiting="unavailable"]')).not.toBeNull()
   })
 
   it('Test Run: the hero renders its shape before any run exists', async () => {
@@ -1114,15 +1171,15 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     expect(container.querySelectorAll('[data-testid="skeleton-bar"]').length).toBeGreaterThan(0)
   })
 
-  it('a settled step never renders a placeholder — an empty card there means it has nothing, not nothing yet', async () => {
+  it('a settled step keeps static unavailable placeholders for evidence it never recorded', async () => {
     await open('portify', manifest({
       status: 'done',
       currentStage: null,
       stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
     }))
-    expect(container.querySelectorAll('[data-testid="skeleton-bar"]')).toHaveLength(0)
-    expect(container.querySelector('[data-testid="double-boot-skeleton"]')).toBeNull()
-    expect(container.querySelector('[data-testid="overlay-skeleton"]')).toBeNull()
+    expect(container.querySelectorAll('[data-testid="skeleton-bar"][data-awaiting="unavailable"].cl-skeleton')).toHaveLength(0)
+    expect(container.querySelector('[data-testid="double-boot-skeleton"] [data-awaiting="unavailable"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="overlay-skeleton"] [data-awaiting="unavailable"]')).not.toBeNull()
   })
 
   it('a settled step holds its places while the band READS them — the ledger lands a fetch after the record', async () => {
@@ -1253,7 +1310,7 @@ describe('Parallel readiness follows the workflow live', () => {
     expect(mocks.loadPortify).toHaveBeenCalledWith('wf-9')
   })
 
-  it('holds both cards while that hydrate is in flight, and releases them when it comes back empty', async () => {
+  it('holds both cards while that hydrate is in flight, then marks them unavailable when it comes back empty', async () => {
     // The settled portify stage has the same two-frame problem the ledger had,
     // from a different source: the store answers `undefined` for a workflow it
     // has not fetched AND for one that no longer exists, so the hold has to
@@ -1283,11 +1340,11 @@ describe('Parallel readiness follows the workflow live', () => {
     expect(container.querySelector('[data-testid="double-boot-skeleton"]')?.textContent).toContain('Copy A')
     expect(container.querySelector('[data-testid="double-boot-skeleton"]')?.textContent).toContain('Copy B')
 
-    // Came back with nothing: the hold ends rather than promising a proof that
-    // is never coming.
+    // Came back with nothing: the card geometry stays, while the static
+    // unavailable fill says no proof is still coming.
     await act(async () => { landHydrate() })
-    expect(container.querySelector('[data-testid="double-boot-skeleton"]')).toBeNull()
-    expect(container.querySelector('[data-testid="overlay-skeleton"]')).toBeNull()
+    expect(container.querySelector('[data-testid="double-boot-skeleton"] [data-awaiting="unavailable"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="overlay-skeleton"] [data-awaiting="unavailable"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="double-boot-panel"]')).toBeNull()
   })
 })

@@ -4,7 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '@/shared/api/client'
-import { ModelLaunchGate } from './ModelLaunchGate'
+import { defaultsByChoice, ModelLaunchGate, savedModelsSummary } from './ModelLaunchGate'
 
 vi.mock('@/shared/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
@@ -76,20 +76,73 @@ function setSelect(el: HTMLSelectElement, value: string): void {
 }
 
 describe('ModelLaunchGate', () => {
-  it('previews the resolved defaults per scoped stage on the defaults card', async () => {
+  it('a short plan names its steps in the collapsed confirmation', async () => {
     await mount()
-    const defaults = byTestId('gate-use-defaults')
-    expect(defaults.textContent).toContain('Auto-repair')
-    expect(defaults.textContent).toContain('opus · high')
-    expect(defaults.textContent).toContain('Commit message')
-    expect(defaults.textContent).toContain('haiku')
+    const summary = byTestId('gate-saved-summary')
+    expect(summary.textContent).toContain('Auto-repair')
+    expect(summary.textContent).toContain('opus · high')
+    expect(summary.textContent).toContain('Commit message')
+    expect(summary.textContent).toContain('haiku')
     // Only the launch's stages appear — no flight-only rows on a run gate.
-    expect(defaults.textContent).not.toContain('Repo scan')
+    expect(summary.textContent).not.toContain('Repo scan')
+    // The editor is behind Change — the confirmation carries no controls.
+    expect(document.querySelector('[data-testid="model-row-heal"]')).toBeNull()
+  })
+
+  it('a long plan summarizes by model instead of listing steps', async () => {
+    const config = {
+      claude: {
+        scout: { model: 'sonnet', effort: 'high' },
+        docs: { model: 'sonnet', effort: 'medium' },
+        prd: { model: 'opus', effort: 'high' },
+        gen: { model: 'opus', effort: 'max' },
+      },
+      codex: {},
+    }
+    await mount({ stages: ['scout', 'docs', 'prd', 'gen'] as const, config })
+    const summary = byTestId('gate-saved-summary')
+    expect(summary.textContent).toBe('sonnet on 2 steps · opus on 2 steps')
+    // No step name and no effort at this altitude — both live behind Change.
+    expect(summary.textContent).not.toContain('Repo scan')
+    expect(summary.textContent).not.toContain('max')
+    // A stage on the agent default is named as such, and one step stays singular.
+    expect(savedModelsSummary('claude', { claude: { gen: { model: 'opus', effort: null } }, codex: {} }, ['gen', 'heal']))
+      .toBe('opus on 1 step · agent default on 1 step')
+  })
+
+  it('groups steps that share a choice onto one preview row', async () => {
+    await mount({
+      stages: ['gen', 'heal', 'commit'] as const,
+      config: {
+        claude: {
+          gen: { model: 'opus', effort: 'max' },
+          heal: { model: 'opus', effort: 'max' },
+          commit: { model: 'sonnet', effort: 'high' },
+        },
+        codex: {},
+      },
+    })
+    expect(defaultsByChoice('claude', {
+      claude: {
+        scout: { model: 'sonnet', effort: 'high' },
+        gen: { model: 'opus', effort: 'max' },
+        heal: { model: 'opus', effort: 'max' },
+        commit: { model: 'sonnet', effort: 'high' },
+      },
+      codex: {},
+    }, ['scout', 'gen', 'heal', 'commit'])).toEqual([
+      { choice: 'sonnet · high', steps: 'Repo scan, Commit message' },
+      { choice: 'opus · max', steps: 'Test authoring, Auto-repair' },
+    ])
+    // Three steps, two rows — and the shared knobs are printed once, not twice.
+    const summary = byTestId('gate-saved-summary')
+    expect(summary.textContent).toContain('Test authoring, Auto-repair')
+    expect(summary.textContent?.match(/opus · max/g)).toHaveLength(1)
   })
 
   it('an unpinned stage previews as "agent default"', async () => {
     await mount({ config: { claude: {}, codex: {} } })
-    expect(byTestId('gate-use-defaults').textContent).toContain('agent default')
+    expect(byTestId('gate-saved-summary').textContent).toContain('agent default')
   })
 
   it('confirm on the defaults card hands back null — the server resolves config itself', async () => {
@@ -99,10 +152,11 @@ describe('ModelLaunchGate', () => {
     expect(api.putProjectConfig).not.toHaveBeenCalled()
   })
 
-  it('customize reveals the grid seeded from resolved defaults; edits ride the confirm', async () => {
+  it('Change swaps the confirmation for the grid, seeded from resolved defaults; edits ride the confirm', async () => {
     const props = await mount()
-    expect(document.querySelector('[data-testid="model-row-heal"]')).toBeNull()
-    await act(async () => { byTestId<HTMLButtonElement>('gate-customize').click() })
+    await act(async () => { byTestId<HTMLButtonElement>('gate-change').click() })
+    // The summary is GONE — the dialog is the editor now, not both at once.
+    expect(document.querySelector('[data-testid="gate-saved-summary"]')).toBeNull()
     const effort = document.querySelector<HTMLSelectElement>('select[aria-label="Auto-repair reasoning effort"]')!
     expect(effort.value).toBe('high')
     setSelect(effort, 'max')
@@ -113,10 +167,24 @@ describe('ModelLaunchGate', () => {
     })
   })
 
+  it('Use saved models discards the edits and confirms on the saved plan', async () => {
+    const props = await mount()
+    await act(async () => { byTestId<HTMLButtonElement>('gate-change').click() })
+    setSelect(document.querySelector<HTMLSelectElement>('select[aria-label="Auto-repair reasoning effort"]')!, 'max')
+    await act(async () => { byTestId<HTMLButtonElement>('gate-use-saved').click() })
+    expect(byTestId('gate-saved-summary')).toBeTruthy()
+    // Re-opening shows the SAVED value, not the abandoned edit.
+    await act(async () => { byTestId<HTMLButtonElement>('gate-change').click() })
+    expect(document.querySelector<HTMLSelectElement>('select[aria-label="Auto-repair reasoning effort"]')!.value).toBe('high')
+    await act(async () => { byTestId<HTMLButtonElement>('gate-use-saved').click() })
+    await act(async () => { byTestId<HTMLButtonElement>('gate-confirm').click() })
+    expect(props.onConfirm).toHaveBeenCalledWith(null)
+  })
+
   it('loads the installed Codex model catalog only when Customize is opened', async () => {
     await mount({ agent: 'codex', stages: ['heal'], config: { claude: {}, codex: {} } })
     expect(api.getAgentProbe).not.toHaveBeenCalled()
-    await act(async () => { byTestId<HTMLButtonElement>('gate-customize').click() })
+    await act(async () => { byTestId<HTMLButtonElement>('gate-change').click() })
     await act(async () => {})
     expect(api.getAgentProbe).toHaveBeenCalledWith(false)
     expect([...document.querySelector<HTMLSelectElement>('select[aria-label="Auto-repair model"]')!.options]
@@ -156,7 +224,7 @@ describe('ModelLaunchGate', () => {
     await mount({ launchNoun: 'flight', confirmLabel: 'Start flight' })
     const dialog = byTestId('model-launch-gate')
     expect(dialog.textContent).toContain('Models for this flight')
-    expect(dialog.textContent).toContain('Final once started')
+    expect(dialog.textContent).toContain('Locked once started')
     expect(byTestId('gate-confirm').textContent).toBe('Start flight')
   })
 })

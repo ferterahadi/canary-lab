@@ -199,7 +199,7 @@ describe('ModelMatrixDialog', () => {
     expect(select('Repo scan model').value).toBe('gpt-5.6-terra')
     expect(select('Repo scan reasoning effort').value).toBe('high')
     expect(select('Doc collection model').value).toBe('gpt-5.6-terra')
-    expect(select('Doc collection reasoning effort').value).toBe('medium')
+    expect(select('Doc collection reasoning effort').value).toBe('high')
     expect(select('Auto-repair model').value).toBe('gpt-5.6-sol')
     expect(select('Auto-repair reasoning effort').value).toBe('high')
     expect(select('Report model').value).toBe('gpt-5.6-terra')

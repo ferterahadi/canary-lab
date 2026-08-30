@@ -135,43 +135,44 @@ export const STAGE_RECOMMENDATION_REASON: Record<ModelStageKey, string> = {
   commit: 'Commit and PR copy needs faithful diff analysis but does not modify product code.',
 }
 
-/** Provider-specific knobs per stage. Codex models stay null here because their
- *  versioned ids are resolved from the runtime catalog below. */
-export const RECOMMENDED_BY_STAGE: Record<ModelAgentKind, Record<ModelStageKey, StageModelChoice>> = {
+type CodexModelRole = 'sol' | 'terra'
+
+interface StageModelRecommendation<TModel extends string = string> {
+  model: TModel
+  effort: string | null
+}
+
+interface ModelRecommendations {
+  claude: Record<ModelStageKey, StageModelRecommendation>
+  codex: Record<ModelStageKey, StageModelRecommendation<CodexModelRole>>
+}
+
+/** Provider-specific model selector and effort per stage. Claude selectors are
+ *  stable aliases; Codex selectors are stable roles resolved to a versioned id
+ *  from the runtime catalog. */
+export const RECOMMENDED_BY_STAGE: ModelRecommendations = {
   claude: {
     scout: { model: 'sonnet', effort: 'high' },
-    docs: { model: 'sonnet', effort: 'medium' },
+    docs: { model: 'sonnet', effort: 'high' },
     prd: { model: 'opus', effort: 'high' },
-    gen: { model: 'opus', effort: 'max' },
+    gen: { model: 'opus', effort: 'high' },
     mapping: { model: 'opus', effort: 'high' },
-    heal: { model: 'opus', effort: 'max' },
+    heal: { model: 'opus', effort: 'high' },
     portify: { model: 'sonnet', effort: 'high' },
     report: { model: 'sonnet', effort: 'high' },
     commit: { model: 'sonnet', effort: 'medium' },
   },
   codex: {
-    scout: { model: null, effort: 'high' },
-    docs: { model: null, effort: 'medium' },
-    prd: { model: null, effort: 'high' },
-    gen: { model: null, effort: 'high' },
-    mapping: { model: null, effort: 'medium' },
-    heal: { model: null, effort: 'high' },
-    portify: { model: null, effort: 'high' },
-    report: { model: null, effort: 'high' },
-    commit: { model: null, effort: 'medium' },
+    scout: { model: 'terra', effort: 'high' },
+    docs: { model: 'terra', effort: 'high' },
+    prd: { model: 'sol', effort: 'high' },
+    gen: { model: 'sol', effort: 'high' },
+    mapping: { model: 'sol', effort: 'high' },
+    heal: { model: 'sol', effort: 'high' },
+    portify: { model: 'terra', effort: 'high' },
+    report: { model: 'terra', effort: 'high' },
+    commit: { model: 'terra', effort: 'medium' },
   },
-}
-
-const CODEX_MODEL_ROLE_BY_STAGE: Record<ModelStageKey, 'sol' | 'terra'> = {
-  scout: 'terra',
-  docs: 'terra',
-  prd: 'sol',
-  gen: 'sol',
-  mapping: 'sol',
-  heal: 'sol',
-  portify: 'terra',
-  report: 'terra',
-  commit: 'terra',
 }
 
 export function recommendedChoice(
@@ -179,15 +180,15 @@ export function recommendedChoice(
   stage: ModelStageKey,
   availableModels: readonly KnownModelOption[] = KNOWN_MODEL_OPTIONS[agent],
 ): StageModelChoice {
-  const base = RECOMMENDED_BY_STAGE[agent][stage]
-  if (agent === 'claude') return base
+  if (agent === 'claude') return RECOMMENDED_BY_STAGE.claude[stage]
 
   // The Sol/Terra role names are stable while the version prefix changes.
   // If a future catalog no longer exposes that role, keep the safe effort-only
   // recommendation rather than pinning an unrelated model by list position.
-  const suffix = `-${CODEX_MODEL_ROLE_BY_STAGE[stage]}`
+  const recommendation = RECOMMENDED_BY_STAGE.codex[stage]
+  const suffix = `-${recommendation.model}`
   const model = availableModels.find(({ value }) => value.toLowerCase().endsWith(suffix))?.value ?? null
-  return { ...base, model }
+  return { model, effort: recommendation.effort }
 }
 
 // ── Normalization (the JSON/config boundary) ─────────────────────────────────
@@ -233,17 +234,36 @@ export function normalizeAgentModels(v: unknown): AgentModelsConfig {
 }
 
 // ── Record-surface display ──────────────────────────────────────────────────
+/** One stage's knobs as display text ("opus · max"), or null when the stage
+ *  rides the agent default — nothing was chosen, so there is nothing to show. */
+export function stageChoiceValue(choice: StageModelChoice | undefined): string | null {
+  const knobs = [choice?.model, choice?.effort].filter((v): v is string => v != null)
+  return knobs.length > 0 ? knobs.join(' · ') : null
+}
+
+/** One pinned stage, label and knobs kept apart. */
+export interface PinnedStageChoice {
+  stage: ModelStageKey
+  label: string
+  value: string
+}
+
+/** The pinned stages of a plan in stage order — empty when every stage rides
+ *  the agent default. Structured rather than pre-joined so a surface can lay
+ *  the plan out as a table instead of re-splitting a display string. */
+export function pinnedPlanChoices(plans: AgentStagePlans | undefined): PinnedStageChoice[] {
+  const out: PinnedStageChoice[] = []
+  for (const stage of MODEL_STAGE_KEYS) {
+    const value = stageChoiceValue(plans?.[stage])
+    if (value) out.push({ stage, label: MODEL_STAGE_LABEL[stage], value })
+  }
+  return out
+}
+
 /** The pinned entries of a stage plan as display strings ("Heal opus · high"),
  *  in stage order — empty when every stage rides the agent default. */
 export function pinnedPlanEntries(plans: AgentStagePlans | undefined): string[] {
-  const out: string[] = []
-  for (const stage of MODEL_STAGE_KEYS) {
-    const c = plans?.[stage]
-    if (!c || (c.model === null && c.effort === null)) continue
-    const knobs = [c.model, c.effort].filter((v): v is string => v !== null).join(' · ')
-    out.push(`${MODEL_STAGE_LABEL[stage]} ${knobs}`)
-  }
-  return out
+  return pinnedPlanChoices(plans).map((choice) => `${choice.label} ${choice.value}`)
 }
 
 /** One line for a record surface (run/flight/coverage detail): the stage

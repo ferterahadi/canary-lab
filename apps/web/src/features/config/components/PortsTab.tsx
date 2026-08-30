@@ -292,7 +292,7 @@ export function PortsTab({
                       cursor: blockedBy ? 'not-allowed' : undefined,
                     }}
               >
-                Open in Flight
+                Portify
               </button>
             )}
             </div>

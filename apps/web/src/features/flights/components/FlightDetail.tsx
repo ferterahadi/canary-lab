@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { ExternalWorkCheckpointData, FlightEntryOptions, FlightIndexEntry, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
+import { isActivePortify, usePortify } from '@/features/portify'
 import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
@@ -11,7 +12,7 @@ import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type E
 import { ACTIVITY_STAGE, type FeatureActivity, type FeatureExternalHistory } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageLabel, stageRailRows, stageStatusTone } from './stage-meta'
+import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageRailRows, stageStatusTone } from './stage-meta'
 import { stageStateLine } from './StageStatusLines'
 import {
   buildDerivedManifest,
@@ -128,6 +129,15 @@ export function FlightDetail({
   // R71/W1: one inline error line under the header — every header/run control
   // failure lands here instead of a silent `.catch(() => {})`.
   const [actionError, setActionError] = useState<string | null>(null)
+  const [parallelSetupStarting, setParallelSetupStarting] = useState(false)
+  // The existing Portify store remains the one owner for this long-running
+  // workflow. Flight only contributes a start affordance and reads the same
+  // pushed index/details every other Portify surface uses.
+  const {
+    workflows: portifyWorkflows = [],
+    startPortify,
+    loadPortify,
+  } = usePortify()
 
   // Read through a ref so `refetch` keeps a stable identity across pushes (it
   // is an effect dep and a control-call callback; churning it would re-run both
@@ -198,6 +208,21 @@ export function FlightDetail({
       .catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)))
   }, [refetch])
 
+  const startParallelSetup = useCallback((): void => {
+    if (!flight || parallelSetupStarting) return
+    setActionError(null)
+    setParallelSetupStarting(true)
+    startPortify({
+      feature: flight.feature,
+      ...(flight.opts.agent ? { agent: flight.opts.agent } : {}),
+    })
+      // The workspace push is the fast path; this authoritative read makes the
+      // header swap and Activity attachment reliable even if that frame drops.
+      .then((workflowId) => loadPortify(workflowId))
+      .catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setParallelSetupStarting(false))
+  }, [flight, loadPortify, parallelSetupStarting, startPortify])
+
   // R71/W1: Escape is the keyboard exit to the workspace (the Close button is
   // gone — the breadcrumb + Flights pill cover pointer navigation). It's the
   // BOTTOM layer of the shared Escape stack: an open dialog or header menu
@@ -252,6 +277,12 @@ export function FlightDetail({
   // tick over a run that is still working (R64).
   const featureActivity = flight ? activity?.get(flight.feature) : undefined
   const featureExternalHistory = flight ? externalHistory?.get(flight.feature) : undefined
+  // A run is intentionally the louder feature-level activity, so that map may
+  // hide a simultaneous Portify job. Read Portify's own index as well: the
+  // Parallel setup pane must keep its workflow and header state while tests run.
+  const featurePortify = flight
+    ? portifyWorkflows.find((workflow) => workflow.feature === flight.feature && isActivePortify(workflow.status))
+    : undefined
   // A verify run is a run in verify mode — the run row must read live for it
   // exactly as for a normal run.
   const runLive = featureActivity != null && ACTIVITY_STAGE[featureActivity.kind] === 'run'
@@ -260,9 +291,22 @@ export function FlightDetail({
   // stream. This is display-only: it never navigates or starts another run.
   const derivedActiveRunId = derivedFeature && runLive ? featureActivity.runId : undefined
   const railRows = useMemo(() => {
-    const rows = flight ? stageRailRows(flight.stages) : []
-    return runLive ? rows.map((r) => (r.key === 'run' && r.status !== 'running' ? { ...r, status: 'running' as const } : r)) : rows
-  }, [flight, runLive])
+    let rows = flight ? stageRailRows(flight.stages) : []
+    if (runLive) {
+      rows = rows.map((candidate) => (
+        candidate.key === 'run' && candidate.status !== 'running'
+          ? { ...candidate, status: 'running' as const }
+          : candidate
+      ))
+    }
+    if (featurePortify) {
+      const status = featurePortify.status === 'ready-to-save'
+        ? 'waiting-for-approval' as const
+        : 'running' as const
+      rows = rows.map((candidate) => candidate.key === 'portify' ? { ...candidate, status } : candidate)
+    }
+    return rows
+  }, [flight, runLive, featurePortify])
 
   // Default the selected stage to the one that needs eyes: waiting → running →
   // first failed → the row that resumes next → last done. The user's explicit
@@ -341,6 +385,18 @@ export function FlightDetail({
         && candidate.checkpoint?.kind === 'external-work'
       ))?.checkpoint
     : undefined
+  const suiteSetupStatus = railRows.find((candidate) => candidate.key === 'scaffold')?.status
+  // Parallel setup is a sibling lane after Suite setup, not the next serial
+  // Flight step. Selecting its pending row therefore makes its own start the
+  // header primary. Once the workflow appears in the shared Portify store this
+  // becomes false and the ordinary Continue/Pause control returns.
+  const showParallelSetupStart = stageKey === 'portify'
+    && row?.status === 'pending'
+    && (suiteSetupStatus === 'done' || suiteSetupStatus === 'skipped')
+    && featurePortify == null
+    && externalWorkCheckpoint == null
+    && flight.status !== 'waiting-for-approval'
+    && externalMutationOwner == null
   const takeoverRequested = externalWorkCheckpoint != null
     && typeof (externalWorkCheckpoint.data as ExternalWorkCheckpointData | undefined)?.takeoverRequestedAt === 'string'
   const suiteActivityChip = externalSuiteWork && featureActivity ? ACTIVITY_CHIP[featureActivity.kind] : null
@@ -438,7 +494,7 @@ export function FlightDetail({
             Settled → ONE Continue menu absorbing resume / repeat-a-step /
             start-over: "Resume at <stage>" (paused) + "From a step…" (+ optional
             what-went-wrong note that reaches the agent's prompt). */}
-        {(flight.status === 'running' || flight.status === 'waiting-for-approval') && !externalWorkCheckpoint && (
+        {(flight.status === 'running' || flight.status === 'waiting-for-approval') && !externalWorkCheckpoint && !showParallelSetupStart && (
           <DisabledControlTooltip>
             <button
               type="button"
@@ -464,33 +520,61 @@ export function FlightDetail({
         )}
         {/* R81 — a derived flight has no record, so every RECORD-scoped control
             (resume / redo / abort / download) would call an id that doesn't
-            exist. It gets one primary instead: conduct the rest from the first
-            step without evidence, or — with every step already done — fly it
-            again from the top. Both hand off to the launcher, which mints the
-            record.
+            exist. An incomplete suite reuses the Continue menu through its
+            feature-scoped start path: Resume mints the record directly, while
+            From a step opens the deliberate picker. An all-done suite keeps
+            Fly again, whose fresh-start launcher may change its inputs.
             The ⋯ menu is NOT record-scoped and stays: its one action deletes the
             SUITE (folder + history) through the feature-scoped API, and a
             derived flight only exists because that folder does. Hiding it with
             the rest denied a perfectly valid action on every suite that was set
             up outside the conductor. */}
-        {derivedFeature ? (
+        {showParallelSetupStart ? (
           <>
-            <DisabledControlTooltip>
-              <button
-                type="button"
-                data-testid="derived-conduct"
-                onClick={() => onStartFlight?.(derivedFeature, derivedEntry ? 'refly' : 'fresh', derivedEntry)}
-                disabled={externalMutationOwner != null}
-                className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
-                title={externalMutationOwner
-                  ? externalMutationTooltip(externalMutationOwner, 'start or continue a flight')
-                  : derivedEntry
-                  ? `Continue this suite from ${stageLabel(derivedEntry)} — finished steps are kept`
-                  : 'Every step is done — start a fresh flight to fly it again'}
-              >
-                {derivedEntry ? `Continue from ${stageLabel(derivedEntry)}` : 'Fly again'}
-              </button>
-            </DisabledControlTooltip>
+            <button
+              type="button"
+              data-testid="flight-run-parallel-setup"
+              onClick={startParallelSetup}
+              disabled={parallelSetupStarting}
+              className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-wait disabled:opacity-65"
+              title="Start Parallel setup now. The remaining Flight can continue at the same time."
+            >
+              {parallelSetupStarting ? 'Starting…' : 'Run Parallel Setup'}
+            </button>
+            <FlightMenu
+              flight={flight}
+              derived={derivedFeature != null}
+              onAction={act}
+              onDeleted={onBackToList}
+              externalMutationOwner={externalMutationOwner}
+            />
+          </>
+        ) : derivedFeature ? (
+          <>
+            {derivedEntry ? (
+              <ContinueMenu
+                flight={flight}
+                onAction={act}
+                onStartFlight={onStartFlight}
+                externalMutationOwner={externalMutationOwner}
+                recordlessEntry={derivedEntry}
+              />
+            ) : (
+              <DisabledControlTooltip>
+                <button
+                  type="button"
+                  data-testid="derived-conduct"
+                  onClick={() => onStartFlight?.(derivedFeature, 'fresh', null)}
+                  disabled={externalMutationOwner != null}
+                  className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+                  title={externalMutationOwner
+                    ? externalMutationTooltip(externalMutationOwner, 'start or continue a flight')
+                    : 'Every step is done — start a fresh flight to fly it again'}
+                >
+                  Fly again
+                </button>
+              </DisabledControlTooltip>
+            )}
             <FlightMenu flight={flight} derived onAction={act} onDeleted={onBackToList} externalMutationOwner={externalMutationOwner} />
           </>
         ) : (
@@ -607,38 +691,47 @@ export function FlightDetail({
             const stateLine = primary ? stageStateLine(primary, flight, folded) : null
             const tooltip = stateLine ? `${STAGE_BLURB[s.key]}\n\n${stateLine}` : STAGE_BLURB[s.key]
             return (
-              <button
-                key={s.key}
-                type="button"
-                data-testid={`stage-rail-${s.key}`}
-                aria-current={selected ? 'true' : undefined}
-                onClick={() => setSelectedStage(s.key)}
-                title={tooltip}
-                className={`cl-hover-row flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors${selected ? ' bg-selected' : ''}`}
-              >
-                {/* Status hue stays a computed token string (one source of
-                    truth in stageStatusTone), so this one keeps `color`. */}
-                <span className="w-3 shrink-0 text-center font-semibold" style={{ color: t }} aria-hidden="true">
-                  {STAGE_ICON[s.status]}
-                </span>
-                <span className={`min-w-0 flex-1 truncate${s.status === 'pending' ? ' text-muted' : ''}`}>
-                  {s.label}
-                </span>
-                {s.note && (
-                  <span
-                    data-testid={`stage-rail-note-${s.key}`}
-                    className="cl-rubric shrink-0 rounded bg-warning/12 px-1 text-warning"
-                  >
-                    {s.note}
-                  </span>
+              <Fragment key={s.key}>
+                {s.key === 'portify' && (
+                  <div data-testid="parallel-setup-divider" className="mb-1 mt-2 px-2">
+                    <div className="flex items-center gap-2">
+                      <span className="cl-rubric shrink-0">Independent</span>
+                      <span className="h-px flex-1 border-t border-dashed border-line" />
+                    </div>
+                  </div>
                 )}
-                {duration && s.status !== 'running' && (
-                  <span className="shrink-0 text-[10px] text-muted font-mono">
-                    {duration}
+                <button
+                  type="button"
+                  data-testid={`stage-rail-${s.key}`}
+                  aria-current={selected ? 'true' : undefined}
+                  onClick={() => setSelectedStage(s.key)}
+                  title={tooltip}
+                  className={`cl-hover-row flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors${selected ? ' bg-selected' : ''}`}
+                >
+                  {/* Status hue stays a computed token string (one source of
+                      truth in stageStatusTone), so this one keeps `color`. */}
+                  <span className="w-3 shrink-0 text-center font-semibold" style={{ color: t }} aria-hidden="true">
+                    {STAGE_ICON[s.status]}
                   </span>
-                )}
-                {s.status === 'running' && <StatusDot state="running" className="shrink-0" />}
-              </button>
+                  <span className={`min-w-0 flex-1 truncate${s.status === 'pending' ? ' text-muted' : ''}`}>
+                    {s.label}
+                  </span>
+                  {s.note && (
+                    <span
+                      data-testid={`stage-rail-note-${s.key}`}
+                      className="cl-rubric shrink-0 rounded bg-warning/12 px-1 text-warning"
+                    >
+                      {s.note}
+                    </span>
+                  )}
+                  {duration && s.status !== 'running' && (
+                    <span className="shrink-0 text-[10px] text-muted font-mono">
+                      {duration}
+                    </span>
+                  )}
+                  {s.status === 'running' && <StatusDot state="running" className="shrink-0" />}
+                </button>
+              </Fragment>
             )
           })}
         </nav>
@@ -662,6 +755,7 @@ export function FlightDetail({
               companion={companionStage}
               runLive={runLive}
               activeRunId={derivedActiveRunId}
+              activePortifyWorkflowId={featurePortify?.workflowId}
               activity={featureActivity}
               externalHistory={featureExternalHistory}
               activityOpen={activityOpenByFlight[flightId]?.[stage.key]}

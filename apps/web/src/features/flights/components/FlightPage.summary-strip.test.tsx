@@ -290,6 +290,69 @@ describe('summary strip (R71/W5)', () => {
     expect(container.querySelector('[data-testid="flight-summary-strip"]')?.textContent).toContain('Codex')
   })
 
+  it('the Models fact is one count that opens the plan; each step carries its own chip', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      opts: {
+        env: 'local',
+        coverageTarget: 100,
+        yolo: false,
+        models: { prd: { model: 'sonnet', effort: 'high' }, heal: { model: 'opus', effort: 'max' } },
+      },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+    }))
+    await render('fl_1')
+    const chip = container.querySelector<HTMLButtonElement>('[data-testid="strip-models"]')
+    expect(chip?.textContent).toContain('2 tuned')
+    // The nine-entry line is what this replaced: no step name reaches the strip.
+    expect(container.querySelector('[data-testid="flight-summary-strip"]')?.textContent).not.toContain('Auto-repair')
+    expect(container.querySelector('[data-testid="strip-models-plan"]')).toBeNull()
+
+    await act(async () => { chip?.click() })
+    const plan = container.querySelector('[data-testid="strip-models-plan"]')
+    expect(plan?.textContent).toContain('Auto-repair')
+    expect(plan?.textContent).toContain('opus · max')
+    // A click anywhere else closes it, like the flight's Continue menu.
+    await act(async () => { document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })) })
+    expect(container.querySelector('[data-testid="strip-models-plan"]')).toBeNull()
+
+    // The choice itself lives on the step that runs it — Test run carries the
+    // repair agent's, Requirements the summary distiller's.
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click() })
+    // One chip per step, not per spawn: it counts the step's pinned choices and
+    // opens the same spawn → knobs rows the strip's popover shows.
+    const stageChip = container.querySelector<HTMLButtonElement>('[data-testid="stage-models"]')
+    expect(stageChip?.textContent).toContain('1')
+    expect(container.querySelector('[data-testid="stage-models-plan"]')).toBeNull()
+    await act(async () => { stageChip?.click() })
+    const stagePlan = container.querySelector('[data-testid="stage-models-plan"]')
+    expect(stagePlan?.textContent).toContain('Auto-repair')
+    expect(stagePlan?.textContent).toContain('opus · max')
+    // The step's panel names only ITS spawns — the flight's other pinned steps
+    // stay in the strip's popover.
+    expect(stagePlan?.textContent).not.toContain('Requirements summary')
+    await act(async () => { document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })) })
+    expect(container.querySelector('[data-testid="stage-models-plan"]')).toBeNull()
+
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click() })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-models"]')?.click() })
+    expect(container.querySelector('[data-testid="stage-models-plan"]')?.textContent).toContain('sonnet · high')
+    // A step left on the agent default says nothing at all.
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scout"]')?.click() })
+    expect(container.querySelector('[data-testid="stage-models"]')).toBeNull()
+  })
+
+  it('counts a single pinned step in the singular', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      opts: { env: 'local', coverageTarget: 100, yolo: false, models: { heal: { model: 'opus', effort: 'max' } } },
+    }))
+    await render('fl_1')
+    const chip = container.querySelector<HTMLButtonElement>('[data-testid="strip-models"]')
+    expect(chip?.textContent).toContain('1 tuned')
+    expect(chip?.getAttribute('title')).toContain('1 step pinned to a model')
+  })
+
   it('the paused status chip explains WHO paused it (pauseReason tooltip)', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'user', currentStage: 'docs' }))
     await render('fl_1')

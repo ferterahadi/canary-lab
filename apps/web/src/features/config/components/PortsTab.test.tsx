@@ -177,7 +177,7 @@ describe('PortsTab', () => {
     // The per-command empty state is a single neutral status — no repeated pitch,
     // no per-card CTA (the band carries the one Portify action).
     expect(container.textContent).toContain('No port slots declared')
-    await act(async () => clickButton('Open in Flight'))
+    await act(async () => clickButton('Portify'))
     expect(onOpenPortify).toHaveBeenCalledWith('np_feature')
   })
 
@@ -195,7 +195,7 @@ describe('PortsTab', () => {
     const buttons = [...container.querySelectorAll('button')]
     expect(buttons.some((b) => b.getAttribute('aria-label') === 'Clear port slots')).toBe(false)
     expect(buttons.some((b) => b.getAttribute('aria-label') === 'Remove portification')).toBe(false)
-    const portify = buttons.find((b) => b.textContent?.trim() === 'Open in Flight')!
+    const portify = buttons.find((b) => b.textContent?.trim() === 'Portify')!
     expect(portify.getAttribute('title')).toContain('Optional')
     await act(async () => portify.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect(onOpenPortify).toHaveBeenCalledWith('cns_exactly_once_fallback')
@@ -221,7 +221,7 @@ describe('PortsTab', () => {
       root.render(<PortsTab feature="cns_exactly_once_fallback" onOpenPortify={vi.fn()} />)
     })
     expect(container.textContent).toContain('Partially injectable — 1 of 2 start commands have slots')
-    const portify = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Open in Flight')!
+    const portify = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Portify')!
     expect(portify.getAttribute('title')).not.toContain('Optional')
   })
 
@@ -359,7 +359,7 @@ describe('PortsTab', () => {
     // Not this feature's workflow → normal band, but the start button is
     // blocked and says why.
     expect(container.textContent).toContain('Not injectable')
-    const btn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('Open in Flight'))!
+    const btn = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Portify')!
     expect((btn as HTMLButtonElement).disabled).toBe(true)
     expect(btn.getAttribute('title')).toContain('other_feature')
     await act(async () => btn.dispatchEvent(new MouseEvent('click', { bubbles: true })))

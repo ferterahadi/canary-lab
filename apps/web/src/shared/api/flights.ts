@@ -44,6 +44,9 @@ export interface StartFlightBody {
   mode?: 'continue' | 'redo' | 'jump'
   /** Stage to start at (mode "jump", or fresh stage entry). */
   fromStage?: FlightStageKeyT
+  /** Optional context for a deliberate stage re-run. Scoped to that stage's
+   *  agent prompt; a plain resume leaves it absent. */
+  feedback?: string
   /** Absent = autopilot on; explicit false asks at every checkpoint (R71/W4). */
   autopilot?: boolean
   /** R79: which CLI conducts the flight's stage agents. Sticky per record —

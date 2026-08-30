@@ -15,6 +15,16 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 2.2.0 — 2026-08-30
+
+> Run `npx canary-lab upgrade`, then restart connected agent apps, to refresh Canary Lab skills.
+
+- **[General]** **Internal agent work now has a model plan.** Choose the model and reasoning effort for each step, keep separate Claude and Codex plans, optionally review the choices at launch, and see the locked plan on each run, Flight, or coverage record.
+- **[Portify]** **Parallel setup can run beside the rest of a Flight.** Start it as soon as the suite exists; Flight follows the same workflow when it reaches that step, so work is not duplicated and review stays in one place.
+- **[General]** **Flight planning can be stopped cleanly.** Cancelling a background plan now ends its agent processes and prevents a late result from starting a Flight.
+
+---
+
 ## 2.1.0 — 2026-08-28
 
 > Run `npx canary-lab upgrade`, then restart connected agent apps, to refresh Canary Lab skills and switch existing connections to the compact profile.

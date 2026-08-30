@@ -63,6 +63,7 @@ are not in this profile); your job is the edits, then relaying the proof.
 
 ## Guardrails
 
+- If a full Flight starts while this standalone workflow is active, the Flight adopts this same workflow when it reaches Parallel setup; do not start a replacement.
 - Keep the same `session_id` for the whole conversation.
 - Edit only inside the returned scratch worktree paths — never the user's checked-out product repo.
 - A FLIGHT can hand you a portify workflow via an `external-work` checkpoint carrying a `workflowId`: drive this same loop against it, but STOP at `ready-to-save`, re-call `get_flight`, and answer with `respond_flight_checkpoint(flightId, choice: "submit")` — the flight owns the save/review decision. If that re-check carries `checkpoint.data.takeoverRequestedAt`, stop the workflow work and release with `choice: "run-internally"` instead — do not submit. Never `save_portify` or `cancel_portify` a flight-owned workflow. The flight will wait on you indefinitely — a parked hand-off has no deadline — so do not end your turn with it open; after 45 minutes with no `get_flight` contact the read reports `handOffIdle` on it.

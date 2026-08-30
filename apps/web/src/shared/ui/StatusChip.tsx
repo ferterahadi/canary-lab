@@ -22,6 +22,8 @@ export function Chip({
   width,
   testId,
   title,
+  onClick,
+  expanded,
 }: {
   /** CSS colour driving the border (chrome="border" falls back to a neutral
    *  `--border-default` frame without it) and, unless overridden by
@@ -49,6 +51,13 @@ export function Chip({
   width?: number
   testId?: string
   title?: string
+  /** Makes the chip a button — identical shape, plus a pointer and hover
+   *  feedback. For a chip that OPENS something (the stage's model plan) rather
+   *  than only reporting; without it the chip stays the inert span it was. */
+  onClick?: () => void
+  /** Set alongside `onClick` when the button opens a popover, so the trigger
+   *  announces the panel it owns. */
+  expanded?: boolean
 }) {
   const resolvedLabelColor = labelColor ?? tone ?? 'var(--text-primary)'
   const shapeClass =
@@ -70,13 +79,8 @@ export function Chip({
       ? { width, justifyContent: 'center', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
       : {}),
   }
-  return (
-    <span
-      data-testid={testId}
-      title={title}
-      className={`inline-flex shrink-0 items-center gap-1.5 ${shapeClass}`.trim()}
-      style={style}
-    >
+  const body = (
+    <>
       {icon}
       <span className={width ? 'truncate' : undefined}>{label}</span>
       {detail && (
@@ -84,6 +88,28 @@ export function Chip({
           {detail}
         </span>
       )}
+    </>
+  )
+  const className = `inline-flex shrink-0 items-center gap-1.5 ${shapeClass}`.trim()
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        data-testid={testId}
+        title={title}
+        aria-haspopup={expanded === undefined ? undefined : 'dialog'}
+        aria-expanded={expanded}
+        onClick={onClick}
+        className={`${className} cursor-pointer transition-colors duration-150 hover:brightness-125`}
+        style={style}
+      >
+        {body}
+      </button>
+    )
+  }
+  return (
+    <span data-testid={testId} title={title} className={className} style={style}>
+      {body}
     </span>
   )
 }

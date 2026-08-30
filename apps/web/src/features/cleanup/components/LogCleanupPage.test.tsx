@@ -170,7 +170,9 @@ describe('LogCleanupPage', () => {
     await mount(undefined, onNavigateToPortify)
     await act(async () => { buttonByText('Portify')?.click() })
     await act(async () => { await Promise.resolve() })
-    await act(async () => { buttonByText('Open in Flight')?.click() })
+    const row = container.querySelector('input[aria-label="Select shop"]')!.closest('tr')!
+    const open = [...row.querySelectorAll('button')].find((button) => button.textContent === 'Portify') as HTMLButtonElement
+    await act(async () => { open.click() })
     expect(onNavigateToPortify).toHaveBeenCalledWith('shop')
   })
 

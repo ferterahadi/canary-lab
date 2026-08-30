@@ -415,9 +415,10 @@ describe('stageFacts — Requirements source tile', () => {
     expect(facts.find((f) => f.label === 'Distilled from')).toBeUndefined()
   })
 
-  it('claims no result before the summary exists — only the source it will read', () => {
+  it('claims no result before the summary exists, while keeping its output slot', () => {
     const facts = stageFacts(docs, flight(), summary, { docBytes: 10_000 })
-    expect(facts.find((f) => f.label === 'Distilled to')).toBeUndefined()
+    expect(facts.find((f) => f.label === 'Distilled to'))
+      .toEqual({ label: 'Distilled to', value: '', awaiting: true })
     expect(facts.find((f) => f.label === 'Source docs')).toMatchObject({ value: '2', sub: '≈ 2.5k tokens · 9.8 KB' })
   })
 
@@ -507,12 +508,15 @@ describe('portify facts — natively injectable suites (no overlay, no workflow)
     // Proof is a concurrent double boot, which nothing here performed — the
     // empty tile has to say so rather than be omitted.
     expect(facts.find((f) => f.label === 'Instances proven')).toMatchObject({ value: '—' })
-    expect(facts.find((f) => f.label === 'Files edited')).toBeUndefined()
+    expect(facts.find((f) => f.label === 'Files edited'))
+      .toEqual({ label: 'Files edited', value: '', awaiting: true })
   })
 
-  it('still renders nothing when neither a workflow nor declared slots exist', () => {
+  it('keeps the full layout when neither a workflow nor declared slots exist', () => {
     const stage = { key: 'portify', status: 'done', evidence: { edits: 0 } } as FlightStage
-    expect(stageFacts(stage, flight({ stages: [stage] })).length).toBe(0)
+    const facts = stageFacts(stage, flight({ stages: [stage] }))
+    expect(facts.map((fact) => fact.label)).toEqual(['Services injectable', 'Files edited', 'Instances proven'])
+    expect(facts.every((fact) => fact.awaiting)).toBe(true)
   })
 })
 
@@ -673,9 +677,16 @@ describe('stageFacts — evaluation report reads the export task, not the flight
     ])
   })
 
-  it('no task and no recorded name means no facts', () => {
+  it('no task and no recorded name keeps the report evidence slots', () => {
     const none = { key: 'evaluation-export', status: 'done', evidence: {} } as FlightStage
-    expect(stageFacts(none, flight())).toEqual([])
+    const facts = stageFacts(none, flight())
+    expect(facts.map((fact) => fact.label)).toEqual([
+      'Requirements with tests',
+      'Test depth',
+      'Tests that passed',
+      'Requirements proven',
+    ])
+    expect(facts.every((fact) => fact.awaiting)).toBe(true)
   })
 })
 
@@ -789,7 +800,7 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
     expect(facts.find((f) => f.label === 'Tests that passed')?.sub).toBe('1 failed · 1 never ran')
   })
 
-  it('with no run joined, the claim and the depth still render — only the run-grounded halves drop', () => {
+  it('with no run joined, the claim and depth render while the run-grounded slots stay visible', () => {
     const facts = stageFacts(stage, flight(), undefined, {
       evalTask: task,
       ledger: joined({
@@ -801,7 +812,13 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
     // Not "0/3 passed · 3 never ran": with no run to run them, that would read as
     // a finding about the suite instead of the absence of a run. Coverage is
     // run-blind though, so the claim tile is honest without one.
-    expect(facts.map((f) => f.label)).toEqual(['Requirements with tests', 'Test depth'])
+    expect(facts.map((f) => f.label)).toEqual([
+      'Requirements with tests',
+      'Test depth',
+      'Tests that passed',
+      'Requirements proven',
+    ])
+    expect(facts.slice(2).every((fact) => fact.awaiting)).toBe(true)
   })
 
   it('a clean sweep says so rather than leaving the tile bare', () => {
@@ -864,9 +881,11 @@ describe('probed coverage with no requirements is undefined, not zero', () => {
     expect(line).not.toMatch(/0 of 0/)
   })
 
-  it('shows no percentage tile — an amber 0% would read as a failing suite', () => {
+  it('shows no percentage while keeping the complete layout', () => {
     expect(stageFacts(noReqs, flight())).toEqual([
+      { label: 'Mapped coverage', value: '—', sub: 'no requirements to map' },
       { label: 'Requirements', value: 'None yet', sub: 'no requirement docs for this suite' },
+      { label: 'Tests written', value: '', awaiting: true },
     ])
   })
 

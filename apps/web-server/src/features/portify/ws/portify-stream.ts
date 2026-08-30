@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { PortifyStore, PortifyStoreEvent } from '../logic/runtime/store'
-import type { PortifyIndexEntry, PortifyManifest, PortifyStatus } from '../logic/runtime/types'
+import { isActivePortifyStatus, type PortifyIndexEntry, type PortifyManifest } from '../logic/runtime/types'
 
 // `/ws/portify` — push channel for the port-ification wizard + the
 // GlobalStatusBar button, mirroring ws/benchmark-stream.ts. On connect, sends
@@ -24,10 +24,6 @@ export type PortifyStreamFrame =
     }
   | { type: 'update'; workflowId: string; manifest: PortifyManifest }
   | { type: 'removed'; workflowId: string }
-
-function isActivePortifyStatus(status: PortifyStatus): boolean {
-  return status === 'planning' || status === 'editing' || status === 'verifying' || status === 'ready-to-save'
-}
 
 export async function portifyStreamRoutes(
   app: FastifyInstance,

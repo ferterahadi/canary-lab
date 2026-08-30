@@ -14,6 +14,9 @@ import type { FlightDrillThroughs } from './FlightPage'
 import { StageErrorPanel, StagePausedPanel, pausedResumeKind } from './StageStatePanels'
 import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
 import { ACTIVITY_STAGE, type ExternalWorkTrace, type FeatureActivity, type StageExternalHistory } from '../state/feature-activity'
+import { Chip } from '@/shared/ui/StatusChip'
+import { flightRowModelChips } from '@shared/flights/stage-models'
+import { ModelPlanPopover } from './ModelPlanPopover'
 import { SkeletonPanel, awaitingFor } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { useStageBandData } from './use-stage-band-data'
@@ -143,6 +146,7 @@ export function StageDetail({
   companion,
   runLive,
   activeRunId,
+  activePortifyWorkflowId,
   activity,
   externalHistory,
   activityOpen,
@@ -167,6 +171,9 @@ export function StageDetail({
   /** Run identity supplied by the live run stream for a derived Flight. Real
    *  flight records keep their own stage/link identity instead. */
   activeRunId?: string
+  /** Portify's own live-store identity. Unlike the one-verb feature Activity
+   *  map, this survives when a simultaneous test run is the louder activity. */
+  activePortifyWorkflowId?: string
   /** This feature's live verb (the one activity map App derives) — drives the
    *  compact external-session Activity row on the stage the job belongs to. */
   activity?: FeatureActivity
@@ -204,21 +211,21 @@ export function StageDetail({
   const runMerged = stage.key === 'run'
   const live = row.status === 'running'
   const settled = row.status === 'done' || row.status === 'failed'
-  // R83: the pane keeps its SETTLED layout in every state — each card a finished
-  // stage shows renders as its own skeleton until it has content. Undefined once
-  // the stage settles, so a card with genuinely nothing to show still renders
-  // nothing rather than promising more.
+  // R83: the pane keeps its settled layout in every state. Missing slots stay
+  // mounted after settle too, but change to the static unavailable treatment so
+  // the stable shape never promises that more evidence is still coming.
   const awaiting = awaitingFor(row.status, live)
   const externalStage = stageExternalHistory(externalHistory, stage, companion)
   const externalTrace = externalStage.current
   // Derived Flights learn external task identity from the task's own live
   // stream before the workspace evidence probe catches up. Feed that identity
   // through the normal stage-band path so the result lands without a refresh.
-  const livePortifyId = activity?.kind === 'portifying'
-    ? activity.workflowId
-    : externalTrace?.kind === 'portifying'
-      ? externalTrace.resourceId
-      : undefined
+  const livePortifyId = activePortifyWorkflowId
+    ?? (activity?.kind === 'portifying'
+      ? activity.workflowId
+      : externalTrace?.kind === 'portifying'
+        ? externalTrace.resourceId
+        : undefined)
   const dataStage: FlightStage = stage.key === 'portify' && livePortifyId
     ? { ...stage, evidence: { ...(stage.evidence ?? {}), workflowId: livePortifyId } }
     : stage
@@ -236,13 +243,14 @@ export function StageDetail({
     companion,
     evalTaskId ? taskById(evalTaskId) : null,
   )
-  // The same hold, for the cards the band's own sources feed. `live` is the
-  // right fill and not a fourth state: the three states answer WHY the slot is
-  // empty, and "a value is on its way" is what a fetch in flight means — `idle`
-  // would tell the user to act and `failed` that nothing is coming. A stage that
-  // is genuinely awaiting outranks it, so a running stage keeps its own reason.
-  const awaitingData = awaiting ?? (band.pending ? 'live' : undefined)
+  // The same hold, for cards the band's own sources feed. A first read outranks
+  // the stage state because a value really is on its way; once it resolves empty,
+  // the stage's own idle, failed, or unavailable treatment takes over.
+  const awaitingData = band.pending ? 'live' : awaiting
   const facts = stageFacts(dataStage, flight, companion ?? undefined, band)
+  // Read off the ROW key, so the merged pairs report their companion's spawns
+  // too (Test run carries heal, Requirements carries the summary distiller).
+  const modelChips = flightRowModelChips(row.key, flight.opts.models)
   const drillThrough = stageDrillThrough(dataStage, flight, drill, companion, onOpenConfig)
   const runId = runMerged
     ? (activeRunId ?? ((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
@@ -390,6 +398,44 @@ export function StageDetail({
           (Advanced setup, drill-through, download) versus the plain chip-only
           stages. */}
       <div data-testid="stage-actions" className="order-last flex min-h-6 shrink-0 items-center gap-2">
+        {/* The models this step's agents were pinned to — a passive fact, so it
+            sits ahead of the status chip and the action buttons rather than
+            among them. A step left on the agent default shows nothing at all,
+            which is what makes the chip mean "this one was deliberately tuned".
+            ONE chip that opens the plan, not one chip per spawn: a bare
+            `opus · high` named a model with no subject, and a merged row put
+            two such subjectless chips side by side. Spelling the subject inline
+            instead just traded that for a header full of prose. The panel is
+            the strip's, via ModelPlanPopover — same spawn → knobs rows, scoped
+            to this step. */}
+        {modelChips.length > 0 && (
+          <ModelPlanPopover
+            /* The stage's chips live in a right-aligned cluster; a left-anchored
+               panel would hang off the pane. */
+            align="right"
+            panelTestId="stage-models-plan"
+            rows={modelChips.map((chip) => ({ key: chip.stage, label: chip.label, value: chip.value }))}
+          >
+            {({ open, toggle }) => (
+              <Chip
+                testId="stage-models"
+                chrome="border"
+                labelColor="var(--text-secondary)"
+                fontWeight={400}
+                onClick={toggle}
+                expanded={open}
+                title={`${modelChips.length} model choice${modelChips.length === 1 ? '' : 's'} this step's agents were pinned to when this flight started — click for which agent runs on what`}
+                label={(
+                  <span className="inline-flex items-baseline gap-1.5">
+                    <span className="cl-rubric">models</span>
+                    <span className="font-mono">{modelChips.length}</span>
+                    <span aria-hidden="true" className="text-[9px] text-muted">▾</span>
+                  </span>
+                )}
+              />
+            )}
+          </ModelPlanPopover>
+        )}
         <StageStatusChip status={row.status} />
         {/* Advanced setup appears once the config EXISTS on disk — approved
             (done) or pre-existing (skipped, the scaffold had nothing to do).
@@ -560,7 +606,7 @@ export function StageDetail({
         <TestRunPanel
           feature={flight.feature}
           runId={runId}
-          awaiting={awaiting}
+          awaiting={row.status === 'done' && runId ? undefined : awaiting}
           live={Boolean(runLive) || live}
           evidence={runEvidence}
           onOpenRun={drill.onOpenRun}

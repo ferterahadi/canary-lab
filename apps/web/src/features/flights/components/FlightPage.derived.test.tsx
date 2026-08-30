@@ -20,11 +20,14 @@ const mocks = vi.hoisted(() => ({
   abortFlight: vi.fn(),
   pauseFlight: vi.fn(),
   redoFlight: vi.fn(),
+  startFlight: vi.fn(),
   deleteFlight: vi.fn(),
   listRuns: vi.fn(),
   getEnvsetSlot: vi.fn(),
   getEnvsetsIndex: vi.fn(),
+  startPortify: vi.fn(),
   loadPortify: vi.fn(async () => {}),
+  portifyWorkflows: vi.fn((): Array<Record<string, unknown>> => []),
   portifyWorkflow: vi.fn(),
   getFeatureCoverage: vi.fn(),
   downloadTask: vi.fn(),
@@ -35,6 +38,8 @@ const mocks = vi.hoisted(() => ({
   putPlaywrightConfig: vi.fn(),
   listFeatureDocs: vi.fn(),
   getFlightEntryOptions: vi.fn(),
+  getProjectConfig: vi.fn(),
+  putProjectConfig: vi.fn(),
   importFeatureDoc: vi.fn(),
   deleteFeatureDoc: vi.fn(),
   deleteFeature: vi.fn(),
@@ -61,6 +66,7 @@ vi.mock('@/shared/api/client', () => ({
   abortFlight: mocks.abortFlight,
   pauseFlight: mocks.pauseFlight,
   redoFlight: mocks.redoFlight,
+  startFlight: mocks.startFlight,
   deleteFlight: mocks.deleteFlight,
   listRuns: mocks.listRuns,
   getEnvsetSlot: mocks.getEnvsetSlot,
@@ -73,6 +79,8 @@ vi.mock('@/shared/api/client', () => ({
   putPlaywrightConfig: mocks.putPlaywrightConfig,
   listFeatureDocs: mocks.listFeatureDocs,
   getFlightEntryOptions: mocks.getFlightEntryOptions,
+  getProjectConfig: mocks.getProjectConfig,
+  putProjectConfig: mocks.putProjectConfig,
   importFeatureDoc: mocks.importFeatureDoc,
   deleteFeatureDoc: mocks.deleteFeatureDoc,
   deleteFeature: mocks.deleteFeature,
@@ -125,7 +133,11 @@ vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
 // The Parallel-readiness band reads its portify workflow off the live
 // `/ws/portify` store; the provider needs a socket, so stub the hooks.
 vi.mock('@/features/portify/state/PortifyContext', () => ({
-  usePortify: () => ({ loadPortify: mocks.loadPortify }),
+  usePortify: () => ({
+    workflows: mocks.portifyWorkflows(),
+    startPortify: mocks.startPortify,
+    loadPortify: mocks.loadPortify,
+  }),
   usePortifyWorkflow: (id?: string | null) => mocks.portifyWorkflow(id),
 }))
 
@@ -183,6 +195,10 @@ let root: Root
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.startPortify.mockReset().mockResolvedValue('wf-direct')
+  mocks.loadPortify.mockReset().mockResolvedValue(undefined)
+  mocks.portifyWorkflows.mockReset().mockReturnValue([])
+  mocks.portifyWorkflow.mockReset().mockReturnValue(undefined)
   mocks.getFeatureCoverage.mockResolvedValue(undefined)
   mocks.getEnvsetsIndex.mockResolvedValue(undefined)
   mocks.getEnvsetSlot.mockResolvedValue(undefined)
@@ -213,6 +229,18 @@ beforeEach(() => {
     prefill: { repoPaths: ['/repo/shop'], description: 'checkout flow', env: 'local', coverageTarget: 100 },
     stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, allowed: true })),
   })
+  mocks.getProjectConfig.mockResolvedValue({
+    healAgent: 'claude',
+    editor: 'auto',
+    personalWikiPath: null,
+    askModelsOnLaunch: false,
+  })
+  mocks.startFlight.mockResolvedValue(manifest({
+    flightId: 'fl_started',
+    feature: 'half-built',
+    status: 'running',
+    currentStage: 'specs-coverage',
+  }))
   mocks.taskById.mockReturnValue(null)
   mocks.taskForRun.mockReturnValue(null)
   container = document.createElement('div')
@@ -261,7 +289,8 @@ async function render(flightId: string, extraProps: Record<string, unknown> = {}
 // R81 — a feature whose stages were completed OUTSIDE the conductor has flown.
 // FlightPage renders that progress from a client-only pseudo-manifest under a
 // `feature:<name>` token, so there is no record to GET and no record-scoped
-// control (resume / redo / abort / delete / download) may appear.
+// endpoint may receive that token. The adapted Continue menu starts by feature;
+// record-only resume / redo / abort / delete / download calls remain forbidden.
 describe('derived flights (R81)', () => {
   const allDone = () => FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
   const upToSpecs = () => FLIGHT_STAGE_KEYS.map((key) => ({
@@ -547,18 +576,141 @@ describe('derived flights (R81)', () => {
     expect(label).not.toContain('Remove flight')
   })
 
-  it('continues from the first stage with no evidence, handing that stage to the launcher', async () => {
+  it('uses the Continue menu and resumes directly from the first stage with no evidence', async () => {
     const onStartFlight = vi.fn()
     await render('feature:half-built', {
       derivedStages: new Map([['half-built', upToSpecs()]]),
       onStartFlight,
     })
-    const primary = container.querySelector<HTMLButtonElement>('[data-testid="derived-conduct"]')!
-    expect(primary.textContent).toContain('Continue from')
+    const primary = container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')!
     act(() => { primary.click() })
-    // specs-coverage is the first stage without an artifact — re-fly intent, so
-    // the finished steps are kept rather than redone.
-    expect(onStartFlight).toHaveBeenCalledWith('half-built', 'refly', 'specs-coverage')
+    expect(container.querySelector('[data-testid="flight-resume"]')?.textContent)
+      .toContain('Resume at Tests & coverage')
+    expect(container.querySelector('[data-testid="flight-redo-open"]')).not.toBeNull()
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="flight-resume"]')?.click()
+    })
+
+    expect(onStartFlight).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-testid="flight-start-submit"]')).toBeNull()
+    expect(mocks.startFlight).toHaveBeenCalledWith({
+      feature: 'half-built',
+      repoPaths: ['/repo/shop'],
+      description: 'checkout flow',
+      env: 'local',
+      coverageTarget: 100,
+      fromStage: 'specs-coverage',
+    })
+  })
+
+  it('opens the step picker only for From a step and carries its feedback into the direct start', async () => {
+    await render('feature:half-built', { derivedStages: new Map([['half-built', upToSpecs()]]) })
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')?.click() })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-open"]')?.click() })
+    expect(container.querySelector('[data-testid="flight-redo-submit"]')).not.toBeNull()
+    expect(mocks.startFlight).not.toHaveBeenCalled()
+
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-docs"]')?.click() })
+    const feedback = container.querySelector<HTMLTextAreaElement>('[data-testid="flight-redo-feedback"]')!
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+      setter.call(feedback, 'requirements changed')
+      feedback.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-submit"]')?.click()
+    })
+
+    expect(mocks.startFlight).toHaveBeenCalledWith(expect.objectContaining({
+      feature: 'half-built',
+      fromStage: 'docs',
+      feedback: 'requirements changed',
+    }))
+  })
+
+  it('respects Ask before launch before a direct resume', async () => {
+    mocks.getProjectConfig.mockResolvedValue({
+      healAgent: 'codex',
+      editor: 'auto',
+      personalWikiPath: null,
+      askModelsOnLaunch: true,
+      agentModels: { codex: { gen: { model: 'gpt-5.6-sol', effort: 'high' } }, claude: {} },
+    })
+    await render('feature:half-built', { derivedStages: new Map([['half-built', upToSpecs()]]) })
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')?.click() })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="flight-resume"]')?.click()
+    })
+
+    expect(container.querySelector('[data-testid="model-launch-gate"]')).not.toBeNull()
+    expect(mocks.startFlight).not.toHaveBeenCalled()
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="gate-confirm"]')?.click()
+    })
+    expect(mocks.startFlight).toHaveBeenCalledWith(expect.objectContaining({
+      feature: 'half-built',
+      fromStage: 'specs-coverage',
+      agent: 'codex',
+    }))
+  })
+
+  it('does not launch when it cannot verify Ask before launch', async () => {
+    mocks.getProjectConfig.mockRejectedValue(new Error('settings unavailable'))
+    await render('feature:half-built', { derivedStages: new Map([['half-built', upToSpecs()]]) })
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')?.click() })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="flight-resume"]')?.click()
+    })
+
+    expect(mocks.startFlight).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('settings unavailable')
+  })
+
+  it('starts Parallel setup directly, then restores the normal Flight action', async () => {
+    mocks.loadPortify.mockImplementation(async (workflowId: string) => {
+      mocks.portifyWorkflows.mockReturnValue([{
+        workflowId,
+        feature: 'half-built',
+        status: 'editing',
+        startedAt: '2026-08-30T10:00:00Z',
+      }])
+      mocks.portifyWorkflow.mockReturnValue({
+        workflowId,
+        feature: 'half-built',
+        repos: [{ name: 'shop', path: '/repo/shop', worktreePath: '/worktree/shop' }],
+        agent: 'claude',
+        branch: 'canary/portify',
+        status: 'editing',
+        attempt: 1,
+        maxAttempts: 3,
+        startedAt: '2026-08-30T10:00:00Z',
+      })
+    })
+    await render('feature:half-built', {
+      derivedStages: new Map([['half-built', upToSpecs()]]),
+      stage: 'portify',
+      onSelectStage: vi.fn(),
+      onStartFlight: vi.fn(),
+    })
+
+    const start = container.querySelector<HTMLButtonElement>('[data-testid="flight-run-parallel-setup"]')
+    expect(start?.textContent).toBe('Run Parallel Setup')
+    expect(container.querySelector('[data-testid="derived-conduct"]')).toBeNull()
+
+    await act(async () => { start?.click() })
+
+    expect(mocks.startPortify).toHaveBeenCalledWith({ feature: 'half-built' })
+    expect(mocks.loadPortify).toHaveBeenCalledWith('wf-direct')
+    expect(container.querySelector('[data-testid="flight-run-parallel-setup"]')).toBeNull()
+    const continueButton = container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')
+    expect(continueButton).not.toBeNull()
+    act(() => { continueButton?.click() })
+    expect(container.querySelector('[data-testid="flight-resume"]')?.textContent)
+      .toContain('Resume at Tests & coverage')
+    expect(container.querySelector('[data-testid="stage-rail-portify"]')?.textContent).toContain('Parallel setup')
+    expect(container.querySelector('[data-testid="stage-rail-portify"] .cl-status-dot')).not.toBeNull()
+    expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-kind')).toBe('portify')
   })
 
   it('offers a fresh flight — not a continue — when every stage is already done', async () => {

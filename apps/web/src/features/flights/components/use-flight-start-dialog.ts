@@ -132,9 +132,8 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
         // "change the intent" handoff on `continue` is exactly the bug that
         // rework fixed: it re-froze the fields the user came to edit.
         if (intent === 'fresh') return
-        // R81: a derived "Continue from <stage>" handoff already answered
-        // "where do we re-enter?" from on-disk evidence — the entry load must
-        // not clobber it back to the top of the pipeline.
+        // A caller-supplied stage already answered "where do we re-enter?" —
+        // the entry load must not clobber it back to the top of the pipeline.
         if (fromStage) return
         setPicked(options.canContinue ? 'continue' : options.flight ? 'similarity' : null)
       })

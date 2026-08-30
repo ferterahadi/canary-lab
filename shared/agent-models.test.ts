@@ -8,9 +8,9 @@ describe('KNOWN_MODELS', () => {
 })
 
 describe('RECOMMENDED_BY_STAGE', () => {
-  it('keeps Claude test authoring and auto-repair at maximum effort', () => {
-    expect(RECOMMENDED_BY_STAGE.claude.gen).toEqual({ model: 'opus', effort: 'max' })
-    expect(RECOMMENDED_BY_STAGE.claude.heal).toEqual({ model: 'opus', effort: 'max' })
+  it('keeps Claude test authoring and auto-repair at high effort', () => {
+    expect(RECOMMENDED_BY_STAGE.claude.gen).toEqual({ model: 'opus', effort: 'high' })
+    expect(RECOMMENDED_BY_STAGE.claude.heal).toEqual({ model: 'opus', effort: 'high' })
   })
 
   it('recommends the Codex Sol role at high effort for coverage mapping', () => {
@@ -19,7 +19,8 @@ describe('RECOMMENDED_BY_STAGE', () => {
       { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' },
     ]
 
+    expect(RECOMMENDED_BY_STAGE.codex.mapping).toEqual({ model: 'sol', effort: 'high' })
     expect(recommendedChoice('codex', 'mapping', available))
-      .toEqual({ model: 'gpt-5.6-sol', effort: 'medium' })
+      .toEqual({ model: 'gpt-5.6-sol', effort: 'high' })
   })
 })

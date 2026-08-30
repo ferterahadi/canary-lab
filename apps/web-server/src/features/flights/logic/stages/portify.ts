@@ -6,6 +6,7 @@ import type { PortifyStageProgress } from '../../../../../../../shared/flights/t
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { featureDirFor, pollUntil, stageModels, type FlightStageDeps } from './context'
 import { editFingerprint } from '../../../portify/logic/runtime/git-ops'
+import { isActivePortifyStatus, type PortifyStatus } from '../../../portify/logic/runtime/types'
 import { portifyJob } from './stage-jobs'
 import { externalWorkCheckpoint, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../types'
@@ -22,15 +23,17 @@ import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../types'
 // port-injectable service is the fast path through the stage (double-boot
 // passes with zero edits, no review needed), not a skip.
 //
-// Parallel setup begins after the Report exists and always runs as Canary-owned
-// background work. The external checkpoint support below is retained only so a
-// Flight persisted before that ownership change can still be released, revised,
-// or settled without losing its verified workflow.
+// Parallel setup can begin as soon as Suite setup exists, independently of the
+// remaining Flight. When the conductor later reaches this stage it adopts that
+// same persistent workflow instead of starting a duplicate. The external
+// checkpoint support below is retained only so a Flight persisted before the
+// ownership change can still be released, revised, or settled without losing
+// its verified workflow.
 
 const PORTIFY_TIMEOUT_MS = 30 * 60 * 1000
 
 interface PortifyView {
-  status?: string
+  status?: PortifyStatus
   attempt?: number
   maxAttempts?: number
   diff?: string
@@ -52,16 +55,18 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
     return resp.json() as PortifyView
   }
 
-  // A ready-to-save workflow for this feature that no run() of ours started —
-  // i.e. a review verified before a server restart (kept answerable by the
-  // startup reclaim) or an open wizard review. Either way it owns the
-  // feature's in-place config edit, so a new workflow is inadmissible and the
-  // stage parks on THIS one.
-  const findParkedReview = async (feature: string): Promise<{ workflowId: string; view: PortifyView } | null> => {
+  // A standalone workflow for this feature that no run() of ours started. It
+  // may still be editing/verifying, or already parked for review. Either way it
+  // owns the feature's scratch config edit, so the Flight follows THIS one.
+  const findReusableWorkflow = async (feature: string): Promise<{ workflowId: string; view: PortifyView } | null> => {
     const resp = await deps.inject({ method: 'GET', url: '/api/portify' })
     if (resp.statusCode >= 300) return null
-    const entries = resp.json() as { workflowId?: string; feature?: string; status?: string }[]
-    const entry = Array.isArray(entries) ? entries.find((e) => e.feature === feature && e.status === 'ready-to-save') : undefined
+    const entries = resp.json() as { workflowId?: string; feature?: string; status?: PortifyStatus }[]
+    const entry = Array.isArray(entries)
+      ? entries.find((candidate) => candidate.feature === feature
+        && candidate.status != null
+        && isActivePortifyStatus(candidate.status))
+      : undefined
     if (!entry?.workflowId) return null
     return { workflowId: entry.workflowId, view: await read(entry.workflowId) }
   }
@@ -185,6 +190,32 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
     return applyCheckpoint(ctx.manifest().feature, workflowId, view.diff, note)
   }
 
+  // A workflow started by this stage and one adopted from the independent lane
+  // finish under the same rules: native/no-edit and yolo save immediately;
+  // proposed edits park for review.
+  const finishFollow = async (ctx: StageContext, workflowId: string, view: PortifyView): Promise<StageOutcome> => {
+    if (view.status === 'ready-to-save') {
+      const hasEdits = Boolean(view.diff && view.diff.trim())
+      if (!hasEdits || ctx.manifest().opts.yolo) {
+        if (!hasEdits) ctx.appendLog('[portify] double-boot passed with zero edits — native port injection\n')
+        return saveAndVerify(ctx, workflowId, hasEdits)
+      }
+    }
+    return settleReview(ctx, workflowId, view)
+  }
+
+  const followReusableWorkflow = async (
+    ctx: StageContext,
+    adopted: { workflowId: string; view: PortifyView },
+  ): Promise<StageOutcome> => {
+    ctx.appendLog(`[portify] adopted independent workflow ${adopted.workflowId}\n`)
+    ctx.setProgress({ workflowId: adopted.workflowId } satisfies PortifyStageProgress)
+    const view = adopted.view.status === 'ready-to-save'
+      ? adopted.view
+      : await awaitReview(ctx, adopted.workflowId)
+    return finishFollow(ctx, adopted.workflowId, view)
+  }
+
   // Start the workflow and follow it to its first settle/park. Reached only
   // AFTER the portify-gate is answered 'run' (or auto-answered/yolo).
   const startAndFollow = async (ctx: StageContext): Promise<StageOutcome> => {
@@ -195,6 +226,13 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
     const started = await deps.inject({ method: 'POST', url: '/api/portify', payload: { feature: m.feature, ...(models ? { models } : {}) } })
     const body = started.json() as { workflowId?: string; error?: string }
     if (started.statusCode >= 300 || !body.workflowId) {
+      // The independent button and the conductor can cross in the same instant:
+      // both see no workflow, then one wins the POST. A 409 is therefore one
+      // last adoption probe, not a failed Flight.
+      if (started.statusCode === 409) {
+        const adopted = await findReusableWorkflow(m.feature)
+        if (adopted) return followReusableWorkflow(ctx, adopted)
+      }
       return { kind: 'failed', error: `portify start rejected (${started.statusCode}): ${body.error ?? 'unknown'}` }
     }
     const workflowId = body.workflowId
@@ -207,15 +245,7 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
     // via the drill-through (see PortifyStageProgress).
     ctx.setProgress({ workflowId } satisfies PortifyStageProgress)
 
-    const view = await awaitReview(ctx, workflowId)
-    if (view.status === 'ready-to-save') {
-      const hasEdits = Boolean(view.diff && view.diff.trim())
-      if (!hasEdits || m.opts.yolo) {
-        if (!hasEdits) ctx.appendLog('[portify] double-boot passed with zero edits — native port injection\n')
-        return saveAndVerify(ctx, workflowId, hasEdits)
-      }
-    }
-    return settleReview(ctx, workflowId, view)
+    return finishFollow(ctx, workflowId, await awaitReview(ctx, workflowId))
   }
 
   /** Park the whole external engagement on ONE checkpoint. The prompt is the
@@ -285,16 +315,13 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
         return { kind: 'skipped', reason: 'already done — a previous flight proved this app can run two at a time' }
       }
 
-      // Re-adopt a review parked across a server restart: reclaim keeps a
-      // verified ready-to-save workflow answerable (save works from its
-      // persisted capture), and starting a NEW workflow while it exists is
-      // rejected — so park this stage straight onto it instead of failing.
-      const adopted = await findParkedReview(m.feature)
-      if (adopted) {
-        ctx.appendLog(`[portify] re-adopted parked workflow ${adopted.workflowId} (verified before a server restart)\n`)
-        ctx.setProgress({ workflowId: adopted.workflowId } satisfies PortifyStageProgress)
-        return settleReview(ctx, adopted.workflowId, adopted.view)
-      }
+      // Reuse the independent Parallel setup workflow when it started before
+      // the conductor reached this stage. Parked reviews survive restarts; an
+      // editing/verifying workflow is followed live to its eventual outcome.
+      // Starting a second workflow would be rejected and would split the UI's
+      // ownership, so the workflow id is pinned to this Flight immediately.
+      const adopted = await findReusableWorkflow(m.feature)
+      if (adopted) return followReusableWorkflow(ctx, adopted)
 
       // Yolo skips every ask; otherwise the gate parks (autopilot answers it
       // 'run' automatically, so the default pipeline never stalls here).

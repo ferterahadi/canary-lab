@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { FlightManifest, FlightStageKey } from '@/shared/api/client'
 import { capitalizeFirst } from '@/shared/lib/format'
-import { pinnedPlanSummary } from '@shared/agent-models'
+import { MODEL_STAGE_KEYS, pinnedPlanChoices, type PinnedStageChoice } from '@shared/agent-models'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { ModelPlanPopover } from './ModelPlanPopover'
 import { formatDuration, num, specsCoverageProgress, stageLabel, stageStatusTone, type StageFact } from './stage-meta'
 import { asRecord } from './StageDetail'
 
@@ -33,7 +34,15 @@ export function FlightSummaryStrip({
    *  still wants; only the flip is withheld. */
   autopilotLockedReason?: string
 }) {
-  const items: Array<{ label: string; value: string; tone?: string; stage?: FlightStageKey; title?: string }> = []
+  const items: Array<{
+    label: string
+    value: string
+    tone?: string
+    stage?: FlightStageKey
+    title?: string
+    /** Set on the Models item only: the fact opens the plan instead of jumping. */
+    plan?: PinnedStageChoice[]
+  }> = []
 
   // R71/W5: the one state where you'd watch the clock used to be the one state
   // that hid it — tick locally while the flight runs.
@@ -68,13 +77,19 @@ export function FlightSummaryStrip({
       title: "The coding agent conducting this flight's steps — chosen at start, fixed for the record",
     })
     // The model plan locked at start (2.2.0) — only pinned stages are worth a
-    // fact; an all-default plan is the norm, not information.
-    const plan = pinnedPlanSummary(flight.opts.models)
-    if (plan) {
+    // fact; an all-default plan is the norm, not information. A COUNT, not the
+    // plan: spelling out nine "step model · effort" entries at flight level
+    // restated the step names the rail lists an inch below, wrapped the strip
+    // onto a second line, and answered a question that belongs to a step. The
+    // plan is one click away here, and each step carries its own chip in
+    // StageDetail.
+    const plan = pinnedPlanChoices(flight.opts.models)
+    if (plan.length > 0) {
       items.push({
         label: 'Models',
-        value: plan,
-        title: 'Model + effort per step, locked when this flight started — the other steps run on the agent default',
+        value: `${plan.length} tuned`,
+        plan,
+        title: `${plan.length} step${plan.length === 1 ? '' : 's'} pinned to a model when this flight started — every other step runs on the agent default`,
       })
     }
   }
@@ -151,16 +166,10 @@ export function FlightSummaryStrip({
           separates label-value pairs with no divider between them. */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         {items.map((item) => {
-          const body = (
-            <>
-              <span className="cl-rubric">
-                {item.label}
-              </span>
-              {/* `tone` is a computed status token from stageStatusTone — the
-                  one place a colour still arrives as a value, not a class. */}
-              <span className="font-mono text-secondary" style={item.tone ? { color: item.tone } : undefined}>{item.value}</span>
-            </>
-          )
+          const body = <FactBody label={item.label} value={item.value} tone={item.tone} />
+          if (item.plan) {
+            return <ModelsPlanFact key={item.label} label={item.label} value={item.value} title={item.title} plan={item.plan} />
+          }
           return item.stage && onSelectStage ? (
             <button
               key={item.label}
@@ -219,6 +228,63 @@ export function FlightSummaryStrip({
         </div>
       )}
     </div>
+  )
+}
+
+/** One strip fact — rubric label + value — shared by all three item shapes
+ *  (plain, stage jump, plan popover) so they can never drift apart. */
+function FactBody({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <>
+      <span className="cl-rubric">
+        {label}
+      </span>
+      {/* `tone` is a computed status token from stageStatusTone — the one place
+          a colour still arrives as a value, not a class. */}
+      <span className="font-mono text-secondary" style={tone ? { color: tone } : undefined}>{value}</span>
+    </>
+  )
+}
+
+/** The launch model plan as ONE fact: how many steps were pinned, with the
+ *  plan itself on click. The panel and its dismiss behaviour are
+ *  `ModelPlanPopover`, shared with the stage header's own models chip. */
+function ModelsPlanFact({
+  label,
+  value,
+  title,
+  plan,
+}: {
+  label: string
+  value: string
+  title?: string
+  plan: PinnedStageChoice[]
+}) {
+  return (
+    <ModelPlanPopover
+      panelTestId="strip-models-plan"
+      rows={plan.map((choice) => ({ key: choice.stage, label: choice.label, value: choice.value }))}
+      /* Only when there IS another step: a plan that pins all nine would be
+         claiming a remainder that doesn't exist. */
+      footer={plan.length < MODEL_STAGE_KEYS.length
+        ? <span className="text-[10.5px] text-muted">Every other step runs on the agent default.</span>
+        : undefined}
+    >
+      {({ open, toggle }) => (
+        <button
+          type="button"
+          data-testid="strip-models"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onClick={toggle}
+          title={title}
+          className="flex items-baseline gap-1.5 rounded text-[11px] underline-offset-2 transition-colors hover:underline"
+        >
+          <FactBody label={label} value={value} />
+          <span aria-hidden="true" className="text-[9px] text-muted">▾</span>
+        </button>
+      )}
+    </ModelPlanPopover>
   )
 }
 

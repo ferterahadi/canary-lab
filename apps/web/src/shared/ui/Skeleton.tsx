@@ -8,26 +8,26 @@ import { PanelCard } from './PanelCard'
 // when the stage finishes.
 //
 // R86 — the placeholder's FILL is what says why the slot is empty, because the
-// shape alone said the same thing in three different situations:
+// shape alone said the same thing in four different situations:
 //   live   filled bar, sweeping   a value is being produced right now
 //   idle   hollow dashed track    the slot is held open; nothing comes until you act
 //   failed struck danger track    the value will never land here
+//   unavailable muted outline     the step settled without recording this value
 // The fill (not the animation) carries this, deliberately: the headless preview
 // forces reduced-motion, so a viewer with no animation must still be able to
 // tell a working stage from a parked one from a broken one.
 
 /** Why a card is showing placeholders: `live` (a stage is working on it),
- *  `idle` (pending or paused — nothing is coming until the user acts) or
- *  `failed` (the stage stopped short, so these slots stay empty until a retry).
- *  Absent means "not awaiting anything", which is how a settled stage keeps its
- *  `return null` for a card it genuinely has no content for. */
-export type AwaitingState = 'live' | 'idle' | 'failed'
+ *  `idle` (pending or paused — nothing is coming until the user acts),
+ *  `failed` (the stage stopped short, so these slots stay empty until a retry),
+ *  or `unavailable` (the step settled without recording that evidence). */
+export type AwaitingState = 'live' | 'idle' | 'failed' | 'unavailable'
 
-/** The pane's awaiting state, from the stage's own status. One home so every
- *  panel is told the same thing: a settled stage has produced everything it ever
- *  will, and must never render a placeholder promising more. */
-export function awaitingFor(status: string, live: boolean): AwaitingState | undefined {
-  if (status === 'done' || status === 'skipped') return undefined
+/** The pane's empty-slot state, from the stage's own status. One home keeps the
+ *  full evidence layout mounted while distinguishing a settled omission from a
+ *  value that is pending, live, or blocked on retry. */
+export function awaitingFor(status: string, live: boolean): AwaitingState {
+  if (status === 'done' || status === 'skipped') return 'unavailable'
   if (live) return 'live'
   return status === 'failed' ? 'failed' : 'idle'
 }
@@ -47,12 +47,21 @@ const BAR_FILL: Record<AwaitingState, CSSProperties> = {
     border: '1px solid color-mix(in srgb, var(--danger) 45%, transparent)',
     boxSizing: 'border-box',
   },
+  unavailable: { border: '1px solid var(--border-default)', boxSizing: 'border-box' },
 }
 
 const BAR_CLASS: Record<AwaitingState, string> = {
   live: ' cl-skeleton',
   idle: '',
   failed: ' cl-skeleton-void',
+  unavailable: '',
+}
+
+const BEAD_BORDER: Record<AwaitingState, string> = {
+  live: 'var(--border-strong)',
+  idle: 'var(--border-strong)',
+  failed: 'var(--danger)',
+  unavailable: 'var(--border-default)',
 }
 
 /** One placeholder bar. Widths are given per site rather than randomized —
@@ -99,7 +108,7 @@ export function SkeletonLines({ awaiting, rows = 2, height = 9 }: {
  *  hero, whose three blocks each sit at a different left edge — must reuse this
  *  bead rather than hand-roll a second circle that drifts from it.
  *
- *  The bead tracks the same three states as the bars: a failed row's indicator
+ *  The bead tracks the same four states as the bars: a failed row's indicator
  *  is the one dot the user will look for when scanning which rows a retry still
  *  owes. */
 export function SkeletonBead({ awaiting, size = 9, className = '' }: {
@@ -116,7 +125,7 @@ export function SkeletonBead({ awaiting, size = 9, className = '' }: {
       style={{
         height: size,
         width: size,
-        borderColor: awaiting === 'failed' ? 'var(--danger)' : 'var(--border-strong)',
+        borderColor: BEAD_BORDER[awaiting],
       }}
     />
   )

@@ -20,6 +20,12 @@ export type PortifyStatus =
   | 'failed'
   | 'aborted'
 
+/** A workflow the user or a Flight can still follow or act on. */
+export function isActivePortifyStatus(status: PortifyStatus): boolean {
+  return status === 'planning' || status === 'editing' || status === 'verifying'
+    || status === 'ready-to-save'
+}
+
 export interface PortifyBootInstance {
   /** Slot name → port this boot was assigned. */
   ports: Record<string, number>
