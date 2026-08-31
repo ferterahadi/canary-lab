@@ -101,94 +101,93 @@ if (!tarballName) {
 
 const tarballPath = path.join(tempRoot, tarballName)
 
-// Upgrade proof starts from the real immutable npm release, not a hand-shaped
-// fixture. 1.5.1 is the public version immediately before 2.0.0: it carries the
-// old four sample suites, the one-skill agent install, the old CLI path, and the
-// upgrade-only postinstall hook. Those are exactly the compatibility boundaries
-// the major release has to migrate without rewriting user-owned feature files.
-const legacyVersion = '1.5.1'
+// Upgrade proof starts from the last supported npm release, not a hand-shaped
+// fixture. A patch release must migrate a real 2.2.0 workspace without rewriting
+// its suites or user-owned files, then leave the documented upgrade retryable.
+const upgradeFromVersion = '2.2.0'
 const releaseVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version
-const legacyHarnessDir = path.join(tempRoot, 'legacy-harness')
-const legacyProjectDir = path.join(legacyHarnessDir, 'legacy-project')
-const legacyHomeDir = path.join(tempRoot, 'legacy-home')
-const legacyEnv = {
-  CANARY_LAB_HOME: legacyHomeDir,
-  CANARY_LAB_AGENT_HOME: legacyHomeDir,
+const upgradeHarnessDir = path.join(tempRoot, 'upgrade-harness')
+const upgradeProjectDir = path.join(upgradeHarnessDir, 'upgrade-project')
+const upgradeHomeDir = path.join(tempRoot, 'upgrade-home')
+const upgradeEnv = {
+  CANARY_LAB_HOME: upgradeHomeDir,
+  CANARY_LAB_AGENT_HOME: upgradeHomeDir,
 }
-fs.mkdirSync(legacyHarnessDir, { recursive: true })
-run('npm', ['init', '-y'], legacyHarnessDir, legacyEnv)
+fs.mkdirSync(upgradeHarnessDir, { recursive: true })
+run('npm', ['init', '-y'], upgradeHarnessDir, upgradeEnv)
 run(
   'npm',
-  ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `canary-lab@${legacyVersion}`],
-  legacyHarnessDir,
-  legacyEnv,
+  ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `canary-lab@${upgradeFromVersion}`],
+  upgradeHarnessDir,
+  upgradeEnv,
 )
 run(
   'npx',
-  ['canary-lab', 'init', 'legacy-project', '--package-spec', legacyVersion, '--no-install'],
-  legacyHarnessDir,
-  legacyEnv,
+  ['canary-lab', 'init', 'upgrade-project', '--package-spec', upgradeFromVersion, '--no-install'],
+  upgradeHarnessDir,
+  upgradeEnv,
 )
 run(
   'npm',
   ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false'],
-  legacyProjectDir,
-  legacyEnv,
+  upgradeProjectDir,
+  upgradeEnv,
 )
 
-const legacyFeatureNames = [
-  'broken_todo_api',
-  'example_todo_api',
-  'flaky_orders_api',
-  'tricky_checkout_api',
+const baselineFeatureNames = [
+  'storefront-journey',
+  'workflow-workbench',
 ]
-if (JSON.stringify(childDirectories(path.join(legacyProjectDir, 'features'))) !== JSON.stringify(legacyFeatureNames)) {
-  throw new Error(`Smoke test failed: npm ${legacyVersion} no longer scaffolds the expected legacy feature boundary`)
+if (JSON.stringify(childDirectories(path.join(upgradeProjectDir, 'features'))) !== JSON.stringify(baselineFeatureNames)) {
+  throw new Error(`Smoke test failed: npm ${upgradeFromVersion} no longer scaffolds the expected feature boundary`)
 }
 
-const userNote = 'keep this user-owned note through the major upgrade\n'
-const userFeatureNotePath = path.join(legacyProjectDir, 'features', 'example_todo_api', 'USER-NOTES.md')
-const userClaudePath = path.join(legacyProjectDir, 'CLAUDE.md')
-const userAgentsPath = path.join(legacyProjectDir, 'AGENTS.md')
-const userSkillPath = path.join(legacyHomeDir, '.codex', 'skills', 'user-owned', 'SKILL.md')
+const userNote = 'keep this user-owned note through the patch upgrade\n'
+const userFeatureNotePath = path.join(upgradeProjectDir, 'features', 'storefront-journey', 'USER-NOTES.md')
+const userClaudePath = path.join(upgradeProjectDir, 'CLAUDE.md')
+const userAgentsPath = path.join(upgradeProjectDir, 'AGENTS.md')
+const userSkillPath = path.join(upgradeHomeDir, '.codex', 'skills', 'user-owned', 'SKILL.md')
 fs.writeFileSync(userFeatureNotePath, userNote)
 fs.writeFileSync(userClaudePath, `# Team notes\n\n${userNote}`)
 fs.writeFileSync(userAgentsPath, `# Agent notes\n\n${userNote}`)
 fs.mkdirSync(path.dirname(userSkillPath), { recursive: true })
 fs.writeFileSync(userSkillPath, userNote)
-fs.appendFileSync(path.join(legacyProjectDir, '.gitignore'), '\n# User rule\nuser-private/\n')
+fs.appendFileSync(path.join(upgradeProjectDir, '.gitignore'), '\n# User rule\nuser-private/\n')
 
-const legacyPackagePath = path.join(legacyProjectDir, 'package.json')
-const legacyPackage = JSON.parse(fs.readFileSync(legacyPackagePath, 'utf8'))
-const legacyStamp = fs.readFileSync(path.join(legacyProjectDir, 'logs', '.canary-lab-version'), 'utf8').trim()
-if (legacyStamp !== legacyVersion) {
-  throw new Error(`Smoke test failed: installed legacy workspace stamp is ${legacyStamp || 'missing'}, expected ${legacyVersion}`)
+const upgradePackagePath = path.join(upgradeProjectDir, 'package.json')
+const upgradePackage = JSON.parse(fs.readFileSync(upgradePackagePath, 'utf8'))
+const baselineStamp = fs.readFileSync(path.join(upgradeProjectDir, 'logs', '.canary-lab-version'), 'utf8').trim()
+if (baselineStamp !== upgradeFromVersion) {
+  throw new Error(`Smoke test failed: installed workspace stamp is ${baselineStamp || 'missing'}, expected ${upgradeFromVersion}`)
 }
-legacyPackage.scripts['user:keep'] = 'echo keep-me'
-legacyPackage.userOwned = { keep: true }
-fs.writeFileSync(legacyPackagePath, `${JSON.stringify(legacyPackage, null, 2)}\n`)
-const featureSnapshot = snapshotFiles(path.join(legacyProjectDir, 'features'))
+upgradePackage.scripts['user:keep'] = 'echo keep-me'
+upgradePackage.userOwned = { keep: true }
+fs.writeFileSync(upgradePackagePath, `${JSON.stringify(upgradePackage, null, 2)}\n`)
+const featureSnapshot = snapshotFiles(path.join(upgradeProjectDir, 'features'))
 
 for (const client of ['codex', 'claude']) {
-  const installed = childDirectories(path.join(legacyHomeDir, `.${client}`, 'skills'))
+  const packaged = childDirectories(
+    path.join(upgradeProjectDir, 'node_modules', 'canary-lab', 'dist', 'agent-integrations', client, 'skills'),
+  )
+  const installed = childDirectories(path.join(upgradeHomeDir, `.${client}`, 'skills'))
     .filter((name) => name.startsWith('canary-lab'))
-  if (JSON.stringify(installed) !== JSON.stringify(['canary-lab'])) {
-    throw new Error(`Smoke test failed: ${legacyVersion} ${client} baseline is not the expected one-skill install`)
+  if (JSON.stringify(installed) !== JSON.stringify(packaged)) {
+    throw new Error(`Smoke test failed: ${upgradeFromVersion} ${client} skills do not match its package`)
   }
 }
 
 // An explicit `npm install <pkg>` does not reliably run the root workspace's
-// postinstall. The 1.5.x UI updater can therefore swap in 2.0 without migrating
-// the workspace. Exercise the first-start recovery from the packed 2.0 code,
+// postinstall. The UI updater can therefore swap the package without migrating
+// the workspace. Exercise the first-start recovery from the packed release,
 // then run the documented command once more to prove the migration is retryable.
 run(
   'npm',
   ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `file:${tarballPath}`],
-  legacyProjectDir,
-  legacyEnv,
+  upgradeProjectDir,
+  upgradeEnv,
 )
 const recoveryModulePath = path.join(
-  legacyProjectDir,
+  upgradeProjectDir,
   'node_modules',
   'canary-lab',
   'dist',
@@ -201,29 +200,29 @@ run(
   [
     '-e',
     `const { finishPendingWorkspaceUpgrade } = require(${JSON.stringify(recoveryModulePath)});` +
-      `finishPendingWorkspaceUpgrade(${JSON.stringify(legacyProjectDir)}, { log: console.log })` +
+      `finishPendingWorkspaceUpgrade(${JSON.stringify(upgradeProjectDir)}, { log: console.log })` +
       `.then((ran) => { if (!ran) throw new Error('expected first-start upgrade recovery to run') })` +
       `.catch((error) => { console.error(error); process.exit(1) })`,
   ],
-  legacyProjectDir,
-  legacyEnv,
+  upgradeProjectDir,
+  upgradeEnv,
 )
-run('npx', ['canary-lab', 'upgrade', '--silent'], legacyProjectDir, legacyEnv)
+run('npx', ['canary-lab', 'upgrade', '--silent'], upgradeProjectDir, upgradeEnv)
 
-const upgradedPackage = JSON.parse(fs.readFileSync(legacyPackagePath, 'utf8'))
+const upgradedPackage = JSON.parse(fs.readFileSync(upgradePackagePath, 'utf8'))
 const installedRelease = JSON.parse(
-  fs.readFileSync(path.join(legacyProjectDir, 'node_modules', 'canary-lab', 'package.json'), 'utf8'),
+  fs.readFileSync(path.join(upgradeProjectDir, 'node_modules', 'canary-lab', 'package.json'), 'utf8'),
 )
 if (installedRelease.version !== releaseVersion) {
   throw new Error(`Smoke test failed: expected upgraded package ${releaseVersion}, got ${installedRelease.version}`)
 }
 if (upgradedPackage.scripts.postinstall !== 'canary-lab upgrade --silent && canary-lab install-browsers') {
-  throw new Error('Smoke test failed: 1.5.1 postinstall was not upgraded to include browser installation')
+  throw new Error('Smoke test failed: the upgraded postinstall no longer includes browser installation')
 }
 if (upgradedPackage.scripts['user:keep'] !== 'echo keep-me' || upgradedPackage.userOwned?.keep !== true) {
   throw new Error('Smoke test failed: upgrade changed user-owned package.json fields')
 }
-assertSnapshotUnchanged(path.join(legacyProjectDir, 'features'), featureSnapshot, '1.5.1 feature tree')
+assertSnapshotUnchanged(path.join(upgradeProjectDir, 'features'), featureSnapshot, `${upgradeFromVersion} feature tree`)
 for (const [file, expected] of [
   [userClaudePath, `# Team notes\n\n${userNote}`],
   [userAgentsPath, `# Agent notes\n\n${userNote}`],
@@ -233,32 +232,32 @@ for (const [file, expected] of [
     throw new Error(`Smoke test failed: upgrade changed user-owned file ${file}`)
   }
 }
-const upgradedGitignore = fs.readFileSync(path.join(legacyProjectDir, '.gitignore'), 'utf8')
+const upgradedGitignore = fs.readFileSync(path.join(upgradeProjectDir, '.gitignore'), 'utf8')
 if (!upgradedGitignore.includes('user-private/') || !upgradedGitignore.includes('features/*/envsets/*/*')) {
   throw new Error('Smoke test failed: upgrade lost user .gitignore rules or envset secret protection')
 }
-const stamp = fs.readFileSync(path.join(legacyProjectDir, 'logs', '.canary-lab-version'), 'utf8').trim()
+const stamp = fs.readFileSync(path.join(upgradeProjectDir, 'logs', '.canary-lab-version'), 'utf8').trim()
 if (stamp !== releaseVersion) {
   throw new Error(`Smoke test failed: upgraded workspace stamp is ${stamp || 'missing'}, expected ${releaseVersion}`)
 }
 
 for (const client of ['codex', 'claude']) {
   const packaged = childDirectories(
-    path.join(legacyProjectDir, 'node_modules', 'canary-lab', 'dist', 'agent-integrations', client, 'skills'),
+    path.join(upgradeProjectDir, 'node_modules', 'canary-lab', 'dist', 'agent-integrations', client, 'skills'),
   )
-  const installed = childDirectories(path.join(legacyHomeDir, `.${client}`, 'skills'))
+  const installed = childDirectories(path.join(upgradeHomeDir, `.${client}`, 'skills'))
     .filter((name) => name.startsWith('canary-lab'))
   if (JSON.stringify(installed) !== JSON.stringify(packaged)) {
-    throw new Error(`Smoke test failed: ${client} skills did not expand from the 1.5.1 set to the 2.0.0 set`)
+    throw new Error(`Smoke test failed: ${client} skills did not refresh from ${upgradeFromVersion} to ${releaseVersion}`)
   }
 }
 
-for (const feature of legacyFeatureNames) {
+for (const feature of baselineFeatureNames) {
   run(
     'npx',
     ['playwright', 'test', '--list', '--config', `features/${feature}/playwright.config.ts`],
-    legacyProjectDir,
-    legacyEnv,
+    upgradeProjectDir,
+    upgradeEnv,
   )
 }
 
