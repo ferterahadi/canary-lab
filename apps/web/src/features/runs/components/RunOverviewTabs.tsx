@@ -60,6 +60,7 @@ export interface RunOverviewTabProps {
   view: RunViewModel
   services: ServiceManifestEntry[]
   repoBranches: RepoBranchSnapshot[]
+  onOpenEvaluationReport?: (feature: string) => void
 }
 
 export function RunOverviewTab({
@@ -67,6 +68,7 @@ export function RunOverviewTab({
   view,
   services,
   repoBranches,
+  onOpenEvaluationReport,
 }: RunOverviewTabProps) {
   const duration = durationBetween(manifest.startedAt, manifest.endedAt)
   // The "Review Evaluation" trigger moved to the run's tab row
@@ -122,7 +124,12 @@ export function RunOverviewTab({
             alert below or in the Run Logs timeline. */}
         </dl>
         {isAssertionExportable(manifest.status) && (
-          <div className="shrink-0"><ReviewEvaluationMenu runId={manifest.runId} /></div>
+          <div className="shrink-0">
+            <ReviewEvaluationMenu
+              runId={manifest.runId}
+              onExportStarted={(task) => onOpenEvaluationReport?.(task.feature)}
+            />
+          </div>
         )}
       </div>
       {/* For a boot-only session the held-state message is the point of the

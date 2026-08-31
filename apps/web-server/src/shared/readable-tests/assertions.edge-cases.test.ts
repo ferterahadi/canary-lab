@@ -260,11 +260,11 @@ describe('Playwright assertion edge cases', () => {
       ],
       [
         'expect(Array.isArray(payload.redirect_uris)).toBe(true)',
-        'Check that payload redirect uris is a list',
+        'Check that payload.redirect_uris is a list',
       ],
       [
         'expect(Array.isArray(payload.contacts)).toBe(false)',
-        'Check that it is false that payload contacts is a list',
+        'Check that it is false that payload.contacts is a list',
       ],
     ]
 

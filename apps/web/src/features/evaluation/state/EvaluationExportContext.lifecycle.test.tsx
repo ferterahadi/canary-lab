@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '@/shared/api/client'
 import type { EvaluationExportTask } from '@/shared/api/types'
-import { EvaluationExportProvider, useEvaluationExportLogs, useEvaluationExports } from './EvaluationExportContext'
+import { EvaluationExportProvider, useEvaluationExportLog, useEvaluationExportLogs, useEvaluationExports } from './EvaluationExportContext'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -204,5 +204,21 @@ describe('EvaluationExportProvider', () => {
         root.render(<OutsideProviderLogsProbe />)
       })
     }).toThrow('useEvaluationExportLogs must be used inside EvaluationExportProvider')
+  })
+
+  it('requires the provider only when a task log is requested', () => {
+    let watchTask: ((taskId: string) => void) | null = null
+    function OptionalLogProbe({ taskId }: { taskId: string | null }) {
+      watchTask = useEvaluationExportLog(taskId).watchTask
+      return null
+    }
+
+    expect(() => {
+      act(() => { root.render(<OptionalLogProbe taskId={null} />) })
+    }).not.toThrow()
+    expect(() => watchTask?.('ignored')).not.toThrow()
+    expect(() => {
+      act(() => { root.render(<OptionalLogProbe taskId="task-1" />) })
+    }).toThrow('useEvaluationExportLog must be used inside EvaluationExportProvider')
   })
 })

@@ -28,10 +28,10 @@ import {
   EvaluationDeliverablePanel,
   OverlayPanel,
 } from './StageEvidencePanels'
-import { SpecsPassTimeline, StageActivity, truncate } from './StageActivity'
+import { SpecsPassTimeline, StageActivityRail, truncate } from './StageActivity'
 import { presentedStageStatus } from './stage-metrics'
 
-export { AgentBlock, SpecsPassTimeline, StageActivity, specsPhaseSub, truncate } from './StageActivity'
+export { AgentBlock, SpecsPassTimeline, StageActivityRail, specsPhaseSub, truncate } from './StageActivity'
 
 // One uniform stage template (R20). Every stage renders the SAME skeleton —
 // nothing stage-shaped leaks into the layout:
@@ -229,19 +229,30 @@ export function StageDetail({
   const dataStage: FlightStage = stage.key === 'portify' && livePortifyId
     ? { ...stage, evidence: { ...(stage.evidence ?? {}), workflowId: livePortifyId } }
     : stage
-  // The Evaluation Report's deliverable: one resolved export task feeds both the
-  // facts (run · report mode · archive name) and the activity rail below, so the
-  // card reads the same on a conducted flight and a derived one.
-  const evalTaskId = evaluationTaskId(stage, flight)
-    ?? (externalTrace?.kind === 'exporting' ? externalTrace.resourceId : undefined)
-  const { taskById } = useEvaluationExports()
+  // The Evaluation Report has two task roles. Its recorded task remains the
+  // pinned deliverable (run · report mode · archive name), while Activity may
+  // follow a newer live export for the same suite.
+  const recordedEvalTaskId = evaluationTaskId(stage, flight)
+  const externalEvalTaskId = externalTrace?.kind === 'exporting' ? externalTrace.resourceId : undefined
+  const deliverableEvalTaskId = recordedEvalTaskId ?? externalEvalTaskId
+  const { tasks: evaluationTasks, taskById } = useEvaluationExports()
+  // A standalone export can run after this stage already has a completed,
+  // pinned deliverable. Keep that completed task in the facts/cards, but let
+  // Activity follow the newest live task so "building…" can never sit above a
+  // replay of an older raw report (or the false "No activity recorded").
+  const liveEvalTask = stage.key === 'evaluation-export'
+    ? evaluationTasks.find((task) => task.feature === flight.feature && task.status === 'running') ?? null
+    : null
+  const activityEvalTask = (externalEvalTaskId ? taskById(externalEvalTaskId) : null)
+    ?? liveEvalTask
+    ?? (deliverableEvalTaskId ? taskById(deliverableEvalTaskId) : null)
   // Sources outside the flight record (ledger, boot run, portify workflow,
   // config, envsets, docs) — resolved for the VISIBLE stage only.
   const band = useStageBandData(
     flight,
     dataStage,
     companion,
-    evalTaskId ? taskById(evalTaskId) : null,
+    deliverableEvalTaskId ? taskById(deliverableEvalTaskId) : null,
   )
   // The same hold, for cards the band's own sources feed. A first read outranks
   // the stage state because a value really is on its way; once it resolves empty,
@@ -349,8 +360,10 @@ export function StageDetail({
     || band.portify?.status === 'planning'
     || band.portify?.status === 'editing'
     || band.portify?.status === 'verifying'
+  const evaluationLive = activityEvalTask?.status === 'running'
   const localActivitySource: AgentSessionSource | undefined =
-    evalTaskId ? { kind: 'evaluation', taskId: evalTaskId, live }
+    activityEvalTask?.sessionRef
+      ? { kind: 'evaluation', taskId: activityEvalTask.taskId, live: evaluationLive }
     : portifyId ? { kind: 'portify', workflowId: portifyId, live }
     : agentDir ? { kind: 'flight', flightId, stage: agentDir, live }
     : undefined
@@ -667,7 +680,7 @@ export function StageDetail({
         return (
           <>
             <EvaluationDeliverablePanel task={band.evalTask ?? null} awaiting={awaiting} probed={probed} />
-            <AllReportsPanel feature={flight.feature} pinnedTaskId={evalTaskId} awaiting={awaiting} probed={probed} />
+            <AllReportsPanel feature={flight.feature} pinnedTaskId={deliverableEvalTaskId} awaiting={awaiting} probed={probed} />
           </>
         )
       })()}
@@ -700,10 +713,12 @@ export function StageDetail({
           on the run detail drill-through), so R80 cut its near-empty band; the
           hero carries a collapsed "Repairs" disclosure instead. */}
       {!runMerged && (
-        <StageActivity
+        <StageActivityRail
+          stageKey={stage.key}
+          evaluationTaskId={stage.key === 'evaluation-export' ? activityEvalTask?.taskId ?? null : undefined}
           source={activitySource}
           sessionSources={sessionSources}
-          live={live || externalSessions.some((session) => session.status === 'running')}
+          live={live || evaluationLive || externalSessions.some((session) => session.status === 'running')}
           settled={settled}
           log={combinedLog}
           externalSessions={externalSessions}

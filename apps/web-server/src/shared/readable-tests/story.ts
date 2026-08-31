@@ -600,6 +600,13 @@ function isIdentifierName(node: ts.Identifier): boolean {
 function exactVariableNames(node: ts.Node): string[] {
   const names = new Set<string>()
   const visit = (child: ts.Node): void => {
+    // Keep an exact dotted path as one visual token when the English renderer
+    // deliberately preserves it (`res.data.data`). Individual identifiers are
+    // still collected below for the humanized sentences used elsewhere.
+    if (ts.isPropertyAccessExpression(child)) {
+      const path = expressionPath(child)
+      if (path) names.add(path)
+    }
     if (ts.isIdentifier(child) && !isIdentifierName(child)) names.add(child.text)
     child.forEachChild(visit)
   }
@@ -616,7 +623,11 @@ function variablePhrases(
   const phrases = new Set<string>()
   for (const name of exactVariableNames(node)) {
     const alias = aliases.get(name)
-    for (const phrase of [name, alias, humanizeIdentifier(name)]) {
+    // A dotted path is useful only in its exact, source-shaped form. Its
+    // individual identifiers are visited separately and keep the established
+    // humanized highlighting in sentences that do not preserve the path.
+    const variants = name.includes('.') ? [name] : [name, alias, humanizeIdentifier(name)]
+    for (const phrase of variants) {
       if (phrase && lowerText.includes(phrase.toLocaleLowerCase())) phrases.add(phrase)
     }
   }

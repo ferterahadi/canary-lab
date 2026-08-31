@@ -113,6 +113,8 @@ vi.mock('@/shared/ui/AgentSessionView', () => ({
 // The export stage reads the download action + task lookups from the export
 // context; the provider needs live sockets, so stub the hook.
 vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
+  useEvaluationExportLog: () => ({ log: '', watchTask: () => {} }),
+  useEvaluationExportLogs: () => ({}),
   useEvaluationExports: () => ({
     tasks: mocks.evaluationTasks(),
     downloadTask: mocks.downloadTask,

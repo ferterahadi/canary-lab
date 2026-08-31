@@ -132,6 +132,23 @@ describe('ReadableTestView', () => {
       .toContain('checkout.spec.ts:L10–11')
   })
 
+  it('marks an English row whose backing source changed', () => {
+    act(() => root.render(
+      <ReadableTestView
+        test={STORY}
+        sourceFile="/repo/e2e/checkout.spec.ts"
+        changedNodeIds={new Set(['action-submit'])}
+      />,
+    ))
+
+    const changed = container.querySelector<HTMLElement>('[data-testid="readable-story-item-action-submit"]')
+    expect(changed?.dataset.changedSource).toBe('true')
+    expect(changed?.getAttribute('style')).toContain('var(--danger)')
+    expect(changed?.getAttribute('aria-label')).toContain('Modified since the committed test')
+    expect(container.querySelector('[data-testid="readable-modified-action-submit"]')?.textContent).toBe('MODIFIED')
+    expect(container.querySelector('[data-testid="readable-story-item-setup-identifiers"]')?.getAttribute('data-changed-source')).toBeNull()
+  })
+
   it('maps generic English grammar tokens to distinct code-theme colours', () => {
     const highlighted: ReadableTest = {
       ...STORY,

@@ -10,11 +10,19 @@
  * watched via the Flights pill and the flight's Evaluation Report stage.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { EvaluationExportMode } from '@/shared/api/types'
+import type { EvaluationExportMode, EvaluationExportTask } from '@/shared/api/types'
 import { useEvaluationExports } from '@/features/evaluation'
 import { useMcpPromo } from '@/shared/shell/McpPromoContext'
 
-export function ReviewEvaluationMenu({ runId }: { runId: string }) {
+export function ReviewEvaluationMenu({
+  runId,
+  onExportStarted,
+}: {
+  runId: string
+  /** The export now lives on Flight's Report stage. Navigation waits for the
+   *  task response so a failed start leaves the reader on the run that failed. */
+  onExportStarted?: (task: EvaluationExportTask) => void
+}) {
   const [open, setOpen] = useState(false)
   const [failed, setFailed] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
@@ -25,9 +33,11 @@ export function ReviewEvaluationMenu({ runId }: { runId: string }) {
     setOpen(false)
     setFailed(false)
     gatePromo('export-evaluation', () => {
-      void Promise.resolve(startExport(runId, mode)).catch(() => setFailed(true))
+      void Promise.resolve(startExport(runId, mode))
+        .then((task) => onExportStarted?.(task))
+        .catch(() => setFailed(true))
     })
-  }, [gatePromo, runId, startExport])
+  }, [gatePromo, onExportStarted, runId, startExport])
 
   // An open menu in a tab row has to close on an outside click — it overlays the
   // pane below it, and leaving it open makes the next click land on the menu

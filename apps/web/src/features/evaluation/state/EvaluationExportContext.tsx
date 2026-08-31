@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import { connectEvaluationExport, type EvaluationExportConnection } from '../api/evaluation-export-socket'
 import { connectWorkspaceEvents, type WorkspaceEventsConnection } from '@/shared/api/workspace-socket'
@@ -18,13 +18,67 @@ interface EvaluationExportContextValue {
 
 const EvaluationExportContext = createContext<EvaluationExportContextValue | null>(null)
 
-// The log stream is its OWN context (same split invalidation.tsx documents): a
-// localized export appends a chunk per agent event, and while `logsByTaskId`
-// sat in the main value every one of those chunks re-rendered every
-// `useEvaluationExports` consumer — StageDetail, the flight's report panels,
-// the derived-stage hooks — at agent-output frequency. Only the log viewer
-// subscribes here.
-const EvaluationExportLogsContext = createContext<Record<string, string> | null>(null)
+interface EvaluationExportLogStore {
+  append: (taskId: string, chunk: string) => void
+  remove: (taskId: string) => void
+  read: (taskId: string | null) => string
+  readAll: () => Record<string, string>
+  subscribe: (taskId: string | null, listener: () => void) => () => void
+  subscribeAll: (listener: () => void) => () => void
+}
+
+interface EvaluationExportLogsContextValue {
+  store: EvaluationExportLogStore
+  watchTask: EvaluationExportContextValue['watchTask']
+}
+
+// A stable store, not a changing log map: task-scoped readers subscribe only to
+// their task, while the legacy all-logs hook remains available to provider tests.
+// This is the second half of the state/log context split — it prevents a chunk
+// for task B from invalidating the visible rail for task A.
+const EvaluationExportLogsContext = createContext<EvaluationExportLogsContextValue | null>(null)
+
+const NOOP_WATCH_TASK: EvaluationExportContextValue['watchTask'] = () => {}
+
+function createEvaluationExportLogStore(): EvaluationExportLogStore {
+  let logs: Record<string, string> = {}
+  const taskListeners = new Map<string, Set<() => void>>()
+  const allListeners = new Set<() => void>()
+  const notify = (listeners: ReadonlySet<() => void> | undefined): void => {
+    for (const listener of listeners ?? []) listener()
+  }
+  return {
+    append: (taskId, chunk) => {
+      logs = { ...logs, [taskId]: `${logs[taskId] ?? ''}${chunk}` }
+      notify(taskListeners.get(taskId))
+      notify(allListeners)
+    },
+    remove: (taskId) => {
+      const { [taskId]: _removed, ...remaining } = logs
+      logs = remaining
+      notify(taskListeners.get(taskId))
+      notify(allListeners)
+    },
+    read: (taskId) => taskId ? logs[taskId] ?? '' : '',
+    readAll: () => logs,
+    subscribe: (taskId, listener) => {
+      if (!taskId) return () => {}
+      const listeners = taskListeners.get(taskId) ?? new Set<() => void>()
+      listeners.add(listener)
+      taskListeners.set(taskId, listeners)
+      return () => {
+        listeners.delete(listener)
+        if (listeners.size === 0) taskListeners.delete(taskId)
+      }
+    },
+    subscribeAll: (listener) => {
+      allListeners.add(listener)
+      return () => { allListeners.delete(listener) }
+    },
+  }
+}
+
+const EMPTY_LOG_STORE = createEvaluationExportLogStore()
 
 export interface EvaluationExportProviderProps {
   children: ReactNode
@@ -34,7 +88,7 @@ export interface EvaluationExportProviderProps {
 
 export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: EvaluationExportProviderProps) {
   const [tasksById, setTasksById] = useState<Record<string, EvaluationExportTask>>({})
-  const [logsByTaskId, setLogsByTaskId] = useState<Record<string, string>>({})
+  const logStore = useMemo(createEvaluationExportLogStore, [])
   const connectionsRef = useRef<Record<string, EvaluationExportConnection>>({})
   const workspaceConnectionRef = useRef<WorkspaceEventsConnection | null>(null)
   const tasksByIdRef = useRef<Record<string, EvaluationExportTask>>({})
@@ -50,11 +104,8 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
   }, [])
 
   const appendLog = useCallback((taskId: string, chunk: string): void => {
-    setLogsByTaskId((current) => ({
-      ...current,
-      [taskId]: `${current[taskId] ?? ''}${chunk}`,
-    }))
-  }, [])
+    logStore.append(taskId, chunk)
+  }, [logStore])
 
   const refreshTask = useCallback(async (taskId: string): Promise<void> => {
     try {
@@ -122,11 +173,8 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
       tasksByIdRef.current = rest
       return rest
     })
-    setLogsByTaskId((current) => {
-      const { [taskId]: _removed, ...rest } = current
-      return rest
-    })
-  }, [])
+    logStore.remove(taskId)
+  }, [logStore])
 
   useEffect(() => {
     let cancelled = false
@@ -238,10 +286,14 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
     downloadTask,
     dismissTask,
   }), [dismissTask, downloadTask, startExport, taskById, taskForRun, tasks, watchTask])
+  const logValue = useMemo<EvaluationExportLogsContextValue>(() => ({
+    store: logStore,
+    watchTask,
+  }), [logStore, watchTask])
 
   return (
     <EvaluationExportContext.Provider value={value}>
-      <EvaluationExportLogsContext.Provider value={logsByTaskId}>
+      <EvaluationExportLogsContext.Provider value={logValue}>
         {children}
       </EvaluationExportLogsContext.Provider>
     </EvaluationExportContext.Provider>
@@ -254,10 +306,31 @@ export function useEvaluationExports(): EvaluationExportContextValue {
   return value
 }
 
-/** The per-task log text, appended chunk by chunk while an export runs. Its own
- *  hook so only the log viewer re-renders per chunk — see the context comment. */
+/** One task's live log plus the stable action that attaches its stream. A null
+ *  task is an intentional no-op so generic stage rails stay provider-optional. */
+export function useEvaluationExportLog(taskId: string | null): {
+  log: string
+  watchTask: EvaluationExportContextValue['watchTask']
+} {
+  const value = useContext(EvaluationExportLogsContext)
+  const store = value?.store ?? EMPTY_LOG_STORE
+  const subscribe = useCallback((listener: () => void) => (
+    store.subscribe(taskId, listener)
+  ), [store, taskId])
+  const read = useCallback(() => store.read(taskId), [store, taskId])
+  const log = useSyncExternalStore(subscribe, read, read)
+  if (!value && taskId) {
+    throw new Error('useEvaluationExportLog must be used inside EvaluationExportProvider')
+  }
+  return { log, watchTask: value?.watchTask ?? NOOP_WATCH_TASK }
+}
+
+/** Full log-map access is retained for provider-level diagnostics. Product
+ *  surfaces should use `useEvaluationExportLog` and subscribe to one task. */
 export function useEvaluationExportLogs(): Record<string, string> {
   const value = useContext(EvaluationExportLogsContext)
+  const store = value?.store ?? EMPTY_LOG_STORE
+  const logs = useSyncExternalStore(store.subscribeAll, store.readAll, store.readAll)
   if (!value) throw new Error('useEvaluationExportLogs must be used inside EvaluationExportProvider')
-  return value
+  return logs
 }

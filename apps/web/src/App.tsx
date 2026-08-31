@@ -144,6 +144,17 @@ export function App() {
     setFlightStage('portify')
   }, [flightsRef, openFlight, setConfigFor, setFlightStage, setSelectedFeature])
 
+  // Evaluation exports are reviewed on Flight's Report stage. A suite need not
+  // have a conductor record: standalone work uses the same evidence-derived
+  // `feature:` Flight the picker and per-suite shortcuts already use.
+  const openEvaluationReport = useCallback((feature: string): void => {
+    const flight = flightsRef.current.find((entry) => entry.feature === feature)
+    setSelectedFeature(feature)
+    openFlight(flight?.flightId ?? derivedFlightToken(feature))
+    // `openFlight` clears a stage when the flight changes, so pin Report after.
+    setFlightStage('evaluation-export')
+  }, [flightsRef, openFlight, setFlightStage, setSelectedFeature])
+
   // R83: what the return chip says. The origin is whatever `flight` held — a
   // recorded id (name it from the index) or a `feature:<name>` derived token
   // (the name IS the token). An id the index no longer carries still gets a
@@ -479,6 +490,7 @@ export function App() {
             <RunDetailColumn
               runId={selectedRunId}
               onOpenPlaywrightSettings={(f) => setConfigFor(f, 'playwright')}
+              onOpenEvaluationReport={openEvaluationReport}
               totalTests={specTotalTests}
               /* Honoured only when the focus belongs to the run being shown, so a
                  stale pair from a previous selection can't scroll this one. */

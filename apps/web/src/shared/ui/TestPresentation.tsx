@@ -58,6 +58,24 @@ export function TestPresentation({
   const executionStoryNodeId = executionSourceLine == null || !test.readable.story
     ? undefined
     : storyItemIdForSourceLine(test.readable.story.steps, sourceFile, executionSourceLine)
+  const changedStory = useMemo(() => {
+    const steps = test.readable.story?.steps
+    if (!changedLines?.size) {
+      return { nodeIds: undefined, unmappedSourceLines: [] as number[] }
+    }
+    const sourceLines = [...changedLines]
+      .sort((a, b) => a - b)
+      .map((bodyLine) => testBodyLine(test) + bodyLine - 1)
+    if (!steps) return { nodeIds: undefined, unmappedSourceLines: sourceLines }
+    const nodeIds = new Set<string>()
+    const unmappedSourceLines: number[] = []
+    for (const sourceLine of sourceLines) {
+      const nodeId = storyItemIdForSourceLine(steps, sourceFile, sourceLine)
+      if (nodeId) nodeIds.add(nodeId)
+      else unmappedSourceLines.push(sourceLine)
+    }
+    return { nodeIds, unmappedSourceLines }
+  }, [changedLines, sourceFile, test])
 
   return (
     <div data-testid="test-presentation">
@@ -121,6 +139,28 @@ export function TestPresentation({
 
       {mode === 'english' ? (
         <div data-testid="test-presentation-english">
+          {changedStory.unmappedSourceLines.length > 0 && (
+            <div
+              data-testid="readable-unmapped-change"
+              className="mb-2 flex items-start gap-2 rounded-md border px-2 py-1.5 text-[10px]"
+              style={{
+                color: 'var(--danger)',
+                borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))',
+                background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
+              }}
+            >
+              <span className="min-w-0 flex-1">
+                Modified source at {formatSourceLines(changedStory.unmappedSourceLines)} has no executable English step. This includes changes such as a check being commented out.
+              </span>
+              <button
+                type="button"
+                className="shrink-0 font-medium underline underline-offset-2"
+                onClick={() => setMode('code')}
+              >
+                View exact diff
+              </button>
+            </div>
+          )}
           <SourceOpenShell
             sourceLocation={{
               file: fullTestRange.file,
@@ -135,6 +175,7 @@ export function TestPresentation({
               executionHighlight={executionHighlight && executionStoryNodeId
                 ? { kind: executionHighlight.kind, nodeId: executionStoryNodeId }
                 : undefined}
+              changedNodeIds={changedStory.nodeIds}
               onSourceSelect={selectSource}
             />
           </SourceOpenShell>
@@ -163,6 +204,10 @@ export function TestPresentation({
       )}
     </div>
   )
+}
+
+function formatSourceLines(lines: readonly number[]): string {
+  return lines.map((line) => `L${line}`).join(', ')
 }
 
 function codeSelection(

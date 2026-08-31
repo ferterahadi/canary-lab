@@ -369,7 +369,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       })
     }
 
-    // Trailing "…" is load-bearing: StageActivity splits the band after the
+    // Trailing "…" is load-bearing: StageActivityRail splits the band after the
     // last tagged line ending in an ellipsis when no agent chunks mirrored in.
     ctx.appendLog(`[docs] agent attempt (${MODE_LABEL[mode]}) — ${mode === 'collect-repo-docs' ? 'reading the repos' : 'reading the git diff'} guided by the intent…\n`)
     const { text } = await spawnAgent({

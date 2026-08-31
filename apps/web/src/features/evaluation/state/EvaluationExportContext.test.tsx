@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '@/shared/api/client'
 import type { EvaluationExportTask } from '@/shared/api/types'
-import { EvaluationExportProvider, useEvaluationExports } from './EvaluationExportContext'
+import { EvaluationExportProvider, useEvaluationExportLog, useEvaluationExports } from './EvaluationExportContext'
 import { Probe, exportSockets, task, taskSocket, workspaceSocket } from './__fixtures__/evaluation-export-context-fixtures'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -86,6 +86,43 @@ function renderProbe(WebSocketImpl: typeof WebSocket = FakeWebSocket as unknown 
 }
 
 describe('EvaluationExportProvider', () => {
+  it('notifies only the task whose log changed', async () => {
+    const renders = { first: 0, second: 0 }
+    const logs = { first: '', second: '' }
+    const first = task({ taskId: 'first', runId: 'run-first', status: 'running' })
+    const second = task({ taskId: 'second', runId: 'run-second', status: 'running' })
+    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([first, second])
+
+    function LogProbe({ taskId }: { taskId: keyof typeof renders }) {
+      const { log } = useEvaluationExportLog(taskId)
+      renders[taskId] += 1
+      logs[taskId] = log
+      return null
+    }
+
+    act(() => {
+      root.render(
+        <EvaluationExportProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket} wsBase="ws://test">
+          <LogProbe taskId="first" />
+          <LogProbe taskId="first" />
+          <LogProbe taskId="second" />
+        </EvaluationExportProvider>,
+      )
+    })
+    await act(async () => { await Promise.resolve() })
+    const firstRenderCount = renders.first
+    const secondRenderCount = renders.second
+
+    act(() => {
+      taskSocket('second').fire({ type: 'data', chunk: 'second task only\n' })
+    })
+
+    expect(logs.first).toBe('')
+    expect(logs.second).toContain('second task only')
+    expect(renders.first).toBe(firstRenderCount)
+    expect(renders.second).toBe(secondRenderCount + 1)
+  })
+
   it('rehydrates persisted tasks and replays task logs on mount', async () => {
     const running = task({ taskId: 'persisted-running', runId: 'run-persisted', status: 'running' })
     const completed = task({

@@ -254,7 +254,7 @@ describe('readable test story', () => {
       'Check that msgs has length 2',
       'Check that for every item in msgs, item pattern equals “TRIGGER_EMAIL_BATCH”',
       'Check that for every item in msgs, item data email info transaction identifier equals txId',
-      'Check that payload redirect uris is a list',
+      'Check that payload.redirect_uris is a list',
     ])
   })
 
@@ -452,6 +452,19 @@ describe('readable test story', () => {
     ]))
     expect(items.find((item) => item.text.includes('10000'))?.spans)
       .toContainEqual({ text: '10000 milliseconds', kind: 'number' })
+  })
+
+  it('keeps a nested collection path exact and highlights it as one variable', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  expect(Array.isArray(res.data.data)).toBe(true)
+}`,
+    })
+
+    const check = storyItems(translated).find((item) => item.role === 'check')
+    expect(check?.text).toBe('Check that res.data.data is a list')
+    expect(check?.spans).toContainEqual({ text: 'res.data.data', kind: 'variable' })
   })
 
   it('keeps mapping, callback, loop, and retry execution nested in the concise story', () => {

@@ -267,7 +267,7 @@ describe('docs stage', () => {
     expect(text).toContain('[docs] agent attempt (collect repo docs) — reading the repos guided by the intent…')
     expect(text).toContain('[docs] agent attempt (collect repo docs) came back empty — no loyalty flow in either repo.')
     expect(text).toContain('Back to your choice: add docs yourself, or retry with feedback.')
-    // The spawn line must keep its ellipsis — StageActivity splits the band on it.
+    // The spawn line must keep its ellipsis — StageActivityRail splits the band on it.
     expect(log.some((l) => l.trimEnd().endsWith('…'))).toBe(true)
   })
 

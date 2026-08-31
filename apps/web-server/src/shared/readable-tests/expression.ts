@@ -563,7 +563,13 @@ function renderCall(
     if (inspection && node.arguments.length === 1) {
       const value = renderPart(node.arguments[0], sourceFile, bindings)
       if (value.fidelity !== 'unresolved') {
-        return { text: inspection.replace('{value}', childText(value)), fidelity: 'derived', compound: false }
+        // A nested property path is already the clearest stable name for the
+        // value whose shape is being checked. Humanizing `res.data.data` into
+        // "response data data" destroys the boundaries and reads like a typo.
+        const inspectedValue = path === 'Array.isArray'
+          ? expressionPath(node.arguments[0]) ?? childText(value)
+          : childText(value)
+        return { text: inspection.replace('{value}', inspectedValue), fidelity: 'derived', compound: false }
       }
     }
 

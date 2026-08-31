@@ -56,9 +56,12 @@ export function RunDetailColumn({
   totalTests,
   focusTest,
   arriveTab,
+  onOpenEvaluationReport,
 }: {
   runId: string | null
   onOpenPlaywrightSettings?: (feature: string) => void
+  /** Opens the routed Flight Report stage after an evaluation task starts. */
+  onOpenEvaluationReport?: (feature: string) => void
   totalTests?: number
   /** R82: a failing test to land on — the run-summary failed-entry `name` a
    *  flight's Test Run stage was clicked on. Opens the Playwright tab and scrolls
@@ -224,6 +227,7 @@ export function RunDetailColumn({
               view={view}
               services={services}
               repoBranches={repoBranches}
+              onOpenEvaluationReport={onOpenEvaluationReport}
             />
           )
         )}

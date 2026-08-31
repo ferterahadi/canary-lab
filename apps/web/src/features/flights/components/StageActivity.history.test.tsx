@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { StageActivity } from './StageActivity'
+import { StageActivityRail } from './StageActivity'
 
 const mocks = vi.hoisted(() => ({
   getFlightAgentSession: vi.fn(),
@@ -21,7 +21,7 @@ vi.mock('@/shared/api/agent-session-socket', () => ({
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-describe('StageActivity multi-session chronology', () => {
+describe('StageActivityRail multi-session chronology', () => {
   let container: HTMLDivElement
   let root: Root
 
@@ -56,7 +56,8 @@ describe('StageActivity multi-session chronology', () => {
   it('keeps timestamped conductor rows between sessions without a copied transcript', async () => {
     await act(async () => {
       root.render(
-        <StageActivity
+        <StageActivityRail
+          stageKey="specs-coverage"
           sessionSources={[
             {
               label: 'Pass 1 · Authoring',
@@ -101,7 +102,8 @@ describe('StageActivity multi-session chronology', () => {
   it('keeps old raw-chunk separators readable without rendering them', async () => {
     await act(async () => {
       root.render(
-        <StageActivity
+        <StageActivityRail
+          stageKey="specs-coverage"
           sessionSources={[
             {
               label: 'Pass 1 · Authoring',
