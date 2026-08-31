@@ -17,7 +17,8 @@ import type { StageBandData } from './StageFacts'
 // than a fetch, because it keeps changing while the stage is open.
 //
 // Every field stays optional: a source that hasn't resolved yet, or doesn't
-// exist for this flight, drops its tile rather than rendering a zero.
+// exist for this flight, leaves its frontend-owned tile as a skeleton rather
+// than rendering a zero or changing the stage's shape.
 //
 // `pending` is what tells the pane which of those two it is. A stage settles by
 // PRODUCING its evidence, but the pane still has to READ it — and these reads are
@@ -158,7 +159,8 @@ export function useStageBandData(
     portify: livePortify ?? null,
     config,
     docsListing,
-    // A zero total means "no docs", which drops the tile rather than showing 0.
+    // A zero total means "no docs". The frontend keeps the Source docs slot but
+    // leaves it unfilled rather than presenting zero as a measured result.
     docBytes: docSizes && docSizes.source > 0 ? docSizes.source : null,
     summaryBytes: docSizes && docSizes.summary > 0 ? docSizes.summary : null,
   }

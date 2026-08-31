@@ -188,6 +188,40 @@ describe('TestPresentation', () => {
     expect(codeBlock?.classList.contains('overflow-y-hidden')).toBe(false)
   })
 
+  it('shows changed executable steps in English and calls out changed source with no English step', async () => {
+    const dirty: ExtractedTest = {
+      ...TEST,
+      bodySource: "{\n  await page.goto('/checkout')\n  // expect(order).toBeDefined()\n}",
+      readable: {
+        ...TEST.readable,
+        story: {
+          steps: [TEST.readable.story!.steps[1]],
+        },
+      },
+    }
+    act(() => root.render(
+      <TestPresentation
+        test={dirty}
+        sourceFile="/repo/e2e/checkout.spec.ts"
+        changedLines={new Set([2, 3])}
+      />,
+    ))
+
+    const changed = container.querySelector<HTMLElement>('[data-testid="readable-story-item-open-checkout"]')
+    expect(changed?.dataset.changedSource).toBe('true')
+    expect(container.querySelector('[data-testid="readable-modified-open-checkout"]')?.textContent).toBe('MODIFIED')
+    const unmapped = container.querySelector('[data-testid="readable-unmapped-change"]')
+    expect(unmapped?.textContent).toContain('L12')
+    expect(unmapped?.textContent).toContain('a check being commented out')
+
+    await act(async () => {
+      ;(Array.from(unmapped?.querySelectorAll('button') ?? [])[0] as HTMLButtonElement).click()
+      await Promise.resolve()
+    })
+    expect(container.querySelector('[data-testid="test-presentation-code"]')).not.toBeNull()
+    expect(container.querySelectorAll('[data-changed-line="true"]')).toHaveLength(2)
+  })
+
   it('reveals a helper snippet in Code when its English node is selected', async () => {
     act(() => root.render(<TestPresentation test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" />))
 

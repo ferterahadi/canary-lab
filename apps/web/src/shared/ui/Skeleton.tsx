@@ -7,15 +7,13 @@ import { PanelCard } from './PanelCard'
 // lands in the slot its placeholder held instead of pushing the pane around
 // when the stage finishes.
 //
-// R86 — the placeholder's FILL is what says why the slot is empty, because the
-// shape alone said the same thing in four different situations:
-//   live   filled bar, sweeping   a value is being produced right now
-//   idle   hollow dashed track    the slot is held open; nothing comes until you act
-//   failed struck danger track    the value will never land here
-//   unavailable muted outline     the step settled without recording this value
-// The fill (not the animation) carries this, deliberately: the headless preview
-// forces reduced-motion, so a viewer with no animation must still be able to
-// tell a working stage from a parked one from a broken one.
+// R86 — lifecycle changes the placeholder's treatment, never its colour:
+//   live        filled bar, sweeping   a value is being produced right now
+//   idle        hollow track           the slot is held open until the user acts
+//   failed      struck hollow track    the value will not land until a retry
+//   unavailable hollow track           the step settled without recording it
+// The surrounding stage status and copy carry the reason a value is missing;
+// every placeholder uses one neutral colour so panes stay visually consistent.
 
 /** Why a card is showing placeholders: `live` (a stage is working on it),
  *  `idle` (pending or paused — nothing is coming until the user acts),
@@ -32,22 +30,26 @@ export function awaitingFor(status: string, live: boolean): AwaitingState {
   return status === 'failed' ? 'failed' : 'idle'
 }
 
-/** The fill per state. `live` is the only filled bar — the sweep class adds the
- *  motion on top of it. `idle` and `failed` are the same held-open outline in
- *  different hues, which is the point: the slot is identical, only the reason it
- *  is empty differs. `failed` takes its strike-through from `.cl-skeleton-void`,
- *  so it sets no background here.
+const SKELETON_COLOR = 'var(--border-strong)'
+
+const SKELETON_OUTLINE: CSSProperties = {
+  borderColor: SKELETON_COLOR,
+  borderStyle: 'solid',
+  borderWidth: 1,
+  boxSizing: 'border-box',
+}
+
+/** The treatment per state. `live` is the only filled bar — the sweep class adds
+ *  motion on top of it. Every other state uses the same neutral outline; `failed`
+ *  takes its strike-through from `.cl-skeleton-void` and sets no background here.
  *
  *  The outline is SOLID, not dashed: a bar is 7–9px tall, and a dashed border at
  *  that size reads as a dotted texture — the pill stops looking like a slot. */
-const BAR_FILL: Record<AwaitingState, CSSProperties> = {
-  live: { background: 'var(--border-strong)' },
-  idle: { border: '1px solid var(--border-strong)', boxSizing: 'border-box' },
-  failed: {
-    border: '1px solid color-mix(in srgb, var(--danger) 45%, transparent)',
-    boxSizing: 'border-box',
-  },
-  unavailable: { border: '1px solid var(--border-default)', boxSizing: 'border-box' },
+const BAR_STYLE: Record<AwaitingState, CSSProperties> = {
+  live: { background: SKELETON_COLOR },
+  idle: SKELETON_OUTLINE,
+  failed: SKELETON_OUTLINE,
+  unavailable: SKELETON_OUTLINE,
 }
 
 const BAR_CLASS: Record<AwaitingState, string> = {
@@ -55,13 +57,6 @@ const BAR_CLASS: Record<AwaitingState, string> = {
   idle: '',
   failed: ' cl-skeleton-void',
   unavailable: '',
-}
-
-const BEAD_BORDER: Record<AwaitingState, string> = {
-  live: 'var(--border-strong)',
-  idle: 'var(--border-strong)',
-  failed: 'var(--danger)',
-  unavailable: 'var(--border-default)',
 }
 
 /** One placeholder bar. Widths are given per site rather than randomized —
@@ -79,7 +74,7 @@ export function SkeletonBar({ awaiting, width = '62%', height = 10, className = 
       data-testid="skeleton-bar"
       data-awaiting={awaiting}
       className={`block rounded-full${BAR_CLASS[awaiting]}${className ? ` ${className}` : ''}`}
-      style={{ width, height, ...BAR_FILL[awaiting] }}
+      style={{ width, height, ...BAR_STYLE[awaiting] }}
     />
   )
 }
@@ -108,9 +103,7 @@ export function SkeletonLines({ awaiting, rows = 2, height = 9 }: {
  *  hero, whose three blocks each sit at a different left edge — must reuse this
  *  bead rather than hand-roll a second circle that drifts from it.
  *
- *  The bead tracks the same four states as the bars: a failed row's indicator
- *  is the one dot the user will look for when scanning which rows a retry still
- *  owes. */
+ *  The bead carries the bar's same neutral colour in every lifecycle state. */
 export function SkeletonBead({ awaiting, size = 9, className = '' }: {
   awaiting: AwaitingState
   /** Match the dot the real row carries — RunRow's is 0.55rem, a failure row's 6px. */
@@ -121,11 +114,12 @@ export function SkeletonBead({ awaiting, size = 9, className = '' }: {
     <span
       aria-hidden
       data-testid="skeleton-bead"
+      data-awaiting={awaiting}
       className={`shrink-0 rounded-full border${className ? ` ${className}` : ''}`}
       style={{
         height: size,
         width: size,
-        borderColor: BEAD_BORDER[awaiting],
+        borderColor: SKELETON_COLOR,
       }}
     />
   )

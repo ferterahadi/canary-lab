@@ -46,6 +46,8 @@ const mocks = vi.hoisted(() => ({
   taskById: vi.fn(),
   taskForRun: vi.fn(),
   evaluationTasks: vi.fn(() => []),
+  evaluationLogs: vi.fn((): Record<string, string> => ({})),
+  watchEvaluationTask: vi.fn(),
 }))
 
 vi.mock('@/shared/api/client', () => ({
@@ -91,24 +93,38 @@ vi.mock('@/shared/api/client', () => ({
 // pre/post around the agent's slot; expose them so the flight tests can assert
 // they ride the same block instead of standalone log panes.
 vi.mock('@/shared/ui/AgentSessionView', () => ({
-  AgentSessionView: ({ source, systemRows }: { source?: { kind: string; stage?: string }; systemRows?: { pre: string[]; post: string[] } }) => (
-    <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage}>
-      {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}
-      {systemRows?.post.map((l, i) => <div key={`post-${i}`} data-testid="system-post">{l}</div>)}
-    </div>
-  ),
+  AgentSessionView: ({ source, sessionSources, systemRows }: {
+    source?: { kind: string; stage?: string }
+    sessionSources?: Array<{ source: { kind: string; stage?: string; live?: boolean } }>
+    systemRows?: { pre: string[]; post: string[] }
+  }) => {
+    const displayed = sessionSources?.find((session) => session.source.live)?.source
+      ?? sessionSources?.at(-1)?.source
+      ?? source
+    return (
+      <div data-testid="agent-session-view" data-kind={displayed?.kind} data-stage={displayed?.stage}>
+        {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}
+        {systemRows?.post.map((l, i) => <div key={`post-${i}`} data-testid="system-post">{l}</div>)}
+      </div>
+    )
+  },
 }))
 
 // The export stage reads the download action + task lookups from the export
 // context; the provider needs live sockets, so stub the hook.
 vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
+  useEvaluationExportLog: (taskId: string | null) => ({
+    log: taskId ? mocks.evaluationLogs()[taskId] ?? '' : '',
+    watchTask: mocks.watchEvaluationTask,
+  }),
+  useEvaluationExportLogs: () => mocks.evaluationLogs(),
   useEvaluationExports: () => ({
     tasks: mocks.evaluationTasks(),
     downloadTask: mocks.downloadTask,
     taskById: mocks.taskById,
     taskForRun: mocks.taskForRun,
     logsByTaskId: {},
-    watchTask: vi.fn(),
+    watchTask: mocks.watchEvaluationTask,
   }),
 }))
 
@@ -205,6 +221,8 @@ beforeEach(() => {
   })
   mocks.taskById.mockReturnValue(null)
   mocks.taskForRun.mockReturnValue(null)
+  mocks.evaluationTasks.mockReturnValue([])
+  mocks.evaluationLogs.mockReturnValue({})
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -616,6 +634,19 @@ describe('trailer model (R14–R18)', () => {
   })
 
   it('R29/R66: the export stage rides the SAME rail — its export task as the agent source', async () => {
+    const task = {
+      taskId: 'task-7',
+      runId: 'run-9',
+      feature: 'checkout',
+      mode: 'localized' as const,
+      status: 'running' as const,
+      downloadReady: false,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      sessionRef: { agent: 'claude' as const, sessionId: 'session-7' },
+    }
+    mocks.evaluationTasks.mockReturnValue([task])
+    mocks.taskById.mockImplementation((taskId) => taskId === task.taskId ? task : null)
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'running',
       currentStage: 'evaluation-export',
@@ -631,6 +662,57 @@ describe('trailer model (R14–R18)', () => {
     // (kind:'evaluation'), identical framing to every other stage.
     expect(container.querySelector('[data-testid="evaluation-task-panel"]')).toBeNull()
     expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-kind')).toBe('evaluation')
+  })
+
+  it('shows the live export log before a localized rewrite has an agent session', async () => {
+    const oldTask = {
+      taskId: 'task-old',
+      runId: 'run-9',
+      feature: 'checkout',
+      mode: 'raw' as const,
+      status: 'completed' as const,
+      downloadReady: true,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:01:00Z',
+    }
+    const liveTask = {
+      taskId: 'task-live',
+      runId: 'run-9',
+      feature: 'checkout',
+      mode: 'localized' as const,
+      status: 'running' as const,
+      downloadReady: false,
+      createdAt: '2026-01-01T00:02:00Z',
+      updatedAt: '2026-01-01T00:02:00Z',
+    }
+    mocks.evaluationTasks.mockReturnValue([liveTask, oldTask])
+    mocks.taskById.mockImplementation((taskId) => (
+      taskId === liveTask.taskId ? liveTask : taskId === oldTask.taskId ? oldTask : null
+    ))
+    mocks.evaluationLogs.mockReturnValue({
+      [liveTask.taskId]: '[evaluation] generating localized wording\n[agent:claude] starting localized rewrite (model: haiku)\n',
+    })
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      links: { runId: 'run-9', evaluationTaskId: oldTask.taskId },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'evaluation-export' ? { evidence: { taskId: oldTask.taskId } } : {}),
+      })),
+    }))
+
+    await render('fl_1', { stage: 'evaluation-export', onSelectStage: vi.fn() })
+    await act(async () => {})
+
+    const activity = container.querySelector('[data-testid="stage-activity"]')
+    expect(activity?.textContent).toContain('[evaluation] generating localized wording')
+    expect(activity?.textContent).toContain('[agent:claude] starting localized rewrite (model: haiku)')
+    // No sessionRef yet: progress comes from the export log rather than asking
+    // the agent-session endpoint for a session that cannot exist yet.
+    expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-kind')).toBeNull()
+    expect(mocks.watchEvaluationTask).toHaveBeenCalledWith(liveTask.taskId)
   })
 })
 

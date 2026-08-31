@@ -2,6 +2,7 @@ import ts from 'typescript'
 import { formatSourceSnippetForDisplay } from '../../../../../shared/code-display-format'
 import type { ReadableFidelity } from '../../../../../shared/readable-tests/types'
 import {
+  exactPropertyAccessPath,
   quoteReadableText,
   renderExpression,
   renderNamedCallResult,
@@ -119,6 +120,11 @@ function parseExpectation(call: ts.CallExpression): Expectation | undefined {
 }
 
 function renderCallAwareExpression(expression: ts.Expression, sourceFile: ts.SourceFile): RenderedExpression {
+  const path = exactPropertyAccessPath(expression)
+  // Property boundaries are part of the assertion's evidence. Keeping the
+  // authored path prevents one matcher from saying `payload.contacts` while
+  // another turns the same value into the ambiguous phrase "payload contacts".
+  if (path) return { text: path, fidelity: 'exact' }
   const rendered = renderExpression(expression, sourceFile)
   if (rendered.fidelity !== 'unresolved') return rendered
   let unwrapped = expression

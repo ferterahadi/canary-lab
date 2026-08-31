@@ -112,7 +112,7 @@ export function CheckpointControls({
 
   // A genuine question on an externally driven flight still belongs to the MCP
   // client that started it. The external-work hand-off itself never reaches
-  // this component: running work lives in StageActivity, not in a decision card.
+  // this component: running work lives in the stage Activity rail, not in a decision card.
   const readOnly = isExternallyDriven(flight)
   const lockedTitle = readOnly
     ? externalMutationTooltip('flight', 'answer this checkpoint')

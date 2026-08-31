@@ -15,6 +15,16 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 2.2.1 — 2026-08-31
+
+- **[General]** **Flight stages keep one stable layout.** Every stage preserves the same At a Glance tiles and evidence panels while pending, running, failed, or complete, using consistent placeholders whenever evidence is unavailable.
+- **[Test Runner]** **Run history stays honest and predictable.** Test Run always shows runs performed, successes, and average duration, while missing measurements remain placeholders instead of zeroes or repair-cycle counts.
+- **[Export evaluation]** **Reports keep their full evidence view.** The Report stage always shows its four verification tiles and streams export work into the same Activity rail used by every other stage.
+- **[Test Generation]** **Requirements work has one history.** Flight keeps document collection and requirement summarization in one ordered Activity timeline, including older Flights that recorded them separately.
+- **[General]** **Changed tests stay visible in plain English.** Modified executable steps are marked directly in the readable view, with an exact-diff prompt when changed source has no English step.
+
+---
+
 ## 2.2.0 — 2026-08-30
 
 > Run `npx canary-lab upgrade`, then restart connected agent apps, to refresh Canary Lab skills.

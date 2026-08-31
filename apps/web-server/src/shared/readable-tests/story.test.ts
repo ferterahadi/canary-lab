@@ -56,7 +56,7 @@ describe('readable test story', () => {
       'Read WhatsApp outbound using conn and ids.messageId, saving the result as wa',
     ])
     expect(textsFor(translated, 'check')).toEqual([
-      'Check that response status is less than 300',
+      'Check that res.status is less than 300',
       'Check that call row status, if available equals “COMPLETED”',
       'Check that WhatsApp outbound is null',
     ])
@@ -64,7 +64,7 @@ describe('readable test story', () => {
       'setup: Skip this scenario — “sync SQL not configured”',
       'setup: Create variable ids using “fallback-A”',
       'action: Send call using ids and an object with call status override set to “COMPLETED”, saving the result as res',
-      'check: Check that response status is less than 300',
+      'check: Check that res.status is less than 300',
       'setup: Using sync SQL connection as conn',
       'action: Until the result status equals “COMPLETED” when available, saving the matching result as callRow',
       'action: Read call outbound using conn and ids.messageId',
@@ -79,7 +79,7 @@ describe('readable test story', () => {
     ))).toEqual(expect.arrayContaining([
       'ids',
       'res',
-      'response',
+      'res.status',
       'connection',
       'call row',
       'WhatsApp outbound',
@@ -254,7 +254,7 @@ describe('readable test story', () => {
       'Check that msgs has length 2',
       'Check that for every item in msgs, item pattern equals “TRIGGER_EMAIL_BATCH”',
       'Check that for every item in msgs, item data email info transaction identifier equals txId',
-      'Check that payload redirect uris is a list',
+      'Check that payload.redirect_uris is a list',
     ])
   })
 
@@ -442,7 +442,7 @@ describe('readable test story', () => {
     const highlighted = new Set(items.flatMap((item) => item.spans.flatMap((span) => span.kind ?? [])))
     expect(highlighted).toEqual(new Set(['verb', 'variable', 'keyword', 'operator', 'number', 'literal']))
     expect(items.find((item) => item.text.includes('at least'))?.spans).toEqual(expect.arrayContaining([
-      { text: 'response', kind: 'variable' },
+      { text: 'response.status', kind: 'variable' },
       { text: 'is at least', kind: 'operator' },
       { text: '200', kind: 'number' },
     ]))
@@ -452,6 +452,32 @@ describe('readable test story', () => {
     ]))
     expect(items.find((item) => item.text.includes('10000'))?.spans)
       .toContainEqual({ text: '10000 milliseconds', kind: 'number' })
+  })
+
+  it('keeps a nested collection path exact and highlights it as one variable', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  expect(Array.isArray(res.data.data)).toBe(true)
+}`,
+    })
+
+    const check = storyItems(translated).find((item) => item.role === 'check')
+    expect(check?.text).toBe('Check that res.data.data is a list')
+    expect(check?.spans).toContainEqual({ text: 'res.data.data', kind: 'variable' })
+  })
+
+  it('keeps a direct property assertion path exact and highlights it as one variable', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  expect(payload.contacts).toContain('ops@example.com')
+}`,
+    })
+
+    const check = storyItems(translated).find((item) => item.role === 'check')
+    expect(check?.text).toBe('Check that payload.contacts contains “ops@example.com”')
+    expect(check?.spans).toContainEqual({ text: 'payload.contacts', kind: 'variable' })
   })
 
   it('keeps mapping, callback, loop, and retry execution nested in the concise story', () => {
@@ -574,13 +600,13 @@ describe('readable test story', () => {
       'Use context',
       'Send only then',
       'order is submitted',
-      'Check that line entity identifier equals identifiers entity identifier',
+      'Check that line.entityId equals ids.entityId',
       'Check that foo equals bar',
       'Check that result passes the “unknown matcher” check',
     ]))
-    const comparison = storyItems(translated).find((step) => step.text.includes('line entity'))
+    const comparison = storyItems(translated).find((step) => step.text.includes('line.entityId'))
     expect(comparison?.spans.filter((span) => span.kind === 'variable').map((span) => span.text))
-      .toEqual(['line', 'identifiers'])
+      .toEqual(['line.entityId', 'ids.entityId'])
     expect(storyItems(translated).find((step) => step.text === 'order is submitted')?.spans[0])
       .toEqual({ text: 'order', kind: 'variable' })
     expect(storyItems(translated).some((step) => step.text.includes('UnknownMatcher'))).toBe(false)

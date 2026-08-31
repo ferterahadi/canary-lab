@@ -12,6 +12,7 @@ import { defaultSpawnAgent, featureDirFor, stageFeedback, stageModels, type Flig
 import { agentSpawnJob } from './stage-jobs'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { agentProgressSink } from './agent-progress'
+import { recordStageAgentSession } from './stage-agent-sessions'
 import { CHECKPOINT_OPTIONS } from '../types'
 
 // Populate features/<f>/docs/ — the prd-source checkpoint is a two-path FORK:
@@ -369,7 +370,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       })
     }
 
-    // Trailing "…" is load-bearing: StageActivity splits the band after the
+    // Trailing "…" is load-bearing: StageActivityRail splits the band after the
     // last tagged line ending in an ellipsis when no agent chunks mirrored in.
     ctx.appendLog(`[docs] agent attempt (${MODE_LABEL[mode]}) — ${mode === 'collect-repo-docs' ? 'reading the repos' : 'reading the git diff'} guided by the intent…\n`)
     const { text } = await spawnAgent({
@@ -385,6 +386,18 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       signal: ctx.signal,
       agent: m.opts.agent,
       models: stageModels(m, 'docs'),
+      onAgentSession: (session) => {
+        recordStageAgentSession({
+          ctx,
+          stage: 'docs',
+          cwd: deps.projectRoot,
+          session,
+          describe: (sequence) => ({
+            label: `Pass ${sequence} · Doc collection`,
+            pass: sequence,
+          }),
+        })
+      },
     })
     return settleCollected(ctx, mode, plan, text)
   }

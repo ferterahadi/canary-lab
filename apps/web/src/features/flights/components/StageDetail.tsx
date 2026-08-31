@@ -16,6 +16,7 @@ import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type E
 import { ACTIVITY_STAGE, type ExternalWorkTrace, type FeatureActivity, type StageExternalHistory } from '../state/feature-activity'
 import { Chip } from '@/shared/ui/StatusChip'
 import { flightRowModelChips } from '@shared/flights/stage-models'
+import { flightStageLabel } from '@shared/flights/stage-labels'
 import { ModelPlanPopover } from './ModelPlanPopover'
 import { SkeletonPanel, awaitingFor } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
@@ -28,10 +29,10 @@ import {
   EvaluationDeliverablePanel,
   OverlayPanel,
 } from './StageEvidencePanels'
-import { SpecsPassTimeline, StageActivity, truncate } from './StageActivity'
+import { SpecsPassTimeline, StageActivityRail, truncate } from './StageActivity'
 import { presentedStageStatus } from './stage-metrics'
 
-export { AgentBlock, SpecsPassTimeline, StageActivity, specsPhaseSub, truncate } from './StageActivity'
+export { AgentBlock, SpecsPassTimeline, StageActivityRail, specsPhaseSub, truncate } from './StageActivity'
 
 // One uniform stage template (R20). Every stage renders the SAME skeleton —
 // nothing stage-shaped leaks into the layout:
@@ -138,6 +139,79 @@ function stageExternalHistory(
   return { traces, ...(current ? { current } : {}) }
 }
 
+/** The folded Requirements row owns two sequential agent stages. New records
+ *  carry immutable session refs; the legacy fallback follows the two stable
+ *  sidecars so Flights recorded before that provenance was added still replay
+ *  both transcripts. */
+function requirementSessionSources({
+  flightId,
+  docs,
+  summary,
+  externalOwnsCurrent,
+  allowLegacy,
+}: {
+  flightId: string
+  docs: FlightStage
+  summary: FlightStage | null
+  externalOwnsCurrent: boolean
+  allowLegacy: boolean
+}): AgentSessionSegmentSource[] {
+  if (docs.key !== 'docs' || summary?.key !== 'prd-summary') return []
+
+  const recorded = (owner: FlightStage): AgentSessionSegmentSource[] =>
+    (owner.agentSessions ?? []).map((session, index, sessions) => ({
+      label: session.label,
+      startedAt: session.startedAt,
+      source: {
+        kind: 'flight',
+        flightId,
+        stage: session.sidecar,
+        live: owner.status === 'running'
+          && !externalOwnsCurrent
+          && index === sessions.length - 1,
+      },
+    }))
+
+  const docsRecorded = recorded(docs)
+  const summaryRecorded = recorded(summary)
+  const docsAgentLine = /^\[docs(?:@([^\]]+))?\] agent attempt \([^)]+\) — .*…$/m.exec(docs.log ?? '')
+  const docsSources = docsRecorded.length > 0
+    ? docsRecorded
+    : allowLegacy && docsAgentLine
+      ? [{
+          label: `Pass 1 · ${flightStageLabel('docs')}`,
+          startedAt: docsAgentLine[1] ?? docs.startedAt,
+          source: {
+            kind: 'flight' as const,
+            flightId,
+            stage: 'docs',
+            live: docs.status === 'running' && !externalOwnsCurrent,
+          },
+        }]
+      : []
+  const summaryEvidence = asRecord(summary.evidence)
+  const legacySummaryRan = allowLegacy
+    && (summary.status === 'running'
+      || summary.status === 'failed'
+      || (summary.status === 'done' && summaryEvidence?.reused !== true))
+  const pass = Math.max(1, docs.agentSessions?.length ?? 0)
+  const summarySources = summaryRecorded.length > 0
+    ? summaryRecorded
+    : legacySummaryRan
+      ? [{
+          label: `Pass ${pass} · ${flightStageLabel('prd-summary')}`,
+          startedAt: summary.startedAt,
+          source: {
+            kind: 'flight' as const,
+            flightId,
+            stage: 'prd-summary',
+            live: summary.status === 'running' && !externalOwnsCurrent,
+          },
+        }]
+      : []
+  return [...docsSources, ...summarySources]
+}
+
 export function StageDetail({
   flightId,
   flight,
@@ -229,19 +303,30 @@ export function StageDetail({
   const dataStage: FlightStage = stage.key === 'portify' && livePortifyId
     ? { ...stage, evidence: { ...(stage.evidence ?? {}), workflowId: livePortifyId } }
     : stage
-  // The Evaluation Report's deliverable: one resolved export task feeds both the
-  // facts (run · report mode · archive name) and the activity rail below, so the
-  // card reads the same on a conducted flight and a derived one.
-  const evalTaskId = evaluationTaskId(stage, flight)
-    ?? (externalTrace?.kind === 'exporting' ? externalTrace.resourceId : undefined)
-  const { taskById } = useEvaluationExports()
+  // The Evaluation Report has two task roles. Its recorded task remains the
+  // pinned deliverable (run · report mode · archive name), while Activity may
+  // follow a newer live export for the same suite.
+  const recordedEvalTaskId = evaluationTaskId(stage, flight)
+  const externalEvalTaskId = externalTrace?.kind === 'exporting' ? externalTrace.resourceId : undefined
+  const deliverableEvalTaskId = recordedEvalTaskId ?? externalEvalTaskId
+  const { tasks: evaluationTasks, taskById } = useEvaluationExports()
+  // A standalone export can run after this stage already has a completed,
+  // pinned deliverable. Keep that completed task in the facts/cards, but let
+  // Activity follow the newest live task so "building…" can never sit above a
+  // replay of an older raw report (or the false "No activity recorded").
+  const liveEvalTask = stage.key === 'evaluation-export'
+    ? evaluationTasks.find((task) => task.feature === flight.feature && task.status === 'running') ?? null
+    : null
+  const activityEvalTask = (externalEvalTaskId ? taskById(externalEvalTaskId) : null)
+    ?? liveEvalTask
+    ?? (deliverableEvalTaskId ? taskById(deliverableEvalTaskId) : null)
   // Sources outside the flight record (ledger, boot run, portify workflow,
   // config, envsets, docs) — resolved for the VISIBLE stage only.
   const band = useStageBandData(
     flight,
     dataStage,
     companion,
-    evalTaskId ? taskById(evalTaskId) : null,
+    deliverableEvalTaskId ? taskById(deliverableEvalTaskId) : null,
   )
   // The same hold, for cards the band's own sources feed. A first read outranks
   // the stage state because a value really is on its way; once it resolves empty,
@@ -255,7 +340,6 @@ export function StageDetail({
   const runId = runMerged
     ? (activeRunId ?? ((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
     : undefined
-  const showRunPanel = runMerged && Boolean(runId || awaiting)
   const pausedKind = pausedResumeKind(stage, flight, companion)
   const pausedNotice = pausedKind ? <StagePausedPanel kind={pausedKind} /> : null
   // The merged Run stage renders as the Test Run hero (TestRunPanel) — it owns
@@ -349,15 +433,17 @@ export function StageDetail({
     || band.portify?.status === 'planning'
     || band.portify?.status === 'editing'
     || band.portify?.status === 'verifying'
+  const evaluationLive = activityEvalTask?.status === 'running'
   const localActivitySource: AgentSessionSource | undefined =
-    evalTaskId ? { kind: 'evaluation', taskId: evalTaskId, live }
+    activityEvalTask?.sessionRef
+      ? { kind: 'evaluation', taskId: activityEvalTask.taskId, live: evaluationLive }
     : portifyId ? { kind: 'portify', workflowId: portifyId, live }
     : agentDir ? { kind: 'flight', flightId, stage: agentDir, live }
     : undefined
   // External producers have no Canary-owned current transcript. Historical
   // internal sessions stay on the rail, but none of them may present as live.
   const externalOwnsCurrent = externalTrace !== undefined || liveExternalFallback !== undefined
-  const sessionSources: AgentSessionSegmentSource[] = (stage.agentSessions ?? []).map((session, index, sessions) => ({
+  const recordedSessionSources: AgentSessionSegmentSource[] = (stage.agentSessions ?? []).map((session, index, sessions) => ({
     label: session.label,
     startedAt: session.startedAt,
     source: {
@@ -371,6 +457,20 @@ export function StageDetail({
         && loopProgress?.pass === session.pass,
     },
   }))
+  const foldedRequirementSessions = requirementSessionSources({
+    flightId,
+    docs: stage,
+    summary: companion,
+    externalOwnsCurrent,
+    // The legacy fallback guesses from stage evidence because old manifests
+    // did not persist session refs. Only internal Flights can safely make that
+    // inference; a settled external Flight no longer satisfies
+    // isExternallyDriven(), but still has no Canary-owned transcript.
+    allowLegacy: flight.opts.stageProducer !== 'external',
+  })
+  const sessionSources = foldedRequirementSessions.length > 0
+    ? foldedRequirementSessions
+    : recordedSessionSources
   // Suppress the legacy local source entirely so its generic live tail cannot
   // add a second spinner under the external-session row or replay an older
   // internal session as current.
@@ -501,7 +601,7 @@ export function StageDetail({
       {/* The recovery card always follows At a glance. Test Run owns a separate
           facts band inside TestRunPanel, so that panel receives the same card in
           the same slot instead of rendering it above the band. */}
-      {!showRunPanel && pausedNotice}
+      {!runMerged && pausedNotice}
 
       {/* Repo scan (R72c): one intent card, then one repo card per inspected
           repo carrying its own location + env files. */}
@@ -602,11 +702,11 @@ export function StageDetail({
           adapter's `interrupt`), so the run is often still going. Keeping it
           mounted keeps its verdict, its score and its failing tests on screen,
           and the poll alive, while the flight waits for Continue. */}
-      {showRunPanel && (
+      {runMerged && (
         <TestRunPanel
           feature={flight.feature}
           runId={runId}
-          awaiting={row.status === 'done' && runId ? undefined : awaiting}
+          awaiting={awaiting}
           live={Boolean(runLive) || live}
           evidence={runEvidence}
           onOpenRun={drill.onOpenRun}
@@ -667,7 +767,7 @@ export function StageDetail({
         return (
           <>
             <EvaluationDeliverablePanel task={band.evalTask ?? null} awaiting={awaiting} probed={probed} />
-            <AllReportsPanel feature={flight.feature} pinnedTaskId={evalTaskId} awaiting={awaiting} probed={probed} />
+            <AllReportsPanel feature={flight.feature} pinnedTaskId={deliverableEvalTaskId} awaiting={awaiting} probed={probed} />
           </>
         )
       })()}
@@ -700,10 +800,12 @@ export function StageDetail({
           on the run detail drill-through), so R80 cut its near-empty band; the
           hero carries a collapsed "Repairs" disclosure instead. */}
       {!runMerged && (
-        <StageActivity
+        <StageActivityRail
+          stageKey={stage.key}
+          evaluationTaskId={stage.key === 'evaluation-export' ? activityEvalTask?.taskId ?? null : undefined}
           source={activitySource}
           sessionSources={sessionSources}
-          live={live || externalSessions.some((session) => session.status === 'running')}
+          live={live || evaluationLive || externalSessions.some((session) => session.status === 'running')}
           settled={settled}
           log={combinedLog}
           externalSessions={externalSessions}

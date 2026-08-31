@@ -83,7 +83,7 @@ describe('readable test story flow edge cases', () => {
       'Create variable request using value',
       'Return request',
       'Send item using item',
-      'Check that item ready equals true',
+      'Check that item.ready equals true',
       'Use context using ctx',
       'Stop this loop',
       'Wrap',

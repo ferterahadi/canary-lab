@@ -30,9 +30,6 @@ export interface RunHistoryStats {
   /** Mean wall-clock over the runs that finished; null when none have. */
   avgDurationMs: number | null
   longestDurationMs: number | null
-  /** Repair cycles summed across the feature's runs. */
-  healCycles: number
-  runsWithRepairs: number
 }
 
 /** Aggregate a feature's run history. Null for a feature with no runs at all —
@@ -54,8 +51,6 @@ export function runHistoryStats(runs: RunIndexEntry[]): RunHistoryStats | null {
       ? Math.round(durations.reduce((sum, ms) => sum + ms, 0) / durations.length)
       : null,
     longestDurationMs: durations.length > 0 ? Math.max(...durations) : null,
-    healCycles: runs.reduce((sum, r) => sum + (r.healCycles ?? 0), 0),
-    runsWithRepairs: runs.filter((r) => (r.healCycles ?? 0) > 0).length,
   }
 }
 
@@ -278,25 +273,19 @@ export interface StrengthCounts extends Record<TestStrength, number> {
   ungraded: number
 }
 
-/** The specs that can carry proof at all — the ones annotated to a requirement —
- *  split by what the joined run did with them. An unmapped spec is excluded
- *  entirely: it may well pass, but it proves nothing about any requirement, so
- *  counting it would inflate the denominator with tests that cannot move the
- *  proven axis.
- *
- *  This is NOT the run's pass/fail count (that is the Test Run stage's, and
- *  reprinting it here is the duplication R80 removed). It is the same population
- *  the coverage stage reports as "Specs authored", re-read through the run — so
- *  the two stages describe one set of specs, once claimed and once proven. */
-export interface ProofSpecs {
-  mapped: number
+/** Every test in the suite, split by what the joined run did with it. This is
+ *  deliberately independent of requirement mapping: a Report can still say
+ *  which tests passed when the suite has no requirement documents. Requirement
+ *  proof remains a separate, selectively rendered axis. */
+export interface TestOutcomes {
+  total: number
   passed: number
   /** Of `passed`, how many needed a Playwright retry — flaky within the run.
    *  Counted so the band never reports a retried pass as a clean one. */
   passedOnRetry: number
   failed: number
-  /** Mapped specs the joined run recorded no outcome for — new, renamed, or
-   *  never reached. Its own bucket: a spec that never ran did not fail. */
+  /** Tests the joined run recorded no outcome for — new, renamed, or never
+   *  reached. Its own bucket: a test that never ran did not fail. */
   neverRan: number
 }
 
@@ -305,7 +294,7 @@ export interface LedgerEvidence {
    *  the feature has no recorded run, so there is no proven axis to report. */
   proven: number | null
   total: number
-  /** The run `proven` (and every `lastRun` behind `specs`) was joined against.
+  /** The run `proven` (and every test `lastRun`) was joined against.
    *  Carried through so a caller can check it is the run it is talking about —
    *  the engine joins the feature's LATEST run, which stops being this report's
    *  run the moment the suite runs again. Null when no run was joined. */
@@ -316,9 +305,8 @@ export interface LedgerEvidence {
    *  `proven` uses, so its two gates read as one fraction each and can be
    *  compared without a unit change in between. */
   covered: number
-  testCount: number
   strength: StrengthCounts
-  specs: ProofSpecs
+  outcomes: TestOutcomes
   /** The joined run's summary merged results forward from a prior execution (a
    *  targeted heal rerun), so the outcomes above span several partial runs —
    *  the passes never all happened in one execution. */
@@ -326,39 +314,41 @@ export interface LedgerEvidence {
 }
 
 /** Reshape the coverage ledger into what the Evaluation Report band shows.
- *  Every figure is read off the ledger the engine computed — nothing here is
- *  recalculated, so the band, the ledger page and `get_feature_coverage` cannot
- *  disagree. The two REQUIREMENT gates (covered, proven) report counts on one
+ *  Every figure comes from ledger totals or its per-test run records, so the
+ *  band, the ledger page and `get_feature_coverage` cannot disagree. The two
+ *  REQUIREMENT gates (covered, proven) report counts on one
  *  denominator rather than the ledger's `coveragePct`/`provenPct` pair, which
  *  is why neither percentage is carried: `6/6` beside `0/6` compares at a
  *  glance, where `100%` beside `0/6` made the reader convert one to see the
- *  other. The specs split deliberately uses a DIFFERENT denominator (the mapped
- *  tests) — it counts tests, not requirements — and its sub-line names its
- *  population so the band's `16/16 · 15/15 · 16/16` never reads as arithmetic
- *  gone wrong. */
+ *  other. Test outcomes deliberately use a DIFFERENT denominator (every suite
+ *  test) because run evidence remains useful even when requirement mapping does
+ *  not exist. */
 export function ledgerEvidence(ledger: CoverageLedger | null | undefined): LedgerEvidence | null {
-  if (!ledger || ledger.totals.total === 0) return null
+  if (!ledger) return null
   const strength: StrengthCounts = { strong: 0, solid: 0, basic: 0, shallow: 0, ungraded: 0 }
-  const specs: ProofSpecs = { mapped: 0, passed: 0, passedOnRetry: 0, failed: 0, neverRan: 0 }
+  const outcomes: TestOutcomes = {
+    total: ledger.tests.length,
+    passed: 0,
+    passedOnRetry: 0,
+    failed: 0,
+    neverRan: 0,
+  }
   for (const test of ledger.tests) {
     if (test.strength) strength[test.strength] += 1
     else strength.ungraded += 1
-    if (test.requirements.length === 0) continue
-    specs.mapped += 1
-    if (!test.lastRun) specs.neverRan += 1
+    if (!test.lastRun) outcomes.neverRan += 1
     else if (test.lastRun.passed) {
-      specs.passed += 1
-      if (test.lastRun.retried) specs.passedOnRetry += 1
-    } else specs.failed += 1
+      outcomes.passed += 1
+      if (test.lastRun.retried) outcomes.passedOnRetry += 1
+    } else outcomes.failed += 1
   }
   return {
     proven: ledger.totals.proven ?? null,
     total: ledger.totals.total,
     provenRunId: ledger.provenRunId ?? null,
     covered: ledger.totals.covered,
-    testCount: ledger.tests.length,
     strength,
-    specs,
+    outcomes,
     spansExecutions: ledger.provenSpansExecutions === true,
   }
 }

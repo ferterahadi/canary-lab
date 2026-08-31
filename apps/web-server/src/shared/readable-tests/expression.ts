@@ -27,6 +27,26 @@ export function expressionPath(node: ts.Expression): string | undefined {
   return undefined
 }
 
+/** Keeps member boundaries visible without erasing optional-access semantics. */
+export function exactPropertyAccessPath(node: ts.Expression): string | undefined {
+  let property = node
+  while (
+    ts.isParenthesizedExpression(property)
+    || ts.isAsExpression(property)
+    || ts.isTypeAssertionExpression(property)
+    || ts.isNonNullExpression(property)
+    || ts.isSatisfiesExpression(property)
+  ) property = property.expression
+  if (!ts.isPropertyAccessExpression(property)) return undefined
+
+  let owner: ts.Expression = property
+  while (ts.isPropertyAccessExpression(owner)) {
+    if (owner.questionDotToken) return undefined
+    owner = owner.expression
+  }
+  return expressionPath(property)
+}
+
 // Calls whose result is a fresh value with a stable meaning. Describing the
 // value ("a new unique identifier") is faithful; naming the mechanism is not
 // what a reader needs.
@@ -563,7 +583,13 @@ function renderCall(
     if (inspection && node.arguments.length === 1) {
       const value = renderPart(node.arguments[0], sourceFile, bindings)
       if (value.fidelity !== 'unresolved') {
-        return { text: inspection.replace('{value}', childText(value)), fidelity: 'derived', compound: false }
+        // A nested property path is already the clearest stable name for the
+        // value whose shape is being checked. Humanizing `res.data.data` into
+        // "response data data" destroys the boundaries and reads like a typo.
+        const inspectedValue = path === 'Array.isArray'
+          ? exactPropertyAccessPath(node.arguments[0]) ?? childText(value)
+          : childText(value)
+        return { text: inspection.replace('{value}', inspectedValue), fidelity: 'derived', compound: false }
       }
     }
 

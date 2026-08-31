@@ -112,6 +112,10 @@ function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightMa
       manifest: () => state.m,
       flightDir: path.join(logsDir, 'flights', state.m.flightId),
       setProgress: (progress) => { progressLog.push(progress) },
+      addAgentSession: (session) => {
+        const stage = state.m.stages.find((candidate) => candidate.key === 'docs')
+        setStage('docs', { agentSessions: [...(stage?.agentSessions ?? []), session] })
+      },
       patchFlight: (patch) => {
         state.m = {
           ...state.m,
@@ -385,18 +389,31 @@ describe('docs stage', () => {
     expect(fs.existsSync(path.join(otherDir, 'docs', 'description.md'))).toBe(true)
   })
 
-  it('legacy use-repo-docs choice degrades to the collect-repo-docs agent path', async () => {
-    const spawnAgent: FlightStageDeps['spawnAgent'] = async () => {
+  it('legacy use-repo-docs choice degrades to the collect-repo-docs agent path and records its session', async () => {
+    const spawnAgent: FlightStageDeps['spawnAgent'] = async (opts) => {
       fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', 'checkout-prd.md'), '# Requirements')
+      opts.onAgentSession?.({
+        agent: 'claude',
+        sessionId: 'docs-session',
+        spawnedAt: '2026-08-31T07:11:51.179Z',
+      })
       return { text: 'collected' }
     }
     const adapter = docsStage(deps({ spawnAgent }))
-    const { ctx, setStage } = ctxFor(manifest())
+    const { ctx, current, setStage } = ctxFor(manifest())
     const parked = await adapter.run(ctx)
     if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
     setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'use-repo-docs' })
     expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'agent-repo-docs' } })
+    expect(current().stages.find((stage) => stage.key === 'docs')?.agentSessions).toEqual([{
+      sidecar: 'docs-session-001',
+      label: 'Pass 1 · Doc collection',
+      startedAt: '2026-08-31T07:11:51.179Z',
+      pass: 1,
+    }])
+    const ref = JSON.parse(fs.readFileSync(path.join(ctx.flightDir, 'docs-session-001', 'agent-session.json'), 'utf-8'))
+    expect(ref.sessions.claude.sessionId).toBe('docs-session')
   })
 
   it('userDocs skips a dangling symlink instead of throwing (statSync follows the link)', async () => {

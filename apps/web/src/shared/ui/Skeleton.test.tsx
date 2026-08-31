@@ -43,47 +43,47 @@ describe('Skeleton primitives', () => {
     container.remove()
   })
 
-  it('the FILL says why the slot is empty, so the four states differ with motion off', () => {
+  it('uses one colour while treatment distinguishes the four lifecycle states', () => {
     const bar = () => container.querySelector<HTMLElement>('[data-testid="skeleton-bar"]')!
     // Live: the only FILLED bar — a bar is the promise of a value.
     act(() => root.render(<SkeletonBar awaiting="live" />))
     expect(bar().className).toContain('cl-skeleton')
     expect(bar().style.background).toBe('var(--border-strong)')
-    // Idle: an outline holding the slot open, with nothing inside it. (happy-dom
-    // drops the colour from a border shorthand, so the hue is not assertable
-    // here — the state attribute below is what a caller reads it back by.)
+    // Idle: an outline holding the slot open, with nothing inside it.
     act(() => root.render(<SkeletonBar awaiting="idle" />))
     expect(bar().className).not.toContain('cl-skeleton')
-    expect(bar().style.border).toContain('solid')
+    expect(bar().style.borderColor).toBe('var(--border-strong)')
     expect(bar().style.background).toBe('')
     expect(bar().dataset.awaiting).toBe('idle')
-    // Unavailable: settled evidence was not recorded. It holds the same shape
-    // without the stronger outline that tells an idle user to act.
+    // Unavailable: settled evidence was not recorded. It keeps the same neutral
+    // outline instead of changing colour with lifecycle state.
     act(() => root.render(<SkeletonBar awaiting="unavailable" />))
     expect(bar().className).not.toContain('cl-skeleton')
-    expect(bar().style.border).toContain('solid')
+    expect(bar().style.borderColor).toBe('var(--border-strong)')
     expect(bar().style.background).toBe('')
     expect(bar().dataset.awaiting).toBe('unavailable')
-    // Failed: the same held-open outline, hued danger and struck through — never
-    // a fill that could be mistaken for a value about to land.
+    // Failed: the same neutral outline, struck through — never a fill that could
+    // be mistaken for a value about to land.
     act(() => root.render(<SkeletonBar awaiting="failed" />))
     expect(bar().className).toContain('cl-skeleton-void')
     // The sweep is `live`'s alone — a struck slot is not being worked on.
     expect(bar().className).not.toMatch(/cl-skeleton(?!-)/)
     expect(bar().style.background).toBe('')
-    // Same held-open outline as idle — the class carries the strike and the hue.
-    expect(bar().style.border).toContain('solid')
+    // Same held-open colour as idle — the class carries the strike.
+    expect(bar().style.borderColor).toBe('var(--border-strong)')
     expect(bar().dataset.awaiting).toBe('failed')
   })
 
-  it('the row bead reddens on a failed stage — the dot a retry is scanned by', () => {
+  it('the row bead uses the same neutral colour in every lifecycle state', () => {
     const bead = () => container.querySelector<HTMLElement>('[data-testid="skeleton-row"] span')!
+    act(() => root.render(<SkeletonRows awaiting="live" rows={1} />))
+    expect(bead().style.borderColor).toBe('var(--border-strong)')
     act(() => root.render(<SkeletonRows awaiting="failed" rows={1} />))
-    expect(bead().style.borderColor).toBe('var(--danger)')
+    expect(bead().style.borderColor).toBe('var(--border-strong)')
     act(() => root.render(<SkeletonRows awaiting="idle" rows={1} />))
     expect(bead().style.borderColor).toBe('var(--border-strong)')
     act(() => root.render(<SkeletonRows awaiting="unavailable" rows={1} />))
-    expect(bead().style.borderColor).toBe('var(--border-default)')
+    expect(bead().style.borderColor).toBe('var(--border-strong)')
   })
 
   it('line widths repeat deterministically, so a re-render never reshuffles the card', () => {

@@ -27,6 +27,8 @@ vi.mock('../state/RunsContext', () => ({
 }))
 
 vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
+  useEvaluationExportLog: vi.fn(() => ({ log: '', watchTask: vi.fn() })),
+  useEvaluationExportLogs: vi.fn(() => ({})),
   useEvaluationExports: vi.fn(() => ({
     startExport: vi.fn(),
     taskForRun: vi.fn(() => null),
@@ -308,7 +310,17 @@ describe('run overview', () => {
   it('gates raw and localized evaluation exports through the MCP promo', async () => {
     const { useRun } = await import('../state/RunsContext')
     const { useEvaluationExports } = await import('@/features/evaluation/state/EvaluationExportContext')
-    const startExport = vi.fn()
+    const onOpenEvaluationReport = vi.fn()
+    const startExport = vi.fn(async (_runId: string, mode: 'raw' | 'localized') => ({
+      taskId: `task-${mode}`,
+      runId: 'run-1',
+      feature: 'alpha',
+      mode,
+      status: 'running' as const,
+      createdAt: '2026-01-01T00:01:00.000Z',
+      updatedAt: '2026-01-01T00:01:00.000Z',
+      downloadReady: false,
+    }))
     vi.mocked(useEvaluationExports).mockReturnValue({ startExport, taskForRun: () => null } as unknown as ReturnType<typeof useEvaluationExports>)
     vi.mocked(useRun).mockReturnValue({
       detail: runDetail({ status: 'passed' }),
@@ -320,7 +332,7 @@ describe('run overview', () => {
     gatePromo.mockImplementation((_action, _continueAction) => {})
 
     await act(async () => {
-      root.render(<RunDetailColumn runId="run-1" />)
+      root.render(<RunDetailColumn runId="run-1" onOpenEvaluationReport={onOpenEvaluationReport} />)
     })
 
     await act(async () => {
@@ -336,8 +348,10 @@ describe('run overview', () => {
     await act(async () => {
       const continueAction = gatePromo.mock.calls.at(-1)?.[1] as () => void
       continueAction()
+      await Promise.resolve()
     })
     expect(startExport).toHaveBeenCalledWith('run-1', 'raw')
+    expect(onOpenEvaluationReport).toHaveBeenCalledExactlyOnceWith('alpha')
 
     await act(async () => {
       clickButton('Review Evaluation')
@@ -348,8 +362,10 @@ describe('run overview', () => {
     await act(async () => {
       const continueAction = gatePromo.mock.calls.at(-1)?.[1] as () => void
       continueAction()
+      await Promise.resolve()
     })
     expect(startExport).toHaveBeenLastCalledWith('run-1', 'localized')
+    expect(onOpenEvaluationReport).toHaveBeenCalledTimes(2)
   })
 
   it('shows the envset recorded on the run manifest', async () => {

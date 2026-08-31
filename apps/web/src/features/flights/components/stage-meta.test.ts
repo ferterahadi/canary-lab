@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { evaluationTaskId, portifyWorkflowId, stageStateLine, stageFacts, healEndLine, healEndShort, formatStageDuration, stageWorkMs } from './stage-meta'
+import { evaluationTaskId, portifyWorkflowId, stageStateLine, stageFacts, runHistoryFacts, healEndLine, healEndShort, formatStageDuration, stageWorkMs } from './stage-meta'
 import { agentActivityLine } from './StageStatusLines'
 
-import type { FlightManifest, FlightStage } from '@/shared/api/client'
-import type { CoverageLedger, EvaluationExportTask, HealEnd } from '@/shared/api/types'
+import type { FlightManifest, FlightStage, FlightStageStatus } from '@/shared/api/client'
+import type { CoverageLedger, EvaluationExportTask, HealEnd, RunIndexEntry } from '@/shared/api/types'
 
 function flight(over: Partial<FlightManifest> = {}): FlightManifest {
   return {
@@ -185,6 +185,59 @@ describe('stageFacts — run stage renders as the hero, not stage facts (R80)', 
   })
 })
 
+describe('stageFacts — the frontend owns one fact contract per stage', () => {
+  const statuses: FlightStageStatus[] = ['pending', 'running', 'waiting-for-approval', 'failed', 'done', 'skipped']
+  const contracts = [
+    ['scout', ['Repos scanned', 'Services found', 'Port slots drafted']],
+    ['scaffold', ['Services booted', 'Boot time', 'Env files']],
+    ['env-capture', ['Env files', 'Boot check']],
+    ['docs', ['Source docs', 'Requirements inferred', 'Distilled to']],
+    ['prd-summary', ['Requirements']],
+    ['specs-coverage', ['Mapped coverage', 'Requirements', 'Tests written']],
+    ['portify', ['Services injectable', 'Files edited', 'Instances proven']],
+    ['evaluation-export', ['Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven']],
+  ] as const
+
+  it.each(contracts)('%s keeps the same ordered slots in every lifecycle state', (key, labels) => {
+    for (const status of statuses) {
+      const facts = stageFacts({ key, status } as FlightStage, flight())
+      expect(facts.map((fact) => fact.label), status).toEqual(labels)
+    }
+  })
+})
+
+describe('runHistoryFacts — Test run keeps exactly three history slots', () => {
+  const historyRun = (over: Partial<RunIndexEntry> = {}): RunIndexEntry => ({
+    runId: 'run-1',
+    feature: 'checkout',
+    startedAt: '2026-07-01T00:00:00.000Z',
+    endedAt: '2026-07-01T00:01:00.000Z',
+    status: 'passed',
+    executionType: 'run',
+    ...over,
+  })
+
+  it('holds all three slots before the first run', () => {
+    const facts = runHistoryFacts([])
+    expect(facts.map((fact) => fact.label)).toEqual(['Runs performed', 'Succeeded', 'Avg duration'])
+    expect(facts.every((fact) => fact.awaiting)).toBe(true)
+  })
+
+  it('keeps Avg duration as a skeleton while the first run is active', () => {
+    const facts = runHistoryFacts([historyRun({ status: 'running', endedAt: undefined })])
+    expect(facts.map((fact) => fact.label)).toEqual(['Runs performed', 'Succeeded', 'Avg duration'])
+    expect(facts[0]).toMatchObject({ value: '1', sub: '1 still going' })
+    expect(facts[1]).toMatchObject({ value: '0' })
+    expect(facts[2]).toEqual({ label: 'Avg duration', value: '', awaiting: true })
+  })
+
+  it('does not grow a fourth history tile when a run needed repairs', () => {
+    const facts = runHistoryFacts([historyRun({ healCycles: 2 })])
+    expect(facts.map((fact) => fact.label)).toEqual(['Runs performed', 'Succeeded', 'Avg duration'])
+    expect(facts.find((fact) => fact.label === 'Repair cycles')).toBeUndefined()
+  })
+})
+
 describe('healEndLine / healEndShort (R80)', () => {
   const he = (over: Partial<HealEnd>): HealEnd => ({ reason: 'no-signal', cycle: 1, message: '', at: '2026-01-01T00:00:00Z', ...over })
 
@@ -261,7 +314,7 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
       .toMatchObject({ value: '0%', big: true, tone: 'warn' })
   })
 
-  it('full coverage with no gaps reads good — bar full, gaps 0 with no sub, both pass tiles dropped once settled', () => {
+  it('does not substitute a backend gap count for the frontend-owned Requirements slot', () => {
     const stage = {
       key: 'specs-coverage',
       status: 'done',
@@ -270,9 +323,12 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
     } as unknown as FlightStage
     const facts = stageFacts(stage, flight())
     expect(facts.find((f) => f.label === 'Mapped coverage')).toMatchObject({ value: '100%', big: true, tone: 'good' })
-    const gaps = facts.find((f) => f.label === 'Coverage gaps')
-    expect(gaps).toMatchObject({ value: '0', big: true, tone: 'good' })
-    expect(gaps?.sub).toBeUndefined()
+    expect(facts.map((f) => f.label)).toEqual(['Mapped coverage', 'Requirements', 'Tests written'])
+    expect(facts.find((f) => f.label === 'Requirements'))
+      .toEqual({ label: 'Requirements', value: '', awaiting: true })
+    expect(facts.find((f) => f.label === 'Tests written'))
+      .toEqual({ label: 'Tests written', value: '', awaiting: true })
+    expect(facts.find((f) => f.label === 'Coverage gaps')).toBeUndefined()
     expect(facts.find((f) => f.label === 'Authoring pass')).toBeUndefined()
     // The settled pass COUNT is gone too: it reported how hard canary worked, not
     // anything about the suite, and the pass history rows below the band already
@@ -296,12 +352,11 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
     // bare count: five buckets across two populations belong on a card, not
     // squeezed through a 10.5px sub-line.
     expect(req).toMatchObject({ value: '12', big: true })
-    expect(req?.segments).toBeUndefined()
     expect(req?.sub).toBeUndefined()
     expect(facts.find((f) => f.label === 'Coverage gaps')).toBeUndefined()
   })
 
-  it('without a ledger the older gap count still stands in — a running loop has no ledger to read', () => {
+  it('without a ledger the Requirements slot stays a skeleton instead of becoming Coverage gaps', () => {
     const stage = {
       key: 'specs-coverage',
       status: 'running',
@@ -334,9 +389,8 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
     const specs = facts.find((f) => f.label === 'Tests written')
     expect(specs).toMatchObject({ value: '2', big: true })
     // Depth and the orphan count both live on the composition card now, so the
-    // tile carries neither a bar nor a sub — and no Orphan specs tile is emitted
-    // even though this ledger has three.
-    expect(specs?.segments).toBeUndefined()
+    // tile carries no breakdown — and no Orphan specs tile is emitted even
+    // though this ledger has three.
     expect(specs?.sub).toBeUndefined()
   })
 
@@ -356,15 +410,6 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
     // And the stand-in the stage falls back to without a ledger does NOT take a
     // slot for one frame and get relabelled in the next.
     expect(facts.find((f) => f.label === 'Coverage gaps')).toBeUndefined()
-  })
-
-  it('reserves the meter slot only on the awaited tile that settles with a bar', () => {
-    const stage = { key: 'specs-coverage', status: 'done', evidence: { coveragePct: 100, gaps: [] } } as unknown as FlightStage
-    const facts = stageFacts(stage, flight(), undefined, { pending: true })
-    // `Mapped coverage` settles with a coverage bar; the two counts beside
-    // it settle bare, and a reserved slot under those would be dead space.
-    expect(facts.find((f) => f.label === 'Requirements')?.meter).toBeUndefined()
-    expect(facts.find((f) => f.label === 'Tests written')?.meter).toBeUndefined()
   })
 
   it('a resolved ledger ends the hold even on the same render — pending is about the READ, not the stage', () => {
@@ -427,11 +472,13 @@ describe('stageFacts — Requirements source tile', () => {
     expect(facts.find((f) => f.label === 'Distilled to')?.sub).toBe('tokens · 8.8 KB')
   })
 
-  it('measured bytes with no docs listed keep their own source tile — nothing else would report them', () => {
+  it('does not let backend byte metadata rename the frontend-owned Source docs slot', () => {
     const noDocs = { key: 'docs', status: 'done', evidence: {} } as unknown as FlightStage
     const facts = stageFacts(noDocs, flight(), summary, { docBytes: 10_000 })
-    expect(facts.find((f) => f.label === 'Source docs')).toBeUndefined()
-    expect(facts.find((f) => f.label === 'Source text')).toMatchObject({ value: '≈ 2.5k', sub: 'tokens · 9.8 KB' })
+    expect(facts.map((f) => f.label)).toEqual(['Source docs', 'Requirements inferred', 'Distilled to'])
+    expect(facts.find((f) => f.label === 'Source docs'))
+      .toEqual({ label: 'Source docs', value: '', awaiting: true })
+    expect(facts.find((f) => f.label === 'Source text')).toBeUndefined()
   })
 })
 
@@ -613,7 +660,7 @@ describe('stageStateLine — read-time (workspace-probed) evidence never asserts
   })
 })
 
-describe('stageFacts — evaluation report reads the export task, not the flight record', () => {
+describe('stageFacts — evaluation report keeps deliverable metadata out of At a glance', () => {
   const task = {
     taskId: 'eval-x',
     runId: '2026-07-01T0245-o456',
@@ -624,11 +671,17 @@ describe('stageFacts — evaluation report reads the export task, not the flight
     createdAt: '2026-07-01T02:45:00Z',
     updatedAt: '2026-07-01T02:50:00Z',
   } as EvaluationExportTask
-  const archive = { label: 'Archive', value: 'canary-lab-evaluation-cns_better_auth-2026-07-01T0245-o456.zip', mono: true, title: 'canary-lab-evaluation-cns_better_auth-2026-07-01T0245-o456.zip' }
+  const expectEmptyReportContract = (facts: ReturnType<typeof stageFacts>): void => {
+    expect(facts.map((fact) => fact.label)).toEqual([
+      'Requirements with tests',
+      'Test depth',
+      'Tests that passed',
+      'Requirements proven',
+    ])
+    expect(facts.every((fact) => fact.awaiting)).toBe(true)
+  }
 
-  it('a conducted export and a probed one produce the SAME card', () => {
-    // The two halves that used to differ: conducted evidence carries the archive
-    // path, a read-time probe carries the task fields. Same task → same card.
+  it('a conducted export and a probed one both keep the report contract without verification evidence', () => {
     const conducted = {
       key: 'evaluation-export',
       status: 'done',
@@ -640,53 +693,31 @@ describe('stageFacts — evaluation report reads the export task, not the flight
       evidence: { taskId: 'eval-x', runId: '2026-07-01T0245-o456', mode: 'localized' },
       evidenceSource: 'workspace',
     } as FlightStage
-    const expected = [
-      { label: 'From run', value: '2026-07-01T0245-o456', mono: true },
-      { label: 'Report', value: 'written by an agent' },
-      archive,
-    ]
-    expect(stageFacts(conducted, flight(), undefined, { evalTask: task })).toEqual(expected)
-    expect(stageFacts(probed, flight(), undefined, { evalTask: task })).toEqual(expected)
+    expectEmptyReportContract(stageFacts(conducted, flight(), undefined, { evalTask: task }))
+    expectEmptyReportContract(stageFacts(probed, flight(), undefined, { evalTask: task }))
   })
 
-  it('never shows export.zip — the internal filename nobody is handed', () => {
+  it('does not promote an export path into a verification fact or remove the contract', () => {
     const stage = {
       key: 'evaluation-export',
       status: 'done',
       evidence: { taskId: 'eval-x', evaluationZip: '/logs/e/eval-x/export.zip' },
     } as FlightStage
-    const values = stageFacts(stage, flight(), undefined, { evalTask: task }).map((f) => f.value)
-    expect(values).toContain(archive.value)
-    expect(values).not.toContain('export.zip')
+    expectEmptyReportContract(stageFacts(stage, flight(), undefined, { evalTask: task }))
   })
 
-  it('falls back to the recorded archive name when the export task is gone', () => {
+  it('does not substitute recorded report identity for missing verification facts', () => {
     const stage = {
       key: 'evaluation-export',
       status: 'done',
       evidence: { taskId: 'eval-x', archiveBase: 'canary-lab-evaluation-checkout-2026-07-01T0245-o456', mode: 'raw' },
     } as FlightStage
-    expect(stageFacts(stage, flight(), undefined, {})).toEqual([
-      { label: 'Report', value: 'built from the run' },
-      {
-        label: 'Archive',
-        value: 'canary-lab-evaluation-checkout-2026-07-01T0245-o456.zip',
-        mono: true,
-        title: 'canary-lab-evaluation-checkout-2026-07-01T0245-o456.zip',
-      },
-    ])
+    expectEmptyReportContract(stageFacts(stage, flight(), undefined, {}))
   })
 
-  it('no task and no recorded name keeps the report evidence slots', () => {
+  it('a settled stage with no evidence still shows the canonical skeleton slots', () => {
     const none = { key: 'evaluation-export', status: 'done', evidence: {} } as FlightStage
-    const facts = stageFacts(none, flight())
-    expect(facts.map((fact) => fact.label)).toEqual([
-      'Requirements with tests',
-      'Test depth',
-      'Tests that passed',
-      'Requirements proven',
-    ])
-    expect(facts.every((fact) => fact.awaiting)).toBe(true)
+    expectEmptyReportContract(stageFacts(none, flight()))
   })
 })
 
@@ -720,6 +751,36 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
       { name: 't3', requirements: ['R3'], pathTypes: [], strength: 'shallow' },
     ],
     ...over,
+  })
+
+  it('zero requirements never changes the Report layout — those two slots stay as skeletons', () => {
+    const testOnlyLedger = ledger({
+      totals: { total: 0, covered: 0, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0, proven: 0 },
+      provenPct: 0,
+      provenRunId: '2026-07-01T0245-o456',
+      tests: [
+        { name: 't1', requirements: [], pathTypes: [], strength: 'solid', lastRun: { runId: '2026-07-01T0245-o456', passed: true } },
+        { name: 't2', requirements: [], pathTypes: [], strength: 'shallow', lastRun: { runId: '2026-07-01T0245-o456', passed: true } },
+      ],
+    })
+    const expectedLabels = ['Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven']
+    for (const status of ['pending', 'running', 'waiting-for-approval', 'failed', 'done', 'skipped'] as const) {
+      const facts = stageFacts({ ...stage, status }, flight(), undefined, {
+        evalTask: task,
+        ledger: testOnlyLedger,
+      })
+      expect(facts.map((fact) => fact.label), status).toEqual(expectedLabels)
+    }
+
+    const facts = stageFacts(stage, flight(), undefined, {
+      evalTask: task,
+      ledger: testOnlyLedger,
+    })
+    expect(facts.map((fact) => fact.label)).toEqual(expectedLabels)
+    expect(facts[0]).toEqual({ label: 'Requirements with tests', value: '', awaiting: true })
+    expect(facts[1]).toMatchObject({ value: '1 solid', sub: '1 shallow' })
+    expect(facts[2]).toMatchObject({ value: '2/2', tone: 'good', sub: 'every test passed' })
+    expect(facts[3]).toEqual({ label: 'Requirements proven', value: '', awaiting: true })
   })
 
   it('reads left to right as the derivation: claim → depth → run → conclusion', () => {
@@ -770,20 +831,20 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
     expect(one.find((f) => f.label === 'Requirements with tests')?.sub).toBe('1 not fully covered')
   })
 
-  it('names the unmapped specs, so the run tile is not read as the whole suite', () => {
+  it('includes unmapped tests because outcomes describe the whole suite', () => {
     const facts = stageFacts(stage, flight(), undefined, {
       evalTask: task,
       ledger: joined({
         tests: [
           { name: 't1', requirements: ['R1'], pathTypes: [], strength: 'solid', lastRun: { runId: '2026-07-01T0245-o456', passed: true } },
-          // Annotated to nothing: it cannot move the proven axis, so it stays out
-          // of the denominator — but the sub says it exists.
+          // Annotated to nothing: it cannot move the proven axis, but its run
+          // result still belongs in the suite outcome.
           { name: 't2', requirements: [], pathTypes: [], strength: 'shallow', lastRun: { runId: '2026-07-01T0245-o456', passed: true } },
         ],
       }),
     })
     expect(facts.find((f) => f.label === 'Tests that passed'))
-      .toMatchObject({ value: '1/1', sub: '1 unlabelled' })
+      .toMatchObject({ value: '2/2', sub: 'every test passed' })
   })
 
   it('a proven axis joined to a DIFFERENT run names that run instead of speaking for this report', () => {
@@ -800,13 +861,18 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
     expect(facts.find((f) => f.label === 'Tests that passed')?.sub).toBe('1 failed · 1 never ran')
   })
 
-  it('with no run joined, the claim and depth render while the run-grounded slots stay visible', () => {
+  it('with no recorded test outcomes, the run-backed slots remain as skeletons', () => {
     const facts = stageFacts(stage, flight(), undefined, {
       evalTask: task,
       ledger: joined({
         totals: { total: 6, covered: 6, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 },
         provenPct: undefined,
         provenRunId: undefined,
+        tests: [
+          { name: 't1', requirements: ['R1'], pathTypes: [], strength: 'solid' },
+          { name: 't2', requirements: ['R2'], pathTypes: [], strength: 'shallow' },
+          { name: 't3', requirements: ['R3'], pathTypes: [], strength: 'shallow' },
+        ],
       }),
     })
     // Not "0/3 passed · 3 never ran": with no run to run them, that would read as
@@ -818,7 +884,10 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
       'Tests that passed',
       'Requirements proven',
     ])
-    expect(facts.slice(2).every((fact) => fact.awaiting)).toBe(true)
+    expect(facts.find((f) => f.label === 'Tests that passed'))
+      .toEqual({ label: 'Tests that passed', value: '', awaiting: true })
+    expect(facts.find((f) => f.label === 'Requirements proven'))
+      .toEqual({ label: 'Requirements proven', value: '', awaiting: true })
   })
 
   it('a clean sweep says so rather than leaving the tile bare', () => {
@@ -833,7 +902,7 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
     expect(facts.find((f) => f.label === 'Requirements proven'))
       .toMatchObject({ value: '6/6', tone: 'good', sub: 'every requirement had a test that passed' })
     expect(facts.find((f) => f.label === 'Tests that passed'))
-      .toMatchObject({ value: '1/1', tone: 'good', sub: 'every labelled test passed' })
+      .toMatchObject({ value: '1/1', tone: 'good', sub: 'every test passed' })
   })
 
   it('a retried pass and a merged summary displace "every test passed" — a flake is not a clean sweep', () => {
@@ -887,6 +956,16 @@ describe('probed coverage with no requirements is undefined, not zero', () => {
       { label: 'Requirements', value: 'None yet', sub: 'no requirement docs for this suite' },
       { label: 'Tests written', value: '', awaiting: true },
     ])
+  })
+
+  it('fills Tests written when a zero-requirement ledger still contains tests', () => {
+    const facts = stageFacts(noReqs, flight(), undefined, {
+      ledger: ledger({
+        tests: [{ name: 'login works', requirements: [], pathTypes: [], file: 'tests/login.spec.ts' }],
+      }),
+    })
+    expect(facts.map((fact) => fact.label)).toEqual(['Mapped coverage', 'Requirements', 'Tests written'])
+    expect(facts[2]).toEqual({ label: 'Tests written', value: '1', big: true, sub: 'across 1 test file' })
   })
 
   it('a probed suite WITH requirements still reports its real coverage', () => {

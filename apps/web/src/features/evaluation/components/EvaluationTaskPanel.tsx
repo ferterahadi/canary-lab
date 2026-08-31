@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { EvaluationExportTask } from '@/shared/api/types'
 import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
-import { useEvaluationExportLogs, useEvaluationExports } from '../state/EvaluationExportContext'
+import { useEvaluationExportLog, useEvaluationExports } from '../state/EvaluationExportContext'
 import { EvaluationTaskOutput, modeLabel } from './EvaluationExportTaskToast'
 
 function dotStateForExport(status: EvaluationExportTask['status']): StatusDotState {
@@ -24,9 +24,8 @@ export function EvaluationTaskPanel({
   showDownload?: boolean
 }) {
   const { watchTask, downloadTask } = useEvaluationExports()
-  // The log stream context, not the task context — this panel is the one
-  // consumer that genuinely re-renders per log chunk.
-  const logsByTaskId = useEvaluationExportLogs()
+  // Subscribe only to this task's log; another export may stream concurrently.
+  const { log } = useEvaluationExportLog(task.taskId)
   const [downloadFailed, setDownloadFailed] = useState(false)
   // Attach the log stream when this panel surfaces a task it didn't start
   // (cold load onto a running export) — no-op when already streaming.
@@ -63,7 +62,7 @@ export function EvaluationTaskPanel({
           {task.error}
         </div>
       )}
-      <EvaluationTaskOutput task={task} log={logsByTaskId[task.taskId] ?? ''} />
+      <EvaluationTaskOutput task={task} log={log} />
     </section>
   )
 }

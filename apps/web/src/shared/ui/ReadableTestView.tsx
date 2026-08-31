@@ -30,12 +30,15 @@ export function ReadableTestView({
   sourceFile,
   selectedNodeId,
   executionHighlight,
+  changedNodeIds,
   onSourceSelect,
 }: {
   test: ReadableTest
   sourceFile?: string
   selectedNodeId?: string | null
   executionHighlight?: ReadableExecutionHighlight
+  /** English rows backed by source lines that differ from git HEAD. */
+  changedNodeIds?: ReadonlySet<string>
   onSourceSelect?: (selection: ReadableSourceSelection) => void
 }) {
   const canvas = useCodeThemeColors()
@@ -53,6 +56,7 @@ export function ReadableTestView({
             sourceFile={sourceFile}
             selectedNodeId={selectedNodeId}
             executionHighlight={executionHighlight}
+            changedNodeIds={changedNodeIds}
             onSourceSelect={onSourceSelect}
           />
         ) : (
@@ -71,6 +75,7 @@ function StorySequence({
   sourceFile,
   selectedNodeId,
   executionHighlight,
+  changedNodeIds,
   onSourceSelect,
 }: {
   steps: ReadableStoryItem[]
@@ -78,6 +83,7 @@ function StorySequence({
   sourceFile?: string
   selectedNodeId?: string | null
   executionHighlight?: ReadableExecutionHighlight
+  changedNodeIds?: ReadonlySet<string>
   onSourceSelect?: (selection: ReadableSourceSelection) => void
 }) {
   const nested = parentSequence.length > 0
@@ -98,6 +104,7 @@ function StorySequence({
           sourceFile={sourceFile}
           selectedNodeId={selectedNodeId}
           executionHighlight={executionHighlight}
+          changedNodeIds={changedNodeIds}
           onSourceSelect={onSourceSelect}
         />
       ))}
@@ -111,6 +118,7 @@ function StoryRow({
   sourceFile,
   selectedNodeId,
   executionHighlight,
+  changedNodeIds,
   onSourceSelect,
 }: {
   step: ReadableStoryItem
@@ -118,6 +126,7 @@ function StoryRow({
   sourceFile?: string
   selectedNodeId?: string | null
   executionHighlight?: ReadableExecutionHighlight
+  changedNodeIds?: ReadonlySet<string>
   onSourceSelect?: (selection: ReadableSourceSelection) => void
 }) {
   const fileNote = sourceFile && step.source.file !== sourceFile ? fileName(step.source.file) : undefined
@@ -128,6 +137,7 @@ function StoryRow({
   const executionKind = executionHighlight?.nodeId === step.id
     ? executionHighlight.kind
     : undefined
+  const changed = changedNodeIds?.has(step.id) === true
   const executionLabel = executionKind === 'running' ? 'RUNNING' : 'FAILED HERE'
   const executionDescription = executionKind === 'running' ? 'Currently running' : 'Last failed here'
   const executionColor = executionKind === 'failed' ? 'var(--danger)' : 'var(--running)'
@@ -143,18 +153,23 @@ function StoryRow({
         data-testid={`readable-story-item-${step.id}`}
         data-fidelity={step.fidelity}
         data-execution-highlight={executionKind}
+        data-changed-source={changed ? 'true' : undefined}
         aria-pressed={selected}
-        aria-label={`${sequenceLabel}. ${keyword}: ${step.text}. ${executionKind ? `${executionDescription}. ` : ''}Show ${sourceLabel(step.source)}`}
-        title={`Step ${sequenceLabel} — ${sourceLabel(step.source)} — ${fidelityTitle(step.fidelity)}${executionKind ? ` — ${executionDescription}` : ''}`}
+        aria-label={`${sequenceLabel}. ${keyword}: ${step.text}. ${changed ? 'Modified since the committed test. ' : ''}${executionKind ? `${executionDescription}. ` : ''}Show ${sourceLabel(step.source)}`}
+        title={`Step ${sequenceLabel} — ${sourceLabel(step.source)} — ${fidelityTitle(step.fidelity)}${changed ? ' — Modified since the committed test' : ''}${executionKind ? ` — ${executionDescription}` : ''}`}
         onClick={() => onSourceSelect?.({ id: step.id, source: step.source })}
         className="grid w-full grid-cols-[2ch_8ch_minmax(0,1fr)] items-start gap-x-2 px-2 py-0 text-left leading-[1.65] transition-colors hover:bg-running/10"
         style={{
           background: executionKind
             ? `color-mix(in srgb, ${executionColor} 18%, transparent)`
-            : selected ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : undefined,
+            : changed
+              ? 'color-mix(in srgb, var(--danger) 16%, transparent)'
+              : selected ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : undefined,
           boxShadow: executionKind
             ? `inset 2px 0 0 ${executionColor}`
-            : selected ? 'inset 2px 0 0 var(--accent)' : undefined,
+            : changed
+              ? 'inset 2px 0 0 var(--danger)'
+              : selected ? 'inset 2px 0 0 var(--accent)' : undefined,
         }}
       >
         <span
@@ -174,6 +189,20 @@ function StoryRow({
         <span className="min-w-0 whitespace-pre-wrap break-words">
           {step.spans.map((span, index) => <StorySpan key={index} span={span} />)}
           {fileNote && <span style={{ color: 'var(--text-muted)' }}> {`// ${fileNote}`}</span>}
+          {changed && (
+            <span
+              data-testid={`readable-modified-${step.id}`}
+              className="ml-2 inline-flex rounded border px-1 text-[9px] font-semibold leading-[1.4]"
+              style={{
+                color: 'var(--danger)',
+                borderColor: 'color-mix(in srgb, var(--danger) 65%, transparent)',
+                background: 'color-mix(in srgb, var(--danger) 10%, transparent)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              MODIFIED
+            </span>
+          )}
           {executionKind && (
             <span
               className="ml-2 inline-flex rounded border px-1 text-[9px] font-semibold leading-[1.4]"
@@ -196,6 +225,7 @@ function StoryRow({
           sourceFile={sourceFile}
           selectedNodeId={selectedNodeId}
           executionHighlight={executionHighlight}
+          changedNodeIds={changedNodeIds}
           onSourceSelect={onSourceSelect}
         />
       )}
