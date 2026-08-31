@@ -4,7 +4,7 @@ import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 
-export { evaluationTaskId, FactTile, FactsGrid, plural, stageFacts } from './StageFacts'
+export { evaluationTaskId, FactTile, FactsGrid, plural, runHistoryFacts, stageFacts } from './StageFacts'
 export type { StageBandData, StageFact } from './StageFacts'
 export { STAGE_COMPANION, stageRailRows, stageRowKey } from './StageRail'
 export type { StageRailRow } from './StageRail'

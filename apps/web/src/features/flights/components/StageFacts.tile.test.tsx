@@ -37,35 +37,36 @@ function render(fact: StageFact) {
   return container.querySelector<HTMLDivElement>('[data-testid="fact-tile"]')!
 }
 
-describe('FactPlaceholder — always a dash, never a bar or a sweep', () => {
+describe('FactPlaceholder — one skeleton shape across lifecycle states', () => {
   const slot = (tile: HTMLElement) => tile.querySelector<HTMLElement>('[data-testid="fact-awaiting"]')!
+  const bar = (tile: HTMLElement) => slot(tile).querySelector<HTMLElement>('[data-testid="skeleton-bar"]')!
   const fact: StageFact = { label: 'Requirements inferred', value: '', awaiting: true }
 
-  it('shows the same static dash on a live tile — no skeleton bar, no animation', () => {
-    const live = slot(renderWith(fact, 'live'))
-    expect(live.querySelector('[data-testid="skeleton-bar"]')).toBeNull()
-    expect(live.textContent).toBe('—')
-    expect(live.querySelector<HTMLElement>('span')?.style.color).toBe('var(--text-muted)')
+  it('uses the shared live skeleton in the value slot', () => {
+    const tile = renderWith(fact, 'live')
+    expect(bar(tile).dataset.awaiting).toBe('live')
+    expect(bar(tile).className).toContain('cl-skeleton')
+    expect(slot(tile).textContent).not.toContain('—')
   })
 
-  it('shows a dash while parked, hued to say the slot is merely held open', () => {
-    const held = slot(renderWith(fact, 'idle'))
-    expect(held.querySelector('[data-testid="skeleton-bar"]')).toBeNull()
-    expect(held.textContent).toBe('—')
-    expect(held.querySelector<HTMLElement>('span')?.style.color).toBe('var(--text-muted)')
+  it('keeps the same skeleton while parked, without live animation', () => {
+    const held = bar(renderWith(fact, 'idle'))
+    expect(held.dataset.awaiting).toBe('idle')
+    expect(held.className).not.toContain('cl-skeleton')
   })
 
-  it('reddens the dash once the step failed, and says so to a screen reader', () => {
-    const struck = slot(renderWith(fact, 'failed'))
-    expect(struck.querySelector<HTMLElement>('span')?.style.color).toBe('var(--danger)')
-    expect(struck.getAttribute('aria-label')).toBe('not measured — the step failed')
+  it('keeps the skeleton and marks it failed when the step stops', () => {
+    const tile = renderWith(fact, 'failed')
+    expect(bar(tile).dataset.awaiting).toBe('failed')
+    expect(bar(tile).className).toContain('cl-skeleton-void')
+    expect(slot(tile).getAttribute('aria-label')).toBe('not measured — the step failed')
   })
 
-  it('names settled missing evidence without making it look pending', () => {
-    const unavailable = slot(renderWith(fact, 'unavailable'))
-    expect(unavailable.textContent).toBe('—')
-    expect(unavailable.dataset.awaiting).toBe('unavailable')
-    expect(unavailable.getAttribute('aria-label')).toBe('not recorded for this flight')
+  it('keeps the skeleton and names settled missing evidence', () => {
+    const tile = renderWith(fact, 'unavailable')
+    expect(bar(tile).dataset.awaiting).toBe('unavailable')
+    expect(slot(tile).dataset.awaiting).toBe('unavailable')
+    expect(slot(tile).getAttribute('aria-label')).toBe('not recorded for this flight')
   })
 
   it('keeps the tile height the figure will need, in every state', () => {
@@ -77,7 +78,7 @@ describe('FactPlaceholder — always a dash, never a bar or a sweep', () => {
   it('renders neither pending nor settled numeric tiles with an underbar', () => {
     const pending = renderWith(awaitingFact('Test depth'), 'live')
     expect(pending.querySelector('.h-\\[3px\\]')).toBeNull()
-    expect(renderWith(fact, 'live').querySelector('[data-testid="fact-meter-track"]')).toBeNull()
+    expect(pending.querySelector('[data-testid="skeleton-bar"]')).not.toBeNull()
     const settled = render({ label: 'Test depth', value: '23 solid', big: true })
     expect(settled.querySelector('.h-\\[3px\\]')).toBeNull()
     expect(settled.querySelector('[style*="background"]')).toBeNull()

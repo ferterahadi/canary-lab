@@ -340,7 +340,6 @@ export function StageDetail({
   const runId = runMerged
     ? (activeRunId ?? ((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
     : undefined
-  const showRunPanel = runMerged && Boolean(runId || awaiting)
   const pausedKind = pausedResumeKind(stage, flight, companion)
   const pausedNotice = pausedKind ? <StagePausedPanel kind={pausedKind} /> : null
   // The merged Run stage renders as the Test Run hero (TestRunPanel) — it owns
@@ -602,7 +601,7 @@ export function StageDetail({
       {/* The recovery card always follows At a glance. Test Run owns a separate
           facts band inside TestRunPanel, so that panel receives the same card in
           the same slot instead of rendering it above the band. */}
-      {!showRunPanel && pausedNotice}
+      {!runMerged && pausedNotice}
 
       {/* Repo scan (R72c): one intent card, then one repo card per inspected
           repo carrying its own location + env files. */}
@@ -703,11 +702,11 @@ export function StageDetail({
           adapter's `interrupt`), so the run is often still going. Keeping it
           mounted keeps its verdict, its score and its failing tests on screen,
           and the poll alive, while the flight waits for Continue. */}
-      {showRunPanel && (
+      {runMerged && (
         <TestRunPanel
           feature={flight.feature}
           runId={runId}
-          awaiting={row.status === 'done' && runId ? undefined : awaiting}
+          awaiting={awaiting}
           live={Boolean(runLive) || live}
           evidence={runEvidence}
           onOpenRun={drill.onOpenRun}

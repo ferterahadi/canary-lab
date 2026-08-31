@@ -30,9 +30,6 @@ export interface RunHistoryStats {
   /** Mean wall-clock over the runs that finished; null when none have. */
   avgDurationMs: number | null
   longestDurationMs: number | null
-  /** Repair cycles summed across the feature's runs. */
-  healCycles: number
-  runsWithRepairs: number
 }
 
 /** Aggregate a feature's run history. Null for a feature with no runs at all —
@@ -54,8 +51,6 @@ export function runHistoryStats(runs: RunIndexEntry[]): RunHistoryStats | null {
       ? Math.round(durations.reduce((sum, ms) => sum + ms, 0) / durations.length)
       : null,
     longestDurationMs: durations.length > 0 ? Math.max(...durations) : null,
-    healCycles: runs.reduce((sum, r) => sum + (r.healCycles ?? 0), 0),
-    runsWithRepairs: runs.filter((r) => (r.healCycles ?? 0) > 0).length,
   }
 }
 

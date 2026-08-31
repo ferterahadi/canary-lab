@@ -659,6 +659,15 @@ describe('trailer model (R14–R18)', () => {
   })
 
   it('R80: the Test Run hero renders the settled run once — verdict + repair cycles, NO agent output', async () => {
+    mocks.listRuns.mockResolvedValue([{
+      runId: 'run-9',
+      feature: 'checkout',
+      startedAt: '2026-01-01T00:00:00Z',
+      endedAt: '2026-01-01T00:01:00Z',
+      status: 'passed',
+      executionType: 'run',
+      healCycles: 1,
+    }])
     mocks.getRunDetail.mockResolvedValue({
       runId: 'run-9',
       manifest: { runId: 'run-9', status: 'passed', healCycles: 1 },
@@ -680,13 +689,18 @@ describe('trailer model (R14–R18)', () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
     })
     const hero = container.querySelector('[data-testid="test-run-hero"]')?.textContent ?? ''
-    // The run is rendered as ONE object: the verdict chip, the pass count, and
-    // the repair cycles — not duplicated across a facts card + a summary card.
+    // The latest run is rendered as ONE object: verdict, pass count and repair
+    // cycles. The separate history band keeps its stable three aggregate slots.
     expect(hero).toContain('passed')
     expect(hero).toContain('8/8')
     expect(hero).toContain('Repair cycles')
-    // The top "At a glance" facts card no longer double-renders the run.
-    expect(container.querySelector('[data-testid="stage-facts"]')).toBeNull()
+    const facts = container.querySelector('[data-testid="stage-facts"]')
+    expect(facts?.textContent).toContain('Runs performed')
+    expect(facts?.textContent).toContain('Succeeded')
+    expect(facts?.textContent).toContain('Avg duration')
+    // Repair cycles stays in Latest run. Adding it to history would grow the
+    // stage conditionally and repeat the same fact a few pixels above.
+    expect(facts?.textContent).not.toContain('Repair cycles')
     expect(container.querySelector('[data-testid="agent-session-view"]')).toBeNull()
   })
 
@@ -917,8 +931,37 @@ describe('trailer model (R14–R18)', () => {
     await openExportStage({ taskId: 'task-7', archiveBase: 'canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc' })
     expect(container.querySelector('[data-testid^="download-report-"]')).toBeNull()
     // Export identity is deliverable metadata, not a substitute for missing
-    // verification evidence in At a glance.
-    expect(container.querySelector('[data-testid="stage-facts"]')).toBeNull()
+    // verification evidence. The frontend still owns the report's four slots.
+    const facts = container.querySelector('[data-testid="stage-facts"]')
+    expect(facts?.textContent).toContain('Requirements with tests')
+    expect(facts?.textContent).toContain('Test depth')
+    expect(facts?.textContent).toContain('Tests that passed')
+    expect(facts?.textContent).toContain('Requirements proven')
+    expect(facts?.querySelectorAll('[data-testid="fact-awaiting"][data-awaiting="unavailable"]')).toHaveLength(4)
+  })
+
+  it('a zero-requirement suite still renders the Report contract as four tiles', async () => {
+    mocks.getFeatureCoverage.mockResolvedValue({
+      feature: 'checkout',
+      requirements: [],
+      tests: [
+        { name: 'login works', requirements: [], pathTypes: [], strength: 'solid', lastRun: { runId: 'run-9', passed: true } },
+      ],
+      totals: { total: 0, covered: 0, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 1, proven: 0 },
+      coveragePct: 0,
+      mappedPct: 0,
+      provenPct: 0,
+      provenRunId: 'run-9',
+      orphanRequirementIds: [],
+      orphanTestNames: ['login works'],
+    })
+    await openExportStage({ taskId: 'task-7', runId: 'run-9' })
+
+    const facts = container.querySelector('[data-testid="stage-facts"]')
+    const labels = [...(facts?.querySelectorAll<HTMLElement>('[data-testid="fact-tile"]') ?? [])]
+      .map((tile) => tile.firstElementChild?.firstElementChild?.textContent)
+    expect(labels).toEqual(['Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven'])
+    expect(facts?.querySelectorAll('[data-testid="fact-awaiting"][data-awaiting="unavailable"]')).toHaveLength(2)
   })
 
   it('surfaces a failed download on the control instead of failing silently', async () => {
@@ -1024,14 +1067,12 @@ describe('R83 — every stage pane wears the settled layout, with placeholders f
     expect(container.querySelector('[data-testid="repo-card-shop"] svg')).toBeNull()
   })
 
-  it('a running stage keeps static dashes — the tiles never sweep — and marks each repo row live', async () => {
+  it('a running stage uses live skeletons in the same slots and marks each repo row live', async () => {
     mocks.getFlight.mockResolvedValue(scoutFlight('running'))
     await openScout()
     const facts = container.querySelector('[data-testid="stage-facts"]')
     expect(facts?.querySelectorAll('[data-testid="fact-awaiting"]')).toHaveLength(2)
-    // A bar where a figure goes reads as a measurement; the repo row and the
-    // pane badge already say the stage is live.
-    expect(facts?.querySelectorAll('.cl-skeleton')).toHaveLength(0)
+    expect(facts?.querySelectorAll('[data-testid="skeleton-bar"][data-awaiting="live"].cl-skeleton')).toHaveLength(2)
     expect(container.querySelector('[data-testid="repo-card-shop"] .bg-running')).not.toBeNull()
   })
 
@@ -1185,12 +1226,42 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     expect(mocks.getRunDetail).not.toHaveBeenCalled()
   })
 
+  it('Test Run: a completed old record keeps a missing duration as unavailable, not idle', async () => {
+    mocks.listRuns.mockResolvedValue([{
+      runId: 'run-9',
+      feature: 'checkout',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'passed',
+      executionType: 'run',
+    }])
+    await open('run', manifest({
+      status: 'done',
+      currentStage: null,
+      links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'run' ? { evidence: { runId: 'run-9', status: 'passed' } } : {}),
+      })),
+    }))
+
+    const avgDuration = [...container.querySelectorAll<HTMLElement>('[data-testid="fact-tile"]')]
+      .find((tile) => tile.textContent?.includes('Avg duration'))
+    expect(avgDuration?.querySelector('[data-testid="fact-awaiting"][data-awaiting="unavailable"]')).not.toBeNull()
+  })
+
   it('Evaluation Report: the deliverable and the reports list hold their places', async () => {
     // No export has ever been built for this suite — `clearAllMocks` does not
     // undo a `mockReturnValue`, so an earlier test's task list would otherwise
     // still be standing here and the list would render for real.
     mocks.evaluationTasks.mockReturnValue([])
     await open('evaluation-export')
+    const facts = container.querySelector('[data-testid="stage-facts"]')
+    expect(facts?.querySelectorAll('[data-testid="fact-tile"]')).toHaveLength(4)
+    expect(facts?.textContent).toContain('Requirements with tests')
+    expect(facts?.textContent).toContain('Test depth')
+    expect(facts?.textContent).toContain('Tests that passed')
+    expect(facts?.textContent).toContain('Requirements proven')
     expect(container.querySelector('[data-testid="evaluation-deliverable-skeleton"]')?.textContent).toContain("This flight's report")
     expect(container.querySelector('[data-testid="all-reports-skeleton"]')?.textContent).toContain('All reports for this suite')
   })

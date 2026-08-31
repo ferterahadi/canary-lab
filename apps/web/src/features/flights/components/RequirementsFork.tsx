@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { FeatureDocsListing, FlightManifest, PrdSourceAttempt, PrdSourceCheckpointData } from '@/shared/api/client'
+import type { FlightManifest, PrdSourceAttempt, PrdSourceCheckpointData } from '@/shared/api/client'
+import type { FeatureDocsListing } from '@/shared/api/types'
 import { AddDocsTile, DocPill, DocsDropOverlay, EmptyDropzone, useDocDrop } from '@/features/coverage/components/CoverageDocsRail'
 import { STAGE_COLUMN } from './stage-meta'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'

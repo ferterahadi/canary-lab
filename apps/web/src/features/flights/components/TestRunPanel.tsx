@@ -1,14 +1,12 @@
 import { useMemo, type ReactNode } from 'react'
-import type { HealEnd, RunIndexEntry, RunStatus } from '@/shared/api/types'
+import * as api from '@/shared/api/client'
+import type { HealEnd, RunDetail, RunIndexEntry, RunStatus } from '@/shared/api/types'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import type { RunOpenTarget } from '@/shared/lib/workspace-view-state'
 import { RunRow, useRun, useRuns } from '@/features/runs'
 import { FailingTests } from './FailingTests'
-import { FactsGrid, HERO_ROW, STAGE_COLUMN, healEndShort, plural, type StageFact } from './stage-meta'
-import { awaitingFact } from './StageFacts'
+import { FactsGrid, HERO_ROW, STAGE_COLUMN, healEndShort, plural, runHistoryFacts } from './stage-meta'
 import { SkeletonBar, SkeletonBead, type AwaitingState } from '@/shared/ui/Skeleton'
-import { runHistoryStats } from './stage-metrics'
-import { formatDuration } from '@/shared/lib/format'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 
 // R80 — the Test Run hero. Before this, the run stage rendered the SAME run
@@ -73,9 +71,9 @@ export function TestRunPanel({
    *  `target.tab` names a pane (the captured fixes go to Changes). */
   onOpenRun?: (feature: string, runId: string, target?: RunOpenTarget) => void
   onError?: (msg: string) => void
-  /** R83: the run stage hasn't settled. Regions with nothing in them yet hold
-   *  their place as placeholders instead of collapsing the pane. */
-  awaiting?: AwaitingState
+  /** Why any missing run-history value is a skeleton. Required so a completed
+   *  run with old/incomplete evidence reads as unavailable, not idle. */
+  awaiting: AwaitingState
   /** The shared stage recovery card. It sits after this panel's own facts band,
    *  matching every other stage without giving run history a second owner. */
   pausedNotice?: ReactNode
@@ -137,7 +135,7 @@ export function TestRunPanel({
           answer. It reports the HISTORY (how many runs, how they ended, how
           long they take); the hero below reports the latest run. Different
           scopes, so no number repeats. */}
-      <FactsGrid facts={runHistoryFacts(featureRuns, awaiting)} awaiting={awaiting} />
+      <FactsGrid facts={runHistoryFacts(featureRuns)} awaiting={awaiting} />
 
       {pausedNotice}
 
@@ -217,70 +215,6 @@ export function TestRunPanel({
       )}
     </div>
   )
-}
-
-/** The stage's "At a glance": what this feature's run history looks like. Every
- *  count comes from `runHistoryStats`, which keeps unfinished runs out of the
- *  outcome buckets — a run still going is not a failure, and a band that folded
- *  it into one would report a worse verdict than the evidence supports. */
-function runHistoryFacts(runs: RunIndexEntry[], awaiting?: AwaitingState): StageFact[] {
-  const stats = runHistoryStats(runs)
-  // A suite that has never run has no history to report — but the stage is
-  // about to produce one, so the band announces its shape rather than being
-  // absent for the whole run. The three core history metrics keep their places
-  // before execution; the first completed run can populate all three.
-  if (!stats) {
-    return awaiting
-      ? [awaitingFact('Runs performed'), awaitingFact('Succeeded'), awaitingFact('Avg duration')]
-      : []
-  }
-  const settled = stats.passed + stats.failed + stats.aborted
-  return [
-    {
-      label: 'Runs performed',
-      value: String(stats.total),
-      big: true,
-      ...(stats.active > 0 ? { sub: `${stats.active} still going` } : {}),
-    },
-    {
-      label: 'Succeeded',
-      value: `${stats.passed}`,
-      big: true,
-      tone: settled === 0 ? undefined : stats.passed === settled ? 'good' : 'warn',
-      ...(outcomeBreakdown(stats.failed, stats.aborted) ? { sub: outcomeBreakdown(stats.failed, stats.aborted)! } : {}),
-    },
-    ...(stats.avgDurationMs != null
-      ? [{
-          label: 'Avg duration',
-          value: formatDuration(stats.avgDurationMs),
-          big: true as const,
-          ...(stats.longestDurationMs != null && stats.longestDurationMs !== stats.avgDurationMs
-            ? { sub: `longest ${formatDuration(stats.longestDurationMs)}` }
-            : {}),
-        }]
-      : []),
-    ...(stats.healCycles > 0
-      ? [{
-          label: 'Repair cycles',
-          value: String(stats.healCycles),
-          big: true as const,
-          // Scoped explicitly: the hero's own Repair-cycles tile counts THIS
-          // run, and two unqualified "Repair cycles" tiles a hand's width apart
-          // would read as a contradiction rather than two scopes.
-          sub: `across ${plural(stats.runsWithRepairs, 'run')}`,
-        }]
-      : []),
-  ]
-}
-
-/** "2 failed · 1 aborted", omitting whichever is zero; undefined when neither
- *  happened, so a clean history carries no sub-line at all. */
-function outcomeBreakdown(failed: number, aborted: number): string | undefined {
-  const parts = [
-    ...(failed > 0 ? [`${failed} failed`] : []),
-    ...(aborted > 0 ? [`${aborted} aborted`] : []),
-  ]
-  return parts.length > 0 ? parts.join(' · ') : undefined
 }
 
 /** One entry on the latest run's stats line. */

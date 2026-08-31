@@ -93,12 +93,21 @@ vi.mock('@/shared/api/client', () => ({
 // pre/post around the agent's slot; expose them so the flight tests can assert
 // they ride the same block instead of standalone log panes.
 vi.mock('@/shared/ui/AgentSessionView', () => ({
-  AgentSessionView: ({ source, systemRows }: { source?: { kind: string; stage?: string }; systemRows?: { pre: string[]; post: string[] } }) => (
-    <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage}>
-      {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}
-      {systemRows?.post.map((l, i) => <div key={`post-${i}`} data-testid="system-post">{l}</div>)}
-    </div>
-  ),
+  AgentSessionView: ({ source, sessionSources, systemRows }: {
+    source?: { kind: string; stage?: string }
+    sessionSources?: Array<{ source: { kind: string; stage?: string; live?: boolean } }>
+    systemRows?: { pre: string[]; post: string[] }
+  }) => {
+    const displayed = sessionSources?.find((session) => session.source.live)?.source
+      ?? sessionSources?.at(-1)?.source
+      ?? source
+    return (
+      <div data-testid="agent-session-view" data-kind={displayed?.kind} data-stage={displayed?.stage}>
+        {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}
+        {systemRows?.post.map((l, i) => <div key={`post-${i}`} data-testid="system-post">{l}</div>)}
+      </div>
+    )
+  },
 }))
 
 // The export stage reads the download action + task lookups from the export

@@ -68,16 +68,6 @@ describe('runHistoryStats', () => {
     expect(stats.longestDurationMs).toBeNull()
   })
 
-  it('sums repair cycles across runs, treating an absent count as zero', () => {
-    const stats = runHistoryStats([
-      run({ runId: 'a', healCycles: 2 }),
-      run({ runId: 'b' }),
-      run({ runId: 'c', healCycles: 1 }),
-    ])!
-    expect(stats.healCycles).toBe(3)
-    expect(stats.runsWithRepairs).toBe(2)
-  })
-
   it('is empty, not zeroed, for a feature with no runs', () => {
     expect(runHistoryStats([])).toBeNull()
   })

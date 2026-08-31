@@ -133,8 +133,8 @@ export function skippedLine(reason: string | undefined): string {
  *  Counts ride in `evidence.counts` (written by the run adapter off the run's
  *  summary artifact): `failed` and `total` are REPORTED, never inferred, because
  *  a test absent from every result list is not-run rather than passed. The
- *  repair-cycle tail reads the same `healCycles` the Repair cycles tile shows, so
- *  the sentence and the tile can't disagree. A run with no counts (older flight,
+ *  repair-cycle tail reads the same `healCycles` as the Latest run card, so the
+ *  sentence and the detail cannot disagree. A run with no counts (older flight,
  *  never-listed suite) falls back to naming the verdict. */
 export function runOutcomeLine(stage: FlightStage, flight: FlightManifest, companion?: FlightStage): string {
   // A PARKED stage has no evidence yet — the run adapter returns its evidence as

@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react'
 import type { FlightManifest, FlightStage, FlightStageKey, PortifyBootInstance, PortifyManifest } from '@/shared/api/client'
-import type { CoverageLedger, EvaluationExportTask, RunDetail } from '@/shared/api/types'
+import type { CoverageLedger, EvaluationExportTask, FeatureDocsListing, RunDetail, RunIndexEntry } from '@/shared/api/types'
 import { formatBytes, formatDuration } from '@/shared/lib/format'
 import { PanelCard } from '@/shared/ui/PanelCard'
-import { type AwaitingState } from '@/shared/ui/Skeleton'
+import { SkeletonBar, type AwaitingState } from '@/shared/ui/Skeleton'
 import { Tooltip, TOOLTIP_ANCHOR_ATTR } from '@/shared/ui/Tooltip'
 import { STAGE_COLUMN, evidenceOf, num, specsCoverageProgress, str } from './stage-meta'
-import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, overlayDiffStat, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
+import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, overlayDiffStat, runHistoryStats, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
 
 // ─── Stage facts (R20) ──────────────────────────────────────────────────────
 // One uniform template for every stage: the 2–4 things the user cares about at
@@ -16,11 +16,10 @@ import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, over
 export interface StageFact {
   label: string
   value: string
-  /** The stage has not produced this value yet — the tile renders a static dash
-   *  in place of the figure (never a bar or a sweep; the pane's status badge
-   *  already says whether the stage is live). Only ever set by `awaitingFact`,
-   *  so no site can hand-write a tile that carries both a value and a
-   *  placeholder. */
+  /** The stage has not produced this value yet — the tile renders the shared
+   *  lifecycle-aware skeleton in the figure's permanent slot. Only ever set by
+   *  `awaitingFact`, so no site can hand-write a tile that carries both a value
+   *  and a placeholder. */
   awaiting?: true
   tone?: 'good' | 'warn' | 'bad'
   /** Render the value in the mono face (paths, filenames, commands). */
@@ -46,9 +45,9 @@ export { plural }
 
 /** Everything a band needs that the flight record does NOT hold. Resolved once
  *  per visible stage by `useStageBandData` and passed in, so `stageFacts` stays
- *  a pure function of its inputs — and so a tile whose source hasn't loaded (or
- *  doesn't exist for this flight) is simply absent rather than showing a zero.
- *  Every field is optional for exactly that reason. */
+ *  a pure function of its inputs. Every field is optional: missing evidence
+ *  leaves its frontend-owned slot as a skeleton rather than becoming zero or
+ *  changing the band's shape. */
 export interface StageBandData {
   /** A source below is being fetched for the FIRST time. Settling is about what
    *  the STAGE produced; this is about what the PANE has read, and the two are
@@ -119,41 +118,27 @@ export function evaluationTaskId(stage: FlightStage, flight: FlightManifest): st
   return str(evidenceOf(stage), 'taskId') ?? flight.links?.evaluationTaskId
 }
 
-/** The tile slots a stage owns, in their permanent order (R83). A slot can name
- *  a semantic alias used by an older or reduced evidence shape; for example,
- *  measured source text occupies the Source docs slot instead of growing a
- *  fourth tile beside it.
+/** The tile slots a stage owns, in their permanent frontend-defined order. Data
+ *  may fill a slot or leave its skeleton in place; it never chooses the shape.
  *
- *  Three stages are deliberately absent. `run`/`heal` render as the Test Run
- *  hero, which owns every number (R80) — a band of placeholders above it would
- *  promise tiles that never arrive. `similarity` is plumbing the rail hides
- *  unless it parks or fails, and its one tile names a matched suite, which most
- *  flights never have: a placeholder would announce a match as if one were
- *  coming. */
-interface FactSlot {
-  label: string
-  aliases?: readonly string[]
-}
+ *  `run` uses the same materializer below but reads its data inside
+ *  `TestRunPanel`, the one owner of the live run store. `heal` is folded into
+ *  that row. `similarity` is plumbing the rail normally hides, and its one fact
+ *  is only meaningful when a match actually exists. */
+const slots = (...labels: string[]): readonly string[] => labels
 
-const slots = (...labels: string[]): readonly FactSlot[] => labels.map((label) => ({ label }))
+const REPORT_FACT_SLOTS = slots('Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven')
+const RUN_HISTORY_FACT_SLOTS = slots('Runs performed', 'Succeeded', 'Avg duration')
 
-const FACT_SLOTS: Partial<Record<FlightStageKey, readonly FactSlot[]>> = {
+const FACT_SLOTS: Partial<Record<FlightStageKey, readonly string[]>> = {
   'scout': slots('Repos scanned', 'Services found', 'Port slots drafted'),
   'scaffold': slots('Services booted', 'Boot time', 'Env files'),
   'env-capture': slots('Env files', 'Boot check'),
-  'docs': [
-    { label: 'Source docs', aliases: ['Source text'] },
-    { label: 'Requirements inferred' },
-    { label: 'Distilled to' },
-  ],
+  'docs': slots('Source docs', 'Requirements inferred', 'Distilled to'),
   'prd-summary': slots('Requirements'),
-  'specs-coverage': [
-    { label: 'Mapped coverage' },
-    { label: 'Requirements', aliases: ['Coverage gaps'] },
-    { label: 'Tests written' },
-  ],
+  'specs-coverage': slots('Mapped coverage', 'Requirements', 'Tests written'),
   'portify': slots('Services injectable', 'Files edited', 'Instances proven'),
-  'evaluation-export': slots('Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven'),
+  'evaluation-export': REPORT_FACT_SLOTS,
 }
 
 /** A tile whose value the stage hasn't produced yet. The empty `value` is never
@@ -162,56 +147,15 @@ export function awaitingFact(label: string): StageFact {
   return { label, value: '', awaiting: true }
 }
 
-/** Fill every canonical slot the stage has not measured (R83). The placeholder
- *  style says whether its value is idle, live, failed, or simply unavailable;
- *  status no longer removes the slot and turns one Flight into a different
- *  layout from another.
- *
- *  The slot list is the WHOLE band: a stage that declares one shows those tiles
- *  in that order in every state. A
- *  running band used to carry extra tiles nothing settled ever shows — the live
- *  agent phase, the authoring pass, portify's attempt and phase — so the band
- *  the user learned to read at rest was a different band from the one in front
- *  of them mid-flight, and the figure they were waiting for kept moving as the
- *  transient tiles came and went. Those live facts all have a home of their own
- *  further down the pane (the passes card, the state line, the Activity panel);
- *  the band's job is the settled shape, with placeholders where figures land. */
-export function withCanonicalFactSlots(
-  stage: FlightStage,
-  known: StageFact[],
-  /** While a pane source is still loading, only exact labels may land. A
-   *  fallback such as Coverage gaps must not occupy the Requirements slot for
-   *  one frame and then get relabelled when the ledger arrives. */
-  pending = false,
-): StageFact[] {
-  const stageSlots = FACT_SLOTS[stage.key]
-  if (!stageSlots) return known
-
-  // Once the Report sources resolve, its band is curated fact-by-fact. A suite
-  // can have run-grounded test outcomes without requirement documents, so
-  // forcing the four requirement-led slots would either hide valid test facts
-  // or fill the row with irrelevant dashes. While the sources are loading we
-  // still hold the canonical shape so the first resolve does not move the pane.
-  if (stage.key === 'evaluation-export' && !pending) {
-    return known
-  }
-
-  const unused = [...known]
-  const settled = stage.status === 'done' || stage.status === 'skipped'
-  const filled = stageSlots.map((slot) => {
-    const index = unused.findIndex((fact) => fact.label === slot.label || (settled && !pending && slot.aliases?.includes(fact.label)))
-    if (index < 0) return awaitingFact(slot.label)
-    return unused.splice(index, 1)[0]!
-  })
-  // A pending source may have left a temporary fallback in `unused`; showing it
-  // beside the slot it must not occupy would still produce the one-frame extra
-  // tile this hold exists to prevent. Once reads settle, preserve every unknown
-  // evidence fact — dropping evidence is worse than a one-off extra tile.
-  return pending || !settled ? filled : [...filled, ...unused]
+/** Fill a frontend-owned shape with measured values. Missing backend evidence
+ *  becomes a placeholder; extra backend fields cannot add or rename tiles. */
+function materializeFactSlots(slotLabels: readonly string[], measured: StageFact[]): StageFact[] {
+  const byLabel = new Map(measured.map((fact) => [fact.label, fact]))
+  return slotLabels.map((label) => byLabel.get(label) ?? awaitingFact(label))
 }
 
-/** The band is the stage's SETTLED tile set in every state — see
- *  `withCanonicalFactSlots`. The live agent's phase (thinking / writing / a tool
+/** The band is the stage's frontend-owned tile set in every lifecycle state.
+ *  The live agent's phase (thinking / writing / a tool
  *  call) is not part of it: it belongs to the state line under the stage title
  *  (`StageStatusLines`) and to the Activity panel, both of which show it with
  *  more detail and without displacing a figure the user is waiting on. */
@@ -223,12 +167,59 @@ export function stageFacts(
    *  their canonical slot unfilled rather than changing the band's width. */
   band: StageBandData = {},
 ): StageFact[] {
-  return withCanonicalFactSlots(stage, measuredStageFacts(stage, flight, companion, band), band.pending)
+  const measured = measuredStageFacts(stage, flight, companion, band)
+  const contract = FACT_SLOTS[stage.key]
+  return contract ? materializeFactSlots(contract, measured) : measured
+}
+
+/** Test run's stable history contract. The panel owns the live run store, but
+ *  the same fact materializer owns its presentation: unfinished runs stay out
+ *  of outcome counts, and a missing average remains a skeleton in its slot. */
+export function runHistoryFacts(runs: RunIndexEntry[]): StageFact[] {
+  const stats = runHistoryStats(runs)
+  if (!stats) return materializeFactSlots(RUN_HISTORY_FACT_SLOTS, [])
+
+  const settled = stats.passed + stats.failed + stats.aborted
+  const outcomeSub = outcomeBreakdown(stats.failed, stats.aborted)
+  const measured: StageFact[] = [
+    {
+      label: 'Runs performed',
+      value: String(stats.total),
+      big: true,
+      ...(stats.active > 0 ? { sub: `${stats.active} still going` } : {}),
+    },
+    {
+      label: 'Succeeded',
+      value: String(stats.passed),
+      big: true,
+      tone: settled === 0 ? undefined : stats.passed === settled ? 'good' : 'warn',
+      ...(outcomeSub ? { sub: outcomeSub } : {}),
+    },
+  ]
+  if (stats.avgDurationMs != null) {
+    measured.push({
+      label: 'Avg duration',
+      value: formatDuration(stats.avgDurationMs),
+      big: true,
+      ...(stats.longestDurationMs != null && stats.longestDurationMs !== stats.avgDurationMs
+        ? { sub: `longest ${formatDuration(stats.longestDurationMs)}` }
+        : {}),
+    })
+  }
+  return materializeFactSlots(RUN_HISTORY_FACT_SLOTS, measured)
+}
+
+function outcomeBreakdown(failed: number, aborted: number): string | undefined {
+  const parts = [
+    ...(failed > 0 ? [`${failed} failed`] : []),
+    ...(aborted > 0 ? [`${aborted} aborted`] : []),
+  ]
+  return parts.length > 0 ? parts.join(' · ') : undefined
 }
 
 /** What the stage has actually measured — evidence, live progress and the band's
- *  outside sources. Absent values drop their tile here; `withCanonicalFactSlots` is
- *  what turns those holes into placeholders. */
+ *  outside sources. Absent values drop their tile here; the contract above turns
+ *  those holes into placeholders. */
 function measuredStageFacts(
   stage: FlightStage,
   flight: FlightManifest,
@@ -375,16 +366,6 @@ function measuredStageFacts(
               ].join(' · '),
             }]
           : []),
-        // No docs listed but bytes measured: nothing above carries the source
-        // weight, so it gets its own tile rather than going unreported.
-        ...(docs.length === 0 && tokens != null && band.docBytes != null
-          ? [{
-              label: 'Source text',
-              value: `≈ ${compactCount(tokens)}`,
-              big: true as const,
-              sub: `tokens · ${formatBytes(band.docBytes)}`,
-            }]
-          : []),
       ]
     }
     case 'prd-summary': {
@@ -407,18 +388,22 @@ function measuredStageFacts(
       // and any non-zero came from a real ledger.
       const everMapped = p?.passes.some((entry) => typeof entry.coveragePct === 'number') ?? false
       const unmeasured = stage.status === 'running' && evPct == null && pct === 0 && !everMapped
-      const gapRows = Array.isArray(ev.gaps) ? (ev.gaps as Array<{ gap?: string }>) : null
-      const gaps = gapRows ? gapRows.length : p?.gapsOpen ?? null
-      // R35: name the gap kinds, not just the count ("2 untested, 1 path-incomplete").
-      const byKind = new Map<string, number>()
-      for (const g of gapRows ?? []) {
-        if (typeof g.gap === 'string') byKind.set(g.gap, (byKind.get(g.gap) ?? 0) + 1)
-      }
-      const breakdown = [...byKind].map(([kind, n]) => `${n} ${kind}`).join(' · ')
       const target = flight.opts.coverageTarget
       const totals = band.ledger?.totals
+      const testsWritten = band.ledger?.tests.length ?? num(ev, 'testsWritten')
+      const testFiles = band.ledger ? specFileCount(band.ledger) : null
+      const testsWrittenFact: StageFact | null = testsWritten == null
+        ? null
+        : {
+            label: 'Tests written',
+            value: String(testsWritten),
+            big: true,
+            ...(totals?.total === 0 && testFiles != null
+              ? { sub: `across ${plural(testFiles, 'test file')}` }
+              : {}),
+          }
       // A probed suite with no requirements has UNDEFINED coverage, not 0%. The
-      // percentage tile (amber, empty bar) would read as a failing suite when the
+      // percentage tile (amber 0%) would read as a failing suite when the
       // truth is there is no PRD to measure its specs against.
       if (stage.evidenceSource === 'workspace' && num(ev, 'total') === 0) {
         // Its own second line, not the label's gloss: "what the documents asked
@@ -427,6 +412,7 @@ function measuredStageFacts(
         return [
           { label: 'Mapped coverage', value: '—', sub: 'no requirements to map' },
           { label: 'Requirements', value: 'None yet', sub: 'no requirement docs for this suite' },
+          ...(testsWrittenFact ? [testsWrittenFact] : []),
         ]
       }
       // An authored test is visible evidence, but its 0% ledger is not a
@@ -435,7 +421,6 @@ function measuredStageFacts(
       // completed result.
       if (stage.evidenceSource === 'workspace' && str(ev, 'mappingState') === 'absent') {
         const requirements = totals?.total ?? num(ev, 'total')
-        const testsWritten = band.ledger?.tests.length ?? num(ev, 'testsWritten')
         return [
           {
             label: 'Mapped coverage',
@@ -445,9 +430,7 @@ function measuredStageFacts(
           ...(requirements != null
             ? [{ label: 'Requirements', value: String(requirements), big: true as const }]
             : []),
-          ...(testsWritten != null
-            ? [{ label: 'Tests written', value: String(testsWritten), big: true as const }]
-            : []),
+          ...(testsWrittenFact ? [testsWrittenFact] : []),
         ]
       }
       // No "Authoring pass N of M" tile: the loop's position is the PASSES card's
@@ -469,35 +452,17 @@ function measuredStageFacts(
         // populations do not fit a 10.5px sub-line, and forcing them through one
         // meant merging the two amber gap kinds into a single bar segment.
         //
-        // While the loop runs there is no ledger yet, so the older gap COUNT
-        // stands in; it answers less, but it is what live progress can support.
+        // A missing ledger leaves this canonical slot as a skeleton. A gap count
+        // is a different metric and must not rename the tile based on whichever
+        // backend shape happens to be available.
         ...(totals && totals.total > 0
           ? [{ label: 'Requirements', value: String(totals.total), big: true as const }]
-          : gaps != null
-            ? [{
-                label: 'Coverage gaps',
-                value: gaps === 0 ? '0' : String(gaps),
-                big: true as const,
-                ...(breakdown && gaps > 0 ? { sub: breakdown } : {}),
-                tone: gaps === 0 ? 'good' as const : 'warn' as const,
-              }]
-            : []),
+          : []),
         // How many tests the suite contains, including tests that are not mapped
         // yet. Their DEPTH is on the
         // composition card; the spec-file count stays as the sub for a suite with
         // no requirements, which has no composition card to fall back to.
-        ...(band.ledger
-          ? [{
-              label: 'Tests written',
-              value: String(band.ledger.tests.length),
-              big: true as const,
-              ...(!totals || totals.total === 0
-                ? specFileCount(band.ledger) != null
-                  ? { sub: `across ${plural(specFileCount(band.ledger)!, 'test file')}` }
-                  : {}
-                : {}),
-            }]
-          : []),
+        ...(testsWrittenFact ? [testsWrittenFact] : []),
       ]
     }
     case 'portify': {
@@ -578,11 +543,12 @@ function measuredStageFacts(
       // exactly the duplication the hero replaced. So: no stage-level facts.
       return []
     case 'evaluation-export': {
-      // The Report keeps four distinct evidence axes, but each tile earns its
-      // place independently. Requirements and proof need a requirement model;
-      // test depth only needs authored tests; outcomes need recorded executions.
-      // Export identity and archive metadata stay on the deliverable card below
-      // instead of replacing a missing evidence axis in this band.
+      // The Report measures four distinct evidence axes. This function emits
+      // only what was measured; the Report contract keeps every frontend slot
+      // mounted around it. Requirements and proof need a requirement
+      // model; test depth only needs authored tests; outcomes need recorded
+      // executions. Export identity and archive metadata stay on the
+      // deliverable card instead of replacing a missing evidence axis here.
       const led = ledgerEvidence(band.ledger)
       const reportRunId = evalTask?.runId ?? str(ev, 'runId')
       const bandFacts: StageFact[] = [
@@ -802,13 +768,11 @@ export const FACT_HELP: Record<string, string> = {
   'Boot check': 'Did each service start and answer? One shut down afterwards still counts as fine.',
   // Requirements
   'Source docs': 'The files Canary read — briefs, specs, notes. The requirements come only from these.',
-  'Source text': 'How much text those files hold. The token figure is a rough estimate, not a count.',
   'Requirements inferred': 'One thing the app must do, small enough to test. Everything later is scored against these.',
   'Requirements': 'One thing the app must do, small enough to test. Everything later is scored against these.',
   'Distilled to': 'The short summary agents read instead of the full files. Tokens are a rough estimate.',
   // Test authoring
   'Mapped coverage': 'Counted from requirement labels in the test files. Nothing was run, so every test could still be failing.',
-  'Coverage gaps': 'Requirements with no test yet, or only part of one. The next pass goes after these.',
   'Tests written': 'All test cases found in the suite’s spec files. They can exist before coverage mapping links them to requirements.',
   // Parallel readiness
   'Parallel': 'Can two runs of this suite start at once without fighting over a port? Checked once.',
@@ -819,7 +783,6 @@ export const FACT_HELP: Record<string, string> = {
   'Runs performed': 'Every run Canary kept for this suite, not just this flight’s.',
   'Succeeded': 'Runs where every test passed. A stopped run counts as neither a pass nor a fail.',
   'Avg duration': 'Average time a finished run took, startup included. Runs still going are left out.',
-  'Repair cycles': 'One cycle: tests fail, an agent fixes the app, the tests run again. It never edits the test.',
   // Evaluation report
   'Requirements with tests': 'Counted from labels in the test files. Nothing was run to check they work.',
   // All four tiers defined where the words are shown — the same definitions the
@@ -857,7 +820,6 @@ export const FACT_GLOSS: Record<string, string> = {
   'Test depth': 'how much each test checks',
   'Requirements': 'what the documents asked for',
   'Mapped coverage': 'linked to a test — nothing has run yet',
-  'Coverage gaps': 'no test covers these yet',
   'Tests written': 'found in the suite',
   'Services injectable': 'each gets its port from the run',
   'Files edited': 'fixed ports swapped out',
@@ -868,7 +830,6 @@ export const FACT_GLOSS: Record<string, string> = {
   'Runs performed': 'this suite’s whole history',
   'Succeeded': 'every test passed',
   'Avg duration': 'finished runs only',
-  'Repair cycles': 'fail, fix the app, run again',
 }
 
 export const FACT_TONE: Record<NonNullable<StageFact['tone']>, string> = {
@@ -877,16 +838,9 @@ export const FACT_TONE: Record<NonNullable<StageFact['tone']>, string> = {
   bad: 'var(--danger)',
 }
 
-/** The stand-in for a figure the stage hasn't produced (R83). Sized to the
- *  22px metric line it replaces, so the tile keeps its height and the value
- *  lands in place instead of pushing the card down when the stage settles.
- *
- *  Always the dash a reader already knows as "no value" — never a skeleton bar
- *  or a sweep. A bar where a figure goes reads as a measurement, and a live
- *  pane already announces itself through its status badge, so animating every
- *  tile adds motion without information. Hue says how the slot emptied:
- *  muted while it is merely held open, `--danger` once the step stopped short
- *  of filling it. */
+/** The stand-in for a figure the stage hasn't produced. It reuses the shared
+ *  skeleton vocabulary, so idle, live, failed and unavailable all keep exactly
+ *  the same geometry while the fill communicates why evidence is missing. */
 export function FactPlaceholder({ awaiting }: { awaiting: AwaitingState }) {
   const label = awaiting === 'failed'
     ? 'not measured — the step failed'
@@ -904,12 +858,7 @@ export function FactPlaceholder({ awaiting }: { awaiting: AwaitingState }) {
       role="img"
       aria-label={label}
     >
-      <span
-        className="text-[22px] font-normal leading-none"
-        style={{ color: awaiting === 'failed' ? 'var(--danger)' : 'var(--text-muted)' }}
-      >
-        —
-      </span>
+      <SkeletonBar awaiting={awaiting} width="42%" height={8} />
     </div>
   )
 }
@@ -937,10 +886,9 @@ function FactHelpMark() {
 }
 
 /** One fact as a tile, in three fixed lines: label (+ `?`), value, second line.
- *  Numeric/scalar facts (`big`) render a large metric value with an optional
- *  stepper/bar; text, path, and sentence values stay in the quiet body size and
- *  truncate inside the tile — so a value like a file path or "Safe — services
- *  boot side by side" reads on the same grid as "0%".
+ *  Numeric/scalar facts (`big`) render as a bare large metric — never with an
+ *  underbar. Text, path, and sentence values stay in the quiet body size and
+ *  truncate inside the tile, so both kinds keep the same grid geometry.
  *
  *  BOTH explanatory lines are resolved by LABEL, not passed in. The second line
  *  prefers the measured `sub` a stage produced and falls back to the static
