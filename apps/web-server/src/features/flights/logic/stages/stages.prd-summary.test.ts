@@ -110,6 +110,10 @@ function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightMa
       manifest: () => state.m,
       flightDir: path.join(logsDir, 'flights', state.m.flightId),
       setProgress: (progress) => { progressLog.push(progress) },
+      addAgentSession: (session) => {
+        const stage = state.m.stages.find((candidate) => candidate.key === 'prd-summary')
+        setStage('prd-summary', { agentSessions: [...(stage?.agentSessions ?? []), session] })
+      },
       patchFlight: (patch) => {
         state.m = {
           ...state.m,
@@ -237,6 +241,7 @@ describe('prd-summary stage', () => {
   it('pins the agent-session ref via onAgentSession during regeneration', async () => {
     fs.mkdirSync(path.join(logsDir, 'flights', 'fl-test', 'prd-summary'), { recursive: true })
     const d = deps({
+      now: () => '2026-08-31T07:12:16.374Z',
       coverage: {
         regenerate: (async (args: {
           featuresDir: string
@@ -255,5 +260,13 @@ describe('prd-summary stage', () => {
     const refPath = path.join(logsDir, 'flights', current().flightId, 'prd-summary', 'agent-session.json')
     const ref = JSON.parse(fs.readFileSync(refPath, 'utf-8'))
     expect(ref.sessions.claude.sessionId).toBe('sess-123')
+    expect(current().stages.find((stage) => stage.key === 'prd-summary')?.agentSessions).toEqual([{
+      sidecar: 'prd-summary-session-001',
+      label: 'Pass 1 · Requirements summary',
+      startedAt: '2026-08-31T07:12:16.374Z',
+      pass: 1,
+    }])
+    const historyRef = JSON.parse(fs.readFileSync(path.join(logsDir, 'flights', current().flightId, 'prd-summary-session-001', 'agent-session.json'), 'utf-8'))
+    expect(historyRef.sessions.claude.sessionId).toBe('sess-123')
   })
 })

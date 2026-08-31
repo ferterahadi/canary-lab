@@ -324,6 +324,66 @@ describe('trailer model (R14–R18)', () => {
     expect(activity?.getAttribute('data-session-labels')).toBe('Pass 1 · Authoring,Pass 1 · Mapping')
   })
 
+  it('shows Doc collection and Requirements summary as one ordered Activity history', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      currentStage: 'prd-summary',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'docs' ? ('done' as const) : key === 'prd-summary' ? ('running' as const) : ('pending' as const),
+        ...(key === 'docs'
+          ? {
+              agentSessions: [{
+                sidecar: 'docs-session-001',
+                label: 'Pass 1 · Doc collection',
+                startedAt: '2026-08-31T07:11:51.179Z',
+                pass: 1,
+              }],
+            }
+          : key === 'prd-summary'
+            ? {
+                agentSessions: [{
+                  sidecar: 'prd-summary-session-001',
+                  label: 'Pass 1 · Requirements summary',
+                  startedAt: '2026-08-31T07:12:16.374Z',
+                  pass: 1,
+                }],
+              }
+            : {}),
+      })),
+    }))
+    await render('fl_1')
+    const activity = container.querySelector('[data-testid="agent-session-view"]')
+    expect(activity?.getAttribute('data-session-stages')).toBe('docs-session-001:history,prd-summary-session-001:live')
+    expect(activity?.getAttribute('data-session-labels')).toBe('Pass 1 · Doc collection,Pass 1 · Requirements summary')
+  })
+
+  it('replays both Requirement sidecars for Flights recorded before session history existed', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      currentStage: 'specs-coverage',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'docs' || key === 'prd-summary' ? ('done' as const) : key === 'specs-coverage' ? ('running' as const) : ('pending' as const),
+        ...(key === 'docs'
+          ? {
+              startedAt: '2026-08-31T07:11:51.172Z',
+              log: '[docs@2026-08-31T07:11:51.179Z] agent attempt (collect repo docs) — reading the repos guided by the intent…\n',
+              evidence: { source: 'agent-repo-docs', docs: ['flight-app-prd.md'] },
+            }
+          : key === 'prd-summary'
+            ? {
+                startedAt: '2026-08-31T07:12:16.374Z',
+                evidence: { requirementCount: 12 },
+              }
+            : {}),
+      })),
+    }))
+    await render('fl_1', { stage: 'docs', onSelectStage: vi.fn() })
+    await act(async () => { toggleActivity(container) })
+    const activity = container.querySelector('[data-testid="agent-session-view"]')
+    expect(activity?.getAttribute('data-session-stages')).toBe('docs:history,prd-summary:history')
+    expect(activity?.getAttribute('data-session-labels')).toBe('Pass 1 · Doc collection,Pass 1 · Requirements summary')
+  })
+
   it('R27: a settled loop keeps the pass history and the pass count fact, without a live row', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'done',
@@ -856,10 +916,9 @@ describe('trailer model (R14–R18)', () => {
     mocks.taskById.mockReturnValue(null)
     await openExportStage({ taskId: 'task-7', archiveBase: 'canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc' })
     expect(container.querySelector('[data-testid^="download-report-"]')).toBeNull()
-    // The recorded name still reads in the band — the flight's own record of
-    // what it built, even with the task gone.
-    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent)
-      .toContain('canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc.zip')
+    // Export identity is deliverable metadata, not a substitute for missing
+    // verification evidence in At a glance.
+    expect(container.querySelector('[data-testid="stage-facts"]')).toBeNull()
   })
 
   it('surfaces a failed download on the control instead of failing silently', async () => {
@@ -1116,12 +1175,12 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     await open('run')
     expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('Latest run')
     expect(container.querySelector('[data-testid="test-run-hero-skeleton"]')).not.toBeNull()
-    // The history band announces the two counts a first run will produce —
-    // never an average, which one run cannot have.
+    // The history band announces the three core metrics a completed first run
+    // will populate, so its resting and settled shapes match.
     const facts = container.querySelector('[data-testid="stage-facts"]')
     expect(facts?.textContent).toContain('Runs performed')
     expect(facts?.textContent).toContain('Succeeded')
-    expect(facts?.textContent).not.toContain('Avg duration')
+    expect(facts?.textContent).toContain('Avg duration')
     // No run id to fetch: the detail call must not fire on an empty run.
     expect(mocks.getRunDetail).not.toHaveBeenCalled()
   })

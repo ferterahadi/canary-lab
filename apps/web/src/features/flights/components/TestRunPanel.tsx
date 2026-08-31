@@ -227,9 +227,13 @@ function runHistoryFacts(runs: RunIndexEntry[], awaiting?: AwaitingState): Stage
   const stats = runHistoryStats(runs)
   // A suite that has never run has no history to report — but the stage is
   // about to produce one, so the band announces its shape rather than being
-  // absent for the whole run. `Avg duration` is deliberately not promised: a
-  // single run reports its own duration, not an average.
-  if (!stats) return awaiting ? [awaitingFact('Runs performed'), awaitingFact('Succeeded')] : []
+  // absent for the whole run. The three core history metrics keep their places
+  // before execution; the first completed run can populate all three.
+  if (!stats) {
+    return awaiting
+      ? [awaitingFact('Runs performed'), awaitingFact('Succeeded'), awaitingFact('Avg duration')]
+      : []
+  }
   const settled = stats.passed + stats.failed + stats.aborted
   return [
     {
@@ -242,18 +246,6 @@ function runHistoryFacts(runs: RunIndexEntry[], awaiting?: AwaitingState): Stage
       label: 'Succeeded',
       value: `${stats.passed}`,
       big: true,
-      // All three outcomes in one bar. A single passed/settled fraction would
-      // render a failed run and an aborted one as the same empty space, and an
-      // abort is a run that never reached a verdict — not a failing one.
-      ...(settled > 0
-        ? {
-            segments: [
-              { value: stats.passed, tone: 'good' as const },
-              { value: stats.failed, tone: 'bad' as const },
-              { value: stats.aborted, tone: 'muted' as const },
-            ],
-          }
-        : {}),
       tone: settled === 0 ? undefined : stats.passed === settled ? 'good' : 'warn',
       ...(outcomeBreakdown(stats.failed, stats.aborted) ? { sub: outcomeBreakdown(stats.failed, stats.aborted)! } : {}),
     },

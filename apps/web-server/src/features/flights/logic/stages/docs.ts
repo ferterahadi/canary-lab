@@ -12,6 +12,7 @@ import { defaultSpawnAgent, featureDirFor, stageFeedback, stageModels, type Flig
 import { agentSpawnJob } from './stage-jobs'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { agentProgressSink } from './agent-progress'
+import { recordStageAgentSession } from './stage-agent-sessions'
 import { CHECKPOINT_OPTIONS } from '../types'
 
 // Populate features/<f>/docs/ — the prd-source checkpoint is a two-path FORK:
@@ -385,6 +386,18 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       signal: ctx.signal,
       agent: m.opts.agent,
       models: stageModels(m, 'docs'),
+      onAgentSession: (session) => {
+        recordStageAgentSession({
+          ctx,
+          stage: 'docs',
+          cwd: deps.projectRoot,
+          session,
+          describe: (sequence) => ({
+            label: `Pass ${sequence} · Doc collection`,
+            pass: sequence,
+          }),
+        })
+      },
     })
     return settleCollected(ctx, mode, plan, text)
   }

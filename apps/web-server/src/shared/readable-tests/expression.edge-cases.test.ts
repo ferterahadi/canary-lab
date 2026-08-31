@@ -155,6 +155,7 @@ describe('readable expression edge cases', () => {
       ['Object.keys(account)', 'the keys of account'],
       ['Object.values(account)', 'the values of account'],
       ['Object.entries(account)', 'the entries of account'],
+      ['Array.isArray(items)', 'items is a list'],
       ['Array.isArray(payload.items)', 'payload.items is a list'],
       ['Array.isArray(res.data.data)', 'res.data.data is a list'],
       ['encodeURI(target)', 'target encoded for a URL'],

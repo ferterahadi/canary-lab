@@ -16,6 +16,7 @@ import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type E
 import { ACTIVITY_STAGE, type ExternalWorkTrace, type FeatureActivity, type StageExternalHistory } from '../state/feature-activity'
 import { Chip } from '@/shared/ui/StatusChip'
 import { flightRowModelChips } from '@shared/flights/stage-models'
+import { flightStageLabel } from '@shared/flights/stage-labels'
 import { ModelPlanPopover } from './ModelPlanPopover'
 import { SkeletonPanel, awaitingFor } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
@@ -136,6 +137,79 @@ function stageExternalHistory(
     .flatMap((entry) => entry.current ? [entry.current] : [])
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
   return { traces, ...(current ? { current } : {}) }
+}
+
+/** The folded Requirements row owns two sequential agent stages. New records
+ *  carry immutable session refs; the legacy fallback follows the two stable
+ *  sidecars so Flights recorded before that provenance was added still replay
+ *  both transcripts. */
+function requirementSessionSources({
+  flightId,
+  docs,
+  summary,
+  externalOwnsCurrent,
+  allowLegacy,
+}: {
+  flightId: string
+  docs: FlightStage
+  summary: FlightStage | null
+  externalOwnsCurrent: boolean
+  allowLegacy: boolean
+}): AgentSessionSegmentSource[] {
+  if (docs.key !== 'docs' || summary?.key !== 'prd-summary') return []
+
+  const recorded = (owner: FlightStage): AgentSessionSegmentSource[] =>
+    (owner.agentSessions ?? []).map((session, index, sessions) => ({
+      label: session.label,
+      startedAt: session.startedAt,
+      source: {
+        kind: 'flight',
+        flightId,
+        stage: session.sidecar,
+        live: owner.status === 'running'
+          && !externalOwnsCurrent
+          && index === sessions.length - 1,
+      },
+    }))
+
+  const docsRecorded = recorded(docs)
+  const summaryRecorded = recorded(summary)
+  const docsAgentLine = /^\[docs(?:@([^\]]+))?\] agent attempt \([^)]+\) — .*…$/m.exec(docs.log ?? '')
+  const docsSources = docsRecorded.length > 0
+    ? docsRecorded
+    : allowLegacy && docsAgentLine
+      ? [{
+          label: `Pass 1 · ${flightStageLabel('docs')}`,
+          startedAt: docsAgentLine[1] ?? docs.startedAt,
+          source: {
+            kind: 'flight' as const,
+            flightId,
+            stage: 'docs',
+            live: docs.status === 'running' && !externalOwnsCurrent,
+          },
+        }]
+      : []
+  const summaryEvidence = asRecord(summary.evidence)
+  const legacySummaryRan = allowLegacy
+    && (summary.status === 'running'
+      || summary.status === 'failed'
+      || (summary.status === 'done' && summaryEvidence?.reused !== true))
+  const pass = Math.max(1, docs.agentSessions?.length ?? 0)
+  const summarySources = summaryRecorded.length > 0
+    ? summaryRecorded
+    : legacySummaryRan
+      ? [{
+          label: `Pass ${pass} · ${flightStageLabel('prd-summary')}`,
+          startedAt: summary.startedAt,
+          source: {
+            kind: 'flight' as const,
+            flightId,
+            stage: 'prd-summary',
+            live: summary.status === 'running' && !externalOwnsCurrent,
+          },
+        }]
+      : []
+  return [...docsSources, ...summarySources]
 }
 
 export function StageDetail({
@@ -370,7 +444,7 @@ export function StageDetail({
   // External producers have no Canary-owned current transcript. Historical
   // internal sessions stay on the rail, but none of them may present as live.
   const externalOwnsCurrent = externalTrace !== undefined || liveExternalFallback !== undefined
-  const sessionSources: AgentSessionSegmentSource[] = (stage.agentSessions ?? []).map((session, index, sessions) => ({
+  const recordedSessionSources: AgentSessionSegmentSource[] = (stage.agentSessions ?? []).map((session, index, sessions) => ({
     label: session.label,
     startedAt: session.startedAt,
     source: {
@@ -384,6 +458,20 @@ export function StageDetail({
         && loopProgress?.pass === session.pass,
     },
   }))
+  const foldedRequirementSessions = requirementSessionSources({
+    flightId,
+    docs: stage,
+    summary: companion,
+    externalOwnsCurrent,
+    // The legacy fallback guesses from stage evidence because old manifests
+    // did not persist session refs. Only internal Flights can safely make that
+    // inference; a settled external Flight no longer satisfies
+    // isExternallyDriven(), but still has no Canary-owned transcript.
+    allowLegacy: flight.opts.stageProducer !== 'external',
+  })
+  const sessionSources = foldedRequirementSessions.length > 0
+    ? foldedRequirementSessions
+    : recordedSessionSources
   // Suppress the legacy local source entirely so its generic live tail cannot
   // add a second spinner under the external-session row or replay an older
   // internal session as current.

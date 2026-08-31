@@ -18,6 +18,7 @@ import { decodeSubmission, defaultSpawnAgent, featureDirFor, stageModelPlan, sta
 import { agentSpawnJob } from './stage-jobs'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { agentProgressSink } from './agent-progress'
+import { recordStageAgentSession } from './stage-agent-sessions'
 import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../types'
 
 // The specs↔coverage loop: the agent edits <featureDir>/e2e/*.spec.ts in place
@@ -289,25 +290,16 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     session: { agent: 'claude' | 'codex'; sessionId: string },
     spawnedAt: string,
   ): void => {
-    const stage = ctx.manifest().stages.find((candidate) => candidate.key === 'specs-coverage')
-    const sequence = (stage?.agentSessions?.length ?? 0) + 1
-    const sidecar = `specs-coverage-session-${String(sequence).padStart(3, '0')}`
-    const sessionDir = path.join(ctx.flightDir, sidecar)
-    writeWorkflowAgentRef(sessionDir, {
-      agent: session.agent,
+    recordStageAgentSession({
+      ctx,
+      stage: 'specs-coverage',
       cwd: deps.projectRoot,
-      spawnedAt,
-      sessionId: session.sessionId,
-    })
-    // writeWorkflowAgentRef is deliberately best-effort. Do not persist a
-    // pointer the viewer can never resolve when that write failed.
-    if (!fs.existsSync(path.join(sessionDir, 'agent-session.json'))) return
-    ctx.addAgentSession({
-      sidecar,
-      label: `Pass ${state.iteration} · ${phase === 'authoring' ? 'Authoring' : 'Mapping'}`,
-      startedAt: spawnedAt,
-      phase,
-      pass: state.iteration,
+      session: { ...session, spawnedAt },
+      describe: () => ({
+        label: `Pass ${state.iteration} · ${phase === 'authoring' ? 'Authoring' : 'Mapping'}`,
+        phase,
+        pass: state.iteration,
+      }),
     })
   }
 

@@ -11,7 +11,7 @@ import {
   requestMethodForCall,
 } from './actions'
 import { renderAssertionStatement, renderGenericAssertionStatement } from './assertions'
-import { expressionPath, quoteReadableText, renderExpression } from './expression'
+import { exactPropertyAccessPath, expressionPath, quoteReadableText, renderExpression } from './expression'
 import {
   assignedNameFromStatement,
   humanizeIdentifier,
@@ -604,7 +604,7 @@ function exactVariableNames(node: ts.Node): string[] {
     // deliberately preserves it (`res.data.data`). Individual identifiers are
     // still collected below for the humanized sentences used elsewhere.
     if (ts.isPropertyAccessExpression(child)) {
-      const path = expressionPath(child)
+      const path = exactPropertyAccessPath(child)
       if (path) names.add(path)
     }
     if (ts.isIdentifier(child) && !isIdentifierName(child)) names.add(child.text)

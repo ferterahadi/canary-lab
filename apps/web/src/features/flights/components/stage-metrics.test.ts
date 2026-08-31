@@ -310,7 +310,7 @@ describe('ledgerEvidence', () => {
       ],
     }))
     expect(evidence?.strength).toEqual({ strong: 2, solid: 1, basic: 0, shallow: 1, ungraded: 1 })
-    expect(evidence?.testCount).toBe(5)
+    expect(evidence?.outcomes.total).toBe(5)
   })
 
   it('carries the run the proven axis was joined against, so a caller can tell it is the run it means', () => {
@@ -319,7 +319,7 @@ describe('ledgerEvidence', () => {
     expect(ledgerEvidence(ledger())?.provenRunId).toBeNull()
   })
 
-  it('splits the MAPPED specs by what the joined run did with them, and ignores the unmapped ones', () => {
+  it('splits every test by its recorded outcome, independently of requirement mapping', () => {
     const evidence = ledgerEvidence(ledger({
       tests: [
         { name: 't1', requirements: ['R1'], pathTypes: [], lastRun: { runId: 'run-9', passed: true } },
@@ -327,14 +327,12 @@ describe('ledgerEvidence', () => {
         { name: 't3', requirements: ['R2'], pathTypes: [], lastRun: { runId: 'run-9', passed: false } },
         // Ran nowhere: new, renamed or never reached. Not a failure.
         { name: 't4', requirements: ['R2'], pathTypes: [] },
-        // Mapped to nothing — it may pass, but it proves no requirement, so it
-        // must not pad the denominator the proven axis is read against.
+        // Mapped to nothing — it proves no requirement, but its run result is
+        // still part of the suite outcome.
         { name: 't5', requirements: [], pathTypes: [], lastRun: { runId: 'run-9', passed: true } },
       ],
     }))
-    expect(evidence?.specs).toEqual({ mapped: 4, passed: 2, passedOnRetry: 0, failed: 1, neverRan: 1 })
-    // The strength buckets still see every spec — depth is not a proof question.
-    expect(evidence?.testCount).toBe(5)
+    expect(evidence?.outcomes).toEqual({ total: 5, passed: 3, passedOnRetry: 0, failed: 1, neverRan: 1 })
   })
 
   it('counts a retried pass as a pass AND as a flake, and carries the merged-execution flag', () => {
@@ -345,16 +343,28 @@ describe('ledgerEvidence', () => {
         { name: 't2', requirements: ['R1'], pathTypes: [], lastRun: { runId: 'run-9', passed: true, retried: true } },
       ],
     }))
-    expect(evidence?.specs).toEqual({ mapped: 2, passed: 2, passedOnRetry: 1, failed: 0, neverRan: 0 })
+    expect(evidence?.outcomes).toEqual({ total: 2, passed: 2, passedOnRetry: 1, failed: 0, neverRan: 0 })
     expect(evidence?.spansExecutions).toBe(true)
     // Absent on the ledger → a single clean execution, not unknown.
     expect(ledgerEvidence(ledger())?.spansExecutions).toBe(false)
   })
 
-  it('returns null for a feature with no requirements at all', () => {
-    expect(ledgerEvidence(ledger({ totals: {
-      total: 0, covered: 0, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0,
-    } }))).toBeNull()
+  it('keeps test depth and outcomes when a feature has no requirements at all', () => {
+    const evidence = ledgerEvidence(ledger({
+      totals: {
+        total: 0, covered: 0, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0,
+      },
+      tests: [
+        { name: 't1', requirements: [], pathTypes: [], strength: 'solid', lastRun: { runId: 'run-9', passed: true } },
+        { name: 't2', requirements: [], pathTypes: [] },
+      ],
+    }))
+    expect(evidence).toMatchObject({
+      total: 0,
+      covered: 0,
+      strength: { strong: 0, solid: 1, basic: 0, shallow: 0, ungraded: 1 },
+      outcomes: { total: 2, passed: 1, passedOnRetry: 0, failed: 0, neverRan: 1 },
+    })
   })
 
   it('returns null when there is no ledger', () => {

@@ -10,6 +10,7 @@ import { agentSpawnJob } from './stage-jobs'
 import { decodeSubmission, featureDirFor, stageModelPlan, type FlightStageDeps } from './context'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { agentProgressSink } from './agent-progress'
+import { recordStageAgentSession } from './stage-agent-sessions'
 
 // Distill features/<f>/docs/ into the requirement summary through the
 // existing agentic PRD engine (stable requirement ids preserved by the engine
@@ -79,11 +80,24 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
       models: stageModelPlan(m, 'prd'),
       onOutput: agentProgressSink(ctx),
       onAgentSession: (session) => {
+        const spawnedAt = (deps.now ?? (() => new Date().toISOString()))()
         writeWorkflowAgentRef(stageDir, {
           agent: session.agent,
           cwd: deps.projectRoot,
-          spawnedAt: new Date().toISOString(),
+          spawnedAt,
           sessionId: session.sessionId,
+        })
+        const docsPasses = m.stages.find((stage) => stage.key === 'docs')?.agentSessions?.length ?? 0
+        const pass = Math.max(1, docsPasses)
+        recordStageAgentSession({
+          ctx,
+          stage: 'prd-summary',
+          cwd: deps.projectRoot,
+          session: { ...session, spawnedAt },
+          describe: () => ({
+            label: `Pass ${pass} · Requirements summary`,
+            pass,
+          }),
         })
       },
     })

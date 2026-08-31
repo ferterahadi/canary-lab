@@ -272,7 +272,7 @@ export interface FlightStageAgentSession {
   startedAt: string
   /** Specs-and-coverage provenance. Other multi-session stages may omit it. */
   phase?: 'authoring' | 'mapping'
-  /** One-based specs-and-coverage pass. */
+  /** One-based pass within a stage's ordered Activity history. */
   pass?: number
 }
 

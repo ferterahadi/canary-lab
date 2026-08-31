@@ -74,13 +74,13 @@ describe('FactPlaceholder — always a dash, never a bar or a sweep', () => {
     }
   })
 
-  it('never reserves a meter slot — the row grows once when real segments land', () => {
-    // The invisible spacer that used to hold the segments meter's height pushed
-    // that one tile's gloss 11px below its neighbours' for the whole wait; the
-    // one-time row growth on settle is the lesser cost.
-    const metered = renderWith(awaitingFact('Test depth'), 'live')
-    expect(metered.querySelector('[data-testid="fact-meter-track"]')).toBeNull()
+  it('renders neither pending nor settled numeric tiles with an underbar', () => {
+    const pending = renderWith(awaitingFact('Test depth'), 'live')
+    expect(pending.querySelector('.h-\\[3px\\]')).toBeNull()
     expect(renderWith(fact, 'live').querySelector('[data-testid="fact-meter-track"]')).toBeNull()
+    const settled = render({ label: 'Test depth', value: '23 solid', big: true })
+    expect(settled.querySelector('.h-\\[3px\\]')).toBeNull()
+    expect(settled.querySelector('[style*="background"]')).toBeNull()
   })
 })
 
@@ -143,10 +143,10 @@ describe('FactTile second line', () => {
     expect(subOf(tile)).toBe('not recorded')
   })
 
-  it('leaves an identity tile two lines — a gloss under a filename is noise', () => {
-    const tile = render({ label: 'Archive', value: 'canary-shop-8vfg.zip', mono: true })
-    expect(FACT_GLOSS['Archive']).toBeUndefined()
+  it('leaves a sentence-valued tile at two lines — repeating the phrase is noise', () => {
+    const tile = render({ label: 'Parallel', value: 'ready' })
+    expect(FACT_GLOSS['Parallel']).toBeUndefined()
     expect(subOf(tile)).toBeUndefined()
-    expect(tile.textContent).toContain('canary-shop-8vfg.zip')
+    expect(tile.textContent).toContain('ready')
   })
 })

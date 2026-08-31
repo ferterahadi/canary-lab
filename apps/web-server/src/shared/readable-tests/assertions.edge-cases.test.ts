@@ -34,6 +34,23 @@ describe('Playwright assertion edge cases', () => {
     }
   })
 
+  it('keeps direct property assertion subjects source-shaped', () => {
+    const cases: Array<[string, string]> = [
+      [
+        "expect(payload.contacts).toContain('ops@example.com')",
+        'Check that payload.contacts contains “ops@example.com”',
+      ],
+      [
+        'expect(payload.redirect_uris).toHaveLength(1)',
+        'Check that payload.redirect_uris has length 1',
+      ],
+    ]
+
+    for (const [source, text] of cases) {
+      expect(assertionFrom(source)).toEqual({ text, fidelity: 'derived', role: 'check' })
+    }
+  })
+
   it('names page and non-page URL and title subjects without losing the receiver', () => {
     const cases: Array<[string, string]> = [
       ["expect(response).not.toHaveURL('/orders')", 'Check that response URL does not equal “/orders”'],
@@ -80,12 +97,12 @@ describe('Playwright assertion edge cases', () => {
       ['expect(list).not.toHaveLength(3)', 'Check that list does not have length 3'],
       ['expect(rows).toContainEqual(row)', 'Check that rows contains an item equal to row'],
       ['expect(rows).not.toContainEqual(row)', 'Check that rows does not contain an item equal to row'],
-      ['expect(res.data).toMatchObject({ id: 1 })', 'Check that response data includes an object with identifier set to 1'],
-      ['expect(res.data).not.toMatchObject({ id: 1 })', 'Check that response data does not include an object with identifier set to 1'],
+      ['expect(res.data).toMatchObject({ id: 1 })', 'Check that res.data includes an object with identifier set to 1'],
+      ['expect(res.data).not.toMatchObject({ id: 1 })', 'Check that res.data does not include an object with identifier set to 1'],
       // The class argument keeps its authored casing — `Date`, never "date".
-      ['expect(row.deliveredAt).toBeInstanceOf(Date)', 'Check that row delivered at is an instance of Date'],
+      ['expect(row.deliveredAt).toBeInstanceOf(Date)', 'Check that row.deliveredAt is an instance of Date'],
       ['expect(value).not.toBeInstanceOf(Date)', 'Check that value is not an instance of Date'],
-      ['expect(value).toBeInstanceOf(errors.TimeoutError)', 'Check that value is an instance of errors timeout error'],
+      ['expect(value).toBeInstanceOf(errors.TimeoutError)', 'Check that value is an instance of errors.TimeoutError'],
     ]
 
     for (const [source, text] of cases) {
@@ -234,7 +251,7 @@ describe('Playwright assertion edge cases', () => {
       role: 'check',
     })
     expect(assertionFrom('expect(allSms.length, JSON.stringify(allSms.map((sms) => sms.body))).toBe(1)')).toEqual({
-      text: 'Check that all sms length equals 1',
+      text: 'Check that allSms.length equals 1',
       fidelity: 'derived',
       role: 'check',
     })
