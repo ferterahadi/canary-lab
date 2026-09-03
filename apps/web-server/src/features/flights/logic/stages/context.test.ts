@@ -57,12 +57,12 @@ describe('flight stage context helpers', () => {
 
   it('keeps the stage model choice with its conducting agent and does not leak feedback', () => {
     const model = { model: 'gpt-5.6-sol', effort: 'high' } as const
-    const manifest = { opts: { agent: 'codex' as const, models: { authoring: model } }, feedback: { stage: 'specs-coverage', note: 'cover the retry path' } }
+    const manifest = { opts: { agent: 'codex' as const, models: { gen: model } }, feedback: { stage: 'specs-coverage', note: 'cover the retry path' } }
 
-    expect(stageModels(manifest, 'authoring')).toEqual(model)
-    expect(stageModels(manifest, 'coverage')).toBeUndefined()
-    expect(stageModelPlan(manifest, 'authoring')).toEqual({ codex: model })
-    expect(stageModelPlan({ opts: { models: { authoring: model } } }, 'authoring')).toEqual({ claude: model })
+    expect(stageModels(manifest, 'gen')).toEqual(model)
+    expect(stageModels(manifest, 'mapping')).toBeUndefined()
+    expect(stageModelPlan(manifest, 'gen')).toEqual({ codex: model })
+    expect(stageModelPlan({ opts: { models: { gen: model } } }, 'gen')).toEqual({ claude: model })
     expect(stageFeedback(manifest, 'specs-coverage')).toBe('cover the retry path')
     expect(stageFeedback(manifest, 'docs')).toBeUndefined()
   })

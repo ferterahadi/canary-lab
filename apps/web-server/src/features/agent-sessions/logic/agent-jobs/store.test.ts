@@ -42,7 +42,7 @@ describe('AgentJobRunStore', () => {
   it('keeps the public index row free of the shared store\'s bookkeeping mirrors', () => {
     const store = new AgentJobRunStore(logsDir)
     store.save(job())
-    const row = store.list()[0] as Record<string, unknown>
+    const row = store.list()[0] as unknown as Record<string, unknown>
     expect(row).not.toHaveProperty('id')
     expect(row).not.toHaveProperty('createdAt')
   })
@@ -62,7 +62,7 @@ describe('AgentJobRunStore', () => {
     // rows must not carry empty keys for fields they do not have.
     const store = new AgentJobRunStore(logsDir)
     store.save({ jobId: 'standalone-1', agent: 'codex', startedAt: '2026-01-01T00:00:00.000Z', status: 'running' })
-    const row = store.list()[0] as Record<string, unknown>
+    const row = store.list()[0] as unknown as Record<string, unknown>
     expect(row).toEqual({ jobId: 'standalone-1', status: 'running', startedAt: '2026-01-01T00:00:00.000Z' })
     expect(store.forFlight('fl-1')).toEqual([])
   })

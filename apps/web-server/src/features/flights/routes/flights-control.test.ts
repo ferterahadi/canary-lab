@@ -73,6 +73,7 @@ function throwingStore(thrown: unknown): FlightStore {
     renameFeature(): number {
       return 0
     },
+    logsDir: tmpDir,
     flightDir(flightId: string): string {
       return path.join(tmpDir, 'flights', flightId)
     },
@@ -115,6 +116,7 @@ describe('flights routes', () => {
   it('releases a checkpoint via respond and refuses one when nothing waits', async () => {
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
       onCheckpointResponse: async () => ({ kind: 'done' as const }),
     }
@@ -189,6 +191,7 @@ describe('flights routes', () => {
     let fail = true
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => (fail ? { kind: 'failed', error: 'no docs' } : { kind: 'done' }),
     }
     app = await buildApp(adapters)
@@ -223,6 +226,7 @@ describe('flights routes', () => {
     let fail = true
     const adapters = allDone()
     adapters.portify = {
+      teardown: () => null,
       run: async () =>
         fail
           ? { kind: 'failed', error: 'portify start rejected (409): repo "r" has uncommitted changes — commit or stash them first' }
@@ -256,7 +260,7 @@ describe('flights routes', () => {
 
   it('remedy: null for a non-matching failure and 409 on apply', async () => {
     const adapters = allDone()
-    adapters.docs = { run: async () => ({ kind: 'failed', error: 'no docs' }) }
+    adapters.docs = { teardown: () => null, run: async () => ({ kind: 'failed', error: 'no docs' }) }
     app = await buildApp(adapters)
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
@@ -417,7 +421,7 @@ describe('flights routes', () => {
         feature: 'checkout',
         repoPaths: [repoDir],
         description: 'checkout flow',
-        opts: { env: 'local', yolo: false, stageProducer: 'external' },
+        opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' },
         status: 'paused',
         pauseReason: 'user',
         currentStage: 'docs',

@@ -404,7 +404,7 @@ describe('pauseFlight', () => {
   it('resume clears pauseReason', async () => {
     const adapters = allDone()
     const d = deps(adapters)
-    adapters.scout = { run: () => new Promise(() => {}) }
+    adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
     const { manifest } = startFlight(args(), d)
     await new Promise((r) => setTimeout(r, 10))
     pauseFlight(manifest.flightId, d)
@@ -422,6 +422,7 @@ describe('pauseFlight', () => {
     const staleGate = new Promise<void>((r) => (releaseStale = r))
     let scoutRuns = 0
     adapters.scout = {
+      teardown: () => null,
       run: async () => {
         scoutRuns += 1
         if (scoutRuns === 1) {
@@ -520,7 +521,7 @@ describe('redoFlight', () => {
 
   it('refuses on an active flight', async () => {
     const adapters = allDone()
-    adapters.scout = { run: () => new Promise(() => {}) }
+    adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
     const { manifest } = startFlight(args(), deps(adapters))
     await new Promise((r) => setTimeout(r, 10))
     expect(() => redoFlight(manifest.flightId, deps(allDone()))).toThrow(/pause or abort/)

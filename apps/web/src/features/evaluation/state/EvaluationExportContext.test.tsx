@@ -74,7 +74,7 @@ afterEach(() => {
 })
 
 function renderProbe(WebSocketImpl: typeof WebSocket = FakeWebSocket as unknown as typeof WebSocket) {
-  const captured: { value: ReturnType<typeof useEvaluationExports> | null } = { value: null }
+  const captured: { value: (ReturnType<typeof useEvaluationExports> & { logsByTaskId: Record<string, string> }) | null } = { value: null }
   act(() => {
     root.render(
       <EvaluationExportProvider WebSocketImpl={WebSocketImpl} wsBase="ws://test">

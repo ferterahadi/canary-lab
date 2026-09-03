@@ -142,7 +142,7 @@ function scenario() {
       'Check that `elapsedMs` is less than `IDLE_EXIT_BUDGET_MS`.',
       'Check that `consumer.logs()` contains `DRAIN_COMPLETE_MARKER`.',
     ])
-    expect(blocks.every((item) => item.semanticCategories.includes('assertion'))).toBe(true)
+    expect(blocks.every((item) => item.semanticCategories?.includes('assertion'))).toBe(true)
   })
 
   it('renders an expression-bodied callback as structure without inventing map intent', () => {

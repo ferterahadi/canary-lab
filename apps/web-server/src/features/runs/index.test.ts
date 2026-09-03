@@ -66,6 +66,7 @@ beforeEach(async () => {
     now: () => Date.now(),
     emit: (event) => runStore.emit('event', event),
     patchManifest: (runId, patch) => runStore.patchManifest(runId, patch),
+    audit: () => {},
   })
   app = Fastify()
   // The pane and run streams declare `{ websocket: true }` routes, which is an

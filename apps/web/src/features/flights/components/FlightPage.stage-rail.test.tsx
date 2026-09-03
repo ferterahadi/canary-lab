@@ -4,6 +4,7 @@ import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlightManifest, FlightStageKey } from '@/shared/api/client'
+import type { EvaluationExportTask } from '@/shared/api/types'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
 
@@ -45,7 +46,7 @@ const mocks = vi.hoisted(() => ({
   restartRun: vi.fn(),
   taskById: vi.fn(),
   taskForRun: vi.fn(),
-  evaluationTasks: vi.fn(() => []),
+  evaluationTasks: vi.fn((): EvaluationExportTask[] => []),
   evaluationLogs: vi.fn((): Record<string, string> => ({})),
   watchEvaluationTask: vi.fn(),
 }))

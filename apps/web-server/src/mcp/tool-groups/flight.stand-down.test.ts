@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CLIENT_KIND, type ToolGroupContext } from '../tool-support'
+import type { ExternalWorkCheckpointData } from '../../features/flights/logic/types'
 import { registerFlightTools } from './flight'
 
 // What an external coding agent is TOLD when the flight it is working for stops.
@@ -57,7 +58,7 @@ const parkedFlight = (over: Record<string, unknown> = {}) => ({
     kind: 'external-work',
     message: 'do the scout step',
     options: ['submit', 'run-internally'],
-    data: { stage: 'scout', prompt: 'survey the repo', handOffId: 'abc12345' },
+    data: { stage: 'scout', prompt: 'survey the repo', handOffId: 'abc12345' } as ExternalWorkCheckpointData,
   } }],
   ...over,
 })

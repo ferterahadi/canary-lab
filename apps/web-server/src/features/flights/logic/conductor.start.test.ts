@@ -50,6 +50,7 @@ const now = () => '2026-01-01T00:00:00Z'
 const OPTS: FlightOptions = { env: 'local', coverageTarget: 100, yolo: false }
 
 const doneAdapter = (calls?: FlightStageKey[]): StageAdapter => ({
+  teardown: () => null,
   run: async (ctx) => {
     calls?.push(ctx.manifest().currentStage as FlightStageKey)
     return { kind: 'done' }
@@ -100,12 +101,14 @@ describe('startFlight', () => {
   it('keeps the Report downloadable when final Parallel setup fails', async () => {
     const adapters = allDone()
     adapters.run = {
+      teardown: () => null,
       run: async (ctx) => {
         ctx.patchFlight({ runVerdict: 'passed', links: { runId: 'run-42' } })
         return { kind: 'done' }
       },
     }
     adapters['evaluation-export'] = {
+      teardown: () => null,
       run: async (ctx) => {
         ctx.patchFlight({
           links: {
@@ -117,7 +120,7 @@ describe('startFlight', () => {
         return { kind: 'done' }
       },
     }
-    adapters.portify = { run: async () => ({ kind: 'failed', error: 'dirty checkout' }) }
+    adapters.portify = { teardown: () => null, run: async () => ({ kind: 'failed', error: 'dirty checkout' }) }
 
     const { manifest, completion } = startFlight(args(), deps(adapters))
     await completion
@@ -151,7 +154,7 @@ describe('startFlight', () => {
 
   it('persists stage evidence computed by the adapter', async () => {
     const adapters = allDone()
-    adapters.similarity = { run: async () => ({ kind: 'done', evidence: { scanned: 3 } }) }
+    adapters.similarity = { teardown: () => null, run: async () => ({ kind: 'done', evidence: { scanned: 3 } }) }
     const { manifest, completion } = startFlight(args(), deps(adapters))
     await completion
     const final = store.get(manifest.flightId)!
@@ -162,6 +165,7 @@ describe('startFlight', () => {
     const adapters = allDone()
     // Park the first flight on a checkpoint so it stays active.
     adapters.scout = {
+      teardown: () => null,
       run: async () => ({
         kind: 'checkpoint',
         checkpoint: { kind: 'config-approval', message: 'approve?' },
@@ -189,7 +193,7 @@ describe('startFlight', () => {
 
   it('a paused feature re-invoked without a mode gets the continue/redo/jump choice (409), and continue resumes the SAME record', async () => {
     const adapters = allDone()
-    adapters.scaffold = { run: async () => ({ kind: 'failed', error: 'boom' }) }
+    adapters.scaffold = { teardown: () => null, run: async () => ({ kind: 'failed', error: 'boom' }) }
     const first = startFlight(args(), deps(adapters))
     await first.completion
     expect(store.get(first.manifest.flightId)!.status).toBe('paused')
@@ -215,7 +219,7 @@ describe('startFlight', () => {
 
   it('redo restarts the SAME record from stage 1 and discards prior stage evidence', async () => {
     const adapters = allDone()
-    adapters.similarity = { run: async () => ({ kind: 'done', evidence: { scanned: 3 } }) }
+    adapters.similarity = { teardown: () => null, run: async () => ({ kind: 'done', evidence: { scanned: 3 } }) }
     const first = startFlight(args(), deps(adapters))
     await first.completion
     expect(store.get(first.manifest.flightId)!.status).toBe('done')
@@ -281,9 +285,10 @@ describe('startFlight', () => {
 
   it('a jump to evaluation-export keeps the validated runId; report-changing jumps reset links', async () => {
     const adapters = allDone()
-    adapters.run = { run: async (ctx) => { ctx.patchFlight({ links: { runId: 'run-42' } }); return { kind: 'done' } } }
+    adapters.run = { teardown: () => null, run: async (ctx) => { ctx.patchFlight({ links: { runId: 'run-42' } }); return { kind: 'done' } } }
     let exportSawRunId: string | undefined
     adapters['evaluation-export'] = {
+      teardown: () => null,
       run: async (ctx) => { exportSawRunId = ctx.manifest().links?.runId; return { kind: 'done' } },
     }
     const first = startFlight(args(), deps(adapters))
@@ -354,6 +359,7 @@ describe('startFlight', () => {
     const adapters = allDone()
     let exportSawRunId: string | undefined
     adapters['evaluation-export'] = {
+      teardown: () => null,
       run: async (ctx) => { exportSawRunId = ctx.manifest().links?.runId; return { kind: 'done' } },
     }
     const first = startFlight(args(), deps(adapters))
@@ -400,6 +406,7 @@ describe('startFlight', () => {
   it('rejects a re-invoke of an active flight for the SAME feature even with a disjoint repo set', async () => {
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
     }
     const first = startFlight(args('/repo/a'), deps(adapters))
@@ -451,6 +458,7 @@ describe('checkpoints', () => {
     const seen: string[] = []
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => ({
         kind: 'checkpoint',
         checkpoint: { kind: 'config-approval', message: 'approve config?', data: { config: 'cjs' } },
@@ -484,6 +492,7 @@ describe('checkpoints', () => {
     let runs = 0
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => {
         runs += 1
         return runs === 1

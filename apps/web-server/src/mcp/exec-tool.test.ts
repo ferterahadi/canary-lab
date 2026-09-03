@@ -235,7 +235,7 @@ describe('compact MCP exec dispatcher', () => {
   })
 
   it('bounds oversized schemas while retaining their top-level field names', async () => {
-    const inputSchema: z.ZodRawShape = {}
+    const inputSchema: Record<string, z.ZodTypeAny> = {}
     for (let index = 0; index < 30; index += 1) {
       inputSchema[`field_${index}`] = z.string().describe('x'.repeat(500))
     }

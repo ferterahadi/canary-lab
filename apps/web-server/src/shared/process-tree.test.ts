@@ -12,7 +12,7 @@ function target(pid: number | undefined = 4242) {
 describe('process-tree', () => {
   it('signals an owned Unix process group instead of only its parent', () => {
     const child = target()
-    const killGroup = vi.fn(() => true)
+    const killGroup = vi.fn(() => true as const)
 
     signalProcessTree(child, 'SIGTERM', { detachedProcessGroup: true }, { platform: 'darwin', killGroup })
 
@@ -92,7 +92,7 @@ describe('process-tree', () => {
   })
 
   it('probes only safe process groups', () => {
-    const alive = vi.fn(() => true)
+    const alive = vi.fn(() => true as const)
     expect(processGroupAlive(4242, alive)).toBe(true)
     expect(alive).toHaveBeenCalledWith(-4242, 0)
 

@@ -77,6 +77,7 @@ function saveThrowsStore(thrown: unknown): FlightStore {
     renameFeature(): number {
       return 0
     },
+    logsDir: tmpDir,
     flightDir(flightId: string): string {
       return path.join(tmpDir, 'flights', flightId)
     },
@@ -306,6 +307,7 @@ describe('plan-features (R54)', () => {
     const gateBox: { gate: (() => void) | null } = { gate: null }
     const busyAdapters = allDone()
     busyAdapters.scout = {
+      teardown: () => null,
       run: async () => { await new Promise<void>((resolve) => { gateBox.gate = resolve }); return { kind: 'done' as const } },
     }
     app = await buildApp(busyAdapters, undefined, agentReturning(planText([
@@ -353,6 +355,7 @@ describe('plan-features (R54)', () => {
     let releaseScout: (() => void) | null = null
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => {
         await new Promise<void>((resolve) => { releaseScout = resolve })
         return { kind: 'done' as const }
@@ -375,11 +378,12 @@ describe('plan-features (R54)', () => {
   })
 
   it('cancels every launched descendant without letting a queued sibling start between aborts', async () => {
-    let releaseScout: (() => void) | null = null
+    const gateBox: { gate: (() => void) | null } = { gate: null }
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => {
-        await new Promise<void>((resolve) => { releaseScout = resolve })
+        await new Promise<void>((resolve) => { gateBox.gate = resolve })
         return { kind: 'done' as const }
       },
     }
@@ -396,7 +400,7 @@ describe('plan-features (R54)', () => {
     const { flightIds } = launched.json() as { flightIds: string[] }
     expect(flightIds).toHaveLength(2)
     const deadline = Date.now() + 3000
-    while (releaseScout === null) {
+    while (gateBox.gate === null) {
       if (Date.now() > deadline) throw new Error('first descendant never reached scout')
       await new Promise((r) => setTimeout(r, 10))
     }
@@ -408,12 +412,13 @@ describe('plan-features (R54)', () => {
       expect((flight.json() as { status: string }).status).toBe('aborted')
     }
 
-    releaseScout!()
+    gateBox.gate!()
   })
 
   it('cancels a checkpointed descendant before its queued sibling can start', async () => {
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
     }
     app = await buildApp(adapters, undefined, agentReturning(planText([

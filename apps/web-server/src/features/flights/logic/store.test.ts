@@ -50,6 +50,7 @@ const now = () => '2026-01-01T00:00:00Z'
 const OPTS: FlightOptions = { env: 'local', coverageTarget: 100, yolo: false }
 
 const doneAdapter = (calls?: FlightStageKey[]): StageAdapter => ({
+  teardown: () => null,
   run: async (ctx) => {
     calls?.push(ctx.manifest().currentStage as FlightStageKey)
     return { kind: 'done' }
@@ -99,6 +100,7 @@ describe('index row staleness (merge-upsert can update but never delete)', () =>
     let attempts = 0
     const adapters = allDone()
     adapters.portify = {
+      teardown: () => null,
       run: async () => {
         attempts += 1
         return attempts === 1 ? { kind: 'failed', error: 'repo has uncommitted changes' } : { kind: 'done' }
@@ -128,6 +130,7 @@ describe('index row staleness (merge-upsert can update but never delete)', () =>
     // the user's own agent) from a question aimed at the human.
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => ({
         kind: 'checkpoint',
         checkpoint: { kind: 'external-work', message: 'hand it off', options: ['submit', 'run-internally'] },
@@ -277,6 +280,7 @@ describe('FlightRunStore repo lookups', () => {
   it('activeForRepos skips an active flight whose repo set does not intersect', async () => {
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
     }
     const { manifest, completion } = startFlight(args('/repo/a'), deps(adapters))
@@ -305,6 +309,7 @@ describe('FlightRunStore repo lookups', () => {
   it('tolerates a legacy index entry with no repoPaths field', async () => {
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
     }
     const { manifest, completion } = startFlight(args('/repo/a'), deps(adapters))

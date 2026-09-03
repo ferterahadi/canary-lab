@@ -104,7 +104,7 @@ describe('Getting Started Flight destinations', () => {
 
   it('jumps a settled Flight to the requested stage — a re-demo redoes real work', () => {
     const entry = flightEntry({
-      flight: { flightId: 'fl_1', status: 'completed', stages: [] },
+      flight: { flightId: 'fl_1', status: 'done', stages: [] },
     })
     expect(demoFlightLaunch('export', 'workflow-workbench', entry)).toEqual({
       kind: 'start',

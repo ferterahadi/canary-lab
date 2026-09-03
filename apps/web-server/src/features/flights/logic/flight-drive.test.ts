@@ -50,6 +50,7 @@ const now = () => '2026-01-01T00:00:00Z'
 const OPTS: FlightOptions = { env: 'local', coverageTarget: 100, yolo: false }
 
 const doneAdapter = (calls?: FlightStageKey[]): StageAdapter => ({
+  teardown: () => null,
   run: async (ctx) => {
     calls?.push(ctx.manifest().currentStage as FlightStageKey)
     return { kind: 'done' }
@@ -72,6 +73,7 @@ describe('external-work timing', () => {
   it.each(['authoring', 'mapping'] as const)('keeps the live %s timer running while the client owns the checkpoint', async (phase) => {
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async (ctx) => {
         ctx.setTimingPhase?.(phase)
         return {
@@ -103,6 +105,7 @@ describe('autopilot (R71/W4)', () => {
   ]
 
   const parkThenDone = (kind: Kind, options: string[], responses: unknown[]): StageAdapter => ({
+    teardown: () => null,
     run: async () => ({ kind: 'checkpoint', checkpoint: { kind, message: 'q?', options } }),
     onCheckpointResponse: async (_ctx, response) => {
       responses.push(response)
@@ -152,6 +155,7 @@ describe('autopilot (R71/W4)', () => {
     for (const [kind, options] of cases) {
       const adapters = allDone()
       adapters.docs = {
+        teardown: () => null,
         run: async () => ({ kind: 'checkpoint', checkpoint: { kind, message: 'q?', options } }),
       }
       const { manifest, completion } = startFlight(
@@ -178,6 +182,7 @@ describe('autopilot (R71/W4)', () => {
   it('prd-source parks when no mapped choice is offered at all', async () => {
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => ({
         kind: 'checkpoint',
         checkpoint: { kind: 'prd-source', message: 'no docs yet', options: ['infer-from-diff', 'retry'] },
@@ -192,6 +197,7 @@ describe('autopilot (R71/W4)', () => {
     const responses: unknown[] = []
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => ({
         kind: 'checkpoint',
         checkpoint: {
@@ -276,6 +282,7 @@ describe('autopilot (R71/W4)', () => {
   it('yolo flights are exempt — a checkpoint an adapter parks under yolo reaches the human', async () => {
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => ({
         kind: 'checkpoint',
         checkpoint: { kind: 'config-approval', message: 'q?', options: ['approve', 'redraft'] },
@@ -293,6 +300,7 @@ describe('autopilot (R71/W4)', () => {
     const responses: unknown[] = []
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => ({
         kind: 'checkpoint',
         checkpoint: { kind: 'config-approval', message: 'q?', options: ['approve', 'redraft'] },
@@ -325,6 +333,7 @@ describe('live stage context', () => {
     // (a stage gains a transcript row only per completed block — 3cde98f).
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async (ctx) => {
         ctx.setAgentActivity({ phase: 'requesting', thinkingTokens: 0, chars: 0, tail: '' })
         ctx.setAgentActivity({ phase: 'writing', thinkingTokens: 240, chars: 11, tail: 'scouting...' })

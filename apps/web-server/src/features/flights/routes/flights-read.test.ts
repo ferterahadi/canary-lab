@@ -247,6 +247,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     let fail = true
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => {
         await new Promise<void>((resolve) => { gateBox.gate = resolve })
         return fail ? { kind: 'failed', error: 'no docs' } : { kind: 'done' }

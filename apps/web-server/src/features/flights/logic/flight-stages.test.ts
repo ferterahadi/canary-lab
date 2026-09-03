@@ -58,6 +58,7 @@ const now = () => '2026-01-01T00:00:00Z'
 const OPTS: FlightOptions = { env: 'local', coverageTarget: 100, yolo: false }
 
 const doneAdapter = (calls?: FlightStageKey[]): StageAdapter => ({
+  teardown: () => null,
   run: async (ctx) => {
     calls?.push(ctx.manifest().currentStage as FlightStageKey)
     return { kind: 'done' }
@@ -130,6 +131,7 @@ describe('stage selection and entry validation', () => {
     }
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => ({ kind: 'done' }),
       reset: async (ctx) => {
         // Reset contexts intentionally absorb activity writes: no discarded
@@ -163,6 +165,7 @@ describe('jump', () => {
     const calls: FlightStageKey[] = []
     const adapters = allDone(calls)
     adapters.similarity = {
+      teardown: () => null,
       run: async () => {
         calls.push('similarity')
         return { kind: 'jump', to: 'run', skipReason: 'no evidence to report' }
@@ -180,6 +183,7 @@ describe('jump', () => {
     const calls: FlightStageKey[] = []
     const adapters = allDone(calls)
     adapters.similarity = {
+      teardown: () => null,
       run: async (ctx) => {
         calls.push('similarity')
         ctx.patchFlight({ feature: 'existing-checkout' })
@@ -202,7 +206,7 @@ describe('jump', () => {
 
   it('treats a backwards jump as a machine bug and parks the flight', async () => {
     const adapters = allDone()
-    adapters.docs = { run: async () => ({ kind: 'jump', to: 'scout', skipReason: 'nope' }) }
+    adapters.docs = { teardown: () => null, run: async () => ({ kind: 'jump', to: 'scout', skipReason: 'nope' }) }
     const { manifest, completion } = startFlight(args(), deps(adapters))
     await completion
     const final = store.get(manifest.flightId)!
@@ -217,6 +221,7 @@ describe('rewind outcome', () => {
     const adapters = allDone(calls)
     let scaffoldRuns = 0
     adapters.scaffold = {
+      teardown: () => null,
       run: async (ctx) => {
         calls.push(ctx.manifest().currentStage as FlightStageKey)
         scaffoldRuns += 1
@@ -236,6 +241,7 @@ describe('rewind outcome', () => {
   it('a forward rewind target is illegal and parks the flight failed-stage', async () => {
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => ({ kind: 'rewind', to: 'run', reason: 'nope' }),
     }
     const { manifest, completion } = startFlight(args(), deps(adapters))
@@ -269,7 +275,7 @@ describe('reopenStages', () => {
 
   it('is a no-op on an active flight (the running conductor owns it)', async () => {
     const adapters = allDone()
-    adapters.scout = { run: () => new Promise(() => {}) }
+    adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
     const { manifest } = startFlight(args(), deps(adapters))
     await new Promise((r) => setTimeout(r, 10))
     expect(reopenStages(manifest.flightId, ['docs'], deps(allDone()))).toBeNull()
@@ -387,7 +393,7 @@ describe('restart wipe (R78)', () => {
 
   it('a jump preserves the earlier stages\' evidence — not just their status', async () => {
     const adapters = allDone()
-    adapters.similarity = { run: async () => ({ kind: 'done', evidence: { scanned: 2 } }) }
+    adapters.similarity = { teardown: () => null, run: async () => ({ kind: 'done', evidence: { scanned: 2 } }) }
     const d: FlightConductorDeps = { ...deps(adapters), validateStageEntry: () => null }
     const first = startFlight(args(), d)
     await first.completion
@@ -405,6 +411,7 @@ describe('restart wipe (R78)', () => {
     let seenRunId: string | undefined
     const adapters = allDone()
     adapters.run = {
+      teardown: () => null,
       run: async () => ({ kind: 'done' }),
       reset: async (ctx) => {
         seenRunId = ctx.manifest().links?.runId
@@ -425,6 +432,7 @@ describe('restart wipe (R78)', () => {
     const adapters = allDone()
     let called = 0
     adapters.docs = {
+      teardown: () => null,
       run: async () => ({ kind: 'done' }),
       reset: async (ctx) => {
         called++
@@ -498,6 +506,7 @@ describe('restart wipe (R78)', () => {
   it('a throwing reset never blocks the restart (best-effort, like interrupt)', async () => {
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => ({ kind: 'done' }),
       reset: async () => {
         throw new Error('boom')
@@ -516,6 +525,7 @@ describe('restart wipe (R78)', () => {
     const adapters = recordingAdapters(events)
     let docsAttempts = 0
     adapters.docs = {
+      teardown: () => null,
       run: async () => {
         docsAttempts += 1
         return docsAttempts === 1 ? { kind: 'failed', error: 'flaky' } : { kind: 'done' }

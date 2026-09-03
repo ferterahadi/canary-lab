@@ -75,6 +75,7 @@ function saveThrowsStore(thrown: unknown): FlightStore {
     renameFeature(): number {
       return 0
     },
+    logsDir: tmpDir,
     flightDir(flightId: string): string {
       return path.join(tmpDir, 'flights', flightId)
     },
@@ -177,6 +178,7 @@ describe('flights routes', () => {
   it('409s a second start for the same repo while one is active (single-flight)', async () => {
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
     }
     app = await buildApp(adapters)
@@ -194,7 +196,7 @@ describe('flights routes', () => {
     const adapters = allDone()
     // A run stage settled by evidence (external work / older records) writes no
     // top-level runVerdict — the strip's RUN must still read the verdict.
-    adapters.run = { run: async () => ({ kind: 'done', evidence: { runId: 'r1', status: 'passed' } }) }
+    adapters.run = { teardown: () => null, run: async () => ({ kind: 'done', evidence: { runId: 'r1', status: 'passed' } }) }
     app = await buildApp(adapters, store)
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
