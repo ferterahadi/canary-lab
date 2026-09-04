@@ -28,33 +28,28 @@ find agent-integrations -name SKILL.md | sort           # every shipped skill fi
 grep -rln '<semantic keyword>' agent-integrations --include=SKILL.md
 ```
 
-**The grep is the authority, not this document.** As of 2026-07-25 that's 7 skill
-families (`canary-lab`, `-run`, `-verify`, `-author`, `-coverage`, `-portify`,
-`-export`) × 3 channels = 21 files — a count you should re-derive, not trust.
+**The grep is the authority, not this document.** Re-derive the file count every
+time; never trust a number written here.
 
 ## The surface map
 
 | # | Surface | Where | Owns |
 | --- | --- | --- | --- |
-| 1 | Profile instructions (`INSTRUCTIONS_BY_PROFILE`) | `apps/web-server/src/mcp/server.ts` | What a skill-less client reads at `initialize` |
+| 1 | Profile instructions + workflow guides (`INSTRUCTIONS_BY_PROFILE`, `WORKFLOW_GUIDES`) | `apps/web-server/src/mcp/instructions.ts` over `apps/web-server/prompts/mcp-*-instructions.md` | The lead above `<!-- initialize-cut -->` (≤ 2048 chars) is what a skill-less client reads at `initialize`; the whole file is what `get_workflow_guide` returns |
 | 2 | Tool-result steering (`healWaitNext`, `bootSessionValue`, collision/queued shapes) | `apps/web-server/src/mcp/heal-task-wait.ts` (helpers) + `tool-groups/` (call sites) | What a result-driven agent follows next |
 | 3 | Shipped run-loop skills | `canary-lab-run/SKILL.md` in all three channels (locate them with the grep) | The full external loop: claim → wait → fix → signal |
 | 4 | Other shipped skill families | `canary-lab{,-verify,-author,-coverage,-portify,-export}/SKILL.md` | Touch only when the changed semantic is theirs — grep decides |
 
-Channel differences to preserve when editing #3/#4 (re-measured 2026-08-22 —
-the convention EVOLVED; an older version of this section claimed codex files
-had their own frontmatter, which is no longer true):
+Channel differences to preserve when editing #3/#4:
 
 - **codex** — the `SKILL.md` is a **byte-identical copy** of the Claude one,
   `type: skill` frontmatter included. Codex-specific addressing lives in the
   sibling `agents/openai.yaml` (only the codex channel has it) — never touch
   that file when syncing a semantic. Procedure: edit the Claude file, then
   copy it over the codex one (`cp`), keeping `agents/openai.yaml` in place.
-- **plugin** — near-parity, NOT a rewrite: it matches the Claude file except
-  a condensed bootstrap "tools look missing" sentence (every skill) and a
-  condensed PR section (`canary-lab-run` only). Apply the same edit to the
-  plugin file; never paste the whole Claude file over it — that clobbers the
-  condensed lines.
+- **plugin** — also a **byte-identical copy** of the Claude file (confirm with
+  `diff -q` before you start). Same procedure: edit the Claude file, then `cp`
+  it over the plugin one.
 - Key phrases are pinned across all three mirrors by `apps/cli/agent.test.ts`
   ("instructs agents to verify fixes with signal_run…") — run it after syncing.
 - Neither skill passes `client_kind` — the bridge auto-detects it from the connection.
@@ -107,8 +102,7 @@ had their own frontmatter, which is no longer true):
 
 | Mistake | Consequence |
 | --- | --- |
-| Working from a hardcoded surface list (this doc's old "three SKILL.md files") | You edit the umbrella `canary-lab` skill while the run loop in `canary-lab-run` stays stale — the exact drift this skill exists to prevent |
+| Working from a hardcoded surface list | You edit the umbrella `canary-lab` skill while the run loop in `canary-lab-run` stays stale — the exact drift this skill exists to prevent |
 | Updating instructions but not tool results (or vice versa) | Skill-less clients follow results, skill-carrying clients follow prose — they diverge |
 | Rewording the repair rule "for clarity" | It's a guardrail, not copy. Weakened wording is how "fix the app" quietly becomes "make it green" |
-| Copying the Claude skill verbatim into the plugin skill | Clobbers the plugin's deliberately condensed lines (bootstrap sentence; run's PR section) |
 | Hand-editing the codex `SKILL.md` independently | It must stay a byte copy of the Claude file — edit Claude, then `cp`; codex identity lives in `agents/openai.yaml`, not the frontmatter |

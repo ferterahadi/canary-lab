@@ -7,6 +7,7 @@ import type {
 } from '@modelcontextprotocol/server'
 import type { z } from 'zod'
 import { registerAuthoringTools } from './tool-groups/authoring'
+import { registerWorkflowGuideTools } from './tool-groups/guides'
 import { registerHealFlowTools } from './tool-groups/heal-flow'
 import { registerReadTools } from './tool-groups/reads'
 import { registerRunLifecycleTools } from './tool-groups/run-lifecycle'
@@ -63,6 +64,7 @@ export function createCanaryLabToolRegistry(
 
   const ctx: ToolGroupContext = { ...baseContext, registerTool }
   registerReadTools(ctx)
+  registerWorkflowGuideTools(ctx)
   registerAuthoringTools(ctx)
   registerRunLifecycleTools(ctx)
   registerHealFlowTools(ctx)

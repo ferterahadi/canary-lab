@@ -325,7 +325,7 @@ queue. This planning surface is not available through the CLI or MCP.
 ## External authoring workflow
 
 The default MCP surface is `compact`: one always-loaded `exec` tool dispatches
-all 63 atomic commands, including Portify. Bare connections and `setup`-installed
+all 64 atomic commands, including Portify. Bare connections and `setup`-installed
 clients use the same profile. Focused direct profiles, `lifecycle`, and `full`
 remain opt-in surfaces for debugging and rollback.
 A client can use the following standalone flow without asking Canary Lab to

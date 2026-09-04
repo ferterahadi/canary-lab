@@ -27,20 +27,18 @@ completion?**
 | Shape | How to spot it | What it can show |
 | --- | --- | --- |
 | **Agentic loop** | spawned to read/iterate with tools: the heal agent, **and PRD-summary + coverage-mapping** (their prompts list file paths and make the agent read the docs/specs itself) — long-running, writes tool_use / tool_result / thinking to its session log | A genuine timeline — reads, thinks, tool calls, results, multiple turns |
-| **One-shot completion** | `codex exec`, or a prompt that **inlines all context** so the model answers in one turn (the evaluation rewrite, eval judge) — seconds, no tool calls | **Only** the prompt + one final answer. No reads. No thinking trace. No tool steps. |
+| **One-shot completion** | `codex exec`, or a prompt that **inlines all context** so the model answers in one turn (the evaluation rewrite) — seconds, no tool calls | **Only** the prompt + one final answer. No reads. No thinking trace. No tool steps. |
 
 **Don't classify by spawn flags alone.** `claude -p --dangerously-skip-permissions`
 already has tools ON — what makes a spawn one-shot *in practice* is a prompt that
 inlines every input, so the model never needs to call a tool. PRD-summary +
-coverage-mapping were one-shot until their prompts were changed (June 2026) to list
-file *paths* and require reading them — now they stream a real read/think/tool
-timeline through `AgentSessionView`. The evaluation rewrite still inlines its evidence
-packet, so it stays one-shot.
+coverage-mapping prompts list file *paths* and require reading them, so they stream
+a real read/think/tool timeline through `AgentSessionView`. The evaluation rewrite
+inlines its evidence packet, so it is one-shot.
 
 If it's one-shot, **say so up front** and scope the view to reality. Do NOT mount a
 tool-loop timeline on it and hope — you'll ship "1 event, looks frozen", the user
-will bounce, and you'll rebuild it (this happened 3× before PRD/coverage were made
-agentic). The durable fix for a one-shot you want to *watch* is to make it agentic
+will bounce, and you'll rebuild it. The durable fix for a one-shot you want to *watch* is to make it agentic
 (stop inlining; hand it paths to read), not to dress up the empty timeline.
 
 ## Two transports — pick the one that fits the shape
@@ -56,12 +54,12 @@ tail physically cannot show token partials (the JSONL records whole blocks, and 
 shared parser drops partial lines). See [[cl_ui-design-philosophy]] "One agent
 timeline everywhere" for when the structured rail IS the right call.
 
-## Honesty / anti-overpromise (the rule that would have saved 3 rounds)
+## Honesty / anti-overpromise
 
 - When a user asks to "see what the agent is doing," **answer with the agent's shape
   first**, then build. "These are one-shot inferences — there's no read/think trace;
   the most you can watch is the answer stream in" is the honest framing. Saying it at
-  design time is cheap; discovering it after shipping is three rebuilds.
+  design time is cheap; discovering it after shipping costs a rebuild.
 - Don't ship a thinner proxy (a flat `<pre>` log behind a toggle) for the thing the
   user explicitly asked to see and call it done. Either deliver the real view or
   surface the constraint and decide together. A toggle that flips between two equally
@@ -80,7 +78,7 @@ header still says *Generating*. One owner for the job lifecycle; every panel rea
 it (see [[cl_ui-design-philosophy]] "One owner for a long-lived lifecycle" and
 [[cl_async-task-ux]]).
 
-## Common mistakes (all real, all from one feature)
+## Common mistakes
 
 | Mistake | Symptom | Fix |
 | --- | --- | --- |

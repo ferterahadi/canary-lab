@@ -64,9 +64,8 @@ dialog open-state to localStorage or broadcast it cross-tab.
 ?feature=checkout&dialog=config&tab=ports           → feature config, on a named tab
 ?feature=checkout&dialog=verification               → Verify-config dialog
 ?feature=checkout&dialog=flight-start               → flight stage-entry launcher (feature-scoped)
-?feature=checkout&dialog=flight-fresh               → same launcher in START-FRESH intent (R76)
+?feature=checkout&dialog=flight-fresh               → same launcher in START-FRESH intent
 ?dialog=flight-new                                  → new-flight launcher (intent + repo picker)
-?dialog=draft&draft=dr_9                            → external authoring draft, by id
 ?dialog=demo                                        → demo chooser (needs only GET /api/onboarding)
 ?dialog=settings                                    → Project Settings (needs only GET /api/project-config)
 ?view=flights&flight=fl_abc                         → flight detail (omit flight = flights list)
@@ -74,18 +73,15 @@ dialog open-state to localStorage or broadcast it cross-tab.
 ```
 
 `RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' |
-'flight-new' | 'draft' | 'demo' | 'settings'`.
-`flight`, `draft` and `tab` are the live id/name qualifiers, each gated to its own
+'flight-new' | 'demo' | 'settings'`.
+`flight` and `tab` are the live id/name qualifiers, each gated to its own
 view/dialog in `persistView`/`readPersistedView`: `flight` only qualifies
-`view=flights` (absent = the flights landing list), `draft` only `dialog=draft`,
-`tab` only `dialog=config` (`ConfigTab`; an unknown name reads as null so the
-mount's own default wins). Because the config dialog is qualified by the DURABLE
-`feature` param, any opener that opens it for a feature other than the selected
-one must `setSelectedFeature` too — otherwise the deep link names the wrong
-suite (this bit the flight's Ports drill-through).
-`wf` (old portify-revisit id) and `task` (old evaluation-dialog id) are
-tombstoned — `persistView` force-deletes both on every write so no stale deep
-link carries them forward; never reuse either name for a new qualifier. Unknown
+`view=flights` (absent = the flights landing list), `tab` only `dialog=config`
+(`ConfigTab`; an unknown name reads as null so the mount's own default wins).
+Because the config dialog is qualified by the DURABLE `feature` param, any opener
+that opens it for a feature other than the selected one must `setSelectedFeature`
+too — otherwise the deep link names the wrong suite.
+`wf`, `task` and `draft` are tombstoned qualifiers (see Gotchas). Unknown
 dialog values are ignored on read.
 
 ## Checklist — adding a new page
@@ -104,7 +100,7 @@ dialog values are ignored on read.
    `workspace-view-state.ts`. If it needs an id qualifier, follow the live
    precedent — `flight` qualifying `view=flights` — add a param and gate it in
    `persistView`/`readPersistedView` so it's dropped unless your dialog/view is
-   active. Don't reuse `wf` or `task` — both are tombstoned (see Gotchas).
+   active. Don't reuse `wf`, `task` or `draft` — all three are tombstoned (see Gotchas).
 2. **Hydrate on mount in `App.tsx`** — seed the dialog's open-state from
    `PERSISTED_VIEW.dialog` in the relevant `useState` initializer.
 3. **Derive it into the route** — add it to the `routedDialog` ternary
@@ -124,7 +120,7 @@ dialog values are ignored on read.
 5. **Add a round-trip test** to `workspace-view-state.test.ts` (URL round-trip +
    the URL-only/localStorage-exclusion assertion).
 
-## Gotchas (each one bit during the 1.4.0 build)
+## Gotchas
 
 - **TDZ / hook order** — the persist effect reads values from context hooks
   (`useWizardDrafts`, etc.). Declare those hooks **above** the persist effect, or
@@ -137,11 +133,11 @@ dialog values are ignored on read.
   (view/feature). Never push run/dialog through it.
 - **Qualifiers belong to their dialog/view only** — `persistView` drops `flight`
   unless `view === 'flights'` (the live precedent to copy — same
-  drop-unless-active gate). `wf` (old portify-revisit id) and `task` (old
-  evaluation-dialog id) are tombstoned: `persistView` force-deletes both on
-  every write regardless of state, so stale deep links don't carry them
-  forward. If your dialog needs its own id, add a new param with the
-  flight-style gate; never reuse `wf` or `task`.
+  drop-unless-active gate). `wf` (old portify-revisit id), `task` (old
+  evaluation-dialog id) and `draft` (old external-authoring id) are tombstoned:
+  `persistView` force-deletes all three on every write regardless of state, so
+  stale deep links don't carry them forward. If your dialog needs its own id,
+  add a new param with the flight-style gate; never reuse `wf`, `task` or `draft`.
 
 ## Deliberately NOT done (don't "fix" these without a reason)
 

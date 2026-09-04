@@ -368,6 +368,7 @@ const installedPackagePaths = [
   'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-flight-instructions.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-portify-instructions.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-compact-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-lifecycle-instructions.md',
 ]
 
 for (const relPath of scaffoldPaths) {

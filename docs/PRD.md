@@ -125,7 +125,7 @@ cross-cutting.
 
 - One published CLI (`flight`, `init`, `setup`, `ui`, `mcp`, `new feature`, `env`,
   `boot`, `upgrade`), a local web UI, and an MCP server sharing one port.
-- Profile-scoped MCP surface with seven workflow profiles (`repair`, `verify`, `author`, `coverage`, `export`, `flight`, and `portify`), two composed direct-tool profiles (`lifecycle` and `full`), and the default `compact` profile. `compact` exposes one `exec` tool that dispatches the same 63 atomic handlers by exact command name; bare and setup-installed connections both use it, while `lifecycle` and `full` remain opt-in direct-tool rollback surfaces.
+- Profile-scoped MCP surface with seven workflow profiles (`repair`, `verify`, `author`, `coverage`, `export`, `flight`, and `portify`), two composed direct-tool profiles (`lifecycle` and `full`), and the default `compact` profile. `compact` exposes one `exec` tool that dispatches the same 64 atomic handlers by exact command name; bare and setup-installed connections both use it, while `lifecycle` and `full` remain opt-in direct-tool rollback surfaces.
 
 ## Non-goals
 

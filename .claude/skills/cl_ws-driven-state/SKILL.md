@@ -86,28 +86,16 @@ Before closing a PR for any route, job runner, or MCP tool that writes to disk:
 
 7. **Wire `workspaceEvents` in `server.ts`** for the new route/runner.
 
-## How to add a new event type (full example)
+## Reference wiring (live examples)
 
-The two gaps fixed in session (2026-06-19) are the reference:
-
-**Portify save** — `POST /api/portify/:id/save` writes the overlay to disk but
-previously emitted no event. Badge stayed stale until the user clicked "Done" in the
-wizard or refreshed.
-
-Fix: added `publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })`
-after `savePortify` returns in `routes/portify.ts`, added `workspaceEvents` to
-`PortifyRouteDeps`, and passed it from `server.ts`.
-
-**Coverage job completion** — `finishOk` / `finishErr` in
-`apps/web-server/src/features/coverage/logic/coverage/jobs/runner.ts` wrote the manifest to disk but never told the client.
-The coverage icon color stayed "Generating" (sky) forever.
-
-Fix: added `coverage-changed` event type to both `WorkspaceEvent` unions, called
-`publishWorkspaceEvent` in both `finishOk` and `finishErr`, added `workspaceEvents` to
-`CoverageJobRunnerDeps`, threaded it through `CoverageRouteDeps`, and wired it in
-`server.ts`. On the client: `App.tsx` increments `coverageRefreshKey` on
-`coverage-changed`; `FeaturesColumn` includes it in the `listCoverageStates`
-`useEffect` deps.
+- **A route mutation** — `routes/portify.ts` publishes `{ type: 'features-changed' }`
+  right after `savePortify` returns, through the `workspaceEvents` dep on
+  `PortifyRouteDeps` that `server.ts` injects.
+- **A background job** — the coverage job store publishes `coverage-changed` on
+  every write via `bridgeCoverageJobEvents(coverageJobStore, workspaceEvents)` in
+  `server.ts`, so job completion reaches the client without the runner knowing
+  about the WS. For the client side read `feature-activity.ts` and
+  `use-stage-band-data.ts` under `apps/web/src/features/flights/`.
 
 ## Both surfaces, or it's only half-wired
 
@@ -120,10 +108,9 @@ rule the user holds you to:
 > user must never refresh to see the latest state.
 
 So for every mutation, ask "what are *all* the ways this gets triggered?" and emit the
-event on each. The 2026-06-25 portify regression was exactly this: the REST route
-`POST /api/portify/:id/save` emitted `features-changed`, but the MCP `save_portify` /
-`remove_portification` tools (the Desktop path) did not — so portifying from Desktop
-left the badge stale until a manual refresh.
+event on each. The classic gap: a REST route emits `features-changed` but the MCP
+tool that performs the same write (the Desktop path) does not — so a mutation made
+from Desktop leaves the badge stale until a manual refresh.
 
 ## Audit — reviewing an existing route for completeness
 

@@ -63,7 +63,6 @@ Hard rules on framing:
 - Phrase each requirement's `text` as an expectation in the **"it should …"**
   form — "It should issue a token on approval", "It should support an
   account-scoped PAT". One or two sentences, concrete and testable.
-- Keep each requirement atomic — one expectation per entry. Split compound asks.
 
 ## Variant dimension (cross-cutting breadth)
 

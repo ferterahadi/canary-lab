@@ -8,13 +8,12 @@ description: Use when creating or editing a sample feature under templates/proje
 
 # Authoring Canary Lab Sample Features
 
-The public scaffold **ships its own demonstration** (R89, 2026-08-07). It carries
+The public scaffold **ships its own demonstration**. It carries
 the storefront product repository at `templates/project/demo-app/` *and* the
 `storefront-journey` suite that exercises it, so a first-time user can press Run
 and watch fail → repair → green without authoring anything.
 
-This reversed an earlier rule that the scaffold ship no pre-authored feature.
-The trade was made deliberately: discoverability for a first-time user beats a
+The trade is deliberate: discoverability for a first-time user beats a
 clean scaffold for an experienced one, and `features/README.md` tells users they
 can delete the samples once they have seen them. Adding a *further* feature under
 `templates/project/features/` still changes the product contract and still needs
@@ -83,8 +82,8 @@ templates/project/features/<name>/
 └── docs/                   # prd.md + the generated _prd-summary.* sidecars
 ```
 
-`feature.config.cjs` essentials (see the contributor-only storefront fixture for
-a multi-service example):
+`feature.config.cjs` essentials (the shipped `storefront-journey` config is the
+three-service example):
 
 - `envs: ['local', 'production']` — which envsets exist for the feature.
 - Each `startCommand`: `command`, `envs: ['local']` to gate local-only boots,

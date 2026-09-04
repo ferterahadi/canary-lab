@@ -53,7 +53,7 @@ while proving nothing:
 ## Errors
 
 - **HTTP-facing failures** are `Object.assign(new Error(msg), { statusCode: N })`
-  — 64 sites. Not a custom error class; the route layer reads `statusCode`.
+  Not a custom error class; the route layer reads `statusCode`.
 - **Fire-and-forget async gets an explicit `.catch()`.** Never a bare
   `void promise`. An orchestrator that handles its own phase failures can still
   reject from a `finally`, and an unhandled rejection is not a strategy.
@@ -76,7 +76,7 @@ Both replace a runtime check with a compile error. That is the whole point.
 
 ## Tests
 
-- **Real filesystem, real git, in a `mkdtempSync` tmpdir** — 131 of 307 test
+- **Real filesystem, real git, in a `mkdtempSync` tmpdir** — about half the test
   files. Mock only the genuinely un-unit-testable edge: the agent subprocess, a
   PTY, the network. A mocked filesystem proves your mock works.
 - **A second suite for different module-level mocks** is `<module>.<variant>.test.ts`
@@ -109,12 +109,12 @@ out of the gate keeps the percentage at 100% while covering less.
   unreachable — where deleting it weakens a security property and testing it would
   mean proving that validator broken. It must carry a `-- reason`, and the file
   must stay in the gate. `check:conventions` requires an allowlist entry, so a new
-  one is a deliberate act. Two files qualify today; everything else was deleted,
-  tested, or made unrepresentable.
+  one is a deliberate act. The allowlist in `tools/check-conventions.mjs` names the
+  files that qualify; everything else was deleted, tested, or made unrepresentable.
 - **A file-level exclude is the last resort, and carries a per-arm rationale.**
 - **That rationale is a hypothesis, not a fact.** Re-measure before trusting it.
-  Both files closed in `0e3d9bf` had *more* uncovered than their comment listed —
-  one claimed 5 arms and had 12 arms + 6 statements + 2 functions, most of them
+  Excluded files have carried *more* uncovered than their comment listed — one
+  claimed 5 arms and had 12 arms + 6 statements + 2 functions, most of them
   reachable.
 - **Measure from `coverage-final.json`'s `statementMap`, not lcov `DA:`/`BRDA:`.**
   An uncovered *statement* does not appear in an lcov branch read; that gap cost a

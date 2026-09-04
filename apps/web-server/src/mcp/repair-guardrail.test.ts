@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
-import { INSTRUCTIONS_BY_PROFILE } from './server'
+import { INSTRUCTIONS_BY_PROFILE, INSTRUCTIONS_DELIVERED_WINDOW } from './instructions'
 import { EXTERNAL_HEAL_NEXT_STEPS } from '../features/runs/logic/heal/external-heal-surface'
 
 // The repair rule — "fix app/service code, not tests, unless a test is provably
@@ -94,16 +94,14 @@ describe('repair guardrail — MCP instructions', () => {
 })
 
 // Presence in the string above is NOT delivery. The Claude Code CLI truncates a
-// server's `instructions` at 2048 chars (`HB=2048` in the binary; 2,268 recorded
-// truncations of canary-lab under ~/Library/Caches/claude-cli-nodejs/*/
-// mcp-logs-canary-lab/). Every assertion above passes on text a skill-less client
-// may never receive — which is exactly how the two rules pinned below came to be
-// asserted-but-undelivered. So each load-bearing rule needs a home in a channel
-// the client provably gets: either inside the delivered window of `instructions`,
-// or in a tool result (results and tool descriptions are not truncated).
+// server's `instructions` at INSTRUCTIONS_DELIVERED_WINDOW chars (its logs read
+// "Server instructions truncated from N to 2048 chars"). Every profile's lead now
+// fits the window (instructions.test.ts), but the two rules pinned below once sat
+// past the cut while every other test in this file stayed green — so each
+// load-bearing rule also keeps a home in a channel the client provably gets: a
+// tool result (results and tool descriptions are not truncated).
 describe('repair guardrail — delivery, not just presence', () => {
-  /** What the Claude Code CLI keeps of a server's `instructions`. */
-  const DELIVERED_WINDOW = 2048
+  const DELIVERED_WINDOW = INSTRUCTIONS_DELIVERED_WINDOW
 
   const healProfiles = ['repair', 'lifecycle', 'full', 'compact'] as const
 
@@ -115,11 +113,10 @@ describe('repair guardrail — delivery, not just presence', () => {
     expect(at).toBeLessThan(DELIVERED_WINDOW)
   })
 
-  // These two live past the cut in `instructions` (measured: ~3549 and ~3847 in
-  // `repair`), so the heal RESULT is the only channel that delivers them. Do not
-  // "de-duplicate" them out of the nextSteps on the grounds that session-init
-  // prose already says it — that reasoning is what the truncation invalidates,
-  // and heal-task-wait.ts's own comment once recorded it as settled.
+  // The repair lead carries these two, but a compact client (the setup-installed
+  // default) reads the compact instructions, not the repair lead — so the heal
+  // RESULT is the one channel every client gets. Do not "de-duplicate" them out
+  // of the nextSteps on the grounds that session-init prose already says it.
   it('the pass-count invariant rides the heal result, not only session-init prose', () => {
     const steps = EXTERNAL_HEAL_NEXT_STEPS.join('\n')
     expect(steps).toMatch(/never total - failed/i)

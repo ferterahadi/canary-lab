@@ -28,6 +28,7 @@ const inertPtyFactory: PtyFactory = () => ({
 const uniqueSorted = (values: string[]): string[] => Array.from(new Set(values)).sort()
 
 const REPAIR_TOOLS = uniqueSorted([
+  'get_workflow_guide',
   'abort_run',
   'boot_services',
   'cancel_heal',
@@ -46,6 +47,7 @@ const REPAIR_TOOLS = uniqueSorted([
 ])
 
 const VERIFY_TOOLS = uniqueSorted([
+  'get_workflow_guide',
   'abort_run',
   'boot_services',
   'create_verification_config',
@@ -60,6 +62,7 @@ const VERIFY_TOOLS = uniqueSorted([
 ])
 
 const AUTHOR_TOOLS = uniqueSorted([
+  'get_workflow_guide',
   'apply_external_draft',
   'capture_feature_env_files',
   'checkout_feature_repo_branch',
@@ -79,6 +82,7 @@ const AUTHOR_TOOLS = uniqueSorted([
 ])
 
 const COVERAGE_TOOLS = uniqueSorted([
+  'get_workflow_guide',
   'clear_prd_summary',
   'delete_feature_doc',
   'get_feature_coverage',
@@ -92,6 +96,7 @@ const COVERAGE_TOOLS = uniqueSorted([
 ])
 
 const EXPORT_TOOLS = uniqueSorted([
+  'get_workflow_guide',
   'delete_evaluation_export',
   'download_evaluation_export',
   'get_evaluation_export',
@@ -104,6 +109,7 @@ const EXPORT_TOOLS = uniqueSorted([
 ])
 
 const FLIGHT_TOOLS = uniqueSorted([
+  'get_workflow_guide',
   'abort_flight',
   'get_flight',
   // The skills' bootstrap liveness probe; see FLIGHT_TOOLS in tool-profiles.ts.
@@ -126,6 +132,7 @@ const FLIGHT_TOOLS = uniqueSorted([
 ])
 
 const PORTIFY_TOOLS = uniqueSorted([
+  'get_workflow_guide',
   'list_features',
   'list_runs',
   'start_external_portify',
@@ -496,6 +503,17 @@ describe('MCP HTTP server (smoke)', () => {
       })
       expect((refusedAbort as { isError?: boolean }).isError).toBe(true)
       expect(toolText(refusedAbort)).toContain('confirm')
+
+      // The full workflow guide is reachable from the one-tool surface too — the
+      // compact initialize text is only the envelope, so this is where a
+      // skill-less compact client learns a loop.
+      const guide = await compactClient.callTool({
+        name: 'exec',
+        arguments: { command: 'get_workflow_guide', arguments: { workflow: 'flight' } },
+      })
+      expect(toolText(guide)).toContain('start_flight')
+      expect(toolText(guide)).toContain('respond_flight_checkpoint')
+      expect(toolText(guide)).not.toContain('<!-- initialize-cut -->')
     } finally {
       if (compactClient) await compactClient.close().catch(() => undefined)
       if (directClient) await directClient.close().catch(() => undefined)

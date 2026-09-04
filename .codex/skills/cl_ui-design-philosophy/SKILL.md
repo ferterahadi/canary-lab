@@ -42,8 +42,8 @@ Terminal/CLI output styling is out of scope.
 ## Principles that make it feel designed
 
 - **One agent timeline everywhere.** Any surface that shows an agent's progress —
-  run heal, draft planning/generating, coverage, portify, benchmark, evaluation
-  export — renders through `AgentSessionView`, never a hand-rolled raw-log `<pre>`.
+  run heal, coverage, portify, benchmark, flight stages, evaluation export —
+  renders through `AgentSessionView`, never a hand-rolled raw-log `<pre>`.
   Reaching for `AgentSessionView` means the producer must pin a session ref (claude
   `--session-id`; codex located by cwd + start) and expose the REST snapshot +
   `/ws/.../agent-session` tail, exactly like the coverage job (see `cl_async-task-ux`).
@@ -54,7 +54,7 @@ Terminal/CLI output styling is out of scope.
   off the per-task stream you already hold. Pattern, worked example, and the
   "only updates after I refresh" fingerprint: [[cl_live-state-sync]].
 - **Meaning carries the style, not decoration.** Prefer a status dot, a coloured
-  border-inset, or a typed chip over a heavy accent. (R9 dropped the TestCard's
+  border-inset, or a typed chip over a heavy accent. (The TestCard has no
   decorative left-accent — the verified dot + `@req-*` chips already say it.)
 - **Worst-first ordering.** Lists of work (gaps, failures) sort the items that need
   attention to the top; "all good" sinks to the bottom.

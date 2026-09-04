@@ -11,8 +11,11 @@ description: Use when adding, editing, or moving an agent prompt or MCP initiali
 Every prompt Canary sends to a spawned agent (Claude/Codex), plus every static
 MCP `initialize` instruction source, lives as a flat file in
 `apps/web-server/prompts/` — never as a template literal or string constant
-buried in a `.ts` file. MCP files use the `mcp-*-instructions.md` naming pattern;
-their profile composition stays in `mcp/server.ts`. One home, one loader:
+buried in a `.ts` file. MCP files use the `mcp-*-instructions.md` naming pattern and
+are loaded by `mcp/instructions.ts`: the text above a file's `<!-- initialize-cut -->`
+marker is the profile's initialize lead (the Claude Code CLI keeps only the first
+2048 characters of a server's instructions), and the whole file is the guide that
+the `get_workflow_guide` tool returns. One home, one loader:
 [`apps/web-server/src/shared/prompts.ts`](../../../apps/web-server/src/shared/prompts.ts).
 
 ## Why prompts get their own folder
@@ -47,13 +50,15 @@ their profile composition stays in `mcp/server.ts`. One home, one loader:
    - `renderPrompt(name, vars)` — the one-shot case: load + substitute in one call.
    - `loadPromptTemplate(path)` / `renderPromptTemplate(template, vars)` — the
      two steps split apart, for callers that accept an injected raw template
-     string for tests (`buildPlanPrompt({ template: '...' })`) or that resolve
-     the path dynamically (`opts.promptPath ?? DEFAULT_PATH`).
-   - Static MCP instructions use `loadPromptTemplate(promptPath(name))`, then
-     `INSTRUCTIONS_BY_PROFILE` composes the workflow profiles in `mcp/server.ts`.
+     string for tests or that resolve the path dynamically
+     (`opts.promptPath ?? HEAL_PROMPT_TEMPLATE_PATH` in `auto-heal.ts`).
+   - Static MCP instructions are loaded once by `mcp/instructions.ts`, which splits
+     each file at `<!-- initialize-cut -->` into `INSTRUCTIONS_BY_PROFILE` (the lead)
+     and `WORKFLOW_GUIDES` (the whole file). `mcp/instructions.test.ts` pins every
+     lead ≤ 2048 chars and requires a cut lead to name `get_workflow_guide`; put a
+     rule past the cut only if the lead still tells the agent where it lives.
 4. Never `fs.readFileSync` a prompt file directly, and never hand-roll another
-   `{{key}}` regex — that's exactly the duplication this module replaced (six
-   near-identical copies before the 2026-07 consolidation).
+   `{{key}}` regex — that's exactly the duplication this module exists to prevent.
 
 ## The `{{placeholder}}` contract
 

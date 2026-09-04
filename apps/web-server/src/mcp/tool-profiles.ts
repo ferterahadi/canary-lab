@@ -79,6 +79,7 @@ export type CanaryLabMcpToolName =
   | 'cancel_portify'
   | 'remove_portification'
   | 'list_portify_status'
+  | 'get_workflow_guide'
 
 export const EXEC_TOOL_NAME = 'exec' as const
 export type CanaryLabMcpExposedToolName = CanaryLabMcpToolName | typeof EXEC_TOOL_NAME
@@ -97,6 +98,9 @@ export interface CanaryLabMcpExecCallEvent {
 }
 
 export const REPAIR_TOOLS = [
+  // Cross-workflow like list_features: every profile can read its own full guide,
+  // because the initialize lead is capped at INSTRUCTIONS_DELIVERED_WINDOW.
+  'get_workflow_guide',
   'list_features',
   'list_runs',
   'start_run',
@@ -115,6 +119,7 @@ export const REPAIR_TOOLS = [
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
 export const VERIFY_TOOLS = [
+  'get_workflow_guide',
   'list_features',
   'list_runs',
   'get_run',
@@ -134,6 +139,7 @@ export const VERIFY_TOOLS = [
 // array; the split keeps each skill/client surface lean while `lifecycle`/`full`
 // stay the same computed unions.
 export const AUTHOR_TOOLS = [
+  'get_workflow_guide',
   'list_features',
   'list_runs',
   'get_run',
@@ -160,6 +166,7 @@ export const AUTHOR_TOOLS = [
 // Coverage = feature docs → PRD summary → semantic coverage ledger (carved out
 // of the old author array; the tools are unchanged).
 export const COVERAGE_TOOLS = [
+  'get_workflow_guide',
   'list_features',
   'write_feature_doc',
   'delete_feature_doc',
@@ -175,6 +182,7 @@ export const COVERAGE_TOOLS = [
 // Export = evaluation archives for a terminal run (carved out of the old
 // author array). list_runs/get_run ride along to pick the run to export.
 export const EXPORT_TOOLS = [
+  'get_workflow_guide',
   'list_features',
   'list_runs',
   'get_run',
@@ -189,6 +197,7 @@ export const EXPORT_TOOLS = [
 // Flight = the conducted end-to-end pipeline. write_feature_doc rides along so
 // the client can distill conversation docs at the prd-source checkpoint.
 export const FLIGHT_TOOLS = [
+  'get_workflow_guide',
   // Every shipped skill's bootstrap uses list_features as its liveness probe
   // ("only an unknown-tool error means the server is disconnected") — flight
   // was the one profile where that probe itself errored, misreporting a
@@ -239,6 +248,7 @@ export const FLIGHT_TOOLS = [
 // profile=portify (or full). The three tools a FLIGHT's portify hand-off needs
 // live in FLIGHT_TOOLS as well, so they reach lifecycle through that union.
 export const PORTIFY_TOOLS = [
+  'get_workflow_guide',
   'list_features',
   'list_runs',
   'start_external_portify',

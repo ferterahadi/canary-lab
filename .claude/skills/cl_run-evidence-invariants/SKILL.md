@@ -65,7 +65,7 @@ green.** A test edited into passing is the exact failure this product exists to 
   **present and labelled `NOT_RUN_STATUS` (`'not run'`)**: never dropped, and never
   rounded into a pass or a fail. A 23-test suite that stopped at the failure limit
   after 6 reports **23 cases with 17 marked never-run**; building the roster from
-  `playbackEvents` instead (the old behavior) silently reported it as a 6-test suite.
+  `playbackEvents` instead silently reports it as a 6-test suite.
   - Anything the run actually reported that the roster misses is **appended, not
     discarded** — evidence is never dropped in either direction.
   - Status conflicts resolve **downward**: a per-test playback verdict beats the

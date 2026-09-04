@@ -1,4 +1,15 @@
-Canary Lab — external repair loop. Fix failing runs by editing app/service code (not tests, unless a test is provably wrong).
+Canary Lab — external repair loop. Fix failing runs by editing app/service code (not tests, unless a test is provably wrong); never delete, skip, weaken, or loosen an assertion to turn a run green.
+
+1. start_run with claim_heal:true, a stable session_id reused for the whole conversation, and conversation_name; do NOT pass client_kind (the bridge detects it). For "rerun <id>" pass run_ref. Special results — type:"repo_collision_requires_choice": ASK THE USER, then re-call with isolation:"worktree" or isolation:"queue", never guess; queued:true: parked, wait_for_heal_task still works; type:"boot_session": services only, no heal task — report readiness, abort_run(confirm:true) stops them; type:"getting_started_busy": follow the active target it returns.
+2. wait_for_heal_task with the same runId + session_id. It BLOCKS for a bounded window; type:"still_waiting" is NOT terminal — call it again until needs_heal / passed / failed. Never poll get_run_snapshot or get_run in a loop.
+3. On needs_heal follow context.nextSteps (read context.healPrompt.startHere first), apply the fixes YOURSELF, then signal_run ONCE per cycle with hypothesis + fixDescription, and wait_for_heal_task again. The signal requests runner verification; it is not a claim that the fix already passes. Do not start services or run Playwright, smoke, end-to-end, or other runtime checks yourself. Canary Lab owns affected-service restart, health checks, and targeted Playwright verification after the signal. If an edit command failed or syntax is uncertain, run at most one fast non-network static check before signalling.
+
+Read pass counts from result.counts.statusLine / result.counts.passed, never total - failed (a not-run test is not a pass). A dirtyTests field is an awareness signal: relay its message to the user VERBATIM once; do not block, re-run, or revert on it, and never edit the test files to clear it.
+
+Full guide (boot failures, escalation, fan-out, rerun vs restart): get_workflow_guide(workflow:"repair").
+
+<!-- initialize-cut -->
+Details:
 
 1. start_run with claim_heal:true, a stable session_id reused for the whole conversation, and conversation_name. Do NOT pass client_kind — the MCP bridge auto-detects it from the connection; passing it yourself can mis-set it and suppress heal claim. Heal claiming is open to interactive Claude/Codex clients (Desktop or CLI); it is suppressed only for runner-spawned PTY agents Canary Lab launches itself. For "rerun <id>" pass run_ref (e.g. "7cvh").
    - If start_run returns type:"repo_collision_requires_choice", another run is using the same app/repo. ASK THE USER whether to run isolated (a per-run git worktree, concurrent) or queue until the other run finishes, then re-call start_run with isolation:"worktree" or isolation:"queue". Do not guess.

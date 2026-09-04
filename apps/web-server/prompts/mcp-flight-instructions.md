@@ -1,6 +1,19 @@
-Canary Lab — flight profile. One conducted pipeline takes bare product repo(s) to a green, covered, healed run and publishes a downloadable Report; Canary then completes Parallel setup as persistent server-owned background work. The server owns every stage verdict, this client only answers checkpoints.
+Canary Lab — flight profile. One conducted pipeline takes bare product repo(s) to a green, covered, healed run and a downloadable Report, then finishes Parallel setup in the background. The server owns every verdict; this client only answers checkpoints.
 
-YOU are the driver of a flight you start. stage_producer defaults to "external" for an MCP caller, and the web UI is READ-ONLY for such a flight: Respond, Pause, Continue and autopilot stay disabled. Abort remains available if this session dies. During an external-work handoff the UI also offers Request takeover; that only records intent and waits for release. If get_flight carries checkpoint.data.takeoverRequestedAt, STOP your work and subagents, do not submit, and acknowledge with respond_flight_checkpoint(choice:"run-internally"); only then does Canary start locally. Never tell the user to answer, pause, or resume from the UI. (Positioned early deliberately: the CLI truncates these instructions at 2048 characters.)
+YOU drive a flight you start; the web UI is READ-ONLY for it, so never tell the user to answer, pause, or resume there. If get_flight carries checkpoint.data.takeoverRequestedAt, STOP (subagents too) and respond_flight_checkpoint(choice:"run-internally"). Pass a stable session_id and conversation_name; external_session_url only when it opens this exact conversation; never client_kind.
+
+Loop: start_flight(repoPaths, description), then get_flight and do what its next: field says. On waiting-for-approval call respond_flight_checkpoint(flightId) with choice (from checkpoint.options), values (missing-env) or data (config-approval). Autopilot is ON by default: safe-default checkpoints answer themselves; the flight still parks on similarity-choice, missing-env, any re-parked checkpoint, and every checkpoint of a stage you re-entered. autopilot:false asks at every stop (e.g. to supply requirement docs yourself at prd-source: write_feature_doc, THEN respond "continue").
+
+When get_flight returns links.evaluationZip, tell the user where the Report is and END YOUR TURN; do not keep polling — Parallel setup is Canary-owned.
+
+ONE flight record per feature: re-calling start_flight follows an active one and resumes a paused one; a settled one needs redo:true or from_stage:"<stage>". A restart WIPES the entry stage and every later artifact (docs, specs, envsets, overlay, run, export) — warn the user first; plain resume never wipes. On resume/from_stage OMIT repoPaths/description (frozen; different ones fail with type:"flight_frozen"). Re-entering after a bad attempt? Pass feedback:"<what went wrong>". pauseReason:"queued" means waiting for the repo, not stuck.
+
+Full guide (checkpoint kinds and choices, forks, remedy, yolo, agent): get_workflow_guide(workflow:"flight").
+
+<!-- initialize-cut -->
+Details:
+
+YOU are the driver of a flight you start. stage_producer defaults to "external" for an MCP caller, and the web UI is READ-ONLY for such a flight: Respond, Pause, Continue and autopilot stay disabled. Abort remains available if this session dies. During an external-work handoff the UI also offers Request takeover; that only records intent and waits for release. If get_flight carries checkpoint.data.takeoverRequestedAt, STOP your work and subagents, do not submit, and acknowledge with respond_flight_checkpoint(choice:"run-internally"); only then does Canary start locally. Never tell the user to answer, pause, or resume from the UI.
 
 When starting an external Flight, pass a stable session_id and useful conversation_name so Activity identifies this external agent session. Use the client's real session id when available. Pass external_session_url only when it opens this exact conversation; never guess a deep link. Do not pass client_kind — the MCP bridge detects Claude/Codex from the connection.
 

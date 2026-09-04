@@ -72,9 +72,11 @@ That is the suite-scoped shape; commands with different inputs use the
 argument fields returned by `describe_tool`.
 
 `list_tools`, `search_tools`, and `describe_tool` are internal discovery
-commands reached through the same `exec` shape. Do not prefix commands with
-verbs such as `learn` or `call`. The `full` profile still exposes all 63 atomic
-tools directly if a client needs the old surface.
+commands reached through the same `exec` shape, and `get_workflow_guide` returns
+the complete guide for one workflow (the initialize instructions are a summary:
+MCP clients keep at most their first 2048 characters). Do not prefix commands
+with verbs such as `learn` or `call`. The `full` profile still exposes all 64
+atomic tools directly if a client needs the old surface.
 
 ## Requirement Coverage (MCP, `compact` or direct `coverage`/`lifecycle`/`full` profiles)
 

@@ -44,7 +44,7 @@ it with a channel you can trust:
   record once** and let the refetched truth flip the UI. Make it **self-limiting** —
   stop refetching the moment the awaited field lands, so you don't poll forever.
 
-Worked example (this session): the export dialog swaps to `AgentSessionView` once the
+Worked example: the export dialog swaps to `AgentSessionView` once the
 rewrite agent pins its `sessionRef`. The reliable signal is the per-task log WS (it's
 visibly streaming the agent's lines). When a chunk matches the agent-start marker and
 the task still lacks `sessionRef`, refetch the task once; the refetched `sessionRef`
@@ -60,7 +60,7 @@ onData: (chunk) => {
 }
 ```
 
-**Second instance (coverage dialog, items 1+2):** the Docs rail must show the
+**Second instance (coverage dialog):** the Docs rail must show the
 generated `_prd-summary.md` the moment generation finishes — not after a manual
 refresh. The fix was *not* the `coverage-changed` broadcast; it was bumping a
 `docsReloadKey` off the **reliable `pollJob` completion** (the per-task poll the

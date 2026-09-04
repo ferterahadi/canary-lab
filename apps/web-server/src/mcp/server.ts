@@ -15,7 +15,7 @@ import {
 import { classifyMcpClient } from './client-surface'
 import { isClientKind, type ClientKind } from '../../../../shared/run-mode'
 import { CANARY_LAB_MCP_PROTOCOL_VERSION } from '../../../../shared/mcp-protocol'
-import { loadPromptTemplate, promptPath } from '../shared/prompts'
+import { INSTRUCTIONS_BY_PROFILE } from './instructions'
 
 // MCP endpoint mounted on the existing Fastify instance at `/mcp`. Uses
 // streamable HTTP so Claude / Codex clients (Desktop or CLI) and other MCP
@@ -47,47 +47,6 @@ export function mcpErrorLogger(
   message: string,
 ): (err: unknown) => void {
   return (err) => app.log.error({ err }, message)
-}
-
-// Sent to MCP clients through initialize/discovery so external agents that do
-// not carry the Canary Lab skill still learn the run/heal/author loops. The
-// repair text is load-bearing: without it, result-driven clients invent their
-// own get_run_snapshot poll loop instead of blocking on wait_for_heal_task,
-// and never pick up the needs_heal handoff.
-const REPAIR_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-repair-instructions.md'))
-
-const VERIFY_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-verify-instructions.md'))
-
-const AUTHOR_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-author-instructions.md'))
-
-const COVERAGE_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-coverage-instructions.md'))
-
-const FLIGHT_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-flight-instructions.md'))
-
-const EXPORT_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-export-instructions.md'))
-
-const PORTIFY_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-portify-instructions.md'))
-
-const COMPACT_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-compact-instructions.md'))
-
-// `lifecycle` carries the everyday one-session loop (repair + author +
-// coverage + flight + export + verify); `full` adds the portify instructions
-// on top. Keep these compositions in step with TOOLS_BY_PROFILE in tools.ts.
-const LIFECYCLE_INSTRUCTIONS = `${REPAIR_INSTRUCTIONS}\n\n${AUTHOR_INSTRUCTIONS}\n\n${COVERAGE_INSTRUCTIONS}\n\n${FLIGHT_INSTRUCTIONS}\n\n${EXPORT_INSTRUCTIONS}\n\n${VERIFY_INSTRUCTIONS}`
-
-// Exported so `repair-guardrail.test.ts` can pin the repair rule ("fix
-// app/service code, not tests") on every profile that can drive a heal loop.
-export const INSTRUCTIONS_BY_PROFILE: Record<CanaryLabMcpProfile, string> = {
-  repair: REPAIR_INSTRUCTIONS,
-  verify: VERIFY_INSTRUCTIONS,
-  author: AUTHOR_INSTRUCTIONS,
-  coverage: COVERAGE_INSTRUCTIONS,
-  export: EXPORT_INSTRUCTIONS,
-  flight: FLIGHT_INSTRUCTIONS,
-  portify: PORTIFY_INSTRUCTIONS,
-  lifecycle: LIFECYCLE_INSTRUCTIONS,
-  full: `${LIFECYCLE_INSTRUCTIONS}\n\n${PORTIFY_INSTRUCTIONS}`,
-  compact: COMPACT_INSTRUCTIONS,
 }
 
 export async function registerMcpRoutes(

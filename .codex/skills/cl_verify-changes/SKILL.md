@@ -21,7 +21,7 @@ npx vitest run <paths touched by the change>
 npx tsc -p tsconfig.build.json --noEmit
 ```
 
-- **Scope the run to what you changed.** The full suite is ~275 files; a bare
+- **Scope the run to what you changed.** The full suite is several hundred files; a bare
   `npx vitest run` is for release (`cl_release`), not for an iteration. Run the
   affected files plus anything that greps for the symbol you touched.
 - **A killed run is not a green run.** The full suite is known to get
@@ -67,8 +67,7 @@ exercise the changed surface.
 Changes to the external run loop (claim, wait, signal, collision, boot sessions) need
 an end-to-end pass: drive the MCP loop against the `demo_catalog` sample
 (`start_run` with `claim_heal` → `wait_for_heal_task` → fix → `signal_run` → wait).
-The old `tools/verify-external-heal.sh` REST smoke was removed — the MCP loop is the
-current path. Evidence-integrity expectations for that loop (honest counts, the
+Evidence-integrity expectations for that loop (honest counts, the
 repair rule, artifact retention) live in `cl_run-evidence-invariants`.
 
 ## Quick reference
@@ -87,7 +86,7 @@ repair rule, artifact retention) live in `cl_run-evidence-invariants`.
 `docs/PRD.md` (intent) are single-source per topic, and `.codex/skills/` must match
 what's actually on disk.
 
-**The mechanical half is now a gate.** `npm run check:docs` fails on any backticked
+**The mechanical half is a gate.** `npm run check:docs` fails on any backticked
 repo path, relative link, or `#anchor` in `README.md` / `docs/**` that doesn't
 resolve. It runs in CI. Don't hand-check what it checks.
 
@@ -112,9 +111,8 @@ diff <(ls .codex/skills) <(grep -o 'cl_[a-z-]*' CLAUDE.md | sort -u)   # index v
 find agent-integrations -name SKILL.md | wc -l                          # what a list would have to say
 ```
 
-> The 2.0.0 audit found 26 findings against these docs, and the discipline-only
-> version of this section caught none of them. If your change makes a doc
-> sentence false, fixing the doc is part of the change — not a follow-up.
+> If your change makes a doc sentence false, fixing the doc is part of the
+> change — not a follow-up.
 
 ## Common mistakes
 
