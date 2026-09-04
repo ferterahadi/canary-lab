@@ -17,14 +17,23 @@ export interface RenderedAssertion {
   role: 'check'
 }
 
-interface Expectation {
+export interface Expectation {
   matcher: string
   matcherCall: ts.CallExpression
   actual: ts.Expression
   negated: boolean
   soft: boolean
+  /** `expect.poll(fn)` — only ever true when the caller opted in. */
+  poll: boolean
   settlement?: 'resolves' | 'rejects'
   message?: ts.Expression
+}
+
+export interface ParseExpectationOptions {
+  /** Accept an `expect.poll(...)` receiver. Off by default: readable rendering
+   *  has no prose for a polled subject and keeps its exact-source fallback,
+   *  while the verification-strength collector needs the chain's facts. */
+  allowPoll?: boolean
 }
 
 interface AssertionContext extends Expectation {
@@ -60,7 +69,7 @@ function unwrapCall(statement: ts.Statement): ts.CallExpression | undefined {
   return ts.isCallExpression(expression) ? expression : undefined
 }
 
-function parseExpectation(call: ts.CallExpression): Expectation | undefined {
+export function parseExpectation(call: ts.CallExpression, options?: ParseExpectationOptions): Expectation | undefined {
   if (!ts.isPropertyAccessExpression(call.expression)) return undefined
   const matcher = call.expression.name.text
   let receiver: ts.Expression = call.expression.expression
@@ -93,19 +102,16 @@ function parseExpectation(call: ts.CallExpression): Expectation | undefined {
   }
   if (!ts.isCallExpression(receiver)) return undefined
 
-  let soft = false
-  if (ts.isIdentifier(receiver.expression) && receiver.expression.text === 'expect') {
-    soft = false
-  } else if (
-    ts.isPropertyAccessExpression(receiver.expression)
-    && ts.isIdentifier(receiver.expression.expression)
-    && receiver.expression.expression.text === 'expect'
-    && receiver.expression.name.text === 'soft'
-  ) {
-    soft = true
-  } else {
-    return undefined
-  }
+  const receiverCallee = receiver.expression
+  const expectMember = ts.isPropertyAccessExpression(receiverCallee)
+    && ts.isIdentifier(receiverCallee.expression)
+    && receiverCallee.expression.text === 'expect'
+    ? receiverCallee.name.text
+    : undefined
+  const plainExpect = ts.isIdentifier(receiverCallee) && receiverCallee.text === 'expect'
+  const soft = expectMember === 'soft'
+  const poll = expectMember === 'poll' && Boolean(options?.allowPoll)
+  if (!plainExpect && !soft && !poll) return undefined
   const actual = receiver.arguments[0]
   if (!actual) return undefined
   return {
@@ -114,6 +120,7 @@ function parseExpectation(call: ts.CallExpression): Expectation | undefined {
     actual,
     negated,
     soft,
+    poll,
     ...(settlement ? { settlement } : {}),
     message: receiver.arguments[1],
   }
