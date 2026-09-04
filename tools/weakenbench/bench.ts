@@ -143,16 +143,24 @@ function sideFile(pair: RawPair): string {
 // A fragment (an Edit tool's old/new string) often has no `test(` wrapper. Parse
 // it as-is first; when nothing declares a test, wrap it so its assertions still
 // form a predicate set. `wrapped` is reported so a reader knows which path ran.
-function extractSide(source: string, file: string): { result: ExtractPredicatesResult; wrapped: boolean } {
-  const direct = extractTestPredicatesFromSource(file, source)
-  if (direct.parseError || direct.tests.length) return { result: direct, wrapped: false }
+function extractSide(source: string, file: string, wrap = false): { result: ExtractPredicatesResult; wrapped: boolean } {
+  const direct = wrap ? undefined : extractTestPredicatesFromSource(file, source)
+  if (direct && (direct.parseError || direct.tests.length)) return { result: direct, wrapped: false }
   return { result: extractTestPredicatesFromSource(file, `test('fragment', async () => {\n${source}\n})`), wrapped: true }
 }
 
 export function classifyPair(pair: RawPair): Prediction {
   const file = sideFile(pair)
-  const before = extractSide(pair.before, file)
-  const after = extractSide(pair.after, file)
+  let before = extractSide(pair.before, file)
+  let after = extractSide(pair.after, file)
+  // A fragment whose edit adds the first `test(` wrapper — or removes the last — has
+  // one side declaring tests and the other bare assertions. Diffing a synthetic
+  // wrapper test against real ones reads as the wrapper being deleted; the honest
+  // comparison is the two assertion sets as one fragment, so both sides wrap.
+  if (before.wrapped !== after.wrapped) {
+    before = extractSide(pair.before, file, true)
+    after = extractSide(pair.after, file, true)
+  }
   const diff: SpecDiff = diffSpecPredicates(before.result, after.result)
   const detail = [
     ...(diff.reasons ?? []).map((reason) => `file:${reason}`),
