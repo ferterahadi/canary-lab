@@ -68,12 +68,24 @@ green.** A test edited into passing is the exact failure this product exists to 
   `playbackEvents` instead silently reports it as a 6-test suite.
   - Anything the run actually reported that the roster misses is **appended, not
     discarded** — evidence is never dropped in either direction.
+  - **An attempt belongs to a test by name + spec file, never by line.** A heal
+    cycle may edit the spec, which moves every later test onto a new line, and the
+    reporter mints a fresh id from that line — so one test can be recorded at two
+    lines under two ids inside one run. Keying on the line turned the pre-fix
+    failure into a phantom fourth case ("3 passed, 1 failed" for a three-test suite
+    that ended green — run `2026-09-04T0638-7rcl`). The line decides only when one
+    file declares the same title more than once; with no roster to count against,
+    the current spec source is counted instead, and when it can't tell, both lines
+    stay. The Tests panel (`TestCasesColumn`) and the Playwright tab follow the
+    same rule, so all three surfaces report the same count.
   - Status conflicts resolve **downward**: a per-test playback verdict beats the
     summary lists, and failed/skipped are checked before passed.
   - Runs recorded before the reporter emitted `knownTests` have none — those **fall
     back to the executed set**, which is all the evidence that exists for them.
-  - Pinned by the `declared-test roster` describe block in
-    `apps/web-server/src/features/evaluation/logic/test-review-export.test.ts`.
+  - Pinned by the `declared-test roster` and `a test that moved lines between heal
+    cycles` describe blocks in
+    `apps/web-server/src/features/evaluation/logic/test-review-export.roster.test.ts`
+    (the latter against the recorded evidence of that run, under `__fixtures__/`).
 - External export wording is **client-authored**; Canary renders and stores it, and
   never agent-generates or rewrites the report content.
 

@@ -258,10 +258,18 @@ function summaryIdentityForWorkspaceTest(
   const matchesName = (known: NonNullable<RunSummary['knownTests']>[number]) => {
     return known.title === name || known.name === summaryEntryName(name)
   }
-  const known = summary?.knownTests?.find((entry) => {
+  // The recorded line is a hint, not an identity: a heal edit moves a test to
+  // another line between cycles, and a targeted rerun only re-lists the tests it
+  // re-runs — so a test that already passed can sit ten lines below where the
+  // roster last saw it. The line decides only when one file declares the same
+  // title more than once.
+  const sameTest = (summary?.knownTests ?? []).filter((entry) => {
     const parsed = parseSummaryLocation(entry.location)
-    return Boolean(parsed && sameSourceFile(parsed.file, file) && parsed.line === line && matchesName(entry))
+    return Boolean(parsed && sameSourceFile(parsed.file, file) && matchesName(entry))
   })
+  const known = sameTest.length === 1
+    ? sameTest[0]
+    : sameTest.find((entry) => parseSummaryLocation(entry.location)?.line === line)
   if (known?.id) return { name, id: known.id }
   return summary?.knownTests?.length
     ? { name, allowNameFallback: false }

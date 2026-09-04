@@ -1,0 +1,144 @@
+[
+  {
+    "type": "test-begin",
+    "time": "2026-09-04T06:38:17.841Z",
+    "test": {
+      "id": "test-id-1toc64y",
+      "name": "test-case-the-budget-is-declared-before-anything-is-measured",
+      "title": "the budget is declared before anything is measured",
+      "location": "<featureDir>/e2e/cns-inbound-latency-budget.spec.ts:149"
+    }
+  },
+  {
+    "type": "test-end",
+    "time": "2026-09-04T06:38:17.856Z",
+    "test": {
+      "id": "test-id-1toc64y",
+      "name": "test-case-the-budget-is-declared-before-anything-is-measured",
+      "title": "the budget is declared before anything is measured",
+      "location": "<featureDir>/e2e/cns-inbound-latency-budget.spec.ts:149"
+    },
+    "status": "passed",
+    "passed": true,
+    "durationMs": 3,
+    "retry": 0
+  },
+  {
+    "type": "test-begin",
+    "time": "2026-09-04T06:38:17.858Z",
+    "test": {
+      "id": "test-id-cr614p",
+      "name": "test-case-a-cold-inbound-reaches-the-host-inside-the-budget",
+      "title": "a COLD inbound reaches the Host inside the budget",
+      "location": "<featureDir>/e2e/cns-inbound-latency-budget.spec.ts:178"
+    }
+  },
+  {
+    "type": "test-end",
+    "time": "2026-09-04T06:38:19.253Z",
+    "test": {
+      "id": "test-id-cr614p",
+      "name": "test-case-a-cold-inbound-reaches-the-host-inside-the-budget",
+      "title": "a COLD inbound reaches the Host inside the budget",
+      "location": "<featureDir>/e2e/cns-inbound-latency-budget.spec.ts:178"
+    },
+    "status": "passed",
+    "passed": true,
+    "durationMs": 1388,
+    "retry": 0
+  },
+  {
+    "type": "test-begin",
+    "time": "2026-09-04T06:38:19.258Z",
+    "test": {
+      "id": "test-id-137rgb9",
+      "name": "test-case-warm-inbounds-stay-inside-the-budget-across-five-samples",
+      "title": "warm inbounds stay inside the budget across five samples",
+      "location": "<featureDir>/e2e/cns-inbound-latency-budget.spec.ts:192"
+    }
+  },
+  {
+    "type": "test-end",
+    "time": "2026-09-04T06:38:21.739Z",
+    "test": {
+      "id": "test-id-137rgb9",
+      "name": "test-case-warm-inbounds-stay-inside-the-budget-across-five-samples",
+      "title": "warm inbounds stay inside the budget across five samples",
+      "location": "<featureDir>/e2e/cns-inbound-latency-budget.spec.ts:192"
+    },
+    "status": "failed",
+    "passed": false,
+    "durationMs": 2464,
+    "retry": 0,
+    "error": {
+      "message": "Error: p50=491ms worst=505ms budget=500ms samples=481,485,491,494,505\n\nexpect(received).toBeLessThanOrEqual(expected)\n\nExpected: <= 500\nReceived:    505",
+      "snippet": "  200 |     // profile that looks fine on a dashboard and feels broken to a merchant.\n  201 |     expect(worst, `p50=${p50}ms worst=${worst}ms budget=${INBOUND_BUDGET_MS}ms samples=${samples.join(',')}`)\n> 202 |       .toBeLessThanOrEqual(INBOUND_BUDGET_MS!)\n      |        ^\n  203 |   })\n  204 | })\n  205 |"
+    },
+    "attachments": [
+      {
+        "name": "error-context",
+        "contentType": "text/markdown",
+        "path": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-04T0638-7rcl/playwright-artifacts/cns-inbound-latency-budget-8504c--budget-across-five-samples/error-context.md"
+      }
+    ]
+  },
+  {
+    "type": "test-begin",
+    "time": "2026-09-04T06:40:36.339Z",
+    "test": {
+      "id": "test-id-137rgb9",
+      "name": "test-case-warm-inbounds-stay-inside-the-budget-across-five-samples",
+      "title": "warm inbounds stay inside the budget across five samples",
+      "location": "<featureDir>/e2e/cns-inbound-latency-budget.spec.ts:192"
+    }
+  },
+  {
+    "type": "test-end",
+    "time": "2026-09-04T06:40:38.914Z",
+    "test": {
+      "id": "test-id-137rgb9",
+      "name": "test-case-warm-inbounds-stay-inside-the-budget-across-five-samples",
+      "title": "warm inbounds stay inside the budget across five samples",
+      "location": "<featureDir>/e2e/cns-inbound-latency-budget.spec.ts:192"
+    },
+    "status": "failed",
+    "passed": false,
+    "durationMs": 2547,
+    "retry": 0,
+    "error": {
+      "message": "Error: p50=493ms worst=533ms budget=500ms samples=488,491,493,494,533\n\nexpect(received).toBeLessThanOrEqual(expected)\n\nExpected: <= 500\nReceived:    533",
+      "snippet": "  200 |     // profile that looks fine on a dashboard and feels broken to a merchant.\n  201 |     expect(worst, `p50=${p50}ms worst=${worst}ms budget=${INBOUND_BUDGET_MS}ms samples=${samples.join(',')}`)\n> 202 |       .toBeLessThanOrEqual(INBOUND_BUDGET_MS!)\n      |        ^\n  203 |   })\n  204 | })\n  205 |"
+    },
+    "attachments": [
+      {
+        "name": "error-context",
+        "contentType": "text/markdown",
+        "path": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-04T0638-7rcl/playwright-artifacts/cns-inbound-latency-budget-8504c--budget-across-five-samples/error-context.md"
+      }
+    ]
+  },
+  {
+    "type": "test-begin",
+    "time": "2026-09-04T06:42:43.523Z",
+    "test": {
+      "id": "test-id-1orufj9",
+      "name": "test-case-warm-inbounds-stay-inside-the-budget-across-five-samples",
+      "title": "warm inbounds stay inside the budget across five samples",
+      "location": "<featureDir>/e2e/cns-inbound-latency-budget.spec.ts:202"
+    }
+  },
+  {
+    "type": "test-end",
+    "time": "2026-09-04T06:42:45.032Z",
+    "test": {
+      "id": "test-id-1orufj9",
+      "name": "test-case-warm-inbounds-stay-inside-the-budget-across-five-samples",
+      "title": "warm inbounds stay inside the budget across five samples",
+      "location": "<featureDir>/e2e/cns-inbound-latency-budget.spec.ts:202"
+    },
+    "status": "passed",
+    "passed": true,
+    "durationMs": 1492,
+    "retry": 0
+  }
+]

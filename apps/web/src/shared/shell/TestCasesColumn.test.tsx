@@ -71,6 +71,12 @@ async function waitFor(condition: () => boolean): Promise<void> {
   expect(condition()).toBe(true)
 }
 
+function statusBadges(): string[] {
+  return [...container.querySelectorAll('span')]
+    .map((span) => span.textContent ?? '')
+    .filter((text) => text === 'passed' || text === 'pending' || text === 'failed')
+}
+
 describe('TestCasesColumn', () => {
   it('shows loading while feature tests are pending', () => {
     vi.mocked(getFeatureTests).mockReturnValue(new Promise<FeatureTests>(() => {}))
@@ -650,5 +656,77 @@ describe('TestCasesColumn', () => {
 
     expect(container.textContent).toContain("page.goto('/checkout')")
     expect(container.textContent).not.toContain('No test body available.')
+  })
+
+  // A heal edit moves a test to another line between cycles, and a targeted
+  // rerun only re-lists the tests it re-runs — so the roster's recorded line is
+  // allowed to be stale for a test that already passed. Matching by exact line
+  // turned two real passes into "pending" (run 2026-09-04T0638-7rcl).
+  it('keeps a passed verdict when a heal edit moved the test to another line', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      {
+        file: '/tmp/features/alpha/e2e/current.spec.ts',
+        tests: [{ name: 'validates checkout', line: 24, bodySource: '{}', steps: [], readable: readableTest('validates checkout') }],
+      },
+    ])
+
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          activeRunStatus="passed"
+          activeRunSummary={{
+            complete: true,
+            total: 1,
+            passed: 1,
+            passedNames: ['test-case-validates-checkout'],
+            passedIds: ['test-id-checkout'],
+            knownTests: [
+              { id: 'test-id-checkout', name: 'test-case-validates-checkout', title: 'validates checkout', location: '/tmp/features/alpha/e2e/current.spec.ts:14' },
+            ],
+            failed: [],
+          }}
+        />,
+      )
+    })
+
+    await waitFor(() => statusBadges().length > 0)
+    expect(statusBadges()).toEqual(['passed'])
+  })
+
+  it('lets the line decide only when one file declares the same title twice', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([
+      {
+        file: '/tmp/features/alpha/e2e/current.spec.ts',
+        tests: [
+          { name: 'renders', line: 14, bodySource: '{}', steps: [], readable: readableTest('renders') },
+          { name: 'renders', line: 30, bodySource: '{}', steps: [], readable: readableTest('renders') },
+        ],
+      },
+    ])
+
+    await act(async () => {
+      root.render(
+        <TestCasesColumn
+          feature="alpha"
+          activeRunStatus="failed"
+          activeRunSummary={{
+            complete: true,
+            total: 2,
+            passed: 1,
+            passedNames: ['test-case-renders'],
+            passedIds: ['id-guest'],
+            knownTests: [
+              { id: 'id-guest', name: 'test-case-renders', title: 'renders', location: '/tmp/features/alpha/e2e/current.spec.ts:14' },
+              { id: 'id-host', name: 'test-case-renders', title: 'renders', location: '/tmp/features/alpha/e2e/current.spec.ts:30' },
+            ],
+            failed: [{ id: 'id-host', name: 'test-case-renders' }],
+          }}
+        />,
+      )
+    })
+
+    await waitFor(() => statusBadges().length === 2)
+    expect(statusBadges()).toEqual(['passed', 'failed'])
   })
 })
