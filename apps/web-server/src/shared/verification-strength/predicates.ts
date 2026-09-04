@@ -40,6 +40,58 @@ function normalize(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
 }
 
+/** Identifiers that declare a test: Playwright's `test`, and `it` — the vitest/jest
+ *  vocabulary and Playwright's own `import { test as it }` alias. One set for the
+ *  declaration walker (`ast-extractor.ts`) and the guard reader below, so `it.skip(cond)`
+ *  and `it('title', fn)` are read from the same root as their `test.` forms. */
+export const TEST_DECLARATORS: ReadonlySet<string> = new Set(['test', 'it'])
+
+// Comparison text for a target, an expected value or a guard condition. The
+// expression is re-printed from its syntax tree with every literal in one spelling:
+// `'a'`, `"a"` and `` `a` `` are one value, `1.0` and `0x1` are `1`, `{ "a": 1 }` is
+// `{ a: 1 }`, and a trailing comma or a line break is not a difference. A formatter
+// pass must read as no change, and a selector whose only difference is quote style
+// must not read as a retarget. `source` keeps the statement as written — that is
+// what a reader sees; this is what the differential compares.
+const IDENTIFIER_NAME = /^[A-Za-z_$][\w$]*$/
+const canonicalPrinter = ts.createPrinter({ removeComments: true })
+
+const canonicalLiterals: ts.TransformerFactory<ts.Node> = (context) => {
+  const { factory } = context
+  const visit = (node: ts.Node): ts.Node => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return factory.createStringLiteral(node.text)
+    if (ts.isNumericLiteral(node)) return factory.createNumericLiteral(String(Number(node.text)))
+    if (ts.isPropertyAssignment(node) && ts.isStringLiteral(node.name) && IDENTIFIER_NAME.test(node.name.text)) {
+      return factory.createPropertyAssignment(node.name.text, ts.visitNode(node.initializer, visit) as ts.Expression)
+    }
+    // Fresh single-line collections and argument lists: the printer keeps a parsed
+    // literal's line breaks and trailing comma, and both are formatting.
+    if (ts.isArrayLiteralExpression(node)) {
+      return factory.createArrayLiteralExpression(node.elements.map((element) => ts.visitNode(element, visit) as ts.Expression), false)
+    }
+    if (ts.isObjectLiteralExpression(node)) {
+      return factory.createObjectLiteralExpression(node.properties.map((property) => ts.visitNode(property, visit) as ts.ObjectLiteralElementLike), false)
+    }
+    if (ts.isCallExpression(node)) {
+      return factory.updateCallExpression(
+        node,
+        ts.visitNode(node.expression, visit) as ts.Expression,
+        node.typeArguments,
+        factory.createNodeArray(node.arguments.map((argument) => ts.visitNode(argument, visit) as ts.Expression), false),
+      )
+    }
+    return ts.visitEachChild(node, visit, context)
+  }
+  return (node) => ts.visitNode(node, visit) as ts.Node
+}
+
+export function canonicalText(node: ts.Expression, sourceFile: ts.SourceFile): string {
+  const result = ts.transform(node, [canonicalLiterals])
+  const printed = canonicalPrinter.printNode(ts.EmitHint.Expression, result.transformed[0], sourceFile)
+  result.dispose()
+  return normalize(printed)
+}
+
 // The `expect(...)` / `expect.soft(...)` / `expect.poll(...)` call that roots a
 // chain. Matcher calls such as `.toBe(1)` have a property-access callee whose
 // object is the chain, so they are not roots.
@@ -133,14 +185,14 @@ function isGuardKind(name: string): name is TestGuard['kind'] {
 }
 
 /** The run-time guard a call is, if it is one: `test.skip(cond, why)`, `test.fixme()`,
- *  `test.fail(cond)`. The same callee is a test *declaration* — the declaration walker's
+ *  `test.fail(cond)` — or the same under `it`. The same callee is a test *declaration* — the declaration walker's
  *  business — when its first argument is a string title or when a callback follows the
  *  first argument (`test.skip('title', fn)`, `test.skip(name, { tag }, fn)`): Playwright
  *  itself tells the two apart by a function in second or third position. Both shapes are
  *  refused here, so the two readers of `test.skip` never both claim a call. */
 export function guardFrom(call: ts.CallExpression, sourceFile: ts.SourceFile): TestGuard | undefined {
   const callee = call.expression
-  if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.expression) || callee.expression.text !== 'test') return undefined
+  if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.expression) || !TEST_DECLARATORS.has(callee.expression.text)) return undefined
   const kind = callee.name.text
   if (!isGuardKind(kind)) return undefined
   const [first, ...rest] = call.arguments
@@ -148,7 +200,7 @@ export function guardFrom(call: ts.CallExpression, sourceFile: ts.SourceFile): T
   if (rest.some((arg) => ts.isArrowFunction(arg) || ts.isFunctionExpression(arg))) return undefined
   return {
     kind,
-    ...(first ? { condition: normalize(first.getText(sourceFile)) } : {}),
+    ...(first ? { condition: canonicalText(first, sourceFile) } : {}),
     line: lineOf(call, sourceFile),
     source: normalize(call.getText(sourceFile)),
   }
@@ -177,9 +229,9 @@ export function collectTestPredicates(body: ts.Node, sourceFile: ts.SourceFile):
         const value = args[args.length - 1]
         predicates.push({
           matcher: expectation.matcher,
-          target: text(expectation.actual),
+          target: canonicalText(expectation.actual, sourceFile),
           expected: value ? expectedShapeOf(value) : 'none',
-          ...(args.length ? { expectedText: args.map(text).join(', ') } : {}),
+          ...(args.length ? { expectedText: args.map((argument) => canonicalText(argument, sourceFile)).join(', ') } : {}),
           expectedArity: args.length,
           ...(options ? { optionKeys: optionKeysOf(options) } : {}),
           negated: expectation.negated,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
-import { extractTestPredicatesFromSource } from '../ast-extractor'
+import { extractTestMetadataFromSource, extractTestPredicatesFromSource, extractTestsFromSource } from '../ast-extractor'
 import { parseExpectation } from '../readable-tests/assertions'
 import type { TestPredicate } from '../../../../../shared/verification-strength/types'
 
@@ -88,13 +88,14 @@ describe('extractTestPredicatesFromSource', () => {
   })
 
   it('reads web-first matchers with their target and expected shape', () => {
+    // Targets and values are canonical text: the fixture's single quotes print double.
     expect(predicates('checkout total').map(summary)).toEqual([
-      "toHaveText|page.getByTestId('total')|literal|'$148.50'|",
-      "toContainText|page.getByRole('heading')|regex|/Order/i|",
-      "toHaveCount|page.locator('.row')|literal|3|",
-      "toBeVisible|page.getByText('Pay')|none||",
-      "toBeVisible|page.getByText('Error')|none||not",
-      "toContain|page.url()|literal|'checkout'|soft",
+      'toHaveText|page.getByTestId("total")|literal|"$148.50"|',
+      'toContainText|page.getByRole("heading")|regex|/Order/i|',
+      'toHaveCount|page.locator(".row")|literal|3|',
+      'toBeVisible|page.getByText("Pay")|none||',
+      'toBeVisible|page.getByText("Error")|none||not',
+      'toContain|page.url()|literal|"checkout"|soft',
       'toHaveURL|page|regex|/\\/checkout$/|',
     ])
   })
@@ -110,7 +111,7 @@ describe('extractTestPredicatesFromSource', () => {
   it('classifies expected values: literal, asymmetric, collection, dynamic', () => {
     expect(predicates('api contract').map(summary)).toEqual([
       'toBe|res.status()|literal|200|',
-      "toMatchObject|body|asymmetric|{ items: expect.arrayContaining([expect.objectContaining({ sku: 'A1' })]) }|",
+      'toMatchObject|body|asymmetric|{ items: expect.arrayContaining([expect.objectContaining({ sku: "A1" })]) }|',
       'toHaveLength|body.items|literal|2|',
       'toBeGreaterThan|body.total|literal|0|',
       'toEqual|body.currency|dynamic|expectedCurrency|',
@@ -119,21 +120,22 @@ describe('extractTestPredicatesFromSource', () => {
       'toStrictEqual|body.meta|literal|null|',
       'toBeTruthy|body.ok|none||',
       'toBeDefined|loadCart()|none||resolves',
-      "toThrow|loadCart()|literal|'boom'|rejects",
-      "toThrow|() => parse('x')|none||",
+      'toThrow|loadCart()|literal|"boom"|rejects',
+      'toThrow|() => parse("x")|none||',
     ])
   })
 
   it('reads expect.poll, toPass, step bodies and inline helpers; keeps unknown matchers', () => {
     expect(predicates('eventually consistent').map(summary)).toEqual([
-      "toBeGreaterThanOrEqual|() => page.locator('.badge').count()|literal|1|poll",
-      "toPass|async () => { const n = await page.locator('.badge').count() expect(n).toBe(1) }|none||",
+      'toBeGreaterThanOrEqual|() => page.locator(".badge").count()|literal|1|poll',
+      // A function body re-prints with the statement separators the printer uses.
+      'toPass|async () => { const n = await page.locator(".badge").count(); expect(n).toBe(1); }|none||',
       // The toPass block's inner expect is a predicate of its own — it is still
       // an assertion the test makes, just retried.
       'toBe|n|literal|1|',
-      "toHaveValue|page.getByLabel('Name')|literal|'Ada'|",
-      "toBeAttached|page.getByText('done')|none||",
-      "toBeCustom|page.locator('#x')|literal|42|",
+      'toHaveValue|page.getByLabel("Name")|literal|"Ada"|',
+      'toBeAttached|page.getByText("done")|none||',
+      'toBeCustom|page.locator("#x")|literal|42|',
     ])
   })
 
@@ -175,7 +177,7 @@ describe('extractTestPredicatesFromSource', () => {
     })`
     const [test] = extractTestPredicatesFromSource('a.spec.ts', src).tests
     expect(test.predicates.map(summary)).toEqual([
-      "toHaveURL|page|regex|new RegExp('^/x')|",
+      'toHaveURL|page|regex|new RegExp("^/x")|',
       'toBe|delta|literal|-1|',
       'toBe|flag|literal|undefined|',
     ])
@@ -271,7 +273,7 @@ describe('run-time guards', () => {
     expect(test.guards).toEqual([
       { kind: 'skip', condition: '!process.env.CREDS', line: 2, source: "test.skip(!process.env.CREDS, 'needs credentials')" },
       { kind: 'fixme', line: 3, source: 'test.fixme()' },
-      { kind: 'fail', condition: "process.env.CI === 'true'", line: 4, source: "test.fail(process.env.CI === 'true')" },
+      { kind: 'fail', condition: 'process.env.CI === "true"', line: 4, source: "test.fail(process.env.CI === 'true')" },
     ])
     expect(test.predicates).toHaveLength(1)
   })
@@ -324,5 +326,152 @@ test.describe('suite', () => {
       ['name', 'skip', undefined],
     ])
     expect(result.tests.every((t) => !t.guards)).toBe(true)
+  })
+})
+
+describe('canonical comparison text', () => {
+  function firstPredicate(body: string): TestPredicate {
+    return extractTestPredicatesFromSource('a.spec.ts', `test('t', async () => {\n${body}\n})`).tests[0].predicates[0]
+  }
+
+  it('reads quote style, line breaks, trailing commas and number spelling as the same target and value', () => {
+    const compact = firstPredicate(`await expect(page.getByRole('button', { name: 'Pay' })).toHaveText('$1', { timeout: 1_000 })`)
+    const reformatted = firstPredicate(`await expect(\n  page.getByRole("button", {\n    name: "Pay",\n  }),\n).toHaveText("$1", { timeout: 1000 },);`)
+    expect(reformatted.target).toBe(compact.target)
+    expect(reformatted.expectedText).toBe(compact.expectedText)
+    // The statement as written is kept for the reader.
+    expect(compact.source).toContain("'Pay'")
+    expect(reformatted.source).toContain('"Pay"')
+  })
+
+  it('reads a quoted property name, a template with no substitution and 1.0 as their plain spellings', () => {
+    const plain = firstPredicate(`expect(body).toEqual({ a: 1, list: [1, 2] })`)
+    const spelled = firstPredicate("expect(body).toEqual({ 'a': 0x1, list: [1.0, 2,], })")
+    expect(spelled.expectedText).toBe(plain.expectedText)
+    expect(firstPredicate('expect(name).toBe(`Ada`)').expectedText).toBe(firstPredicate("expect(name).toBe('Ada')").expectedText)
+    // A different value is still a different value, and a key that needs quoting keeps them.
+    expect(firstPredicate(`expect(body).toEqual({ a: 2 })`).expectedText).not.toBe(plain.expectedText)
+    expect(firstPredicate(`expect(body).toEqual({ 'kebab-case': 1 })`).expectedText).not.toBe(firstPredicate(`expect(body).toEqual({ kebabCase: 1 })`).expectedText)
+  })
+
+  it('canonicalises a guard condition the same way, and keeps its source as written', () => {
+    const [test] = extractTestPredicatesFromSource('a.spec.ts', `test('t', async () => { test.skip(process.env.CI === 'true', 'ci') })`).tests
+    expect(test.guards).toEqual([{ kind: 'skip', condition: 'process.env.CI === "true"', line: 1, source: "test.skip(process.env.CI === 'true', 'ci')" }])
+  })
+})
+
+describe('the `it` spelling', () => {
+  it('declares tests, steps, hooks, describes and guards under `it` exactly as under `test`', () => {
+    const src = `import { test as it, expect } from '@playwright/test'
+it.describe('suite', () => {
+  it.beforeEach(async () => { it.skip(!process.env.CREDS, 'creds') })
+  it('a', async ({ page }) => {
+    await it.step('inner', async () => { expect(1).toBe(1) })
+  })
+  it.skip('b', async () => { expect(2).toBe(2) })
+  it.fixme(process.platform === 'win32', 'posix')
+})`
+    const result = extractTestPredicatesFromSource('a.spec.ts', src)
+    const inherited = ["it.skip(!process.env.CREDS, 'creds')", "it.fixme(process.platform === 'win32', 'posix')"]
+    expect(result.tests.map((t) => [t.name, t.modifier, t.predicates.length, (t.guards ?? []).map((g) => g.source)])).toEqual([
+      ['a', undefined, 1, inherited],
+      ['b', 'skip', 1, inherited],
+    ])
+  })
+})
+
+describe('parametrised declarations', () => {
+  const names = (src: string): string[] => extractTestPredicatesFromSource('a.spec.ts', src).tests.map((t) => t.name)
+
+  it('declares one test per element of an inline or const-bound array, with the title resolved', () => {
+    expect(names(`for (const key of ['a', 'b']) test(\`redeems \${key} voucher\`, async () => { await go(key) })`))
+      .toEqual(['redeems a voucher', 'redeems b voucher'])
+    expect(names(`const KEYS = ['x', 2, true] as const
+test.describe('suite', () => {
+  for (const key of KEYS) {
+    test(\`case \${key}\`, async () => { await go(key) })
+  }
+})`)).toEqual(['case x', 'case 2', 'case true'])
+  })
+
+  it('resolves destructured object and array elements, and property access on an element', () => {
+    const src = `const cases = [
+  { key: 'expired', errorText: 'This voucher has expired' },
+  { key: 'invalidCode', errorText: 'Voucher cannot be applied' },
+] as const
+for (const { key, errorText: text } of cases) test(\`rejects \${key}: \${text}\`, async () => { await go(key) })
+for (const entry of cases) test(\`entry \${entry.key} / \${entry.missing} / \${other.key}\`, async () => { await go(entry) })
+for (const [a, b] of [[1, 'one'], [2, 'two']]) test(\`pair \${a}-\${b}\`, async () => { await go(a) })`
+    expect(names(src)).toEqual([
+      'rejects expired: This voucher has expired',
+      'rejects invalidCode: Voucher cannot be applied',
+      'entry expired / ${entry.missing} / ${other.key}',
+      'entry invalidCode / ${entry.missing} / ${other.key}',
+      'pair 1-one',
+      'pair 2-two',
+    ])
+  })
+
+  it('takes the product of nested loops, outer first, and reads forEach like for…of', () => {
+    const src = `const sizes = ['s', 'l']
+for (const colour of ['red', 'blue']) {
+  sizes.forEach((size) => {
+    test(\`\${colour} \${size}\`, async () => { await go(colour, size) })
+  })
+}`
+    expect(names(src)).toEqual(['red s', 'red l', 'blue s', 'blue l'])
+  })
+
+  it('keeps one template-named test when the set cannot be read', () => {
+    const cases = [
+      `for (const key of keysFor(env)) test(\`k \${key}\`, async () => { await go(key) })`,
+      `for (const key of [...base, 'x']) test(\`k \${key}\`, async () => { await go(key) })`,
+      `for (const key of imported) test(\`k \${key}\`, async () => { await go(key) })`,
+      `const keys = keys\nfor (const key of keys) test(\`k \${key}\`, async () => { await go(key) })`,
+      `var keys = ['a']\nfor (const key of keys) test(\`k \${key}\`, async () => { await go(key) })`,
+      `{ const keys = ['a'] }\nfor (const key of keys) test(\`k \${key}\`, async () => { await go(key) })`,
+      `for (key of ['a']) test(\`k \${key}\`, async () => { await go(key) })`,
+      `['a'].map((key) => test(\`k \${key}\`, async () => { await go(key) }))`,
+    ]
+    for (const src of cases) expect(names(src), src).toEqual(['k ${key}'])
+    // A readable set whose pattern the element cannot satisfy, or a name the loop does
+    // not bind, resolves what it can and leaves the rest as written.
+    expect(names(`for (const { key } of ['plain']) test(\`k \${key}\`, async () => { await go(key) })`)).toEqual(['k ${key}'])
+    expect(names(`[{ key: 'a' }].forEach(({ key }, index) => test(\`k \${key} \${index}\`, async () => { await go(index) }))`)).toEqual(['k a ${index}'])
+  })
+
+  it('lets an inner const shadow an outer one; a static or dynamic title resolves per element too', () => {
+    const src = `const keys = ['outer']
+test.describe('s', () => {
+  const keys = ['inner1', 'inner2']
+  for (const key of keys) test(\`k \${key}\`, async () => { await go(key) })
+})
+for (const key of keys) test('static', async () => { await go(key) })
+for (const key of ['dyn']) test(key, async () => { await go(key) })
+for (const [{ key }] of [[{ key: 'nested' }]]) test(\`deep \${key}\`, async () => { await go(key) })`
+    expect(names(src)).toEqual(['k inner1', 'k inner2', 'static', 'dyn', 'deep ${key}'])
+  })
+
+  it('binds only what the element can supply: quoted or shorthand keys yes; nested, rest, computed, missing or call interpolations stay as written', () => {
+    const src = `const key = 'shorthand'
+for (const { key: k, 'quoted': q } of [{ key, 'quoted': 'Q' }]) test(\`a \${k} \${q}\`, async () => { await go(k) })
+for (const { a: { b }, ...rest } of [{ a: { b: 1 }, c: 2 }]) test(\`b \${b} \${rest}\`, async () => { await go(b) })
+for (const { [dyn]: v, nope } of [{ x: 1 }]) test(\`c \${v} \${nope}\`, async () => { await go(v) })
+for (const key2 of ['up']) test(\`d \${key2.toUpperCase()} \${key2}\`, async () => { await go(key2) })`
+    // A shorthand element property is a variable, so it interpolates as its source name.
+    expect(names(src)).toEqual(['a key Q', 'b ${b} ${rest}', 'c ${v} ${nope}', 'd ${key2.toUpperCase()} up'])
+  })
+
+  it('leaves the metadata and readable extractors on the template name — the runner resolves those', () => {
+    const src = `for (const key of ['a', 'b']) test(\`k \${key}\`, async () => { await go(key) })`
+    expect(extractTestMetadataFromSource('a.spec.ts', src).tests.map((t) => t.name)).toEqual(['k ${key}'])
+    expect(extractTestsFromSource('a.spec.ts', src).tests.map((t) => t.name)).toEqual(['k ${key}'])
+  })
+
+  it('marks a test that can enforce nothing: no callback, or a callback with no statements', () => {
+    const src = `test('todo')\ntest('empty', async () => {})\ntest('live', async () => { await page.goto('/') })\ntest('expr', () => go())`
+    expect(extractTestPredicatesFromSource('a.spec.ts', src).tests.map((t) => [t.name, t.emptyBody])).toEqual([
+      ['todo', true], ['empty', true], ['live', undefined], ['expr', undefined],
+    ])
   })
 })

@@ -126,19 +126,29 @@ describe('diffSpecPredicates — weaker', () => {
     ])
   })
 
-  it('flags a deleted test, and a test that proved nothing deletes as equivalent', () => {
+  it('flags a deleted test; a live one with no readable assertion is weaker too, and only an empty or disabled one is equivalent', () => {
     const body = `  await expect(page.getByText('Pay')).toBeVisible()`
     const kept = spec(body, 'kept')
-    const result = diff(`${kept}\n${spec(body, 'gone')}`, kept)
-    expect(summary(result)).toEqual([
+    expect(summary(diff(`${kept}\n${spec(body, 'gone')}`, kept))).toEqual([
       'deleted:weaker gone',
       "  removed:weaker await expect(page.getByText('Pay')).toBeVisible() => -",
     ])
-    // A test with no assertions never enforced anything; deleting it changes no proof.
-    expect(diff(`${kept}\n${spec(`  await page.goto('/')`, 'empty')}`, kept)).toMatchObject({
+    // Helpers assert and actions fail: a live test with statements checks something
+    // even when no expect is visible in it. The reason carries what the change list cannot.
+    expect(diff(`${kept}\n${spec(`  await expectCartEmpty(page)`, 'helpers')}`, kept)).toEqual({
+      verdict: 'weaker',
+      tests: [{
+        kind: 'deleted', name: 'helpers', verdict: 'weaker', changes: [],
+        reason: 'a live test with no readable assertion was deleted; what its helpers and actions checked is gone',
+      }],
+    })
+    // An empty callback never enforced anything, and neither did a test a modifier had
+    // already disabled: deleting either changes no proof.
+    expect(diff(`${kept}\n${spec('', 'empty')}`, kept)).toEqual({
       verdict: 'equivalent',
       tests: [{ kind: 'deleted', name: 'empty', verdict: 'equivalent', changes: [] }],
     })
+    expect(diff(`${kept}\n${spec(`  await expectCartEmpty(page)`, 'off', 'test.skip')}`, kept).verdict).toBe('equivalent')
   })
 
   it('flags test.skip / test.fixme / test.fail: a disabled test enforces nothing', () => {
@@ -180,6 +190,21 @@ describe('diffSpecPredicates — stronger', () => {
       'added:stronger extra',
       "  added:stronger - => await expect(page.getByText('Pay')).toBeVisible()",
     ])
+  })
+
+  it('flags an added live test whose assertions live in helpers, but not an added empty one', () => {
+    const kept = spec(`  await expect(page.getByText('Pay')).toBeVisible()`, 'kept')
+    expect(diff(kept, `${kept}\n${spec(`  await expectCartEmpty(page)`, 'helpers')}`)).toEqual({
+      verdict: 'stronger',
+      tests: [{
+        kind: 'added', name: 'helpers', verdict: 'stronger', changes: [],
+        reason: 'a live test with no readable assertion was added; what its helpers and actions check is new',
+      }],
+    })
+    expect(diff(kept, `${kept}\n${spec('', 'empty')}`)).toEqual({
+      verdict: 'equivalent',
+      tests: [{ kind: 'added', name: 'empty', verdict: 'equivalent', changes: [] }],
+    })
   })
 
   it('flags a matcher swapped for a stronger one, a re-enabled test, and a removed test.only', () => {
@@ -370,5 +395,58 @@ describe('diffSpecPredicates — run-time guards', () => {
     const before = spec(`  test.skip(!a)\n  expect(1).toBe(1)`, 'checkout', 'test.skip')
     const after = spec(`  expect(1).toBe(1)`, 'checkout', 'test.skip')
     expect(diff(before, after)).toEqual({ verdict: 'equivalent', tests: [] })
+  })
+})
+
+describe('diffSpecPredicates — the corpus gaps L6, L7, L8', () => {
+  it('reads a dropped element of a loop-declared test as a deleted test (L6)', () => {
+    const loop = (keys: string): string => `const sadKeys = [${keys}] as const
+test.describe('sad paths', () => {
+  for (const key of sadKeys) {
+    test(\`rejects \${key} with error toast\`, async ({ page }) => {
+      await redeemCode(page, key)
+      await expectErrorToast(page)
+    })
+  }
+})`
+    const result = diff(loop(`'expired', 'minSpendNotMet', 'invalidCode'`), loop(`'expired', 'invalidCode'`))
+    expect(result.verdict).toBe('weaker')
+    expect(result.tests.map((t) => `${t.kind}:${t.verdict} ${t.name}`)).toEqual(['deleted:weaker rejects minSpendNotMet with error toast'])
+    // The other direction is a strengthening, and a reordered set changes nothing.
+    expect(diff(loop(`'expired'`), loop(`'expired', 'invalidCode'`)).verdict).toBe('stronger')
+    expect(diff(loop(`'a', 'b'`), loop(`'b', 'a'`))).toEqual({ verdict: 'equivalent', tests: [] })
+  })
+
+  it('reads a formatter pass — quotes, wrapping, semicolons, trailing commas — as equivalent (L7)', () => {
+    const before = `test('checkout', async ({ page }) => {
+  await expect(page.getByRole('button', { name: 'Pay' })).toHaveText('Pay now', { timeout: 5_000 })
+  expect(body).toEqual({ items: [1, 2], total: 3 })
+  test.skip(process.env.CI === 'true', 'flaky on CI')
+})`
+    const after = `test("checkout", async ({ page }) => {
+  await expect(
+    page.getByRole("button", {
+      name: "Pay",
+    }),
+  ).toHaveText("Pay now", { timeout: 5000 });
+  expect(body).toEqual({
+    items: [1, 2],
+    total: 3,
+  });
+  test.skip(process.env.CI === "true", "flaky on CI");
+});`
+    expect(diff(before, after)).toEqual({ verdict: 'equivalent', tests: [] })
+  })
+
+  it('reads an `it` suite test by test instead of as one opaque file (L8)', () => {
+    const suite = (extra: string): string => `import { describe, it, expect } from 'vitest'
+describe('sum', () => {
+  it('adds', () => { expect(sum(1, 2)).toBe(3)${extra} })
+  it('is commutative', () => { expect(sum(2, 1)).toBe(sum(1, 2)) })
+})`
+    expect(summary(diff(suite(`; expect(sum(0, 0)).toBe(0)`), suite('')))).toEqual([
+      'changed:weaker adds',
+      '  removed:weaker expect(sum(0, 0)).toBe(0) => -',
+    ])
   })
 })

@@ -7,7 +7,7 @@ import type { PathType } from '../../../../shared/coverage/types'
 import type { ReadableSemanticRuleConfig, ReadableTest } from '../../../../shared/readable-tests/types'
 import type { TestPredicate, TestGuard,
   UnparsedExpectation } from '../../../../shared/verification-strength/types'
-import { collectTestPredicates, guardFrom } from './verification-strength/predicates'
+import { collectTestPredicates, guardFrom, TEST_DECLARATORS } from './verification-strength/predicates'
 import {
   translateReadableTest,
   translateReadableTestFromAst,
@@ -134,19 +134,19 @@ function declarationModifier(call: ts.CallExpression): TestModifier | undefined 
 }
 
 function isTestCall(call: ts.CallExpression): boolean {
-  // Match Playwright's test declaration forms, but not hooks/configuration
-  // methods such as test.beforeEach(), test.use(), or test.setTimeout(). A
-  // titled hook also carries a string + callback, so argument shape alone
-  // cannot distinguish it from a test.
-  const chain = getCalleeChain(call.expression)
-  if (chain.length === 0 || chain[0] !== 'test') return false
-  if (chain.length === 1) return true
-  return chain.length === 2 && isTestModifier(chain[1])
+  // Match the test declaration forms — `test(...)` and its `it` spelling — but not
+  // hooks/configuration methods such as test.beforeEach(), test.use(), or
+  // test.setTimeout(). A titled hook also carries a string + callback, so argument
+  // shape alone cannot distinguish it from a test.
+  const [root, modifier, ...rest] = getCalleeChain(call.expression)
+  if (root === undefined || !TEST_DECLARATORS.has(root)) return false
+  if (modifier === undefined) return true
+  return rest.length === 0 && isTestModifier(modifier)
 }
 
 function isTestStepCall(call: ts.CallExpression): boolean {
   const chain = getCalleeChain(call.expression)
-  return chain.length >= 2 && chain[0] === 'test' && chain[1] === 'step'
+  return chain.length >= 2 && TEST_DECLARATORS.has(chain[0] ?? '') && chain[1] === 'step'
 }
 
 function getStepBody(call: ts.CallExpression): ts.Node | null {
@@ -449,9 +449,203 @@ interface TestDeclaration {
   line: number
   bodySource: string
   bodyLine: number
+  /** No callback, or a callback with no statements: the test can enforce nothing. */
+  emptyBody: boolean
 }
 
-function testDeclarationsFrom(src: ts.SourceFile): TestDeclaration[] {
+// ---- Parametrised declarations ----------------------------------------------------
+//
+// `for (const key of KEYS) test(\`redeems ${key}\`, …)` declares one test per element at
+// run time. The readable and metadata extractors keep the single template-named
+// declaration: the runner's `--list` resolves the real titles for them. The
+// verification-strength differential has no runner — it compares two sources — so
+// for it the iteration set is enumerated here, syntactically: an array literal
+// written inline or bound to a `const`/`let` in an enclosing scope, seen through
+// `as const`, `satisfies` and parentheses. Dropping an element from that array
+// deletes a test, and only an enumerated set can show it. A set that cannot be read
+// (a call, an import, a spread, `Object.entries`) leaves the declaration as one
+// template-named test, exactly as before.
+
+interface LoopLevel {
+  binding: ts.BindingName
+  elements: ts.Expression[]
+}
+
+/** The literal each bound name takes under one iteration. */
+type IterationBindings = Map<string, ts.Expression>
+
+function unwrapExpression(node: ts.Expression): ts.Expression {
+  let current = node
+  while (
+    ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isSatisfiesExpression(current)
+    || ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current)
+  ) current = current.expression
+  return current
+}
+
+function encloses(scope: ts.Node, node: ts.Node): boolean {
+  return scope.pos <= node.pos && node.end <= scope.end
+}
+
+// The innermost `const`/`let` named `name` declared by a statement whose block
+// encloses `from`. Syntax only: no binder, so shadowing is read from nesting.
+function enclosingBinding(name: string, from: ts.Node, src: ts.SourceFile): ts.VariableDeclaration | undefined {
+  let found: ts.VariableDeclaration | undefined
+  let foundScope: ts.Node | undefined
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name && node.initializer) {
+      const list = node.parent
+      const statement = list.parent
+      const blockScoped = (list.flags & (ts.NodeFlags.Const | ts.NodeFlags.Let)) !== 0
+      if (blockScoped && ts.isVariableStatement(statement) && encloses(statement.parent, from) && (!foundScope || encloses(foundScope, statement.parent))) {
+        found = node
+        foundScope = statement.parent
+      }
+    }
+    node.forEachChild(visit)
+  }
+  visit(src)
+  return found
+}
+
+function literalElements(
+  expr: ts.Expression,
+  from: ts.Node,
+  src: ts.SourceFile,
+  seen: Set<ts.VariableDeclaration>,
+): ts.Expression[] | undefined {
+  const unwrapped = unwrapExpression(expr)
+  if (ts.isArrayLiteralExpression(unwrapped)) {
+    return unwrapped.elements.some(ts.isSpreadElement) ? undefined : [...unwrapped.elements]
+  }
+  if (!ts.isIdentifier(unwrapped)) return undefined
+  // `const KEYS = OTHER` resolves one step further; `seen` stops a self-reference
+  // (`const keys = keys`), which parses even though it can never run.
+  const declaration = enclosingBinding(unwrapped.text, from, src)
+  if (!declaration?.initializer || seen.has(declaration)) return undefined
+  seen.add(declaration)
+  return literalElements(declaration.initializer, declaration, src, seen)
+}
+
+// Every enclosing loop that declares this test once per element, outermost first:
+// `for (const k of KEYS) { … }` and `KEYS.forEach((k) => { … })`. A level whose set
+// cannot be read contributes nothing.
+function loopLevelsOf(call: ts.CallExpression, src: ts.SourceFile): LoopLevel[] {
+  const levels: LoopLevel[] = []
+  let child: ts.Node = call
+  for (let node: ts.Node = call.parent; !ts.isSourceFile(node); child = node, node = node.parent) {
+    let binding: ts.BindingName | undefined
+    let iterable: ts.Expression | undefined
+    if (ts.isForOfStatement(node) && child === node.statement && ts.isVariableDeclarationList(node.initializer)) {
+      binding = node.initializer.declarations[0]?.name
+      iterable = node.expression
+    } else if (
+      (ts.isArrowFunction(node) || ts.isFunctionExpression(node))
+      && ts.isCallExpression(node.parent) && node.parent.arguments[0] === node
+      && ts.isPropertyAccessExpression(node.parent.expression) && node.parent.expression.name.text === 'forEach'
+    ) {
+      binding = node.parameters[0]?.name
+      iterable = node.parent.expression.expression
+    }
+    if (!binding || !iterable) continue
+    const elements = literalElements(iterable, node, src, new Set())
+    if (elements) levels.unshift({ binding, elements })
+  }
+  return levels
+}
+
+function propertyValue(object: ts.ObjectLiteralExpression, name: string): ts.Expression | undefined {
+  for (const property of object.properties) {
+    if (ts.isPropertyAssignment(property) && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) && property.name.text === name) {
+      return property.initializer
+    }
+    if (ts.isShorthandPropertyAssignment(property) && property.name.text === name) return property.name
+  }
+  return undefined
+}
+
+// What one element binds: the name itself, the properties an object pattern picks
+// (`{ key, errorText: text }`), or the positions an array pattern picks (`[key, value]`).
+// A pattern the element's shape cannot satisfy binds nothing.
+function bindingsFor(binding: ts.BindingName, element: ts.Expression): IterationBindings {
+  const bound: IterationBindings = new Map()
+  const value = unwrapExpression(element)
+  if (ts.isIdentifier(binding)) {
+    bound.set(binding.text, value)
+  } else if (ts.isObjectBindingPattern(binding) && ts.isObjectLiteralExpression(value)) {
+    for (const part of binding.elements) {
+      const key = part.propertyName ?? part.name
+      if (!ts.isIdentifier(part.name) || part.dotDotDotToken || !(ts.isIdentifier(key) || ts.isStringLiteral(key))) continue
+      const property = propertyValue(value, key.text)
+      if (property) bound.set(part.name.text, property)
+    }
+  } else if (ts.isArrayBindingPattern(binding) && ts.isArrayLiteralExpression(value)) {
+    binding.elements.forEach((part, index) => {
+      const item = value.elements[index]
+      if (ts.isBindingElement(part) && ts.isIdentifier(part.name) && !part.dotDotDotToken && item && !ts.isSpreadElement(item) && !ts.isOmittedExpression(item)) {
+        bound.set(part.name.text, item)
+      }
+    })
+  }
+  return bound
+}
+
+// The text an interpolation takes under one iteration: `${key}` or `${entry.key}`
+// where the name is bound. A string element interpolates as its value, as the
+// template does at run time; anything else as its source. Unbound → undefined, and
+// the interpolation stays as written.
+function interpolated(expr: ts.Expression, bound: IterationBindings, src: ts.SourceFile): string | undefined {
+  let value: ts.Expression | undefined
+  if (ts.isIdentifier(expr)) {
+    value = bound.get(expr.text)
+  } else if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression)) {
+    const object = bound.get(expr.expression.text)
+    const unwrapped = object ? unwrapExpression(object) : undefined
+    value = unwrapped && ts.isObjectLiteralExpression(unwrapped) ? propertyValue(unwrapped, expr.name.text) : undefined
+  }
+  if (!value) return undefined
+  return ts.isStringLiteralLike(value) ? value.text : value.getText(src).replace(/\s+/g, ' ')
+}
+
+function resolvedName(call: ts.CallExpression, name: string, bound: IterationBindings, src: ts.SourceFile): string {
+  const title = call.arguments[0]
+  if (!title || ts.isStringLiteralLike(title)) return name
+  if (!ts.isTemplateExpression(title)) return interpolated(title, bound, src) ?? name
+  // Replace each `${…}` span, last first so earlier offsets stay valid. A span opens
+  // with the last two characters of the literal token before it and closes with the
+  // first character of the literal token after it.
+  const start = title.getStart(src)
+  let text = title.getText(src)
+  let previous: ts.Node = title.head
+  const spans = title.templateSpans.map((span) => {
+    const range = { span, from: previous.getEnd() - 2 - start, to: span.literal.getStart(src) + 1 - start }
+    previous = span.literal
+    return range
+  })
+  for (const { span, from, to } of spans.reverse()) {
+    const value = interpolated(span.expression, bound, src)
+    if (value !== undefined) text = text.slice(0, from) + value + text.slice(to)
+  }
+  return text.slice(1, -1)
+}
+
+// One name per run-time test the declaration produces: the cartesian product of its
+// readable loop levels, outer first — the order the runner declares them in. With no
+// readable level this is the single name the walker found.
+function parametrisedNames(call: ts.CallExpression, name: string, src: ts.SourceFile): string[] {
+  let combos: IterationBindings[] = [new Map()]
+  for (const level of loopLevelsOf(call, src)) {
+    combos = combos.flatMap((outer) => level.elements.map((element) => new Map([...outer, ...bindingsFor(level.binding, element)])))
+  }
+  return combos.map((bound) => resolvedName(call, name, bound, src))
+}
+
+interface DeclarationWalkOptions {
+  /** Enumerate `for … of` / `forEach` iteration sets into one declaration per element. */
+  expandParametrised?: boolean
+}
+
+function testDeclarationsFrom(src: ts.SourceFile, options: DeclarationWalkOptions = {}): TestDeclaration[] {
   const declarations: TestDeclaration[] = []
   function visit(node: ts.Node): void {
     if (ts.isCallExpression(node) && isTestCall(node)) {
@@ -459,15 +653,19 @@ function testDeclarationsFrom(src: ts.SourceFile): TestDeclaration[] {
       const name = getTestNameArg(node, src, body)
       if (name !== null) {
         const modifier = declarationModifier(node)
-        declarations.push({
-          call: node,
-          body,
-          name,
-          line: lineFor(node, src),
-          bodySource: body ? bodySourceFor(body, src) : '',
-          bodyLine: body ? lineFor(body, src) : lineFor(node, src),
-          ...(modifier ? { modifier } : {}),
-        })
+        const names = options.expandParametrised ? parametrisedNames(node, name, src) : [name]
+        for (const resolved of names) {
+          declarations.push({
+            call: node,
+            body,
+            name: resolved,
+            line: lineFor(node, src),
+            bodySource: body ? bodySourceFor(body, src) : '',
+            bodyLine: body ? lineFor(body, src) : lineFor(node, src),
+            emptyBody: body === null || (ts.isBlock(body) && body.statements.length === 0),
+            ...(modifier ? { modifier } : {}),
+          })
+        }
         // A test callback cannot declare another suite-level test. Avoid walking
         // its body again; test.step calls are handled by the full extractor.
         return
@@ -506,11 +704,11 @@ export function extractTestMetadataFromSource(file: string, source: string): Ext
 const HOOKS: ReadonlySet<string> = new Set(['beforeEach', 'beforeAll', 'afterEach', 'afterAll'])
 
 function isDescribeChain(chain: string[]): boolean {
-  return chain[0] === 'describe' || (chain[0] === 'test' && chain[1] === 'describe')
+  return chain[0] === 'describe' || (TEST_DECLARATORS.has(chain[0] ?? '') && chain[1] === 'describe')
 }
 
 function isHookChain(chain: string[]): boolean {
-  return HOOKS.has(chain[0] ?? '') || (chain[0] === 'test' && HOOKS.has(chain[1] ?? ''))
+  return HOOKS.has(chain[0] ?? '') || (TEST_DECLARATORS.has(chain[0] ?? '') && HOOKS.has(chain[1] ?? ''))
 }
 
 interface ScopedGuard {
@@ -578,6 +776,9 @@ export interface ExtractedTestPredicates {
    *  an enclosing describe or its hooks (outermost first), then the body's own.
    *  Present only when non-empty. */
   guards?: TestGuard[]
+  /** The callback has no statements, or there is no callback: the test can enforce
+   *  nothing, so adding or deleting it changes no proof. Absent otherwise. */
+  emptyBody?: true
 }
 
 export interface ExtractPredicatesResult {
@@ -596,7 +797,9 @@ export function extractTestPredicatesFromSource(file: string, source: string): E
     const scoped = scopedGuardsFrom(sourceFile)
     return {
       file,
-      tests: testDeclarationsFrom(sourceFile).map(({ call, name, line, body, modifier }) => {
+      // Parametrised declarations are enumerated for the differential alone — see the
+      // walker's note; the metadata and readable extractors keep the template name.
+      tests: testDeclarationsFrom(sourceFile, { expandParametrised: true }).map(({ call, name, line, body, modifier, emptyBody }) => {
         const collected = body ? collectTestPredicates(body, sourceFile) : { predicates: [], unparsed: [], guards: [] }
         const guards = [...inheritedGuards(scoped, call), ...collected.guards]
         return {
@@ -606,6 +809,7 @@ export function extractTestPredicatesFromSource(file: string, source: string): E
           predicates: collected.predicates,
           ...(collected.unparsed.length ? { unparsed: collected.unparsed } : {}),
           ...(guards.length ? { guards } : {}),
+          ...(emptyBody ? { emptyBody: true as const } : {}),
         }
       }),
     }

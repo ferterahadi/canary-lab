@@ -134,18 +134,25 @@ function unifiedDiff(before: string, after: string, context: number): string {
   }
 }
 
+// A pair is parsed under its own file name: the extension picks the script kind, and
+// a `.test.tsx` side full of JSX mocks mis-parses as plain TypeScript.
+function sideFile(pair: RawPair): string {
+  return path.basename(pair.filePath) || 'pair.spec.ts'
+}
+
 // A fragment (an Edit tool's old/new string) often has no `test(` wrapper. Parse
 // it as-is first; when nothing declares a test, wrap it so its assertions still
 // form a predicate set. `wrapped` is reported so a reader knows which path ran.
-function extractSide(source: string): { result: ExtractPredicatesResult; wrapped: boolean } {
-  const direct = extractTestPredicatesFromSource('pair.spec.ts', source)
+function extractSide(source: string, file: string): { result: ExtractPredicatesResult; wrapped: boolean } {
+  const direct = extractTestPredicatesFromSource(file, source)
   if (direct.parseError || direct.tests.length) return { result: direct, wrapped: false }
-  return { result: extractTestPredicatesFromSource('pair.spec.ts', `test('fragment', async () => {\n${source}\n})`), wrapped: true }
+  return { result: extractTestPredicatesFromSource(file, `test('fragment', async () => {\n${source}\n})`), wrapped: true }
 }
 
 export function classifyPair(pair: RawPair): Prediction {
-  const before = extractSide(pair.before)
-  const after = extractSide(pair.after)
+  const file = sideFile(pair)
+  const before = extractSide(pair.before, file)
+  const after = extractSide(pair.after, file)
   const diff: SpecDiff = diffSpecPredicates(before.result, after.result)
   const detail = [
     ...(diff.reasons ?? []).map((reason) => `file:${reason}`),
@@ -259,7 +266,7 @@ function cmdSurface(argv: string[]): void {
     if (!pair) continue
     for (const source of [pair.before, pair.after]) {
       sides++
-      const side = extractSide(source)
+      const side = extractSide(source, sideFile(pair))
       if (side.wrapped) wrapped++
       if (side.result.parseError) { parseErrors++; continue }
       for (const test of side.result.tests) {

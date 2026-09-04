@@ -324,13 +324,26 @@ describe('extractTestsFromSource', () => {
     expect(Array.isArray(r.tests)).toBe(true)
   })
 
-  it('ignores calls on identifiers other than test', () => {
+  it('ignores calls not rooted at a test declarator', () => {
     const src = `
-      describe('group', () => { it('case', () => {}) })
       foo.test('bar', () => {})
+      suite('group', () => { check('case', () => {}) })
+      tests.it('x', () => {})
     `
     const r = extractTestsFromSource('a.spec.ts', src)
     expect(r.tests).toEqual([])
+  })
+
+  it('accepts `it` — the vitest/jest spelling and Playwright\'s `test as it` alias — with its steps and modifiers', () => {
+    const src = `
+      describe('group', () => { it('case', async () => { await it.step('s', async () => {}) }) })
+      it.only('solo', () => {})
+      // A table declared through \`.each\` is a call on a call, not a declarator chain:
+      // it is not read (WeakenBench gap L6b), and must not be mistaken for a test either.
+      it.each([1])('table %i', () => {})
+    `
+    const r = extractTestsFromSource('a.spec.ts', src)
+    expect(r.tests.map((t) => [t.name, t.steps.map((s) => s.label)])).toEqual([['case', ['s']], ['solo', []]])
   })
 
   it('returns parseError when createSourceFile throws', () => {

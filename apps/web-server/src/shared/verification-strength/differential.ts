@@ -191,6 +191,26 @@ function enforcedSet(test: ExtractedTestPredicates): PredicateSet {
   return enforced(test) ? test : NOTHING_ENFORCED
 }
 
+// A live test with statements but no readable assertion still checks something: its
+// helpers assert, and every action in it fails when the page does not cooperate. So
+// its removal weakens the suite and its arrival strengthens it, even though no
+// predicate can be shown for either — the reason says so instead. Only a test that
+// could enforce nothing — an empty callback, or a disabled one — comes and goes as
+// equivalent.
+function unreadableBodyVerdict(
+  test: ExtractedTestPredicates,
+  set: PredicateSetDiff,
+  verdict: 'weaker' | 'stronger',
+): Pick<TestChange, 'verdict' | 'reason'> {
+  if (set.changes.length || test.emptyBody || !enforced(test)) return { verdict: set.verdict }
+  return {
+    verdict,
+    reason: verdict === 'weaker'
+      ? 'a live test with no readable assertion was deleted; what its helpers and actions checked is gone'
+      : 'a live test with no readable assertion was added; what its helpers and actions check is new',
+  }
+}
+
 function testChange(before: ExtractedTestPredicates, after: ExtractedTestPredicates): TestChange | undefined {
   const set = diffPredicateSets(enforcedSet(before), enforcedSet(after))
   const wasEnforced = enforced(before)
@@ -241,11 +261,11 @@ export function diffSpecPredicates(before: ExtractPredicatesResult, after: Extra
       continue
     }
     const set = diffPredicateSets(enforcedSet(test), NOTHING_ENFORCED)
-    tests.push({ kind: 'deleted', name: test.name, verdict: set.verdict, changes: set.changes })
+    tests.push({ kind: 'deleted', name: test.name, ...unreadableBodyVerdict(test, set, 'weaker'), changes: set.changes })
   }
   for (const test of unmatchedAfter) {
     const set = diffPredicateSets(NOTHING_ENFORCED, enforcedSet(test))
-    tests.push({ kind: 'added', name: test.name, verdict: set.verdict, changes: set.changes })
+    tests.push({ kind: 'added', name: test.name, ...unreadableBodyVerdict(test, set, 'stronger'), changes: set.changes })
   }
 
   // `only` narrows the run to the marked tests; the others are as unenforced as

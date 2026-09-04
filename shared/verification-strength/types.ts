@@ -13,12 +13,14 @@ export type ExpectedShape = 'none' | 'literal' | 'regex' | 'asymmetric' | 'colle
 export interface TestPredicate {
   /** Matcher name as written — `toHaveText`, `toBeVisible`, a custom matcher. */
   matcher: string
-  /** Normalized source of the `expect(...)` subject — the thing being checked. */
+  /** Canonical text of the `expect(...)` subject — the thing being checked. Re-printed
+   *  from syntax with every literal in one spelling, so quote style, line breaks and
+   *  trailing commas are not differences. */
   target: string
   /** Shape of the value argument (the last non-option argument). */
   expected: ExpectedShape
-  /** Normalized source of every non-option argument, comma-joined. Absent when
-   *  the matcher took no value argument. */
+  /** Canonical text (as `target`) of every non-option argument, comma-joined. Absent
+   *  when the matcher took no value argument. */
   expectedText?: string
   /** Count of non-option arguments: `toHaveProperty('a')` (1, existence) vs
    *  `toHaveProperty('a', 1)` (2, value) are different predicates. */
@@ -34,7 +36,8 @@ export interface TestPredicate {
   settlement?: 'resolves' | 'rejects'
   /** 1-based line of the assertion statement in the spec. */
   line: number
-  /** Normalized source of the whole assertion chain, `await` included. */
+  /** Source of the whole assertion chain as written, whitespace collapsed, `await`
+   *  included — what a reader sees, not what the differential compares. */
   source: string
 }
 
@@ -73,7 +76,8 @@ export interface UnparsedExpectation {
  *  in a test body, or inherited from an enclosing describe, a hook, or the file's top
  *  level. The test sits out (or has its outcome inverted) whenever the guard fires,
  *  so a guard added to a live test is a weakening and a guard removed a strengthening.
- *  `condition` is the normalized text of the first argument; absent for the bare form,
+ *  `condition` is the canonical text (as `TestPredicate.target`) of the first argument;
+ *  absent for the bare form,
  *  which silences the test unconditionally and reads like a declaration modifier. */
 export interface TestGuard {
   kind: 'skip' | 'fixme' | 'fail'
@@ -119,6 +123,9 @@ export interface TestChange {
   wasNamed?: string
   verdict: StrengthVerdict
   changes: PredicateChange[]
+  /** Why the verdict, when no listed change carries it: a live test with no readable
+   *  assertion came or went. Absent otherwise. */
+  reason?: string
 }
 
 export interface SpecDiff {
