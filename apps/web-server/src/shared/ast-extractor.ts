@@ -5,6 +5,9 @@ import {
 } from '../../../../shared/code-display-format'
 import type { PathType } from '../../../../shared/coverage/types'
 import type { ReadableSemanticRuleConfig, ReadableTest } from '../../../../shared/readable-tests/types'
+import type { TestPredicate, TestGuard,
+  UnparsedExpectation } from '../../../../shared/verification-strength/types'
+import { collectTestPredicates, guardFrom } from './verification-strength/predicates'
 import {
   translateReadableTest,
   translateReadableTestFromAst,
@@ -112,7 +115,23 @@ function getCalleeChain(expr: ts.Expression): string[] {
   return []
 }
 
-const TEST_DECLARATION_MODIFIERS = new Set(['only', 'skip', 'fixme', 'fail'])
+/** A declaration-level modifier: `test.skip(...)`, `test.fixme(...)`, `test.fail(...)`,
+ *  `test.only(...)`. The first three stop the test from proving anything; `only`
+ *  stops every other test in the file from running. */
+export type TestModifier = 'only' | 'skip' | 'fixme' | 'fail'
+
+const TEST_DECLARATION_MODIFIERS: ReadonlySet<string> = new Set<TestModifier>(['only', 'skip', 'fixme', 'fail'])
+
+function isTestModifier(name: string): name is TestModifier {
+  return TEST_DECLARATION_MODIFIERS.has(name)
+}
+
+// Only meaningful for a call `isTestCall` accepted: a declaration's modifier is
+// the second segment of its callee chain, and a bare `test(...)` has none.
+function declarationModifier(call: ts.CallExpression): TestModifier | undefined {
+  const tail = getCalleeChain(call.expression)[1] ?? ''
+  return isTestModifier(tail) ? tail : undefined
+}
 
 function isTestCall(call: ts.CallExpression): boolean {
   // Match Playwright's test declaration forms, but not hooks/configuration
@@ -122,7 +141,7 @@ function isTestCall(call: ts.CallExpression): boolean {
   const chain = getCalleeChain(call.expression)
   if (chain.length === 0 || chain[0] !== 'test') return false
   if (chain.length === 1) return true
-  return chain.length === 2 && TEST_DECLARATION_MODIFIERS.has(chain[1])
+  return chain.length === 2 && isTestModifier(chain[1])
 }
 
 function isTestStepCall(call: ts.CallExpression): boolean {
@@ -421,6 +440,7 @@ function extractStepsFrom(node: ts.Node, src: ts.SourceFile): ExtractedStep[] {
 
 interface TestDeclaration {
   call: ts.CallExpression
+  modifier?: TestModifier
   body: ts.Node | null
   name: string
   line: number
@@ -435,6 +455,7 @@ function testDeclarationsFrom(src: ts.SourceFile): TestDeclaration[] {
       const body = getCallableBody(node)
       const name = getTestNameArg(node, src, body)
       if (name !== null) {
+        const modifier = declarationModifier(node)
         declarations.push({
           call: node,
           body,
@@ -442,6 +463,7 @@ function testDeclarationsFrom(src: ts.SourceFile): TestDeclaration[] {
           line: lineFor(node, src),
           bodySource: body ? bodySourceFor(body, src) : '',
           bodyLine: body ? lineFor(body, src) : lineFor(node, src),
+          ...(modifier ? { modifier } : {}),
         })
         // A test callback cannot declare another suite-level test. Avoid walking
         // its body again; test.step calls are handled by the full extractor.
@@ -468,6 +490,121 @@ export function extractTestMetadataFromSource(file: string, source: string): Ext
         bodySource,
         bodyLine,
       })),
+    }
+  } catch (err) {
+    return {
+      file,
+      tests: [],
+      parseError: err instanceof Error ? err.message : String(err),
+    }
+  }
+}
+
+const HOOKS: ReadonlySet<string> = new Set(['beforeEach', 'beforeAll', 'afterEach', 'afterAll'])
+
+function isDescribeChain(chain: string[]): boolean {
+  return chain[0] === 'describe' || (chain[0] === 'test' && chain[1] === 'describe')
+}
+
+function isHookChain(chain: string[]): boolean {
+  return HOOKS.has(chain[0] ?? '') || (chain[0] === 'test' && HOOKS.has(chain[1] ?? ''))
+}
+
+interface ScopedGuard {
+  guard: TestGuard
+  /** The node whose test declarations the guard reaches. */
+  scope: ts.Node
+}
+
+// A guard outside every test body reaches the tests declared in its scope: the
+// enclosing describe callback, or the whole file when it sits at top level. A hook
+// body is transparent — `test.skip(cond)` in a `beforeEach` skips each test of its
+// describe — while any other function body (a helper) is opaque: which tests call
+// the helper is not a syntactic fact, so its guard is dropped rather than guessed.
+function scopeOf(guard: ts.CallExpression): ts.Node | undefined {
+  let node: ts.Node = guard.parent
+  while (!ts.isSourceFile(node)) {
+    if (ts.isFunctionLike(node)) {
+      const chain = ts.isCallExpression(node.parent) ? getCalleeChain(node.parent.expression) : []
+      if (isDescribeChain(chain)) return node
+      if (!isHookChain(chain)) return undefined
+    }
+    node = node.parent
+  }
+  return node
+}
+
+function scopedGuardsFrom(sourceFile: ts.SourceFile): ScopedGuard[] {
+  const scoped: ScopedGuard[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      // Guard first: `isTestCall` accepts any `test.skip(...)` by its callee alone, and
+      // a describe-level `test.skip(cond, why)` is exactly what this walk is for. A test
+      // body is not entered — a guard inside one belongs to that test — and
+      // `test.skip('title', fn)` is a declaration, which `guardFrom` refuses.
+      const guard = guardFrom(node, sourceFile)
+      if (guard) {
+        const scope = scopeOf(node)
+        if (scope) scoped.push({ guard, scope })
+      } else if (isTestCall(node)) {
+        return
+      }
+    }
+    node.forEachChild(visit)
+  }
+  visit(sourceFile)
+  return scoped
+}
+
+function inheritedGuards(scoped: ScopedGuard[], declaration: ts.CallExpression): TestGuard[] {
+  return scoped
+    .filter(({ scope }) => scope.pos <= declaration.pos && declaration.end <= scope.end)
+    .map(({ guard }) => guard)
+}
+
+export interface ExtractedTestPredicates {
+  name: string
+  line: number
+  /** Declaration modifier, when one is present. `skip`/`fixme`/`fail` mean the
+   *  predicates below are not enforced; `only` means the rest of the file is not. */
+  modifier?: TestModifier
+  predicates: TestPredicate[]
+  /** `expect(...)` forms the collector could not read. Present only when non-empty. */
+  unparsed?: UnparsedExpectation[]
+  /** Run-time guards that reach this test: those inherited from the file's top level,
+   *  an enclosing describe or its hooks (outermost first), then the body's own.
+   *  Present only when non-empty. */
+  guards?: TestGuard[]
+}
+
+export interface ExtractPredicatesResult {
+  file: string
+  tests: ExtractedTestPredicates[]
+  parseError?: string
+}
+
+/** The verification-strength differential reads each test's assertion set from
+ * here. Syntax-only, like the metadata extractor: what a test checks must not
+ * depend on the readable-prose pipeline or a TypeChecker, and it runs on every
+ * dirty-spec recompute. */
+export function extractTestPredicatesFromSource(file: string, source: string): ExtractPredicatesResult {
+  try {
+    const { sourceFile } = parseSource(file, source)
+    const scoped = scopedGuardsFrom(sourceFile)
+    return {
+      file,
+      tests: testDeclarationsFrom(sourceFile).map(({ call, name, line, body, modifier }) => {
+        const collected = body ? collectTestPredicates(body, sourceFile) : { predicates: [], unparsed: [], guards: [] }
+        const guards = [...inheritedGuards(scoped, call), ...collected.guards]
+        return {
+          name,
+          line,
+          ...(modifier ? { modifier } : {}),
+          predicates: collected.predicates,
+          ...(collected.unparsed.length ? { unparsed: collected.unparsed } : {}),
+          ...(guards.length ? { guards } : {}),
+        }
+      }),
     }
   } catch (err) {
     return {
