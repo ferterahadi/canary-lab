@@ -6,7 +6,7 @@
 // corpus directory; pair content is printed to the terminal, never written.
 //
 //   npx tsx tools/weakenbench/bench.ts pool     --corpus raw.jsonl --out <dir>
-//   npx tsx tools/weakenbench/bench.ts sample   --pool <dir>/pool.jsonl --framework playwright --n 60 --seed 20260904 --out <dir>/pilot.ids
+//   npx tsx tools/weakenbench/bench.ts sample   --pool <dir>/pool.jsonl --framework playwright --n 60 --seed 20260904 --out <dir>/pilot.ids [--exclude <ids>] [--repo <name>]
 //   npx tsx tools/weakenbench/bench.ts show     --corpus raw.jsonl --ids a,b,c [--context 1] [--max 90]
 //   npx tsx tools/weakenbench/bench.ts surface  --corpus raw.jsonl --ids <file>
 //   npx tsx tools/weakenbench/bench.ts classify --corpus raw.jsonl --ids <file> --out predictions.jsonl
@@ -37,6 +37,8 @@ export interface PoolEntry {
   changedLines: number
   /** Did the multiset of `expect` lines change? Cheap stratification signal, not a verdict. */
   assertionChanged: boolean
+  /** Repository directory name for git pairs, so a multi-repo holdout can be sampled per repo; absent for transcript pairs. */
+  repo?: string
 }
 
 export interface Label {
@@ -59,7 +61,7 @@ export interface Prediction {
 const PLAYWRIGHT_IMPORT = /^\s*import\b[^\n]*from\s+['"]@playwright\/test['"]/m
 const PLAYWRIGHT_MARKER = /\b(page\.|locator\(|getBy(Role|Text|TestId|Label|Placeholder)\(|toBeVisible|toHaveText|toHaveURL|toHaveCount)/
 const UNIT_TEST_FILE = /\.test\.(ts|tsx|js|mjs|cjs)$/
-const SPEC_FILE = /\.spec\.(ts|tsx|js|mjs|cjs)$/
+const SPEC_FILE = /\.(spec|e2e)\.(ts|tsx|js|mjs|cjs)$/
 const EXPECT_LINE = /^.*\bexpect\b.*$/gm
 
 /** Which benchmark pool a raw pair belongs to, or none.
@@ -205,6 +207,7 @@ function cmdPool(argv: string[]): void {
       file: path.basename(pair.filePath),
       changedLines,
       assertionChanged: expectLines(pair.before) !== expectLines(pair.after),
+      ...(pair.source === 'git' && pair.cwd ? { repo: path.basename(pair.cwd) } : {}),
     })
   }
   entries.sort((a, b) => a.id.localeCompare(b.id))
@@ -220,7 +223,8 @@ function cmdSample(argv: string[]): void {
   const n = Number(need(argv, 'n'))
   const seed = Number(need(argv, 'seed'))
   const exclude = new Set(arg(argv, 'exclude') ? readIds(need(argv, 'exclude')) : [])
-  const pool = readJsonl<PoolEntry>(need(argv, 'pool')).filter((entry) => entry.framework === framework && !exclude.has(entry.id))
+  const repo = arg(argv, 'repo')
+  const pool = readJsonl<PoolEntry>(need(argv, 'pool')).filter((entry) => entry.framework === framework && !exclude.has(entry.id) && (!repo || entry.repo === repo))
   const strata = new Map<string, PoolEntry[]>()
   for (const entry of pool) {
     const key = `${entry.source}/${entry.granularity}/${entry.assertionChanged ? 'assert' : 'noassert'}`
@@ -241,7 +245,7 @@ function cmdSample(argv: string[]): void {
   const chosen: PoolEntry[] = []
   keys.forEach((key, i) => chosen.push(...shuffle(strata.get(key) ?? [], random).slice(0, counts[i])))
   const out = need(argv, 'out')
-  fs.writeFileSync(out, [`# sample framework=${framework} n=${n} seed=${seed} pool=${pool.length}`, ...chosen.map((entry) => entry.id)].join('\n') + '\n')
+  fs.writeFileSync(out, [`# sample framework=${framework} n=${n} seed=${seed} pool=${pool.length}${repo ? ` repo=${repo}` : ''}`, ...chosen.map((entry) => entry.id)].join('\n') + '\n')
   console.log(`sampled ${chosen.length}/${n} from ${pool.length}`, Object.fromEntries(keys.map((key, i) => [key, `${counts[i]}/${(strata.get(key) ?? []).length}`])))
 }
 
@@ -254,7 +258,7 @@ function cmdShow(argv: string[]): void {
     const pair = corpus.get(id)
     if (!pair) { console.log(`### ${id} — not in corpus`); continue }
     const lines = unifiedDiff(pair.before, pair.after, context).split('\n')
-    console.log(`\n### ${pair.id} · ${pair.source}/${pair.granularity} · ${pair.framework} · public=${pair.publicOk} · ${path.basename(pair.filePath)} · ${pair.timestamp.slice(0, 10)}`)
+    console.log(`\n### ${pair.id} · ${pair.source}/${pair.granularity} · ${pair.framework} · public=${pair.publicOk} · ${path.basename(pair.filePath)} · ${(pair.timestamp ?? 'undated').slice(0, 10)}`)
     console.log(lines.slice(0, max).join('\n'))
     if (lines.length > max) console.log(`… ${lines.length - max} more diff lines`)
   }

@@ -45,14 +45,14 @@ export interface RawPair {
   author?: string
   before: string
   after: string
-  /** Drawn from a Canary Lab demo/template project — safe to publish verbatim. */
+  /** Drawn from a Canary Lab demo/template project or a public open-source clone — safe to publish verbatim. */
   publicOk: boolean
   /** How many further occurrences collapsed into this record (Codex guardian
    *  sessions echo every planned patch several times). */
   duplicates: number
 }
 
-const TEST_FILE = /\.(spec|test)\.(ts|tsx|js|mjs|cjs)$/
+const TEST_FILE = /\.(spec|test|e2e)\.(ts|tsx|js|mjs|cjs)$/
 
 // Paths whose content is Canary Lab's own public demo material. Everything else
 // is private until a human says otherwise — the list is deliberately narrow.
@@ -67,6 +67,8 @@ const PUBLIC_PATH_MARKERS = [
   '/Documents/canary-lab/apps/',
   '/Documents/canary-lab/shared/',
   '/scratchpad/gs-live/',
+  // Clones of public open-source repositories, harvested for the Phase 0b holdout.
+  '/weakenbench-data/oss/',
 ]
 
 export function isPublicPath(filePath: string): boolean {
@@ -398,7 +400,7 @@ function git(repo: string, args: string[]): string | null {
 }
 
 function harvestGitHistory(repo: string, corpus: Corpus): void {
-  const log = git(repo, ['log', '--format=%x01%H%x09%at%x09%an', '--name-only', '--diff-filter=M', '--', '*.spec.ts', '*.spec.js', '*.test.ts', '*.test.js'])
+  const log = git(repo, ['log', '--format=%x01%H%x09%at%x09%an', '--name-only', '--diff-filter=M', '--', '*.spec.ts', '*.spec.js', '*.test.ts', '*.test.js', '*.e2e.ts'])
   if (!log) return
   for (const chunk of log.split('\x01')) {
     const [head, ...files] = chunk.split('\n')
