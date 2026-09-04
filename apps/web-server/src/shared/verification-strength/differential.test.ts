@@ -357,6 +357,15 @@ describe('diffSpecPredicates — run-time guards', () => {
     ])
   })
 
+  it('counts a guard on a live test whose assertions all live in helpers — no direct expect is not no test', () => {
+    // Pilot pair 58ae6f0af517a649: `test.skip(!entry, …)` lifted from tests that assert
+    // only through `expectVoucherInList(page, …)`. The test still runs; the guard still gates it.
+    const guarded = spec(`  test.skip(!entry, 'fixture missing')\n  await expectVoucherInList(page, entry.code)`)
+    const live = spec(`  await expectVoucherInList(page, entry.code)`)
+    expect(summary(diff(guarded, live))).toEqual(['changed:stronger checkout', "  unguarded:stronger test.skip(!entry, 'fixture missing') => -"])
+    expect(summary(diff(live, guarded))).toEqual(['changed:weaker checkout', "  guarded:weaker - => test.skip(!entry, 'fixture missing')"])
+  })
+
   it('ignores guards inside a test that a declaration modifier already disables', () => {
     const before = spec(`  test.skip(!a)\n  expect(1).toBe(1)`, 'checkout', 'test.skip')
     const after = spec(`  expect(1).toBe(1)`, 'checkout', 'test.skip')

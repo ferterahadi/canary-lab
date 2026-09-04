@@ -35,10 +35,11 @@ import { compareTiers, strengthOf } from './lattice'
 //
 // - A run-time `test.skip(cond)` / `fixme` / `fail` call is a guard: the test sits
 //   out whenever it fires. Guards pair by kind and condition (rewording the reason
-//   changes nothing); one added to a live test is weaker, one lifted from a test
-//   that still enforces something is stronger, and a changed condition reads as
-//   both — which rolls up weaker, the conservative side. A guard on a test that is
-//   new, deleted or disabled carries no story of its own: the predicates do. The
+//   changes nothing); one added to a live test is weaker, one lifted from a live
+//   test is stronger — even a test whose assertions all live in helpers — and a
+//   changed condition reads as both, which rolls up weaker, the conservative side.
+//   A guard on a test that is new, deleted or disabled carries no story of its
+//   own: the predicates do. The
 //   bare form (`test.skip()`) silences the test outright and reads like a
 //   declaration modifier. Describe-level guards arrive already attributed to the
 //   tests they reach (see the extractor), so a whole-suite skip is one change per
@@ -103,15 +104,17 @@ function uncancelled<T>(before: T[], after: T[], key: (item: T) => string): [T[]
   return [before.filter((item) => !matched.has(item)), onlyAfter]
 }
 
-// The reason string is documentation; the kind and the condition are the guard.
+// The reason string is documentation; the kind and the condition are the guard. A
+// bare guard never gets here: it silences its test, which then diffs as NOTHING_ENFORCED.
 function guardKey(guard: TestGuard): string {
-  return `${guard.kind}|${guard.condition ?? ''}`
+  return `${guard.kind}|${guard.condition}`
 }
 
-// A set with nothing to enforce: a guard can neither weaken it nor be lifted from it.
-function enforcesNothing(set: PredicateSet): boolean {
-  return set.predicates.length === 0 && !set.unparsed?.length
-}
+// Stands in for a test that is absent from one side or silenced on it, and is
+// recognised by identity. A real test with no direct `expect` (its assertions live
+// in helpers) still runs, so a guard imposed on or lifted from it is a change in
+// what it enforces; a guard on a test that is new, deleted, or disabled is not.
+const NOTHING_ENFORCED: PredicateSet = { predicates: [] }
 
 function reshape(before: TestPredicate, after: TestPredicate): PredicateChange {
   const was = strengthOf(before)
@@ -145,8 +148,8 @@ export function diffPredicateSets(before: PredicateSet, after: PredicateSet): Pr
   }
 
   const [lifted, imposed] = uncancelled(before.guards ?? [], after.guards ?? [], guardKey)
-  if (!enforcesNothing(after)) for (const guard of lifted) changes.push({ kind: 'unguarded', verdict: 'stronger', before: guard })
-  if (!enforcesNothing(before)) for (const guard of imposed) changes.push({ kind: 'guarded', verdict: 'weaker', after: guard })
+  if (after !== NOTHING_ENFORCED) for (const guard of lifted) changes.push({ kind: 'unguarded', verdict: 'stronger', before: guard })
+  if (before !== NOTHING_ENFORCED) for (const guard of imposed) changes.push({ kind: 'guarded', verdict: 'weaker', after: guard })
 
   const [gone, added] = uncancelled(before.predicates, after.predicates, identity)
   const spare = [...added]
@@ -182,10 +185,10 @@ function enforced(test: ExtractedTestPredicates): boolean {
   return !test.guards?.some((guard) => guard.condition === undefined)
 }
 
-// The set a test actually enforces: nothing, when a declaration modifier keeps
-// it from running or inverts its outcome.
+// The set a test actually enforces: nothing, when a declaration modifier or a bare
+// guard keeps it from running or inverts its outcome.
 function enforcedSet(test: ExtractedTestPredicates): PredicateSet {
-  return enforced(test) ? test : { predicates: [] }
+  return enforced(test) ? test : NOTHING_ENFORCED
 }
 
 function testChange(before: ExtractedTestPredicates, after: ExtractedTestPredicates): TestChange | undefined {
@@ -237,11 +240,11 @@ export function diffSpecPredicates(before: ExtractPredicatesResult, after: Extra
       tests.push({ kind: 'renamed', name: partner.name, wasNamed: test.name, verdict: 'equivalent', changes: [] })
       continue
     }
-    const set = diffPredicateSets(enforcedSet(test), { predicates: [] })
+    const set = diffPredicateSets(enforcedSet(test), NOTHING_ENFORCED)
     tests.push({ kind: 'deleted', name: test.name, verdict: set.verdict, changes: set.changes })
   }
   for (const test of unmatchedAfter) {
-    const set = diffPredicateSets({ predicates: [] }, enforcedSet(test))
+    const set = diffPredicateSets(NOTHING_ENFORCED, enforcedSet(test))
     tests.push({ kind: 'added', name: test.name, verdict: set.verdict, changes: set.changes })
   }
 

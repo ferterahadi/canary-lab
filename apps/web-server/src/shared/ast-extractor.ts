@@ -157,10 +157,13 @@ function getStepBody(call: ts.CallExpression): ts.Node | null {
 }
 
 // The test callback can be the 2nd or 3rd argument: `test(title, fn)` or, with a
-// Playwright details object, `test(title, { tag }, fn)`. Scan all args for the
-// function so the body (steps + assertions) is found in both shapes.
+// Playwright details object, `test(title, { tag }, fn)`. Scan the args after the
+// title for the function so the body (steps + assertions) is found in both shapes.
+// The first argument is never a body: in the callback form of a run-time guard,
+// `test.skip(({ browserName }) => …, why)`, it is the condition, and reading it as a
+// body would register the guard as a test named after its own condition.
 function getCallableBody(call: ts.CallExpression): ts.Node | null {
-  for (const arg of call.arguments) {
+  for (const arg of call.arguments.slice(1)) {
     if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) return arg.body
   }
   return null

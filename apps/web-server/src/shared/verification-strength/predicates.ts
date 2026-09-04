@@ -133,16 +133,19 @@ function isGuardKind(name: string): name is TestGuard['kind'] {
 }
 
 /** The run-time guard a call is, if it is one: `test.skip(cond, why)`, `test.fixme()`,
- *  `test.fail(cond)`. The same callee with a string first argument is a test
- *  *declaration* (`test.skip('title', fn)`) — the declaration walker's business — so it
- *  is refused here; the two readers of `test.skip` must never both claim a call. */
+ *  `test.fail(cond)`. The same callee is a test *declaration* — the declaration walker's
+ *  business — when its first argument is a string title or when a callback follows the
+ *  first argument (`test.skip('title', fn)`, `test.skip(name, { tag }, fn)`): Playwright
+ *  itself tells the two apart by a function in second or third position. Both shapes are
+ *  refused here, so the two readers of `test.skip` never both claim a call. */
 export function guardFrom(call: ts.CallExpression, sourceFile: ts.SourceFile): TestGuard | undefined {
   const callee = call.expression
   if (!ts.isPropertyAccessExpression(callee) || !ts.isIdentifier(callee.expression) || callee.expression.text !== 'test') return undefined
   const kind = callee.name.text
   if (!isGuardKind(kind)) return undefined
-  const [first] = call.arguments
+  const [first, ...rest] = call.arguments
   if (first && (ts.isStringLiteralLike(first) || ts.isTemplateExpression(first))) return undefined
+  if (rest.some((arg) => ts.isArrowFunction(arg) || ts.isFunctionExpression(arg))) return undefined
   return {
     kind,
     ...(first ? { condition: normalize(first.getText(sourceFile)) } : {}),

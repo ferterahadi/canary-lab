@@ -308,18 +308,20 @@ test('c', async () => {})`
     })
   })
 
-  it('never mistakes a declaration for a guard, and drops a guard inside a helper whose callers are unknown', () => {
+  it('never mistakes a declaration — literal or dynamic title — for a guard, and drops a guard inside a helper whose callers are unknown', () => {
     const src = `function requireCreds() { test.skip(!process.env.CREDS) }
 test.describe('suite', () => {
   test.skip('declared skipped', async () => { expect(1).toBe(1) })
   test.fixme(\`declared \${variant}\`, async () => {})
   test('t', async () => { requireCreds(); expect(1).toBe(1) })
+  for (const name of names) test.skip(name, { tag: '@slow' }, async () => { expect(1).toBe(1) })
 })`
     const result = extractTestPredicatesFromSource('a.spec.ts', src)
-    const named = result.tests.filter((t) => t.name === 'declared skipped' || t.name === 't')
+    const named = result.tests.filter((t) => ['declared skipped', 't', 'name'].includes(t.name))
     expect(named.map((t) => [t.name, t.modifier, t.guards])).toEqual([
       ['declared skipped', 'skip', undefined],
       ['t', undefined, undefined],
+      ['name', 'skip', undefined],
     ])
     expect(result.tests.every((t) => !t.guards)).toBe(true)
   })
