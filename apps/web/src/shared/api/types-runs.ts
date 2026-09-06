@@ -23,6 +23,11 @@ export interface RunIndexEntry {
   verificationConfigName?: string
   verificationPlaywrightEnvsetId?: string
   verificationTargetUrls?: Record<string, string>
+  /** Live spec edits still pending against this run's run-start suite copy,
+   *  and the integrity hints on them — counts, mirrored from the manifest.
+   *  Absent when zero. */
+  pendingSpecEdits?: number
+  integrityHints?: number
 }
 
 export interface ServiceManifestEntry {
@@ -88,6 +93,38 @@ export interface ExternalHealSession {
   cycleCount: number
 }
 
+/** The run-start copy of the suite the run executes (D9). `unavailable` means
+ *  the run fell back to the live suite dir and says so. */
+export type RunSuiteSnapshot =
+  | { kind: 'taken'; dir: string; takenAt: string; digest: string }
+  | { kind: 'unavailable'; at: string; reason: string }
+
+export interface PendingSpecEdit {
+  /** Spec path relative to the suite dir. */
+  file: string
+  change: 'modified' | 'added' | 'deleted'
+  affectedTests: string[]
+  strength?: { verdict: 'stronger' | 'equivalent' | 'weaker' | 'unclassifiable'; baseline: 'run-start' | 'head' }
+}
+
+/** Live spec edits the run has NOT executed, and who adopted the ones it did. */
+export interface RunSpecEdits {
+  checkedAt: string
+  pending: PendingSpecEdit[]
+  adopted: Array<{ at: string; by: 'human' | 'test-heal'; files: string[] }>
+}
+
+export type IntegrityHint =
+  | { kind: 'weaker'; file: string; test: string; requirements?: string[]; was: string[]; now: string[] }
+  | { kind: 'cannot-classify'; file: string; test?: string; reason: string }
+
+/** Advisory reading of `specEdits.pending` (D13); never changes a status.
+ *  `disclosure` says how the detection was checked — show it beside any hint. */
+export interface RunIntegrity {
+  hints: IntegrityHint[]
+  disclosure: string
+}
+
 export interface RunManifest {
   runId: string
   executionType?: ExecutionType
@@ -132,6 +169,11 @@ export interface RunManifest {
    *  say why (gh not signed in, no push rights, patch no longer applies). */
   prAttempt?: RunPrAttempt
   verification?: VerificationRunMetadata
+  suiteSnapshot?: RunSuiteSnapshot
+  /** Absent until the first Playwright exit, and on runs without a snapshot. */
+  specEdits?: RunSpecEdits
+  /** Written together with `specEdits`; same absence rule. */
+  integrity?: RunIntegrity
   /** Set when the suite was cut short rather than run to completion — the
    *  `healOnFailureThreshold` trip, a user pause, or a cancelled heal. */
   stoppedEarly?: StoppedEarlyInfo
