@@ -26,6 +26,12 @@ export type OrchestratorCancelHealResult =
   | { ok: true }
   | { ok: false; reason: 'not-healing' | 'no-agent-running' }
 
+/** Mirrors `AdoptSpecEditsResult` in `runtime/run-suite-snapshot.ts` for the
+ *  same reason the pause/cancel results are duplicated here. */
+export type OrchestratorAdoptSpecEditsResult =
+  | { ok: true; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
+  | { ok: false; reason: 'tests-running' | 'nothing-to-adopt' | 'snapshot-failed' }
+
 export type OrchestratorInterjectResult =
   | { ok: true }
   | { ok: false; reason: 'no-agent-running' }
@@ -43,6 +49,9 @@ export interface OrchestratorLike {
   stop(finalStatus?: RunManifest['status']): Promise<void>
   pauseAndHeal(): Promise<OrchestratorPauseResult>
   cancelHeal(): Promise<OrchestratorCancelHealResult>
+  /** A human adopts the live spec edits into the run: re-snapshot, re-baseline,
+   *  rerun. Human-only by construction — reached from the HTTP route alone. */
+  adoptSpecEdits?(): Promise<OrchestratorAdoptSpecEditsResult>
   /** Interject — drop the user's text into the live REPL's stdin (Esc-then-
    *  text-then-Enter). Used by the HTTP fallback route. The bidirectional
    *  pane bypasses this and goes through `writeToHealAgent` instead. */

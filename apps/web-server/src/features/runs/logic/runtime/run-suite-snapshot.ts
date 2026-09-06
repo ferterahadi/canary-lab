@@ -12,6 +12,11 @@ import type { RunContext } from './run-context'
 import { copyDirRecursive } from '../../../../../../../shared/lib/copy-dir'
 import { computePendingEdits, hashFeatureSpecs } from '../dirty-specs/detect'
 import { readManifest } from './manifest'
+import { captureDirtySpecBaseline } from './run-manifest-writer'
+
+export type AdoptSpecEditsResult =
+  | { ok: true; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
+  | { ok: false; reason: 'tests-running' | 'nothing-to-adopt' | 'snapshot-failed' }
 
 // Top-level entries of a feature dir that are not suite content. Envsets are
 // read from the LIVE dir by the env switcher and carry secrets; node_modules
@@ -43,6 +48,40 @@ export function recordSpecEdits(ctx: RunContext): void {
       adopted,
     },
   })
+}
+
+/** A human lets the live edits into this run: the snapshot is taken again from
+ *  the live suite, the dirty baseline re-read from it, the adoption recorded on
+ *  the manifest, and a rerun signalled so the adopted suite actually runs. The
+ *  only path that moves the boundary — no verdict, hint or MCP tool does
+ *  (D13); the HTTP route beside /approve-dirty is its sole caller. Refused
+ *  while Playwright is executing the current copy: replacing files under a
+ *  running process would corrupt the very run it is meant to inform. */
+export async function adoptSpecEdits(ctx: RunContext): Promise<AdoptSpecEditsResult> {
+  if (ctx.playwrightPty) return { ok: false, reason: 'tests-running' }
+  const live = ctx.feature.featureDir
+  const hadSnapshot = ctx.suiteDir !== live
+  const pending = hadSnapshot ? computePendingEdits(live, ctx.suiteDir) : []
+  if (hadSnapshot && pending.length === 0) return { ok: false, reason: 'nothing-to-adopt' }
+  // With no copy yet (the boundary was unavailable at boot) adopting means
+  // taking the first one: every spec the live suite holds is what gets adopted.
+  const adopted = hadSnapshot ? pending.map((edit) => edit.file) : Object.keys(hashFeatureSpecs(live)).sort()
+
+  snapshotSuite(ctx)
+  if (ctx.suiteDir === live) return { ok: false, reason: 'snapshot-failed' }
+  await captureDirtySpecBaseline(ctx)
+
+  const previous = readManifest(ctx.paths.manifestPath)?.specEdits?.adopted ?? []
+  const at = new Date().toISOString()
+  ctx.stateSink.patchManifest(ctx.runId, {
+    specEdits: { checkedAt: at, pending: [], adopted: [...previous, { at, files: adopted }] },
+  })
+  const signal = ctx.signalGate.observe('rerun', {
+    hypothesis: 'A human adopted the edited spec(s) into this run.',
+    fixDescription: `Adopted ${adopted.join(', ')}; rerunning the suite as it now reads.`,
+    adoptedSpecEdits: adopted,
+  })
+  return { ok: true, adopted, rerun: signal.accepted ? 'signalled' : signal.reason }
 }
 
 /** Copy the live feature dir to `paths.suiteSnapshotDir`, point the run at the

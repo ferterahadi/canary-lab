@@ -286,6 +286,26 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
     return { reason }
   })
 
+  // POST /api/runs/:runId/adopt-spec-edits — a human lets the live spec edits
+  // into an active run: the run-start copy is re-taken and a rerun signalled
+  // (D9). Sits beside /approve-dirty as the second human-only integrity lever;
+  // no MCP tool wraps it (pinned by mcp/repair-guardrail.test.ts). A terminal
+  // run has nothing to adopt into — a new run snapshots the live suite itself.
+  app.post<{ Params: { runId: string } }>('/api/runs/:runId/adopt-spec-edits', async (req, reply) => {
+    const orch = deps.store.registry.get(req.params.runId)
+    if (!orch?.adoptSpecEdits) {
+      reply.code(404)
+      return { error: 'run not active; start a new run to test the edited suite' }
+    }
+    const result = await orch.adoptSpecEdits()
+    if (!result.ok) {
+      reply.code(409)
+      return { reason: result.reason }
+    }
+    reply.code(202)
+    return { status: 'adopted', adopted: result.adopted, rerun: result.rerun }
+  })
+
   // POST /api/runs/:runId/abort — explicit abort of an active run. Stops
   // the orchestrator (kills Playwright + heal agent + service ptys) and
   // marks the manifest 'aborted'. The run is preserved in history so the

@@ -17,7 +17,7 @@ export type { AbortAllResult, AbortResult, CleanupListing, CleanupOrphan, Cleanu
 export { getRunDetail, readPlaywrightPlaybackEvents, readRunLifecycleEvents, readRunSummary } from './run-detail'
 export type { PlaywrightPlaybackEvent, RunDetail, RunSummary, RunSummaryFailedEntry, RunSummaryRunningStep } from './run-detail'
 export { createRegistry } from './run-registry'
-export type { OrchestratorCancelHealResult, OrchestratorInterjectResult, OrchestratorLike, OrchestratorPauseResult, OrchestratorRegistry, RestartHealResult, RestartRunResult, StartRunOutcome } from './run-registry'
+export type { OrchestratorAdoptSpecEditsResult, OrchestratorCancelHealResult, OrchestratorInterjectResult, OrchestratorLike, OrchestratorPauseResult, OrchestratorRegistry, RestartHealResult, RestartRunResult, StartRunOutcome } from './run-registry'
 
 export interface ListRunsOptions {
   feature?: string

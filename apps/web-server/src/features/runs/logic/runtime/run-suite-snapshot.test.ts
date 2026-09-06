@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { recordSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
+import { adoptSpecEdits, recordSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
 import { writeManifest, type RunManifest } from './manifest'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
@@ -180,6 +180,77 @@ describe('recordSpecEdits', () => {
     recordSpecEdits(ctx)
 
     expect(sink.patches).toEqual([])
+  })
+})
+
+describe('adoptSpecEdits', () => {
+  const WEAKER = "test('a', async () => {})\n"
+
+  it('refuses while Playwright is running the current copy', async () => {
+    const { ctx } = ctxFor({ playwrightPty: { pid: 1 } as unknown as RunContext['playwrightPty'] })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', WEAKER)
+
+    expect(await adoptSpecEdits(ctx)).toEqual({ ok: false, reason: 'tests-running' })
+  })
+
+  it('refuses when the live suite already matches the copy', async () => {
+    const { ctx } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+
+    expect(await adoptSpecEdits(ctx)).toEqual({ ok: false, reason: 'nothing-to-adopt' })
+  })
+
+  it('re-takes the snapshot, re-baselines the dirty record, records the adoption and signals a rerun', async () => {
+    const captureRunStart = vi.fn(async () => ({}))
+    const { ctx, sink } = ctxFor({}, { dirtySpecHooks: { captureRunStart, finalizeRun: vi.fn() } })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', WEAKER)
+    recordSpecEdits(ctx)
+    ctx.signalGate.beginWaiting()
+
+    const result = await adoptSpecEdits(ctx)
+
+    expect(result).toEqual({ ok: true, adopted: ['e2e/a.spec.ts'], rerun: 'signalled' })
+    // The copy now holds the adopted content and the baseline was re-taken from it.
+    expect(fs.readFileSync(path.join(ctx.paths.suiteSnapshotDir, 'e2e', 'a.spec.ts'), 'utf8')).toBe(WEAKER)
+    expect(captureRunStart).toHaveBeenLastCalledWith('demo', ctx.paths.suiteSnapshotDir)
+    const last = sink.patches.at(-1) as { specEdits: RunManifest['specEdits'] }
+    expect(last.specEdits).toMatchObject({ pending: [], adopted: [{ at: expect.any(String), files: ['e2e/a.spec.ts'] }] })
+    // The rerun signal carries the human's authorship so the journal reads right.
+    expect(ctx.signalGate.consume()).toMatchObject({ kind: 'rerun', body: { adoptedSpecEdits: ['e2e/a.spec.ts'] } })
+  })
+
+  it('reports when no rerun could be signalled because the loop is not waiting for one', async () => {
+    const { ctx } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', WEAKER)
+
+    expect(await adoptSpecEdits(ctx)).toMatchObject({ ok: true, rerun: 'not-waiting-for-signal' })
+  })
+
+  it('takes a first snapshot when the run had none (the boundary was unavailable at boot)', async () => {
+    const { ctx } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+
+    const result = await adoptSpecEdits(ctx)
+
+    expect(result).toMatchObject({ ok: true, adopted: ['e2e/a.spec.ts'] })
+    expect(ctx.suiteDir).toBe(ctx.paths.suiteSnapshotDir)
+  })
+
+  it('fails closed when the re-snapshot cannot be taken', async () => {
+    const { ctx } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', WEAKER)
+    vi.spyOn(fs, 'copyFileSync').mockImplementation(() => { throw new Error('EACCES') })
+
+    expect(await adoptSpecEdits(ctx)).toEqual({ ok: false, reason: 'snapshot-failed' })
   })
 })
 
