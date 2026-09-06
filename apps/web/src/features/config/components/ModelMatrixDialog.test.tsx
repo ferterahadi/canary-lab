@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '@/shared/api/client'
 import type { AgentProbe } from '@/shared/api/client'
-import { MODEL_STAGE_KEYS, recommendedChoice } from '@shared/agent-models'
+import { MODEL_STAGE_KEYS, recommendedChoice, type KnownModelOption } from '@shared/agent-models'
 import { ModelMatrixDialog, StageChoiceGrid } from './ModelMatrixDialog'
 
 vi.mock('@/shared/api/client', async () => {
@@ -20,16 +20,18 @@ vi.mock('@/shared/api/client', async () => {
 const OK_PROBE = (agent: 'claude' | 'codex', over: Partial<AgentProbe> = {}): AgentProbe => ({
   agent, state: 'ok', binaryPath: `/usr/local/bin/${agent}`, version: '9.9.9', models: [], remedy: null, ...over,
 })
+// Named separately because `AgentProbe.models` is optional on purpose (older
+// servers predate model discovery). Tests that extend the discovered roster
+// spread THIS list, so what they add to is the same value the snapshot carries.
+const CODEX_MODELS: readonly KnownModelOption[] = [
+  { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' },
+  { value: 'gpt-5.6-terra', label: 'GPT-5.6-Terra' },
+  { value: 'gpt-5.6-luna', label: 'GPT-5.6-Luna' },
+]
 const SNAPSHOT = {
   probedAt: '2026-08-28T00:00:00Z',
   claude: OK_PROBE('claude'),
-  codex: OK_PROBE('codex', {
-    models: [
-      { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' },
-      { value: 'gpt-5.6-terra', label: 'GPT-5.6-Terra' },
-      { value: 'gpt-5.6-luna', label: 'GPT-5.6-Luna' },
-    ],
-  }),
+  codex: OK_PROBE('codex', { models: CODEX_MODELS }),
 }
 
 let container: HTMLDivElement
@@ -210,7 +212,7 @@ describe('ModelMatrixDialog', () => {
     vi.mocked(api.getAgentProbe).mockResolvedValue({
       ...SNAPSHOT,
       codex: OK_PROBE('codex', { models: [
-        ...SNAPSHOT.codex.models,
+        ...CODEX_MODELS,
         { value: 'gpt-6-astra', label: 'GPT-6-Astra' },
       ] }),
     })
