@@ -99,6 +99,14 @@ export interface StoppedEarlyInfo {
   suiteTotal: number
 }
 
+/** Whether this run executes a run-start copy of its suite (D9). `taken` names
+ *  the copy and a digest of the spec content it held; `unavailable` means the
+ *  copy failed and the run fell back to the live feature dir — said out loud so
+ *  no surface claims a boundary that was never there. */
+export type RunSuiteSnapshot =
+  | { kind: 'taken'; dir: string; takenAt: string; digest: string }
+  | { kind: 'unavailable'; at: string; reason: string }
+
 export type LocalHealAgent = 'claude' | 'codex'
 
 export type ExternalHealSessionStatus =
@@ -147,6 +155,9 @@ export interface RunManifest {
   queueReason?: QueueReason
   playwrightArtifacts?: PlaywrightArtifactPolicy
   stoppedEarly?: StoppedEarlyInfo
+  /** The run-start suite copy the verdict rests on. Absent on runs recorded
+   *  before the snapshot boundary existed and on boot-only sessions. */
+  suiteSnapshot?: RunSuiteSnapshot
   /**
    * Per heal-cycle record of which services were restarted vs kept warm.
    * Populated when the orchestrator processes a `.restart` signal whose body

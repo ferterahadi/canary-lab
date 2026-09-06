@@ -109,7 +109,7 @@ export async function runManualExternalHealLoop(ctx: RunContext, host: RunLoopHo
     // exit code arrives after the abort flips the flag — don't
     // compute a finalStatus from it.
     if (ctx.stopped) return ctx.status
-    finalStatus = decideRunStatus(ctx.feature.featureDir, ctx.paths.summaryPath, exitCode)
+    finalStatus = decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
     setStatus(ctx, finalStatus)
     if (finalStatus === 'passed') break
   }
@@ -211,13 +211,13 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
           setStatus(ctx, finalStatus)
           break
         }
-        finalStatus = decideRunStatus(ctx.feature.featureDir, ctx.paths.summaryPath, exitCode)
+        finalStatus = decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
         setStatus(ctx, finalStatus)
         if (finalStatus === 'passed') break
         const afterSummary = readSummary(ctx.paths.summaryPath)
         if (
           extractFailedSlugs(afterSummary).length === 0 &&
-          nonPassedSignatureFromPlan(computeVerificationPlan(ctx.feature.featureDir, afterSummary)) === beforeSignature
+          nonPassedSignatureFromPlan(computeVerificationPlan(ctx.suiteDir, afterSummary)) === beforeSignature
         ) {
           const skippedCount = pendingPlan.kind === 'targeted' ? pendingPlan.skipped.length : 0
           recordLifecycle(ctx, 'rerunning-tests', 'Stopped: not-yet-passed tests stayed unchanged after rerun', {
@@ -460,7 +460,7 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
         setStatus(ctx, finalStatus)
         break
       }
-      finalStatus = decideRunStatus(ctx.feature.featureDir, ctx.paths.summaryPath, exitCode)
+      finalStatus = decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
       setStatus(ctx, finalStatus)
       if (finalStatus === 'passed') break
     }

@@ -195,12 +195,14 @@ describe('readSummary / extractFailedSlugs / defaultPlaywrightSpawner / defaultS
       ],
     })).toEqual(['e2e/a.spec.ts:10'])
     const f = makeFeature()
-    const inv = defaultPlaywrightSpawner({ feature: f, paths: buildRunPaths(runDir) })
+    const suiteDir = buildRunPaths(runDir).suiteSnapshotDir
+    const inv = defaultPlaywrightSpawner({ feature: f, suiteDir, paths: buildRunPaths(runDir) })
     expect(inv.command).toContain('playwright test')
     expect(inv.command).toContain(`--output=${JSON.stringify(path.join(runDir, 'playwright-artifacts'))}`)
-    expect(inv.cwd).toBe(f.featureDir)
+    expect(inv.cwd).toBe(suiteDir)
     const targeted = defaultPlaywrightSpawner({
       feature: f,
+      suiteDir,
       paths: buildRunPaths(runDir),
       rerunTargets: ['e2e/a.spec.ts:10', 'e2e/b spec.ts:20'],
     })

@@ -58,6 +58,20 @@ describe('copyDirRecursive', () => {
     expect(fs.readFileSync(path.join(dst, 'real.txt'), 'utf8')).toBe('real')
   })
 
+  it('skips the entries skipEntry names, subtree included', () => {
+    fs.writeFileSync(path.join(src, 'keep.txt'), 'k')
+    fs.mkdirSync(path.join(src, 'envsets', 'local'), { recursive: true })
+    fs.writeFileSync(path.join(src, 'envsets', 'local', 'secret.env'), 'x')
+    fs.mkdirSync(path.join(src, 'e2e'), { recursive: true })
+    fs.writeFileSync(path.join(src, 'e2e', 'a.spec.ts'), 'a')
+    fs.writeFileSync(path.join(src, 'e2e', 'a.tmp'), 't')
+    copyDirRecursive(src, dst, undefined, (rel) => rel === 'envsets' || rel.endsWith('.tmp'))
+    expect(fs.readFileSync(path.join(dst, 'keep.txt'), 'utf8')).toBe('k')
+    expect(fs.readFileSync(path.join(dst, 'e2e', 'a.spec.ts'), 'utf8')).toBe('a')
+    expect(fs.existsSync(path.join(dst, 'envsets'))).toBe(false)
+    expect(fs.existsSync(path.join(dst, 'e2e', 'a.tmp'))).toBe(false)
+  })
+
   it('maps entry names through renameEntry', () => {
     fs.writeFileSync(path.join(src, 'gitignore'), 'node_modules\n')
     fs.writeFileSync(path.join(src, 'keep.txt'), 'keep')

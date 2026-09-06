@@ -247,12 +247,14 @@ export function setStatus(ctx: RunContext, status: RunManifest['status']): void 
   }
 }
 
-// Record the pre-heal spec hashes for this run. Guards a missing featureDir and
-// swallows errors so integrity capture never blocks boot.
+// Record the pre-heal spec hashes for this run, taken from the suite copy the
+// run executes (`ctx.suiteDir`) so the baseline describes what actually ran.
+// Guards a missing featureDir and swallows errors so integrity capture never
+// blocks boot.
 export async function captureDirtySpecBaseline(ctx: RunContext): Promise<void> {
   if (!ctx.dirtySpecHooks || !ctx.feature.featureDir) return
   try {
-    await ctx.dirtySpecHooks.captureRunStart(ctx.feature.name, ctx.feature.featureDir)
+    await ctx.dirtySpecHooks.captureRunStart(ctx.feature.name, ctx.suiteDir)
   } catch {
     /* integrity capture is best-effort */
   }

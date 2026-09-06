@@ -31,11 +31,20 @@ describe('rerun test-list file', () => {
   }
 
   const feature = { featureDir: '/proj/features/demo' } as unknown as FeatureConfig
+  const suiteDir = '/proj/logs/runs/r1/suite'
+
+  it('runs Playwright from the suite dir it is handed, not the live feature dir', () => {
+    // The run-start snapshot is the verdict boundary (D9): a mid-run spec edit
+    // in features/<suite>/ must not reach the process that produces the verdict.
+    const inv = defaultPlaywrightSpawner({ feature, suiteDir, paths: mkPaths() })
+    expect(inv.cwd).toBe(suiteDir)
+  })
 
   it('writes one line per entry and adds --test-list to the command', () => {
     const paths = mkPaths()
     const inv = defaultPlaywrightSpawner({
       feature,
+      suiteDir,
       paths,
       rerunSelection: {
         kind: 'test-list',
@@ -58,6 +67,7 @@ describe('rerun test-list file', () => {
     const paths = mkPaths()
     const inv = defaultPlaywrightSpawner({
       feature,
+      suiteDir,
       paths,
       rerunGrep: 'a title',
       rerunSelection: {
@@ -83,7 +93,7 @@ describe('rerun test-list file', () => {
   it('writes nothing when there is no selection at all (first full run)', () => {
     const paths = mkPaths()
     expect(writeRerunTestList(paths.rerunListPath, undefined)).toBe(false)
-    const inv = defaultPlaywrightSpawner({ feature, paths })
+    const inv = defaultPlaywrightSpawner({ feature, suiteDir, paths })
     expect(inv.command).not.toContain('--test-list')
   })
 })
