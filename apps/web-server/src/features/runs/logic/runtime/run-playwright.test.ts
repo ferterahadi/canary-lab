@@ -5,7 +5,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { persistPlaywrightArtifacts, runVerification, waitForPlaywrightExit } from './run-playwright'
+import { persistPlaywrightArtifacts, runPlaywright, runVerification, waitForPlaywrightExit } from './run-playwright'
+import { snapshotSuite } from './run-suite-snapshot'
+import type { PlaywrightSpawner } from './run-spawn'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { RunnerLog } from './runner-log'
@@ -140,6 +142,44 @@ describe('waitForPlaywrightExit', () => {
   })
 })
 
+const exit0Pty = () => ({
+  pid: 42,
+  onData: () => ({ dispose() {} }),
+  onExit: (cb: (e: { exitCode: number }) => void) => { setTimeout(() => cb({ exitCode: 0 }), 0); return { dispose() {} } },
+  write() {}, resize() {}, kill() {},
+})
+
+function spec(dir: string, name: string, body: string): void {
+  fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'e2e', name), body)
+}
+
+describe('runPlaywright — the snapshot boundary', () => {
+  it('spawns every rerun from the run-start copy, so a signal_run rerun cannot pick up a live edit', async () => {
+    const spawner = vi.fn<PlaywrightSpawner>(() => ({ command: 'noop', cwd: tmpDir }))
+    const { ctx } = ctxFor({}, { ptyFactory: exit0Pty, playwrightSpawner: spawner })
+    spec(ctx.feature.featureDir, 'a.spec.ts', "test('a', async () => {})\n")
+    snapshotSuite(ctx)
+
+    await runPlaywright(ctx, { kind: 'grep', grep: 'a', selected: 1, total: 1, mode: 'failed-and-pending', reason: 'r' })
+
+    expect(spawner).toHaveBeenCalledWith(expect.objectContaining({ suiteDir: ctx.paths.suiteSnapshotDir }))
+  })
+
+  it('records the pending live edits on the manifest when Playwright exits', async () => {
+    const { ctx, sink } = ctxFor({}, { ptyFactory: exit0Pty, playwrightSpawner: () => ({ command: 'noop', cwd: tmpDir }) })
+    spec(ctx.feature.featureDir, 'a.spec.ts', "test('a', async () => { expect(1).toBe(1) })\n")
+    snapshotSuite(ctx)
+    spec(ctx.feature.featureDir, 'a.spec.ts', "test('a', async () => {})\n")
+
+    await runPlaywright(ctx)
+
+    expect(sink.patches).toContainEqual(expect.objectContaining({
+      specEdits: expect.objectContaining({ pending: [expect.objectContaining({ file: 'e2e/a.spec.ts', change: 'modified' })] }),
+    }))
+  })
+})
+
 describe('runVerification', () => {
   it('returns the live status without running tests when the run was aborted', async () => {
     const { ctx } = ctxFor({ stopped: true, status: 'aborted' })
@@ -152,17 +192,7 @@ describe('runVerification', () => {
     // no reporter inventory the verdict falls back to listing spec files, so
     // reading the live dir would report the run as pending-and-failed for a
     // test Playwright was never handed. Every suite reader switches together.
-    const exit0Pty = () => ({
-      pid: 42,
-      onData: () => ({ dispose() {} }),
-      onExit: (cb: (e: { exitCode: number }) => void) => { setTimeout(() => cb({ exitCode: 0 }), 0); return { dispose() {} } },
-      write() {}, resize() {}, kill() {},
-    })
     const { ctx } = ctxFor({}, { ptyFactory: exit0Pty, playwrightSpawner: () => ({ command: 'noop', cwd: tmpDir }) })
-    const spec = (dir: string, name: string, body: string) => {
-      fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
-      fs.writeFileSync(path.join(dir, 'e2e', name), body)
-    }
     spec(ctx.feature.featureDir, 'a.spec.ts', "test('a', async () => {})\n")
     spec(ctx.feature.featureDir, 'b.spec.ts', "test('b', async () => {})\n")
     ctx.suiteDir = path.join(ctx.runDir, 'suite')

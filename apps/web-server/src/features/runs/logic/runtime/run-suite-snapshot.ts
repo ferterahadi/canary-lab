@@ -10,7 +10,8 @@ import { createHash } from 'crypto'
 import fs from 'fs'
 import type { RunContext } from './run-context'
 import { copyDirRecursive } from '../../../../../../../shared/lib/copy-dir'
-import { hashFeatureSpecs } from '../dirty-specs/detect'
+import { computePendingEdits, hashFeatureSpecs } from '../dirty-specs/detect'
+import { readManifest } from './manifest'
 
 // Top-level entries of a feature dir that are not suite content. Envsets are
 // read from the LIVE dir by the env switcher and carry secrets; node_modules
@@ -25,6 +26,23 @@ export function suiteDigest(suiteDir: string): string {
   const h = createHash('sha256')
   for (const rel of Object.keys(hashes).sort()) h.update(`${rel}\0${hashes[rel]}\n`)
   return h.digest('hex')
+}
+
+/** Re-measure the live suite against the copy and write the result to the
+ *  manifest. Called after every Playwright exit, so the run's own record — and
+ *  every MCP result derived from it — says which live edits the verdict never
+ *  executed. Carries the adopted history forward; a run without a snapshot
+ *  records nothing, since there is no boundary to measure against. */
+export function recordSpecEdits(ctx: RunContext): void {
+  if (ctx.suiteDir === ctx.feature.featureDir) return
+  const adopted = readManifest(ctx.paths.manifestPath)?.specEdits?.adopted ?? []
+  ctx.stateSink.patchManifest(ctx.runId, {
+    specEdits: {
+      checkedAt: new Date().toISOString(),
+      pending: computePendingEdits(ctx.feature.featureDir, ctx.suiteDir),
+      adopted,
+    },
+  })
 }
 
 /** Copy the live feature dir to `paths.suiteSnapshotDir`, point the run at the

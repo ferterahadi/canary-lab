@@ -5,7 +5,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { snapshotSuite, suiteDigest } from './run-suite-snapshot'
+import { recordSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
+import { writeManifest, type RunManifest } from './manifest'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { RunnerLog } from './runner-log'
@@ -133,6 +134,52 @@ describe('snapshotSuite', () => {
     snapshotSuite(ctx)
 
     expect(sink.patches[0]).toMatchObject({ suiteSnapshot: { kind: 'unavailable', reason: 'disk full' } })
+  })
+})
+
+describe('recordSpecEdits', () => {
+  it('writes the live edits the run has not executed onto the manifest', () => {
+    const { ctx, sink } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', "test('a', async () => {})\n")
+
+    recordSpecEdits(ctx)
+
+    const patch = sink.patches.at(-1) as { specEdits: RunManifest['specEdits'] }
+    expect(patch.specEdits).toMatchObject({
+      checkedAt: expect.any(String),
+      pending: [{ file: 'e2e/a.spec.ts', change: 'modified', affectedTests: ['a'], strength: { verdict: 'weaker' } }],
+      adopted: [],
+    })
+  })
+
+  it('keeps the adopted history already on the manifest', () => {
+    // Adoption is appended by the adopt route; a routine re-check after a
+    // Playwright exit must not wipe that record.
+    const { ctx, sink } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    const adopted = [{ at: '2026-09-06T00:00:00.000Z', files: ['e2e/a.spec.ts'] }]
+    writeManifest(ctx.paths.manifestPath, {
+      runId: ctx.runId, feature: 'demo', startedAt: '', status: 'running', healCycles: 0, services: [],
+      specEdits: { checkedAt: '', pending: [], adopted },
+    })
+
+    recordSpecEdits(ctx)
+
+    expect((sink.patches.at(-1) as { specEdits: RunManifest['specEdits'] }).specEdits).toMatchObject({ pending: [], adopted })
+  })
+
+  it('records nothing when the run has no snapshot to compare against', () => {
+    // Without a copy there is no boundary; a `pending: []` here would read as
+    // "no edits" when the truth is "we cannot tell".
+    const { ctx, sink } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+
+    recordSpecEdits(ctx)
+
+    expect(sink.patches).toEqual([])
   })
 })
 

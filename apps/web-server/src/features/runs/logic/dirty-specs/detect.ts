@@ -73,6 +73,13 @@ export interface DirtyResult {
   dirtySpecs: DirtySpec[]
 }
 
+/** A live spec that differs from the copy a run executed — an edit the run has
+ *  NOT run. Run-level and strict: HEAD and approvals play no part, since a
+ *  committed edit is still one the verdict never saw. */
+export interface PendingSpecEdit extends DirtySpec {
+  change: 'modified' | 'added' | 'deleted'
+}
+
 export function hashContent(content: string): string {
   return createHash('sha256').update(content).digest('hex')
 }
@@ -271,6 +278,42 @@ export async function computeDirty(featureDir: string, baseline: DirtyBaseline):
     })
   }
   return { status: dirtySpecs.length ? 'dirty' : 'clean', dirtySpecs }
+}
+
+// Compare the live suite with the run-start copy the run executed. Every spec on
+// either side is reported when it differs: modified (both, different bytes),
+// added (live only) or deleted (copy only). `affectedTests` narrows a modified
+// file to the tests whose bodies changed, same rule as `computeDirty`; an added
+// or deleted file names every test it declares. `strength` diffs the copy's
+// assertions against the live ones, so a deletion reads as `weaker`.
+export function computePendingEdits(liveDir: string, snapshotDir: string): PendingSpecEdit[] {
+  const live = readSpecSources(liveDir)
+  const snapshot = readSpecSources(snapshotDir)
+  const rels = [...new Set([...Object.keys(snapshot), ...Object.keys(live)])].sort()
+  const pending: PendingSpecEdit[] = []
+  for (const rel of rels) {
+    const before = snapshot[rel]
+    const after = live[rel]
+    if (before === after) continue
+    const change = before === undefined ? 'added' : after === undefined ? 'deleted' : 'modified'
+    const beforeTests = before === undefined ? {} : hashTestBodies(rel, before)
+    const afterTests = after === undefined ? {} : hashTestBodies(rel, after)
+    const names = testNamesOf(rel, after ?? before ?? '')
+    const changedTests = names.filter((name) => beforeTests[testHashKey(rel, name)] !== afterTests[testHashKey(rel, name)])
+    const strength: SpecStrength = {
+      ...diffSpecPredicates(
+        extractTestPredicatesFromSource(rel, before ?? ''),
+        extractTestPredicatesFromSource(rel, after ?? ''),
+      ),
+      baseline: 'run-start',
+    }
+    pending.push({ file: rel, change, affectedTests: changedTests.length > 0 ? changedTests : names, strength })
+  }
+  return pending
+}
+
+function testNamesOf(rel: string, source: string): string[] {
+  return extractTestMetadataFromSource(rel, source).tests.map((t) => t.name)
 }
 
 // Promote run-start hashes to the green baseline for specs that were NOT modified

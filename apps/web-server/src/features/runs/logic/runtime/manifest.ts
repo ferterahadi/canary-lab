@@ -19,6 +19,7 @@ import type {
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 import type { ExternalSessionMeta } from '../../../../../../../shared/run-mode'
 import type { RunModelPlan } from './run-model-plan'
+import type { PendingSpecEdit } from '../dirty-specs/detect'
 export type {
   HealEnd,
   QueueReason,
@@ -107,6 +108,15 @@ export type RunSuiteSnapshot =
   | { kind: 'taken'; dir: string; takenAt: string; digest: string }
   | { kind: 'unavailable'; at: string; reason: string }
 
+/** Live spec edits measured against the run-start copy. `pending` is what the
+ *  run has NOT executed; a human adopting an edit re-takes the snapshot and
+ *  appends to `adopted`. Re-checked after every Playwright exit. */
+export interface RunSpecEdits {
+  checkedAt: string
+  pending: PendingSpecEdit[]
+  adopted: Array<{ at: string; files: string[] }>
+}
+
 export type LocalHealAgent = 'claude' | 'codex'
 
 export type ExternalHealSessionStatus =
@@ -158,6 +168,10 @@ export interface RunManifest {
   /** The run-start suite copy the verdict rests on. Absent on runs recorded
    *  before the snapshot boundary existed and on boot-only sessions. */
   suiteSnapshot?: RunSuiteSnapshot
+  /** Absent until the first Playwright exit, and on runs without a snapshot —
+   *  no copy means no boundary to measure against, and `pending: []` would
+   *  then read as "no edits" when the truth is "cannot tell". */
+  specEdits?: RunSpecEdits
   /**
    * Per heal-cycle record of which services were restarted vs kept warm.
    * Populated when the orchestrator processes a `.restart` signal whose body

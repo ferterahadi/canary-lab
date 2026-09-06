@@ -12,6 +12,7 @@ import { SummaryShape, VerificationPlan, computeVerificationPlan, decideRunStatu
 import { testPortEnv } from './run-service-boot'
 import { prepareRun, recordLifecycle, setStatus } from './run-manifest-writer'
 import { repoPathOverrideEnv } from './repo-path-env'
+import { recordSpecEdits } from './run-suite-snapshot'
 
 // ─── Playwright + heal loop ────────────────────────────────────────────────
 //
@@ -75,6 +76,9 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
     pty.onExit(({ exitCode, signal }) => {
       ctx.playwrightPty = null
       persistPlaywrightArtifacts(ctx)
+      // Before the verdict is read: whoever decides the status (and whoever
+      // reads the run over MCP right after) sees which live edits did not run.
+      recordSpecEdits(ctx)
       ctx.emit('playwright-exit', { exitCode })
       recordLifecycle(ctx, exitCode === 0 ? 'completed' : 'failed', `Playwright exited with code ${exitCode}`, {
         detail: signal ? `Process signal: ${signal}` : undefined,
