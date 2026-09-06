@@ -319,6 +319,17 @@ describe('computePendingEdits', () => {
     fs.rmSync(copyDir, { recursive: true, force: true })
   })
 
+  it('names every declared test when the pending edit is outside any test body', () => {
+    const rel = writeSpec('voucher.spec.ts', TWO_TESTS_HELPER_EDITED)
+    const copyDir = writeRunStartCopy('voucher.spec.ts', TWO_TESTS)
+    const pending = computePendingEdits(dir, copyDir)
+    expect(pending).toHaveLength(1)
+    // No test body changed, so the file-level edit is attributed to both tests
+    // rather than to none — the same rule `computeDirty` applies.
+    expect(pending[0]).toMatchObject({ file: rel, change: 'modified', affectedTests: ['a', 'b'] })
+    fs.rmSync(copyDir, { recursive: true, force: true })
+  })
+
   it('still reports the edit when the live content was committed to HEAD', async () => {
     const rel = writeSpec('voucher.spec.ts', ONE_ASSERTION_DROPPED)
     git(['add', '.'])

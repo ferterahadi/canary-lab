@@ -298,7 +298,7 @@ export function computePendingEdits(liveDir: string, snapshotDir: string): Pendi
     const change = before === undefined ? 'added' : after === undefined ? 'deleted' : 'modified'
     const beforeTests = before === undefined ? {} : hashTestBodies(rel, before)
     const afterTests = after === undefined ? {} : hashTestBodies(rel, after)
-    const names = testNamesOf(rel, after ?? before ?? '')
+    const names = testNamesOf(rel, after ?? before)
     const changedTests = names.filter((name) => beforeTests[testHashKey(rel, name)] !== afterTests[testHashKey(rel, name)])
     const strength: SpecStrength = {
       ...diffSpecPredicates(

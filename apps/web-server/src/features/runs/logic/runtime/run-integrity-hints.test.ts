@@ -69,6 +69,54 @@ describe('deriveIntegrityHints', () => {
     ])
   })
 
+  it('falls back to the first unclassifiable change for the reason, then to a fixed sentence', () => {
+    const edits: PendingSpecEdit[] = [
+      {
+        file: 'e2e/a.spec.ts', change: 'modified', affectedTests: ['x'],
+        strength: {
+          baseline: 'run-start', verdict: 'unclassifiable',
+          tests: [{
+            kind: 'changed', name: 'x', verdict: 'unclassifiable',
+            changes: [
+              { kind: 'reshaped', verdict: 'equivalent', before: predicate('a'), after: predicate('b') },
+              { kind: 'reshaped', verdict: 'unclassifiable', reason: 'toLookRight has no strength rule', before: predicate('c'), after: predicate('d') },
+            ],
+          }],
+        },
+      },
+      {
+        file: 'e2e/b.spec.ts', change: 'modified', affectedTests: ['y'],
+        strength: {
+          baseline: 'run-start', verdict: 'unclassifiable',
+          tests: [{ kind: 'changed', name: 'y', verdict: 'unclassifiable', changes: [] }],
+        },
+      },
+    ]
+    expect(deriveIntegrityHints(edits, () => undefined)).toEqual([
+      { kind: 'cannot-classify', file: 'e2e/a.spec.ts', test: 'x', reason: 'toLookRight has no strength rule' },
+      { kind: 'cannot-classify', file: 'e2e/b.spec.ts', test: 'y', reason: 'the differential could not read this change' },
+    ])
+  })
+
+  it('reads the live source once per file, however many weaker tests it holds', () => {
+    const reads: string[] = []
+    const readLiveSource = (rel: string) => { reads.push(rel); return `${SOURCE}test('refunds the card', { tag: ['@req-payments-9'] }, async () => {})\n` }
+    const twoWeaker: PendingSpecEdit = {
+      ...WEAKENED,
+      affectedTests: ['charges the card', 'refunds the card'],
+      strength: {
+        baseline: 'run-start', verdict: 'weaker',
+        tests: [
+          ...WEAKENED.strength!.tests,
+          { kind: 'changed', name: 'refunds the card', verdict: 'weaker', changes: [{ kind: 'removed', verdict: 'weaker', before: predicate('await expect(refund).toHaveText(\'ok\')') }] },
+        ],
+      },
+    }
+    const hints = deriveIntegrityHints([twoWeaker], readLiveSource)
+    expect(hints.map((h) => h.kind === 'weaker' && h.requirements)).toEqual([['checkout-12', 'payments-3'], ['payments-9']])
+    expect(reads).toEqual(['e2e/checkout.spec.ts'])
+  })
+
   it('says nothing about equivalent or stronger edits, or edits with no verdict', () => {
     const edits: PendingSpecEdit[] = [
       { file: 'e2e/a.spec.ts', change: 'modified', affectedTests: ['x'], strength: { baseline: 'run-start', verdict: 'stronger', tests: [{ kind: 'changed', name: 'x', verdict: 'stronger', changes: [] }] } },

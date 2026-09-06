@@ -135,6 +135,31 @@ describe('RunOrchestrator misc branches', () => {
     await orch.stop('passed')
   })
 
+  it('adoptSpecEdits adopts a live spec edit into the run-start copy as a human adopt', async () => {
+    const f = makeFakeFactory()
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'a.spec.ts')
+    fs.writeFileSync(spec, "test('a', async () => { expect(1).toBe(1) })\n")
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ featureDir, repos: [] }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
+    })
+    await orch.start()
+    fs.writeFileSync(spec, "test('a', async () => { expect(1).toBe(2) })\n")
+
+    const result = await orch.adoptSpecEdits()
+
+    expect(result).toMatchObject({ ok: true, adopted: ['e2e/a.spec.ts'] })
+    expect(readManifest(orch.paths.manifestPath)!.specEdits?.adopted).toMatchObject([{ by: 'human', files: ['e2e/a.spec.ts'] }])
+    await orch.stop('failed')
+  })
+
   it('auto-heal finishes passed from the pending branch when the summary already shows all tests passed', async () => {
     const f = makeFakeFactory()
     const featureDir = path.join(tmpDir, 'features', 'demo')
