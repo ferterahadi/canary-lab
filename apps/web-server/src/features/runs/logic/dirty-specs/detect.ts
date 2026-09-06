@@ -2,8 +2,10 @@ import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { listSpecFiles } from '../../../../shared/feature-loader'
-import { extractTestMetadataFromSource } from '../../../../shared/ast-extractor'
+import { extractTestMetadataFromSource, extractTestPredicatesFromSource } from '../../../../shared/ast-extractor'
 import { getGitRoot, runGit } from '../../../../shared/git-repo'
+import { diffSpecPredicates } from '../../../../shared/verification-strength/differential'
+import type { SpecDiff } from '../../../../../../../shared/verification-strength/types'
 
 // Test-file integrity detection. Canary Lab's promise is that a verdict stays
 // outside the agent's control; the threat is the heal agent silently editing a
@@ -43,11 +45,27 @@ export interface DirtyBaseline {
   lastGreenTestHashes?: SpecHashes
   runStartTestHashes?: SpecHashes
   approvedTestHashes?: SpecHashes
+  /** Directory holding the run-start copy of the suite (the D9 snapshot), when
+   *  one was taken. Supplies the before-side *content* for the strength verdict;
+   *  the hashes above can say "changed" but not "changed how". */
+  runStartSourceDir?: string
+}
+
+/** The verification-strength differential for one dirty spec: the assertion set
+ *  before the edit against the assertion set now. An advisory hint, never a gate
+ *  (D13) — `weaker` and `unclassifiable` are what a reader is told about. */
+export interface SpecStrength extends SpecDiff {
+  /** Where the before-side content came from: the run-start copy, or the
+   *  committed spec when no copy holds this file. */
+  baseline: 'run-start' | 'head'
 }
 
 export interface DirtySpec {
   file: string
   affectedTests: string[]
+  /** Absent when no baseline content is readable (a hash-only legacy record,
+   *  an untracked file with no run-start copy) — the file is still dirty. */
+  strength?: SpecStrength
 }
 
 export interface DirtyResult {
@@ -75,19 +93,28 @@ export function listFeatureSpecs(featureDir: string): SpecInfo[] {
   })
 }
 
-// Content-hash every spec under the feature dir, keyed by rel path. A missing /
-// unreadable spec contributes no entry (callers treat absence as "nothing to
-// attest" rather than a phantom change).
-export function hashFeatureSpecs(featureDir: string): SpecHashes {
-  const out: SpecHashes = {}
+// Every readable spec's content under the feature dir, keyed by rel path. A
+// missing / unreadable spec contributes no entry (callers treat absence as
+// "nothing to attest" rather than a phantom change).
+function readSpecSources(featureDir: string): Record<string, string> {
+  const out: Record<string, string> = {}
   for (const abs of listSpecFiles(featureDir)) {
     try {
-      out[path.relative(featureDir, abs)] = hashContent(fs.readFileSync(abs, 'utf8'))
+      out[path.relative(featureDir, abs)] = fs.readFileSync(abs, 'utf8')
     } catch {
-      /* missing/unreadable spec contributes no hash */
+      /* missing/unreadable spec contributes no content */
     }
   }
   return out
+}
+
+function hashSources(sources: Record<string, string>): SpecHashes {
+  return Object.fromEntries(Object.entries(sources).map(([rel, source]) => [rel, hashContent(source)]))
+}
+
+// Content-hash every spec under the feature dir, keyed by rel path.
+export function hashFeatureSpecs(featureDir: string): SpecHashes {
+  return hashSources(readSpecSources(featureDir))
 }
 
 // Hash of each individual test's body (via the same AST extractor used for
@@ -122,9 +149,9 @@ export function hashFeatureSpecTests(featureDir: string): SpecHashes {
 async function headSpecHashes(
   featureDir: string,
   rels: string[],
-): Promise<{ file: SpecHashes; tests: SpecHashes }> {
+): Promise<{ file: SpecHashes; tests: SpecHashes; sources: Record<string, string> }> {
   const root = await getGitRoot(featureDir)
-  if (!root) return { file: {}, tests: {} }
+  if (!root) return { file: {}, tests: {}, sources: {} }
   // `getGitRoot` returns a realpath'd toplevel; realpath the feature dir too so
   // the repo-relative path is correct even when featureDir traverses a symlink
   // (e.g. macOS /var → /private/var). A mismatch yields a `../../` path and
@@ -137,15 +164,50 @@ async function headSpecHashes(
   }
   const file: SpecHashes = {}
   const tests: SpecHashes = {}
+  const sources: Record<string, string> = {}
   for (const rel of rels) {
     const repoRel = path.relative(root, path.join(realFeatureDir, rel))
     const res = await runGit(root, ['show', `HEAD:${repoRel}`])
     if (res.code === 0) {
       file[rel] = hashContent(res.stdout)
+      sources[rel] = res.stdout
       Object.assign(tests, hashTestBodies(rel, res.stdout))
     }
   }
-  return { file, tests }
+  return { file, tests, sources }
+}
+
+// The before side of a dirty spec's strength verdict: the run-start copy when it
+// holds the file, else the committed content. Absent when neither does.
+function baselineSource(
+  rel: string,
+  runStartSourceDir: string | undefined,
+  headSource: string | undefined,
+): { source: string; baseline: SpecStrength['baseline'] } | undefined {
+  if (runStartSourceDir) {
+    try {
+      return { source: fs.readFileSync(path.join(runStartSourceDir, rel), 'utf8'), baseline: 'run-start' }
+    } catch {
+      /* copy no longer holds this spec (or was never taken for it) — fall through to HEAD */
+    }
+  }
+  if (headSource !== undefined) return { source: headSource, baseline: 'head' }
+  return undefined
+}
+
+function specStrength(
+  rel: string,
+  after: string,
+  runStartSourceDir: string | undefined,
+  headSource: string | undefined,
+): SpecStrength | undefined {
+  const before = baselineSource(rel, runStartSourceDir, headSource)
+  if (!before) return undefined
+  const diff = diffSpecPredicates(
+    extractTestPredicatesFromSource(rel, before.source),
+    extractTestPredicatesFromSource(rel, after),
+  )
+  return { ...diff, baseline: before.baseline }
 }
 
 // Whether a single hash (current vs. head/approved/attest) reads as clean —
@@ -172,7 +234,8 @@ function isCleanAgainst(cur: string, head: string | undefined, approved: string 
 // in the file, since the change can't be pinned to one and still needs flagging.
 export async function computeDirty(featureDir: string, baseline: DirtyBaseline): Promise<DirtyResult> {
   const specs = listFeatureSpecs(featureDir)
-  const current = hashFeatureSpecs(featureDir)
+  const sources = readSpecSources(featureDir)
+  const current = hashSources(sources)
   const currentTests = hashFeatureSpecTests(featureDir)
   const heads = await headSpecHashes(featureDir, specs.map((s) => s.rel))
   const greenTests = baseline.lastGreenTestHashes ?? {}
@@ -200,7 +263,12 @@ export async function computeDirty(featureDir: string, baseline: DirtyBaseline):
       if (testAttest === undefined && testApproved === undefined && testHead === undefined) return true
       return !isCleanAgainst(testCur, testHead, testApproved, testAttest)
     })
-    dirtySpecs.push({ file: spec.rel, affectedTests: perTestDirty.length > 0 ? perTestDirty : spec.tests })
+    const strength = specStrength(spec.rel, sources[spec.rel], baseline.runStartSourceDir, heads.sources[spec.rel])
+    dirtySpecs.push({
+      file: spec.rel,
+      affectedTests: perTestDirty.length > 0 ? perTestDirty : spec.tests,
+      ...(strength ? { strength } : {}),
+    })
   }
   return { status: dirtySpecs.length ? 'dirty' : 'clean', dirtySpecs }
 }
