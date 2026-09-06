@@ -25,6 +25,8 @@ const TAMPERED = `test('applies voucher', async () => { expect(1).toBe(2) })\n`
 const TWO_TESTS = `test('a', async () => { expect(1).toBe(1) })
 test('b', async () => { expect(2).toBe(2) })
 `
+const TWO_ASSERTIONS = `test('applies voucher', async () => { expect(1).toBe(1); expect(2).toBe(2) })\n`
+const ONE_ASSERTION_DROPPED = `test('applies voucher', async () => { expect(1).toBe(1) })\n`
 const TWO_TESTS_B_EDITED = `test('a', async () => { expect(1).toBe(1) })
 test('b', async () => { expect(2).toBe(3) })
 `
@@ -184,6 +186,23 @@ describe('DirtySpecStore', () => {
     const rec = await store.recompute('checkout', featureDir)
     expect(rec.status).toBe('dirty')
     expect(rec.dirtySpecs[0].affectedTests).toEqual(['b'])
+  })
+
+  it('captureRunStart records the run-start copy so a later recompute carries a verdict', async () => {
+    const copyDir = path.join(root, 'snapshot')
+    fs.mkdirSync(path.join(copyDir, 'e2e'), { recursive: true })
+    fs.writeFileSync(path.join(copyDir, 'e2e', 'voucher.spec.ts'), TWO_ASSERTIONS)
+    writeSpec(TWO_ASSERTIONS)
+    const store = new DirtySpecStore(logsDir)
+
+    const captured = await store.captureRunStart('checkout', copyDir)
+    expect(captured.runStartSourceDir).toBe(copyDir)
+    expect(captured.status).toBe('clean')
+
+    writeSpec(ONE_ASSERTION_DROPPED)
+    const rec = await store.recompute('checkout', featureDir)
+    expect(rec.status).toBe('dirty')
+    expect(rec.dirtySpecs[0].strength).toMatchObject({ baseline: 'run-start', verdict: 'weaker' })
   })
 
   it('stamps `since` only when status changes', async () => {

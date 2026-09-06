@@ -363,6 +363,28 @@ describe('classifyWaitForHealTask', () => {
     expect(nextSteps?.[0]).toContain('Fix app/service code, not tests')
   })
 
+  it('carries the run-level specEdits warning on needs_heal', () => {
+    fs.mkdirSync(path.join(logsDir, 'runs', 'run-1'), { recursive: true })
+    const result = classify(needsHealDetail({
+      specEdits: {
+        checkedAt: 't',
+        pending: [{ file: 'e2e/checkout.spec.ts', change: 'modified', affectedTests: ['checkout fails'] }],
+        adopted: [],
+      },
+      integrity: { hints: [], disclosure: 'd' },
+    }))
+
+    // The agent is about to repair against a suite copy the live spec no
+    // longer matches; it must hear that before it edits anything.
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        type: 'needs_heal',
+        specEdits: { pending: [{ file: 'e2e/checkout.spec.ts', change: 'modified' }], hints: [] },
+      },
+    })
+  })
+
   it('slims the context from cycle 2 and reads the cycle off the active lifecycle', () => {
     const result = classify(needsHealDetail({ lifecycle: { phase: 'waiting-for-signal', activeCycle: 2 } }))
 

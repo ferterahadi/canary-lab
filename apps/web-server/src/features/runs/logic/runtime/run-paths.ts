@@ -45,6 +45,11 @@ export interface RunPaths {
   // `<repoName>.patch` per changed repo plus a `fixes.json` index. The
   // run detail's Changes tab and the PR pipeline read from here.
   fixesDir: string
+  // The run-start copy of `features/<suite>/` that Playwright actually executes
+  // (D9). Taken before any service or agent starts, so a spec edited mid-run
+  // never reaches the process that produces the verdict; replaced only when a
+  // human adopts the edit. Envsets, node_modules and .git are left out.
+  suiteSnapshotDir: string
   failedDir: string
   signalsDir: string
   restartSignal: string
@@ -81,6 +86,7 @@ export function buildRunPaths(runDir: string, overrides?: { signalsDir?: string 
     diagnosisJournalPath: path.join(runDir, 'diagnosis-journal.md'),
     healAgentTailPath: path.join(runDir, 'heal-agent-tail.txt'),
     fixesDir: path.join(runDir, 'fixes'),
+    suiteSnapshotDir: path.join(runDir, 'suite'),
     failedDir: path.join(runDir, 'failed'),
     signalsDir,
     restartSignal: path.join(signalsDir, '.restart'),

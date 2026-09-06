@@ -12,6 +12,7 @@ import { SummaryShape, VerificationPlan, computeVerificationPlan, decideRunStatu
 import { testPortEnv } from './run-service-boot'
 import { prepareRun, recordLifecycle, setStatus } from './run-manifest-writer'
 import { repoPathOverrideEnv } from './repo-path-env'
+import { recordSpecEdits } from './run-suite-snapshot'
 
 // ─── Playwright + heal loop ────────────────────────────────────────────────
 //
@@ -24,6 +25,7 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
   const feature = featureWithLatestHealThreshold(ctx)
   const inv = ctx.playwrightSpawner({
     feature,
+    suiteDir: ctx.suiteDir,
     paths: ctx.paths,
     rerunTargets,
     rerunGrep,
@@ -55,6 +57,8 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
       // the local service bound (CANARY_PORT_<shell-safe-slot>). Empty when no ports
       // were allocated, preserving the static envset target for remote runs.
       ...testPortEnv(ctx),
+      // Stays the LIVE feature dir on purpose: envset targets and project-root
+      // resolution read it; only the specs run from the copy (`cwd`).
       CANARY_LAB_PROJECT_ROOT: ctx.feature.featureDir,
       CANARY_LAB_MANIFEST_PATH: ctx.paths.manifestPath,
       CANARY_LAB_SUMMARY_PATH: ctx.paths.summaryPath,
@@ -72,6 +76,9 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
     pty.onExit(({ exitCode, signal }) => {
       ctx.playwrightPty = null
       persistPlaywrightArtifacts(ctx)
+      // Before the verdict is read: whoever decides the status (and whoever
+      // reads the run over MCP right after) sees which live edits did not run.
+      recordSpecEdits(ctx)
       ctx.emit('playwright-exit', { exitCode })
       recordLifecycle(ctx, exitCode === 0 ? 'completed' : 'failed', `Playwright exited with code ${exitCode}`, {
         detail: signal ? `Process signal: ${signal}` : undefined,
@@ -125,7 +132,7 @@ export function persistPlaywrightArtifacts(ctx: RunContext): void {
 }
 
 export function verificationPlanForSummary(ctx: RunContext, summary: SummaryShape): VerificationPlan {
-  const plan = computeVerificationPlan(ctx.feature.featureDir, summary)
+  const plan = computeVerificationPlan(ctx.suiteDir, summary)
   if (plan.kind === 'targeted') {
     ctx.runnerLog?.info(`Targeted re-run: ${plan.failedFirst.length} failed + ${plan.skipped.length} skipped + ${plan.pending.length} pending of ${plan.total} total tests`)
     recordLifecycle(ctx, 'rerunning-tests', 'Targeted rerun selected', {
@@ -201,7 +208,7 @@ export async function runVerification(ctx: RunContext): Promise<RunManifest['sta
   })
   const exitCode = await runPlaywright(ctx)
   if (ctx.stopped) return ctx.status
-  const finalStatus = decideRunStatus(ctx.feature.featureDir, ctx.paths.summaryPath, exitCode)
+  const finalStatus = decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
   setStatus(ctx, finalStatus)
   return finalStatus
 }

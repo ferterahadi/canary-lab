@@ -1,6 +1,6 @@
 import type { RunDetail, RunStoreEvent } from '../features/runs/logic/run-store'
 import type { ClientKind } from '../../../../shared/run-mode'
-import { buildExternalHealContext, normalizeRunCounts, slimRepeatHealContext, type ExternalHealContext, type NormalizedRunCounts } from '../features/runs/logic/heal/external-heal-surface'
+import { buildExternalHealContext, buildSpecEditsWarning, normalizeRunCounts, slimRepeatHealContext, type ExternalHealContext, type NormalizedRunCounts, type SpecEditsWarning } from '../features/runs/logic/heal/external-heal-surface'
 import { isActiveRunStatus, isTerminalRunStatus } from '../../../../shared/run-state'
 import type { CanaryLabMcpDeps } from './tool-schemas'
 import { ensureExternalClaimForMcpCall } from './tool-support'
@@ -123,10 +123,13 @@ export function healFixOutcome(detail: RunDetail): HealFixOutcome | undefined {
   }
 }
 
+// `dirtyTests` is the feature's live dirty record; `specEdits` is what THIS run
+// recorded against its own run-start suite copy (D9). They answer different
+// questions, so both ride along; neither is consulted by the verdict.
 export type WaitForHealTaskValue =
-  | { type: 'needs_heal'; runId: string; cycle: number; context: ExternalHealContext; dirtyTests?: DirtyTestsWarning }
-  | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning; fix?: HealFixOutcome }
-  | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning }
+  | { type: 'needs_heal'; runId: string; cycle: number; context: ExternalHealContext; dirtyTests?: DirtyTestsWarning; specEdits?: SpecEditsWarning }
+  | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning; specEdits?: SpecEditsWarning; fix?: HealFixOutcome }
+  | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning; specEdits?: SpecEditsWarning }
   | {
       type: 'still_waiting'
       runId: string
@@ -171,6 +174,7 @@ export function classifyWaitForHealTask(
 
   const status = detail.manifest.status
   const dirtyTests = dirtyTestsWarning(deps, detail.manifest.feature)
+  const specEdits = buildSpecEditsWarning(detail.manifest)
   if (status === 'passed') {
     const fix = healFixOutcome(detail)
     return {
@@ -181,6 +185,7 @@ export function classifyWaitForHealTask(
         summary: detail.summary ?? null,
         counts: normalizeRunCounts(detail.summary ?? null),
         ...(dirtyTests ? { dirtyTests } : {}),
+        ...(specEdits ? { specEdits } : {}),
         ...(fix ? { fix } : {}),
       },
     }
@@ -195,6 +200,7 @@ export function classifyWaitForHealTask(
         summary: detail.summary ?? null,
         counts: normalizeRunCounts(detail.summary ?? null),
         ...(dirtyTests ? { dirtyTests } : {}),
+        ...(specEdits ? { specEdits } : {}),
       },
     }
   }
@@ -234,6 +240,7 @@ export function classifyWaitForHealTask(
         cycle,
         context,
         ...(dirtyTests ? { dirtyTests } : {}),
+        ...(specEdits ? { specEdits } : {}),
       },
     }
   }

@@ -19,6 +19,8 @@ import type {
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 import type { ExternalSessionMeta } from '../../../../../../../shared/run-mode'
 import type { RunModelPlan } from './run-model-plan'
+import type { PendingSpecEdit } from '../dirty-specs/detect'
+import type { IntegrityHint } from './run-integrity-hints'
 export type {
   HealEnd,
   QueueReason,
@@ -99,6 +101,38 @@ export interface StoppedEarlyInfo {
   suiteTotal: number
 }
 
+/** Whether this run executes a run-start copy of its suite (D9). `taken` names
+ *  the copy and a digest of the spec content it held; `unavailable` means the
+ *  copy failed and the run fell back to the live feature dir — said out loud so
+ *  no surface claims a boundary that was never there. */
+export type RunSuiteSnapshot =
+  | { kind: 'taken'; dir: string; takenAt: string; digest: string }
+  | { kind: 'unavailable'; at: string; reason: string }
+
+/** Who took a live spec edit into the run. `human`: the adopt route in Canary
+ *  Lab. `test-heal`: the runner itself, only for a run with zero editable repos
+ *  — there the spec is the only fixable code and Canary told the agent to edit
+ *  it, so its own signal is the adopt. Never a verdict, never an MCP tool. */
+export type SpecEditsAdoptedBy = 'human' | 'test-heal'
+
+/** Live spec edits measured against the run-start copy. `pending` is what the
+ *  run has NOT executed; adopting an edit re-takes the snapshot and appends to
+ *  `adopted`. Re-checked after every Playwright exit. */
+export interface RunSpecEdits {
+  checkedAt: string
+  pending: PendingSpecEdit[]
+  adopted: Array<{ at: string; by: SpecEditsAdoptedBy; files: string[] }>
+}
+
+/** What the strength differential says about `specEdits.pending` (D13).
+ *  Advisory: a hint informs whoever reads the run, it never changes a status.
+ *  `disclosure` travels with the hints so no surface quotes the detection
+ *  without saying how it was checked. */
+export interface RunIntegrity {
+  hints: IntegrityHint[]
+  disclosure: string
+}
+
 export type LocalHealAgent = 'claude' | 'codex'
 
 export type ExternalHealSessionStatus =
@@ -147,6 +181,15 @@ export interface RunManifest {
   queueReason?: QueueReason
   playwrightArtifacts?: PlaywrightArtifactPolicy
   stoppedEarly?: StoppedEarlyInfo
+  /** The run-start suite copy the verdict rests on. Absent on runs recorded
+   *  before the snapshot boundary existed and on boot-only sessions. */
+  suiteSnapshot?: RunSuiteSnapshot
+  /** Absent until the first Playwright exit, and on runs without a snapshot —
+   *  no copy means no boundary to measure against, and `pending: []` would
+   *  then read as "no edits" when the truth is "cannot tell". */
+  specEdits?: RunSpecEdits
+  /** Written together with `specEdits`; same absence rule. */
+  integrity?: RunIntegrity
   /**
    * Per heal-cycle record of which services were restarted vs kept warm.
    * Populated when the orchestrator processes a `.restart` signal whose body
@@ -287,6 +330,12 @@ export interface RunIndexEntry {
   verificationConfigName?: string
   verificationPlaywrightEnvsetId?: string
   verificationTargetUrls?: Record<string, string>
+  /** Live spec edits still pending against this run's suite copy, and the
+   *  integrity hints on them — counts only, so `list_runs` can flag a run
+   *  without a manifest read. Mirrored on every status write; absent when
+   *  zero, and on entries written before the fields existed. */
+  pendingSpecEdits?: number
+  integrityHints?: number
 }
 
 export function readRunsIndex(logsDir: string): RunIndexEntry[] {

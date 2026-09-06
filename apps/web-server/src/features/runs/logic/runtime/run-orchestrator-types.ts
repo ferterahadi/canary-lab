@@ -31,7 +31,9 @@ export interface ServiceSpec {
 // the hashing/diffing. Structural so `DirtySpecStore` satisfies it and tests can
 // omit it. Absent in unit tests; wired to the singleton store in server.ts.
 export interface DirtySpecHooks {
-  captureRunStart(featureId: string, featureDir: string): Promise<unknown>
+  /** `suiteDir` is the directory the run executes — the run-start copy when one
+   *  was taken — and is remembered as the before side of the strength verdict. */
+  captureRunStart(featureId: string, suiteDir: string): Promise<unknown>
   finalizeRun(featureId: string, featureDir: string, passed: boolean): Promise<unknown>
 }
 

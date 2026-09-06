@@ -33,6 +33,9 @@ export interface DirtySpecRecord {
   lastGreenTestHashes: SpecHashes
   runStartTestHashes: SpecHashes
   approvedTestHashes: SpecHashes
+  /** The run-start copy the hashes were taken from (D9 snapshot dir), when the
+   *  run took one. Read by `computeDirty` for the strength verdict's before side. */
+  runStartSourceDir?: string
   message: string
   /** When the current status was entered (ISO). */
   since: string
@@ -142,12 +145,15 @@ export class DirtySpecStore {
 
   // Capture the pre-heal baseline at run start. Used as the fallback baseline
   // when the feature has no green yet; never itself a green attestation.
-  async captureRunStart(featureId: string, featureDir: string): Promise<DirtySpecRecord> {
+  // `suiteDir` is the directory the hashes are taken from — the run-start
+  // snapshot copy when the run took one (D9), else the live feature dir. It is
+  // remembered so later recomputes can diff the edited spec against that content.
+  async captureRunStart(featureId: string, suiteDir: string): Promise<DirtySpecRecord> {
     const rec = this.load(featureId)
-    const runStartHashes = hashFeatureSpecs(featureDir)
-    const runStartTestHashes = hashFeatureSpecTests(featureDir)
-    const withStart: DirtySpecRecord = { ...rec, runStartHashes, runStartTestHashes }
-    const { status, dirtySpecs } = await computeDirty(featureDir, withStart)
+    const runStartHashes = hashFeatureSpecs(suiteDir)
+    const runStartTestHashes = hashFeatureSpecTests(suiteDir)
+    const withStart: DirtySpecRecord = { ...rec, runStartHashes, runStartTestHashes, runStartSourceDir: suiteDir }
+    const { status, dirtySpecs } = await computeDirty(suiteDir, withStart)
     return this.saveWithDirty(withStart, status, dirtySpecs)
   }
 

@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { detectForeignTerminalWrite, setStatus, startHeartbeat, stopHeartbeat, writeInitialManifest } from './run-manifest-writer'
+import { captureDirtySpecBaseline, detectForeignTerminalWrite, setStatus, startHeartbeat, stopHeartbeat, writeInitialManifest } from './run-manifest-writer'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { RunManifest } from './manifest'
@@ -64,6 +64,21 @@ describe('writeInitialManifest', () => {
 
     const written = (sink.bootstrap as unknown as { mock: { calls: [{ repoPaths: string[] }][] } }).mock.calls[0][0]
     expect(written.repoPaths).toEqual([real])
+  })
+})
+
+describe('captureDirtySpecBaseline', () => {
+  it('hashes the run-start suite copy, not the live feature dir', async () => {
+    // The baseline must describe what the run will execute. Hashing the live
+    // dir instead would let an edit landing between snapshot and capture
+    // become the "run-start" content and never read as a mid-run change.
+    const captureRunStart = vi.fn(async () => ({}))
+    const { ctx } = ctxFor({}, { dirtySpecHooks: { captureRunStart, finalizeRun: vi.fn() } })
+    ctx.suiteDir = path.join(ctx.runDir, 'suite')
+
+    await captureDirtySpecBaseline(ctx)
+
+    expect(captureRunStart).toHaveBeenCalledWith('demo', ctx.suiteDir)
   })
 })
 

@@ -5,6 +5,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   computeDirty,
+  computePendingEdits,
   hashContent,
   hashFeatureSpecs,
   hashFeatureSpecTests,
@@ -43,6 +44,17 @@ const TWO_TESTS_HELPER_EDITED = `const helper = () => 1
 test('a', async () => { expect(1).toBe(1) })
 test('b', async () => { expect(2).toBe(2) })
 `
+const TWO_ASSERTIONS = `test('applies voucher', async () => { expect(1).toBe(1); expect(2).toBe(2) })\n`
+const ONE_ASSERTION_DROPPED = `test('applies voucher', async () => { expect(1).toBe(1) })\n`
+
+/** A run-start copy of the suite in its own directory — what the D9 snapshot is. */
+function writeRunStartCopy(name: string, body: string): string {
+  const copyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dirty-detect-copy-'))
+  const abs = path.join(copyDir, 'e2e', name)
+  fs.mkdirSync(path.dirname(abs), { recursive: true })
+  fs.writeFileSync(abs, body)
+  return copyDir
+}
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dirty-detect-'))
@@ -220,6 +232,134 @@ describe('computeDirty', () => {
     } finally {
       spy.mockRestore()
     }
+  })
+})
+
+describe('computeDirty — strength verdict', () => {
+  it('reads the before side from the committed spec when there is no run-start copy', async () => {
+    const rel = writeSpec('voucher.spec.ts', TWO_ASSERTIONS)
+    git(['add', '.'])
+    git(['commit', '-q', '-m', 'baseline'])
+    writeSpec('voucher.spec.ts', ONE_ASSERTION_DROPPED)
+
+    const { dirtySpecs } = await computeDirty(dir, EMPTY)
+
+    expect(dirtySpecs).toHaveLength(1)
+    expect(dirtySpecs[0].file).toBe(rel)
+    expect(dirtySpecs[0].strength?.baseline).toBe('head')
+    expect(dirtySpecs[0].strength?.verdict).toBe('weaker')
+    expect(dirtySpecs[0].strength?.tests.map((t) => `${t.kind}:${t.verdict} ${t.name}`)).toEqual([
+      'changed:weaker applies voucher',
+    ])
+  })
+
+  it('prefers the run-start copy over HEAD as the before side', async () => {
+    // Untracked: HEAD has no content, so the copy is the only baseline source.
+    const rel = writeSpec('voucher.spec.ts', ONE_ASSERTION_DROPPED)
+    const copyDir = writeRunStartCopy('voucher.spec.ts', TWO_ASSERTIONS)
+    const baseline: DirtyBaseline = {
+      ...EMPTY,
+      runStartHashes: { [rel]: hashContent(TWO_ASSERTIONS) },
+      runStartSourceDir: copyDir,
+    }
+
+    const { dirtySpecs } = await computeDirty(dir, baseline)
+
+    expect(dirtySpecs[0].strength?.baseline).toBe('run-start')
+    expect(dirtySpecs[0].strength?.verdict).toBe('weaker')
+    fs.rmSync(copyDir, { recursive: true, force: true })
+  })
+
+  it('falls back to HEAD when the run-start copy no longer holds the spec', async () => {
+    const rel = writeSpec('voucher.spec.ts', TWO_ASSERTIONS)
+    git(['add', '.'])
+    git(['commit', '-q', '-m', 'baseline'])
+    writeSpec('voucher.spec.ts', ONE_ASSERTION_DROPPED)
+    const copyDir = writeRunStartCopy('other.spec.ts', TWO_ASSERTIONS)
+    const baseline: DirtyBaseline = { ...EMPTY, runStartSourceDir: copyDir }
+
+    const { dirtySpecs } = await computeDirty(dir, baseline)
+
+    expect(dirtySpecs.map((d) => d.file)).toEqual([rel])
+    expect(dirtySpecs[0].strength?.baseline).toBe('head')
+    fs.rmSync(copyDir, { recursive: true, force: true })
+  })
+
+  it('carries no verdict when no baseline content is readable', async () => {
+    // A hash-only run-start baseline (legacy record, no copy, untracked file):
+    // the file is still dirty, but there is nothing to diff against.
+    const rel = writeSpec('voucher.spec.ts', ONE_ASSERTION_DROPPED)
+    const baseline: DirtyBaseline = { ...EMPTY, runStartHashes: { [rel]: hashContent(TWO_ASSERTIONS) } }
+
+    const { status, dirtySpecs } = await computeDirty(dir, baseline)
+
+    expect(status).toBe('dirty')
+    expect(dirtySpecs[0].strength).toBeUndefined()
+  })
+})
+
+describe('computePendingEdits', () => {
+  // Run-level, not feature-level: what differs between the live suite and the
+  // copy the run executed. HEAD and approvals play no part — a committed edit
+  // is still an edit the run never ran.
+  it('is empty when the live suite matches the run-start copy', () => {
+    writeSpec('voucher.spec.ts', TWO_ASSERTIONS)
+    const copyDir = writeRunStartCopy('voucher.spec.ts', TWO_ASSERTIONS)
+    expect(computePendingEdits(dir, copyDir)).toEqual([])
+    fs.rmSync(copyDir, { recursive: true, force: true })
+  })
+
+  it('reports a modified spec with the edited test and a run-start strength verdict', () => {
+    const rel = writeSpec('two.spec.ts', TWO_TESTS_B_EDITED)
+    const copyDir = writeRunStartCopy('two.spec.ts', TWO_TESTS)
+    const pending = computePendingEdits(dir, copyDir)
+    expect(pending).toHaveLength(1)
+    expect(pending[0]).toMatchObject({ file: rel, change: 'modified', affectedTests: ['b'] })
+    expect(pending[0].strength).toMatchObject({ baseline: 'run-start' })
+    fs.rmSync(copyDir, { recursive: true, force: true })
+  })
+
+  it('names every declared test when the pending edit is outside any test body', () => {
+    const rel = writeSpec('voucher.spec.ts', TWO_TESTS_HELPER_EDITED)
+    const copyDir = writeRunStartCopy('voucher.spec.ts', TWO_TESTS)
+    const pending = computePendingEdits(dir, copyDir)
+    expect(pending).toHaveLength(1)
+    // No test body changed, so the file-level edit is attributed to both tests
+    // rather than to none — the same rule `computeDirty` applies.
+    expect(pending[0]).toMatchObject({ file: rel, change: 'modified', affectedTests: ['a', 'b'] })
+    fs.rmSync(copyDir, { recursive: true, force: true })
+  })
+
+  it('still reports the edit when the live content was committed to HEAD', async () => {
+    const rel = writeSpec('voucher.spec.ts', ONE_ASSERTION_DROPPED)
+    git(['add', '.'])
+    git(['commit', '-q', '-m', 'agent committed the weakening'])
+    const copyDir = writeRunStartCopy('voucher.spec.ts', TWO_ASSERTIONS)
+    expect(computePendingEdits(dir, copyDir).map((p) => `${p.change}:${p.file}:${p.strength?.verdict}`)).toEqual([
+      `modified:${rel}:weaker`,
+    ])
+    fs.rmSync(copyDir, { recursive: true, force: true })
+  })
+
+  it('reports a spec added after run start with every test it declares', () => {
+    writeSpec('voucher.spec.ts', TWO_ASSERTIONS)
+    const rel = writeSpec('new.spec.ts', TWO_TESTS)
+    const copyDir = writeRunStartCopy('voucher.spec.ts', TWO_ASSERTIONS)
+    const pending = computePendingEdits(dir, copyDir)
+    expect(pending).toHaveLength(1)
+    expect(pending[0]).toMatchObject({ file: rel, change: 'added', affectedTests: ['a', 'b'] })
+    expect(pending[0].strength?.tests.map((t) => t.kind)).toEqual(['added', 'added'])
+    fs.rmSync(copyDir, { recursive: true, force: true })
+  })
+
+  it('reports a spec deleted after run start with the tests the copy still holds', () => {
+    const copyDir = writeRunStartCopy('two.spec.ts', TWO_TESTS)
+    fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
+    const pending = computePendingEdits(dir, copyDir)
+    expect(pending).toHaveLength(1)
+    expect(pending[0]).toMatchObject({ file: 'e2e/two.spec.ts', change: 'deleted', affectedTests: ['a', 'b'] })
+    expect(pending[0].strength).toMatchObject({ baseline: 'run-start', verdict: 'weaker' })
+    fs.rmSync(copyDir, { recursive: true, force: true })
   })
 })
 

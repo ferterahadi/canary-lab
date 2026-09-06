@@ -20,6 +20,7 @@ import { computeVerificationPlan, decideRunStatus, extractFailedSlugs, nonPassed
 import { healAgentCauseSuffix } from './heal-agent-text'
 import { ensureServicesRunning } from './run-service-boot'
 import { appendJournalIteration, markStoppedEarly, noteHealCycle, recordLifecycle, setStatus } from './run-manifest-writer'
+import { adoptTestHealSpecEdits } from './run-suite-snapshot'
 import type { RunOrchestrator } from './orchestrator'
 
 export { cancelHeal, continueAfterTestRun, pauseAndHeal, restartHealFromFailure } from './run-heal-controls'
@@ -86,6 +87,10 @@ export async function runManualExternalHealLoop(ctx: RunContext, host: RunLoopHo
     } catch { /* journal is best-effort */ }
     const verificationPlan = verificationPlanForSummary(ctx, readSummary(ctx.paths.summaryPath))
     setStatus(ctx, 'running')
+    // Test-heal mode only (zero editable repos): the spec IS the fix, so the
+    // agent's signal adopts its edits into the copy the rerun executes. Every
+    // other run keeps its run-start copy — a spec edit there stays inert.
+    await adoptTestHealSpecEdits(ctx)
     if (signal.kind === 'restart') {
       await host.restart(filesChanged)
     } else {
@@ -109,7 +114,7 @@ export async function runManualExternalHealLoop(ctx: RunContext, host: RunLoopHo
     // exit code arrives after the abort flips the flag — don't
     // compute a finalStatus from it.
     if (ctx.stopped) return ctx.status
-    finalStatus = decideRunStatus(ctx.feature.featureDir, ctx.paths.summaryPath, exitCode)
+    finalStatus = decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
     setStatus(ctx, finalStatus)
     if (finalStatus === 'passed') break
   }
@@ -211,13 +216,13 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
           setStatus(ctx, finalStatus)
           break
         }
-        finalStatus = decideRunStatus(ctx.feature.featureDir, ctx.paths.summaryPath, exitCode)
+        finalStatus = decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
         setStatus(ctx, finalStatus)
         if (finalStatus === 'passed') break
         const afterSummary = readSummary(ctx.paths.summaryPath)
         if (
           extractFailedSlugs(afterSummary).length === 0 &&
-          nonPassedSignatureFromPlan(computeVerificationPlan(ctx.feature.featureDir, afterSummary)) === beforeSignature
+          nonPassedSignatureFromPlan(computeVerificationPlan(ctx.suiteDir, afterSummary)) === beforeSignature
         ) {
           const skippedCount = pendingPlan.kind === 'targeted' ? pendingPlan.skipped.length : 0
           recordLifecycle(ctx, 'rerunning-tests', 'Stopped: not-yet-passed tests stayed unchanged after rerun', {
@@ -420,6 +425,8 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
 
       const verificationPlan = verificationPlanForSummary(ctx, summary)
       setStatus(ctx, 'running')
+      // Same test-heal adopt as the manual loop, before either arm reruns.
+      await adoptTestHealSpecEdits(ctx)
 
       const action = heal.actionForSignal(effectiveSignal.kind === 'heal' ? 'rerun' : effectiveSignal.kind)
       if (action.kind === 'restart-and-rerun') {
@@ -460,7 +467,7 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
         setStatus(ctx, finalStatus)
         break
       }
-      finalStatus = decideRunStatus(ctx.feature.featureDir, ctx.paths.summaryPath, exitCode)
+      finalStatus = decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
       setStatus(ctx, finalStatus)
       if (finalStatus === 'passed') break
     }

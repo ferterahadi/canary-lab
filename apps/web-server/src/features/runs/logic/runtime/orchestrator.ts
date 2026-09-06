@@ -23,6 +23,7 @@ import { decideRunStatus, finalLifecyclePhase, readSummary, restartPlanDetail, s
 import { killTree, scheduleSigkillFallback } from './run-spawn'
 import type { PlaywrightSpawner } from './run-spawn'
 import { ensureServicesRunning, spawnService, waitForHealth } from './run-service-boot'
+import { adoptSpecEdits, snapshotSuite } from './run-suite-snapshot'
 import { captureDirtySpecBaseline, markStoppedEarly, noteHealCycle, prepareRun, recordLifecycle, setStatus, stopHeartbeat } from './run-manifest-writer'
 import type { InterjectResult, OrchestratorEventMap, OrchestratorOptions, ServiceSpec } from './run-orchestrator-types'
 
@@ -99,6 +100,10 @@ export class RunOrchestrator extends EventEmitter {
     return cancelHeal(this.ctx, this)
   }
 
+  async adoptSpecEdits(): ReturnType<typeof adoptSpecEdits> {
+    return adoptSpecEdits(this.ctx)
+  }
+
   async restartHealFromFailure(guidance = ''): ReturnType<typeof restartHealFromFailure> {
     return restartHealFromFailure(this.ctx, this, guidance)
   }
@@ -147,10 +152,14 @@ export class RunOrchestrator extends EventEmitter {
   // server show "services up" before tests start.
   async start(): Promise<void> {
     prepareRun(this.ctx, 'starting')
-    // Capture the pre-heal spec baseline before any service (and therefore any
-    // heal agent) can touch a test file. This is the run-start fallback baseline
-    // and the reference the green promotion compares against. Best-effort —
-    // integrity tracking must never block a run from booting.
+    // Copy the suite before any service (and therefore any heal agent) can
+    // touch a test file: Playwright runs from the copy, so a mid-run spec edit
+    // is inert until a human adopts it (D9). Then hash that copy as the
+    // pre-heal baseline — the run-start fallback baseline and the reference the
+    // green promotion compares against. Both are best-effort: integrity
+    // tracking must never block a run from booting, and a failed copy is
+    // recorded on the manifest rather than hidden.
+    snapshotSuite(this.ctx)
     await captureDirtySpecBaseline(this.ctx)
     // Apply the ephemeral port overlay BEFORE any service spawns. A failure
     // here throws out of start() so the caller's `.catch` runs stop('aborted')
@@ -318,7 +327,7 @@ export class RunOrchestrator extends EventEmitter {
     //   - Targeted re-runs that complete cleanly while earlier failures or
     //     pending tests are still recorded in the summary.
     let finalStatus: RunManifest['status'] = decideRunStatus(
-      this.ctx.feature.featureDir,
+      this.ctx.suiteDir,
       this.ctx.paths.summaryPath,
       exitCode,
     )
@@ -377,7 +386,7 @@ export class RunOrchestrator extends EventEmitter {
     setStatus(this.ctx, 'running')
     const exitCode = await runPlaywright(this.ctx, selection)
     if (this.ctx.stopped) return this.ctx.status
-    const finalStatus = decideRunStatus(this.ctx.feature.featureDir, this.ctx.paths.summaryPath, exitCode)
+    const finalStatus = decideRunStatus(this.ctx.suiteDir, this.ctx.paths.summaryPath, exitCode)
     setStatus(this.ctx, finalStatus)
     return await continueAfterTestRun(this.ctx, this, finalStatus)
   }

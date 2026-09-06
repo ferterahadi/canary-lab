@@ -481,6 +481,30 @@ describe('RunStore', () => {
     expect(events).toEqual([{ kind: 'removed', runId: 'done' }])
   })
 
+  it('a spec-edit manifest patch emits `changed` so the runs stream pushes the new manifest', () => {
+    // The D9 record (suiteSnapshot / specEdits / integrity) is written through
+    // this sink by the orchestrator, and /ws/runs turns every `changed` into an
+    // `update` frame carrying the re-read manifest. That IS the live path for
+    // the boundary UI — no WorkspaceEvent doubles it. Removing this emit would
+    // leave the Tests panel stale until the next status flip.
+    seedRun('boundary', { status: 'running' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    store.patchManifest('boundary', {
+      suiteSnapshot: { kind: 'taken', dir: '/logs/runs/boundary/suite', takenAt: 't', digest: 'd' },
+      specEdits: { checkedAt: 't', pending: [{ file: 'e2e/a.spec.ts', change: 'modified', affectedTests: ['a'] }], adopted: [] },
+      integrity: { hints: [], disclosure: 'd' },
+    })
+
+    expect(events).toEqual([{ kind: 'changed', runId: 'boundary' }])
+    expect(store.get('boundary')?.manifest).toMatchObject({
+      suiteSnapshot: { kind: 'taken' },
+      specEdits: { pending: [{ file: 'e2e/a.spec.ts' }] },
+    })
+  })
+
   it('removeFromHistory returns false without emitting when no run is removed', () => {
     const store = new RunStore(tmpDir, createRegistry())
     const events: RunStoreEvent[] = []

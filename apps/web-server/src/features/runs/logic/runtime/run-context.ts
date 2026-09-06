@@ -13,6 +13,7 @@
 //
 // Mutability is deliberate and mirrors the class it replaces: `readonly` marks
 // what the constructor fixed, everything else is written as the run moves.
+import fs from 'fs'
 import path from 'path'
 import { buildRunPaths, type RunPaths } from './run-paths'
 import { overlayExists } from '../../../portify/logic/runtime/overlay'
@@ -100,6 +101,13 @@ export interface RunContext {
   readonly playwrightEnv: Record<string, string>
 
   // ── run state ─────────────────────────────────────────────────────────────
+  /** The directory Playwright runs from and every verdict reader lists specs
+   *  in: the run-start snapshot once `snapshotSuite` has taken it, the live
+   *  `feature.featureDir` before that (and when the copy failed). Everything
+   *  that means *the suite as executed* reads this; `feature.featureDir` stays
+   *  for what means *the feature* — its config, envsets, overlay, the dir the
+   *  heal agent reads. */
+  suiteDir: string
   status: RunManifest['status']
   healCycles: number
   startedAt: string
@@ -233,6 +241,10 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     verification: opts.verification,
     playwrightEnv: opts.playwrightEnv ?? {},
 
+    // A restart builds a fresh context over the SAME run dir without calling
+    // start(); picking the existing copy up here is what keeps a restart from
+    // silently adopting whatever was edited mid-run.
+    suiteDir: fs.existsSync(paths.suiteSnapshotDir) ? paths.suiteSnapshotDir : opts.feature.featureDir,
     status: 'running',
     healCycles: opts.initialHealCycles ?? 0,
     startedAt: '',
