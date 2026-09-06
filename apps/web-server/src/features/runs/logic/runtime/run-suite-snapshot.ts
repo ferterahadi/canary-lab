@@ -8,11 +8,13 @@
 // re-takes this snapshot.
 import { createHash } from 'crypto'
 import fs from 'fs'
+import path from 'path'
 import type { RunContext } from './run-context'
 import { copyDirRecursive } from '../../../../../../../shared/lib/copy-dir'
 import { computePendingEdits, hashFeatureSpecs } from '../dirty-specs/detect'
 import { readManifest } from './manifest'
 import { captureDirtySpecBaseline } from './run-manifest-writer'
+import { INTEGRITY_HINT_DISCLOSURE, deriveIntegrityHints } from './run-integrity-hints'
 
 export type AdoptSpecEditsResult =
   | { ok: true; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
@@ -41,13 +43,19 @@ export function suiteDigest(suiteDir: string): string {
 export function recordSpecEdits(ctx: RunContext): void {
   if (ctx.suiteDir === ctx.feature.featureDir) return
   const adopted = readManifest(ctx.paths.manifestPath)?.specEdits?.adopted ?? []
+  const pending = computePendingEdits(ctx.feature.featureDir, ctx.suiteDir)
   ctx.stateSink.patchManifest(ctx.runId, {
-    specEdits: {
-      checkedAt: new Date().toISOString(),
-      pending: computePendingEdits(ctx.feature.featureDir, ctx.suiteDir),
-      adopted,
-    },
+    specEdits: { checkedAt: new Date().toISOString(), pending, adopted },
+    integrity: { hints: deriveIntegrityHints(pending, (rel) => readLive(ctx.feature.featureDir, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
   })
+}
+
+function readLive(featureDir: string, rel: string): string | undefined {
+  try {
+    return fs.readFileSync(path.join(featureDir, rel), 'utf8')
+  } catch {
+    return undefined // deleted since run start — the hint then carries no @req ids
+  }
 }
 
 /** A human lets the live edits into this run: the snapshot is taken again from
@@ -75,6 +83,7 @@ export async function adoptSpecEdits(ctx: RunContext): Promise<AdoptSpecEditsRes
   const at = new Date().toISOString()
   ctx.stateSink.patchManifest(ctx.runId, {
     specEdits: { checkedAt: at, pending: [], adopted: [...previous, { at, files: adopted }] },
+    integrity: { hints: [], disclosure: INTEGRITY_HINT_DISCLOSURE },
   })
   const signal = ctx.signalGate.observe('rerun', {
     hypothesis: 'A human adopted the edited spec(s) into this run.',

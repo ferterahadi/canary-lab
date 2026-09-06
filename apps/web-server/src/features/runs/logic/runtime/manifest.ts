@@ -20,6 +20,7 @@ import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 import type { ExternalSessionMeta } from '../../../../../../../shared/run-mode'
 import type { RunModelPlan } from './run-model-plan'
 import type { PendingSpecEdit } from '../dirty-specs/detect'
+import type { IntegrityHint } from './run-integrity-hints'
 export type {
   HealEnd,
   QueueReason,
@@ -117,6 +118,15 @@ export interface RunSpecEdits {
   adopted: Array<{ at: string; files: string[] }>
 }
 
+/** What the strength differential says about `specEdits.pending` (D13).
+ *  Advisory: a hint informs whoever reads the run, it never changes a status.
+ *  `disclosure` travels with the hints so no surface quotes the detection
+ *  without saying how it was checked. */
+export interface RunIntegrity {
+  hints: IntegrityHint[]
+  disclosure: string
+}
+
 export type LocalHealAgent = 'claude' | 'codex'
 
 export type ExternalHealSessionStatus =
@@ -172,6 +182,8 @@ export interface RunManifest {
    *  no copy means no boundary to measure against, and `pending: []` would
    *  then read as "no edits" when the truth is "cannot tell". */
   specEdits?: RunSpecEdits
+  /** Written together with `specEdits`; same absence rule. */
+  integrity?: RunIntegrity
   /**
    * Per heal-cycle record of which services were restarted vs kept warm.
    * Populated when the orchestrator processes a `.restart` signal whose body

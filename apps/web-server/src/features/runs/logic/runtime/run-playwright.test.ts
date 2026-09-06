@@ -180,6 +180,22 @@ describe('runPlaywright — the snapshot boundary', () => {
   })
 })
 
+describe('a weaker pending edit never touches the status', () => {
+  it('leaves the verdict where the executed copy put it and only adds a hint (D13)', async () => {
+    const { ctx, sink } = ctxFor({}, { ptyFactory: exit0Pty, playwrightSpawner: () => ({ command: 'noop', cwd: tmpDir }) })
+    spec(ctx.feature.featureDir, 'a.spec.ts', "test('a', async () => { expect(1).toBe(1); expect(2).toBe(2) })\n")
+    snapshotSuite(ctx)
+    // The agent gutted the live assertion after the snapshot. The copy — the
+    // thing that ran — still holds both assertions, and it passed.
+    spec(ctx.feature.featureDir, 'a.spec.ts', "test('a', async () => {})\n")
+    fs.writeFileSync(ctx.paths.summaryPath, JSON.stringify({ passed: 1, failed: [], passedNames: ['test-case-a'] }))
+
+    expect(await runVerification(ctx)).toBe('passed')
+    const integrity = (sink.patches.find((p) => 'integrity' in p) as { integrity: { hints: Array<{ kind: string }> } }).integrity
+    expect(integrity.hints.map((h) => h.kind)).toEqual(['weaker'])
+  })
+})
+
 describe('runVerification', () => {
   it('returns the live status without running tests when the run was aborted', async () => {
     const { ctx } = ctxFor({ stopped: true, status: 'aborted' })

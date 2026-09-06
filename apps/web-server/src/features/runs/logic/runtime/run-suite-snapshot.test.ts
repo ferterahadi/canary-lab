@@ -154,6 +154,21 @@ describe('recordSpecEdits', () => {
     })
   })
 
+  it('writes the integrity hints and their disclosure beside the pending edits', () => {
+    const { ctx, sink } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', "test('a', { tag: ['@req-cart-1'] }, async () => { expect(1).toBe(1); expect(2).toBe(2) })\n")
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', "test('a', { tag: ['@req-cart-1'] }, async () => { expect(1).toBe(1) })\n")
+
+    recordSpecEdits(ctx)
+
+    const patch = sink.patches.at(-1) as { integrity: RunManifest['integrity'] }
+    expect(patch.integrity).toEqual({
+      hints: [{ kind: 'weaker', file: 'e2e/a.spec.ts', test: 'a', requirements: ['cart-1'], was: ['expect(2).toBe(2)'], now: [] }],
+      disclosure: expect.stringContaining('no human'),
+    })
+  })
+
   it('keeps the adopted history already on the manifest', () => {
     // Adoption is appended by the adopt route; a routine re-check after a
     // Playwright exit must not wipe that record.
@@ -218,8 +233,10 @@ describe('adoptSpecEdits', () => {
     // The copy now holds the adopted content and the baseline was re-taken from it.
     expect(fs.readFileSync(path.join(ctx.paths.suiteSnapshotDir, 'e2e', 'a.spec.ts'), 'utf8')).toBe(WEAKER)
     expect(captureRunStart).toHaveBeenLastCalledWith('demo', ctx.paths.suiteSnapshotDir)
-    const last = sink.patches.at(-1) as { specEdits: RunManifest['specEdits'] }
+    const last = sink.patches.at(-1) as { specEdits: RunManifest['specEdits']; integrity: RunManifest['integrity'] }
     expect(last.specEdits).toMatchObject({ pending: [], adopted: [{ at: expect.any(String), files: ['e2e/a.spec.ts'] }] })
+    // Adopted means accepted: the hints that described the pending edit are gone.
+    expect(last.integrity).toMatchObject({ hints: [] })
     // The rerun signal carries the human's authorship so the journal reads right.
     expect(ctx.signalGate.consume()).toMatchObject({ kind: 'rerun', body: { adoptedSpecEdits: ['e2e/a.spec.ts'] } })
   })
