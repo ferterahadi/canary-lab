@@ -200,6 +200,19 @@ describe('repair guardrail — shipped agent skills', () => {
   )
 
   it.each(runLoopSkills.map((f) => [path.relative(REPO_ROOT, f), f]))(
+    '%s reads specEdits as untested edits: restore, or ask the human to adopt',
+    (_label, file) => {
+      const text = fs.readFileSync(file, 'utf8')
+      expect(text).toMatch(/specEdits/)
+      expect(text).toMatch(/not tested/i)
+      expect(text).toMatch(/restore/i)
+      expect(text).toMatch(/ask the human to adopt/i)
+      expect(text).toMatch(/no (MCP )?tool can adopt/i)
+      expect(text).toMatch(/weaker/i)
+    },
+  )
+
+  it.each(runLoopSkills.map((f) => [path.relative(REPO_ROOT, f), f]))(
     '%s assigns runtime verification to the runner',
     (_label, file) => {
       const text = fs.readFileSync(file, 'utf8')

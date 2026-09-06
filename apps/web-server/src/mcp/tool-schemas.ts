@@ -194,7 +194,8 @@ export interface CanaryLabMcpDeps {
   }
   workspaceEvents?: WorkspaceEventPublisher
   /** Test-file integrity store. When present, terminal/needs_heal run results
-   *  carry a `dirtyTests` warning the agent relays verbatim. Read-only here —
+   *  carry a `dirtyTests` warning the agent relays verbatim (the run-level
+   *  `specEdits` warning is read off the manifest, not this store). Read-only here —
    *  the MCP surface never approves or gates on it (awareness, not enforcement). */
   dirtySpecStore?: DirtySpecStore
   /** R76: deleting a feature deletes its flight history with it — guards
