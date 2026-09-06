@@ -7,6 +7,10 @@ import { buildRunPaths, runDirFor } from '../runtime/run-paths'
 import { stuckSlugsFromJournal } from '../runtime/log-enrichment'
 import { ESCALATION_THRESHOLD, buildHealEscalation, type HealEscalation } from '../runtime/heal-escalation'
 import type { HealSignalKind, RunBootFailure } from '../../../../../../../shared/run-state'
+import type { StrengthVerdict } from '../../../../../../../shared/verification-strength/types'
+import type { PendingSpecEdit } from '../dirty-specs/detect'
+import type { RunManifest } from '../runtime/manifest'
+import { INTEGRITY_HINT_DISCLOSURE, type IntegrityHint } from '../runtime/run-integrity-hints'
 import { CompactRunCounts, NormalizedRunCounts, compactCounts, normalizeRunCounts } from './external-heal-counts'
 
 export { normalizeRunCounts } from './external-heal-counts'
@@ -79,6 +83,52 @@ export interface ExternalHealContext {
   escalation?: HealEscalation
 }
 
+// The agent-facing reading of the D9 boundary. A run executes the run-start
+// copy of its suite, so a spec edited after that point was never tested — this
+// says so, names the edits and the hints, and offers the two honest exits:
+// restore the spec, or ask the human to adopt in Canary Lab. Advisory by
+// construction: no verdict reads it, and no MCP tool can adopt or approve.
+export interface SpecEditsWarning {
+  pending: Array<{
+    file: string
+    change: PendingSpecEdit['change']
+    affectedTests: string[]
+    /** The differential's file-level verdict; absent when no baseline was readable. */
+    verdict?: StrengthVerdict
+  }>
+  hints: IntegrityHint[]
+  disclosure: string
+  message: string
+  nextSteps: string[]
+}
+
+/** Nothing when the run recorded no edits (no snapshot, or none pending) —
+ *  `pending: []` would read as "no edits" on a run that cannot tell. */
+export function buildSpecEditsWarning(manifest: RunManifest): SpecEditsWarning | undefined {
+  const pending = manifest.specEdits?.pending ?? []
+  if (pending.length === 0) return undefined
+  const hints = manifest.integrity?.hints ?? []
+  const weaker = hints.filter((h) => h.kind === 'weaker')
+  const files = pending.length === 1 ? '1 spec file' : `${pending.length} spec files`
+  return {
+    pending: pending.map((edit) => ({
+      file: edit.file,
+      change: edit.change,
+      affectedTests: edit.affectedTests,
+      ...(edit.strength ? { verdict: edit.strength.verdict } : {}),
+    })),
+    hints,
+    disclosure: INTEGRITY_HINT_DISCLOSURE,
+    message: `⚠️ ${files} changed after this run started. The run executed the run-start copy of the suite, so none of these edits was tested.`,
+    nextSteps: [
+      'Restore the edited spec(s) to what the run started with, or ask the human to adopt the edits in Canary Lab (adopting re-runs the suite against them). No MCP tool can adopt or approve a spec edit — do not try, and do not report the edited tests as passed.',
+      ...(weaker.length > 0
+        ? [`A hint reads ${weaker.map((h) => `${h.file} › ${h.test}`).join(', ')} as weaker than what ran. Restore it — a weaker assertion is never a repair.`]
+        : []),
+    ],
+  }
+}
+
 export interface ExternalRunSnapshot {
   runId: string
   feature: string
@@ -98,6 +148,8 @@ export interface ExternalRunSnapshot {
   journalMarkdown: string | null
   artifactsBase: string
   healPrompt?: HealPromptMap
+  /** Present only while live spec edits are pending against this run's suite copy. */
+  specEdits?: SpecEditsWarning
 }
 
 export interface ExternalFailureDetail extends ExternalHealFailedTest {
@@ -312,6 +364,7 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
   const runDir = runDirFor(logsDir, runId)
   const paths = buildRunPaths(runDir)
   const summary = detail.summary
+  const specEdits = buildSpecEditsWarning(detail.manifest)
   const context: ExternalRunSnapshot = {
     runId,
     feature: detail.manifest.feature,
@@ -328,6 +381,7 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
     counts: normalizeRunCounts(summary ?? null),
     failedTests: buildFailedTests(detail, paths.failedDir),
     ...(detail.manifest.bootFailure ? { bootFailure: detail.manifest.bootFailure } : {}),
+    ...(specEdits ? { specEdits } : {}),
     healIndexMarkdown: safeRead(paths.healIndexPath),
     journalMarkdown: safeRead(paths.diagnosisJournalPath),
     artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,

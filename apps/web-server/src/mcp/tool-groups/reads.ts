@@ -4,7 +4,7 @@
 // enclosing function is new. Add a tool here, then wire its name into the
 // profile arrays in ../tool-support.ts (see the cl_add-mcp-tool skill).
 import { z } from 'zod'
-import { buildExternalRunSnapshotSlim } from '../../features/runs/logic/heal/external-heal-surface'
+import { buildExternalRunSnapshotSlim, buildSpecEditsWarning } from '../../features/runs/logic/heal/external-heal-surface'
 import { loadFeatures } from '../../shared/feature-loader'
 import { createVerificationConfig, getVerificationConfig, listVerificationConfigs, updateVerificationConfig } from '../../features/coverage/logic/verification'
 import {
@@ -62,12 +62,17 @@ export function registerReadTools(ctx: ToolGroupContext): void {
     const next = isTerminalRunStatus(detail.manifest.status)
       ? { next: `Run is terminal (${detail.manifest.status}). The user-facing next step is /canary-lab-export ${runId}; do not replace it with an npx canary-lab export command. When continuing in this client instead of handing off, call start_external_evaluation_export(runId), submit it, and give the user the returned archivePath. Status is preserved even for a failed run, and evaluation.html is inside that existing zip.` }
       : {}
-    if (includeRaw) return asJsonResult({ ...detail, ...next })
+    // The manifest carries the raw specEdits record; the top-level block is
+    // the agent-facing reading (what was untested, what to do) — same one
+    // wait_for_heal_task and get_run_snapshot hand out.
+    const specEdits = buildSpecEditsWarning(detail.manifest)
+    if (includeRaw) return asJsonResult({ ...detail, ...(specEdits ? { specEdits } : {}), ...next })
     const { lifecycleEvents: _lifecycleEvents, playwrightArtifacts: _playwrightArtifacts, playbackEvents: _playbackEvents, ...core } = detail
     return asJsonResult({
       ...core,
       artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
       raw: { omitted: ['lifecycleEvents', 'playwrightArtifacts', 'playbackEvents'], hint: 'call get_run with includeRaw:true to inline them' },
+      ...(specEdits ? { specEdits } : {}),
       ...next,
     })
   })

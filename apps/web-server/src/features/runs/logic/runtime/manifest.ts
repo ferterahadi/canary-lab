@@ -324,6 +324,12 @@ export interface RunIndexEntry {
   verificationConfigName?: string
   verificationPlaywrightEnvsetId?: string
   verificationTargetUrls?: Record<string, string>
+  /** Live spec edits still pending against this run's suite copy, and the
+   *  integrity hints on them — counts only, so `list_runs` can flag a run
+   *  without a manifest read. Mirrored on every status write; absent when
+   *  zero, and on entries written before the fields existed. */
+  pendingSpecEdits?: number
+  integrityHints?: number
 }
 
 export function readRunsIndex(logsDir: string): RunIndexEntry[] {

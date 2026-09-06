@@ -150,6 +150,41 @@ describe('FileRunStateSink', () => {
     expect(readRunsIndex(logsDir)[0].healMode).toBe('external')
   })
 
+  it('mirrors pending spec-edit and hint counts into the index so list_runs can flag a run', () => {
+    const sink = new FileRunStateSink(logsDir)
+    sink.bootstrap(manifest())
+    // Written at Playwright exit through patchManifest; the next status write
+    // carries the counts into the index.
+    sink.patchManifest('run-1', {
+      specEdits: {
+        checkedAt: 't',
+        pending: [
+          { file: 'e2e/a.spec.ts', change: 'modified', affectedTests: ['a'] },
+          { file: 'e2e/b.spec.ts', change: 'deleted', affectedTests: ['b'] },
+        ],
+        adopted: [],
+      },
+      integrity: { hints: [{ kind: 'cannot-classify', file: 'e2e/b.spec.ts', reason: 'deleted' }], disclosure: 'd' },
+    })
+    sink.finalize('run-1', 'passed', '2026-05-08T00:01:00.000Z', 0)
+
+    expect(readRunsIndex(logsDir)[0]).toMatchObject({ pendingSpecEdits: 2, integrityHints: 1 })
+  })
+
+  it('leaves the counts off the index when nothing is pending', () => {
+    const sink = new FileRunStateSink(logsDir)
+    sink.bootstrap(manifest())
+    sink.patchManifest('run-1', {
+      specEdits: { checkedAt: 't', pending: [], adopted: [{ at: 't', files: ['e2e/a.spec.ts'] }] },
+      integrity: { hints: [], disclosure: 'd' },
+    })
+    sink.finalize('run-1', 'passed', '2026-05-08T00:01:00.000Z', 0)
+
+    const entry = readRunsIndex(logsDir)[0]
+    expect(entry).not.toHaveProperty('pendingSpecEdits')
+    expect(entry).not.toHaveProperty('integrityHints')
+  })
+
   it('flips a stale index entry terminal even when the manifest file is missing', () => {
     const sink = new FileRunStateSink(logsDir)
     // Simulate an interrupted run: an active index entry with no manifest.json

@@ -168,6 +168,8 @@ function indexEntryFromManifest(
     ...(manifest.verification?.configName ? { verificationConfigName: manifest.verification.configName } : {}),
     ...(manifest.verification?.playwrightEnvsetId ? { verificationPlaywrightEnvsetId: manifest.verification.playwrightEnvsetId } : {}),
     ...(manifest.verification?.targetUrls ? { verificationTargetUrls: manifest.verification.targetUrls } : {}),
+    ...(manifest.specEdits?.pending.length ? { pendingSpecEdits: manifest.specEdits.pending.length } : {}),
+    ...(manifest.integrity?.hints.length ? { integrityHints: manifest.integrity.hints.length } : {}),
   }
 }
 

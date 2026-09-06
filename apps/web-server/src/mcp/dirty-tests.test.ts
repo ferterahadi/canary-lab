@@ -72,3 +72,72 @@ describe('classifyWaitForHealTask — dirtyTests', () => {
     expect(value.dirtyTests).toBeUndefined()
   })
 })
+
+// specEdits is the run-level sibling of dirtyTests: dirtyTests reads the
+// feature's live dirty record, specEdits reads what this run recorded against
+// its own run-start suite copy. Both ride the terminal verdicts, both are
+// awareness only.
+function runWithSpecEdits(status: 'passed' | 'failed', pending: number): RunDetail {
+  return {
+    manifest: {
+      status,
+      feature: 'checkout',
+      executionType: 'run',
+      specEdits: {
+        checkedAt: 't1',
+        pending: Array.from({ length: pending }, (_, i) => ({
+          file: `e2e/spec-${i}.spec.ts`,
+          change: 'modified',
+          affectedTests: [`test ${i}`],
+        })),
+        adopted: [],
+      },
+      integrity: {
+        hints: pending > 0
+          ? [{ kind: 'weaker', file: 'e2e/spec-0.spec.ts', test: 'test 0', was: ['expect(a).toBe(1)'], now: [] }]
+          : [],
+        disclosure: 'Advisory only — this hint never changes a verdict. Its detection was checked by AI: one AI labelled, a second AI checked blind, no human.',
+      },
+    },
+    summary: null,
+  } as unknown as RunDetail
+}
+
+type SpecEditsValue = {
+  type: string
+  status?: string
+  specEdits?: { pending: Array<{ file: string }>; hints: Array<{ kind: string }>; disclosure: string; nextSteps: string[] }
+  dirtyTests?: unknown
+}
+
+describe('classifyWaitForHealTask — specEdits', () => {
+  it('attaches the pending edits and hints to a passed run', () => {
+    const res = classifyWaitForHealTask(makeDeps(runWithSpecEdits('passed', 2)), 'r', 's')
+    const value = (res as { ok: true; value: SpecEditsValue }).value
+    expect(value.type).toBe('passed')
+    expect(value.specEdits?.pending.map((p) => p.file)).toEqual(['e2e/spec-0.spec.ts', 'e2e/spec-1.spec.ts'])
+    expect(value.specEdits?.hints).toEqual([expect.objectContaining({ kind: 'weaker' })])
+    expect(value.specEdits?.disclosure).toContain('no human')
+    expect(value.specEdits?.nextSteps.join(' ')).toContain('ask the human to adopt')
+  })
+
+  it('attaches them to a failed run too — the edits were untested either way', () => {
+    const res = classifyWaitForHealTask(makeDeps(runWithSpecEdits('failed', 1)), 'r', 's')
+    const value = (res as { ok: true; value: SpecEditsValue }).value
+    expect(value.type).toBe('failed')
+    expect(value.specEdits?.pending).toHaveLength(1)
+  })
+
+  it('omits specEdits when the run recorded none pending', () => {
+    const res = classifyWaitForHealTask(makeDeps(runWithSpecEdits('passed', 0)), 'r', 's')
+    const value = (res as { ok: true; value: SpecEditsValue }).value
+    expect(value.specEdits).toBeUndefined()
+  })
+
+  it('keeps dirtyTests and specEdits independent: a dirty feature with a clean run carries only dirtyTests', () => {
+    const res = classifyWaitForHealTask(makeDeps(runWithSpecEdits('passed', 0), dirtyRecord('checkout')), 'r', 's')
+    const value = (res as { ok: true; value: SpecEditsValue }).value
+    expect(value.dirtyTests).toBeDefined()
+    expect(value.specEdits).toBeUndefined()
+  })
+})

@@ -183,6 +183,45 @@ describe('get_run', () => {
     })
   }
 
+  it('lifts pending spec edits to a top-level warning with next steps', async () => {
+    const manifest = {
+      status: 'passed',
+      specEdits: {
+        checkedAt: 't',
+        pending: [{ file: 'e2e/voucher.spec.ts', change: 'modified', affectedTests: ['applies voucher'] }],
+        adopted: [],
+      },
+      integrity: { hints: [], disclosure: 'd' },
+    }
+    const { call } = harness({ store: { logsDir, list: () => [], get: () => runDetail({}, manifest) } })
+
+    const out = await call('get_run', { runId: 'run-1', includeRaw: false })
+
+    // The manifest already carries the raw record; the top-level block is what
+    // tells an agent reading the core view what to do about it.
+    expect(out.specEdits).toMatchObject({
+      pending: [{ file: 'e2e/voucher.spec.ts', change: 'modified' }],
+      nextSteps: [expect.stringContaining('ask the human to adopt')],
+    })
+  })
+
+  it('keeps the specEdits block on the includeRaw path too', async () => {
+    const manifest = {
+      specEdits: { checkedAt: 't', pending: [{ file: 'e2e/voucher.spec.ts', change: 'added', affectedTests: [] }], adopted: [] },
+    }
+    const { call } = harness({ store: { logsDir, list: () => [], get: () => runDetail({}, manifest) } })
+
+    const out = await call('get_run', { runId: 'run-1', includeRaw: true })
+
+    expect(out.specEdits).toMatchObject({ pending: [{ file: 'e2e/voucher.spec.ts' }], hints: [] })
+  })
+
+  it('has no specEdits block when the run recorded none', async () => {
+    const { call } = harness({ store: { logsDir, list: () => [], get: () => runDetail() } })
+
+    expect(await call('get_run', { runId: 'run-1', includeRaw: false })).not.toHaveProperty('specEdits')
+  })
+
   it('keeps the terminal steer on the includeRaw path too', async () => {
     const { call } = harness({ store: { logsDir, list: () => [], get: () => runDetail({}, { status: 'passed' }) } })
 
