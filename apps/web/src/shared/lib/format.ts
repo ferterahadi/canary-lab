@@ -109,3 +109,10 @@ export function shortTime(iso: string): string {
   const pad = (n: number): string => n.toString().padStart(2, '0')
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
+
+/** Short, stable run reference for an identity line — the trailing token of
+ *  the run id (`…-z6kc` → `z6kc`), falling back to the whole id. */
+export function shortRunRef(runId: string): string {
+  const tail = runId.split(/[-_]/).pop()
+  return tail && tail.length >= 3 ? tail : runId
+}

@@ -78,6 +78,18 @@ describe('runs index', () => {
     expect(readRunsIndex(tmpDir)).toHaveLength(1)
   })
 
+  it('upsertRunsIndexEntry drops the keys named in `clear` before merging, so an omitted count means none', () => {
+    upsertRunsIndexEntry(tmpDir, { runId: 'rc', feature: 'f', startedAt: 't', status: 'running', pendingSpecEdits: 2, integrityHints: 1 })
+    upsertRunsIndexEntry(tmpDir, { runId: 'rc', feature: 'f', startedAt: 't', status: 'running' }, { clear: ['pendingSpecEdits', 'integrityHints'] })
+    const row = readRunsIndex(tmpDir).find((e) => e.runId === 'rc')!
+    expect(row).not.toHaveProperty('pendingSpecEdits')
+    expect(row).not.toHaveProperty('integrityHints')
+    // Without `clear`, the merge keeps what the new entry omits (the endedAt rule).
+    upsertRunsIndexEntry(tmpDir, { runId: 'rc', feature: 'f', startedAt: 't', status: 'running', pendingSpecEdits: 3 })
+    upsertRunsIndexEntry(tmpDir, { runId: 'rc', feature: 'f', startedAt: 't', status: 'passed' })
+    expect(readRunsIndex(tmpDir).find((e) => e.runId === 'rc')).toMatchObject({ status: 'passed', pendingSpecEdits: 3 })
+  })
+
   it('upsertRunsIndexEntry inserts new and merges existing', () => {
     upsertRunsIndexEntry(tmpDir, {
       runId: 'a', feature: 'demo', startedAt: 't1', status: 'running',

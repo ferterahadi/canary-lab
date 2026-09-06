@@ -32,6 +32,10 @@ export type OrchestratorAdoptSpecEditsResult =
   | { ok: true; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
   | { ok: false; reason: 'tests-running' | 'nothing-to-adopt' | 'snapshot-failed' }
 
+export type OrchestratorRestoreSpecEditsResult =
+  | { ok: true; restored: string[] }
+  | { ok: false; reason: 'tests-running' | 'nothing-to-restore' | 'restore-failed' }
+
 export type OrchestratorInterjectResult =
   | { ok: true }
   | { ok: false; reason: 'no-agent-running' }
@@ -52,6 +56,15 @@ export interface OrchestratorLike {
   /** A human adopts the live spec edits into the run: re-snapshot, re-baseline,
    *  rerun. Human-only by construction — reached from the HTTP route alone. */
   adoptSpecEdits?(): Promise<OrchestratorAdoptSpecEditsResult>
+  /** A human puts the live specs back to what the run executed. Human-only by
+   *  construction, the same way as adopt. */
+  restoreSpecEdits?(): OrchestratorRestoreSpecEditsResult
+  /** A live spec of `feature` changed on disk: re-measure the run's pending
+   *  edits now rather than at the next Playwright exit, so the run's own count
+   *  (hero, chip, review) says what is pending while the run waits on a heal.
+   *  A no-op for another feature's run, and while Playwright is executing (the
+   *  exit handler records then). Never moves the boundary. */
+  refreshSpecEdits?(feature: string): void
   /** Interject — drop the user's text into the live REPL's stdin (Esc-then-
    *  text-then-Enter). Used by the HTTP fallback route. The bidirectional
    *  pane bypasses this and goes through `writeToHealAgent` instead. */

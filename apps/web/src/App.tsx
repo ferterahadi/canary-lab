@@ -52,6 +52,7 @@ export function App() {
     selectedFlightId, setSelectedFlightId,
     configFor, setConfigFor, configTab, setConfigTab,
     verifyOpen, setVerifyOpen,
+    specReviewOpen, setSpecReviewOpen,
     flightStartFor, flightStartFresh, flightStartStage, setFlightStartFor,
     flightStartNew, setFlightStartNew,
     demoOpen, setDemoOpen,
@@ -531,6 +532,8 @@ export function App() {
         returnFlight={returnFlight}
         returnFlightLabel={returnFlightLabel}
         onReturnToFlight={openFlight}
+        specReviewOpen={specReviewOpen}
+        onSpecReviewOpenChange={setSpecReviewOpen}
       />
       <div className="min-h-0 flex-1">
         {/* One-time chunk load for a lazy view — a quiet line on the app's own
@@ -589,6 +592,10 @@ export function App() {
               stage={flightStage}
               onSelectStage={setFlightStage}
               onStartFlight={(feature, intent, fromStage) => { setSelectedFeature(feature); setFlightStartFor(feature, intent, fromStage) }}
+              /* The run hero's "verdict from run-start snapshot · N pending
+                 edits" link lands on the same review the status-bar pill
+                 opens — one dialog, routed once (?dialog=tests-review). */
+              onOpenSpecReview={() => setSpecReviewOpen(true)}
             />
           : <ResizablePanels panels={panels} />}
         </Suspense>

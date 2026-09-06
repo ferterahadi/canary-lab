@@ -255,6 +255,14 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'verification' }))
   })
 
+  it('round-trips the changed-tests review (URL-only, not mirrored)', () => {
+    persistView(view({ feature: 'checkout', dialog: 'tests-review' }))
+    expect(window.location.search).toContain('dialog=tests-review')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'tests-review' }))
+    // A review open in one tab must not pop open in another.
+    expect(localStorage.getItem(KEY)).not.toContain('tests-review')
+  })
+
   it('round-trips the feature-scoped flight-start dialog (URL-only, not mirrored)', () => {
     persistView(view({ feature: 'checkout', dialog: 'flight-start' }))
     expect(window.location.search).toContain('dialog=flight-start')

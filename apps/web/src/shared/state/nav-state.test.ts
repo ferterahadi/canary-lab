@@ -18,6 +18,7 @@ const base: NavState = {
   configFor: null,
   configTab: null,
   verifyOpen: false,
+  specReviewOpen: false,
   flightStartFor: null,
   flightStartFresh: false,
   flightStartNew: false,
@@ -109,6 +110,11 @@ describe('initialNavState', () => {
   it('opens verification / flight-new from their dialog params', () => {
     expect(initialNavState(persisted({ dialog: 'verification' })).verifyOpen).toBe(true)
     expect(initialNavState(persisted({ dialog: 'flight-new' })).flightStartNew).toBe(true)
+  })
+
+  it('reopens the changed-tests review from a cold load, and only from its own param', () => {
+    expect(initialNavState(persisted({ dialog: 'tests-review' })).specReviewOpen).toBe(true)
+    expect(initialNavState(persisted({ dialog: 'verification' })).specReviewOpen).toBe(false)
   })
 
   it('reopens the demo chooser from a cold load, and only from its own param', () => {
@@ -203,6 +209,15 @@ describe('routedDialog precedence (z-order)', () => {
 
   it('verify wins when it is the only one open', () => {
     expect(routedDialog({ ...base, verifyOpen: true })).toBe('verification')
+  })
+
+  it('routes the changed-tests review above verify and settings, under the full-screen overlays', () => {
+    expect(routedDialog({ ...base, specReviewOpen: true })).toBe('tests-review')
+    // A status-bar modal paints over the columns' own dialogs…
+    expect(routedDialog({ ...base, specReviewOpen: true, verifyOpen: true, settingsOpen: true })).toBe('tests-review')
+    // …but a launcher opened from a flight is what is on top.
+    expect(routedDialog({ ...base, specReviewOpen: true, demoOpen: true })).toBe('demo')
+    expect(routedDialog({ ...base, specReviewOpen: true, flightStartFor: 'y' })).toBe('flight-start')
   })
 
   it('routes Project Settings, and ranks it under every overlay above it', () => {

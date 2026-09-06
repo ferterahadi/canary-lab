@@ -6,6 +6,7 @@ import type { StageModelChoice } from '@shared/agent-models'
 import type { HealEnd, RunBootFailure, RunFixCapture, RunPrAttempt, RunProposedPr, RunLifecycleEvent, RunLifecycleSnapshot, RunStatus, ServiceStatus } from '@shared/run-state'
 import type { ExecutionType, VerificationRunMetadata } from '@shared/verification'
 import type { ClientKind } from '@shared/run-mode'
+import type { SpecDiff } from '@shared/verification-strength/types'
 
 export interface RunIndexEntry {
   runId: string
@@ -104,7 +105,9 @@ export interface PendingSpecEdit {
   file: string
   change: 'modified' | 'added' | 'deleted'
   affectedTests: string[]
-  strength?: { verdict: 'stronger' | 'equivalent' | 'weaker' | 'unclassifiable'; baseline: 'run-start' | 'head' }
+  /** The differential's reading of this edit — the whole diff, so the review
+   *  dialog can show each predicate's was/now. Advisory (D13). */
+  strength?: SpecDiff & { baseline: 'run-start' | 'head' }
 }
 
 /** Live spec edits the run has NOT executed, and who adopted the ones it did. */

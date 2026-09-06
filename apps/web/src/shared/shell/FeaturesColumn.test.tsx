@@ -608,3 +608,61 @@ describe('FeaturesColumn coverage-headline fetching', () => {
     expect(listCoverageStates).not.toHaveBeenCalled()
   })
 })
+
+// The modified-tests badge carries the differential's reading (D13): `!` rose
+// for a weaker hint, `~` muted for changed / cannot classify, `↑` emerald when
+// every edit reads stronger. Only the weaker row keeps the danger wash.
+describe('FeaturesColumn modified-tests badge', () => {
+  const dirty = (name: string, verdicts: Array<'weaker' | 'equivalent' | 'stronger' | 'unclassifiable' | undefined>) => ({
+    name, repos: [], envs: [],
+    dirty: {
+      status: 'dirty' as const,
+      specs: verdicts.map((verdict, i) => ({
+        file: `e2e/${i}.spec.ts`, affectedTests: ['t'],
+        ...(verdict ? { strength: { verdict, baseline: 'head' as const, tests: [] } } : {}),
+      })),
+    },
+  })
+  const render = (features: unknown[]) => {
+    act(() => {
+      root.render(<FeaturesColumn features={features as never} selectedFeature={null} onSelectFeature={() => {}} />)
+    })
+  }
+  const badge = (name: string) => container.querySelector(`[data-testid="dirty-badge-${name}"]`)
+
+  it('shows no badge and no row cue for a clean suite', () => {
+    render([{ name: 'calm', repos: [], envs: [] }])
+    expect(badge('calm')).toBeNull()
+    expect(featureRow('calm').className).not.toMatch(/cl-list-row-(dirty|changed)/)
+  })
+
+  it('! rose with the danger row wash for a weaker reading — labelled as a hint', () => {
+    render([dirty('shop', ['equivalent', 'weaker'])])
+    const b = badge('shop')!
+    expect(b.textContent).toBe('!')
+    expect(b.getAttribute('data-tone')).toBe('weaker')
+    expect(b.getAttribute('aria-label')).toBe('Tests weaker')
+    expect(b.getAttribute('style')).toContain('--danger')
+    expect(featureRow('shop').className).toContain('cl-list-row-dirty')
+  })
+
+  it('~ muted with a neutral wash for equivalent, cannot-classify, or no verdict', () => {
+    render([dirty('a', ['equivalent']), dirty('b', ['unclassifiable']), dirty('c', [undefined]), dirty('d', ['stronger', 'equivalent'])])
+    for (const name of ['a', 'b', 'c', 'd']) {
+      const b = badge(name)!
+      expect(b.textContent, name).toBe('~')
+      expect(b.getAttribute('style'), name).not.toContain('--danger')
+      expect(featureRow(name).className, name).toContain('cl-list-row-changed')
+      expect(featureRow(name).className, name).not.toContain('cl-list-row-dirty')
+    }
+  })
+
+  it('↑ emerald when every edit reads stronger', () => {
+    render([dirty('up', ['stronger', 'stronger'])])
+    const b = badge('up')!
+    expect(b.textContent).toBe('↑')
+    expect(b.getAttribute('style')).toContain('--success')
+    expect(b.getAttribute('aria-label')).toBe('Tests stronger')
+    expect(featureRow('up').className).toContain('cl-list-row-changed')
+  })
+})

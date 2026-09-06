@@ -92,6 +92,13 @@ describe('useWorkspaceNavigation — seeding from the route', () => {
     await mount(persisted({ dialog: 'verification' }))
     expect(nav.verifyOpen).toBe(true)
 
+    await mount(persisted({ dialog: 'tests-review' }))
+    expect(nav.specReviewOpen).toBe(true)
+    expect(nav.routedDialog).toBe('tests-review')
+    await act(async () => { nav.setSpecReviewOpen(false) })
+    expect(nav.routedDialog).toBeNull()
+    expect(window.location.search).not.toContain('tests-review')
+
     await mount(persisted({ feature: 'checkout', dialog: 'flight-fresh' }))
     expect(nav.flightStartFor).toBe('checkout')
     expect(nav.flightStartFresh).toBe(true)

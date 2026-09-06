@@ -17,6 +17,8 @@ import {
   openRunRepo,
   proposeRunPr,
   stopRun,
+  adoptSpecEdits,
+  restoreSpecEdits,
   deleteRun,
   listJournal,
 } from './runs'
@@ -126,6 +128,23 @@ describe('runs api', () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
     await expect(stopRun('r3', { fetchImpl })).resolves.toBeUndefined()
     expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r3/abort', { method: 'POST' })
+  })
+
+  it('adoptSpecEdits POSTs to /adopt-spec-edits and returns the 202 body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: 'adopted', adopted: ['e2e/a.spec.ts'], rerun: 'signalled' }), {
+        status: 202,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    await expect(adoptSpecEdits('r4', { baseUrl: '', fetchImpl })).resolves.toEqual({ status: 'adopted', adopted: ['e2e/a.spec.ts'], rerun: 'signalled' })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r4/adopt-spec-edits', { method: 'POST' })
+  })
+
+  it('restoreSpecEdits POSTs to /restore-spec-edits and returns the restored files', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ status: 'restored', restored: ['e2e/a.spec.ts'] }))
+    await expect(restoreSpecEdits('r4', { baseUrl: '', fetchImpl })).resolves.toEqual({ status: 'restored', restored: ['e2e/a.spec.ts'] })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r4/restore-spec-edits', { method: 'POST' })
   })
 
   it('pauseHealRun resolves with the success body on 202', async () => {

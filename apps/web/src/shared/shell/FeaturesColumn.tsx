@@ -4,6 +4,7 @@ import type { ExecutionType, Feature, RunStatus, VersionStatus } from '../api/ty
 import { useMcpPromo } from './McpPromoContext'
 import { FeatureConfigEditor, SettingsModal } from '@/features/config'
 import { FeatureChipBadge, FlightStatusChip, flightAwaitsUser, readGroupOpen, writeGroupOpen, type FeatureFlightAction } from '@/features/flights'
+import { SPEC_TONE, featureTone } from '@/features/runs'
 import { ThemeToggle } from '../ui/ThemeToggle'
 import { VersionUpdateButton } from './VersionUpdateButton'
 import { ChevronRightIcon } from '@/shared/ui/atoms'
@@ -320,7 +321,11 @@ function FeatureRow({
   // clicking the row resumes the flight.
   if (f.pending) return <PendingFeatureRow feature={f} onOpenFlight={onOpenFlight} />
   const isSelected = f.name === selectedFeature
-  const isDirty = f.dirty?.status === 'dirty'
+  // The suite's modified-tests reading (null = clean). Only `weaker` earns the
+  // danger row wash and ring; a changed or stronger suite gets a quiet neutral
+  // wash — it still needs a human's commit, but nothing about it is an alarm.
+  const tone = featureTone(f)
+  const rowCue = tone === 'weaker' ? ' cl-list-row-dirty' : tone ? ' cl-list-row-changed' : ''
   const isActive = Boolean(activeRunFeature) && f.name === activeRunFeature
   const runState = isActive
     ? (activeRunExecutionType === 'boot'
@@ -354,7 +359,7 @@ function FeatureRow({
   const actionsWidth = Math.max(0, actionCount * 28 + (actionCount - 1) * 2 + 12 - chipWidth)
   return (
     <li
-      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${inFlight ? (flight?.attention ? ' cl-list-row-inflight-attention' : ' cl-list-row-inflight') : ''}${runState ? ` cl-list-row-${runState}` : ''}${isDirty ? ' cl-list-row-dirty' : ''}`}
+      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${inFlight ? (flight?.attention ? ' cl-list-row-inflight-attention' : ' cl-list-row-inflight') : ''}${runState ? ` cl-list-row-${runState}` : ''}${rowCue}`}
       style={{
         // An in-flight suite reads at full text contrast like a selected one: at 6%
         // the wash alone is nearly invisible on the dark theme, so the brighter
@@ -365,19 +370,20 @@ function FeatureRow({
       }}
       title={runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : inFlight ? flight?.title : undefined}
     >
-      {isDirty && (
-        <Tooltip label="Test files modified — review in the status bar">
+      {tone && (
+        <Tooltip label={`${SPEC_TONE[tone].title} — review in the status bar`}>
           <span
-            aria-label="Tests modified"
+            aria-label={`Tests ${SPEC_TONE[tone].label.toLowerCase()}`}
             data-testid={`dirty-badge-${f.name}`}
+            data-tone={tone}
             className="ml-1.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded text-[11px] font-semibold leading-none"
             style={{
-              color: 'var(--danger)',
-              background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
-              border: '1px solid color-mix(in srgb, var(--danger) 35%, transparent)',
+              color: SPEC_TONE[tone].color,
+              background: `color-mix(in srgb, ${SPEC_TONE[tone].color} 14%, transparent)`,
+              border: `1px solid color-mix(in srgb, ${SPEC_TONE[tone].color} 35%, transparent)`,
             }}
           >
-            !
+            {SPEC_TONE[tone].glyph}
           </span>
         </Tooltip>
       )}

@@ -43,6 +43,8 @@ export interface WorkspaceNavigation {
   /** Which tab the config dialog is on (null = the default the mount picks). */
   configTab: ConfigTab | null
   verifyOpen: boolean
+  /** Whether the changed-tests review is open (routed ?dialog=tests-review). */
+  specReviewOpen: boolean
   flightStartFor: string | null
   flightStartFresh: boolean
   flightStartNew: boolean
@@ -66,6 +68,7 @@ export interface WorkspaceNavigation {
   /** Follow the dialog's own tab switches into the route. */
   setConfigTab: (tab: ConfigTab) => void
   setVerifyOpen: (open: boolean) => void
+  setSpecReviewOpen: (open: boolean) => void
   /** Open (feature) / close (null) the flight launcher. `intent` picks which job
    *  it opens for — 're-fly' (the stage-entry picker, default) or 'fresh' (edit
    *  intent + repos, full restart). Setting it always rewrites the intent, so a
@@ -130,6 +133,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setConfigTab(f !== null ? tab : null)
   }, [])
   const [verifyOpen, setVerifyOpen] = useState<boolean>(SEED.verifyOpen)
+  const [specReviewOpen, setSpecReviewOpen] = useState<boolean>(SEED.specReviewOpen)
   const [flightStartFor, setFlightStartForState] = useState<string | null>(SEED.flightStartFor)
   const [flightStartFresh, setFlightStartFresh] = useState<boolean>(SEED.flightStartFresh)
   const [flightStartNew, setFlightStartNew] = useState<boolean>(SEED.flightStartNew)
@@ -175,6 +179,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     configFor,
     configTab,
     verifyOpen,
+    specReviewOpen,
     flightStartFor,
     flightStartFresh,
     flightStartNew,
@@ -260,6 +265,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     configFor,
     configTab,
     verifyOpen,
+    specReviewOpen,
     flightStartFor,
     flightStartFresh,
     flightStartStage,
@@ -278,6 +284,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setConfigFor,
     setConfigTab,
     setVerifyOpen,
+    setSpecReviewOpen,
     setFlightStartFor,
     setFlightStartNew,
     setDemoOpen,

@@ -245,20 +245,20 @@ describe('spec-edit boundary — humans adopt, hints advise', () => {
     return out.sort()
   }
 
-  it('exposes no tool that adopts or approves a spec edit', () => {
+  it('exposes no tool that adopts, restores or approves a spec edit', () => {
     for (const name of [...FULL_TOOLS, EXEC_TOOL_NAME]) {
-      expect(name).not.toMatch(/adopt|approve[-_]?(dirty|spec)|commit[-_]?dirty/i)
+      expect(name).not.toMatch(/adopt|approve[-_]?(dirty|spec)|commit[-_]?dirty|restore[-_]?spec/i)
     }
   })
 
-  it('no MCP source reaches the human-only adopt/approve routes or the orchestrator adopt', () => {
+  it('no MCP source reaches the human-only adopt/restore/approve routes or the orchestrator levers', () => {
     const sources = findSources(MCP_SRC)
     expect(sources.length).toBeGreaterThan(20)
     for (const file of sources) {
       const text = fs.readFileSync(file, 'utf8')
       // Compact profile's `exec` dispatches by internal tool name, so a route
       // reached through app.inject() would be reachable from every client.
-      expect(text, path.relative(REPO_ROOT, file)).not.toMatch(/adopt-spec-edits|approve-dirty|commit-dirty|adoptSpecEdits\(/)
+      expect(text, path.relative(REPO_ROOT, file)).not.toMatch(/adopt-spec-edits|restore-spec-edits|approve-dirty|commit-dirty|adoptSpecEdits\(|restoreSpecEdits\(/)
     }
   })
 

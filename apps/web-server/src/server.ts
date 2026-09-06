@@ -11,6 +11,7 @@ import { registerMcpRoutes } from './mcp/server'
 import { register as registerAgentSessions } from './features/agent-sessions/index'
 import { workspaceStreamRoutes } from './shared/ws/workspace-stream'
 import { createRegistry, RunStore, type OrchestratorRegistry } from './features/runs/logic/run-store'
+import { bridgeDirtySpecsToActiveRuns } from './features/runs/logic/runtime/run-spec-edits-bridge'
 import { BenchmarkRunStore } from './features/benchmark/logic/runtime/store'
 import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './features/benchmark/logic/runtime/skills'
 import { register as registerPortify } from './features/portify/index'
@@ -206,6 +207,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   dirtySpecStore.onEvent((e) => {
     if (e.featureId) workspaceEvents.publish({ type: 'tests-dirty-changed', feature: e.featureId })
   })
+  // The same change re-measures an active run's pending edits (D9), so the
+  // run's own count moves with the file rather than at its next Playwright exit.
+  bridgeDirtySpecsToActiveRuns(dirtySpecStore, registry)
   const dirtySpecWatcher = startDirtySpecWatcher({
     featuresDir,
     store: dirtySpecStore,

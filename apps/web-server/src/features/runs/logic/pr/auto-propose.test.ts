@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import { autoProposeFixes, shouldAutoPropose } from './auto-propose'
 import type { RunContext } from '../runtime/run-context'
 import type { RunFixCapture, RunManifest } from '../runtime/manifest'
@@ -29,6 +32,7 @@ function mkCtx(over: Partial<RunContext> = {}) {
     projectRoot: '/workspace',
     executionType: 'run',
     healCycles: 2,
+    paths: { manifestPath: '/nonexistent/manifest.json' },
     stateSink: { patchManifest: (_id: string, patch: Partial<RunManifest>) => { patches.push(patch) } },
     runnerLog: { info: (m: string) => infos.push(m), warn: (m: string) => warnings.push(m) },
     ...over,
@@ -91,6 +95,34 @@ describe('autoProposeFixes', () => {
       prAttempt: { at: 'T', auto: true, results: [{ repoName: 'fnb', ok: true, url: 'https://gh/pr/1' }] },
     }])
     expect(infos.some((m) => m.includes('https://gh/pr/1'))).toBe(true)
+  })
+
+  it('hands propose the verdict provenance read off the manifest on disk (D9)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-auto-propose-'))
+    const manifestPath = path.join(dir, 'manifest.json')
+    const suiteSnapshot = { kind: 'taken' as const, dir: '/s', takenAt: 't', digest: 'abcdef0123456789' }
+    fs.writeFileSync(manifestPath, JSON.stringify({ runId: 'run-1', suiteSnapshot, specEdits: { checkedAt: 't', pending: [], adopted: [] } }))
+    const { ctx } = mkCtx({ paths: { manifestPath } } as unknown as Partial<RunContext>)
+    let sawVerdict: unknown
+    await autoProposeFixes({
+      ctx,
+      capture,
+      finalStatus: 'passed',
+      deps: { loadConfig: () => config, preflight: async () => preflight, propose: async (o) => { sawVerdict = o.verdict; return [] } },
+    })
+    expect(sawVerdict).toEqual({ suiteSnapshot, specEdits: { checkedAt: 't', pending: [], adopted: [] } })
+  })
+
+  it('passes no verdict for a run whose manifest never recorded a snapshot', async () => {
+    const { ctx } = mkCtx()
+    let call: Record<string, unknown> | undefined
+    await autoProposeFixes({
+      ctx,
+      capture,
+      finalStatus: 'passed',
+      deps: { loadConfig: () => config, preflight: async () => preflight, propose: async (o) => { call = o as unknown as Record<string, unknown>; return [] } },
+    })
+    expect(call).not.toHaveProperty('verdict')
   })
 
   it('records why a repo opened nothing, and leaves proposedPrs alone', async () => {

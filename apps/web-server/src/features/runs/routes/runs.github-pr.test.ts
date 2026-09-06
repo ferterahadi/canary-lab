@@ -181,6 +181,19 @@ describe('GitHub / PR routes (R80)', () => {
     ])
   })
 
+  it('POST propose-pr forwards the verdict provenance so the PR footer says which suite passed (D9)', async () => {
+    const suiteSnapshot = { kind: 'taken' as const, dir: '/s', takenAt: 't', digest: 'abcdef0123456789' }
+    const specEdits = { checkedAt: 't', pending: [{ file: 'e2e/a.spec.ts', change: 'modified' as const, affectedTests: ['a'] }], adopted: [] }
+    writeManifestWithCapture('r1', undefined, { suiteSnapshot, specEdits })
+    prMocks.buildPrPreflight.mockResolvedValueOnce(PREFLIGHT_PUSHABLE)
+    prMocks.proposeFixesForRun.mockResolvedValueOnce([])
+    const { app } = await build()
+
+    await app.inject({ method: 'POST', url: '/api/runs/r1/propose-pr' })
+
+    expect(prMocks.proposeFixesForRun).toHaveBeenCalledWith(expect.objectContaining({ verdict: { suiteSnapshot, specEdits } }))
+  })
+
   it('POST propose-pr forwards the run\'s failures as the message agent\'s evidence', async () => {
     writeManifestWithCapture('r1')
     fs.writeFileSync(

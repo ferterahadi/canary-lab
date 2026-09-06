@@ -7,6 +7,7 @@ import { extractTestsFromSource, type ExtractedTest } from '../../../shared/ast-
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { translateReadableTest } from '../../../shared/readable-tests/translator'
 import type { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
+import { dirtySummaryView } from '../../runs/logic/dirty-specs/review-view'
 import { diffChangedLines } from '../../runs/logic/dirty-specs/text-diff'
 import { listPlaywrightTests, type PlaywrightListSpawner } from '../../runs/logic/playwright-list'
 import { parseDotenv } from '../logic/dotenv-edit'
@@ -34,18 +35,6 @@ export interface FeaturesRouteDeps {
   dirtySpecStore?: DirtySpecStore
 }
 
-// Compact dirty summary folded into each feature-list row. Clean when the store
-// has no record yet (cold load before the watcher's first recompute) or the
-// feature has no modified specs.
-function dirtySummary(store: DirtySpecStore | undefined, featureName: string): {
-  status: 'clean' | 'dirty'
-  specs: { file: string; affectedTests: string[] }[]
-} {
-  const rec = store?.get(featureName)
-  if (!rec || rec.status !== 'dirty') return { status: 'clean', specs: [] }
-  return { status: 'dirty', specs: rec.dirtySpecs.map((s) => ({ file: s.file, affectedTests: s.affectedTests })) }
-}
-
 export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {
   app.get('/api/features', async () => {
     const features = loadFeatures(deps.featuresDir)
@@ -66,8 +55,10 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       // (its live runs + export stores already carry it).
       evidence: deriveFeatureEvidence(f.featureDir, deps.logsDir, f.name, f.repos),
       // Test-file integrity: 'dirty' when a spec changed since the last green
-      // (or run-start) and hasn't been approved/committed. Drives the red cue.
-      dirty: dirtySummary(deps.dirtySpecStore, f.name),
+      // (or run-start) and hasn't been approved/committed, with the strength
+      // verdict and @req ids the review surfaces render. Clean when the store
+      // has no record yet (cold load before the watcher's first recompute).
+      dirty: dirtySummaryView(deps.dirtySpecStore?.get(f.name), f.featureDir),
     }))
   })
 

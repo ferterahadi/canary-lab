@@ -23,7 +23,7 @@ import { decideRunStatus, finalLifecyclePhase, readSummary, restartPlanDetail, s
 import { killTree, scheduleSigkillFallback } from './run-spawn'
 import type { PlaywrightSpawner } from './run-spawn'
 import { ensureServicesRunning, spawnService, waitForHealth } from './run-service-boot'
-import { adoptSpecEdits, snapshotSuite } from './run-suite-snapshot'
+import { adoptSpecEdits, refreshSpecEdits, restoreSpecEdits, snapshotSuite } from './run-suite-snapshot'
 import { captureDirtySpecBaseline, markStoppedEarly, noteHealCycle, prepareRun, recordLifecycle, setStatus, stopHeartbeat } from './run-manifest-writer'
 import type { InterjectResult, OrchestratorEventMap, OrchestratorOptions, ServiceSpec } from './run-orchestrator-types'
 
@@ -102,6 +102,14 @@ export class RunOrchestrator extends EventEmitter {
 
   async adoptSpecEdits(): ReturnType<typeof adoptSpecEdits> {
     return adoptSpecEdits(this.ctx)
+  }
+
+  restoreSpecEdits(): ReturnType<typeof restoreSpecEdits> {
+    return restoreSpecEdits(this.ctx)
+  }
+
+  refreshSpecEdits(feature: string): void {
+    refreshSpecEdits(this.ctx, feature)
   }
 
   async restartHealFromFailure(guidance = ''): ReturnType<typeof restartHealFromFailure> {

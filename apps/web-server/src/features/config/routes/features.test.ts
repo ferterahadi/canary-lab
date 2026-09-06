@@ -308,6 +308,29 @@ describe('dirty summary on GET /api/features', () => {
     expect(alpha.dirty.specs[0]).toMatchObject({ file: 'e2e/a.spec.ts' })
     expect(alpha.dirty.specs[0].affectedTests).toEqual(['one'])
   })
+
+  it('ships the strength verdict whole, with the live @requirement ids on each changed test', async () => {
+    const dir = writeFeature('alpha', { spec: "// @requirement checkout-1\ntest('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    // exact → existential: the differential reads this as weaker.
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "// @requirement checkout-1\ntest('one', async () => { expect(1).toBeTruthy() })\n")
+
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+
+    const app = await build({ dirtySpecStore: store })
+    const res = await app.inject({ method: 'GET', url: '/api/features' })
+    const body = res.json() as Array<{
+      name: string
+      dirty: { specs: { strength?: { verdict: string; baseline: string; tests: { name: string; verdict: string; requirements?: string[]; changes: unknown[] }[] } }[] }
+    }>
+    const strength = body.find((f) => f.name === 'alpha')!.dirty.specs[0].strength!
+    expect(strength.verdict).toBe('weaker')
+    expect(strength.baseline).toBe('head')
+    expect(strength.tests).toHaveLength(1)
+    expect(strength.tests[0]).toMatchObject({ name: 'one', verdict: 'weaker', requirements: ['checkout-1'] })
+    expect(strength.tests[0].changes).toHaveLength(1)
+  })
 })
 
 describe('POST /api/features/:name/approve-dirty', () => {

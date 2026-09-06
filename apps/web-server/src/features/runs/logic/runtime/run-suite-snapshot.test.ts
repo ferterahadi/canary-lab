@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { adoptSpecEdits, adoptTestHealSpecEdits, recordSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
+import { adoptSpecEdits, adoptTestHealSpecEdits, recordSpecEdits, refreshSpecEdits, restoreSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
 import { writeManifest, type RunManifest } from './manifest'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
@@ -282,6 +282,107 @@ describe('adoptSpecEdits', () => {
     vi.spyOn(fs, 'copyFileSync').mockImplementation(() => { throw new Error('EACCES') })
 
     expect(await adoptSpecEdits(ctx)).toEqual({ ok: false, reason: 'snapshot-failed' })
+  })
+})
+
+describe('refreshSpecEdits', () => {
+  const WEAKER = "test('a', async () => {})\n"
+
+  it('re-measures the pending edits when a live spec of THIS feature changes while Playwright is idle', () => {
+    const { ctx, sink } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    const before = sink.patches.length
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', WEAKER)
+
+    refreshSpecEdits(ctx, ctx.feature.name)
+
+    const patch = sink.patches.at(-1) as { specEdits: RunManifest['specEdits'] }
+    expect(sink.patches.length).toBe(before + 1)
+    expect(patch.specEdits?.pending).toMatchObject([{ file: 'e2e/a.spec.ts', change: 'modified' }])
+    // The boundary itself did not move: the copy still holds what ran.
+    expect(fs.readFileSync(path.join(ctx.suiteDir, 'e2e/a.spec.ts'), 'utf8')).toBe(SPEC_A)
+  })
+
+  it("stays quiet for another feature's change, and while Playwright is executing the copy", () => {
+    const { ctx, sink } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', WEAKER)
+    const before = sink.patches.length
+
+    refreshSpecEdits(ctx, `${ctx.feature.name}-other`)
+    ctx.playwrightPty = { pid: 1 } as unknown as RunContext['playwrightPty']
+    refreshSpecEdits(ctx, ctx.feature.name)
+
+    expect(sink.patches.length).toBe(before)
+  })
+})
+
+describe('restoreSpecEdits', () => {
+  const WEAKER = "test('a', async () => {})\n"
+
+  it('refuses while Playwright is running the current copy', () => {
+    const { ctx } = ctxFor({ playwrightPty: { pid: 1 } as unknown as RunContext['playwrightPty'] })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', WEAKER)
+
+    expect(restoreSpecEdits(ctx)).toEqual({ ok: false, reason: 'tests-running' })
+  })
+
+  it('refuses when there is no copy, and when the live suite already matches it', () => {
+    const { ctx: noCopy } = ctxFor()
+    write(noCopy.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    expect(restoreSpecEdits(noCopy)).toEqual({ ok: false, reason: 'nothing-to-restore' })
+
+    const { ctx } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    expect(restoreSpecEdits(ctx)).toEqual({ ok: false, reason: 'nothing-to-restore' })
+  })
+
+  it('rewrites a modified spec, recreates a deleted one, removes an added one, and clears the pending record', () => {
+    const { ctx, sink } = ctxFor()
+    const live = ctx.feature.featureDir
+    write(live, 'e2e/a.spec.ts', SPEC_A)
+    write(live, 'e2e/gone.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(live, 'e2e/a.spec.ts', WEAKER)
+    fs.rmSync(path.join(live, 'e2e', 'gone.spec.ts'))
+    write(live, 'e2e/new.spec.ts', SPEC_A)
+    recordSpecEdits(ctx)
+    expect((sink.patches.at(-1) as { specEdits: RunManifest['specEdits'] }).specEdits?.pending).toHaveLength(3)
+
+    const result = restoreSpecEdits(ctx)
+
+    expect(result).toEqual({ ok: true, restored: ['e2e/a.spec.ts', 'e2e/gone.spec.ts', 'e2e/new.spec.ts'] })
+    expect(fs.readFileSync(path.join(live, 'e2e', 'a.spec.ts'), 'utf8')).toBe(SPEC_A)
+    expect(fs.readFileSync(path.join(live, 'e2e', 'gone.spec.ts'), 'utf8')).toBe(SPEC_A)
+    expect(fs.existsSync(path.join(live, 'e2e', 'new.spec.ts'))).toBe(false)
+    // The boundary did not move: the copy is untouched and nothing was adopted.
+    expect(ctx.suiteDir).toBe(ctx.paths.suiteSnapshotDir)
+    const last = sink.patches.at(-1) as { specEdits: RunManifest['specEdits']; integrity: RunManifest['integrity'] }
+    expect(last.specEdits).toMatchObject({ pending: [], adopted: [] })
+    expect(last.integrity).toMatchObject({ hints: [] })
+    // No rerun: the verdict already rests on the copy the live suite now matches.
+    expect(ctx.signalGate.consume()).toBeNull()
+  })
+
+  it('fails closed, re-measures what did change, and warns when a file cannot be rewritten', () => {
+    const runnerLog = fakeRunnerLog()
+    const { ctx, sink } = ctxFor({ runnerLog })
+    const live = ctx.feature.featureDir
+    write(live, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(live, 'e2e/a.spec.ts', WEAKER)
+    vi.spyOn(fs, 'copyFileSync').mockImplementation(() => { throw new Error('EACCES') })
+
+    expect(restoreSpecEdits(ctx)).toEqual({ ok: false, reason: 'restore-failed' })
+    expect(runnerLog.warnings.join('\n')).toMatch(/restoring spec edits stopped after 0\/1: EACCES/)
+    // The live edit is still pending — the manifest says so rather than claiming a restore.
+    const last = sink.patches.at(-1) as { specEdits: RunManifest['specEdits'] }
+    expect(last.specEdits?.pending).toHaveLength(1)
   })
 })
 

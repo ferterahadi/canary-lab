@@ -1239,6 +1239,16 @@ body {
     inset 0 0 12px -4px var(--danger);
 }
 
+/* Changed (test files edited, nothing reads weaker) row: a quiet neutral wash
+   and no ring — the suite still needs a human's commit, but a changed test is
+   not an alarm (D13). The danger wash above is reserved for a weaker hint. */
+.cl-list-row-changed {
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+}
+.cl-list-row-changed:hover {
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
+}
+
 /* Subtle count chip — mono numeral on a soft fill. */
 .cl-count-chip {
   display: inline-flex;

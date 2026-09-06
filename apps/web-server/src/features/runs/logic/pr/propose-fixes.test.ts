@@ -402,6 +402,25 @@ describe('proposeFixesForRun — agent-written wording', () => {
     expect(create[create.indexOf('--title') + 1]).toBe('fix(fnb): canary-lab heal fixes')
   })
 
+  it('appends the verdict provenance under the agent wording and under the fallback alike', async () => {
+    const verdict = {
+      suiteSnapshot: { kind: 'taken' as const, dir: '/s', takenAt: '2026-09-07T01:00:00.000Z', digest: 'abcdef0123456789' },
+      specEdits: { checkedAt: 't', pending: [{ file: 'e2e/a.spec.ts', change: 'modified' as const, affectedTests: ['a'] }], adopted: [] },
+    }
+    for (const writeMessage of [async () => written, async () => null]) {
+      const h = harness()
+      await proposeFixesForRun({
+        runId: 'run-9', feature: 'fnb', fixCapture, preflight, verdict,
+        deps: { git: h.git.run, gh: h.gh, now: () => 'T', tmpWorktreeDir: () => '/tmp/wt', writeMessage },
+      })
+      const create = h.ghCalls.find((c) => c[1] === 'create')!
+      const body = create[create.indexOf('--body') + 1]
+      expect(body).toContain('run `run-9`')
+      expect(body).toContain('The tests this run passed are the suite as it stood at run start (snapshot `abcdef012345`')
+      expect(body).toContain('- Not executed — 1 spec edit made after the run started: `e2e/a.spec.ts` (modified).')
+    }
+  })
+
   it('still opens the PR when the message agent throws', async () => {
     // A dull message beats no pull request.
     const h = harness()

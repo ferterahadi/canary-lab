@@ -129,7 +129,19 @@ export class FileRunStateSink implements RunStateSink {
   }
 
   patchManifest(runId: string, patch: Partial<RunManifest>): void {
-    updateManifest(this.manifestPath(runId), patch)
+    const mp = this.manifestPath(runId)
+    updateManifest(mp, patch)
+    // The index mirrors the pending-edit and hint counts (list_runs, the runs
+    // column chip, the review's Restore/Adopt). They used to reach it only on
+    // the next status write, which during a heal wait is minutes away — a spec
+    // edited mid-heal showed on the feature list but not on its run (seen
+    // live). Re-derive the entry right here for the two fields that carry them.
+    if ('specEdits' in patch || 'integrity' in patch) {
+      const m = readManifest(mp)
+      // Cleared explicitly: a restore takes the count to nothing, and the
+      // index merge would otherwise keep the old number.
+      if (m) upsertRunsIndexEntry(this.logsDir, indexEntryFromManifest(m, m.status, m.endedAt), { clear: ['pendingSpecEdits', 'integrityHints'] })
+    }
   }
 
   recordLifecycleEvent(runId: string, event: RunLifecycleEvent): void {

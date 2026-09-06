@@ -153,8 +153,9 @@ describe('FileRunStateSink', () => {
   it('mirrors pending spec-edit and hint counts into the index so list_runs can flag a run', () => {
     const sink = new FileRunStateSink(logsDir)
     sink.bootstrap(manifest())
-    // Written at Playwright exit through patchManifest; the next status write
-    // carries the counts into the index.
+    // Written through patchManifest (Playwright exit, or a live spec change
+    // mid-heal); the index carries the counts from THAT write, not the next
+    // status write — a heal wait can be minutes long.
     sink.patchManifest('run-1', {
       specEdits: {
         checkedAt: 't',
@@ -166,9 +167,27 @@ describe('FileRunStateSink', () => {
       },
       integrity: { hints: [{ kind: 'cannot-classify', file: 'e2e/b.spec.ts', reason: 'deleted' }], disclosure: 'd' },
     })
-    sink.finalize('run-1', 'passed', '2026-05-08T00:01:00.000Z', 0)
+    expect(readRunsIndex(logsDir)[0]).toMatchObject({ status: 'running', pendingSpecEdits: 2, integrityHints: 1 })
+    expect(readRunsIndex(logsDir)[0]).not.toHaveProperty('endedAt')
 
-    expect(readRunsIndex(logsDir)[0]).toMatchObject({ pendingSpecEdits: 2, integrityHints: 1 })
+    sink.finalize('run-1', 'passed', '2026-05-08T00:01:00.000Z', 0)
+    expect(readRunsIndex(logsDir)[0]).toMatchObject({ status: 'passed', pendingSpecEdits: 2, integrityHints: 1 })
+
+    // A later re-measure that finds nothing pending (a restore) clears the
+    // counts on the same write, and keeps the terminal status + endedAt.
+    sink.patchManifest('run-1', { specEdits: { checkedAt: 't2', pending: [], adopted: [] }, integrity: { hints: [], disclosure: 'd' } })
+    const entry = readRunsIndex(logsDir)[0]
+    expect(entry).toMatchObject({ status: 'passed', endedAt: '2026-05-08T00:01:00.000Z' })
+    expect(entry).not.toHaveProperty('pendingSpecEdits')
+    expect(entry).not.toHaveProperty('integrityHints')
+  })
+
+  it('leaves the index alone for a patch that carries neither counts field', () => {
+    const sink = new FileRunStateSink(logsDir)
+    sink.bootstrap(manifest())
+    const before = JSON.stringify(readRunsIndex(logsDir))
+    sink.patchManifest('run-1', { stoppedEarly: { reason: 'user-paused', at: 't' } as never })
+    expect(JSON.stringify(readRunsIndex(logsDir))).toBe(before)
   })
 
   it('leaves the counts off the index when nothing is pending', () => {

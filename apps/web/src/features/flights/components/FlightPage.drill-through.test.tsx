@@ -250,7 +250,7 @@ async function render(flightId: string, extraProps: Record<string, unknown> = {}
 }
 
 describe('stage summary + drill-through (R6)', () => {
-  async function renderWithDrill(m: FlightManifest, drill: { onOpenRun?: ReturnType<typeof vi.fn>; onOpenCoverage?: ReturnType<typeof vi.fn>; onOpenConfig?: ReturnType<typeof vi.fn> }) {
+  async function renderWithDrill(m: FlightManifest, drill: { onOpenRun?: ReturnType<typeof vi.fn>; onOpenCoverage?: ReturnType<typeof vi.fn>; onOpenConfig?: ReturnType<typeof vi.fn>; onOpenSpecReview?: ReturnType<typeof vi.fn> }) {
     mocks.getFlight.mockResolvedValue(m)
     await render('fl_1', { ...drill })
   }
@@ -359,6 +359,81 @@ describe('stage summary + drill-through (R6)', () => {
     expect(link?.closest('[title]')?.getAttribute('title')).toBe('catalog-service · 1 file\ncheckout-service · 2 files')
     await act(async () => { link?.click() })
     expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9', { tab: 'changes' })
+  })
+
+  it('says where the verdict came from — the run-start snapshot — and links pending edits to the review (D9)', async () => {
+    const onOpenSpecReview = vi.fn()
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-9',
+      manifest: {
+        runId: 'run-9',
+        status: 'passed',
+        healCycles: 0,
+        suiteSnapshot: { kind: 'taken', dir: '/logs/runs/run-9/suite', takenAt: '2026-01-01T00:00:00Z', digest: 'abcdef0123456789' },
+        specEdits: {
+          checkedAt: '2026-01-01T00:01:00Z',
+          pending: [
+            { file: 'e2e/a.spec.ts', change: 'modified', affectedTests: ['a'] },
+            { file: 'e2e/b.spec.ts', change: 'added', affectedTests: ['b'] },
+          ],
+          adopted: [],
+        },
+        integrity: { hints: [{ kind: 'weaker', file: 'e2e/a.spec.ts', test: 'a', was: ['x'], now: [] }], disclosure: 'd' },
+      },
+      summary: { complete: true, total: 7, passed: 7, failed: [] },
+    })
+    await renderWithDrill(manifest({
+      status: 'done',
+      currentStage: null,
+      links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+    }), { onOpenSpecReview })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
+    })
+    const link = container.querySelector<HTMLButtonElement>('[data-testid="run-hero-spec-edits"]')
+    expect(link?.textContent).toContain('Verdict from')
+    expect(link?.textContent).toContain('run-start snapshot · 2 pending edits · 1 hint')
+    expect(link?.closest('[title]')?.getAttribute('title')).toMatch(/2 spec edits made since the run started were not executed/)
+    await act(async () => { link?.click() })
+    expect(onOpenSpecReview).toHaveBeenCalledTimes(1)
+  })
+
+  it('states the snapshot provenance without a link when nothing is pending, and flags a run that had no snapshot', async () => {
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-9',
+      manifest: {
+        runId: 'run-9',
+        status: 'passed',
+        healCycles: 0,
+        suiteSnapshot: { kind: 'taken', dir: '/logs/runs/run-9/suite', takenAt: '2026-01-01T00:00:00Z', digest: 'abcdef0123456789' },
+        specEdits: { checkedAt: '2026-01-01T00:01:00Z', pending: [], adopted: [] },
+      },
+      summary: { complete: true, total: 7, passed: 7, failed: [] },
+    })
+    const flight = manifest({
+      status: 'done',
+      currentStage: null,
+      links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+    })
+    await renderWithDrill(flight, { onOpenSpecReview: vi.fn() })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click() })
+    let stats = container.querySelector('[data-testid="run-hero-stats"]')
+    expect(stats?.textContent).toContain('Verdict fromrun-start snapshot')
+    expect(container.querySelector('[data-testid="run-hero-spec-edits"]')).toBeNull()
+
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-9',
+      manifest: { runId: 'run-9', status: 'passed', healCycles: 0, suiteSnapshot: { kind: 'unavailable', at: '2026-01-01T00:00:00Z', reason: 'EACCES' } },
+      summary: { complete: true, total: 7, passed: 7, failed: [] },
+    })
+    await renderWithDrill(flight, {})
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click() })
+    stats = container.querySelector('[data-testid="run-hero-stats"]')
+    expect(stats?.textContent).toContain('live suite (no snapshot)')
+    // The one danger-hued segment: a mid-run edit could have moved this verdict.
+    expect(stats?.querySelector('.text-danger')?.textContent).toBe('live suite (no snapshot)')
   })
 
   it('omits the fixes link when the run captured no repair', async () => {

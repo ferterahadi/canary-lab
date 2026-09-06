@@ -2,6 +2,7 @@ import { useMemo, type ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import type { HealEnd, RunDetail, RunIndexEntry, RunStatus } from '@/shared/api/types'
 import { PanelCard } from '@/shared/ui/PanelCard'
+import { shortRunRef } from '@/shared/lib/format'
 import type { RunOpenTarget } from '@/shared/lib/workspace-view-state'
 import { RunRow, useRun, useRuns } from '@/features/runs'
 import { FailingTests } from './FailingTests'
@@ -53,6 +54,7 @@ export function TestRunPanel({
   live,
   evidence,
   onOpenRun,
+  onOpenSpecReview,
   onError,
   awaiting,
   pausedNotice,
@@ -70,6 +72,10 @@ export function TestRunPanel({
    *  detail lands on the Playwright tab, scrolled to that test (R82);
    *  `target.tab` names a pane (the captured fixes go to Changes). */
   onOpenRun?: (feature: string, runId: string, target?: RunOpenTarget) => void
+  /** Opens the changed-tests review (?dialog=tests-review) — where the run's
+   *  pending spec edits get adopted or restored. Without it the hero still
+   *  states where the verdict came from, just not as a link. */
+  onOpenSpecReview?: () => void
   onError?: (msg: string) => void
   /** Why any missing run-history value is a skeleton. Required so a completed
    *  run with old/incomplete evidence reads as unavailable, not idle. */
@@ -120,6 +126,13 @@ export function TestRunPanel({
     services: manifest?.services,
     fixCapture: manifest?.fixCapture,
     ...(runId && onOpenRun ? { onOpenFixes: () => onOpenRun(feature, runId, { tab: 'changes' }) } : {}),
+    suiteSnapshot: manifest?.suiteSnapshot,
+    // The manifest's list is the record; the index count is what `/ws/runs`
+    // pushes between manifest reads, so a fresh edit shows before the detail
+    // catches up. Either way it is the run's own number, not the dirty store's.
+    pendingSpecEdits: manifest?.specEdits?.pending.length ?? currentEntry.pendingSpecEdits ?? 0,
+    integrityHints: manifest?.integrity?.hints.length ?? currentEntry.integrityHints ?? 0,
+    onOpenSpecReview,
   })
   const failing = summary?.failed ?? []
   const active = live && (status === 'running' || status === 'healing')
@@ -355,6 +368,10 @@ function runStats({
   services,
   fixCapture,
   onOpenFixes,
+  suiteSnapshot,
+  pendingSpecEdits,
+  integrityHints,
+  onOpenSpecReview,
 }: {
   summary: RunDetail['summary'] | undefined
   healCycles: number
@@ -366,6 +383,14 @@ function runStats({
    *  (no drill-through wired), and the fixes then aren't reported here at all —
    *  a count the user can't act on is worse than silence. */
   onOpenFixes?: () => void
+  /** The run-start copy of the suite (D9). Absent on runs recorded before the
+   *  boundary existed — those say nothing rather than guess. */
+  suiteSnapshot?: RunDetail['manifest']['suiteSnapshot']
+  /** Live spec edits the run has not executed, and the advisory hints on them. */
+  pendingSpecEdits?: number
+  integrityHints?: number
+  /** Opens the changed-tests review, where those edits are adopted/restored. */
+  onOpenSpecReview?: () => void
 }): RunStat[] {
   const stats: RunStat[] = []
   if (summary && summary.total > 0) {
@@ -414,6 +439,36 @@ function runStats({
       title: fixRepos.map((r) => `${r.repoName} · ${plural(r.files, 'file')}`).join('\n'),
       onClick: onOpenFixes,
       testId: 'run-hero-fixes',
+    })
+  }
+  // Where the verdict came from (D9). A run executes the suite as it was at
+  // run start, so a spec edited mid-run did NOT change this verdict — the count
+  // says how many edits are waiting, and the link goes where they are adopted
+  // or restored. Pending edits with nowhere to go still get named (unlike the
+  // fixes above, the fact matters even when the reader can't act here: it is
+  // the difference between "the tests passed" and "the tests I'm looking at
+  // passed"). A run that fell back to the live suite says so too — the reader
+  // then knows a mid-run edit COULD have moved the result.
+  if (suiteSnapshot?.kind === 'taken') {
+    const pending = pendingSpecEdits ?? 0
+    const hints = integrityHints ?? 0
+    const qualifier = pending > 0
+      ? ` · ${plural(pending, 'pending edit')}${hints > 0 ? ` · ${plural(hints, 'hint')}` : ''}`
+      : ''
+    stats.push({
+      label: 'Verdict from',
+      value: `run-start snapshot${qualifier}`,
+      title: pending > 0
+        ? `${plural(pending, 'spec edit')} made since the run started ${pending > 1 ? 'were' : 'was'} not executed — the verdict is from the suite as it stood at run start. Adopt or restore them in the review.`
+        : `The suite as it stood when the run started (${suiteSnapshot.digest.slice(0, 12)}). No live spec has changed since.`,
+      ...(pending > 0 && onOpenSpecReview ? { onClick: onOpenSpecReview, testId: 'run-hero-spec-edits' } : {}),
+    })
+  } else if (suiteSnapshot?.kind === 'unavailable') {
+    stats.push({
+      label: 'Verdict from',
+      value: 'live suite (no snapshot)',
+      title: `The run-start copy could not be taken: ${suiteSnapshot.reason}. A spec edited mid-run may have changed what this run executed.`,
+      bad: true,
     })
   }
   return stats
@@ -480,9 +535,3 @@ function RunControls({
   )
 }
 
-/** Short, stable run reference for the identity line — the trailing token of
- *  the run id (`…-z6kc` → `z6kc`), falling back to the whole id. */
-function shortRunRef(runId: string): string {
-  const tail = runId.split(/[-_]/).pop()
-  return tail && tail.length >= 3 ? tail : runId
-}

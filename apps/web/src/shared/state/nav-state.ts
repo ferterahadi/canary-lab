@@ -35,6 +35,9 @@ export interface NavState {
   configTab: ConfigTab | null
   /** The Verify-config dialog in the runs column (routed ?dialog=verification). */
   verifyOpen: boolean
+  /** The changed-tests review (routed ?dialog=tests-review) — the status bar's
+   *  "Tests changed" pill and the run hero's snapshot link both open it. */
+  specReviewOpen: boolean
   /** The flight stage-entry launcher (routed ?dialog=flight-start), by feature. */
   flightStartFor: string | null
   /** R76: the launcher opened in START-FRESH intent (routed ?dialog=flight-fresh)
@@ -91,6 +94,7 @@ export function initialNavState(persisted: PersistedView): NavState {
     configFor: persisted.dialog === 'config' ? persisted.feature : null,
     configTab: persisted.dialog === 'config' ? persisted.configTab : null,
     verifyOpen: persisted.dialog === 'verification',
+    specReviewOpen: persisted.dialog === 'tests-review',
     flightStartFor: persisted.dialog === 'flight-start' || persisted.dialog === 'flight-fresh'
       ? persisted.feature
       : null,
@@ -114,6 +118,11 @@ export function initialNavState(persisted: PersistedView): NavState {
  *  overlays (config > flight-start > flight-new > demo) sit above the
  *  in-column verify dialog, so the topmost open one wins.
  *
+ *  `tests-review` sits between them: it is a status-bar modal that paints over
+ *  the columns (so above verify), but the run hero's link into it can be
+ *  followed from a flight whose launcher is open, and then the launcher is
+ *  what is on top.
+ *
  *  `demo` ranks BELOW flight-new deliberately: its own "Start a flight" action
  *  opens that launcher, and for the moment both are open the URL must name the
  *  launcher — the thing the user is actually looking at.
@@ -128,6 +137,7 @@ export function routedDialog(state: NavState): RouteDialog | null {
   if (state.flightStartFor) return state.flightStartFresh ? 'flight-fresh' : 'flight-start'
   if (state.flightStartNew) return 'flight-new'
   if (state.demoOpen) return 'demo'
+  if (state.specReviewOpen) return 'tests-review'
   if (state.verifyOpen) return 'verification'
   if (state.settingsOpen) return 'settings'
   return null

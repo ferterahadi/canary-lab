@@ -117,7 +117,8 @@ export type SpecEditsAdoptedBy = 'human' | 'test-heal'
 
 /** Live spec edits measured against the run-start copy. `pending` is what the
  *  run has NOT executed; adopting an edit re-takes the snapshot and appends to
- *  `adopted`. Re-checked after every Playwright exit. */
+ *  `adopted`. Re-checked after every Playwright exit, and whenever a live spec
+ *  of the feature changes while the run is waiting between executions. */
 export interface RunSpecEdits {
   checkedAt: string
   pending: PendingSpecEdit[]
@@ -352,16 +353,24 @@ export function writeRunsIndex(logsDir: string, entries: RunIndexEntry[]): void 
   atomicWrite(runsIndexPath(logsDir), JSON.stringify(entries, null, 2) + '\n')
 }
 
+/** Merge `entry` over the run's existing row (a caller rarely knows every
+ *  field). Merging keeps a key the new entry omits, which is right for
+ *  `endedAt` and wrong for a count that legitimately went to nothing — name
+ *  those in `clear` and they are dropped before the merge, so an absent key
+ *  means absent. */
 export function upsertRunsIndexEntry(
   logsDir: string,
   entry: RunIndexEntry,
+  opts: { clear?: Array<keyof RunIndexEntry> } = {},
 ): RunIndexEntry[] {
   const entries = readRunsIndex(logsDir)
   const idx = entries.findIndex((e) => e.runId === entry.runId)
   if (idx === -1) {
     entries.push(entry)
   } else {
-    entries[idx] = { ...entries[idx], ...entry }
+    const existing = { ...entries[idx] }
+    for (const key of opts.clear ?? []) delete existing[key]
+    entries[idx] = { ...existing, ...entry }
   }
   writeRunsIndex(logsDir, entries)
   return entries

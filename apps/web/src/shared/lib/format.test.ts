@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  shortRunRef,
   formatCount,
   formatDuration,
   formatElapsedSeconds,
@@ -131,5 +132,14 @@ describe('evaluationArchiveFilename', () => {
       .toBe('canary-lab-evaluation-shop-redeeming-2026-05-06-run.zip')
     expect(safeFilename('///')).toBe('run')
     expect(safeFilename('--keep.me--')).toBe('keep.me')
+  })
+})
+
+describe('shortRunRef', () => {
+  it('takes the trailing token of a run id, and the whole id when the tail is too short to identify', () => {
+    expect(shortRunRef('2026-09-04T0638-7rcl')).toBe('7rcl')
+    expect(shortRunRef('run_z6kc')).toBe('z6kc')
+    expect(shortRunRef('ab')).toBe('ab')
+    expect(shortRunRef('x-y')).toBe('x-y')
   })
 })

@@ -57,6 +57,7 @@ export function FlightDetail({
   onClose,
   onStartFlight,
   onOpenConfig,
+  onOpenSpecReview,
   configRefreshKey,
   docsRefreshKey,
   activity,
@@ -79,6 +80,7 @@ export function FlightDetail({
   onClose: () => void
   onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
   onOpenConfig?: (feature: string, tab?: ConfigTab) => void
+  onOpenSpecReview?: () => void
   configRefreshKey?: number
   docsRefreshKey?: number
   /** Per-feature live activity — drives the run row's live icon (R64). */
@@ -765,6 +767,7 @@ export function FlightDetail({
               onActionError={setActionError}
               onStartFlight={onStartFlight}
               onOpenConfig={onOpenConfig}
+              onOpenSpecReview={onOpenSpecReview}
               configRefreshKey={configRefreshKey}
               docsRefreshKey={docsRefreshKey}
               drill={drill}

@@ -6,6 +6,7 @@ import { type DerivedStage, type FeatureActivity, FlightsPill } from '@/features
 import {
   DirtyReviewDialog,
   DirtyTestsPill,
+  featureTone,
   ServicesDialog,
   useActiveBootSessions,
   useActiveVerifyRuns,
@@ -66,6 +67,12 @@ interface Props {
   /** Label for that chip — the flight's feature name. */
   returnFlightLabel?: string | null
   onReturnToFlight?: (flightId: string) => void
+  /** The changed-tests review panel's open-state, driven off the route
+   *  (`?dialog=tests-review`) so a refresh keeps it open — see
+   *  cl_route-every-surface. Uncontrolled (local state) when absent, which keeps
+   *  the bar's own tests and any host without routing working unchanged. */
+  specReviewOpen?: boolean
+  onSpecReviewOpenChange?: (open: boolean) => void
 }
 
 // Always-visible top bar showing whether any run is currently active across
@@ -85,8 +92,8 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onOpenPortify, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight }: Props) {
-  const { connection } = useRuns()
+export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onOpenPortify, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight, specReviewOpen, onSpecReviewOpenChange }: Props) {
+  const { connection, runs } = useRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Deployed-env verification runs (record-only) get their own pill (R27) —
   // a verify is neither a test run nor a boot, so neither the Flights pill
@@ -98,9 +105,19 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
   // the way into a live run now).
   const [servicesOpen, setServicesOpen] = useState(false)
   const [benchmarkOpen, setBenchmarkOpen] = useState(false)
-  const [dirtyReviewOpen, setDirtyReviewOpen] = useState(false)
-  // Features with modified test files — drives the danger pill + review panel.
-  const dirtyFeatureCount = features.filter((f) => f.dirty?.status === 'dirty').length
+  const [localSpecReviewOpen, setLocalSpecReviewOpen] = useState(false)
+  const reviewOpen = specReviewOpen ?? localSpecReviewOpen
+  const setReviewOpen = (open: boolean): void => {
+    setLocalSpecReviewOpen(open)
+    onSpecReviewOpenChange?.(open)
+  }
+  // Suites with modified test files, plus suites whose live run holds spec edits
+  // it has not executed (D9 `specEdits.pending`) — one pill reads both. The
+  // weaker count is the only thing that turns it danger, and it is a hint (D13).
+  const dirtyFeatures = features.filter((f) => f.dirty?.status === 'dirty')
+  const pendingRuns = runs.filter((r) => isActiveRunStatus(r.status) && (r.pendingSpecEdits ?? 0) > 0)
+  const reviewSuites = new Set([...dirtyFeatures.map((f) => f.name), ...pendingRuns.map((r) => r.feature)])
+  const weakerSuites = dirtyFeatures.filter((f) => featureTone(f) === 'weaker').length
   // The right-hand action cluster collapses into a single toggle. Default
   // expanded (actions stay glanceable); the choice persists across reloads.
   const [actionsExpanded, setActionsExpanded] = useState<boolean>(() => {
@@ -186,9 +203,14 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
           ← {returnFlightLabel ?? 'Flight'}
         </button>
       )}
-      {dirtyFeatureCount > 0 && (
+      {reviewSuites.size > 0 && (
         <div className="shrink-0">
-          <DirtyTestsPill count={dirtyFeatureCount} onOpen={() => setDirtyReviewOpen(true)} />
+          <DirtyTestsPill
+            suites={reviewSuites.size}
+            weakerSuites={weakerSuites}
+            pendingSuites={new Set(pendingRuns.map((r) => r.feature)).size}
+            onOpen={() => setReviewOpen(true)}
+          />
         </div>
       )}
       <div className="ml-auto hidden min-w-0 items-center justify-end sm:flex">
@@ -323,7 +345,7 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
       </div>
       </div>
       {servicesOpen && <ServicesDialog onClose={() => setServicesOpen(false)} />}
-      {dirtyReviewOpen && <DirtyReviewDialog features={features} onClose={() => setDirtyReviewOpen(false)} />}
+      {reviewOpen && <DirtyReviewDialog features={features} pendingRuns={pendingRuns} onClose={() => setReviewOpen(false)} />}
       {benchmarkOpen && (
         <BenchmarkWindow
           onClose={() => setBenchmarkOpen(false)}

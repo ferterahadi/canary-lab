@@ -230,6 +230,7 @@ export function StageDetail({
   onActionError,
   onStartFlight,
   onOpenConfig,
+  onOpenSpecReview,
   configRefreshKey,
   docsRefreshKey,
   drill,
@@ -265,6 +266,8 @@ export function StageDetail({
   /** R75: the Repo scan panel's "Change…" → launcher handoff. */
   onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
   onOpenConfig?: (feature: string, tab?: ConfigTab) => void
+  /** The run hero's link into the changed-tests review. */
+  onOpenSpecReview?: () => void
   configRefreshKey?: number
   docsRefreshKey?: number
   drill: FlightDrillThroughs
@@ -710,6 +713,7 @@ export function StageDetail({
           live={Boolean(runLive) || live}
           evidence={runEvidence}
           onOpenRun={drill.onOpenRun}
+          onOpenSpecReview={onOpenSpecReview}
           onError={onActionError}
           pausedNotice={pausedNotice}
           mutationLockedReason={externalMutationOwner

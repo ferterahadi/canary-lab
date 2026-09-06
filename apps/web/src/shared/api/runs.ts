@@ -290,6 +290,26 @@ export function proposeRunPr(runId: string, opts?: ClientOptions): Promise<{ res
   return request<{ results: ProposePrResult[] }>(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/propose-pr`, { method: 'POST' }, fetchImpl)
 }
 
+// Spec-edit boundary (D9): the two human-only levers on an active run's live
+// spec edits. Adopt re-takes the run-start copy from the live suite and reruns
+// it; restore rewrites the live specs from the copy the run executed. Neither
+// is reachable over MCP — the agent that edited the spec cannot bless it.
+export function adoptSpecEdits(
+  runId: string,
+  opts?: ClientOptions,
+): Promise<{ status: 'adopted'; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/adopt-spec-edits`, { method: 'POST' }, fetchImpl)
+}
+
+export function restoreSpecEdits(
+  runId: string,
+  opts?: ClientOptions,
+): Promise<{ status: 'restored'; restored: string[] }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/restore-spec-edits`, { method: 'POST' }, fetchImpl)
+}
+
 // Abort an active run. POSTs to the abort endpoint which kills Playwright,
 // the heal agent, and any service ptys, then marks the manifest 'aborted'.
 // History is preserved — use `deleteRun` afterwards to hard-remove the logs.

@@ -306,6 +306,24 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
     return { status: 'adopted', adopted: result.adopted, rerun: result.rerun }
   })
 
+  // POST /api/runs/:runId/restore-spec-edits — a human puts the live specs back
+  // to what the run executed (the run-start copy), so the pending edits and
+  // their hints clear without moving the boundary. The other human-only lever
+  // beside adopt; no MCP tool wraps it either (pinned by mcp/repair-guardrail).
+  app.post<{ Params: { runId: string } }>('/api/runs/:runId/restore-spec-edits', async (req, reply) => {
+    const orch = deps.store.registry.get(req.params.runId)
+    if (!orch?.restoreSpecEdits) {
+      reply.code(404)
+      return { error: 'run not active; restore the spec files from git instead' }
+    }
+    const result = orch.restoreSpecEdits()
+    if (!result.ok) {
+      reply.code(409)
+      return { reason: result.reason }
+    }
+    return { status: 'restored', restored: result.restored }
+  })
+
   // POST /api/runs/:runId/abort — explicit abort of an active run. Stops
   // the orchestrator (kills Playwright + heal agent + service ptys) and
   // marks the manifest 'aborted'. The run is preserved in history so the

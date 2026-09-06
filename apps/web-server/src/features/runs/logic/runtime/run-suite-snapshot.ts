@@ -21,6 +21,10 @@ export type AdoptSpecEditsResult =
   | { ok: true; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
   | { ok: false; reason: 'tests-running' | 'nothing-to-adopt' | 'snapshot-failed' }
 
+export type RestoreSpecEditsResult =
+  | { ok: true; restored: string[] }
+  | { ok: false; reason: 'tests-running' | 'nothing-to-restore' | 'restore-failed' }
+
 // Top-level entries of a feature dir that are not suite content. Envsets are
 // read from the LIVE dir by the env switcher and carry secrets; node_modules
 // resolves by walking up from the copy exactly as it does from the live dir;
@@ -51,6 +55,18 @@ export function recordSpecEdits(ctx: RunContext): void {
   })
 }
 
+/** The dirty-spec watcher saw a live spec of `feature` change. Re-measure this
+ *  run's pending edits now — otherwise the run's own count sits at its last
+ *  Playwright exit for as long as the run waits on a heal, and the hero, the
+ *  chip and the review would offer no Restore/Adopt for an edit the feature
+ *  list already shows against the run-start copy (seen live). Skipped while
+ *  Playwright executes: the exit handler records then, and the count must not
+ *  move under a verdict being read. Reads only; the boundary stays put. */
+export function refreshSpecEdits(ctx: RunContext, feature: string): void {
+  if (feature !== ctx.feature.name || ctx.playwrightPty) return
+  recordSpecEdits(ctx)
+}
+
 function readLive(featureDir: string, rel: string): string | undefined {
   try {
     return fs.readFileSync(path.join(featureDir, rel), 'utf8')
@@ -76,6 +92,43 @@ export async function adoptSpecEdits(ctx: RunContext): Promise<AdoptSpecEditsRes
     adoptedSpecEdits: adopted.adopted,
   })
   return { ok: true, adopted: adopted.adopted, rerun: signal.accepted ? 'signalled' : signal.reason }
+}
+
+/** A human puts the live suite back to what the run executed: every pending edit
+ *  is undone from the run-start copy (a modified or deleted spec is rewritten
+ *  from the copy, an added one removed) and the manifest re-measured, so
+ *  `specEdits.pending` and the hints empty out. The other human-only lever
+ *  beside adopt (D9/D13); reached from its HTTP route alone, wrapped by no MCP
+ *  tool. Nothing moves the boundary or reruns: the verdict already rests on the
+ *  copy, and after this the live suite says the same thing. Refused while
+ *  Playwright runs — the agent's edit is inert to the run either way, and a
+ *  restore mid-execution would only race the agent for the same files. */
+export function restoreSpecEdits(ctx: RunContext): RestoreSpecEditsResult {
+  if (ctx.playwrightPty) return { ok: false, reason: 'tests-running' }
+  const live = ctx.feature.featureDir
+  if (ctx.suiteDir === live) return { ok: false, reason: 'nothing-to-restore' }
+  const pending = computePendingEdits(live, ctx.suiteDir)
+  if (pending.length === 0) return { ok: false, reason: 'nothing-to-restore' }
+  const restored: string[] = []
+  try {
+    for (const edit of pending) {
+      const liveFile = path.join(live, edit.file)
+      if (edit.change === 'added') {
+        fs.rmSync(liveFile)
+      } else {
+        fs.mkdirSync(path.dirname(liveFile), { recursive: true })
+        fs.copyFileSync(path.join(ctx.suiteDir, edit.file), liveFile)
+      }
+      restored.push(edit.file)
+    }
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    ctx.runnerLog?.warn(`restoring spec edits stopped after ${restored.length}/${pending.length}: ${reason}`)
+    recordSpecEdits(ctx)
+    return { ok: false, reason: 'restore-failed' }
+  }
+  recordSpecEdits(ctx)
+  return { ok: true, restored }
 }
 
 /** The runner's own adopt, for the one sanctioned "edit the spec" path: a run

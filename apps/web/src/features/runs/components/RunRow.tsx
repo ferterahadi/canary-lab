@@ -122,7 +122,7 @@ export function RunRow({
             {passLabel}
           </span>
         )}
-        <RunStatusChip status={run.status} executionType={run.executionType} />
+        <RunStatusChip status={run.status} executionType={run.executionType} pendingSpecEdits={run.pendingSpecEdits} />
         <span
           className={`shrink-0 transition-opacity ${arrow === 'always' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
           style={{ color: 'var(--accent)' }}
@@ -135,7 +135,14 @@ export function RunRow({
   )
 }
 
-export function RunStatusChip({ status, executionType }: { status: RunStatus; executionType?: ExecutionType }) {
+/** The status chip, plus — for an active run holding spec edits it has not
+ *  executed (D9) — a quiet "N pending" companion. It sits WITH the status because
+ *  that is the claim it qualifies: HEALING or PASSED describes the suite as it
+ *  stood at run start, and this says the live suite has since moved. Border
+ *  chrome and muted tone: a fact about provenance, not an alarm (the danger
+ *  reading, if any, is the features column's weaker badge). The count is
+ *  mirrored onto the runs index by the server so this needs no detail read. */
+export function RunStatusChip({ status, executionType, pendingSpecEdits }: { status: RunStatus; executionType?: ExecutionType; pendingSpecEdits?: number }) {
   const boot = executionType === 'boot' && (status === 'running' || status === 'aborted')
   const palette = boot
     ? (status === 'running'
@@ -143,16 +150,29 @@ export function RunStatusChip({ status, executionType }: { status: RunStatus; ex
         : { bg: 'var(--bg-selected)', text: 'var(--text-muted)' })
     : CHIP[status]
   const label = boot ? (status === 'running' ? 'services up' : 'stopped') : status
+  const pending = pendingSpecEdits ?? 0
   return (
-    <Chip
-      chrome="fill"
-      tone={palette.text}
-      background={palette.bg}
-      label={label}
-      uppercase
-      fontSize={10}
-      fontWeight={600}
-    />
+    <>
+      {pending > 0 && (
+        <Chip
+          chrome="border"
+          tone="var(--text-muted)"
+          label={`${pending} pending`}
+          fontSize={10}
+          testId="run-pending-edits"
+          title={`${pending} spec edit${pending > 1 ? 's' : ''} made since this run started ${pending > 1 ? 'have' : 'has'} not been executed — the verdict is from the run-start snapshot. Adopt or restore them under Tests changed.`}
+        />
+      )}
+      <Chip
+        chrome="fill"
+        tone={palette.text}
+        background={palette.bg}
+        label={label}
+        uppercase
+        fontSize={10}
+        fontWeight={600}
+      />
+    </>
   )
 }
 

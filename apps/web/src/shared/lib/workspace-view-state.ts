@@ -47,7 +47,14 @@ export type WorkspaceView = 'workspace' | 'cleanup' | 'coverage' | 'flights'
 // `settings` is Project Settings (the features column's gear). Workspace-scoped
 // rather than feature-scoped, and rebuilt entirely from GET /api/project-config,
 // so a cold load needs nothing this tab happened to be holding.
-export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' | 'flight-new' | 'demo' | 'settings'
+// `tests-review` is the changed-tests review (the status bar's "Tests changed"
+// pill, the features-column badge, and the run hero's "verdict from run-start
+// snapshot" link all open it). Workspace-scoped: it lists every suite with a
+// changed spec or a live run holding unexecuted edits, rebuilt from
+// GET /api/features + the runs index, so a cold load is coherent — and it is
+// exactly the surface a teammate pastes a link to ("look at this weakened
+// test"), which is the point of routing it.
+export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' | 'flight-new' | 'demo' | 'settings' | 'tests-review'
 
 /** The Feature-config dialog's tabs — the `tab` qualifier for `dialog=config`.
  *  Routed because entry points land on different tabs (the run detail opens
@@ -133,7 +140,7 @@ export type DurableView = Pick<PersistedView, 'view' | 'feature'>
 
 const STORAGE_KEY = 'cl.workspace.view'
 const VIEWS: WorkspaceView[] = ['workspace', 'cleanup', 'coverage', 'flights']
-const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-fresh', 'flight-new', 'demo', 'settings']
+const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-fresh', 'flight-new', 'demo', 'settings', 'tests-review']
 const CONFIG_TABS: ConfigTab[] = ['general', 'repos', 'ports', 'envsets', 'playwright']
 const RUN_ARRIVAL_TABS: RunArrivalTab[] = ['changes']
 const MODELS_AGENTS: ModelsAgent[] = ['claude', 'codex']

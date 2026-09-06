@@ -69,6 +69,24 @@ describe('RunRow (R80 hero props)', () => {
     expect(occurrences).toBe(1)
   })
 
+  it('qualifies the status with a quiet "N pending" chip when the run holds unexecuted spec edits (D9)', () => {
+    renderRow({ run: { ...run, status: 'healing', pendingSpecEdits: 2 } })
+    const chip = container.querySelector('[data-testid="run-pending-edits"]')
+    expect(chip?.textContent).toBe('2 pending')
+    expect(chip?.getAttribute('title')).toMatch(/2 spec edits .* not been executed — the verdict is from the run-start snapshot/)
+    // Provenance, not an alarm: no danger hue on the companion chip.
+    expect(chip?.getAttribute('style') ?? '').not.toContain('--danger')
+    // The status chip itself is untouched.
+    expect(container.textContent).toContain('healing')
+  })
+
+  it('shows no pending chip when the run has none (and on runs recorded before the boundary)', () => {
+    renderRow({ run: { ...run, pendingSpecEdits: 0 } })
+    expect(container.querySelector('[data-testid="run-pending-edits"]')).toBeNull()
+    renderRow()
+    expect(container.querySelector('[data-testid="run-pending-edits"]')).toBeNull()
+  })
+
   it('calls onSelect with the run when clicked', () => {
     const onSelect = vi.fn()
     renderRow({ onSelect })

@@ -11,6 +11,7 @@ import { launchEditorDir } from '../../../shared/editor-launch'
 import { loadProjectConfig } from '../logic/runtime/launcher/project-config'
 import { buildPrPreflight } from '../logic/pr/pr-preflight'
 import { proposeFixesForRun } from '../logic/pr/propose-fixes'
+import { verdictProvenanceOf } from '../logic/pr/pr-provenance'
 import { commitModelPlans } from '../logic/runtime/run-model-plan'
 import { EMPTY_AGENT_MODELS } from '../../agent-sessions/logic/agent-models'
 import { detectGhStatus } from '../../../shared/gh-cli'
@@ -184,6 +185,8 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(409)
       return { error: 'no repo is pushable — connect GitHub (Settings) or check push access', preflight }
     }
+    // Which suite the verdict is about (D9) — the footer tells the reviewer.
+    const verdict = verdictProvenanceOf(detail.manifest)
     const results = await proposeFixesForRun({
       runId: detail.runId,
       feature: detail.manifest.feature,
@@ -192,6 +195,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       // The failures the repair answered — the message agent's evidence for
       // WHY the diff exists. Empty on a run whose summary no longer lists any.
       ...(detail.summary?.failed?.length ? { failed: detail.summary.failed } : {}),
+      ...(verdict ? { verdict } : {}),
       // Commit-stage choices per agent from today's config, with the run's
       // launch-resolved choice laid over the agent the run locked to.
       models: commitModelPlans(

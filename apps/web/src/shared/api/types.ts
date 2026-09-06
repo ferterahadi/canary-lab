@@ -21,6 +21,7 @@ import type {
   VerificationTarget,
 } from '@shared/verification'
 import type { RunProducer } from '@shared/run-mode'
+import type { SpecDiff, TestChange } from '@shared/verification-strength/types'
 import type {
   FlightCheckpointKind,
   FlightPauseReason,
@@ -102,6 +103,17 @@ export interface FeatureRepo {
 export interface DirtySpecSummary {
   file: string
   affectedTests: string[]
+  /** The verification-strength differential for this spec: its assertions
+   *  before the edit against now, from the run-start copy when a run took one,
+   *  else the committed spec. Each changed test carries the `@requirement` ids
+   *  the live spec gives it. Absent when no baseline content is readable. An
+   *  advisory reading (D13) — nothing here changes a verdict. */
+  strength?: DirtySpecStrength
+}
+
+export interface DirtySpecStrength extends SpecDiff {
+  baseline: 'run-start' | 'head'
+  tests: Array<TestChange & { requirements?: string[] }>
 }
 
 export interface FeatureDirtyState {

@@ -5,16 +5,14 @@
 // `weaker` and `cannot-classify` are worth a reader's attention; an edit the
 // differential reads as equivalent or stronger is reported as a pending edit
 // and nothing more.
-import { extractTestsFromSource } from '../../../../shared/ast-extractor'
 import type { PendingSpecEdit } from '../dirty-specs/detect'
+import { testRequirementsReader } from '../dirty-specs/test-requirements'
 import type { PredicateChange } from '../../../../../../../shared/verification-strength/types'
 
-/** How the detection behind a `weaker` hint was checked. The Phase 1 holdout
- *  was labelled by one AI and checked blind by a second; no human labelled it.
- *  Travels with every surface that shows a hint, so a number is never quoted
- *  without it. */
-export const INTEGRITY_HINT_DISCLOSURE =
-  'Advisory only — this hint never changes a verdict. Its detection was checked by AI: one AI labelled, a second AI checked blind, no human.'
+// The disclosure lives in the root shared tree so the web can show it beside a
+// hint that has no run manifest to read it from; re-exported here for the
+// server-side callers that already import it from this module.
+export { INTEGRITY_HINT_DISCLOSURE } from '../../../../../../../shared/verification-strength/disclosure'
 
 export type IntegrityHint =
   | {
@@ -46,7 +44,7 @@ export function deriveIntegrityHints(
     const strength = edit.strength
     if (!strength) continue
     for (const reason of strength.reasons ?? []) hints.push({ kind: 'cannot-classify', file: edit.file, reason })
-    const requirementsOf = requirementsReader(edit.file, readLiveSource)
+    const requirementsOf = testRequirementsReader(edit.file, readLiveSource)
     for (const test of strength.tests) {
       if (test.verdict === 'weaker') {
         const weakening = test.changes.filter((change) => change.verdict === 'weaker')
@@ -70,19 +68,6 @@ export function deriveIntegrityHints(
     }
   }
   return hints
-}
-
-// The live source is read once per file and only when a hint needs it. The
-// full extractor (not the metadata one) is what reads `@req-*` tags.
-function requirementsReader(rel: string, readLiveSource: (rel: string) => string | undefined): (test: string) => string[] | undefined {
-  let byName: Map<string, string[] | undefined> | null = null
-  return (test) => {
-    if (!byName) {
-      const source = readLiveSource(rel)
-      byName = new Map(source === undefined ? [] : extractTestsFromSource(rel, source).tests.map((t) => [t.name, t.requirements]))
-    }
-    return byName.get(test)
-  }
 }
 
 function unclassifiableReason(changes: PredicateChange[]): string {

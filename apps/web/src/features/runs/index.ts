@@ -19,6 +19,7 @@ export {
   useRuns,
 } from './state/RunsContext'
 export { sourceLineForBodyLine } from './utils/editor-location'
+export { SPEC_TONE, featureTone, specTone, worstTone, type SpecEditTone } from './utils/spec-integrity'
 export {
   activeBodyLineForTest,
   colorClassForStatus,
