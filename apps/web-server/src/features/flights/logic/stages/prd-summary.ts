@@ -11,6 +11,7 @@ import { decodeSubmission, featureDirFor, stageModelPlan, type FlightStageDeps }
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { agentProgressSink } from './agent-progress'
 import { recordStageAgentSession } from './stage-agent-sessions'
+import { clearRequirementsDraft, readRequirementsDraft } from './requirements-draft'
 
 // Distill features/<f>/docs/ into the requirement summary through the
 // existing agentic PRD engine (stable requirement ids preserved by the engine
@@ -143,6 +144,14 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
       const m = ctx.manifest()
       const featureDir = featureDirFor(deps, m.feature)
 
+      const draft = readRequirementsDraft(featureDir, ctx.flightDir)
+      if (draft) {
+        applyExternalSummary({ featuresDir: deps.featuresDir, feature: m.feature, ...draft })
+        clearRequirementsDraft(ctx.flightDir)
+        ctx.appendLog('[prd-summary] validated the collector draft and reconciled requirement ids\n')
+        return settleFromDisk(ctx)
+      }
+
       const existing = readPrdSummary(featureDir)
       if (existing && liveCount(existing) > 0 && Date.parse(existing.generatedAt) >= newestDocMtime(featureDir)) {
         return { kind: 'done', evidence: { requirementCount: liveCount(existing), reused: true } }
@@ -184,6 +193,7 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
     // themselves belong to the docs stage; a restart HERE keeps them.
     async reset(ctx) {
       const m = ctx.manifest()
+      clearRequirementsDraft(ctx.flightDir)
       if (!fs.existsSync(featureDirFor(deps, m.feature))) return
       clearPrdSummary({ featuresDir: deps.featuresDir, feature: m.feature })
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })

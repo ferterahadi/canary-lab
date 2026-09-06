@@ -386,17 +386,18 @@ describe('portify stage', () => {
     expect(progressLog).toContainEqual({ workflowId: 'wf9' })
   })
 
-  it('adopts an independently started workflow before it reaches review', async () => {
+  it.each(['verifying', 'ready-to-save'])('adopts an independent workflow whose first detail read is %s', async (initialStatus) => {
     const calls: InjectCall[] = []
+    let detailReads = 0
     const inject = makeInject((call) => {
       if (call.method === 'GET' && call.url === '/api/portify') {
         return { statusCode: 200, body: [{ workflowId: 'wf-live', feature: 'checkout', status: 'editing' }] }
       }
-      // The independent job advanced between the index read and the detail
-      // read. Its active index status is what proves the Flight can discover
-      // it before the old ready-to-save-only adoption point.
+      // Follow the same job whether it finishes between the list/detail reads
+      // or needs a further verification poll. Neither case starts a duplicate.
       if (call.method === 'GET' && call.url === '/api/portify/wf-live') {
-        return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/x' } }
+        detailReads += 1
+        return { statusCode: 200, body: { status: detailReads === 1 ? initialStatus : 'ready-to-save', diff: '--- a/x' } }
       }
       return undefined
     }, calls)
@@ -410,6 +411,7 @@ describe('portify stage', () => {
     })
     expect(calls.some((call) => call.method === 'POST' && call.url === '/api/portify')).toBe(false)
     expect(ctxObj.progressLog).toContainEqual({ workflowId: 'wf-live' })
+    expect(detailReads).toBe(initialStatus === 'verifying' ? 2 : 1)
   })
 
   it('adopts the independent workflow when its start wins the same-instant race', async () => {
@@ -443,6 +445,16 @@ describe('portify stage', () => {
     })
     expect(calls.filter((call) => call.method === 'POST' && call.url === '/api/portify')).toHaveLength(1)
     expect(ctxObj.progressLog).toContainEqual({ workflowId: 'wf-race' })
+  })
+
+  it('preserves a start conflict when there is no workflow to adopt', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => call.method === 'GET'
+      ? { statusCode: 200, body: [] }
+      : { statusCode: 409, body: { error: 'repo has uncommitted changes' } }, calls)
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
+    expect(outcome).toMatchObject({ kind: 'failed', error: 'portify start rejected (409): repo has uncommitted changes' })
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1)
   })
 
   it('settles the save-poll via a "failed" status (not just "saved") and still checks the overlay mark', async () => {

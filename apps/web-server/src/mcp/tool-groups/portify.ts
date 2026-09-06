@@ -14,7 +14,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
 
   // ── Port-ification (make a feature's apps use injectable ports) ──────────
   registerTool('start_external_portify', {
-    description: "Start a port-ification workflow YOU drive — no local agent. Canary sets up a scratch worktree per repo and returns the edit paths + task. Edit the listeners to read injected ports IN PLACE, declare the `ports` slots in the feature config, then submit_external_portify to verify (concurrent double-boot); save_portify captures the result as the feature's overlay. Async — returns a workflowId + targets; one workflow PER FEATURE (different features can port-ify concurrently up to a resource cap, so you can fan out a subagent per feature; at capacity start_external_portify returns a 429 — wait for one to finish, or save/cancel it).",
+    description: "Start a port-ification workflow YOU drive — no local agent. Canary sets up a scratch worktree per repo and returns the edit paths + task. When status is verifying, poll get_portify before editing or submitting; declared injection is verified immediately. Otherwise edit the listeners to read injected ports IN PLACE, declare the `ports` slots in the feature config, then submit_external_portify to verify (concurrent double-boot); save_portify captures the result as the feature's overlay. Async — returns a workflowId + targets; one workflow PER FEATURE (different features can port-ify concurrently up to a resource cap, so you can fan out a subagent per feature; at capacity start_external_portify returns a 429 — wait for one to finish, or save/cancel it).",
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       session_id: z.string().describe('Stable id for your conversation — reuse it across calls.'),
@@ -37,13 +37,18 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
         ...(external_session_url ? { sessionUrl: external_session_url } : {}),
       })
       if (claim?.kind === 'claimed') deps.gettingStartedDemo?.attach(claim.sessionId, { kind: 'portify', id: result.workflowId, feature })
+      const verifying = result.status === 'verifying'
       return asJsonResult({
         ...result,
-        status: 'editing',
+        status: result.status ?? 'editing',
         canaryLabBehavior: 'tracking-only',
-        statusMeaning: 'You edit the scratch worktrees in place; Canary Lab is not running a local agent — it verifies + saves.',
-        nextSteps: ['submit_external_portify'],
-        next: `Edit each target's source (in its worktree path) so the listener reads an injected port, declare the matching \`ports\` slots in ${result.configPath}, then call submit_external_portify with workflowId "${result.workflowId}". Poll get_portify; save_portify once status is "ready-to-save".`,
+        statusMeaning: verifying
+          ? 'Canary Lab is verifying declared port injection with two concurrent boots; no local agent is running.'
+          : 'You edit the scratch worktrees in place; Canary Lab is not running a local agent — it verifies + saves.',
+        nextSteps: [verifying ? 'get_portify' : 'submit_external_portify'],
+        next: verifying
+          ? `Poll get_portify with workflowId "${result.workflowId}". Do not edit or submit during verification. On "ready-to-save", save_portify; on "editing", read verification.failureDetail, fix the worktree, then submit_external_portify.`
+          : `Edit each target's source (in its worktree path) so the listener reads an injected port, declare the matching \`ports\` slots in ${result.configPath}, then call submit_external_portify with workflowId "${result.workflowId}". Poll get_portify; save_portify once status is "ready-to-save".`,
       })
     } catch (err) {
       if (claim?.kind === 'claimed') deps.gettingStartedDemo?.abandon(claim.sessionId)

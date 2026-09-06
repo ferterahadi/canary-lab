@@ -46,7 +46,7 @@ afterEach(() => {
 
 describe('createPortifyRunner (branch coverage)', () => {
   describe('external producer', () => {
-it('startExternalPortify sets up the worktree, parks at editing, and runs no local agent', async () => {
+it('startExternalPortify begins verification of declared injection and runs no local agent', async () => {
       const { featuresDir, logsDir } = await singleFixture()
       const { store, runner } = makeRunner(featuresDir, logsDir)
       const agentCallsBefore = vi.mocked(runPortifyAgent).mock.calls.length
@@ -62,12 +62,13 @@ it('startExternalPortify sets up the worktree, parks at editing, and runs no loc
       expect(result.instructions.length).toBeGreaterThan(0)
 
       const m = store.get(result.workflowId)!
-      expect(m.status).toBe('editing')
+      expect(m.status).toBe('verifying')
       expect(m.producer).toBe('external')
       expect(m.external).toMatchObject({ clientKind: 'claude', sessionId: 's1', conversationName: 'port work' })
       expect(m.repos[0].worktreePath).toBeTruthy()
       // No local agent is spawned for an external workflow.
       expect(vi.mocked(runPortifyAgent).mock.calls.length).toBe(agentCallsBefore)
+      expect(await waitForStatus(store, result.workflowId, ['ready-to-save', 'failed'])).toBe('ready-to-save')
 
       await runner.cancel(result.workflowId)
     })
@@ -77,6 +78,8 @@ it('submitExternalPortify verifies in-place edits → ready-to-save, then save c
       const { store, runner } = makeRunner(featuresDir, logsDir)
 
       const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
+      expect(await waitForStatus(store, result.workflowId, ['ready-to-save', 'failed'])).toBe('ready-to-save')
+      runner.reviseExternalPortify(result.workflowId, 'adjust the port wiring')
       // Simulate the external client editing the scratch worktree IN PLACE.
       fs.appendFileSync(
         path.join(result.targets[0].editPath, 'src', 'server.js'),
@@ -103,7 +106,6 @@ it('submitExternalPortify parks at ready-to-save on an empty diff when the doubl
       const { store, runner } = makeRunner(featuresDir, logsDir)
 
       const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'codex', sessionId: 's1' })
-      await runner.submitExternalPortify(result.workflowId)
 
       expect(await waitForStatus(store, result.workflowId, ['ready-to-save', 'editing', 'failed'])).toBe('ready-to-save')
       const ready = store.get(result.workflowId)!
@@ -164,7 +166,6 @@ it('borrows a sibling feature\'s saved overlay for the same app and pre-applies 
 
       // Submit with no further edits: the borrowed source already reads the port,
       // so the double-boot passes and feat-b's OWN overlay captures the patch.
-      await runner.submitExternalPortify(result.workflowId)
       expect(await waitForStatus(store, result.workflowId, ['ready-to-save', 'editing', 'failed'])).toBe('ready-to-save')
       await runner.save(result.workflowId)
       expect(readOverlay(featBDir)!.patches['app']).toContain('borrowed: listener reads injected PORT')
@@ -277,7 +278,6 @@ it('submitExternalPortify re-parks at editing with a clear message when an empty
       const { store, runner } = makeRunner(featuresDir, logsDir, /* healthy */ false)
 
       const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'codex', sessionId: 's1' })
-      await runner.submitExternalPortify(result.workflowId)
 
       const deadline = Date.now() + 4000
       let m = store.get(result.workflowId)!
@@ -296,6 +296,8 @@ it('reviseExternalPortify reopens a VERIFIED workflow instead of discarding the 
       const { store, runner } = makeRunner(featuresDir, logsDir)
 
       const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
+      expect(await waitForStatus(store, result.workflowId, ['ready-to-save', 'failed'])).toBe('ready-to-save')
+      runner.reviseExternalPortify(result.workflowId, 'adjust the port wiring')
       const editedFile = path.join(result.targets[0].editPath, 'src', 'server.js')
       fs.appendFileSync(editedFile, '\n// port made injectable by external client\n')
       await runner.submitExternalPortify(result.workflowId)
@@ -306,7 +308,7 @@ it('reviseExternalPortify reopens a VERIFIED workflow instead of discarding the 
         '  also token-ise the health-check URL  ',
       )
       expect(manifest.status).toBe('editing')
-      expect(manifest.feedbackRounds).toBe(1)
+      expect(manifest.feedbackRounds).toBe(2)
       expect(manifest.error).toBeUndefined()
       // The feedback rides into the prompt trimmed, with the constraints restated.
       expect(instructions).toContain('also token-ise the health-check URL')
@@ -323,7 +325,7 @@ it('reviseExternalPortify reopens a VERIFIED workflow instead of discarding the 
       // A second round of feedback counts on top of the first — the review loop
       // is unbounded, same as the internal revise().
       const second = runner.reviseExternalPortify(result.workflowId, 'and rename the slot')
-      expect(second.manifest.feedbackRounds).toBe(2)
+      expect(second.manifest.feedbackRounds).toBe(3)
       await runner.cancel(result.workflowId)
     })
 it('reviseExternalPortify rejects an unknown, internal, mid-edit or empty-feedback revise', async () => {
@@ -355,8 +357,6 @@ it('reviseExternalPortify 404s when the feature vanished under a live workflow',
       const { store, runner } = makeRunner(featuresDir, logsDir, true, 'claude', () => features)
 
       const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
-      fs.appendFileSync(path.join(result.targets[0].editPath, 'src', 'server.js'), '\n// injectable\n')
-      await runner.submitExternalPortify(result.workflowId)
       expect(await waitForStatus(store, result.workflowId, ['ready-to-save', 'failed'])).toBe('ready-to-save')
 
       features = [] // the feature was deleted while the client was reviewing
@@ -372,7 +372,6 @@ it('externalRetryPrompt renders the retry playbook once a double-boot has failed
       // Before any submit there is no failure to explain.
       expect(runner.externalRetryPrompt(result.workflowId)).toBeNull()
 
-      await runner.submitExternalPortify(result.workflowId)
       const deadline = Date.now() + 4000
       let m = store.get(result.workflowId)!
       while (Date.now() < deadline && !m.verification?.failureDetail) {
@@ -445,8 +444,8 @@ it('allows DIFFERENT features to port-ify concurrently (lock is per-feature)', a
         const a = await runner.startExternalPortify({ feature: 'featA', clientKind: 'claude', sessionId: 'a' })
         // featB must NOT bounce on featA's workflow — different feature, same machine.
         const b = await runner.startExternalPortify({ feature: 'featB', clientKind: 'claude', sessionId: 'b' })
-        expect(await waitForStatus(store, a.workflowId, ['editing'])).toBe('editing')
-        expect(await waitForStatus(store, b.workflowId, ['editing'])).toBe('editing')
+        expect(await waitForStatus(store, a.workflowId, ['ready-to-save'])).toBe('ready-to-save')
+        expect(await waitForStatus(store, b.workflowId, ['ready-to-save'])).toBe('ready-to-save')
         await runner.cancel(a.workflowId)
         await runner.cancel(b.workflowId)
       } finally {
@@ -502,7 +501,7 @@ it('startExternalPortify includes sessionUrl in the external session record when
         sessionId: 's1',
         sessionUrl: 'https://claude.ai/chat/abc-123',
       })
-      await waitForStatus(store, result.workflowId, ['editing'])
+      await waitForStatus(store, result.workflowId, ['ready-to-save'])
       const m = store.get(result.workflowId)!
       expect(m.external?.sessionUrl).toBe('https://claude.ai/chat/abc-123')
       await runner.cancel(result.workflowId)

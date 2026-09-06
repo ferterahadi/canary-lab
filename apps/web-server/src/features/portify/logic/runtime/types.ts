@@ -162,6 +162,9 @@ export interface ExternalPortifyEditTarget {
 
 export interface StartExternalPortifyResult {
   workflowId: string
+  /** Verification can start immediately when injection is already declared.
+   * Absent on older providers, which always handed back the editing window. */
+  status?: 'editing' | 'verifying'
   /** The scratch worktree path to edit each repo's source in. */
   targets: ExternalPortifyEditTarget[]
   /** Absolute path of the feature config to edit in place (declare `ports` slots). */

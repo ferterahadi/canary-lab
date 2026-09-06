@@ -38,6 +38,13 @@ function harness(deps: Record<string, unknown>) {
 }
 
 describe('start_external_portify', () => {
+  it('directs a verification-first start to polling without an edit or submit', async () => {
+    const { call } = harness({ startExternalPortify: async () => ({ workflowId: 'native', status: 'verifying', configPath: '/c', targets: [], instructions: 'poll' }) })
+    const out = await call('start_external_portify', { feature: 'checkout', session_id: 's', client_kind: 'codex' })
+    expect(out).toMatchObject({ workflowId: 'native', status: 'verifying', nextSteps: ['get_portify'] })
+    expect(out.next).toContain('Do not edit or submit during verification')
+    expect(out.next).toContain('verification.failureDetail')
+  })
   it('hands back the edit targets and what to do with them', async () => {
     const startExternalPortify = vi.fn(async () => ({
       workflowId: 'wf-1',

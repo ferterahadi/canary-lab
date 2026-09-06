@@ -3,7 +3,7 @@ import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type ExternalWorkCheckpointDat
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { drive } from './flight-drive'
 import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightNotParkedError, FlightStageEntryError, FlightTakeoverRequestedError, stampSystemLine } from './flight-errors'
-import { FlightEntryMode, StageAdapters, bankAllStageTimings, bankStageActivity, checkStageEntry, defaultFlightId, driveControllers, firstOpenStageIndex, freshStages, interruptStage, resetStagesForRestart, sameRepoSet, stagesForJump } from './flight-stages'
+import { FlightEntryMode, StageAdapters, bankAllStageTimings, bankStageActivity, checkStageEntry, defaultFlightId, abortFlightWork, firstOpenStageIndex, freshStages, interruptStage, resetStagesForRestart, sameRepoSet, stagesForJump } from './flight-stages'
 
 export { abortFlight, deleteFlight, drainQueuedFlights, enqueueFlight, removeFlightRecordsForFeature } from './flight-queue'
 
@@ -325,7 +325,7 @@ export async function pauseFlight(flightId: string, deps: FlightConductorDeps): 
   if (!isActiveFlightStatus(current.status)) {
     throw new Error(`flight ${flightId} is ${current.status}, not active — nothing to pause`)
   }
-  const openStage = current.stages.find(
+  const openStages = current.stages.filter(
     (s) => s.status === 'running' || s.status === 'waiting-for-approval',
   )
   const pausedAt = now()
@@ -335,7 +335,7 @@ export async function pauseFlight(flightId: string, deps: FlightConductorDeps): 
     pauseReason: 'user',
     updatedAt: pausedAt,
     stages: current.stages.map((s) =>
-      s.key === openStage?.key
+      openStages.some((open) => open.key === s.key)
         ? {
             // Close the work clock: the pause ends the stage's live segment,
             // and the time parked must not count as stage work. A stage paused
@@ -348,16 +348,16 @@ export async function pauseFlight(flightId: string, deps: FlightConductorDeps): 
             // replays it (seamless). An answer that already produced the park
             // the user paused on is spent; keeping it would replay a stale
             // choice instead of re-asking.
-            ...(openStage.status === 'waiting-for-approval' ? { checkpointResponse: undefined } : {}),
+            ...(s.status === 'waiting-for-approval' ? { checkpointResponse: undefined } : {}),
           }
         : s,
     ),
   }
   store.save(manifest)
-  driveControllers.get(flightId)?.abort()
+  abortFlightWork(flightId)
   // Awaited, not fired and forgotten. The park above already happened, so the
   // drive cannot advance while we wait, and the pause-race rule still holds.
-  if (openStage) await interruptStage(flightId, openStage.key, 'pause', deps)
+  await Promise.all(openStages.map((stage) => interruptStage(flightId, stage.key, 'pause', deps)))
   // Re-read: the teardown writes its own log line through the store, so the
   // snapshot built above is already one write stale. Callers render this
   // response — a client shown a record with no teardown line would have to wait

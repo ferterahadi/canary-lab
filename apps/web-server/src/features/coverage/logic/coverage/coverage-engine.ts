@@ -8,12 +8,12 @@ import {
   buildAnnotatePrompt,
   proposeCoverageMappings,
   type AnnotateAdapter,
-  type AnnotateTestInput,
   type CoverageAgentSession,
 } from './annotate-engine'
 import { writeCoversTag } from './tag-writer'
 import { changedRequirementIds, requirementFingerprintMap, requirementsSetHash } from './fingerprints'
 import { readCoverageRunState, writeCoverageRunState } from './run-state'
+import { mappingInferenceSnapshot, rememberMappingInference, unexaminedMappingTests, type MappingInferenceSnapshot, type MappingTestInput } from './mapping-cache'
 import { readPrdSummary } from './prd-summary'
 import { clearPrdSummary } from './feature-docs'
 import { FeatureNotFoundError, collectTests, computeFeatureCoverage, resolveFeatureDir } from './service'
@@ -42,6 +42,8 @@ export interface RunCoverageEngineArgs {
    *  every other requirement remain authoritative because tag writes are
    *  additive. Used by the specs loop after it recomputes the live gaps. */
   requirementIds?: string[]
+  /** Reuse examined test/requirement pairs whose source inputs are unchanged. */
+  incremental?: boolean
   cwd?: string
   now?: string
   signal?: AbortSignal
@@ -69,6 +71,16 @@ export interface RunCoverageEngineResult {
   reconciledRequirementIds?: string[]
   /** The recomputed ledger after applying (auto) or storing (review). */
   ledger: CoverageLedger
+}
+
+function mappingInputs(featureDir: string): MappingTestInput[] {
+  return collectTests(featureDir).collected.map((c) => ({
+    name: c.input.name,
+    file: path.relative(featureDir, c.absFile),
+    bodySource: c.bodySource,
+    assertions: [...c.assertions],
+    annotations: { requirements: c.input.requirements, pathTypes: c.input.pathTypes, variants: c.input.variants },
+  }))
 }
 
 /** Resolve a relative spec path under the feature and write a covers tag onto a
@@ -139,21 +151,11 @@ export async function runCoverageEngine(
   const summary = readPrdSummary(featureDir)
   const requirements: Requirement[] = summary?.requirements ?? []
 
-  const { collected } = collectTests(featureDir)
-  const orphans = collected.filter((c) => !(c.input.requirements?.length))
-  const orphanTestsBefore = orphans.map((c) => c.input.name).sort()
+  const allInputs = mappingInputs(featureDir)
+  const orphanTestsBefore = allInputs.filter((test) => !test.annotations?.requirements?.length).map((test) => test.name).sort()
 
-  // Re-map EVERY test each run — not just the untagged orphans. By default the
-  // agent re-examines every requirement↔test pair; callers with a freshly
-  // computed gap ledger may narrow the requirement side below. Tag-writes are
-  // idempotent + additive (tag-writer.ts), so covered requirements omitted from
-  // that scope keep their existing evidence without churning the spec.
-  const engineInputs = collected.map((c) => ({
-    name: c.input.name,
-    file: c.input.file,
-    bodySource: c.bodySource,
-    assertions: [...c.assertions],
-  }))
+  // Default runs re-examine every test. Flights can reuse examined pairs and
+  // narrow requirements to live gaps; additive tags retain existing evidence.
 
   // Reconcile-by-delta (R10): in delta mode, restrict the candidate requirements
   // to those whose fingerprint changed since the last engine run — unchanged reqs
@@ -178,9 +180,24 @@ export async function runCoverageEngine(
     candidateRequirements = candidateRequirements.filter((r) => changedSet.has(r.id))
   }
 
-  const proposals = await propose(
+  const prior = readCoverageRunState(featureDir)
+  const snapshot = mappingInferenceSnapshot(featureDir, allInputs, candidateRequirements, summary?.variantDimension)
+  const engineInputs = args.incremental
+    ? unexaminedMappingTests(allInputs, snapshot, prior?.mappingInference)
+    : allInputs
+  args.onOutput?.(`[mapping] examining ${engineInputs.length} of ${allInputs.length} tests against ${candidateRequirements.length} requirements\n`)
+  const proposals = args.incremental && (engineInputs.length === 0 || candidateRequirements.length === 0) ? [] : await propose(
     { requirements: candidateRequirements, variantDimension: summary?.variantDimension, tests: engineInputs, adapter: args.adapter, featureDir, cwd: args.cwd, signal: args.signal, spawnScope: args.spawnScope, agentJob: args.agentJob, onOutput: args.onOutput, onSession: args.onAgentSession, models: args.models },
   )
+  const liveSummary = readPrdSummary(featureDir)
+  const candidateIds = new Set(candidateRequirements.map((r) => r.id))
+  const liveRequirements = (liveSummary?.requirements ?? []).filter((r) => candidateIds.has(r.id))
+  const inputsUnchanged = JSON.stringify(snapshot) === JSON.stringify(
+    mappingInferenceSnapshot(featureDir, mappingInputs(featureDir), liveRequirements, liveSummary?.variantDimension),
+  )
+  if (args.incremental && !inputsUnchanged) {
+    throw Object.assign(new Error('Mapping inputs changed while the agent worked — retry against the current tests.'), { statusCode: 409 })
+  }
 
   // No review gate (R16): every inferred mapping's `covers` tag is written now.
   // Agent proposals report only a testName (the agent reads the spec but doesn't
@@ -188,11 +205,12 @@ export async function runCoverageEngine(
   // without this the entire agentic mapping path is a no-op at tag-writing.
   const fileByTestName = new Map(engineInputs.map((t) => [t.name, t.file]))
   const sourceByTestName = new Map<string, MappingTestSource>(
-    engineInputs.map((t) => [t.name, { assertions: t.assertions, bodySource: t.bodySource ?? '' }]),
+    engineInputs.map((t) => [t.name, { assertions: t.assertions, bodySource: t.bodySource }]),
   )
   const applied: ProposedMapping[] = []
   for (const m of proposals) {
-    const file = m.file ?? fileByTestName.get(m.testName)
+    if (args.incremental && (!fileByTestName.has(m.testName) || m.requirements.some((id) => !candidateIds.has(id)))) continue
+    const file = args.incremental ? fileByTestName.get(m.testName) : m.file ?? fileByTestName.get(m.testName)
     if (!file) continue
     if (applyTagToFile(featureDir, file, m.testName, m.requirements, m.pathTypes, m.variants)) {
       // FLAG, don't drop: suspicious claims still apply, but carry `issues`.
@@ -206,6 +224,11 @@ export async function runCoverageEngine(
   const runState = {
     requirementsHash: summary?.requirementsHash ?? requirementsSetHash(requirements),
     requirementFingerprints: requirementFingerprintMap(requirements),
+    mappingInference: inputsUnchanged ? rememberMappingInference(
+      mappingInferenceSnapshot(featureDir, mappingInputs(featureDir), candidateRequirements, summary?.variantDimension),
+      engineInputs.map((test) => test.name),
+      prior?.mappingInference,
+    ) : undefined,
     ranAt: args.now ?? new Date().toISOString(),
   }
   // Write the completion marker before computing so a legitimate zero-link pass
@@ -243,6 +266,8 @@ export interface CoverageMappingContext {
    *  expected `{ mappings: [...] }` output shape) — hand this to the client
    *  verbatim. Reuses the internal annotate prompt so both surfaces agree. */
   prompt: string
+  /** Server-pinned inputs for an incremental Flight handoff. */
+  inferenceSnapshot?: MappingInferenceSnapshot
 }
 
 /** True when a feature has a PRD summary — required before coverage mapping (the
@@ -254,27 +279,27 @@ export function hasPrdSummary(featuresDir: string, feature: string): boolean {
 /** Assemble the read-only context an offloaded client needs to map tests →
  *  requirements. Throws FeatureNotFoundError for an unknown feature; the caller
  *  is responsible for checking hasPrdSummary first. */
-export function buildCoverageMappingContext(args: { featuresDir: string; feature: string; requirementIds?: string[] }): CoverageMappingContext {
+export function buildCoverageMappingContext(args: { featuresDir: string; feature: string; requirementIds?: string[]; incremental?: boolean }): CoverageMappingContext {
   const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
   const summary = readPrdSummary(featureDir)
   const requestedIds = args.requirementIds ? new Set(args.requirementIds) : null
   const requirements = (summary?.requirements ?? []).filter((r) => !r.deprecated && (!requestedIds || requestedIds.has(r.id)))
-  const { collected } = collectTests(featureDir)
-  const engineInputs: AnnotateTestInput[] = collected.map((c) => ({
-    name: c.input.name,
-    file: c.input.file,
-    assertions: [...c.assertions],
-  }))
+  const allInputs = mappingInputs(featureDir)
+  const snapshot = mappingInferenceSnapshot(featureDir, allInputs, requirements, summary?.variantDimension)
+  const engineInputs = args.incremental
+    ? unexaminedMappingTests(allInputs, snapshot, readCoverageRunState(featureDir)?.mappingInference)
+    : allInputs
   const prompt = buildAnnotatePrompt(requirements, engineInputs, featureDir, summary?.variantDimension)
   return {
     feature: args.feature,
     requirements,
     tests: engineInputs.map((t) => ({
       testName: t.name,
-      file: t.file && featureDir ? path.join(featureDir, t.file) : t.file,
-      assertions: t.assertions!,
+      file: t.file ? path.join(featureDir, t.file) : t.file,
+      assertions: t.assertions,
     })),
     prompt,
+    ...(args.incremental ? { inferenceSnapshot: snapshot } : {}),
   }
 }
 
@@ -284,6 +309,8 @@ export interface ApplyExternalCoverageArgs {
   feature: string
   mappings: ProposedMapping[]
   now?: string
+  /** Supplied only by a server-owned handoff after its complete roster validates. */
+  inference?: { snapshot: MappingInferenceSnapshot; roster: string[] }
 }
 
 export interface ApplyExternalCoverageResult {
@@ -301,7 +328,17 @@ export function applyExternalCoverageMappings(args: ApplyExternalCoverageArgs): 
   const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
   const summary = readPrdSummary(featureDir)
   const requirements: Requirement[] = summary?.requirements ?? []
-  const knownIds = new Set(requirements.filter((r) => !r.deprecated).map((r) => r.id))
+  const inferredRequirements = args.inference
+    ? requirements.filter((r) => r.id in args.inference!.snapshot.requirements)
+    : requirements
+  if (args.inference) {
+    const live = mappingInferenceSnapshot(featureDir, mappingInputs(featureDir), inferredRequirements, summary?.variantDimension)
+    if (JSON.stringify(live) !== JSON.stringify(args.inference.snapshot)) {
+      throw Object.assign(new Error('Mapping inputs changed during the handoff — rebuild the mapping context before submitting.'), { statusCode: 409 })
+    }
+  }
+  const prior = readCoverageRunState(featureDir)
+  const knownIds = new Set(inferredRequirements.filter((r) => !r.deprecated).map((r) => r.id))
 
   const { collected } = collectTests(featureDir)
   const fileByTestName = new Map(collected.map((c) => [c.input.name, c.input.file]))
@@ -313,9 +350,10 @@ export function applyExternalCoverageMappings(args: ApplyExternalCoverageArgs): 
 
   const applied: ProposedMapping[] = []
   for (const m of args.mappings) {
+    if (args.inference && !args.inference.roster.includes(m.testName)) continue
     const requirementsFiltered = (m.requirements ?? []).filter((id) => knownIds.has(id))
     if (!requirementsFiltered.length) continue
-    const file = m.file ?? fileByTestName.get(m.testName)
+    const file = args.inference ? fileByTestName.get(m.testName) : m.file ?? fileByTestName.get(m.testName)
     if (!file) continue // unknown test name → not a mapping
     const variantsFiltered = (m.variants ?? [])
       .map((v) => v.trim().toLowerCase())
@@ -334,6 +372,13 @@ export function applyExternalCoverageMappings(args: ApplyExternalCoverageArgs): 
   const runState = {
     requirementsHash: summary?.requirementsHash ?? requirementsSetHash(requirements),
     requirementFingerprints: requirementFingerprintMap(requirements),
+    ...(args.inference ? {
+      mappingInference: rememberMappingInference(
+        mappingInferenceSnapshot(featureDir, mappingInputs(featureDir), inferredRequirements, summary?.variantDimension),
+        args.inference.roster,
+        prior?.mappingInference,
+      ),
+    } : {}),
     ranAt: args.now ?? new Date().toISOString(),
   }
   writeCoverageRunState(featureDir, runState)

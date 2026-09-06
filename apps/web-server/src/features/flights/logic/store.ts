@@ -101,11 +101,13 @@ export class FlightRunStore implements FlightStore {
       withFeature: (m, feature) => ({ ...m, feature }),
       sortNewestFirst: true,
       reconcile: {
-        isInterrupted: (m) => m.status === 'running',
+        isInterrupted: (m) => m.status === 'running'
+          || (m.status === 'waiting-for-approval' && m.stages.some((stage) => stage.status === 'running')),
         mark: (m, now) => ({
           ...m,
-          status: 'paused',
-          pauseReason: 'restart' as const,
+          // Preserve an external handoff while resetting the lost boot.
+          status: m.status === 'waiting-for-approval' ? m.status : 'paused',
+          pauseReason: m.status === 'waiting-for-approval' ? m.pauseReason : 'restart' as const,
           updatedAt: now,
           stages: m.stages.map((s) =>
             // `activeSince` is cleared WITHOUT banking: the server died at some
@@ -123,7 +125,7 @@ export class FlightRunStore implements FlightStore {
                 }
               : s,
           ),
-          error: m.error ?? 'Interrupted by server restart — resume with `canary-lab flight`',
+          error: m.status === 'waiting-for-approval' ? m.error : m.error ?? 'Interrupted by server restart — resume with `canary-lab flight`',
         }),
       },
     })

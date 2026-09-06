@@ -238,10 +238,11 @@ describe('prd-summary stage', () => {
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('no requirements') })
   })
 
-  it('pins the agent-session ref via onAgentSession during regeneration', async () => {
+  it.each([true, false])('pins the agent-session ref during regeneration with an injected clock: %s', async (injectedClock) => {
     fs.mkdirSync(path.join(logsDir, 'flights', 'fl-test', 'prd-summary'), { recursive: true })
+    const before = Date.now()
     const d = deps({
-      now: () => '2026-08-31T07:12:16.374Z',
+      ...(injectedClock ? { now: () => '2026-08-31T07:12:16.374Z' } : {}),
       coverage: {
         regenerate: (async (args: {
           featuresDir: string
@@ -263,9 +264,14 @@ describe('prd-summary stage', () => {
     expect(current().stages.find((stage) => stage.key === 'prd-summary')?.agentSessions).toEqual([{
       sidecar: 'prd-summary-session-001',
       label: 'Pass 1 · Requirements summary',
-      startedAt: '2026-08-31T07:12:16.374Z',
+      startedAt: injectedClock ? '2026-08-31T07:12:16.374Z' : expect.any(String),
       pass: 1,
     }])
+    if (!injectedClock) {
+      const startedAt = current().stages.find((stage) => stage.key === 'prd-summary')!.agentSessions![0].startedAt
+      expect(Date.parse(startedAt)).toBeGreaterThanOrEqual(before)
+      expect(Date.parse(startedAt)).toBeLessThanOrEqual(Date.now())
+    }
     const historyRef = JSON.parse(fs.readFileSync(path.join(logsDir, 'flights', current().flightId, 'prd-summary-session-001', 'agent-session.json'), 'utf-8'))
     expect(historyRef.sessions.claude.sessionId).toBe('sess-123')
   })

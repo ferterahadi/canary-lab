@@ -8,6 +8,6 @@ Before driving a workflow read its guide: get_workflow_guide(workflow:"<name>") 
 - coverage — write_feature_doc → start/submit_external_summary → start/submit_external_coverage (EVERY test in mappings[] or unmappable[]) → get_feature_coverage and report from that ledger.
 - flight — start_flight(repoPaths, description) → get_flight → respond_flight_checkpoint; YOU drive it and the UI is read-only; when links.evaluationZip appears, report it and end your turn.
 - export — start_external_evaluation_export → submit_external_evaluation_export (keep the exact case count and order); relay archivePath verbatim; export as-is, never heal first.
-- portify — start_external_portify → edit the listeners → submit_external_portify (a double-boot verifies) → save_portify(confirm:true) (standalone tools: portify/full profiles).
+- portify — start_external_portify → poll if verifying; otherwise edit and submit_external_portify (a double-boot verifies) → save_portify(confirm:true) (standalone tools: portify/full profiles).
 
 Reuse one stable session_id for the whole conversation; never pass client_kind.

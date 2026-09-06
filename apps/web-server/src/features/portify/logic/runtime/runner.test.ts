@@ -125,17 +125,25 @@ function makeRunner(
   agent: 'claude' | 'codex' = 'claude',
   loadFeaturesFn?: () => FeatureConfig[],
   resolveModels: () => { model: string | null; effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null } = () => ({ model: null, effort: null }),
+  requiresEdit = true,
 ) {
   const store = new PortifyRunStore(logsDir)
+  const bootReady = new Map<string, boolean>()
   const runner = createPortifyRunner({
     logsDir,
     store,
-    ptyFactory: fakePtyFactory,
+    ptyFactory: (opts) => {
+      // These edit/review cases model declared slots whose source still needs
+      // the agent's rewrite. Native injection is exercised separately below.
+      const edited = fs.readFileSync(path.join(opts.cwd, 'src', 'server.js'), 'utf-8').includes('port made injectable by agent')
+      bootReady.set(String(opts.env?.PORT), !requiresEdit || edited)
+      return fakePtyFactory(opts)
+    },
     loadFeatures: loadFeaturesFn ?? (() => loadFeatures(featuresDir)),
     pickAgent: () => agent,
     resolveModels,
     now: () => '2026-06-07T00:00:00.000Z',
-    healthCheck: async () => healthy,
+    healthCheck: async (url) => healthy && bootReady.get(new URL(url).port) === true,
     healthPollIntervalMs: 5,
     healthDeadlineMs: healthy ? 400 : 40,
   })
@@ -171,14 +179,31 @@ async function singleFixture(): Promise<{ featuresDir: string; logsDir: string; 
 }
 
 describe('createPortifyRunner (integration)', () => {
-  it('runs to ready-to-save with a passing double-boot verification and a captured diff', async () => {
+  it('verifies declared native injection and saves with two boot receipts and no agent edits', async () => {
     const { featuresDir, logsDir } = await singleFixture()
-    const { store, runner } = makeRunner(featuresDir, logsDir)
-
-    const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+    const { store, runner } = makeRunner(featuresDir, logsDir, true, 'claude', undefined, undefined, false)
+    const callsBefore = vi.mocked(runPortifyAgent).mock.calls.length
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat' })
     expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
+    const ready = store.get(workflowId)!
+    expect(ready.attempt).toBe(0)
+    expect(ready.verification?.instances).toHaveLength(2)
+    expect(ready.verification?.instances.every((instance) => instance.ok)).toBe(true)
+    expect(ready.verification?.instances[0].ports).not.toEqual(ready.verification?.instances[1].ports)
+    expect(vi.mocked(runPortifyAgent).mock.calls.length).toBe(callsBefore)
+    expect(ready.diff).toBe('')
+    expect((await runner.save(workflowId)).status).toBe('saved')
+  })
+  it.each(['claude', 'codex'] as const)('runs %s after failed native verification and captures the verified diff', async (agent) => {
+    const { featuresDir, logsDir } = await singleFixture()
+    const { store, runner } = makeRunner(featuresDir, logsDir, true, agent)
+
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent, maxAttempts: 1 })
+    const status = await waitForStatus(store, workflowId, TERMINAL)
+    expect(status, store.get(workflowId)?.error).toBe('ready-to-save')
 
     const ready = store.get(workflowId)!
+    expect(ready.agent).toBe(agent)
     expect(ready.verification?.ok).toBe(true)
     expect(ready.verification?.instances).toHaveLength(2)
     expect(ready.diff).toContain('port made injectable by agent')

@@ -267,7 +267,11 @@ reimplementing coverage, Portify, runs, or export.
 
 One suite has one Flight manifest, keyed internally by `feature`. The conductor
 persists stage evidence and
-typed checkpoints. It always finishes the active or explicitly re-entered stage,
+typed checkpoints. Boot verification overlaps docs and summary after scaffold.
+Tests join both results. The boot keeps its own cancellation owner across an
+external Requirements handoff; pause/abort await both owners. A boot failure or
+missing-env checkpoint is exposed after the Requirements lane, so there is only
+one answerable checkpoint. Outside that overlap, it finishes the active or explicitly re-entered stage,
 then selects the first unfinished stage in `FLIGHT_EXECUTION_ORDER`. That priority
 runs the serial Test run, its repair mirror, and Report before independent
 Parallel setup, so a large Portify pass cannot delay either evidence surface.
@@ -276,6 +280,22 @@ A plain resume preserves artifacts. Most stage jumps reset that stage and all
 later record stages after checking `STAGE_DEPENDS_ON`; a Parallel-setup jump
 resets only Portify because neither the run nor Report consumes its output. A
 full redo resets the entire pipeline.
+
+The docs collector can return the structured requirements draft in the same
+session. Canary fingerprints the accepted documents and prior summary, then the
+summary stage validates and assembles that draft through the normal stable-ID
+reconciler. Changed inputs, invalid drafts and older handoffs use the separate
+summary producer. Playwright listing and TypeScript validation run concurrently;
+both finish before mapping or another authoring pass. Flight mapping caches
+examined test/requirement pairs, including unmappable answers, and invalidates
+reuse when test bodies, shared helpers, support files, configuration, dependency
+lockfiles or requirement meanings change. It still recomputes the ledger.
+
+Parallel setup verifies declared port injection before starting an agent, using
+the same attempt-zero path as borrowed overlays. Both concurrent boots must pass;
+a failed verification feeds its diagnostics into the first repair prompt. External
+Portify starts return their actual `editing` or `verifying` state so clients poll
+instead of editing while the harness boots.
 
 ### Stage producers
 

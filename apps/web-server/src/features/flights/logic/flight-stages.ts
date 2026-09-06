@@ -118,6 +118,23 @@ export function defaultFlightId(): string {
  *  cancel (store reconcile already parked the flight). */
 export const driveControllers = new Map<string, AbortController>()
 
+/** Boot verification may outlive a Requirements checkpoint. Its controller is
+ * owned separately so returning that checkpoint does not orphan the boot. */
+export interface BackgroundEnvJob {
+  controller: AbortController
+  completion: Promise<StageOutcome>
+  outcome?: StageOutcome
+}
+export const backgroundEnvJobs = new Map<string, BackgroundEnvJob>()
+
+export function abortFlightWork(flightId: string): void {
+  driveControllers.get(flightId)?.abort()
+  const background = backgroundEnvJobs.get(flightId)
+  background?.controller.abort()
+  // A completed but deferred checkpoint has no producer left to unwind.
+  if (background?.outcome) backgroundEnvJobs.delete(flightId)
+}
+
 export function bankStageTiming(
   stage: FlightStage,
   key: FlightStageTimingKey,
@@ -405,6 +422,9 @@ export function firstOpenStageIndex(m: FlightManifest): number {
   // A live/checkpointed stage owns the next call even when its key is later in
   // normal priority. Otherwise a checkpoint response could be delivered to
   // Test run while an older Flight is still parked in Parallel setup.
+  const foreground = m.stages.findIndex((stage) => stage.key === m.currentStage
+    && (stage.status === 'running' || stage.status === 'waiting-for-approval'))
+  if (foreground >= 0) return foreground
   const active = m.stages.findIndex((stage) =>
     stage.status === 'running' || stage.status === 'waiting-for-approval',
   )

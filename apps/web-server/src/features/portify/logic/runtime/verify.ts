@@ -1,5 +1,6 @@
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import { portInjectability } from '../../../../../../../shared/launcher/port-injectability'
 import { collectPortSlots, buildServiceSpecs } from '../../../runs/logic/runtime/orchestrator'
 import { allocatePorts, releasePorts } from '../../../runs/logic/runtime/port-allocator'
 import { bootAndProbe, fileTee, type BootProbeResult } from '../../../runs/logic/runtime/boot-probe'
@@ -33,6 +34,14 @@ export interface VerifyDeps {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Declaration is only permission to try verification without an edit. The
+ * two concurrent boots remain the proof that the app reads its injected ports. */
+export function hasDeclaredPortInjection(feature: FeatureConfig, env?: string): boolean {
+  const slots = collectPortSlots(feature, env)
+  return portInjectability(feature.repos) === 'declared'
+    && slots.length > 0 && slots.every((slot) => Boolean(slot.env?.trim()))
 }
 
 export async function verifyDoubleBoot(

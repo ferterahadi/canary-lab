@@ -27,4 +27,10 @@ How to work:
 - Group verifiable behaviors, flows, edge cases, and errors under short headings. Cite repo-relative sources per group.
 - Do NOT modify any file inside the repos. The output path above is the only file you write.
 
-If you find no material relevant to the intent anywhere, do NOT write the file. Reply with the single line `NOTHING_FOUND: <one short reason>` instead. Otherwise, after writing the file, reply with one short line summarizing what you collected and from where.
+If you find no material relevant to the intent anywhere, do NOT write the file. Reply with the single line `NOTHING_FOUND: <one short reason>` instead. Otherwise, after writing the document, draft its structured requirements in this
+same session. Follow the summary instructions below, reading the completed output
+and every other listed document. Return that JSON as your final answer (on `data`
+when responding to a Flight checkpoint). Canary validates the draft and preserves
+requirement ids in the next stage. Do not write the generated summary files.
+
+{{summaryPrompt}}

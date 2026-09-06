@@ -14,6 +14,7 @@ import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectS
 import { agentProgressSink } from './agent-progress'
 import { recordStageAgentSession } from './stage-agent-sessions'
 import { CHECKPOINT_OPTIONS } from '../types'
+import { prepareRequirementsDraft, saveRequirementsDraft, type RequirementsDraftInput } from './requirements-draft'
 
 // Populate features/<f>/docs/ — the prd-source checkpoint is a two-path FORK:
 //   manual — the user supplies docs (UI drop zone / MCP write_feature_doc),
@@ -274,7 +275,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
   const settleCollected = (
     ctx: StageContext,
     mode: 'collect-repo-docs' | 'infer-from-diff',
-    plan: { outName: string; outPath: string },
+    plan: { outName: string; outPath: string; draftInput?: RequirementsDraftInput },
     reply: string,
   ): StageOutcome => {
     const m = ctx.manifest()
@@ -294,6 +295,9 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     // Symmetric with attemptLogLine: the accepted attempt says so, so the band
     // reads as a sequence of verdicts rather than undifferentiated noise.
     ctx.appendLog(`[docs] agent attempt (${MODE_LABEL[mode]}) succeeded — wrote docs/${plan.outName}\n`)
+    if (saveRequirementsDraft(featureDirFor(deps, m.feature), ctx.flightDir, plan.outName, plan.draftInput, reply)) {
+      ctx.appendLog('[docs] requirements draft saved for summary validation\n')
+    }
     return {
       kind: 'done',
       evidence: {
@@ -340,6 +344,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     // follows should still carry the note).
     const note = feedback ?? stageFeedback(m, 'docs')
     const feedbackNote = note ? `Feedback on the previous attempt — take it into account: ${note}` : ''
+    const draft = prepareRequirementsDraft(featureDir, ctx.flightDir, outName)
     const prompt =
       mode === 'collect-repo-docs'
         ? renderPrompt('flight-collect-docs.md', {
@@ -348,6 +353,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
             repoPaths: m.repoPaths.map((p) => `- ${p}`).join('\n'),
             outPath,
             feedbackNote,
+            summaryPrompt: draft.prompt,
           })
         : renderPrompt('flight-infer-diff.md', {
             feature: m.feature,
@@ -355,8 +361,9 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
             repoTargets,
             outPath,
             feedbackNote,
+            summaryPrompt: draft.prompt,
           })
-    const plan = { outName, outPath }
+    const plan = { outName, outPath, draftInput: draft.input }
 
     // Hand off unless the caller forced the local path (the client answered
     // `run-internally`). The client gets the SAME rendered prompt — including its
@@ -365,8 +372,8 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     if (forceInternal !== true && handsOffToClient(ctx)) {
       ctx.appendLog(`[docs] handed the ${MODE_LABEL[mode]} step to the external agent session…\n`)
       return externalWorkCheckpoint(ctx, 'docs', prompt, {
-        message: `Ask your user first: if they have a PRD/spec to supply, write THAT to ${outPath} instead of gathering — never invent one. Otherwise gather requirement docs (${MODE_LABEL[mode]}) in your own client and write the doc to the same path, then respond. Reply NOTHING_FOUND on \`data\` if there is nothing relevant.`,
-        context: { mode, outPath, outName, intent: m.description },
+        message: `Ask your user first: if they have a PRD/spec to supply, write THAT to ${outPath} instead of gathering — never invent one. Otherwise gather requirement docs (${MODE_LABEL[mode]}) in your own client and write the doc to the same path. Follow the prompt to draft its summary in this session and return { requirements[], variantDimension? } on \`data\`. Reply NOTHING_FOUND if there is nothing relevant.`,
+        context: { mode, ...plan, intent: m.description },
       })
     }
 
@@ -438,7 +445,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
         // all read `.context`; this was the odd one out, and its unit test hid
         // it by hand-building a flat fixture the parker never writes.
         const handOff = (m.stages.find((s) => s.key === 'docs')?.checkpoint?.data as
-          | { context?: { mode?: 'collect-repo-docs' | 'infer-from-diff'; outPath?: string; outName?: string } }
+          | { context?: { mode?: 'collect-repo-docs' | 'infer-from-diff'; outPath?: string; outName?: string; draftInput?: RequirementsDraftInput } }
           | undefined)?.context
         const mode = handOff?.mode ?? 'collect-repo-docs'
         if (choice === 'run-internally') {
@@ -460,7 +467,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
         // Same on-disk check the local agent's result goes through. `data` is only
         // mined for a NOTHING_FOUND reason — it never decides the verdict.
         const reply = typeof response.data === 'string' ? response.data : JSON.stringify(response.data ?? '')
-        return settleCollected(ctx, mode, { outName: handOff.outName, outPath: handOff.outPath }, reply)
+        return settleCollected(ctx, mode, { outName: handOff.outName, outPath: handOff.outPath, draftInput: handOff.draftInput }, reply)
       }
       if (choice === 'continue') {
         if (existing.length > 0) {

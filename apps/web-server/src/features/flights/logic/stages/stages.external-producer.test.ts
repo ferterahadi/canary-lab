@@ -709,6 +709,32 @@ describe('specs-coverage mapping — external producer', () => {
     expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')).toContain('@req-R1')
   })
 
+  it.each(['source changed', 'write denied'] as const)('handles mapping submission after %s without applying stale evidence', async (failure) => {
+    const dir = fullFeature()
+    const specPath = path.join(dir, 'e2e', 'a.spec.ts')
+    const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
+    setStage('specs-coverage', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { phase: 'authoring', pass: { iteration: 1, validationErrors: '', passes: [] } } } } })
+    const stage = specsCoverageStage(mapDeps({ coverage: { compute: (() => ledger(0)) as unknown as never } }))
+    const handoff = await stage.onCheckpointResponse!(ctx, { choice: 'submit', data: 'wrote specs' })
+    if (handoff.kind !== 'checkpoint') throw new Error('expected mapping handoff')
+    setStage('specs-coverage', { checkpoint: handoff.checkpoint })
+    const token = (handoff.checkpoint.data as { handOffId: string }).handOffId
+    if (failure === 'source changed') fs.writeFileSync(specPath, SPEC.replace('toBe(1)', 'toBe(2)'))
+    else fs.chmodSync(specPath, 0o400)
+    try {
+      const submitted = stage.onCheckpointResponse!(ctx, { choice: 'submit', token, data: { mappings: [{ testName: TEST_NAME, requirements: ['R1'] }] } })
+      if (failure === 'write denied') await expect(submitted).rejects.toThrow(/EACCES/)
+      else {
+        const next = handOffOf(await submitted)
+        expect(next.data.handOffId).not.toBe(token)
+        expect(next.data.context).toMatchObject({ phase: 'mapping', roster: [TEST_NAME] })
+      }
+      expect(fs.readFileSync(specPath, 'utf-8')).not.toContain('@req-R1')
+    } finally {
+      fs.chmodSync(specPath, 0o600)
+    }
+  })
+
   it('carries no-progress evidence across external authoring and mapping hand-offs', async () => {
     fullFeature()
     const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
@@ -739,15 +765,9 @@ describe('specs-coverage mapping — external producer', () => {
     expect(carriedPass.lastMappedGapSignature).toEqual(expect.any(String))
     setStage('specs-coverage', { checkpoint: (authorTwo as Extract<StageOutcome, { kind: 'checkpoint' }>).checkpoint })
 
-    const mapTwo = await adapter.onCheckpointResponse!(ctx, { choice: 'submit', token: String(authorTwoCp.data.handOffId) })
-    const mapTwoCp = handOffOf(mapTwo)
-    setStage('specs-coverage', { checkpoint: (mapTwo as Extract<StageOutcome, { kind: 'checkpoint' }>).checkpoint })
-
-    const stopped = await adapter.onCheckpointResponse!(ctx, {
-      choice: 'submit',
-      token: String(mapTwoCp.data.handOffId),
-      data: { mappings: [], unmappable: [{ testName: TEST_NAME, reason: 'no observable requirement applies' }] },
-    })
+    // The second authoring submission did not change the suite. Reuse the
+    // complete negative answer and reach the same no-progress stop directly.
+    const stopped = await adapter.onCheckpointResponse!(ctx, { choice: 'submit', token: String(authorTwoCp.data.handOffId) })
     expect(stopped).toMatchObject({
       kind: 'checkpoint',
       checkpoint: { kind: 'coverage-stuck', data: { stopReason: 'no-progress' } },

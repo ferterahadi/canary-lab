@@ -15,6 +15,18 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 2.3.0 — Unreleased
+
+> After upgrading, run `npx canary-lab upgrade`, then restart connected agent apps, to refresh Flight and Portify instructions.
+
+- **[General]** **Boot checks and requirements work run together.** Flight starts both after setup, waits for both before authoring tests, and keeps completed requirements when boot needs a retry.
+- **[Test Generation]** **Requirements need fewer agent handoffs.** Document collection can also produce the structured requirements draft. Flight validates it through the usual summary checks and uses a separate summary session when the draft is missing, invalid, or stale.
+- **[Test Generation]** **Spec validation runs in parallel.** Playwright test discovery and TypeScript checks run together, with both results checked before Flight continues.
+- **[Coverage]** **Unchanged coverage decisions are reused.** Flight avoids asking the mapper about the same test and requirement inputs again, including tests it previously could not map. Changes to tests, helpers, supporting files, configuration, dependencies, or requirement definitions invalidate reuse; test execution and coverage verification still run.
+- **[Portify]** **Parallel-ready suites can finish setup without an agent.** Portify first verifies suites that already declare configurable ports with two simultaneous boots on different ports. Healthy suites finish without edits; failed checks give the repair agent the boot diagnostics.
+
+---
+
 ## 2.2.1 — 2026-08-31
 
 - **[General]** **Flight stages keep one stable layout.** Every stage preserves the same At a Glance tiles and evidence panels while pending, running, failed, or complete, using consistent placeholders whenever evidence is unavailable.

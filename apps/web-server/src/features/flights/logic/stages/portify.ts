@@ -287,10 +287,10 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
     checkpoint: {
       kind: 'portify-gate',
       message:
-        `Make "${feature}" safe to run two at a time? An agent changes how each service picks its port, in a scratch copy of ` +
-        `your repos, then proves it by starting two copies of the app side by side — a big app can take 30-60+ minutes. If ` +
-        `another suite already did this work for the same app, Canary reuses and re-checks it first (the agent only runs when ` +
-        `that fails). Skip it and runs go one at a time — a later flight can ask again.`,
+        `Make "${feature}" safe to run two at a time? Canary first verifies port injection already declared by the suite, ` +
+        `or reuses a saved port change for the same app. It proves readiness by starting two scratch copies on different ports. ` +
+        `An agent runs only when changes are needed; duration depends on the stack and the edits required. ` +
+        `Skip it and runs go one at a time — a later flight can ask again.`,
       options: [...CHECKPOINT_OPTIONS['portify-gate']],
     },
   })

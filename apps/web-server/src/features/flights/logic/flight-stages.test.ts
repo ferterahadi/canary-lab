@@ -257,10 +257,16 @@ describe('rewind outcome', () => {
 })
 
 describe('reopenStages', () => {
-  it('flips the named stages and everything after them to pending on a settled flight', async () => {
+  it.each([true, false])('reopens downstream stages with an injected clock: %s', async (injectedClock) => {
     const { manifest, completion } = startFlight(args(), deps(allDone()))
     await completion
-    const reopened = reopenStages(manifest.flightId, ['docs', 'prd-summary', 'specs-coverage'], deps(allDone()))!
+    const before = Date.now()
+    const d = deps(allDone())
+    const reopened = reopenStages(manifest.flightId, ['docs', 'prd-summary', 'specs-coverage'], injectedClock ? d : { ...d, now: undefined })!
+    if (!injectedClock) {
+      expect(Date.parse(reopened.updatedAt)).toBeGreaterThanOrEqual(before)
+      expect(Date.parse(reopened.updatedAt)).toBeLessThanOrEqual(Date.now())
+    }
     expect(reopened.status).toBe('paused')
     expect(reopened.pauseReason).toBe('user')
     expect(reopened.currentStage).toBe('docs')

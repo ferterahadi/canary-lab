@@ -169,6 +169,26 @@ function getCallableBody(call: ts.CallExpression): ts.Node | null {
   return null
 }
 
+/** Shared spec context for mapping reuse: hooks, imports, fixtures and enclosing
+ * control flow affect every test. Remove only recognized test declarations so
+ * editing one body does not invalidate its unchanged siblings. */
+export function extractTestMappingContext(file: string, source: string): string {
+  const { sourceFile } = parseSource(file, source)
+  const transformed = ts.transform(sourceFile, [(context) => {
+    const visit: ts.Visitor = (node) => {
+      if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)
+        && isTestCall(node.expression) && getCallableBody(node.expression)) return undefined
+      return ts.visitEachChild(node, visit, context)
+    }
+    return (root) => ts.visitNode(root, visit) as ts.SourceFile
+  }])
+  try {
+    return ts.createPrinter().printFile(transformed.transformed[0])
+  } finally {
+    transformed.dispose()
+  }
+}
+
 function getTestNameArg(call: ts.CallExpression, src: ts.SourceFile, body: ts.Node | null): string | null {
   const staticName = getStringArg(call, src)
   if (staticName !== null) return staticName

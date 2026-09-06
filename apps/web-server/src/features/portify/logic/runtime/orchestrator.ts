@@ -19,12 +19,9 @@ export interface PortifyOrchestratorDeps {
   setup: () => Promise<PortifyRepoState[]>
   /** Run the agent for this attempt; `failureDetail` is set on retries. */
   runAgent: (attempt: number, failureDetail?: string) => Promise<void>
-  /** True when setup() pre-applied a sibling feature's overlay into the
-   *  worktree(s). Gates the attempt-0 verify: a seeded rewrite might already
-   *  pass the double-boot, so try it BEFORE spending an agent run. Without a
-   *  seed there is nothing to test — attempt 0 would burn a doomed double-boot
-   *  on every fresh portify. */
-  seeded?: () => boolean
+  /** Try the double-boot before an agent when native injection is declared or
+   * setup() pre-applied a sibling overlay. Declarations alone never pass it. */
+  verifyBeforeAgent?: () => boolean
   /** Resume the agent session with the user's review feedback (revise pass). */
   runFeedbackAgent: (feedback: string) => Promise<void>
   /** Unified diff of the agent's edits so far. */
@@ -70,13 +67,12 @@ export class PortifyOrchestrator {
       let diff: string | undefined
       let verification: PortifyVerification | undefined
 
-      // Attempt 0 — reuse before investigation: when setup seeded a sibling
-      // feature's saved overlay for the same app(s), the rewrite may already
+      // Attempt 0 — declared injection or a borrowed overlay may already
       // be complete. Verify it directly; a pass parks at ready-to-save with
       // ZERO agent minutes spent. A fail is not wasted either — its boot
       // evidence feeds attempt 1's prompt (normally the first agent run gets
       // no failure context at all).
-      if (d.seeded?.()) {
+      if (d.verifyBeforeAgent?.()) {
         diff = await d.captureDiff()
         m = { ...m, status: 'verifying', diff }
         d.persist(m)

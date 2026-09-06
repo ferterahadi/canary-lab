@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { docsDirFor } from './docs-collection'
+import type { MappingInferenceCache } from './mapping-cache'
 
 // Records the requirements-set hash the coverage engine last ran against. The
 // state model compares this to the live summary's `requirementsHash`: if they
@@ -15,6 +16,8 @@ export interface CoverageRunState {
   /** Per-requirement fingerprints at last run (id → fingerprint) — the baseline
    *  reconcile-by-delta (R10) diffs against to re-infer only changed reqs. */
   requirementFingerprints?: Record<string, string>
+  /** Examined test/requirement inputs; this records inference, never run proof. */
+  mappingInference?: MappingInferenceCache
   /** Last exact ledger percentage computed by a coverage pass. The suite-list
    *  status endpoint reads this small manifest instead of reparsing every spec.
    *  Absent on older manifests; those truthfully report "Covered" without a
