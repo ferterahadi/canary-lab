@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
-import { INSTRUCTIONS_BY_PROFILE, INSTRUCTIONS_DELIVERED_WINDOW } from './instructions'
+import { INSTRUCTIONS_BY_PROFILE, INSTRUCTIONS_DELIVERED_WINDOW, WORKFLOW_GUIDES } from './instructions'
 import { EXEC_TOOL_NAME, FULL_TOOLS } from './tool-profiles'
 import { classifyWaitForHealTask, type CanaryLabMcpDeps } from './tools'
 import { EXTERNAL_HEAL_NEXT_STEPS, buildSpecEditsWarning, normalizeRunCounts } from '../features/runs/logic/heal/external-heal-surface'
@@ -83,6 +83,31 @@ describe('repair guardrail — MCP instructions', () => {
 
   it('repair instructions forbid editing tests to clear the dirtyTests signal', () => {
     expect(INSTRUCTIONS_BY_PROFILE.repair).toMatch(/never edit the test files/i)
+  })
+
+  it('repair instructions read specEdits as untested edits: restore, or ask the human to adopt', () => {
+    // The lead is what a skill-less client gets; the rule must be there, not
+    // only in the guide.
+    const lead = INSTRUCTIONS_BY_PROFILE.repair
+    expect(lead).toMatch(/specEdits/)
+    expect(lead).toMatch(/not tested/i)
+    expect(lead).toMatch(/restore/i)
+    expect(lead).toMatch(/ask the human to adopt/i)
+    expect(lead).toMatch(/no (MCP )?tool can adopt/i)
+  })
+
+  it('the repair guide orders a restore on a weaker hint, never an edit to the test', () => {
+    const guide = WORKFLOW_GUIDES.repair
+    expect(guide).toMatch(/kind:"weaker"|weaker hint/i)
+    expect(guide).toMatch(/restore/i)
+    expect(guide).toMatch(/never a repair|never edit the test files/i)
+    expect(guide).toMatch(/one AI labelled/i)
+  })
+
+  it('compact instructions carry the specEdits rule too', () => {
+    const text = INSTRUCTIONS_BY_PROFILE.compact
+    expect(text).toMatch(/specEdits/)
+    expect(text).toMatch(/ask the human to adopt/i)
   })
 
   it('repair instructions keep the honest pass-count rule', () => {
