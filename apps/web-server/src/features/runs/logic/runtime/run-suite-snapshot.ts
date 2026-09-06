@@ -12,9 +12,10 @@ import path from 'path'
 import type { RunContext } from './run-context'
 import { copyDirRecursive } from '../../../../../../../shared/lib/copy-dir'
 import { computePendingEdits, hashFeatureSpecs } from '../dirty-specs/detect'
-import { readManifest } from './manifest'
+import { readManifest, type SpecEditsAdoptedBy } from './manifest'
 import { captureDirtySpecBaseline } from './run-manifest-writer'
 import { INTEGRITY_HINT_DISCLOSURE, deriveIntegrityHints } from './run-integrity-hints'
+import { detectHealMode } from './auto-heal'
 
 export type AdoptSpecEditsResult =
   | { ok: true; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
@@ -67,6 +68,38 @@ function readLive(featureDir: string, rel: string): string | undefined {
  *  running process would corrupt the very run it is meant to inform. */
 export async function adoptSpecEdits(ctx: RunContext): Promise<AdoptSpecEditsResult> {
   if (ctx.playwrightPty) return { ok: false, reason: 'tests-running' }
+  const adopted = await adoptPendingSpecEdits(ctx, 'human')
+  if (!adopted.ok) return adopted
+  const signal = ctx.signalGate.observe('rerun', {
+    hypothesis: 'A human adopted the edited spec(s) into this run.',
+    fixDescription: `Adopted ${adopted.adopted.join(', ')}; rerunning the suite as it now reads.`,
+    adoptedSpecEdits: adopted.adopted,
+  })
+  return { ok: true, adopted: adopted.adopted, rerun: signal.accepted ? 'signalled' : signal.reason }
+}
+
+/** The runner's own adopt, for the one sanctioned "edit the spec" path: a run
+ *  with zero editable repos (`detectHealMode` → `test`), where Canary itself
+ *  told the agent to fix the spec. Without it the agent's fix lands in the
+ *  live dir while every rerun executes the run-start copy, and the repair can
+ *  never pass. Called by the heal loops on the agent's signal, before the
+ *  rerun; keyed on the heal MODE, never on a verdict. Returns the adopted
+ *  files, or nothing when there is no copy, nothing pending, or app code. */
+export async function adoptTestHealSpecEdits(ctx: RunContext): Promise<string[]> {
+  if (ctx.suiteDir === ctx.feature.featureDir) return []
+  if (detectHealMode(ctx.paths.manifestPath) !== 'test') return []
+  if (computePendingEdits(ctx.feature.featureDir, ctx.suiteDir).length === 0) return []
+  const adopted = await adoptPendingSpecEdits(ctx, 'test-heal')
+  return adopted.ok ? adopted.adopted : []
+}
+
+type AdoptCoreResult =
+  | { ok: true; adopted: string[] }
+  | { ok: false; reason: 'nothing-to-adopt' | 'snapshot-failed' }
+
+/** Re-take the snapshot over the live suite, re-baseline the dirty record and
+ *  record the adoption. No signal: who reruns, and how, is the caller's. */
+async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy): Promise<AdoptCoreResult> {
   const live = ctx.feature.featureDir
   const hadSnapshot = ctx.suiteDir !== live
   const pending = hadSnapshot ? computePendingEdits(live, ctx.suiteDir) : []
@@ -82,15 +115,10 @@ export async function adoptSpecEdits(ctx: RunContext): Promise<AdoptSpecEditsRes
   const previous = readManifest(ctx.paths.manifestPath)?.specEdits?.adopted ?? []
   const at = new Date().toISOString()
   ctx.stateSink.patchManifest(ctx.runId, {
-    specEdits: { checkedAt: at, pending: [], adopted: [...previous, { at, files: adopted }] },
+    specEdits: { checkedAt: at, pending: [], adopted: [...previous, { at, by, files: adopted }] },
     integrity: { hints: [], disclosure: INTEGRITY_HINT_DISCLOSURE },
   })
-  const signal = ctx.signalGate.observe('rerun', {
-    hypothesis: 'A human adopted the edited spec(s) into this run.',
-    fixDescription: `Adopted ${adopted.join(', ')}; rerunning the suite as it now reads.`,
-    adoptedSpecEdits: adopted,
-  })
-  return { ok: true, adopted, rerun: signal.accepted ? 'signalled' : signal.reason }
+  return { ok: true, adopted }
 }
 
 /** Copy the live feature dir to `paths.suiteSnapshotDir`, point the run at the

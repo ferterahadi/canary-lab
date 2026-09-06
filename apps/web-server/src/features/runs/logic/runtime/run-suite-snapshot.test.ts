@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { adoptSpecEdits, recordSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
+import { adoptSpecEdits, adoptTestHealSpecEdits, recordSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
 import { writeManifest, type RunManifest } from './manifest'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
@@ -154,6 +154,20 @@ describe('recordSpecEdits', () => {
     })
   })
 
+  it('hints on a spec deleted since run start without its @req ids — there is no live file to read them from', () => {
+    const { ctx, sink } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', "test('a', { tag: ['@req-cart-1'] }, async () => { expect(1).toBe(1) })\n")
+    snapshotSuite(ctx)
+    fs.rmSync(path.join(ctx.feature.featureDir, 'e2e', 'a.spec.ts'))
+
+    recordSpecEdits(ctx)
+
+    const patch = sink.patches.at(-1) as { specEdits: RunManifest['specEdits']; integrity: RunManifest['integrity'] }
+    expect(patch.specEdits?.pending).toMatchObject([{ file: 'e2e/a.spec.ts', change: 'deleted' }])
+    expect(patch.integrity?.hints).toEqual([expect.objectContaining({ kind: 'weaker', file: 'e2e/a.spec.ts', test: 'a' })])
+    expect(patch.integrity?.hints[0]).not.toHaveProperty('requirements')
+  })
+
   it('writes the integrity hints and their disclosure beside the pending edits', () => {
     const { ctx, sink } = ctxFor()
     write(ctx.feature.featureDir, 'e2e/a.spec.ts', "test('a', { tag: ['@req-cart-1'] }, async () => { expect(1).toBe(1); expect(2).toBe(2) })\n")
@@ -234,7 +248,7 @@ describe('adoptSpecEdits', () => {
     expect(fs.readFileSync(path.join(ctx.paths.suiteSnapshotDir, 'e2e', 'a.spec.ts'), 'utf8')).toBe(WEAKER)
     expect(captureRunStart).toHaveBeenLastCalledWith('demo', ctx.paths.suiteSnapshotDir)
     const last = sink.patches.at(-1) as { specEdits: RunManifest['specEdits']; integrity: RunManifest['integrity'] }
-    expect(last.specEdits).toMatchObject({ pending: [], adopted: [{ at: expect.any(String), files: ['e2e/a.spec.ts'] }] })
+    expect(last.specEdits).toMatchObject({ pending: [], adopted: [{ at: expect.any(String), by: 'human', files: ['e2e/a.spec.ts'] }] })
     // Adopted means accepted: the hints that described the pending edit are gone.
     expect(last.integrity).toMatchObject({ hints: [] })
     // The rerun signal carries the human's authorship so the journal reads right.
@@ -283,5 +297,71 @@ describe('suiteDigest', () => {
 
     write(b, 'e2e/x.spec.ts', "test('a', async () => {})\n")
     expect(suiteDigest(a)).not.toBe(suiteDigest(b))
+  })
+})
+
+// Test-heal mode is the one sanctioned "edit the spec" path: the feature has
+// zero editable repos, so the spec IS the fixable code and Canary itself told
+// the agent to change it. Without this, the agent's fix lands in the live dir
+// while every rerun executes the run-start copy — the repair can never pass.
+// The adopt is keyed on the heal MODE (no app to fix), never on a verdict.
+describe('adoptTestHealSpecEdits', () => {
+  const WEAKER = "test('a', async () => {})\n"
+
+  function manifestWithRepos(ctx: RunContext, repoPaths: string[]): void {
+    writeManifest(ctx.paths.manifestPath, {
+      runId: ctx.runId, feature: 'demo', startedAt: 't', status: 'healing', healCycles: 1, services: [], repoPaths,
+    } as RunManifest)
+  }
+
+  it('adopts the live edits before a rerun when the run has no editable repos', async () => {
+    const { ctx, sink } = ctxFor()
+    manifestWithRepos(ctx, [])
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', WEAKER)
+
+    expect(await adoptTestHealSpecEdits(ctx)).toEqual(['e2e/a.spec.ts'])
+
+    expect(fs.readFileSync(path.join(ctx.paths.suiteSnapshotDir, 'e2e', 'a.spec.ts'), 'utf8')).toBe(WEAKER)
+    const last = sink.patches.at(-1) as { specEdits: RunManifest['specEdits'] }
+    // The record says who adopted, so the UI never shows a runner adopt as a human one.
+    expect(last.specEdits?.adopted).toEqual([{ at: expect.any(String), by: 'test-heal', files: ['e2e/a.spec.ts'] }])
+    // No rerun signal: the loop is already acting on the agent's own signal.
+    expect(ctx.signalGate.consume()).toBeNull()
+  })
+
+  it('never adopts for a run that has app code to fix', async () => {
+    const { ctx, sink } = ctxFor()
+    manifestWithRepos(ctx, ['/repo/app'])
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', WEAKER)
+    const before = sink.patches.length
+
+    expect(await adoptTestHealSpecEdits(ctx)).toEqual([])
+    expect(fs.readFileSync(path.join(ctx.paths.suiteSnapshotDir, 'e2e', 'a.spec.ts'), 'utf8')).toBe(SPEC_A)
+    expect(sink.patches.length).toBe(before)
+  })
+
+  it('adopts nothing when the re-snapshot fails — the copy that ran stays the copy', async () => {
+    const { ctx } = ctxFor()
+    manifestWithRepos(ctx, [])
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', WEAKER)
+    vi.spyOn(fs, 'copyFileSync').mockImplementation(() => { throw new Error('EACCES') })
+
+    expect(await adoptTestHealSpecEdits(ctx)).toEqual([])
+  })
+
+  it('is a no-op when nothing is pending, and when the run has no copy to adopt into', async () => {
+    const { ctx } = ctxFor()
+    manifestWithRepos(ctx, [])
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    expect(await adoptTestHealSpecEdits(ctx)).toEqual([])
+
+    snapshotSuite(ctx)
+    expect(await adoptTestHealSpecEdits(ctx)).toEqual([])
   })
 })

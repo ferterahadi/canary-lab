@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { buildAgentSpawnCommand, buildClaudeMcpConfigArg, isAgentCliAvailable, makeAgentSpawnCommandBuilder, pickAvailableHealAgent, readPriorSessionId, readPriorSessionIdFromValue, resolveAgentBinary, type AgentResolveDeps, type HealAgent } from './auto-heal'
+import { MODE_COPY, buildAgentSpawnCommand, buildClaudeMcpConfigArg, detectHealMode, isAgentCliAvailable, makeAgentSpawnCommandBuilder, pickAvailableHealAgent, readPriorSessionId, readPriorSessionIdFromValue, resolveAgentBinary, type AgentResolveDeps, type HealAgent } from './auto-heal'
 import { HEAL_MODELS } from '../../../agent-sessions/logic/agent-models'
 
 // Deps that find nothing — `which` misses and no candidate path is executable.
@@ -539,5 +539,34 @@ describe('pickAvailableHealAgent', () => {
 
   it('returns null when neither claude nor codex resolves', () => {
     expect(pickAvailableHealAgent('', NONE)).toBe(null)
+  })
+})
+
+// The spawned agent's copy of the repair rule, and the one gate that can flip
+// it. The spec-edit boundary (D9) makes a live spec edit inert for every run
+// that has app code; `test` mode is the sole sanctioned exception, and it is
+// selected by repo EVIDENCE alone — so both the copy and the gate are pinned.
+describe('repair rule — spawned heal agent', () => {
+  it('service mode tells the agent to fix the app, not the tests', () => {
+    expect(MODE_COPY.service.healingDirective).toMatch(/not tests/)
+    expect(MODE_COPY.service.healingDirective).not.toMatch(/fix the (failing )?(playwright )?tests/i)
+  })
+
+  it('only test mode names the spec as the thing to fix', () => {
+    expect(MODE_COPY.test.healingDirective).toMatch(/no editable service repos/)
+    expect(MODE_COPY.test.healingDirective).toMatch(/Fix the failing Playwright tests/)
+  })
+
+  it('selects test mode only on zero repoPaths, and falls back to service without a manifest', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-mode-'))
+    const manifestPath = path.join(dir, 'run-manifest.json')
+    // Missing manifest: a transient read glitch must never hand a feature with
+    // app code the "edit the spec" directive.
+    expect(detectHealMode(manifestPath)).toBe('service')
+    fs.writeFileSync(manifestPath, JSON.stringify({ runId: 'r', feature: 'f', startedAt: 't', status: 'healing', healCycles: 0, services: [], repoPaths: ['/repo/app'] }))
+    expect(detectHealMode(manifestPath)).toBe('service')
+    fs.writeFileSync(manifestPath, JSON.stringify({ runId: 'r', feature: 'f', startedAt: 't', status: 'healing', healCycles: 0, services: [], repoPaths: [] }))
+    expect(detectHealMode(manifestPath)).toBe('test')
+    fs.rmSync(dir, { recursive: true, force: true })
   })
 })

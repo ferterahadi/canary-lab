@@ -109,13 +109,19 @@ export type RunSuiteSnapshot =
   | { kind: 'taken'; dir: string; takenAt: string; digest: string }
   | { kind: 'unavailable'; at: string; reason: string }
 
+/** Who took a live spec edit into the run. `human`: the adopt route in Canary
+ *  Lab. `test-heal`: the runner itself, only for a run with zero editable repos
+ *  — there the spec is the only fixable code and Canary told the agent to edit
+ *  it, so its own signal is the adopt. Never a verdict, never an MCP tool. */
+export type SpecEditsAdoptedBy = 'human' | 'test-heal'
+
 /** Live spec edits measured against the run-start copy. `pending` is what the
- *  run has NOT executed; a human adopting an edit re-takes the snapshot and
- *  appends to `adopted`. Re-checked after every Playwright exit. */
+ *  run has NOT executed; adopting an edit re-takes the snapshot and appends to
+ *  `adopted`. Re-checked after every Playwright exit. */
 export interface RunSpecEdits {
   checkedAt: string
   pending: PendingSpecEdit[]
-  adopted: Array<{ at: string; files: string[] }>
+  adopted: Array<{ at: string; by: SpecEditsAdoptedBy; files: string[] }>
 }
 
 /** What the strength differential says about `specEdits.pending` (D13).

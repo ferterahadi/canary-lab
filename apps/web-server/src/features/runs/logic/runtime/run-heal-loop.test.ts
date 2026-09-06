@@ -37,6 +37,7 @@ const h = vi.hoisted(() => ({
   appendJournalIteration: vi.fn(),
   markStoppedEarly: vi.fn(),
   recordLifecycle: vi.fn(),
+  adoptTestHealSpecEdits: vi.fn(),
 }))
 
 vi.mock('./run-playwright', () => ({
@@ -53,6 +54,7 @@ vi.mock('./run-heal-agent', () => ({
   recordHealEnd: h.recordHealEnd,
 }))
 vi.mock('./run-service-boot', () => ({ ensureServicesRunning: h.ensureServicesRunning }))
+vi.mock('./run-suite-snapshot', () => ({ adoptTestHealSpecEdits: h.adoptTestHealSpecEdits }))
 vi.mock('./feature-repo-diff', () => ({
   snapshotFeatureRepos: h.snapshotFeatureRepos,
   diffFeatureRepos: h.diffFeatureRepos,
@@ -117,6 +119,7 @@ beforeEach(() => {
   h.snapshotFeatureRepos.mockResolvedValue([])
   h.diffFeatureRepos.mockResolvedValue([])
   h.diffContentForFeatureRepos.mockResolvedValue('')
+  h.adoptTestHealSpecEdits.mockResolvedValue([])
   h.decideRunStatus.mockReturnValue('failed')
   h.runPlaywright.mockResolvedValue(1)
   h.captureHealAgentCause.mockReturnValue(undefined)
@@ -283,6 +286,20 @@ describe('runManualExternalHealLoop', () => {
     expect(await runManualExternalHealLoop(ctx, host, 'failed')).toBe('passed')
     expect(h.appendJournalIteration).not.toHaveBeenCalled()
     expect(host.rerun).toHaveBeenCalledTimes(1)
+  })
+
+  it('adopts test-heal spec edits into the copy before the rerun executes it', async () => {
+    // Order is the point: adopting after host.rerun() would still leave
+    // runPlaywright executing the stale copy on this cycle.
+    const { ctx } = ctxFor()
+    h.waitForHealSignal.mockResolvedValue({ signal: rerunSignal() })
+    h.decideRunStatus.mockReturnValue('passed')
+    const host = makeLoopHost()
+
+    await runManualExternalHealLoop(ctx, host, 'failed')
+
+    expect(h.adoptTestHealSpecEdits).toHaveBeenCalledWith(ctx)
+    expect(h.adoptTestHealSpecEdits.mock.invocationCallOrder[0]).toBeLessThan((host.rerun as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0])
   })
 
   it('keeps waiting for another signal while the suite is still red', async () => {
@@ -504,6 +521,28 @@ describe('runAutoHealLoop', () => {
       expect(await runAutoHealLoop(ctx, makeLoopHost())).toBe('failed')
       expect(h.runHealAgent).not.toHaveBeenCalled()
       expect(h.recordHealEnd).toHaveBeenCalledWith(ctx, expect.objectContaining({ reason: 'foreign-abort' }))
+    })
+
+    it('adopts test-heal spec edits before the cycle reruns, on both the rerun and the restart arm', async () => {
+      const { ctx } = ctxFor({}, { autoHeal: { maxCycles: 1 } })
+      h.runHealAgent.mockResolvedValue({ signal: rerunSignal(), reason: 'signal' })
+      const host = makeLoopHost()
+
+      await runAutoHealLoop(ctx, host)
+
+      expect(h.adoptTestHealSpecEdits).toHaveBeenCalledWith(ctx)
+      expect(h.adoptTestHealSpecEdits.mock.invocationCallOrder[0]).toBeLessThan((host.rerun as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0])
+
+      vi.clearAllMocks()
+      h.adoptTestHealSpecEdits.mockResolvedValue([])
+      h.runHealAgent.mockResolvedValue({ signal: { kind: 'restart', body: {} }, reason: 'signal' })
+      const { ctx: ctx2 } = ctxFor({}, { autoHeal: { maxCycles: 1 } })
+      const host2 = makeLoopHost()
+
+      await runAutoHealLoop(ctx2, host2)
+
+      expect(h.adoptTestHealSpecEdits).toHaveBeenCalledWith(ctx2)
+      expect(h.adoptTestHealSpecEdits.mock.invocationCallOrder[0]).toBeLessThan((host2.restart as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0])
     })
 
     it('stops with a max-cycles reason once the cap is reached', async () => {
