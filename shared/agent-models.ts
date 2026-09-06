@@ -105,7 +105,7 @@ export const KNOWN_MODELS: Record<ModelAgentKind, readonly string[]> = {
 // The tier is explanatory UI copy; the actual provider knobs are explicit per
 // stage below because equal-capability models can need different effort levels.
 // Claude's stable aliases resolve to the latest family member. Codex resolves a
-// Sol/Terra role from the installed CLI catalog, so version releases do not
+// Astra/Sol/Terra role from the installed CLI catalog, so version releases do not
 // require a Canary update.
 export type ModelTier = 'frontier' | 'agentic' | 'balanced'
 
@@ -135,7 +135,7 @@ export const STAGE_RECOMMENDATION_REASON: Record<ModelStageKey, string> = {
   commit: 'Commit and PR copy needs faithful diff analysis but does not modify product code.',
 }
 
-type CodexModelRole = 'sol' | 'terra'
+type CodexModelRole = 'astra' | 'sol' | 'terra'
 
 interface StageModelRecommendation<TModel extends string = string> {
   model: TModel
@@ -166,9 +166,9 @@ export const RECOMMENDED_BY_STAGE: ModelRecommendations = {
     scout: { model: 'terra', effort: 'high' },
     docs: { model: 'terra', effort: 'high' },
     prd: { model: 'sol', effort: 'high' },
-    gen: { model: 'sol', effort: 'high' },
+    gen: { model: 'astra', effort: 'high' },
     mapping: { model: 'sol', effort: 'high' },
-    heal: { model: 'sol', effort: 'high' },
+    heal: { model: 'astra', effort: 'high' },
     portify: { model: 'terra', effort: 'high' },
     report: { model: 'terra', effort: 'high' },
     commit: { model: 'terra', effort: 'medium' },
@@ -182,13 +182,16 @@ export function recommendedChoice(
 ): StageModelChoice {
   if (agent === 'claude') return RECOMMENDED_BY_STAGE.claude[stage]
 
-  // The Sol/Terra role names are stable while the version prefix changes.
-  // If a future catalog no longer exposes that role, keep the safe effort-only
-  // recommendation rather than pinning an unrelated model by list position.
+  // Reserve Astra for code authoring and repair; older catalogs retain Sol.
+  // Match roles in preference order, independent of the CLI catalog order.
+  // Without a matching role, keep the safe effort-only recommendation.
   const recommendation = RECOMMENDED_BY_STAGE.codex[stage]
-  const suffix = `-${recommendation.model}`
-  const model = availableModels.find(({ value }) => value.toLowerCase().endsWith(suffix))?.value ?? null
-  return { model, effort: recommendation.effort }
+  const roles = recommendation.model === 'astra' ? ['astra', 'sol'] : [recommendation.model]
+  for (const role of roles) {
+    const model = availableModels.find(({ value }) => value.toLowerCase().endsWith(`-${role}`))?.value
+    if (model) return { model, effort: recommendation.effort }
+  }
+  return { model: null, effort: recommendation.effort }
 }
 
 // ── Normalization (the JSON/config boundary) ─────────────────────────────────

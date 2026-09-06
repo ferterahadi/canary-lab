@@ -206,6 +206,32 @@ describe('ModelMatrixDialog', () => {
     expect(select('Report reasoning effort').value).toBe('high')
   })
 
+  it('Reset all selects discovered Astra for authoring and repair and saves those choices', async () => {
+    vi.mocked(api.getAgentProbe).mockResolvedValue({
+      ...SNAPSHOT,
+      codex: OK_PROBE('codex', { models: [
+        ...SNAPSHOT.codex.models,
+        { value: 'gpt-6-astra', label: 'GPT-6-Astra' },
+      ] }),
+    })
+    await mount({ agent: 'codex' })
+    await act(async () => {
+      [...document.querySelectorAll('button')].find((b) => b.textContent === 'Reset all to recommended')!.click()
+    })
+    expect(select('Test authoring model').value).toBe('gpt-6-astra')
+    expect(select('Auto-repair model').value).toBe('gpt-6-astra')
+    expect(select('Coverage mapping model').value).toBe('gpt-5.6-sol')
+    expect(select('Repo scan model').value).toBe('gpt-5.6-terra')
+    await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.click() })
+    expect(api.putProjectConfig).toHaveBeenCalledWith({ agentModels: {
+      claude: {},
+      codex: expect.objectContaining({
+        gen: { model: 'gpt-6-astra', effort: 'high' },
+        heal: { model: 'gpt-6-astra', effort: 'high' },
+      }),
+    } })
+  })
+
   it('an auth-failed probe warns with the remedy and Retry re-probes fresh — nothing is disabled', async () => {
     vi.mocked(api.getAgentProbe).mockResolvedValue({
       ...SNAPSHOT,
