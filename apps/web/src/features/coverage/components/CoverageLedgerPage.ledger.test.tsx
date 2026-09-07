@@ -48,6 +48,7 @@ vi.mock('@/shared/api/client', async () => {
     listCoverageJobs: vi.fn(),
     getFeatureTests: vi.fn(),
     openEditor: vi.fn(),
+    acceptRequirementWording: vi.fn(),
   }
 })
 
@@ -508,4 +509,32 @@ describe('CoverageLedgerPage', () => {
     })
     expect(container.querySelector('[data-testid="test-source-sends receipt"]')?.textContent).toContain('Source not found')
   })
+
+  // --- The time axis (D11) on the page: worst-first sort + the human-only Accept lever. ---
+
+  it('sorts a requirement whose tests were weakened since the proof above every other row', async () => {
+    const led = structuredClone(LEDGER)
+    led.requirements[1].enforcement = { state: 'tests-weakened', provenAt: { runId: 'run-1', at: '2026-09-02T00:00:00.000Z' }, testsChangedAt: { at: '2026-09-03T00:00:00.000Z', tests: ['sends receipt'], verdict: 'weaker' }, wordingChangedAt: '2026-09-01T00:00:00.000Z', accepted: 'none' }
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
+    await mount()
+    const ids = [...container.querySelectorAll('[data-testid^="req-R"]')].map((el) => el.getAttribute('data-testid'))
+    // R2 is covered — it would sink to the bottom on claim status alone.
+    expect(ids[0]).toBe('req-R2')
+  })
+
+  it('Accept wording posts the acceptance for that requirement and re-pulls the ledger', async () => {
+    const led = structuredClone(LEDGER)
+    led.requirements[1].enforcement = { state: 'proven-unchanged', provenAt: { runId: 'run-1', at: '2026-09-02T00:00:00.000Z' }, wordingChangedAt: '2026-09-01T00:00:00.000Z', accepted: 'none' }
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
+    vi.mocked(api.acceptRequirementWording).mockResolvedValue({ feature: 'checkout', requirementId: 'R2', acceptedAt: '2026-09-07T00:00:00.000Z', acceptedFingerprint: 'fp' })
+    await mount()
+    const pulls = vi.mocked(api.getFeatureCoverage).mock.calls.length
+    const button = container.querySelector('[data-testid="accept-R2"]') as HTMLButtonElement
+    expect(button).toBeTruthy()
+    await act(async () => { button.click() })
+    await act(async () => { await Promise.resolve() })
+    expect(api.acceptRequirementWording).toHaveBeenCalledWith('checkout', 'R2')
+    expect(vi.mocked(api.getFeatureCoverage).mock.calls.length).toBeGreaterThan(pulls)
+  })
+
 })

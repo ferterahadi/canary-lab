@@ -41,6 +41,10 @@ export const summaryRequirementInput = z.object({
     tier: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     description: z.string(),
   })).optional(),
+  source: z.object({
+    doc: z.string().describe('The source doc (from context.docs) this requirement was read in — exactly as listed.'),
+    heading: z.string().optional().describe('The heading of the section it sits under, when the doc has headings.'),
+  }).optional().describe('Provenance: where the wording came from. Canary re-locates it in that doc and shows the place in the ledger; a doc not in context.docs is dropped.'),
 })
 
 // The feature-level variant dimension (D1) an offloaded client may declare on

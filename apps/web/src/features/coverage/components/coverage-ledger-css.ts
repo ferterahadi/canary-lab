@@ -54,6 +54,7 @@ export const COVERAGE_CSS = `
 .clcov-cap{display:flex;flex-wrap:wrap;align-items:center;gap:9px;font-size:11px;color:var(--text-muted)}
 .clcov-cap strong{color:var(--text-secondary);font-variant-numeric:tabular-nums;font-weight:600}
 .clcov-cap-sep{color:var(--border-default)}
+.clcov-cap-run{font-family:var(--font-mono);font-size:10.5px;color:var(--text-secondary)}
 .clcov-stale{color:var(--warning);cursor:help;border-bottom:1px dotted color-mix(in srgb,var(--warning) 55%,transparent)}
 .clcov-info{position:relative;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:2px;border-radius:50%;border:1px solid var(--border-default);color:var(--text-muted);cursor:help;outline:none}
 .clcov-info:hover,.clcov-info:focus-visible{color:var(--text-primary);border-color:color-mix(in srgb,var(--text-muted) 45%,var(--border-default))}
@@ -110,6 +111,12 @@ export const COVERAGE_CSS = `
 .clcov-gap{display:inline-flex;align-items:center;vertical-align:middle;gap:5px;margin-left:6px;font-size:10px;font-weight:600;white-space:nowrap;border-radius:999px;padding:1px 8px;border:1px solid color-mix(in srgb,currentColor 38%,transparent);background:color-mix(in srgb,currentColor 12%,transparent)}
 .clcov-gap-dot{width:6px;height:6px;border-radius:50%;flex:none}
 .clcov-req-text{font-size:12px;color:var(--text-secondary);line-height:1.45;margin-top:5px}
+.clcov-enf{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:6px;font-size:10.5px;color:var(--text-muted);font-variant-numeric:tabular-nums}
+.clcov-enf-item{display:inline-flex;align-items:center;gap:8px}
+.clcov-enf-sep{color:var(--border-default)}
+.clcov-enf code{font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)}
+.clcov-enf-accept{font:inherit;font-size:10.5px;line-height:1.3;padding:1px 8px;border-radius:999px;border:1px solid var(--border-default);background:transparent;color:var(--text-secondary);cursor:pointer;transition:background 120ms,border-color 120ms}
+.clcov-enf-accept:hover{background:var(--bg-selected);border-color:var(--text-muted)}
 /* Variant coverage = accordion: a row of path pills (happy 1/4); clicking one
    reveals only that path's variant chips below, so a many-path/variant requirement
    stays compact and you inspect one path's gap at a time. */

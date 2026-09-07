@@ -1,5 +1,5 @@
-import { type KeyboardEvent as ReactKeyboardEvent, useState } from 'react'
-import type { CoverageLedger, CoverageStatus, ExtractedTest, GapType, RequirementCoverage, TestCoverage, TestStrength } from '@/shared/api/types'
+import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useState } from 'react'
+import type { CoverageLedger, CoverageStatus, EnforcementState, ExtractedTest, GapType, RequirementCoverage, RequirementEnforcement, TestCoverage, TestStrength } from '@/shared/api/types'
 import { TestPresentation } from '@/shared/ui/TestPresentation'
 import { TestIdBadge } from '@/shared/ui/TestIdBadge'
 import { stripLeadingTestOrdinal } from '@/shared/test-numbering'
@@ -53,6 +53,40 @@ export const PATH_DESC: Record<string, string> = { happy: 'happy', sad: 'failure
 // gaps that need work sit at the top — the whole point of the ledger.
 export const STATUS_RANK: Record<CoverageStatus, number> = { uncovered: 0, partial: 1, covered: 2 }
 
+// The time axis (D11): one chip per requirement, worst-first. The copy is the
+// 2026-09-03 mockup's; the hues follow the status vocabulary (rose = the proof
+// is undermined, amber = the proof is behind, green = proven and current).
+export const ENFORCEMENT_META: Record<EnforcementState, { label: string; abbr: string; color: string; rank: number; help: string }> = {
+  'tests-weakened': { label: 'Tests weakened since proof', abbr: 'W', color: 'var(--danger)', rank: 0, help: 'A mapped test was made weaker after the run that proved this requirement — that proof never saw the weaker test.' },
+  'proof-stale': { label: 'Proof stale', abbr: 'S', color: 'var(--warning)', rank: 1, help: 'A mapped test changed after the proof (or the requirement was never proven) and no green run has followed.' },
+  'wording-ahead': { label: 'Wording ahead of tests', abbr: 'A', color: 'var(--warning)', rank: 2, help: 'The requirement\'s wording changed after its tests and its proof — the tests may no longer test what it says.' },
+  'proven-unchanged': { label: 'Proven, unchanged', abbr: 'P', color: 'var(--success)', rank: 3, help: 'A green run over every mapped test is newer than both the tests\' and the wording\'s last change.' },
+}
+
+/** Worst-first row order: a weakened test outranks any claim status (the proof
+ *  is undermined, whatever the tags claim), then claim status, then the time
+ *  axis. Stable within a rank; a ledger without the axis sorts by claim alone. */
+export function compareRequirements(a: RequirementCoverage, b: RequirementCoverage): number {
+  const weakened = (rc: RequirementCoverage): number => (rc.enforcement?.state === 'tests-weakened' ? 0 : 1)
+  const axis = (rc: RequirementCoverage): number => (rc.enforcement ? ENFORCEMENT_META[rc.enforcement.state].rank : 0)
+  return weakened(a) - weakened(b)
+    || STATUS_RANK[statusOf(a)] - STATUS_RANK[statusOf(b)]
+    || axis(a) - axis(b)
+}
+
+/** ISO instant → calendar day; the axis is about ORDER, and a day is the grain a
+ *  reader compares by (three full timestamps on one line are noise). */
+const day = (iso: string): string => iso.slice(0, 10)
+
+function enforcementTooltip(e: RequirementEnforcement): string {
+  return [
+    ENFORCEMENT_META[e.state].help,
+    e.provenAt ? `Proven in run ${e.provenAt.runId} · ${day(e.provenAt.at)}` : 'Never proven — no run has passed every mapped test',
+    e.testsChangedAt ? `Tests changed ${day(e.testsChangedAt.at)} (${e.testsChangedAt.verdict})` : 'No recorded test change',
+    `Wording changed ${day(e.wordingChangedAt)}`,
+  ].join('\n')
+}
+
 // Golden-angle hue rotation gives each test a distinct, stable colour regardless
 // of how many there are. Mid lightness reads on both light and dark themes.
 export function testColor(index: number): string {
@@ -90,15 +124,75 @@ export function countFor(ledger: CoverageLedger, g: GapType): number {
   }
 }
 
-export function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
+// The time axis under a requirement's text: the proof run, the last test change
+// with its verdict, the last wording change, where the wording came from, and
+// the Accept lever. Facts as a `·`-separated strip in the muted hue — the chip
+// above already carries the verdict colour, so the strip stays neutral.
+function EnforcementStrip({ rc, enforcement: e, onAccept }: { rc: RequirementCoverage; enforcement: RequirementEnforcement; onAccept?: () => void }) {
+  const id = rc.requirement.id
+  const source = rc.requirement.source
+  const acceptedAt = rc.requirement.acceptedAt
+  const items: Array<{ key: string; node: ReactNode; title?: string }> = [
+    e.provenAt
+      ? { key: 'proven', node: <>proven in run <code>{e.provenAt.runId}</code></>, title: `Every mapped test passed in run ${e.provenAt.runId} on ${day(e.provenAt.at)}` }
+      : { key: 'proven', node: 'never proven', title: 'No recorded run has passed every test mapped to this requirement' },
+  ]
+  if (e.testsChangedAt) {
+    items.push({
+      key: 'tests',
+      node: <>tests changed {day(e.testsChangedAt.at)} ({e.testsChangedAt.verdict})</>,
+      title: `${e.testsChangedAt.tests.join(', ')}${e.testsChangedAt.runId ? ` — recorded by run ${e.testsChangedAt.runId}` : ' — edited between runs'}`,
+    })
+  }
+  items.push({ key: 'wording', node: <>wording changed {day(e.wordingChangedAt)}</> })
+  if (source) {
+    items.push({
+      key: 'source',
+      node: <code>{source.heading ? `${source.doc} § ${source.heading}` : source.doc}</code>,
+      title: `Where this wording came from${source.line ? ` (line ${source.line})` : ''}`,
+    })
+  }
+  if (e.accepted === 'current' && acceptedAt) {
+    items.push({ key: 'accepted', node: <>accepted {day(acceptedAt)}</>, title: 'A human accepted this exact wording from the ledger' })
+  }
+  return (
+    <div className="clcov-enf" data-testid={`enf-strip-${id}`}>
+      {items.map((item, i) => (
+        <span key={item.key} className="clcov-enf-item">
+          {i > 0 && <span className="clcov-enf-sep" aria-hidden="true">·</span>}
+          <span title={item.title}>{item.node}</span>
+        </span>
+      ))}
+      {onAccept && e.accepted !== 'current' && (
+        <button
+          type="button"
+          className="clcov-enf-accept"
+          data-testid={`accept-${id}`}
+          title={e.accepted === 'outdated' && acceptedAt
+            ? `The wording moved since it was accepted on ${day(acceptedAt)} — accept the current wording`
+            : 'Mark this wording as accepted (recorded with its fingerprint, so a later change shows)'}
+          onClick={(ev) => { ev.stopPropagation(); onAccept() }}
+        >
+          {e.accepted === 'outdated' ? 'Re-accept wording' : 'Accept wording'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+export function RequirementCard({ rc, colors, active, focused, dimmed, onHover, onAccept }: {
   rc: RequirementCoverage
   colors: string[]
   active: boolean
   focused: boolean
   dimmed: boolean
   onHover: (on: boolean) => void
+  /** The human-only Accept-wording lever (D11). Absent on read-only embeds. */
+  onAccept?: () => void
 }) {
   const meta = GAP_META[rc.gapType]
+  const enf = rc.enforcement
+  const enfMeta = enf ? ENFORCEMENT_META[enf.state] : null
   // The which-paths / which-variants detail is no longer crammed into the gap pill —
   // the path chips (1-axis) or the path×variant matrix below name the exact gaps,
   // so the status reads as just a dot + short label and never crushes the title.
@@ -164,8 +258,16 @@ export function RequirementCard({ rc, colors, active, focused, dimmed, onHover }
           <span className="clcov-cq-full">{meta.label}</span>
           <span className="clcov-cq-abbr" aria-hidden="true">{meta.abbr}</span>
         </span>
+        {enf && enfMeta && (
+          <span className="clcov-gap" data-testid={`enf-${rc.requirement.id}`} title={enforcementTooltip(enf)} style={{ color: enfMeta.color }}>
+            <span className="clcov-gap-dot" style={{ background: enfMeta.color }} />
+            <span className="clcov-cq-full">{enfMeta.label}</span>
+            <span className="clcov-cq-abbr" aria-hidden="true">{enfMeta.abbr}</span>
+          </span>
+        )}
       </div>
       <div className="clcov-req-text">{rc.requirement.text}</div>
+      {enf && <EnforcementStrip rc={rc} enforcement={enf} onAccept={onAccept} />}
       {hasVariants ? (
         // Variant requirement: the path×variant matrix (or a single inline row when
         // there's one path) is the source of truth — the 1-axis path chips would

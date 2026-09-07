@@ -172,6 +172,15 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
           <span title="Requirements where every declared path has a mapped test"><strong>{covered}/{total}</strong> covered</span>
           <span className="clcov-cap-sep" aria-hidden="true">·</span>
           <span data-testid="mapped-stat" title="Requirements with at least one test mapped to them"><strong>{mapped}/{total}</strong> mapped</span>
+          {ledger.enforcement && (
+            <>
+              <span className="clcov-cap-sep" aria-hidden="true">·</span>
+              <span data-testid="proven-stat" title="Requirements whose proof — a green run over every mapped test — is newer than both their tests' and their wording's last change">
+                <strong>{ledger.enforcement.provenUnchanged}/{ledger.enforcement.total}</strong>
+                {ledger.enforcement.runId ? <> proven in run <code className="clcov-cap-run">{ledger.enforcement.runId}</code></> : ' proven · no run yet'}
+              </span>
+            </>
+          )}
           {orphans > 0 && (
             <span data-testid="orphan-note" className="clcov-stale" title={`These test tags point at requirements that no longer exist — re-map to clear:\n${ledger.orphanRequirementIds.join(', ')}`}>
               ⚠ {orphans} stale tag{orphans > 1 ? 's' : ''}

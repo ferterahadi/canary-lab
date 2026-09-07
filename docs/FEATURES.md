@@ -162,6 +162,22 @@ latest run. A mapped test can therefore claim coverage while its requirement
 remains unproven because the test failed or did not run. This latest-run overlay
 does not change the claim-based gap types or coverage percentage.
 
+The ledger's time axis places each requirement's proof against its changes.
+Three timestamps are read from the run records at request time — when a run
+last passed every mapped test, when a mapped test last changed (with the
+verification-strength verdict), and when the wording last changed — and derive
+one state:
+
+| State | Meaning |
+| --- | --- |
+| `proven-unchanged` | The proof is newer than both the tests' and the wording's last change |
+| `tests-weakened` | A mapped test was classified weaker after the proof |
+| `proof-stale` | A mapped test changed after the proof, or no run ever proved it |
+| `wording-ahead` | The wording changed after the tests and the proof |
+
+A human can accept a requirement's wording from the ledger; the acceptance is
+recorded with the wording's fingerprint, so a later change shows as outdated.
+
 Coverage depth is separate from both. Canary Lab classifies the strongest
 assertion layer in each test—application log, internal state, application API or
 UI, or a real external destination—and labels it `shallow`, `basic`, `solid`, or

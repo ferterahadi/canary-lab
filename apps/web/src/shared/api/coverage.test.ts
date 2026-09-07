@@ -14,6 +14,7 @@ import {
   getCoverageAgentSession,
   getEvaluationAgentSession,
   clearPrdSummary,
+  acceptRequirementWording,
 } from './coverage'
 import { ok, fail } from './__fixtures__/response'
 
@@ -232,6 +233,14 @@ describe('coverage api', () => {
   it('getEvaluationAgentSession rethrows non-404 errors', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(500, {}))
     await expect(getEvaluationAgentSession('task1', { fetchImpl })).rejects.toMatchObject({ status: 500 })
+  })
+
+  it('acceptRequirementWording POSTs the human-only accept route, encoding both ids', async () => {
+    const body = { feature: 'a b', requirementId: 'R1', acceptedAt: 't', acceptedFingerprint: 'f' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(body))
+    const result = await acceptRequirementWording('a b', 'R1', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/features/a%20b/requirements/R1/accept', { method: 'POST' })
   })
 
   it('clearPrdSummary DELETEs the prd-summary endpoint', async () => {

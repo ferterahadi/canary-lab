@@ -9,8 +9,9 @@ import type {
   VariantNA,
 } from '../../../../../../../shared/coverage/types'
 import { type DocsCollection } from './docs-collection'
-import { withFingerprints } from './fingerprints'
+import { fingerprintRequirement, withFingerprints } from './fingerprints'
 import { summarizePrd } from './prd-summary'
+import { locateRequirementSource, type RequirementSourceHint } from './requirement-source'
 
 export const PATH_TYPES: PathType[] = ['happy', 'sad', 'edge']
 
@@ -29,6 +30,21 @@ export interface ParsedRequirement {
   variants?: string[]
   variantsNA?: VariantNA[]
   strictnessLadder?: StrictnessLadderRung[]
+  /** Where the agent says it read the wording (doc + heading). A HINT only —
+   *  `assembleSummary` locates the real source and drops a hint that names
+   *  nothing in the collection. */
+  source?: RequirementSourceHint
+}
+
+/** Normalize the agent's `source` hint: an object with string `doc` (required)
+ *  and optional string `heading`; anything else is no hint. */
+export function normalizeSourceHint(value: unknown): RequirementSourceHint | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as { doc?: unknown; heading?: unknown }
+  const doc = normalizeProse(raw.doc)
+  if (!doc) return undefined
+  const heading = normalizeProse(raw.heading)
+  return { doc, ...(heading ? { heading } : {}) }
 }
 
 export function normalizeKind(value: unknown): 'functional' | 'non-functional' | undefined {
@@ -191,6 +207,7 @@ export function parsePrdSummaryOutput(
       variants,
       variantsNA: normalizeRequirementVariantsNA(r.variantsNA, variants),
       strictnessLadder: normalizeLadder(r.strictnessLadder),
+      source: normalizeSourceHint(r.source),
     })
   }
   return out
@@ -275,6 +292,15 @@ export function reconcileRequirementIds(
       // existing ladder when the regen doesn't re-propose one (parallels id
       // preservation — agents shouldn't have to re-derive it every time).
       strictnessLadder: candidate.strictnessLadder ?? survivedFrom?.strictnessLadder,
+      // Provenance is re-located at assembly; the survivor's answer stands in until
+      // then (and stays when the new wording matches no doc).
+      ...(survivedFrom?.source ? { source: survivedFrom.source } : {}),
+      // Acceptance is a HUMAN's mark on a fingerprint — it travels with the id
+      // verbatim; a wording change shows as fingerprint ≠ acceptedFingerprint,
+      // it never re-accepts and never clears (D11).
+      ...(survivedFrom?.acceptedAt ? { acceptedAt: survivedFrom.acceptedAt } : {}),
+      ...(survivedFrom?.acceptedFingerprint ? { acceptedFingerprint: survivedFrom.acceptedFingerprint } : {}),
+      ...(survivedFrom?.wordingChangedAt ? { wordingChangedAt: survivedFrom.wordingChangedAt } : {}),
     })
   }
 
@@ -302,7 +328,27 @@ export function assembleSummary(
   variantDimension?: VariantDimension,
   now?: string,
 ): PrdSummary {
-  const requirements = reconcileRequirementIds(previous?.requirements ?? [], parsed)
+  const generatedAt = now ?? new Date().toISOString()
+  const prevById = new Map((previous?.requirements ?? []).map((r) => [r.id, r]))
+  // reconcileRequirementIds keeps parsed order, then appends the deprecated
+  // carry-overs — so parsed[i] is the hint for requirements[i] while i is in range.
+  const requirements = reconcileRequirementIds(previous?.requirements ?? [], parsed).map((req, i) => {
+    if (req.deprecated) return req
+    const located = locateRequirementSource(req, collection.entries, parsed[i]?.source)
+    const prev = prevById.get(req.id)
+    // The wording-change stamp (D11): a fresh requirement is stamped now; a
+    // survivor keeps its stamp while its MEANING (fingerprint) is unchanged and
+    // is re-stamped when it moved. A pre-D11 survivor with unchanged meaning
+    // carries none — "unknown" is the honest value, not an invented date.
+    const meaningMoved = prev !== undefined
+      && (prev.fingerprint ?? fingerprintRequirement(prev)) !== fingerprintRequirement(req)
+    const wordingChangedAt = prev === undefined || meaningMoved ? generatedAt : prev.wordingChangedAt
+    return {
+      ...req,
+      ...(located ? { source: located } : {}),
+      ...(wordingChangedAt ? { wordingChangedAt } : {}),
+    }
+  })
   // Preserve a prior dimension when this pass didn't re-declare one (stability,
   // like requirement ids) — but a freshly-declared dimension always wins.
   const dimension = variantDimension ?? previous?.variantDimension
@@ -311,7 +357,7 @@ export function assembleSummary(
     ...(dimension ? { variantDimension: dimension } : {}),
     docsHash: collection.docsHash,
     sourceDocs: collection.entries.map((e) => e.relPath),
-    generatedAt: now ?? new Date().toISOString(),
+    generatedAt,
   }
   return withFingerprints(summary, collection.entries)
 }

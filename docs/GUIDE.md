@@ -113,6 +113,15 @@ proof state for Flight and evaluation surfaces. The Coverage headline and gap
 groups remain claim-based. Strictness describes the strongest assertion layer
 in each test.
 
+Each requirement card also carries a time-axis chip and strip: which run last
+proved it, when a mapped test last changed (with the strength verdict), when
+the wording last changed, and where the wording came from. The chip reads
+**Proven, unchanged**, **Tests weakened since proof**, **Proof stale**, or
+**Wording ahead of tests**; weakened requirements sort to the top. **Accept
+wording** records that a human accepted the current wording, so a later change
+shows as outdated instead of being forgotten. The header states how many
+requirements are proven unchanged in the latest run.
+
 Regenerating the PRD summary preserves surviving requirement IDs. Changes to
 source docs mark the summary and dependent coverage state stale instead of
 silently reusing old mappings. See [FEATURES](FEATURES.md#requirement-coverage)

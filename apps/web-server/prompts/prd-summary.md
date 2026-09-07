@@ -126,6 +126,14 @@ to strongest, climbing toward the real user-observable effect (domain-specific):
 - tier 4 — a real external destination / browser confirms the real effect.
 Only include rungs that make sense (a pure-internal requirement may top at tier 2–3).
 
+## Provenance — where each requirement came from
+
+Every requirement names its `source`: the source document it was read from
+(`doc`, the file name exactly as listed above) and the heading of the section it
+sits under (`heading`, or `null` when the document has no headings). The server
+re-locates the wording in that document and shows the place in the ledger; a `doc`
+that is not one of the listed files is dropped, so name only what you read.
+
 ## CRITICAL — requirement id stability
 
 Requirement ids are the spine that test annotations point at. You will be shown the
@@ -192,7 +200,8 @@ cross-cutting dimension. Every requirement object MUST include `id` and `kind`.
       "strictnessLadder": [
         { "tier": 1, "description": "app log shows the action" },
         { "tier": 4, "description": "browser confirms the real effect" }
-      ]
+      ],
+      "source": { "doc": "checkout.md", "heading": "Payment callbacks" }
     }
   ]
 }

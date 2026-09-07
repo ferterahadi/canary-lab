@@ -245,20 +245,22 @@ describe('spec-edit boundary — humans adopt, hints advise', () => {
     return out.sort()
   }
 
-  it('exposes no tool that adopts, restores or approves a spec edit', () => {
+  it('exposes no tool that adopts, restores or approves a spec edit, or accepts a requirement wording', () => {
     for (const name of [...FULL_TOOLS, EXEC_TOOL_NAME]) {
-      expect(name).not.toMatch(/adopt|approve[-_]?(dirty|spec)|commit[-_]?dirty|restore[-_]?spec/i)
+      expect(name).not.toMatch(/adopt|approve[-_]?(dirty|spec)|commit[-_]?dirty|restore[-_]?spec|accept[-_]?(wording|requirement)/i)
     }
   })
 
-  it('no MCP source reaches the human-only adopt/restore/approve routes or the orchestrator levers', () => {
+  it('no MCP source reaches the human-only adopt/restore/approve/accept routes or the orchestrator levers', () => {
     const sources = findSources(MCP_SRC)
     expect(sources.length).toBeGreaterThan(20)
     for (const file of sources) {
       const text = fs.readFileSync(file, 'utf8')
       // Compact profile's `exec` dispatches by internal tool name, so a route
       // reached through app.inject() would be reachable from every client.
-      expect(text, path.relative(REPO_ROOT, file)).not.toMatch(/adopt-spec-edits|restore-spec-edits|approve-dirty|commit-dirty|adoptSpecEdits\(|restoreSpecEdits\(/)
+      // The D11 acceptance route joins the list: an agent must not accept the
+      // wording its own coverage is judged against.
+      expect(text, path.relative(REPO_ROOT, file)).not.toMatch(/adopt-spec-edits|restore-spec-edits|approve-dirty|commit-dirty|adoptSpecEdits\(|restoreSpecEdits\(|requirements\/[^'"`]*\/accept|acceptRequirementWording\(/)
     }
   })
 

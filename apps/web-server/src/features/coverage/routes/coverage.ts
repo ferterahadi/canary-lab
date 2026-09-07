@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import {
   FeatureNotFoundError,
+  acceptRequirementWording,
   clearPrdSummary,
   computeFeatureCoverage,
   featureExists,
@@ -226,6 +227,34 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
       throw err
     }
   })
+
+  // A human accepts a requirement's wording from the ledger (D11). Human-only,
+  // like adopt/restore on a run: no MCP tool wraps it (mcp/repair-guardrail.test.ts).
+  app.post<{ Params: { name: string; id: string } }>(
+    '/api/features/:name/requirements/:id/accept',
+    async (req, reply) => {
+      try {
+        const result = acceptRequirementWording({
+          featuresDir: deps.featuresDir,
+          feature: req.params.name,
+          requirementId: req.params.id,
+        })
+        publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
+        return result
+      } catch (err) {
+        if (err instanceof FeatureNotFoundError) {
+          reply.code(404)
+          return { error: err.message }
+        }
+        const statusCode = (err as { statusCode?: unknown }).statusCode
+        if (typeof statusCode === 'number') {
+          reply.code(statusCode)
+          return { error: (err as Error).message }
+        }
+        throw err
+      }
+    },
+  )
 
   app.post<{ Params: { name: string }; Body: { adapter?: SummarizeAdapter } | undefined }>(
     '/api/features/:name/prd-summary/regenerate',

@@ -9,7 +9,7 @@ import { CoverageDocsRail } from './CoverageDocsRail'
 import { CoverageGeneratingPane } from './CoverageGeneratingPane'
 import { buildTestNumbering, testNumberKey } from '@/shared/test-numbering'
 import { useInvalidationKey } from '@/shared/state/invalidation'
-import { Hovered, RequirementCard, STATUS_RANK, TestCard, TestCardSkeleton, statusOf, testColor } from './CoverageCards'
+import { Hovered, RequirementCard, TestCard, TestCardSkeleton, compareRequirements, testColor } from './CoverageCards'
 import { CoverageEmptyMain, CoverageHeader, HeadlinePill, readRailPref, writeRailPref } from './CoverageHeader'
 import { COVERAGE_CSS } from './coverage-ledger-css'
 
@@ -316,11 +316,20 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
     return { activeReqIds: reqIds, activeTestNames: testNames }
   }, [hovered, ledger])
 
+  // Accept wording (D11) — the human-only lever. The route announces
+  // `coverage-changed`, which re-pulls every open ledger; the explicit refresh
+  // makes THIS page reflect the click even before the socket frame lands.
+  const acceptWording = useCallback((requirementId: string) => {
+    api.acceptRequirementWording(feature, requirementId)
+      .catch(() => undefined) // a 404 means the ledger moved under us — the re-pull below shows the truth
+      .then(() => refresh())
+  }, [feature, refresh])
+
   const visibleReqs = useMemo(() => {
     if (!ledger) return []
     const filtered = gapFilter ? ledger.requirements.filter((r) => r.gapType === gapFilter) : ledger.requirements
-    // Worst-first: uncovered → partial → covered, stable within a rank.
-    return [...filtered].sort((a, b) => STATUS_RANK[statusOf(a)] - STATUS_RANK[statusOf(b)])
+    // Worst-first: weakened tests → uncovered → partial → covered → the time axis.
+    return [...filtered].sort(compareRequirements)
   }, [ledger, gapFilter])
 
   const orphanTests = useMemo(
@@ -523,6 +532,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
                         focused={focusReq?.id === rc.requirement.id}
                         dimmed={Boolean(hovered) && !activeReqIds.has(rc.requirement.id)}
                         onHover={(on) => setHovered(on ? { kind: 'req', key: rc.requirement.id } : null)}
+                        onAccept={() => acceptWording(rc.requirement.id)}
                       />
                     ))}
                   </div>

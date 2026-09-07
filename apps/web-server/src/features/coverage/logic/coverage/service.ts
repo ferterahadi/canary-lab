@@ -6,6 +6,8 @@ import type { CoverageLedger, PrdSummary, Requirement } from '../../../../../../
 import { computeCoverageLedger, type CoverageTestInput } from './ledger'
 import { lastRunOutcomeForTitle, readLatestRunOutcomes } from '../../../runs/logic/runtime/run-outcomes'
 import { applyTestStrength, type TestAssertions } from './strength'
+import { applyEnforcement } from './enforcement'
+import { historyForTests, readFeatureRunHistory } from './requirement-history'
 import { changedDocPaths, diffDocs, fingerprintDocs } from './fingerprints'
 import {
   deriveCoverageStateView,
@@ -20,8 +22,8 @@ import { readPrdSummary } from './prd-summary'
 
 export { LEGACY_MAPPINGS_JSON, applyExternalCoverageMappings, buildCoverageMappingContext, flagMappingIssues, hasPrdSummary, runCoverageEngine } from './coverage-engine'
 export type { ApplyExternalCoverageArgs, ApplyExternalCoverageResult, CoverageMappingContext, CoverageMappingTest, MappingTestSource, RunCoverageEngineArgs, RunCoverageEngineDeps, RunCoverageEngineResult } from './coverage-engine'
-export { applyExternalSummary, buildSummaryAuthoringContext, clearPrdSummary, listFeatureDocs, regeneratePrdSummary } from './feature-docs'
-export type { ApplyExternalSummaryArgs, ApplyExternalSummaryResult, BuildSummaryAuthoringResult, FeatureDoc, FeatureDocsListing, RegeneratePrdSummaryArgs, RegeneratePrdSummaryDeps, RegeneratePrdSummaryResult, SummaryAuthoringContext, SummaryAuthoringDoc } from './feature-docs'
+export { acceptRequirementWording, applyExternalSummary, buildSummaryAuthoringContext, clearPrdSummary, listFeatureDocs, regeneratePrdSummary } from './feature-docs'
+export type { AcceptRequirementWordingArgs, AcceptRequirementWordingResult, ApplyExternalSummaryArgs, ApplyExternalSummaryResult, BuildSummaryAuthoringResult, FeatureDoc, FeatureDocsListing, RegeneratePrdSummaryArgs, RegeneratePrdSummaryDeps, RegeneratePrdSummaryResult, SummaryAuthoringContext, SummaryAuthoringDoc } from './feature-docs'
 
 // The single computation layer for the Requirement Coverage Ledger. Both the REST
 // route (routes/coverage.ts) and the MCP tools (mcp/tools.ts) call these — so
@@ -181,7 +183,22 @@ export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): Covera
         }
       : {}),
   })
-  const ledger = applyTestStrength(breadth, assertions)
+  const graded = applyTestStrength(breadth, assertions)
+
+  // Time axis (D11): when each requirement was proven, when its tests changed,
+  // when its wording changed — read from run records at request time, never
+  // stored. Additive like the proven axis. A feature with no summary has no
+  // requirements to stamp, so the walk over run history is skipped.
+  const ledger = summary
+    ? (() => {
+        const history = readFeatureRunHistory(args.logsDir, args.feature)
+        return applyEnforcement(graded, {
+          generatedAt: summary.generatedAt,
+          ...(outcomes ? { runId: outcomes.runId } : {}),
+          historyFor: (names) => historyForTests(history, tests, names),
+        })
+      })()
+    : graded
 
   // --- State model (R3): summary × coverage axes + drift detail. ---
   const live = readDocsCollection(featureDir)

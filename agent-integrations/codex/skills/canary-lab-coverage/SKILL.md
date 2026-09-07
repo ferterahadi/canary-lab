@@ -39,6 +39,24 @@ feature has a recorded run the ledger also carries an additive **proven**
 axis (`provenPct`, `totals.proven`, per-requirement/path `proven`,
 `provenRunId`): covered = a tag claims it; proven = the covering test
 actually passed in the latest run (omitted when no run is recorded).
+The ledger also carries the **time axis**: per requirement an `enforcement`
+block — `state`, `provenAt` (the newest run in which every mapped test
+passed), `testsChangedAt` (the last classified spec edit on a mapped test, with
+its verdict), `wordingChangedAt`, `accepted` — where `state` is one of:
+
+| `state` | Meaning |
+| --- | --- |
+| `proven-unchanged` | A green run over every mapped test is newer than both the tests' and the wording's last change |
+| `tests-weakened` | A mapped test was classified weaker AFTER the proof — the run that proved it never saw the weaker test |
+| `proof-stale` | A mapped test changed after the proof (or no run ever proved it) and no green run has followed |
+| `wording-ahead` | The wording moved after the tests and the proof — the tests may no longer test what it says |
+
+The ledger-level `enforcement` rolls it up (`provenUnchanged`/`total` for
+`runId`). Report these states as Canary derived them, never a claim of your
+own. A `tests-weakened` requirement is fixed by restoring the assertion — the
+weaker edit is exactly what the proof never saw — never by re-running.
+Accepting a requirement's wording is a human action in the Canary Lab UI; no
+tool performs it.
 
 ## Workspace Bootstrap
 
@@ -199,3 +217,4 @@ same computation.
   whole conversation. The submit calls take their `jobId`, not `session_id`.
 - New tests belong to the `canary-lab-author` skill/profile; this profile maps and measures.
 - Proving coverage takes a run — `canary-lab-run` (or a flight) records the run the `proven` axis reads.
+- The time axis reads run records, never a stored opinion: a `proof-stale` requirement is cleared by a green run, a `wording-ahead` one by a human accepting the wording or by tests that match it, a `tests-weakened` one by restoring the assertion.
