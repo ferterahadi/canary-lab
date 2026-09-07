@@ -14,11 +14,12 @@ import {
   type TestStatusIdentity,
   summaryEntryName,
 } from '@/features/runs'
-import type { RunSummary, RunSummaryRunningStep } from '../api/types'
+import type { RunManifest, RunSummary, RunSummaryRunningStep } from '../api/types'
 import { StepStatusBadge } from '../ui/TestCodeBlock'
 import { TestPresentation } from '../ui/TestPresentation'
 import { TestIdBadge } from '../ui/TestIdBadge'
 import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
+import { sourceFileInRun } from '@/features/runs'
 import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
 
 type DirtyDiff = { name: string; changedLines: number[] }[]
@@ -33,6 +34,7 @@ interface ExpandedTestSelection {
 interface Props {
   feature: string | null
   activeRunSummary: RunSummary | undefined
+  activeRunManifest?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot'>
   activeRunStatus: RunStatus | undefined
   onTotalTestsChange?: (n: number) => void
   /** Spec files flagged as modified, each with the test title(s) actually
@@ -40,7 +42,7 @@ interface Props {
   dirtySpecs?: DirtySpecSummary[]
 }
 
-export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, onTotalTestsChange, dirtySpecs = [] }: Props) {
+export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, activeRunStatus, onTotalTestsChange, dirtySpecs = [] }: Props) {
   // The spec list refetches when a `tests-changed` event fires for the selected
   // feature (App gates the invalidation to the visible feature).
   const refreshKey = useInvalidationKey('tests')
@@ -131,7 +133,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
   const passedCount = (displaySpecs ?? []).reduce(
     (acc, spec) => acc + spec.tests.filter(
       (t) => statusForTest(
-        summaryIdentityForWorkspaceTest(t.name, t.line, t.sourceFile ?? spec.file, activeRunSummary),
+        summaryIdentityForWorkspaceTest(t.name, t.line, sourceFileInRun(t.sourceFile ?? spec.file, activeRunManifest), activeRunSummary),
         activeRunSummary,
         isRunActivelyTesting,
       ) === 'passed',
@@ -144,6 +146,11 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
       <div className="cl-panel-header flex items-center justify-between gap-2 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <span className="cl-kicker">Tests</span>
+          {activeRunManifest?.suiteSnapshot?.kind === 'taken' && (
+            <span className="text-[10px] text-secondary" title="Statuses are from the selected run’s suite snapshot. The source below is the current workspace; edits made afterward have not been verified.">
+              Last execution
+            </span>
+          )}
         </div>
         <TestsHeaderIndicator
           summary={activeRunSummary}
@@ -184,7 +191,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
                 const testIdentity = summaryIdentityForWorkspaceTest(
                   t.name,
                   t.line,
-                  sourceFile,
+                  sourceFileInRun(sourceFile, activeRunManifest),
                   activeRunSummary,
                 )
                 const runningTest = isRunActivelyTesting && activeRunSummary
@@ -200,7 +207,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
                   bodyLine: bodyStartLine,
                   bodySource: t.bodySource,
                   summary: activeRunSummary,
-                  sourceFile,
+                  sourceFile: sourceFileInRun(sourceFile, activeRunManifest),
                   isRunActivelyTesting,
                 })
                 const executionHighlight: TestCardExecutionHighlight | undefined = executionLine

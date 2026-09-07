@@ -5,7 +5,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { adoptSpecEdits, adoptTestHealSpecEdits, recordSpecEdits, refreshSpecEdits, restoreSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
+import { createHash } from 'crypto'
+import { adoptSpecEdits, adoptTestHealSpecEdits, digestOfSpecHashes, recordSpecEdits, refreshSpecEdits, restoreSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
+import { hashFeatureSpecs } from '../dirty-specs/detect'
 import { writeManifest, type RunManifest } from './manifest'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
@@ -383,6 +385,32 @@ describe('restoreSpecEdits', () => {
     // The live edit is still pending — the manifest says so rather than claiming a restore.
     const last = sink.patches.at(-1) as { specEdits: RunManifest['specEdits'] }
     expect(last.specEdits?.pending).toHaveLength(1)
+  })
+
+  it('names a non-Error throw in the warning instead of printing [object Object]', () => {
+    const runnerLog = fakeRunnerLog()
+    const { ctx } = ctxFor({ runnerLog })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', WEAKER)
+    vi.spyOn(fs, 'copyFileSync').mockImplementation(() => { throw 'disk full' })
+
+    expect(restoreSpecEdits(ctx)).toEqual({ ok: false, reason: 'restore-failed' })
+    expect(runnerLog.warnings.join('\n')).toMatch(/restoring spec edits stopped after 0\/1: disk full/)
+  })
+})
+
+describe('digestOfSpecHashes', () => {
+  it('is what suiteDigest records, and digests an empty map to a real sha256', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-digest-'))
+    try {
+      fs.mkdirSync(path.join(dir, 'e2e'))
+      fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'test("a", () => {})\n')
+      expect(digestOfSpecHashes(hashFeatureSpecs(dir))).toBe(suiteDigest(dir))
+      expect(digestOfSpecHashes({})).toBe(createHash('sha256').digest('hex'))
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

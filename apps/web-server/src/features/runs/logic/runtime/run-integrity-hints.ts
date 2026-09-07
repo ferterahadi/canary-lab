@@ -13,27 +13,8 @@ import type { PredicateChange } from '../../../../../../../shared/verification-s
 // hint that has no run manifest to read it from; re-exported here for the
 // server-side callers that already import it from this module.
 export { INTEGRITY_HINT_DISCLOSURE } from '../../../../../../../shared/verification-strength/disclosure'
-
-export type IntegrityHint =
-  | {
-      kind: 'weaker'
-      /** Spec path relative to the suite dir. */
-      file: string
-      /** Test name on the live side; for a deleted test, the name the copy knew. */
-      test: string
-      /** `@req-*` ids the live test carries. Absent when it carries none or is gone. */
-      requirements?: string[]
-      /** Assertion source as written, before-side then live-side, for the changes that weakened. */
-      was: string[]
-      now: string[]
-    }
-  | {
-      kind: 'cannot-classify'
-      file: string
-      /** Absent when the whole file could not be read (a side that does not parse). */
-      test?: string
-      reason: string
-    }
+export type { IntegrityHint } from '../../../../../../../shared/verification-strength/hints'
+import type { IntegrityHint } from '../../../../../../../shared/verification-strength/hints'
 
 export function deriveIntegrityHints(
   pending: PendingSpecEdit[],

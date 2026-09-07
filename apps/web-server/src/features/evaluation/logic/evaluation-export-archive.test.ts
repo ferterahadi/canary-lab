@@ -72,6 +72,27 @@ describe('buildEvaluationExportArchive — coverage attachment', () => {
   })
 })
 
+describe('buildEvaluationExportArchive — the behavior certificate', () => {
+  it('bundles certificate.json and the offline checker beside the report, and returns the certificate', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-cert-'))
+    const logsDir = path.join(tmpDir, 'logs')
+    fs.mkdirSync(logsDir, { recursive: true })
+
+    const built = await buildEvaluationExportArchive(detail(), { logsDir })
+
+    const names = zipEntries(built.zip).map((e) => e.filename)
+    expect(names).toEqual(expect.arrayContaining(['evaluation.html', 'certificate.json', 'verify-certificate.mjs']))
+    const inZip = JSON.parse(zipEntries(built.zip).find((e) => e.filename === 'certificate.json')!.data.toString('utf8'))
+    expect(inZip).toEqual(JSON.parse(JSON.stringify(built.certificate)))
+    expect(built.certificate.format).toBe('canary-lab/behavior-certificate@1')
+    expect(built.certificate.run.runId).toBe(detail().runId)
+    expect(zipEntries(built.zip).find((e) => e.filename === 'verify-certificate.mjs')!.data.toString('utf8')).toContain('behavior-certificate@1')
+    // The checker and the certificate are not report assets: the contents record
+    // keeps describing the report the way it did.
+    expect(built.contents.assets).toBe(0)
+  })
+})
+
 describe('buildEvaluationExportArchive', () => {
   it('includes videos retained in the keep dir and skips unsafe or missing artifacts', async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-'))
@@ -100,7 +121,7 @@ describe('buildEvaluationExportArchive', () => {
 
     const entries = zipEntries(built.zip)
     expect(built.archiveBase).toBe('canary-lab-evaluation-Checkout-Flow-run-id')
-    expect(entries.map((entry) => entry.filename)).toEqual(['evaluation.html', 'run-id.mp4'])
+    expect(entries.map((entry) => entry.filename)).toEqual(['evaluation.html', 'certificate.json', 'verify-certificate.mjs', 'run-id.mp4'])
     expect(entries.find((entry) => entry.filename === 'run-id.mp4')?.data.toString('utf8')).toBe('kept-video')
     expect(entries.find((entry) => entry.filename === 'evaluation.html')?.data.toString('utf8')).toContain('run-id.mp4')
     // Contents count what LANDED in the zip, not what the run declared: three

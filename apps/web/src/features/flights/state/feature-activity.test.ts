@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunIndexEntry } from '@/shared/api/types'
+import type { RunManifest, CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunIndexEntry } from '@/shared/api/types'
 import type { PortifyIndexEntry } from '@/shared/api/client'
+import fixture from '../../runs/utils/__fixtures__/cns-wa-snapshot.json'
 import { deriveFeatureActivity, deriveFeatureExternalHistory } from './feature-activity'
 
 const run = (over: Partial<RunIndexEntry>): RunIndexEntry => ({
@@ -523,4 +524,14 @@ describe('deriveFeatureExternalHistory', () => {
       run: { current: { kind: 'running' } },
     })
   })
+})
+
+it('carries the recorded review wait from run detail into the feature activity', () => {
+  const manifest = fixture.manifest as RunManifest
+  const result = deriveFeatureActivity({
+    activeRuns: [{ runId: manifest.runId, feature: manifest.feature, status: manifest.status, startedAt: manifest.startedAt }],
+    runDetails: { [manifest.runId]: { runId: manifest.runId, manifest } },
+    portifyWorkflows: [], drafts: [],
+  })
+  expect(result.get('cns-wa')?.waiting?.label).toBe('Awaiting test review')
 })

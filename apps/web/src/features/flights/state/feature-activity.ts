@@ -6,6 +6,7 @@ import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useEvaluationExports } from '@/features/evaluation'
 import { isActivePortify, usePortify } from '@/features/portify'
 import { useActiveRuns, useRunDetails, useRuns } from '@/features/runs'
+import { runWaitingState, type RunWaitingState } from '@/features/runs'
 import { isActiveWizardTask, useWizardDrafts } from '@/features/wizard'
 
 // Per-feature "what is happening right now" — the live signal behind the
@@ -36,6 +37,7 @@ export interface FeatureActivity {
    *  process this server spawned. Drives the stage's compact external-session
    *  Activity row and the flight view's mutation lock. */
   external?: boolean
+  waiting?: RunWaitingState
 }
 
 /** Persistent provenance for one piece of work behind a Flight step. Live
@@ -174,7 +176,9 @@ export function deriveFeatureActivity(input: {
     const kind: FeatureActivityKind = r.executionType === 'verify'
       ? 'verifying'
       : r.status === 'healing' ? 'healing' : 'running'
+    const waiting = runWaitingState(input.runDetails?.[r.runId] ?? r)
     map.set(r.feature, {
+      ...(waiting ? { waiting } : {}),
       kind,
       runId: r.runId,
       external: r.healMode === 'external' || input.runDetails?.[r.runId]?.manifest.healMode === 'external',

@@ -5,6 +5,7 @@ import { isClientKind } from '../../../../../../shared/run-mode'
 import { FileBackedTaskStore, sharedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
 import { bridgeRecordEvents } from '../../../shared/store-event-bridge'
 import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { BEHAVIOR_CERTIFICATE_FILENAME, type BehaviorCertificate } from '../../../../../../shared/verification-strength/certificate'
 import type {
   EvaluationArchiveContents,
   EvaluationExportSessionRef,
@@ -27,6 +28,9 @@ export interface EvaluationExportTaskPaths {
   taskJson: string
   logPath: string
   zipPath: string
+  /** The behavior certificate, also bundled inside the zip; kept beside it so
+   *  the MCP tools can hand it out without unpacking the archive. */
+  certificatePath: string
 }
 
 export function evaluationExportsDir(logsDir: string): string {
@@ -42,6 +46,7 @@ export function evaluationExportTaskPaths(logsDir: string, taskId: string): Eval
     taskJson: path.join(taskDir, 'task.json'),
     logPath: path.join(taskDir, 'export.log'),
     zipPath: path.join(taskDir, 'export.zip'),
+    certificatePath: path.join(taskDir, BEHAVIOR_CERTIFICATE_FILENAME),
   }
 }
 
@@ -199,6 +204,29 @@ export function writeEvaluationExportZip(logsDir: string, taskId: string, zip: B
   if (!p) throw new Error(`Invalid evaluation export task id: ${taskId}`)
   fs.mkdirSync(p.taskDir, { recursive: true })
   fs.writeFileSync(p.zipPath, zip)
+}
+
+/** Persist what the archive builder produced: the zip and, beside it, the
+ *  behavior certificate the zip also carries. One writer for the UI route, the
+ *  MCP submit and the flight hand-off, so no completion path can store an
+ *  archive without its certificate. */
+export function writeEvaluationExportBuild(
+  logsDir: string,
+  taskId: string,
+  built: { zip: Buffer; certificate: BehaviorCertificate },
+): void {
+  writeEvaluationExportZip(logsDir, taskId, built.zip)
+  // Non-null: writeEvaluationExportZip has just thrown on an unsafe id.
+  const p = evaluationExportTaskPaths(logsDir, taskId)!
+  fs.writeFileSync(p.certificatePath, JSON.stringify(built.certificate, null, 2), 'utf8')
+}
+
+/** The stored certificate, or null when the task has none — an export built
+ *  before certificates existed, an unsafe id, or a hand-deleted file. */
+export function readEvaluationExportCertificate(logsDir: string, taskId: string): BehaviorCertificate | null {
+  const p = evaluationExportTaskPaths(logsDir, taskId)
+  if (!p || !fs.existsSync(p.certificatePath)) return null
+  return JSON.parse(fs.readFileSync(p.certificatePath, 'utf8')) as BehaviorCertificate
 }
 
 export function writeEvaluationExportFilesZip(

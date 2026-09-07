@@ -1,4 +1,5 @@
 import type { RunDetail, PlaywrightPlaybackEvent } from '../../../runs/logic/run-store'
+import { suiteDirForReading } from '../../../runs/logic/runtime/manifest'
 import { missingAssertionReason, unknownAssertion } from './assertions'
 import { sourceKey, specFileOf } from './ast'
 import { loadSourceTests } from './source-analysis'
@@ -19,7 +20,9 @@ export function legacyCaseOrder(detail: RunDetail): string[] {
 }
 
 export function buildTestReviewPacket(detail: RunDetail): TestReviewPacket {
-  const sourceTests = loadSourceTests(detail.manifest.featureDir)
+  // Source comes from the copy the verdict executed while it exists (D9), not
+  // the live dir an agent may have edited since — the report must show what ran.
+  const sourceTests = loadSourceTests(suiteDirForReading(detail.manifest))
   const verdicts = runVerdicts(detail)
   const tests = declaredRoster(detail, playbackTests(detail.playbackEvents ?? []), sourceTests).map(({ entry, attempt }) => {
     // The last attempt's position is the freshest one the run saw; the declared

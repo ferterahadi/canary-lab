@@ -7,7 +7,7 @@ import fastifyWebsocket from '@fastify/websocket'
 import WebSocket from 'ws'
 import { evaluationRoutes } from './evaluation'
 import { createRegistry, RunStore } from '../../runs/logic/run-store'
-import { bridgeEvaluationExportEvents, createEvaluationExportTask, evaluationExportsDir, patchEvaluationExportTask, readEvaluationExportTask, writeEvaluationExportZip } from '../logic/evaluation-export-store'
+import { bridgeEvaluationExportEvents, createEvaluationExportTask, evaluationExportsDir, patchEvaluationExportTask, readEvaluationExportTask, writeEvaluationExportBuild } from '../logic/evaluation-export-store'
 import { writeManifest } from '../../runs/logic/runtime/manifest'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
@@ -19,7 +19,7 @@ vi.mock('../logic/evaluation-export-store', async (importOriginal) => {
     ...original,
     patchEvaluationExportTask: vi.fn(original.patchEvaluationExportTask),
     readEvaluationExportTask: vi.fn(original.readEvaluationExportTask),
-    writeEvaluationExportZip: vi.fn(original.writeEvaluationExportZip),
+    writeEvaluationExportBuild: vi.fn(original.writeEvaluationExportBuild),
   }
 })
 
@@ -41,7 +41,7 @@ let featuresDir: string
 beforeEach(() => {
   vi.mocked(patchEvaluationExportTask).mockClear()
   vi.mocked(readEvaluationExportTask).mockClear()
-  vi.mocked(writeEvaluationExportZip).mockClear()
+  vi.mocked(writeEvaluationExportBuild).mockClear()
   vi.mocked(resolveManifestSessionRef).mockClear()
   vi.mocked(loadAgentSession).mockClear()
   tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-evalroutes-')))
@@ -385,9 +385,9 @@ describe('evaluation rewrite write-helper catch blocks', () => {
 })
 
 describe('startEvaluationExportTask — non-Error thrown in try block (line 172 false branch)', () => {
-  it('uses String(err) when writeEvaluationExportZip throws a non-Error string value', async () => {
+  it('uses String(err) when writeEvaluationExportBuild throws a non-Error string value', async () => {
     writeManifestForRun('r-string-throw', 'checkout', 'passed')
-    vi.mocked(writeEvaluationExportZip).mockImplementationOnce(() => { throw 'zip-write-failed' })
+    vi.mocked(writeEvaluationExportBuild).mockImplementationOnce(() => { throw 'zip-write-failed' })
     const { app } = await build()
 
     const started = await app.inject({

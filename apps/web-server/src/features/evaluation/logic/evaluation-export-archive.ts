@@ -6,6 +6,13 @@ import { createEvaluationExport, type AssertionHtmlOptions } from './test-review
 import { computeFeatureCoverage } from '../../coverage/logic/coverage/service'
 import { createZip } from '../../../shared/simple-zip'
 import type { EvaluationArchiveContents } from './evaluation-export-types'
+import { buildBehaviorCertificate } from './behavior-certificate'
+import { readBundledAsset } from '../../../shared/bundled-assets'
+import {
+  BEHAVIOR_CERTIFICATE_CHECKER_FILENAME,
+  BEHAVIOR_CERTIFICATE_FILENAME,
+  type BehaviorCertificate,
+} from '../../../../../../shared/verification-strength/certificate'
 
 export type { EvaluationArchiveContents } from './evaluation-export-types'
 
@@ -21,7 +28,7 @@ export interface EvaluationExportArchiveOptions {
 export async function buildEvaluationExportArchive(
   detail: RunDetail,
   options: EvaluationExportArchiveOptions,
-): Promise<{ archiveBase: string; zip: Buffer; contents: EvaluationArchiveContents }> {
+): Promise<{ archiveBase: string; zip: Buffer; contents: EvaluationArchiveContents; certificate: BehaviorCertificate }> {
   const runPaths = buildRunPaths(runDirFor(options.logsDir, detail.runId))
   const videos = assertionVideos(
     detail.playwrightArtifacts,
@@ -46,8 +53,14 @@ export async function buildEvaluationExportArchive(
     coverage,
   })
   const videoEntries = videos.map((video) => ({ filename: video.filename, data: fs.readFileSync(video.path) }))
+  // The certificate rides in the same archive as the report (D7) with the
+  // zero-dependency checker beside it, so the file a reader receives can be
+  // re-verified without Canary Lab.
+  const certificate = buildBehaviorCertificate(detail, { coverage })
   const zip = createZip([
     { filename: 'evaluation.html', data: Buffer.from(exported.html, 'utf8') },
+    { filename: BEHAVIOR_CERTIFICATE_FILENAME, data: Buffer.from(JSON.stringify(certificate, null, 2), 'utf8') },
+    { filename: BEHAVIOR_CERTIFICATE_CHECKER_FILENAME, data: Buffer.from(readBundledAsset(BEHAVIOR_CERTIFICATE_CHECKER_FILENAME), 'utf8') },
     ...exported.assets,
     ...videoEntries,
   ])
@@ -55,6 +68,7 @@ export async function buildEvaluationExportArchive(
     archiveBase: `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`,
     zip,
     contents: { bytes: zip.length, videos: videoEntries.length, assets: exported.assets.length },
+    certificate,
   }
 }
 

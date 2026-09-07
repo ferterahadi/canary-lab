@@ -22,6 +22,7 @@ interface Props {
   /** Execution type of that active run — a `boot` run gets the teal
    *  "services up" treatment instead of the running/healing tint. */
   activeRunExecutionType?: ExecutionType | null
+  activeRunWaitingLabel?: string
   onSelectFeature: (name: string) => void
   onFeaturesChanged?: (preferredFeature?: string | null) => void
   /** Opens the Requirement Coverage ledger for a feature (R8 column entry point). */
@@ -128,6 +129,7 @@ export function FeaturesColumn({
   activeRunFeature,
   activeRunStatus,
   activeRunExecutionType,
+  activeRunWaitingLabel,
   onSelectFeature,
   onFeaturesChanged,
   onOpenCoverage,
@@ -213,6 +215,7 @@ export function FeaturesColumn({
                     activeRunFeature={activeRunFeature}
                     activeRunStatus={activeRunStatus}
                     activeRunExecutionType={activeRunExecutionType}
+                    activeRunWaitingLabel={activeRunWaitingLabel}
                     coverageHeadline={coverageHeadlines[f.name]}
                     onSelectFeature={onSelectFeature}
                     onOpenCoverage={onOpenCoverage}
@@ -231,6 +234,7 @@ export function FeaturesColumn({
                 activeRunFeature={activeRunFeature}
                 activeRunStatus={activeRunStatus}
                 activeRunExecutionType={activeRunExecutionType}
+                activeRunWaitingLabel={activeRunWaitingLabel}
                 coverageHeadlines={coverageHeadlines}
                 onSelectFeature={onSelectFeature}
                 onOpenCoverage={onOpenCoverage}
@@ -297,6 +301,7 @@ function FeatureRow({
   activeRunFeature,
   activeRunStatus,
   activeRunExecutionType,
+  activeRunWaitingLabel,
   coverageHeadline,
   onSelectFeature,
   onOpenCoverage,
@@ -309,6 +314,7 @@ function FeatureRow({
   activeRunFeature?: string | null
   activeRunStatus?: RunStatus | null
   activeRunExecutionType?: ExecutionType | null
+  activeRunWaitingLabel?: string
   coverageHeadline?: string | null
   onSelectFeature: (name: string) => void
   onOpenCoverage?: (feature: string) => void
@@ -359,7 +365,7 @@ function FeatureRow({
   const actionsWidth = Math.max(0, actionCount * 28 + (actionCount - 1) * 2 + 12 - chipWidth)
   return (
     <li
-      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${inFlight ? (flight?.attention ? ' cl-list-row-inflight-attention' : ' cl-list-row-inflight') : ''}${runState ? ` cl-list-row-${runState}` : ''}${rowCue}`}
+      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${inFlight ? (flight?.attention ? ' cl-list-row-inflight-attention' : ' cl-list-row-inflight') : ''}${runState && !activeRunWaitingLabel ? ` cl-list-row-${runState}` : ''}${rowCue}`}
       style={{
         // An in-flight suite reads at full text contrast like a selected one: at 6%
         // the wash alone is nearly invisible on the dark theme, so the brighter
@@ -368,7 +374,7 @@ function FeatureRow({
         fontWeight: isSelected ? 500 : 400,
         ['--feature-row-actions' as string]: `${actionsWidth}px`,
       }}
-      title={runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : inFlight ? flight?.title : undefined}
+      title={isActive && activeRunWaitingLabel ? activeRunWaitingLabel : runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : inFlight ? flight?.title : undefined}
     >
       {tone && (
         <Tooltip label={`${SPEC_TONE[tone].title} — review in the status bar`}>
@@ -413,7 +419,7 @@ function FeatureRow({
         {f.name}
       </button>
       {runState && (
-        <span className="sr-only">{runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
+        <span className="sr-only">{activeRunWaitingLabel ?? (runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running')}</span>
       )}
       {inFlight && flight && (
         /* In flow, not floating — it keeps its box while fading under the hover
@@ -494,6 +500,7 @@ function FeatureGroupAccordion({
   activeRunFeature,
   activeRunStatus,
   activeRunExecutionType,
+  activeRunWaitingLabel,
   coverageHeadlines,
   onSelectFeature,
   onOpenCoverage,
@@ -506,6 +513,7 @@ function FeatureGroupAccordion({
   activeRunFeature?: string | null
   activeRunStatus?: RunStatus | null
   activeRunExecutionType?: ExecutionType | null
+  activeRunWaitingLabel?: string
   coverageHeadlines: Record<string, string | null>
   onSelectFeature: (name: string) => void
   onOpenCoverage?: (feature: string) => void
@@ -547,6 +555,7 @@ function FeatureGroupAccordion({
               activeRunFeature={activeRunFeature}
               activeRunStatus={activeRunStatus}
               activeRunExecutionType={activeRunExecutionType}
+              activeRunWaitingLabel={activeRunWaitingLabel}
               coverageHeadline={coverageHeadlines[f.name]}
               onSelectFeature={onSelectFeature}
               onOpenCoverage={onOpenCoverage}

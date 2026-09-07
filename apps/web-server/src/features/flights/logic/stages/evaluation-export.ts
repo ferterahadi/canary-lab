@@ -212,7 +212,7 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
           return handOffLocalized(ctx, runId,
             `the submission was not a usable rewrite — reply with { slots: [...] } (preferred) or a full { cases: [...] } envelope carrying exactly ${packet.tests.length} case(s) in the given order`)
         }
-        const completed = await completeExternalEvaluationExport({ logsDir: deps.logsDir, detail, taskId, rewrite })
+        const completed = await completeExternalEvaluationExport({ logsDir: deps.logsDir, featuresDir: deps.featuresDir, detail, taskId, rewrite })
         if (!completed.ok) return { kind: 'failed', error: completed.error }
         // Harness predicate: the zip on disk, linked from the manifest — the
         // same settle the internal producer goes through.

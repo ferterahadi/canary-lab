@@ -177,6 +177,10 @@ export function featureChipState(
   activity?: FeatureActivity,
   derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>,
 ): FeatureChipState {
+  if (activity?.waiting) return {
+    label: activity.waiting.shortLabel, tone: FLIGHT_STATUS_TONE['waiting-for-approval'],
+    live: false, rank: 0, title: `${activity.waiting.label}. ${activity.waiting.detail}`,
+  }
   // A hand-off to the client that started the flight is WORK, not a question —
   // it reads exactly like a running flight (same verb, same sky, same pulse,
   // same rank), and only the tooltip says where the work is happening. Checked
@@ -290,7 +294,7 @@ export function resolveFeatureFlightAction(
     // Read off the flight record rather than the chip's rank, so the "blocked on
     // the human" wash tracks the same condition featureChipState branches on —
     // a hand-off is busy, not blocked, so it takes the sky `live` wash instead.
-    attention: flightAwaitsUser(flight),
+    attention: activity?.waiting?.kind === 'test-review' || flightAwaitsUser(flight),
   }
 }
 

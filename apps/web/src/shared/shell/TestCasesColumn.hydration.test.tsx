@@ -5,6 +5,8 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, getFeatureDirtyDiff, getFeatureTests } from '../api/client'
 import { readableTest } from '../api/__fixtures__/readable-test'
+import fixture from '@/features/runs/utils/__fixtures__/cns-wa-snapshot.json'
+import type { RunManifest, RunSummary } from '../api/types'
 import { TestCasesColumn } from './TestCasesColumn'
 
 vi.mock('../api/client', async () => {
@@ -188,4 +190,28 @@ describe('TestCasesColumn', () => {
     expect(container.textContent).toContain('validates duplicate')
     expect(container.querySelectorAll('.border-success\\/40')).toHaveLength(12)
   })
+})
+
+// Recorded from 2026-09-07T0406-r8vx: all 98 tests had results, but the
+// workspace/snapshot root difference made every card PENDING after refresh.
+it('hydrates the recorded snapshot results without confusing them with live source', async () => {
+  vi.mocked(getFeatureTests).mockResolvedValue(fixture.specs.map((spec) => ({
+    ...spec,
+    tests: spec.tests.map((test) => ({ ...test, bodySource: '{}', steps: [], readable: readableTest(test.name) })),
+  })))
+  await act(async () => {
+    root.render(<TestCasesColumn
+      feature="cns-wa"
+      activeRunStatus="healing"
+      activeRunManifest={fixture.manifest as RunManifest}
+      activeRunSummary={fixture.summary as RunSummary}
+    />)
+  })
+  const badges = Array.from(container.querySelectorAll('button')).map((b) => (b.textContent ?? '').toUpperCase())
+  expect(badges.filter((t) => t.endsWith('PASSED'))).toHaveLength(77)
+  expect(badges.filter((t) => t.endsWith('FAILED'))).toHaveLength(12)
+  expect(badges.filter((t) => t.endsWith('SKIPPED'))).toHaveLength(9)
+  expect(badges.filter((t) => t.endsWith('PENDING'))).toHaveLength(0)
+  expect(container.textContent).toMatch(/77\s*\/\s*98/)
+  expect(container.textContent).toContain('Last execution')
 })

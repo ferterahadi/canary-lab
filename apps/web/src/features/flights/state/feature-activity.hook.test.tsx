@@ -25,7 +25,8 @@ const stores = {
   coverageJobs: null as CoverageJobIndexEntry[] | null,
 }
 
-vi.mock('@/features/runs', () => ({
+vi.mock('@/features/runs', async () => ({
+  runWaitingState: (await import('../../runs/utils/run-waiting-state')).runWaitingState,
   useActiveRuns: () => ({ runs: stores.runs }),
   useRuns: () => ({ runs: stores.allRuns }),
   useRunDetails: () => stores.runDetails,

@@ -10,7 +10,7 @@ import { buildAgentSessionResponse, resolveManifestSessionRef } from '../../agen
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { generateEvaluationRewriteWithAgent, type EvaluationRewrite, type EvaluationRewriteAgentOptions } from '../logic/test-review-export'
 import { normalizePerAgentChoices, perAgentStageChoices } from '../../agent-sessions/logic/agent-models'
-import { buildEvaluationExportArchive, type EvaluationArchiveContents } from '../logic/evaluation-export-archive'
+import { buildEvaluationExportArchive } from '../logic/evaluation-export-archive'
 import {
   appendEvaluationExportLog,
   createEvaluationExportTask,
@@ -21,7 +21,7 @@ import {
   readEvaluationExportLog,
   readEvaluationExportTask,
   readEvaluationExportZip,
-  writeEvaluationExportZip,
+  writeEvaluationExportBuild,
   type EvaluationExportMode,
   type EvaluationExportTaskRecord,
 } from '../logic/evaluation-export-store'
@@ -58,7 +58,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     signal?: AbortSignal,
     onSession?: (session: { agent: 'claude' | 'codex'; sessionId: string }) => void,
     modelsOverride?: unknown,
-  ): Promise<{ archiveBase: string; zip: Buffer; contents: EvaluationArchiveContents }> => {
+  ): ReturnType<typeof buildEvaluationExportArchive> => {
     throwIfAborted(signal)
     log?.(`[evaluation] preparing ${mode === 'raw' ? 'raw output' : 'localized output'} export\n`)
     // `healAgent` says who drives REPAIR, not whether a CLI exists for a
@@ -170,7 +170,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
       try {
         const built = await buildEvaluationZip(detail, mode, push, active.abortController.signal, onSession, modelsOverride)
         if (!readEvaluationExportTask(deps.store.logsDir, task.taskId)) return
-        writeEvaluationExportZip(deps.store.logsDir, task.taskId, built.zip)
+        writeEvaluationExportBuild(deps.store.logsDir, task.taskId, built)
         const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
           archiveBase: built.archiveBase,
           archive: built.contents,

@@ -173,7 +173,7 @@ export function RunDetailColumn({
       <header className="cl-panel-header px-4 pt-3 pb-0">
         <div className="flex min-w-0 items-center gap-2">
           <span className="shrink-0">
-            <RunStatusIndicator status={view.displayStatus} executionType={executionType} />
+            <RunStatusIndicator status={view.displayStatus} executionType={executionType} waitingLabel={view.waiting?.label} />
           </span>
           <span
             className="min-w-0 flex-1 truncate text-sm font-medium"

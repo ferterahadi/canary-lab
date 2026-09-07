@@ -8,6 +8,7 @@ import {
   evaluationExportTaskPaths,
   evaluationExportTaskView,
   listEvaluationExportTasks,
+  readEvaluationExportCertificate,
   readEvaluationExportTask,
   readEvaluationExportZip,
   type EvaluationExportTaskRecord,
@@ -16,11 +17,59 @@ import {
 import { completeExternalEvaluationExport, createExternalEvaluationExportTask } from '../../features/evaluation/logic/external-evaluation-export'
 import { applyEvaluationTextSlotRewrite, buildTestReviewPacket, deterministicEvaluationRewrite, normalizeEvaluationRewrite, type EvaluationRewrite } from '../../features/evaluation/logic/test-review-export'
 import { isTerminalRunStatus } from '../../../../../shared/run-state'
+import {
+  BEHAVIOR_CERTIFICATE_CHECKER_FILENAME,
+  BEHAVIOR_CERTIFICATE_FILENAME,
+  type BehaviorCertificate,
+} from '../../../../../shared/verification-strength/certificate'
 import { type ToolGroupContext, asJsonResult, asToonResult, errorResult, evaluationRewriteInput, evaluationTextSlotInput, externalEvaluationReportSchema, failureResult, gettingStartedBusyResult } from '../tool-support'
 
 type EvaluationExportToolView = EvaluationExportTaskView & {
   archivePath?: string
   reportInsideArchive?: 'evaluation.html'
+  /** The behavior certificate beside the zip, and its offline checker inside it. */
+  certificatePath?: string
+  certificateInsideArchive?: typeof BEHAVIOR_CERTIFICATE_FILENAME
+  checkerInsideArchive?: typeof BEHAVIOR_CERTIFICATE_CHECKER_FILENAME
+  /** The certificate's headline, sized for a tool result; the full file is at
+   *  `certificatePath` and comes inline only from download_evaluation_export. */
+  certificate?: CertificateDigest
+}
+
+interface CertificateDigest {
+  format: BehaviorCertificate['format']
+  statement: string
+  suite: Pick<BehaviorCertificate['suite'], 'source' | 'digest' | 'runStartCheck'>
+  counts: BehaviorCertificate['run']['counts']
+  claims: { total: number; allPassed: number; someFailed: number; notRun: number; noTests: number }
+  pendingSpecEdits: number | 'unknown'
+  hints: number
+  notProven: string[]
+  verifyOffline: string
+}
+
+/** What an agent relays about the certificate without paying for the whole
+ *  file: the claim in one sentence, the counts, the suite check, what is not
+ *  proven, and how a third party re-checks it. */
+export function certificateDigest(certificate: BehaviorCertificate, certificatePath: string): CertificateDigest {
+  const claims = { total: certificate.claims.length, allPassed: 0, someFailed: 0, notRun: 0, noTests: 0 }
+  for (const claim of certificate.claims) {
+    if (claim.outcome === 'all-passed') claims.allPassed += 1
+    else if (claim.outcome === 'some-failed') claims.someFailed += 1
+    else if (claim.outcome === 'not-run') claims.notRun += 1
+    else claims.noTests += 1
+  }
+  return {
+    format: certificate.format,
+    statement: certificate.statement,
+    suite: { source: certificate.suite.source, digest: certificate.suite.digest, runStartCheck: certificate.suite.runStartCheck },
+    counts: certificate.run.counts,
+    claims,
+    pendingSpecEdits: certificate.specEdits ? certificate.specEdits.pending.length : 'unknown',
+    hints: certificate.hints.length,
+    notProven: certificate.notProven,
+    verifyOffline: `unzip the archive, then: node ${BEHAVIOR_CERTIFICATE_CHECKER_FILENAME} ${BEHAVIOR_CERTIFICATE_FILENAME}${'dir' in certificate.suite ? ` --suite ${JSON.stringify(certificate.suite.dir)}` : ''} — re-derives the spec hashes, the suite digest and every listed assertion from files on disk, with no Canary Lab code involved (certificate on this machine: ${certificatePath})`,
+  }
 }
 
 /** MCP clients run on the same machine as this server, so a completed export's
@@ -34,10 +83,22 @@ function evaluationExportToolView(logsDir: string, task: EvaluationExportTaskRec
   // the safe path builder cannot reject this id.
   const paths = evaluationExportTaskPaths(logsDir, task.taskId)!
   if (!fs.existsSync(paths.zipPath)) return view
-  return {
+  const withArchive: EvaluationExportToolView = {
     ...view,
     archivePath: path.resolve(paths.zipPath),
     reportInsideArchive: 'evaluation.html',
+  }
+  // Exports built before certificates existed have a zip and no certificate;
+  // they keep reading as completed history without claiming one.
+  const certificate = readEvaluationExportCertificate(logsDir, task.taskId)
+  if (!certificate) return withArchive
+  const certificatePath = path.resolve(paths.certificatePath)
+  return {
+    ...withArchive,
+    certificatePath,
+    certificateInsideArchive: BEHAVIOR_CERTIFICATE_FILENAME,
+    checkerInsideArchive: BEHAVIOR_CERTIFICATE_CHECKER_FILENAME,
+    certificate: certificateDigest(certificate, certificatePath),
   }
 }
 
@@ -132,6 +193,7 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
       // Render + store + complete via the shared path (also the flight's).
       const completed = await completeExternalEvaluationExport({
         logsDir: deps.store.logsDir,
+        featuresDir: deps.featuresDir,
         detail,
         taskId,
         rewrite: normalizedRewrite,
@@ -151,6 +213,7 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
         nextSteps: [
           'Present this evaluation to the user in chat — the featureTitle, the summary, and the per-case title + confidence verdicts. Do not just say it is available in the UI.',
           'Give the user archivePath as the exact local file location now. The archive already exists; do not send a separate download command.',
+          'Relay certificate.statement and certificate.notProven as written: the certificate proves which tests ran from which suite snapshot and what they asserted, not the absence of weakening. Point at certificate.verifyOffline for a third-party re-check.',
         ],
       })
     } catch (err) {
@@ -167,7 +230,7 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('get_evaluation_export', {
-    description: 'Fetch one evaluation export task.',
+    description: 'Fetch one evaluation export task. A completed task carries archivePath plus the behavior certificate digest (certificate.statement, counts, suite check, notProven) and certificatePath to the full file.',
     inputSchema: { taskId: z.string() },
   }, async ({ taskId }) => {
     const task = readEvaluationExportTask(deps.store.logsDir, taskId)
@@ -176,7 +239,7 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('download_evaluation_export', {
-    description: 'Return a completed evaluation export archive path plus base64 for clients that cannot access the server filesystem.',
+    description: 'Return a completed evaluation export archive path plus base64 for clients that cannot access the server filesystem, with the full behavior certificate inline.',
     inputSchema: { taskId: z.string() },
   }, async ({ taskId }) => {
     const task = readEvaluationExportTask(deps.store.logsDir, taskId)
@@ -184,10 +247,15 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
     const zip = task.status === 'completed' ? readEvaluationExportZip(deps.store.logsDir, taskId) : null
     if (!zip) return errorResult('evaluation export is not ready')
     const taskView = evaluationExportToolView(deps.store.logsDir, task)
+    // The full certificate rides inline here and nowhere else: this is the one
+    // tool a client without filesystem access calls, and it already carries the
+    // whole archive as base64, so the certificate adds little beside it.
+    const certificate = readEvaluationExportCertificate(deps.store.logsDir, taskId)
     return asJsonResult({
       task: taskView,
       archivePath: taskView.archivePath,
       reportInsideArchive: taskView.reportInsideArchive,
+      ...(certificate ? { certificatePath: taskView.certificatePath, certificate } : {}),
       filename: `${task.archiveBase}.zip`,
       archiveBase64: zip.toString('base64'),
     })

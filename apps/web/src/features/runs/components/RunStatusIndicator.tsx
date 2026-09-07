@@ -48,9 +48,11 @@ const BOOT_PALETTE: Partial<Record<DisplayStatus, Entry>> = {
 export function RunStatusIndicator({
   status,
   executionType,
+  waitingLabel,
 }: {
   status: DisplayStatus
   executionType?: ExecutionType
+  waitingLabel?: string
 }) {
   const p = (executionType === 'boot' ? BOOT_PALETTE[status] : undefined)
     ?? PALETTE[status]
@@ -62,8 +64,8 @@ export function RunStatusIndicator({
       data-mode={executionType === 'boot' ? 'boot' : undefined}
       className={`inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.08em] ${p.text}`}
     >
-      <StatusDot state={p.dot} pulse={p.pulse} halo={p.pulse} />
-      {p.label ?? status}
+      <StatusDot state={p.dot} pulse={p.pulse && !waitingLabel} halo={p.pulse && !waitingLabel} />
+      {waitingLabel ?? p.label ?? status}
     </span>
   )
 }

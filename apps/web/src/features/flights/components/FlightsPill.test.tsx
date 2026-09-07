@@ -596,3 +596,18 @@ describe('external-work hand-off (a step running in the user\'s own agent)', () 
     expect(resolveFeatureFlightAction('checkout', [handOff({ checkpointKind: 'portify-apply' })])?.attention).toBe(true)
   })
 })
+
+it('shows an adoption wait as review needed, and returns to active when the wait clears', () => {
+  const work: FeatureActivity = { kind: 'healing', runId: 'r1', waiting: {
+    kind: 'test-review', label: 'Awaiting test review', shortLabel: 'to review', detail: 'Adopt or restore the edits.',
+  } }
+  const activity = new Map([['checkout', work]])
+  act(() => { root.render(<FlightsPill flights={[]} activity={activity} onOpenFlight={vi.fn()} />) })
+  expect(container.textContent).toContain('Flights · review needed')
+  const state = featureChipState(null, work)
+  expect(state).toMatchObject({ label: 'to review', live: false, rank: 0 })
+  expect(resolveFeatureFlightAction('checkout', [flight({})], work)).toMatchObject({ label: 'to review', live: false, attention: true })
+  act(() => { root.render(<FlightsPill flights={[]} activity={new Map([['checkout', { kind: 'running', runId: 'r1' }]])} onOpenFlight={vi.fn()} />) })
+  expect(container.textContent).toContain('Flights · 1 active')
+  expect(container.textContent).not.toContain('review needed')
+})

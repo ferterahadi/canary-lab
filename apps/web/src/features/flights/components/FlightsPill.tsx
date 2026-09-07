@@ -78,13 +78,16 @@ export function FlightsPill({
   // blocker — a flight parked on a checkpoint / paused for a non-user,
   // non-queued reason, OR a pre-flight settled and awaiting review. Independent
   // of any toast — it stays until the underlying state resolves.
-  const needsAttention = preFlightReview.length > 0 || flights.some((f) =>
+  const waitingForReview = [...activity.values()].some((a) => a.waiting?.kind === 'test-review')
+  const needsAttention = waitingForReview || preFlightReview.length > 0 || flights.some((f) =>
     flightAwaitsUser(f)
     || (f.status === 'paused' && f.pauseReason !== 'user' && f.pauseReason !== 'queued'))
 
-  const needsHuman = waiting.length > 0 || preFlightReview.length > 0
+  const needsHuman = waitingForReview || waiting.length > 0 || preFlightReview.length > 0
   const tone = needsHuman ? FLIGHT_STATUS_TONE['waiting-for-approval'] : activeCount > 0 ? 'var(--accent)' : undefined
-  const label = needsHuman
+  const label = waitingForReview
+    ? 'Flights · review needed'
+    : needsHuman
     ? `Flights · approval needed`
     : activeCount > 0
       ? `Flights · ${activeCount} active`

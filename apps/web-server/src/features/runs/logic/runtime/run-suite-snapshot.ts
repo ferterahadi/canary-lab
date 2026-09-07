@@ -34,7 +34,14 @@ const SUITE_SNAPSHOT_SKIP = new Set(['envsets', 'node_modules', '.git'])
 /** One digest over every spec's content, independent of listing order. Lets a
  *  reader check that the copy still holds what it held at run start. */
 export function suiteDigest(suiteDir: string): string {
-  const hashes = hashFeatureSpecs(suiteDir)
+  return digestOfSpecHashes(hashFeatureSpecs(suiteDir))
+}
+
+/** The digest over an already-computed `hashFeatureSpecs` map — what
+ *  `suiteDigest` records and what `verify-certificate.mjs` re-derives offline;
+ *  an empty map digests too, so a run with no readable suite still gets the
+ *  real digest shape. */
+export function digestOfSpecHashes(hashes: Record<string, string>): string {
   const h = createHash('sha256')
   for (const rel of Object.keys(hashes).sort()) h.update(`${rel}\0${hashes[rel]}\n`)
   return h.digest('hex')

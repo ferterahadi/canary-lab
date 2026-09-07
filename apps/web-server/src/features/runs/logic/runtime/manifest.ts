@@ -134,6 +134,17 @@ export interface RunIntegrity {
   disclosure: string
 }
 
+/** The directory a READER of this run should take the suite's content from: the
+ *  run-start copy while it exists (the verdict executed it — D9), else the live
+ *  feature dir. One resolver for every after-the-fact reader (the evaluation
+ *  report, the certificate) so none of them renders live source against a
+ *  verdict that ran the copy. `undefined` when the run recorded no feature dir. */
+export function suiteDirForReading(manifest: Pick<RunManifest, 'featureDir' | 'suiteSnapshot'>): string | undefined {
+  const snapshot = manifest.suiteSnapshot
+  if (snapshot?.kind === 'taken' && fs.existsSync(snapshot.dir)) return snapshot.dir
+  return manifest.featureDir
+}
+
 export type LocalHealAgent = 'claude' | 'codex'
 
 export type ExternalHealSessionStatus =

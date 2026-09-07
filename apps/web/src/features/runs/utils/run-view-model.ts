@@ -12,9 +12,11 @@ import {
   deriveRunActionAvailability,
   isTerminalRunStatus,
 } from '@shared/run-state'
+import { runWaitingState, type RunWaitingState } from './run-waiting-state'
 import type { RunActionAvailability } from '@shared/run-state'
 
 export interface RunViewModel {
+  waiting?: RunWaitingState
   displayStatus: DisplayStatus
   headline: string
   subtext?: string
@@ -40,12 +42,14 @@ export function deriveRunViewModel(
   const lifecycle = detail?.manifest.lifecycle
   const events = detail?.lifecycleEvents ?? []
   const displayStatus = deriveDisplayStatus(status, transient)
-  const headline = transientHeadline(transient, executionType) ?? lifecycle?.headline ?? fallbackHeadline(status, executionType)
-  const subtext = lifecycle?.detail
+  const waiting = transient ? undefined : runWaitingState(input)
+  const headline = waiting?.label ?? transientHeadline(transient, executionType) ?? lifecycle?.headline ?? fallbackHeadline(status, executionType)
+  const subtext = waiting?.detail ?? lifecycle?.detail
   const alert = primaryAlert(status, lifecycle?.abortReason?.service, executionType)
 
   return {
     displayStatus,
+    ...(waiting ? { waiting } : {}),
     headline,
     ...(subtext ? { subtext } : {}),
     ...(alert ? { primaryAlert: alert } : {}),

@@ -3,12 +3,13 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import {
+  completeExternalEvaluationExport,
   createExternalEvaluationExportTask,
   evaluationArchiveBase,
   newEvaluationTaskId,
   safeFilename,
 } from './external-evaluation-export'
-import { readEvaluationExportTask } from './evaluation-export-store'
+import { readEvaluationExportCertificate, readEvaluationExportTask } from './evaluation-export-store'
 import { detail } from './__fixtures__/test-review-fixtures'
 
 // The shared task-lifecycle helpers behind BOTH external-export surfaces (the
@@ -86,5 +87,25 @@ describe('createExternalEvaluationExportTask', () => {
     expect(task).not.toHaveProperty('conversationName')
     expect(task).not.toHaveProperty('language')
     expect(task).not.toHaveProperty('externalSessionUrl')
+  })
+})
+
+describe('completeExternalEvaluationExport', () => {
+  it('stores the archive with its certificate, with or without a feature root for the ledger', async () => {
+    const run = detail({ featureDir: path.join(tmpDir, 'no-such-feature') })
+    const rewrite = { summary: 's', cases: [{ title: 't', whatWasChecked: 'w', whyItMatters: 'm', confidence: 'High' }] }
+
+    const bare = createExternalEvaluationExportTask({ logsDir, detail: run, sessionId: 's-1' })
+    const withoutLedger = await completeExternalEvaluationExport({ logsDir, detail: run, taskId: bare.taskId, rewrite })
+    expect(withoutLedger.ok).toBe(true)
+    expect(readEvaluationExportCertificate(logsDir, bare.taskId)).toMatchObject({ format: 'canary-lab/behavior-certificate@1' })
+    expect(readEvaluationExportCertificate(logsDir, bare.taskId)!.notProven.join('\n')).toContain('No requirement ledger')
+
+    // A feature root that holds no such feature attaches nothing, and says so the
+    // same way — the arm is the MCP tool's and the flight's, so it is exercised here.
+    const scoped = createExternalEvaluationExportTask({ logsDir, detail: run, sessionId: 's-1' })
+    const withRoot = await completeExternalEvaluationExport({ logsDir, featuresDir: path.join(tmpDir, 'features'), detail: run, taskId: scoped.taskId, rewrite })
+    expect(withRoot.ok).toBe(true)
+    expect(readEvaluationExportCertificate(logsDir, scoped.taskId)!.claims).toEqual([])
   })
 })

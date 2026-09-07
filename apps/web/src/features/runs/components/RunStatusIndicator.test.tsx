@@ -57,3 +57,10 @@ describe('RunStatusIndicator', () => {
     expect(html).toContain('stopped')
   })
 })
+
+it('renders a waiting heal without an active pulse', () => {
+  const html = renderToStaticMarkup(<RunStatusIndicator status="healing" waitingLabel="Awaiting test review" />)
+  expect(html).toContain('Awaiting test review')
+  expect(html).not.toContain('animate-ping')
+  expect(html).not.toContain('animate-pulse')
+})

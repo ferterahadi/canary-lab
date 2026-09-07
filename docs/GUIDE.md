@@ -77,6 +77,22 @@ When the suite has a PRD summary, the report separates two questions:
 
 Canary Lab never borrows a result from another run for an export.
 
+The archive also carries a **behavior certificate** (`certificate.json`) with a
+zero-dependency checker beside it (`verify-certificate.mjs`). The certificate
+states which tests ran from which suite snapshot (the run-start copy and its
+digest), what each test asserted and how strongly, how the run ended, which live
+spec edits the verdict never executed, and the advisory hints. It says in its own
+text what it does not prove: the absence of weakening, the completeness of the
+requirement set, or anything the listed assertions did not observe. A third
+party re-checks it without Canary Lab:
+
+```bash
+node verify-certificate.mjs certificate.json --suite <path-to-the-suite-copy>
+```
+
+The checker re-derives every spec hash, the suite digest and every assertion's
+line from files on disk and exits non-zero when any of them differ.
+
 The Export menu offers two wording modes:
 
 - **Raw** renders directly from captured evidence and uses no LLM.

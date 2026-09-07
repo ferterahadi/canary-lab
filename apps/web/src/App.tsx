@@ -19,6 +19,7 @@ const LogCleanupPage = lazy(() => import('./features/cleanup/components/LogClean
 const CoverageLedgerPage = lazy(() => import('./features/coverage/components/CoverageLedgerPage').then((m) => ({ default: m.CoverageLedgerPage })))
 const FlightPage = lazy(() => import('./features/flights/components/FlightPage').then((m) => ({ default: m.FlightPage })))
 import { FlightStartDialog } from './features/flights/components/FlightStartDialog'
+import { runWaitingState } from './features/runs'
 import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useRunStart } from './features/runs/state/use-run-start'
 import { useFeatureWorkState, type FeatureActivity } from './features/flights/state/feature-activity'
@@ -421,6 +422,7 @@ export function App() {
           selectedFeature={selectedFeature}
           activeRunFeature={globalActiveRunEntry?.feature ?? null}
           activeRunStatus={globalActiveRunEntry?.status ?? null}
+          activeRunWaitingLabel={runWaitingState(activeRunDetail ?? globalActiveRunEntry)?.label}
           activeRunExecutionType={globalActiveRunEntry?.executionType ?? null}
           onSelectFeature={(name) => {
             pendingRunSelectionRef.current = null
@@ -451,6 +453,7 @@ export function App() {
         <TestCasesColumn
           feature={selectedFeature}
           activeRunSummary={summaryForSelectedFeature}
+          activeRunManifest={statusRunDetail.detail?.manifest}
           activeRunStatus={statusForSelectedFeature}
           onTotalTestsChange={setSpecTotalTests}
           dirtySpecs={features.find((f) => f.name === selectedFeature)?.dirty?.specs ?? []}

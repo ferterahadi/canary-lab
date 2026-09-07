@@ -1,6 +1,7 @@
 import type { ExecutionType, RunDetail, RunIndexEntry, RunStatus } from '@/shared/api/types'
 import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
+import { runWaitingState } from '../utils/run-waiting-state'
 import { shortTime } from '@/shared/lib/format'
 
 // One run row + its status chip, extracted verbatim from RunsListDialog (R64)
@@ -77,6 +78,7 @@ export function RunRow({
 }) {
   const ports = showPorts ? portsLabel(detail) : null
   const note = queueNote(run, detail)
+  const waiting = runWaitingState(detail ?? run)
   // A held boot session is status 'running' but reads as teal "services up".
   const isBoot = run.executionType === 'boot'
   const dot = isBoot && run.status === 'running' ? { state: 'booted' as const, pulse: true } : DOT[run.status]
@@ -95,7 +97,7 @@ export function RunRow({
         className="group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left cl-hover-row"
         title={`Go to run ${run.runId}`}
       >
-        <StatusDot state={dot.state} pulse={dot.pulse} halo={dot.pulse} className="shrink-0" />
+        <StatusDot state={dot.state} pulse={dot.pulse && !waiting} halo={dot.pulse && !waiting} className="shrink-0" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-[13px]" style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
             {primaryLabel ?? run.feature}
@@ -122,7 +124,7 @@ export function RunRow({
             {passLabel}
           </span>
         )}
-        <RunStatusChip status={run.status} executionType={run.executionType} pendingSpecEdits={run.pendingSpecEdits} />
+        <RunStatusChip status={run.status} executionType={run.executionType} pendingSpecEdits={run.pendingSpecEdits} waitingLabel={waiting?.label} />
         <span
           className={`shrink-0 transition-opacity ${arrow === 'always' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
           style={{ color: 'var(--accent)' }}
@@ -142,14 +144,14 @@ export function RunRow({
  *  chrome and muted tone: a fact about provenance, not an alarm (the danger
  *  reading, if any, is the features column's weaker badge). The count is
  *  mirrored onto the runs index by the server so this needs no detail read. */
-export function RunStatusChip({ status, executionType, pendingSpecEdits }: { status: RunStatus; executionType?: ExecutionType; pendingSpecEdits?: number }) {
+export function RunStatusChip({ status, executionType, pendingSpecEdits, waitingLabel }: { status: RunStatus; executionType?: ExecutionType; pendingSpecEdits?: number; waitingLabel?: string }) {
   const boot = executionType === 'boot' && (status === 'running' || status === 'aborted')
   const palette = boot
     ? (status === 'running'
         ? { bg: 'var(--boot-soft)', text: 'var(--boot)' }
         : { bg: 'var(--bg-selected)', text: 'var(--text-muted)' })
     : CHIP[status]
-  const label = boot ? (status === 'running' ? 'services up' : 'stopped') : status
+  const label = boot ? (status === 'running' ? 'services up' : 'stopped') : waitingLabel ?? status
   const pending = pendingSpecEdits ?? 0
   return (
     <>

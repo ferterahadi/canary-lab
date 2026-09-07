@@ -2,6 +2,7 @@ import * as api from '@/shared/api/client'
 import type { RunIndexEntry } from '@/shared/api/types'
 import { formatDuration, durationBetween, shortTime } from '@/shared/lib/format'
 import { deriveRunViewModel } from '../utils/run-view-model'
+import { useRunDetails } from '../state/RunsContext'
 import { useRunsColumn } from './use-runs-column'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { VerificationDialog } from '@/features/coverage'
@@ -73,6 +74,8 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
     confirmDelete,
   } = useRunsColumn({ runs, selectedRunId, onSelectRun, verifyOpen, onVerifyOpenChange })
 
+  const details = useRunDetails()
+
   return (
     <div ref={containerRef} className="cl-panel flex h-full flex-col">
       <div className="cl-panel-header flex items-center gap-3 px-4 py-3">
@@ -127,7 +130,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
               const isCancellingHeal = transient === 'cancelling-heal'
               const isRestarting = restartingIds.has(r.runId)
               const rowError = errors[r.runId] ?? restartErrors[r.runId] ?? null
-              const view = deriveRunViewModel(r, transient)
+              const view = deriveRunViewModel(details[r.runId] ?? r, transient)
               const displayStatus = view.displayStatus
               const executionType = r.executionType ?? 'run'
               const typeLabel = executionType === 'verify' ? 'Verify' : 'Run'
@@ -164,7 +167,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                           </span>
                           <ExecutionTypeBadge type={executionType} />
                         </div>
-                        <RunStatusIndicator status={displayStatus} executionType={executionType} />
+                        <RunStatusIndicator status={displayStatus} executionType={executionType} waitingLabel={view.waiting?.label} />
                       </div>
                       <div
                         className="flex w-full min-w-0 items-center justify-between gap-2"
@@ -261,7 +264,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                               />
                             )}
                             <span className="ml-1 inline-flex items-center">
-                              <RunStatusIndicator status={displayStatus} executionType={executionType} />
+                              <RunStatusIndicator status={displayStatus} executionType={executionType} waitingLabel={view.waiting?.label} />
                             </span>
                           </>
                         )}

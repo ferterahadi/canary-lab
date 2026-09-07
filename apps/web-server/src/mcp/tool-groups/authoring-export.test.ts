@@ -10,7 +10,8 @@ import {
   deleteEvaluationExportTask,
   evaluationExportTaskPaths,
 } from '../../features/evaluation/logic/evaluation-export-store'
-import { registerEvaluationExportTools } from './authoring-export'
+import { certificateDigest, registerEvaluationExportTools } from './authoring-export'
+import type { BehaviorCertificate } from '../../../../../shared/verification-strength/certificate'
 import { BUSY_ACTIVE, captureTools, fakeGettingStartedDemo } from './__fixtures__/tool-group-harness'
 
 // The externally-authored evaluation export: create a task for a finished run,
@@ -525,6 +526,127 @@ describe('download_evaluation_export', () => {
 
     expect(await text('download_evaluation_export', { taskId: 'eval-ghost' }))
       .toBe('evaluation export task not found: eval-ghost')
+  })
+})
+
+describe('the behavior certificate through the export tools', () => {
+  async function completed(): Promise<string> {
+    const taskId = await startTask()
+    await harness().call('submit_external_evaluation_export', {
+      taskId, rewrite: { summary: 'One scenario passed.', cases: [CASE] },
+    })
+    return taskId
+  }
+
+  it('submit and get carry the digest and the path; download carries the whole file', async () => {
+    const taskId = await startTask()
+    const { call } = harness()
+    const submitted = await call('submit_external_evaluation_export', {
+      taskId, rewrite: { summary: 'One scenario passed.', cases: [CASE] },
+    })
+    const paths = evaluationExportTaskPaths(logsDir, taskId)!
+
+    // The digest is what an agent relays: the sentence, the counts, the suite
+    // check, what is not proven, how to re-check — never the whole predicate list.
+    expect(submitted).toMatchObject({
+      certificatePath: paths.certificatePath,
+      certificateInsideArchive: 'certificate.json',
+      checkerInsideArchive: 'verify-certificate.mjs',
+      certificate: {
+        format: 'canary-lab/behavior-certificate@1',
+        counts: { declared: 1, passed: 1, failed: 0, skipped: 0, interrupted: 0, notRun: 0 },
+        suite: { source: 'none', runStartCheck: 'unverifiable' },
+        pendingSpecEdits: 'unknown',
+        hints: 0,
+      },
+    })
+    const digest = submitted.certificate as { statement: string; notProven: string[]; verifyOffline: string; tests?: unknown }
+    expect(digest.statement).toContain('ran 1 declared test for run run-1')
+    expect(digest.notProven[0]).toMatch(/^The absence of weakening/)
+    expect(digest.verifyOffline).toContain('node verify-certificate.mjs certificate.json')
+    expect(digest).not.toHaveProperty('tests')
+    expect(String(submitted.nextSteps)).toContain('not the absence of weakening')
+
+    const got = await call('get_evaluation_export', { taskId })
+    expect(got).toMatchObject({ certificatePath: paths.certificatePath, certificate: { format: 'canary-lab/behavior-certificate@1' } })
+
+    const downloaded = await call('download_evaluation_export', { taskId })
+    const full = downloaded.certificate as BehaviorCertificate
+    expect(downloaded.certificatePath).toBe(paths.certificatePath)
+    expect(full.tests).toEqual([expect.objectContaining({ name: 'pays', status: 'passed', predicates: [] })])
+    expect(full).toEqual(JSON.parse(fs.readFileSync(paths.certificatePath, 'utf8')))
+  })
+
+  it('submit hands the feature root to the certificate, so its claims come from the coverage ledger', async () => {
+    // The claim list is the ledger's requirement ids; without featuresDir the
+    // certificate can only see @req-* tags, and this roster carries none.
+    const featuresDir = path.join(tmpDir, 'features')
+    const docsDir = path.join(featuresDir, 'checkout', 'docs')
+    fs.mkdirSync(docsDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(featuresDir, 'checkout', 'feature.config.cjs'),
+      `module.exports = { config: { name: 'checkout', description: 'd', envs: ['local'], repos: [], featureDir: __dirname } }`,
+    )
+    fs.writeFileSync(path.join(docsDir, '_prd-summary.json'), JSON.stringify({
+      requirements: [{ id: 'R1', title: 'Pays', text: 'A shopper can pay', pathTypes: ['happy'] }],
+      requirementsHash: 'h1', docsHash: 'h2', generatedAt: '2026-01-01T00:00:00.000Z', sourceDocs: [],
+    }))
+    const detail = runDetail()
+    const { call } = harness(detail, { featuresDir })
+    const started = await call('start_external_evaluation_export', {
+      runId: detail.runId, language: 'English', session_id: 's-1', client_kind: 'claude',
+    })
+    const taskId = (started.task as { taskId: string }).taskId
+    const submitted = await call('submit_external_evaluation_export', {
+      taskId, rewrite: { summary: 'One scenario passed.', cases: [CASE] },
+    })
+
+    expect(submitted.certificate).toMatchObject({ claims: { total: 1, noTests: 1 } })
+    const full = JSON.parse(fs.readFileSync(evaluationExportTaskPaths(logsDir, taskId)!.certificatePath, 'utf8')) as BehaviorCertificate
+    expect(full.claims).toEqual([expect.objectContaining({ requirement: expect.objectContaining({ id: 'R1', title: 'Pays' }), tests: [], outcome: 'no-tests' })])
+  })
+
+  it('an export built before certificates existed still reads as completed, without claiming one', async () => {
+    const taskId = await completed()
+    fs.unlinkSync(evaluationExportTaskPaths(logsDir, taskId)!.certificatePath)
+    const { call } = harness()
+
+    const got = await call('get_evaluation_export', { taskId })
+    expect(got).toMatchObject({ status: 'completed', archivePath: evaluationExportTaskPaths(logsDir, taskId)!.zipPath })
+    expect(got).not.toHaveProperty('certificate')
+    expect(got).not.toHaveProperty('certificatePath')
+
+    const downloaded = await call('download_evaluation_export', { taskId })
+    expect(downloaded).not.toHaveProperty('certificate')
+    expect(downloaded).not.toHaveProperty('certificatePath')
+  })
+
+  it('digest: counts every claim outcome and points the offline check at the suite dir when there is one', () => {
+    const certificate = {
+      format: 'canary-lab/behavior-certificate@1',
+      statement: 's',
+      run: { counts: { declared: 2, passed: 1, failed: 1, skipped: 0, interrupted: 0, notRun: 0 } },
+      suite: { source: 'run-start-snapshot', digest: 'abc', runStartCheck: 'matches', dir: '/logs/runs/r/suite' },
+      claims: [{ outcome: 'all-passed' }, { outcome: 'some-failed' }, { outcome: 'not-run' }, { outcome: 'no-tests' }, { outcome: 'all-passed' }],
+      specEdits: { pending: [{}, {}] },
+      hints: [{}],
+      notProven: ['n1'],
+    } as unknown as BehaviorCertificate
+
+    const digest = certificateDigest(certificate, '/logs/evaluation-exports/eval-1/certificate.json')
+
+    expect(digest).toEqual({
+      format: 'canary-lab/behavior-certificate@1',
+      statement: 's',
+      suite: { source: 'run-start-snapshot', digest: 'abc', runStartCheck: 'matches' },
+      counts: { declared: 2, passed: 1, failed: 1, skipped: 0, interrupted: 0, notRun: 0 },
+      claims: { total: 5, allPassed: 2, someFailed: 1, notRun: 1, noTests: 1 },
+      pendingSpecEdits: 2,
+      hints: 1,
+      notProven: ['n1'],
+      verifyOffline: expect.stringContaining('node verify-certificate.mjs certificate.json --suite "/logs/runs/r/suite"'),
+    })
+    expect(digest.verifyOffline).toContain('/logs/evaluation-exports/eval-1/certificate.json')
   })
 })
 

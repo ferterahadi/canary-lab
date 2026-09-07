@@ -5,6 +5,7 @@ import path from 'path'
 import {
   readManifest,
   readRunsIndex,
+  suiteDirForReading,
   updateManifest,
   updateServiceStatus,
   upsertRunsIndexEntry,
@@ -162,5 +163,21 @@ describe('service status updates', () => {
     const after = readManifest(manifestPath)!.services[0]!
     expect(after.startingAt).toBe(first.startingAt)
     expect(after.readyAt).toBe(first.readyAt)
+  })
+})
+
+describe('suiteDirForReading', () => {
+  it('prefers the run-start copy while it exists, else the live feature dir, else nothing', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-suite-dir-'))
+    try {
+      const taken = { kind: 'taken' as const, dir, takenAt: 'x', digest: 'd' }
+      expect(suiteDirForReading({ featureDir: '/live', suiteSnapshot: taken })).toBe(dir)
+      expect(suiteDirForReading({ featureDir: '/live', suiteSnapshot: { ...taken, dir: path.join(dir, 'gone') } })).toBe('/live')
+      expect(suiteDirForReading({ featureDir: '/live', suiteSnapshot: { kind: 'unavailable', at: 'x', reason: 'r' } })).toBe('/live')
+      expect(suiteDirForReading({ featureDir: '/live' })).toBe('/live')
+      expect(suiteDirForReading({})).toBeUndefined()
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
