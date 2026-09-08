@@ -144,6 +144,7 @@ export default defineConfig({
         'shared/flights/**/*.ts',
         'shared/launcher/**/*.ts',
         'shared/lib/**/*.ts',
+        'shared/robustness/**/*.ts',
         'shared/runtime/**/*.ts',
         'shared/agent-models.ts',
         'shared/code-display-format.ts',

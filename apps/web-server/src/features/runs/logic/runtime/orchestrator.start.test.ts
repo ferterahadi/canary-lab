@@ -3,6 +3,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { EventEmitter } from 'events'
+import net from 'net'
+import { findFreePort } from './port-allocator'
 import { RunOrchestrator, type ServiceSpec } from './orchestrator'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
@@ -162,6 +164,39 @@ describe('RunOrchestrator.start', () => {
     expect(fs.existsSync(path.join(tmpDir, 'logs', 'current'))).toBe(false)
 
     await orch.stop('passed')
+  })
+
+  it('starts one perturbation shim per slot once the services are healthy, and closes them on stop', async () => {
+    const { factory } = makeFakeFactory()
+    const shimPorts = new Map([['api', await findFreePort()]])
+    const orch = new RunOrchestrator({
+      feature: makeFeature({
+        repos: [{ name: 'api', localPath: tmpDir, startCommands: [{ command: 'echo hi', name: 'api', ports: [{ name: 'api', env: 'PORT' }], healthCheck: { url: 'http://x' } }] }],
+      }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      portMap: new Map([['api', 4100]]),
+      perturbation: { envelope: { format: 'canary-lab/robustness-envelope@1', latency: { ms: 0 } }, shimPorts },
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+
+    await orch.start()
+
+    const shimPort = shimPorts.get('api')!
+    await expect(new Promise<void>((resolve, reject) => {
+      const s = net.connect(shimPort, '127.0.0.1', () => { s.destroy(); resolve() })
+      s.on('error', reject)
+    })).resolves.toBeUndefined()
+    expect(readManifest(orch.paths.manifestPath)?.perturbation).toEqual({ envelope: { format: 'canary-lab/robustness-envelope@1', latency: { ms: 0 } }, shimPorts: { api: shimPort } })
+
+    await orch.stop('passed')
+
+    await expect(new Promise<void>((resolve, reject) => {
+      const s = net.connect(shimPort, '127.0.0.1', () => { s.destroy(); resolve() })
+      s.on('error', reject)
+    })).rejects.toThrow(/ECONNREFUSED/)
   })
 
   it('tees pty output to disk and emits service-output', async () => {

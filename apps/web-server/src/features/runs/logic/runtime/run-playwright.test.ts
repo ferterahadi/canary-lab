@@ -166,6 +166,17 @@ describe('runPlaywright — the snapshot boundary', () => {
     expect(spawner).toHaveBeenCalledWith(expect.objectContaining({ suiteDir: ctx.paths.suiteSnapshotDir }))
   })
 
+  it('re-arms the perturbation shims before every spawn, so a heal-cycle rerun meets the same perturbation', async () => {
+    const { ctx } = ctxFor({}, { ptyFactory: exit0Pty, playwrightSpawner: () => ({ command: 'noop', cwd: tmpDir }) })
+    const reset = vi.fn()
+    ctx.perturbationShims.push({ slot: 'api', port: 1, upstreamPort: 2, events: [], reset, close: async () => {} })
+
+    await runPlaywright(ctx)
+    await runPlaywright(ctx)
+
+    expect(reset).toHaveBeenCalledTimes(2)
+  })
+
   it('records the pending live edits on the manifest when Playwright exits', async () => {
     const { ctx, sink } = ctxFor({}, { ptyFactory: exit0Pty, playwrightSpawner: () => ({ command: 'noop', cwd: tmpDir }) })
     spec(ctx.feature.featureDir, 'a.spec.ts', "test('a', async () => { expect(1).toBe(1) })\n")

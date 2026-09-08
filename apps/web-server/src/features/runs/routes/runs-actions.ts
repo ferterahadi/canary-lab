@@ -12,6 +12,8 @@ import type { ExecutionType } from '../../../../../../shared/verification'
 import { ExternalHealAgentRequest, findActiveRunForFeature, parseExternalHealAgent } from './runs-route-support'
 import { GettingStartedBusyError, type GettingStartedOwner } from '../../config/logic/getting-started-session'
 import type { GettingStartedRunWorkflow } from '../../config/routes/onboarding'
+import { parseRobustnessEnvelope } from '../../../../../../shared/robustness/envelope'
+import type { RobustnessEnvelope } from '../../../../../../shared/robustness/types'
 
 export { compareActiveRuns } from './runs-route-support'
 export type { ExternalHealAgentRequest } from './runs-route-support'
@@ -35,6 +37,8 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       models?: unknown
       gettingStartedSource?: GettingStartedOwner
       gettingStartedWorkflow?: GettingStartedRunWorkflow
+      /** A robustness envelope to boot under; validated below. */
+      perturbation?: unknown
     }
   }>('/api/runs', async (req, reply) => {
     const feature = req.body?.feature
@@ -60,6 +64,17 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
     if (healAgent && 'error' in healAgent) {
       reply.code(400)
       return { error: healAgent.error }
+    }
+    // A robustness envelope to boot under (D14). Human-edited JSON, so a bad
+    // one is named here rather than booted as "no perturbation".
+    let perturbation: RobustnessEnvelope | undefined
+    if (req.body?.perturbation !== undefined) {
+      const parsed = parseRobustnessEnvelope(req.body.perturbation)
+      if (!parsed.ok) {
+        reply.code(400)
+        return { error: `invalid perturbation: ${parsed.reason}` }
+      }
+      perturbation = parsed.envelope
     }
     // Heal-claim policy: only runner-spawned PTY agents Canary Lab launches
     // itself (claude-pty/codex-pty) are denied a heal claim. A disallowed
@@ -136,7 +151,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       : undefined
     const executionType: ExecutionType = req.body?.mode === 'boot' ? 'boot' : 'run'
     try {
-      const outcome = await deps.startRun(feature, env, externalRunReq, isolation, executionType, req.body?.models)
+      const outcome = await deps.startRun(feature, env, externalRunReq, isolation, executionType, req.body?.models, perturbation)
       if (outcome.kind === 'collision') {
         if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
         // Same-repo collision and the caller didn't choose how to handle it.

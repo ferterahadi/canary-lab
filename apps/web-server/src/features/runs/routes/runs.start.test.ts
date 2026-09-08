@@ -110,6 +110,27 @@ describe('POST /api/runs', () => {
     expect(registry.get('run-1')).toBe(stub)
   })
 
+  it('forwards a valid perturbation envelope to the factory', async () => {
+    writeFeature('foo')
+    const startRun = vi.fn(async () => ({ kind: 'started' as const, orch: makeStub('run-p') }))
+    const { app } = await build({ startRun })
+    const envelope = { format: 'canary-lab/robustness-envelope@1', latency: { ms: 250 } }
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', perturbation: envelope } })
+    expect(res.statusCode).toBe(201)
+    expect(startRun).toHaveBeenCalledWith('foo', undefined, undefined, undefined, 'run', undefined, envelope)
+  })
+
+  // The envelope is human-edited JSON; a bad one is named, never booted as "no perturbation".
+  it('400s an invalid perturbation envelope with the reason', async () => {
+    writeFeature('foo')
+    const startRun = vi.fn()
+    const { app } = await build({ startRun })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', perturbation: { format: 'nope' } } })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ error: 'invalid perturbation: format must be "canary-lab/robustness-envelope@1"' })
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
   it('claims and links a Getting Started run before returning its owner page id', async () => {
     writeFeature('foo')
     const claim = vi.fn(() => ({ sessionId: 'gs-1' }))

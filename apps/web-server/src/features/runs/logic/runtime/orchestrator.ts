@@ -14,6 +14,7 @@ import { type RunManifest } from './manifest'
 import type { RunnerLog } from './runner-log'
 import { planRestart } from './restart-planner'
 import { releasePorts } from './port-allocator'
+import { startPerturbationShims, stopPerturbationShims } from './perturbation/run-perturbation'
 import { removeWorktree } from './repo-worktree'
 // Headless event-emitting orchestrator for a single feature run. Wraps the
 // existing health-check / signal-file semantics behind a clean API the future
@@ -187,6 +188,9 @@ export class RunOrchestrator extends EventEmitter {
     // this baseline at teardown is exactly the heal agent's fix (R80).
     await captureFixBaseline(this.ctx)
     await ensureServicesRunning(this.ctx)
+    // Only once every service is up: the shims forward to the real ports, and
+    // the first request a test makes must be the first one perturbed.
+    await startPerturbationShims(this.ctx)
   }
 
   // Manually fire a restart. When `filesChanged` is supplied and non-empty,
@@ -448,6 +452,9 @@ export class RunOrchestrator extends EventEmitter {
       scheduleSigkillFallback(this.ctx.healAgentPty)
       this.ctx.healAgentPty = null
     }
+    // Shims before services: a request held for a restart is released rather
+    // than left hanging on a socket whose upstream is about to die.
+    await stopPerturbationShims(this.ctx)
     for (const [name, pty] of this.ctx.servicePtys) {
       killTree(pty, 'SIGTERM')
       this.ctx.servicePtys.delete(name)
@@ -475,6 +482,7 @@ export class RunOrchestrator extends EventEmitter {
     // worktree run, tear the worktree down so the source repo doesn't
     // accumulate stale checkouts. Failures here must not block finalization.
     if (this.ctx.portMap) releasePorts(this.ctx.portMap.values())
+    if (this.ctx.perturbation) releasePorts(this.ctx.perturbation.shimPorts.values())
     if (this.ctx.portified) {
       await reversePortifyOverlay(this.ctx).catch(() => {})
     } else {

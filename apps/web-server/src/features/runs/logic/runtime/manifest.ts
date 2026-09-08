@@ -18,6 +18,7 @@ import type {
 } from '../../../../../../../shared/verification'
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 import type { ExternalSessionMeta } from '../../../../../../../shared/run-mode'
+import type { RobustnessEnvelope } from '../../../../../../../shared/robustness/types'
 import type { RunModelPlan } from './run-model-plan'
 import type { PendingSpecEdit } from '../dirty-specs/detect'
 import type { IntegrityHint } from './run-integrity-hints'
@@ -170,6 +171,11 @@ export interface ExternalHealSession extends ExternalSessionMeta {
   cycleCount: number
 }
 
+export interface RunPerturbationRecord {
+  envelope: RobustnessEnvelope
+  shimPorts: Record<string, number>
+}
+
 export interface RunManifest {
   runId: string
   executionType?: ExecutionType
@@ -202,6 +208,9 @@ export interface RunManifest {
   specEdits?: RunSpecEdits
   /** Written together with `specEdits`; same absence rule. */
   integrity?: RunIntegrity
+  /** The robustness envelope this run booted under and the shim port fronting
+   *  each slot (D14). Absent on an unperturbed run — the common case. */
+  perturbation?: RunPerturbationRecord
   /**
    * Per heal-cycle record of which services were restarted vs kept warm.
    * Populated when the orchestrator processes a `.restart` signal whose body

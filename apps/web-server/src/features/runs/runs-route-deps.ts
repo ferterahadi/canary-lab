@@ -9,6 +9,7 @@ import { runsRoutes } from './routes/runs'
 import { pickConfiguredHealAgent } from './pick-heal-agent'
 import { type OrchestratorLike, type StartRunOutcome } from './logic/run-store'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
+import { allocatePerturbationPorts } from './logic/runtime/perturbation/run-perturbation'
 import type { ServerContext } from '../../server-context'
 import { loadFeatures } from '../../shared/feature-loader'
 import { generateRunId } from './logic/runtime/run-id'
@@ -28,6 +29,7 @@ import {
 } from './logic/runtime/env-switcher/switch'
 import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { ExecutionType } from '../../../../../shared/verification'
+import type { RobustnessEnvelope } from '../../../../../shared/robustness/types'
 import type { makeAttachRunStreams, makeRestartExternalRun } from './run-stream-wiring'
 import type { buildRunScheduling } from './run-scheduling'
 import { settleOrchestratorRun } from './logic/settle-run'
@@ -83,6 +85,7 @@ export function buildRunsRouteDeps(
       isolation?: 'worktree' | 'queue',
       executionType: ExecutionType = 'run',
       modelsOverride?: unknown,
+      perturbationEnvelope?: RobustnessEnvelope,
     ): Promise<StartRunOutcome> => {
       const isBoot = executionType === 'boot'
       const features = loadFeatures(featuresDir)
@@ -130,10 +133,13 @@ export function buildRunsRouteDeps(
         const repoBranchSnapshots = await collectRepoBranchSnapshots(feature)
 
       const portMap = await allocateRunPorts(feature, env)
+      // Shim ports are allocated before the envset is written so `${port.<slot>}`
+      // already points at the shim; a slot-less suite is refused here as a 400.
+      const perturbation = await allocatePerturbationPorts(perturbationEnvelope, portMap)
       let backups: BackupRecord[] | null = null
       if (env) {
         try {
-          backups = applyFeatureEnvset(feature.featureDir, env, portMap)
+          backups = applyFeatureEnvset(feature.featureDir, env, perturbation?.shimPorts ?? portMap)
           if (backups) runnerLog.info(`Applied envset "${env}" for ${feature.name}`)
         } catch (err) {
           runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
@@ -271,6 +277,7 @@ export function buildRunsRouteDeps(
           runId,
           runDir,
           portMap,
+          perturbation,
           worktrees,
 	          ptyFactory,
           runnerLog,
@@ -376,10 +383,12 @@ export function buildRunsRouteDeps(
         runnerLog.warn(`Restarting run for legacy manifest without persisted env; defaulting to "${env}".`)
       }
       const portMap = await allocateRunPorts(feature, env)
+      // A restart meets the same perturbation the original run booted under.
+      const perturbation = await allocatePerturbationPorts(manifest.perturbation?.envelope, portMap)
       let backups: BackupRecord[] | null = null
       if (env) {
         try {
-          backups = applyFeatureEnvset(feature.featureDir, env, portMap)
+          backups = applyFeatureEnvset(feature.featureDir, env, perturbation?.shimPorts ?? portMap)
           if (backups) runnerLog.info(`Applied envset "${env}" for run restart ${feature.name}`)
         } catch (err) {
           runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
@@ -441,6 +450,7 @@ export function buildRunsRouteDeps(
           runId,
           runDir,
           portMap,
+          perturbation,
           ptyFactory,
           runnerLog,
           autoHeal,

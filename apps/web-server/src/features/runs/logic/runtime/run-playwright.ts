@@ -13,6 +13,7 @@ import { testPortEnv } from './run-service-boot'
 import { prepareRun, recordLifecycle, setStatus } from './run-manifest-writer'
 import { repoPathOverrideEnv } from './repo-path-env'
 import { recordSpecEdits } from './run-suite-snapshot'
+import { resetPerturbationShims } from './perturbation/run-perturbation'
 
 // ─── Playwright + heal loop ────────────────────────────────────────────────
 //
@@ -40,6 +41,7 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
         reason: rerunSelection.reason,
       } satisfies RunLifecycleTargetedRerun
     : undefined
+  resetPerturbationShims(ctx)
   ctx.emit('playwright-started', { command: inv.command })
   recordLifecycle(ctx, targetedRerun ? 'rerunning-tests' : 'running-tests', targetedRerun ? 'Rerunning Playwright tests' : 'Running Playwright tests', {
     detail: targetedRerun

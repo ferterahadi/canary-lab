@@ -73,6 +73,18 @@ describe('snapshotSuite', () => {
     }])
   })
 
+  // The robustness envelope (D15) lives in the suite folder precisely so it
+  // rides in this copy: a mid-run edit to it is then a spec edit under D9.
+  it('carries robustness/envelope.json into the copy', () => {
+    const { ctx } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    write(ctx.feature.featureDir, 'robustness/envelope.json', '{"format":"canary-lab/robustness-envelope@1"}\n')
+
+    snapshotSuite(ctx)
+
+    expect(fs.readFileSync(path.join(ctx.suiteDir, 'robustness', 'envelope.json'), 'utf8')).toBe('{"format":"canary-lab/robustness-envelope@1"}\n')
+  })
+
   it('leaves envsets, node_modules and .git out of the copy', () => {
     // Envsets carry secrets and are read from the live dir by the env switcher;
     // node_modules resolves by walking up from the copy exactly as it does from

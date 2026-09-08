@@ -39,6 +39,8 @@ import type {
 import type { VerificationRunMetadata, ExecutionType as ExecutionType } from '../../../../../../../shared/verification'
 import type { PlaywrightSpawner } from './run-spawn'
 import type { RunModelPlan } from './run-model-plan'
+import type { RunPerturbation } from './perturbation/client-ports'
+import type { ProxyShim } from './perturbation/proxy-shim'
 
 /** The orchestrator's own `emit`, handed to the modules so they can report
  *  progress without holding a reference back to the class. */
@@ -61,6 +63,9 @@ export interface RunContext {
    *  unit tests and the CLI shim, which have no project config to consult. */
   readonly projectRoot?: string
   readonly portMap?: Map<string, number>
+  /** Set when the run boots under a robustness envelope: Playwright and the
+   *  envsets get `perturbation.shimPorts`; services keep `portMap`. */
+  readonly perturbation?: RunPerturbation
   readonly worktreeHandles: WorktreeHandle[]
   readonly repoPathOverrides: Record<string, string>
   /** Ephemeral port overlay: when the feature has a saved overlay, its captured
@@ -141,6 +146,9 @@ export interface RunContext {
    *  the top of every ensureServicesRunning so a stale failure from a prior
    *  cycle doesn't survive a successful reboot. */
   bootFailure: RunBootFailure | undefined
+  /** The shims fronting each slot while a perturbed run is live; empty for an
+   *  unperturbed run and after teardown. */
+  perturbationShims: ProxyShim[]
 
   // ── heal-agent state ──────────────────────────────────────────────────────
   /** Tracked while a heal-agent pty is in flight so cancelHeal() can SIGTERM it.
@@ -197,6 +205,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     logsRoot,
     ...(opts.projectRoot === undefined ? {} : { projectRoot: opts.projectRoot }),
     portMap: opts.portMap,
+    perturbation: opts.perturbation,
     worktreeHandles,
     repoPathOverrides,
     portified: overlayExists(opts.feature.featureDir),
@@ -262,6 +271,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     playwrightPty: null,
     playwrightExitWaiter: null,
     bootFailure: undefined,
+    perturbationShims: [],
 
     healAgentPty: null,
     healAgentMcpOutputDir: undefined,

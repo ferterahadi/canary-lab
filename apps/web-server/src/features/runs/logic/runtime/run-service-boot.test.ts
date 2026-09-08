@@ -66,6 +66,18 @@ describe('testPortEnv', () => {
     expect(testPortEnv(ctx)).toEqual({ CANARY_PORT_checkout_service: '51997' })
   })
 
+  // Under a perturbation the SERVICE keeps the real port (its env + health probe
+  // come from portMap) while Playwright is handed the shim's, so every request
+  // the suite makes crosses the shim.
+  it('hands Playwright the shim port, not the real one, when the run is perturbed', () => {
+    const { ctx } = ctxFor({
+      portMap: new Map([['api', 51997]]),
+      perturbation: { envelope: { format: 'canary-lab/robustness-envelope@1' }, shimPorts: new Map([['api', 51900]]) },
+    })
+
+    expect(testPortEnv(ctx)).toEqual({ CANARY_PORT_api: '51900' })
+  })
+
   it('normalizes every non-identifier character, not only hyphens', () => {
     expect(testPortEnvKey('checkout.service/v2')).toBe('CANARY_PORT_checkout_service_v2')
   })

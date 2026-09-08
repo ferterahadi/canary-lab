@@ -1,4 +1,5 @@
 import path from 'path'
+import type { RunPerturbation } from './perturbation/client-ports'
 import type { FeatureConfig, HealthProbe } from '../../../../../../../shared/launcher/types'
 import type { ExecutionType, VerificationRunMetadata } from '../../../../../../../shared/verification'
 import { type ExternalHealSession, type RunLifecycleAbortReason, type RunLifecycleEvent, type RunLifecycleRestartPlan, type RunLifecycleSeverity, type RunLifecycleTargetedRerun, type RepoBranchSnapshot, type RunManifest } from './manifest'
@@ -39,6 +40,9 @@ export interface DirtySpecHooks {
 
 export interface OrchestratorOptions {
   feature: FeatureConfig
+  /** Boot under a robustness envelope (D14): the launcher allocates one shim
+   *  port per slot up front; the orchestrator starts the shims after health. */
+  perturbation?: RunPerturbation
   runId: string
   runDir: string
   // Repo root where the diagnosis journal lives (independent of the run dir).

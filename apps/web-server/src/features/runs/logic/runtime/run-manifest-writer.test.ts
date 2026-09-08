@@ -51,6 +51,21 @@ describe('writeInitialManifest', () => {
     ])
   })
 
+  it('records the perturbation the run boots under — envelope and shim ports — and omits it otherwise', () => {
+    const envelope = { format: 'canary-lab/robustness-envelope@1' as const, latency: { ms: 300 } }
+    const { ctx, sink } = ctxFor({}, { perturbation: { envelope, shimPorts: new Map([['api', 4900]]) } })
+
+    writeInitialManifest(ctx)
+
+    const written = (sink.bootstrap as unknown as { mock: { calls: [RunManifest][] } }).mock.calls[0][0]
+    expect(written.perturbation).toEqual({ envelope, shimPorts: { api: 4900 } })
+
+    const plain = ctxFor()
+    writeInitialManifest(plain.ctx)
+    const plainWritten = (plain.sink.bootstrap as unknown as { mock: { calls: [RunManifest][] } }).mock.calls[0][0]
+    expect('perturbation' in plainWritten).toBe(false)
+  })
+
   it('keeps only repo paths that exist on disk', () => {
     const real = path.join(tmpDir, 'repo-here')
     fs.mkdirSync(real)

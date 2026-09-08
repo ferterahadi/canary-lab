@@ -1,6 +1,7 @@
 
 import fs from 'fs'
 import path from 'path'
+import type { RobustnessEnvelope } from '../../../../../../shared/robustness/types'
 import type { RunStore, RestartHealResult, RestartRunResult, StartRunOutcome } from '../logic/run-store'
 import type { ExecutionType } from '../../../../../../shared/verification'
 import type { ExternalHealBroker } from '../logic/heal/external-heal-broker'
@@ -34,6 +35,8 @@ export interface RunsRouteDeps {
      *  normalizes it against the chosen agent's vocabulary before resolving
      *  override → workspace config → agent default. */
     models?: unknown,
+    /** Already validated by the route; the factory allocates the shim ports. */
+    perturbation?: RobustnessEnvelope,
   ): Promise<StartRunOutcome>
   /** Cancel a run still waiting in the admission queue (no orchestrator yet).
    *  Returns true when it was queued and is now aborted. */

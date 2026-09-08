@@ -6,6 +6,7 @@ import { isRestartableRunStatus } from '../../../../../shared/run-state'
 import type { ClientKind } from '../../../../../shared/run-mode'
 import { type OrchestratorLike } from './logic/run-store'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
+import { allocatePerturbationPorts } from './logic/runtime/perturbation/run-perturbation'
 import { PaneBroker } from './logic/pane-broker'
 import { loadFeatures } from '../../shared/feature-loader'
 import { httpFailure } from '../../shared/http-error'
@@ -147,10 +148,12 @@ export function makeRestartExternalRun(
   const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
 
   const portMap = await allocateRunPorts(feature, env)
+  // A restart meets the same perturbation the original run booted under.
+  const perturbation = await allocatePerturbationPorts(manifest.perturbation?.envelope, portMap)
   let backups: BackupRecord[] | null = null
   if (env) {
     try {
-      backups = applyFeatureEnvset(feature.featureDir, env, portMap)
+      backups = applyFeatureEnvset(feature.featureDir, env, perturbation?.shimPorts ?? portMap)
       if (backups) runnerLog.info(`Applied envset "${env}" for external restart ${feature.name}`)
     } catch (err) {
       runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
@@ -190,6 +193,7 @@ export function makeRestartExternalRun(
       runId,
       runDir,
       portMap,
+      perturbation,
       ptyFactory,
       runnerLog,
       externalHeal: true,
