@@ -1,4 +1,5 @@
 
+import type { RunQueueDiagnostics } from '../../../../../../shared/run-queue'
 import fs from 'fs'
 import path from 'path'
 import type { RobustnessEnvelope } from '../../../../../../shared/robustness/types'
@@ -41,6 +42,7 @@ export interface RunsRouteDeps {
   /** Cancel a run still waiting in the admission queue (no orchestrator yet).
    *  Returns true when it was queued and is now aborted. */
   cancelQueuedRun?(runId: string): boolean
+  queueDiagnostics?(runId: string): RunQueueDiagnostics | null
   /** Whether a worktree's owning run/benchmark is still active (non-terminal),
    *  so the cleanup UI can refuse to remove a worktree in use. Wired in the
    *  server factory where both the run + benchmark stores are in scope. */

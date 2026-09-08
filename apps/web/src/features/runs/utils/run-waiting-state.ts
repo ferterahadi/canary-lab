@@ -1,7 +1,7 @@
 import type { RunDetail, RunIndexEntry } from '@/shared/api/types'
 
 export interface RunWaitingState {
-  kind: 'test-review' | 'agent'
+  kind: 'test-review' | 'agent' | 'queued'
   label: string
   shortLabel: string
   detail: string
@@ -14,6 +14,10 @@ export function runWaitingState(input: RunDetail | RunIndexEntry | null | undefi
   if (!input) return undefined
   const detail = 'manifest' in input ? input : undefined
   const run = detail ? detail.manifest : input as RunIndexEntry
+  if (run.status === 'queued') return {
+    kind: 'queued', label: 'Queued', shortLabel: 'queued',
+    detail: 'Services and tests have not started. Open the run to see why it is waiting.',
+  }
   if (run.status !== 'healing') return undefined
   const pending = detail ? detail.manifest.specEdits?.pending.length ?? 0 : (input as RunIndexEntry).pendingSpecEdits ?? 0
   const session = detail?.manifest.externalHealSession

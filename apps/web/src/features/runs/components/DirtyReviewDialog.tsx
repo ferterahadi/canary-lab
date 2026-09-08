@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { DirtySpecStrength, DirtySpecSummary, Feature, RunIndexEntry } from '@/shared/api/types'
+import type { DirtySpecStrength, DirtySpecSummary, Feature, RunDetail, RunIndexEntry } from '@/shared/api/types'
 import type { PredicateChange, TestChange } from '@shared/verification-strength/types'
 import * as api from '@/shared/api/client'
 import { shortRunRef } from '@/shared/lib/format'
@@ -10,6 +10,8 @@ import { SPEC_TONE, WEAKER_HINT_COPY, featureTone, specTone, type SpecEditTone }
 
 interface Props {
   features: Feature[]
+  focusRunId?: string | null
+  focusRunDetail?: RunDetail | null
   /** Active runs holding spec edits they have not executed (D9). A suite with
    *  one sorts first and gains the two run-scoped levers, adopt and restore. */
   pendingRuns?: RunIndexEntry[]
@@ -29,16 +31,19 @@ interface Props {
 // copy's content over them. Chrome mirrors RunsListDialog so the panels read as
 // a family. Suites with a pending edit against a live run sort first, then the
 // weaker readings — worst first, like every list of work.
-export function DirtyReviewDialog({ features, pendingRuns = [], onClose }: Props) {
-  const pendingByFeature = new Map(pendingRuns.map((r) => [r.feature, r]))
+export function DirtyReviewDialog({ features, pendingRuns = [], focusRunId, focusRunDetail, onClose }: Props) {
+  const pendingByFeature = new Map<string, RunIndexEntry>()
+  for (const run of pendingRuns) {
+    if (!pendingByFeature.has(run.feature) || run.runId === focusRunId) pendingByFeature.set(run.feature, run)
+  }
   const dirty = features.filter((f) => f.dirty?.status === 'dirty')
   // A run whose suite the feature list does not (yet) flag still earns a card —
   // the run knows what it never executed even before the dirty store recomputes.
-  const runOnly = pendingRuns.filter((r) => !dirty.some((f) => f.name === r.feature))
+  const runOnly = [...pendingByFeature.values()].filter((r) => !dirty.some((f) => f.name === r.feature))
   const cards: Array<{ name: string; feature: Feature | null; run: RunIndexEntry | undefined }> = [
     ...dirty.map((f) => ({ name: f.name, feature: f, run: pendingByFeature.get(f.name) })),
     ...runOnly.map((r) => ({ name: r.feature, feature: null, run: r })),
-  ].sort((a, b) => cardRank(a) - cardRank(b) || a.name.localeCompare(b.name))
+  ].sort((a, b) => (focusRunId ? Number(b.run?.runId === focusRunId) - Number(a.run?.runId === focusRunId) : 0) || cardRank(a) - cardRank(b) || a.name.localeCompare(b.name))
 
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<Record<string, string | undefined>>({})
@@ -87,6 +92,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], onClose }: Props
   }
 
   const anyWeaker = cards.some((c) => (c.feature ? featureTone(c.feature) : null) === 'weaker')
+    || (focusRunDetail?.manifest.specEdits?.pending ?? []).some((spec) => specTone(spec) === 'weaker')
 
   return (
     <SlideOverPanel
@@ -120,8 +126,8 @@ export function DirtyReviewDialog({ features, pendingRuns = [], onClose }: Props
       }
     >
       <div className="px-4 pt-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-        A test file changed since the suite it is compared against. A live run&apos;s verdict stays on the
-        copy it executed; an edit counts only once you commit, adopt, or restore it.
+        Review the changes, then adopt them to rerun with the edited tests, or restore the original tests.
+        Committing saves edits in git; it does not adopt them into an active run.
       </div>
       {anyWeaker && (
         <div className="px-4 pt-1 text-[11px]" style={{ color: 'var(--danger)' }} data-testid="dirty-review-hint-copy">
@@ -143,6 +149,9 @@ export function DirtyReviewDialog({ features, pendingRuns = [], onClose }: Props
         )}
         <ul className="flex flex-col gap-3">
           {cards.map(({ name, feature, run }) => {
+            const specs = run && focusRunDetail?.manifest.runId === run.runId
+              ? focusRunDetail.manifest.specEdits?.pending ?? feature?.dirty?.specs ?? []
+              : feature?.dirty?.specs ?? []
             const tone = feature ? featureTone(feature) : null
             const isBusy = busy[name] ?? false
             const danger = tone === 'weaker'
@@ -171,9 +180,9 @@ export function DirtyReviewDialog({ features, pendingRuns = [], onClose }: Props
                     {plural(run.pendingSpecEdits ?? 0, 'edit')} not executed — the verdict is from the run-start snapshot
                   </div>
                 )}
-                {feature && (
+                {specs.length > 0 && (
                   <ul className="mb-2 flex flex-col gap-2">
-                    {(feature.dirty?.specs ?? []).map((spec) => <SpecRows key={spec.file} spec={spec} />)}
+                    {specs.map((spec) => <SpecRows key={spec.file} spec={spec} />)}
                   </ul>
                 )}
                 {error[name] && (
@@ -189,13 +198,13 @@ export function DirtyReviewDialog({ features, pendingRuns = [], onClose }: Props
                         className="cl-button px-2.5 py-1 text-xs"
                         title="Put the live spec files back to what this run executed"
                       >
-                        Restore
+                        Restore original tests
                       </button>
                       <button
                         type="button"
                         onClick={() => act(name, () => api.adoptSpecEdits(run.runId))}
                         disabled={isBusy}
-                        className="cl-button px-2.5 py-1 text-xs"
+                        className="cl-button-primary px-2.5 py-1 text-xs"
                         title="Take the edited suite as this run's suite and rerun it"
                       >
                         Adopt &amp; rerun

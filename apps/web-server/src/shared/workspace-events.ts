@@ -28,6 +28,7 @@ export type WorkspaceEvent =
   // A Flight manifest changed (stage transition, checkpoint, settle).
   // The client refetches the flight list / the open flight detail view.
   | { type: 'flights-changed' }
+  | { type: 'notifications-changed' }
   // A spawned-agent record changed — started, ended, stopped, or reconciled to
   // `orphaned` on boot. The client refetches the agent jobs for the flight it has
   // open, so a live agent's stop control and a tombstone row appear without a

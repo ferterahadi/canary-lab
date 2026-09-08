@@ -506,6 +506,9 @@ describe('useWorkspaceData — workspace events', () => {
     await mount()
     const before = api.listFlights.mock.calls.length
 
+    await fire({ type: 'notifications-changed' })
+    expect(harness.invalidated).toContainEqual(['notifications', undefined])
+    harness.invalidated = []
     await fire({ type: 'flights-changed' })
 
     expect(harness.invalidated).toEqual([['flights', undefined]])
@@ -553,7 +556,7 @@ describe('useWorkspaceData — reconnect resync', () => {
     expect(harness.invalidated).toEqual([
       ['repos', undefined], ['tests', undefined], ['coverage', undefined],
       ['verification', undefined], ['journal', 'r1'], ['flights', undefined],
-      ['project-config', undefined], ['onboarding', undefined],
+      ['project-config', undefined], ['onboarding', undefined], ['notifications', undefined],
     ])
     expect(api.listFlights.mock.calls.length).toBe(2)
     expect(api.getVersionStatus.mock.calls.length).toBe(2)

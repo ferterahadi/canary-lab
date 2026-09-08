@@ -38,6 +38,7 @@ export interface NavState {
   /** The changed-tests review (routed ?dialog=tests-review) — the status bar's
    *  "Tests changed" pill and the run hero's snapshot link both open it. */
   specReviewOpen: boolean
+  notificationsOpen: boolean
   /** The flight stage-entry launcher (routed ?dialog=flight-start), by feature. */
   flightStartFor: string | null
   /** R76: the launcher opened in START-FRESH intent (routed ?dialog=flight-fresh)
@@ -95,6 +96,7 @@ export function initialNavState(persisted: PersistedView): NavState {
     configTab: persisted.dialog === 'config' ? persisted.configTab : null,
     verifyOpen: persisted.dialog === 'verification',
     specReviewOpen: persisted.dialog === 'tests-review',
+    notificationsOpen: persisted.dialog === 'notifications',
     flightStartFor: persisted.dialog === 'flight-start' || persisted.dialog === 'flight-fresh'
       ? persisted.feature
       : null,
@@ -137,6 +139,7 @@ export function routedDialog(state: NavState): RouteDialog | null {
   if (state.flightStartFor) return state.flightStartFresh ? 'flight-fresh' : 'flight-start'
   if (state.flightStartNew) return 'flight-new'
   if (state.demoOpen) return 'demo'
+  if (state.notificationsOpen) return 'notifications'
   if (state.specReviewOpen) return 'tests-review'
   if (state.verifyOpen) return 'verification'
   if (state.settingsOpen) return 'settings'

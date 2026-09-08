@@ -177,6 +177,10 @@ export function featureChipState(
   activity?: FeatureActivity,
   derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>,
 ): FeatureChipState {
+  if (activity?.waiting?.kind === 'queued') return {
+    label: 'queued', tone: 'var(--text-muted)', live: false, rank: 5.5,
+    title: `${activity.waiting.label}. ${activity.waiting.detail}`,
+  }
   if (activity?.waiting) return {
     label: activity.waiting.shortLabel, tone: FLIGHT_STATUS_TONE['waiting-for-approval'],
     live: false, rank: 0, title: `${activity.waiting.label}. ${activity.waiting.detail}`,

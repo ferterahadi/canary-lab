@@ -45,6 +45,8 @@ export interface WorkspaceNavigation {
   verifyOpen: boolean
   /** Whether the changed-tests review is open (routed ?dialog=tests-review). */
   specReviewOpen: boolean
+  notificationsOpen: boolean
+  setNotificationsOpen: (open: boolean) => void
   flightStartFor: string | null
   flightStartFresh: boolean
   flightStartNew: boolean
@@ -133,6 +135,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setConfigTab(f !== null ? tab : null)
   }, [])
   const [verifyOpen, setVerifyOpen] = useState<boolean>(SEED.verifyOpen)
+  const [notificationsOpen, setNotificationsOpen] = useState<boolean>(SEED.notificationsOpen)
   const [specReviewOpen, setSpecReviewOpen] = useState<boolean>(SEED.specReviewOpen)
   const [flightStartFor, setFlightStartForState] = useState<string | null>(SEED.flightStartFor)
   const [flightStartFresh, setFlightStartFresh] = useState<boolean>(SEED.flightStartFresh)
@@ -180,6 +183,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     configTab,
     verifyOpen,
     specReviewOpen,
+    notificationsOpen,
     flightStartFor,
     flightStartFresh,
     flightStartNew,
@@ -266,6 +270,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     configTab,
     verifyOpen,
     specReviewOpen,
+    notificationsOpen,
     flightStartFor,
     flightStartFresh,
     flightStartStage,
@@ -285,6 +290,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setConfigTab,
     setVerifyOpen,
     setSpecReviewOpen,
+    setNotificationsOpen,
     setFlightStartFor,
     setFlightStartNew,
     setDemoOpen,

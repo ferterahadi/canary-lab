@@ -151,8 +151,25 @@ describe('DirtyReviewDialog', () => {
     expect(names).toEqual(['dirty-review-card-z-pending', 'dirty-review-card-a-clean-name'])
     expect(container.querySelector('[data-testid="dirty-review-pending-z-pending"]')?.textContent)
       .toMatch(/Pending against run z6kc · 2 edits not executed — the verdict is from the run-start snapshot/)
-    expect(buttons(card('z-pending'))).toEqual(['Restore', 'Adopt & rerun', 'Commit changes'])
+    expect(buttons(card('z-pending'))).toEqual(['Restore original tests', 'Adopt & rerun', 'Commit changes'])
     expect(buttons(card('a-clean-name'))).toEqual(['Commit changes'])
+  })
+
+  it('shows the selected run pending files before feature-level dirty data catches up', () => {
+    const entry = run('shop', 1)
+    render({ pendingRuns: [entry], focusRunId: entry.runId, focusRunDetail: {
+      manifest: { runId: entry.runId, specEdits: { pending: [{ file: 'e2e/new.spec.ts', affectedTests: ['merchant session check'], change: 'modified' }] } },
+    } as unknown as import('@/shared/api/types').RunDetail })
+    expect(card('shop')?.textContent).toContain('e2e/new.spec.ts')
+    expect(card('shop')?.textContent).toContain('merchant session check')
+  })
+
+  it('opens the selected run first even when another run of that suite also has pending edits', () => {
+    const first = { ...run('shop', 1), runId: 'newer' }
+    const focused = { ...run('shop', 2), runId: 'selected' }
+    render({ features: [feature('shop', [EQUIVALENT_SPEC])], pendingRuns: [first, focused], focusRunId: 'selected' })
+    expect(container.querySelectorAll('[data-testid="dirty-review-card-shop"]')).toHaveLength(1)
+    expect(card('shop')?.textContent).toContain('2 edits not executed')
   })
 
   it('Restore and Adopt call the run-scoped levers with the run id; Commit calls the feature route', async () => {
@@ -178,7 +195,7 @@ describe('DirtyReviewDialog', () => {
   it('renders a card from the run alone when the feature list does not flag the suite yet', () => {
     render({ pendingRuns: [run('fresh', 1)] })
     expect(card('fresh')?.getAttribute('data-pending')).toBe('true')
-    expect(buttons(card('fresh'))).toEqual(['Restore', 'Adopt & rerun'])
+    expect(buttons(card('fresh'))).toEqual(['Restore original tests', 'Adopt & rerun'])
   })
 
   it('closes itself once the last card leaves — but not on an empty mount, which a cold routed load is', () => {

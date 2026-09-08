@@ -11,6 +11,8 @@ import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { ExternalHealPanel } from './ExternalHealPanel'
 import { ChangesTab } from './ChangesTab'
 import { JournalTab } from './JournalTab'
+import { RunQueueBanner } from './RunQueueBanner'
+import { TestReviewBanner } from './TestReviewBanner'
 import { ManualHealBanner } from './ManualHealBanner'
 import { PlaywrightPanel } from './RunDiagnosticsPanels'
 import { RunLogsTab, RunOverviewTab, VerifyOverviewTab, repoServiceCount } from './RunOverviewTabs'
@@ -57,8 +59,10 @@ export function RunDetailColumn({
   focusTest,
   arriveTab,
   onOpenEvaluationReport,
+  onOpenSpecReview,
 }: {
   runId: string | null
+  onOpenSpecReview?: () => void
   onOpenPlaywrightSettings?: (feature: string) => void
   /** Opens the routed Flight Report stage after an evaluation task starts. */
   onOpenEvaluationReport?: (feature: string) => void
@@ -200,6 +204,10 @@ export function RunDetailColumn({
             {m.feature}
           </span>
         </div>
+        {m.status === 'queued' && <RunQueueBanner key={m.runId} runId={m.runId} />}
+        {view.waiting?.kind === 'test-review' && onOpenSpecReview && (
+          <TestReviewBanner count={m.specEdits?.pending.length ?? 0} onReview={onOpenSpecReview} />
+        )}
         <nav className="mt-3 flex gap-5 overflow-x-auto scrollbar-none">
           <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>Overview</TabButton>
           {!isVerify && <TabButton active={tab === 'run-logs'} onClick={() => setTab('run-logs')}>Run Logs</TabButton>}

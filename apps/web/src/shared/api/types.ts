@@ -220,6 +220,7 @@ export interface FeatureSpecFile {
   tests: ExtractedTest[]
   parseError?: string
   discoveryError?: string
+  discoveryDiagnostics?: string
 }
 
 export type FeatureTests = FeatureSpecFile[]

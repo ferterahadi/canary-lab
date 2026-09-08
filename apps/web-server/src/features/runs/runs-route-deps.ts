@@ -364,6 +364,7 @@ export function buildRunsRouteDeps(
       return { kind: 'started', orch }
     },
     cancelQueuedRun,
+    queueDiagnostics: (runId) => scheduler.diagnostics(runId),
     restartRun: async (runId: string) => {
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }

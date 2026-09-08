@@ -17,6 +17,7 @@ import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './features/
 import { register as registerPortify } from './features/portify/index'
 import { register as registerConfig } from './features/config/index'
 import { register as registerCoverage } from './features/coverage/index'
+import { register as registerNotifications } from './features/notifications/index'
 import { register as registerFlights } from './features/flights/index'
 import { register as registerRuns } from './features/runs/index'
 import { register as registerWizard } from './features/wizard/index'
@@ -329,6 +330,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // from `ctx` — adding or removing one should not touch anything else here.
   await registerConfig(app, ctx)
   await registerFlights(app, ctx)
+  await registerNotifications(app, ctx)
   await registerVersion(app, ctx)
   // `runs` hands back the three primitives other features legitimately share:
   // the scheduler and stream attacher benchmark reuses, and the external-run

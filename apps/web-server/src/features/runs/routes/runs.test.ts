@@ -45,7 +45,7 @@ beforeEach(() => {
   fs.mkdirSync(featuresDir, { recursive: true })
 })
 
-function writeManifestForRun(runId: string, feature = 'foo', status: 'running' | 'passed' | 'failed' | 'healing' | 'aborted' = 'passed'): void {
+function writeManifestForRun(runId: string, feature = 'foo', status: 'running' | 'passed' | 'failed' | 'healing' | 'aborted' | 'queued' = 'passed'): void {
   const dir = runDirFor(logsDir, runId)
   fs.mkdirSync(dir, { recursive: true })
   writeManifest(path.join(dir, 'manifest.json'), {
@@ -65,6 +65,7 @@ async function build(opts: {
 	  broker?: Parameters<typeof runsRoutes>[1]['broker']
 	  restartHeal?: (runId: string, text: string) => Promise<RestartHealResult>
 	  restartRun?: (runId: string) => Promise<RestartRunResult>
+  queueDiagnostics?: Parameters<typeof runsRoutes>[1]['queueDiagnostics']
   projectRoot?: string
   events?: WorkspaceEvent[]
   isWorktreeOwnerActive?: (kind: 'run' | 'benchmark', id: string) => boolean
@@ -76,6 +77,7 @@ async function build(opts: {
     featuresDir,
     projectRoot: opts.projectRoot,
     store,
+    queueDiagnostics: opts.queueDiagnostics,
     broker: opts.broker,
 	    startRun: opts.startRun ?? (async () => { throw new Error('not configured') }),
 	    cancelQueuedRun: opts.cancelQueuedRun,
@@ -275,5 +277,22 @@ describe('GET /api/runs/:runId/artifacts/*', () => {
 
     const res = await app.inject({ method: 'GET', url: '/api/runs/r1/artifacts/pw-slug-a/video.webm' })
     expect(res.statusCode).toBe(404)
+  })
+})
+
+
+describe('GET /api/runs/:runId/queue', () => {
+  it('reads the live queue only for a queued run, without mutating its manifest', async () => {
+    writeManifestForRun('q', 'foo', 'queued')
+    writeManifestForRun('done')
+    const queueDiagnostics = vi.fn(() => null)
+    const { app } = await build({ queueDiagnostics })
+    expect((await app.inject('/api/runs/q/queue')).json()).toEqual({ diagnostics: null })
+    expect(queueDiagnostics).toHaveBeenCalledExactlyOnceWith('q')
+    expect((await app.inject('/api/runs/done/queue')).json()).toEqual({ diagnostics: null })
+    expect((await app.inject('/api/runs/missing/queue')).statusCode).toBe(404)
+    expect(queueDiagnostics).toHaveBeenCalledTimes(1)
+    expect((await app.inject('/api/runs/q')).json().manifest.status).toBe('queued')
+    await app.close()
   })
 })

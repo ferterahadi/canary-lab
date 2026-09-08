@@ -187,7 +187,7 @@ describe('GlobalStatusBar', () => {
   })
 
   // R83: a flight's Latest-run drill-through lands in the workspace run detail,
-  // which has no close of its own — this chip is the only way back.
+  // which has no close of its own — this button is the only way back.
   it('R83: offers a way back to the flight a drill-through came from', async () => {
     const onReturnToFlight = vi.fn()
     await act(async () => {
@@ -200,9 +200,18 @@ describe('GlobalStatusBar', () => {
         />,
       )
     })
-    const chip = container.querySelector('[data-testid="return-to-flight"]')
-    expect(chip?.textContent).toContain('merchant-pass-fnb')
-    await act(async () => { chip?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    const back = container.querySelector<HTMLButtonElement>('[data-testid="return-to-flight"]')!
+    const label = 'Go back to the “merchant-pass-fnb” flight.'
+    expect(back.getAttribute('aria-label')).toBe(label)
+    expect(back.textContent).toBe('')
+    expect(container.querySelector('.cl-shell-bar')?.firstElementChild?.contains(back)).toBe(true)
+    await act(async () => { back.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe(label)
+    await act(async () => { back.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')).toBeNull()
+    await act(async () => { back.focus() })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe(label)
+    await act(async () => { back.click() })
     expect(onReturnToFlight).toHaveBeenCalledWith('fl_abc')
   })
 
@@ -212,10 +221,11 @@ describe('GlobalStatusBar', () => {
         <GlobalStatusBar activeRunDetail={null} returnFlight="fl_abc" onReturnToFlight={vi.fn()} />,
       )
     })
-    expect(container.querySelector('[data-testid="return-to-flight"]')?.textContent).toContain('Flight')
+    expect(container.querySelector('[data-testid="return-to-flight"]')?.getAttribute('aria-label'))
+      .toBe('Go back to the flight you came from.')
   })
 
-  it('R83: no return chip when the user got here on their own', async () => {
+  it('R83: no return button when the user got here on their own', async () => {
     await act(async () => {
       root.render(<GlobalStatusBar activeRunDetail={null} />)
     })

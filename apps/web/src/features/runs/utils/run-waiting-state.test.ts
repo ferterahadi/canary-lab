@@ -21,8 +21,13 @@ describe('runWaitingState', () => {
   it('has an index fallback before detail hydration, and does not relabel terminal/running runs', () => {
     expect(runWaitingState({ runId: 'r', feature: 'f', status: 'healing', startedAt: '', pendingSpecEdits: 1 })?.shortLabel).toBe('to review')
     expect(runWaitingState({ runId: 'r', feature: 'f', status: 'healing', startedAt: '' })).toBeUndefined()
-    for (const status of ['passed', 'failed', 'running', 'aborted', 'queued'] as const) expect(runWaitingState(detail({ status }))).toBeUndefined()
+    for (const status of ['passed', 'failed', 'running', 'aborted'] as const) expect(runWaitingState(detail({ status }))).toBeUndefined()
     expect(runWaitingState(null)).toBeUndefined()
+  })
+  it('labels a queued run before hydration without claiming tests are executing', () => {
+    const run = { runId: 'q', feature: 'f', status: 'queued' as const, startedAt: '' }
+    expect(runWaitingState(run)).toMatchObject({ kind: 'queued', label: 'Queued' })
+    expect(runWaitingState(detail({ status: 'queued' }))?.label).toBe('Queued')
   })
   it('distinguishes an active repair from a waiting/disconnected external session', () => {
     const session = recorded.manifest.externalHealSession!

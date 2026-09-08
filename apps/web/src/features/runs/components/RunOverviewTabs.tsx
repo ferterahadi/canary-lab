@@ -86,8 +86,8 @@ export function RunOverviewTab({
         <dt className="cl-rubric self-center">Envset</dt>
         <dd className="truncate" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }} title={manifest.env ?? ''}>{manifest.env ?? '-'}</dd>
         <dt className="cl-rubric self-center">Duration</dt>
-        <dd style={{ color: 'var(--text-primary)' }}>{duration == null ? 'in progress' : formatDuration(duration)}</dd>
-        <dt className="cl-rubric self-center">Started</dt>
+        <dd style={{ color: 'var(--text-primary)' }}>{manifest.status === 'queued' ? 'Not started' : duration == null ? 'in progress' : formatDuration(duration)}</dd>
+        <dt className="cl-rubric self-center">{manifest.status === 'queued' ? 'Queued at' : 'Started'}</dt>
         <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.startedAt}>{manifest.startedAt}</dd>
         {manifest.endedAt && (
           <>
@@ -203,8 +203,8 @@ export function VerifyOverviewTab({
         <dt className="cl-rubric self-center">Playwright envset</dt>
         <dd className="truncate" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }} title={verification?.playwrightEnvsetId ?? manifest.env ?? ''}>{verification?.playwrightEnvsetId ?? manifest.env ?? '-'}</dd>
         <dt className="cl-rubric self-center">Duration</dt>
-        <dd style={{ color: 'var(--text-primary)' }}>{duration == null ? 'in progress' : formatDuration(duration)}</dd>
-        <dt className="cl-rubric self-center">Started</dt>
+        <dd style={{ color: 'var(--text-primary)' }}>{manifest.status === 'queued' ? 'Not started' : duration == null ? 'in progress' : formatDuration(duration)}</dd>
+        <dt className="cl-rubric self-center">{manifest.status === 'queued' ? 'Queued at' : 'Started'}</dt>
         <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.startedAt}>{manifest.startedAt}</dd>
         {manifest.endedAt && (
           <>

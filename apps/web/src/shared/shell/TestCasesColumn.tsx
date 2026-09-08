@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api/client'
 import { useInvalidationKey } from '../state/invalidation'
 import type { DirtySpecSummary, ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
@@ -48,6 +48,8 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
   const refreshKey = useInvalidationKey('tests')
   const [loaded, setLoaded] = useState<{ feature: string; specs: FeatureSpecFile[] } | null>(null)
   const specs = loaded?.feature === feature ? loaded.specs : null
+  const previousLists = useRef(new Map<string, FeatureSpecFile[]>())
+  const [discovery, setDiscovery] = useState<{ feature: string; specs: FeatureSpecFile[] } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [retryKey, setRetryKey] = useState(0)
   const [expandedTest, setExpandedTest] = useState<ExpandedTestSelection | null>(null)
@@ -69,6 +71,8 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
       ? current
       : { feature, key: null, autoExpandPending: true })
     setLoadError(null)
+    setDiscovery(null)
+    setLoaded(previousLists.current.has(feature) ? { feature, specs: previousLists.current.get(feature)! } : null)
     setDirtyDiffs({})
     const failed = (message: string): void => {
       if (cancelled) return
@@ -83,10 +87,12 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
         .then((data) => {
           if (cancelled) return
           const discoveryError = data.find((spec) => spec.discoveryError)?.discoveryError
-          if (discoveryError) { failed(discoveryError); return }
+          if (discoveryError) { setDiscovery({ feature, specs: data }); failed(discoveryError); return }
           const availableKeys = new Set(
             data.flatMap((spec) => spec.tests.map((test) => workspaceTestKey(spec.file, test))),
           )
+          previousLists.current.set(feature, data)
+          setDiscovery(null)
           setLoaded({ feature, specs: data })
           setLoadError(null)
           setExpandedTest((current) => {
@@ -143,6 +149,8 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
   }
 
   const displaySpecs = specs
+  const incompleteSpecs = discovery?.feature === feature ? discovery.specs : []
+  const diagnostics = incompleteSpecs.find((spec) => spec.discoveryDiagnostics)?.discoveryDiagnostics
   const isRunActivelyTesting = activeRunStatus === 'running'
   const passedCount = (displaySpecs ?? []).reduce(
     (acc, spec) => acc + spec.tests.filter(
@@ -177,9 +185,24 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
         {loadError && (
           <div role="status" className="mb-2 rounded-md border px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
-            {loadError}
-            {displaySpecs && <span> Showing the previous test list until discovery succeeds.</span>}
-            <button type="button" className="cl-button ml-2 px-2 py-1" onClick={() => setRetryKey((key) => key + 1)}>Retry</button>
+            <div className="font-medium text-primary">Test discovery failed</div>
+            <p className="mt-1">{loadError}</p>
+            <p className="mt-1">{displaySpecs ? 'Showing the previous test list until discovery succeeds.' : 'A complete test list is unavailable. This is a discovery error, not a test result.'}</p>
+            <p className="mt-1">Review the discovery error, fix the configuration or import it identifies, then retry.</p>
+            {diagnostics && <details className="mt-2">
+              <summary className="cursor-pointer text-accent">View discovery error</summary>
+              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px]">{diagnostics}</pre>
+            </details>}
+            {!displaySpecs && incompleteSpecs.length > 0 && <details className="mt-2">
+              <summary className="cursor-pointer text-accent">Source definitions · incomplete</summary>
+              <p className="mt-1">Generated cases may be missing. These definitions are not the discovered test count.</p>
+              {incompleteSpecs.map((spec) => <div key={spec.file} className="mt-2">
+                <div className="break-all text-muted">{spec.file}</div>
+                <ul className="mt-1 space-y-1">{spec.tests.map((test, i) => <li key={`${test.line}:${i}`}>{test.name}</li>)}</ul>
+                {spec.parseError && <p className="text-danger">{spec.parseError}</p>}
+              </div>)}
+            </details>}
+            <button type="button" className="cl-button mt-2 px-2 py-1" onClick={() => setRetryKey((key) => key + 1)}>Retry</button>
           </div>
         )}
         {!displaySpecs ? (

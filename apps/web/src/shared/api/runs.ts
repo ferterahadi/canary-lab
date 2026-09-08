@@ -1,6 +1,7 @@
 // Test runs and the heal loop: start, pause, heal, fixes, PRs, journal.
 // Split out of client.ts; see that barrel for the shared surface.
 
+import type { RunQueueDiagnostics } from '@shared/run-queue'
 import type { StageModelChoice } from '@shared/agent-models'
 import type { AuditList, RunIndexEntry, RunDetail, JournalEntry, RunProposedPr } from './types'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
@@ -21,6 +22,11 @@ export function getRunDetail(runId: string, opts?: ClientOptions): Promise<RunDe
     { method: 'GET' },
     fetchImpl,
   )
+}
+
+export function getRunQueue(runId: string, opts?: ClientOptions): Promise<{ diagnostics: RunQueueDiagnostics | null }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/queue`, { method: 'GET' }, fetchImpl)
 }
 
 export function getRunAudit(runId: string, opts?: ClientOptions): Promise<AuditList> {

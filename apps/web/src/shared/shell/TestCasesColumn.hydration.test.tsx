@@ -256,3 +256,33 @@ it('hydrates the recorded snapshot results without confusing them with live sour
   expect(container.textContent).toMatch(/77\s*\/\s*98/)
   expect(container.textContent).toContain('Last execution')
 })
+
+it('shows discovery diagnostics and incomplete definitions without presenting them as test results', async () => {
+  vi.mocked(getFeatureTests).mockResolvedValue([{
+    file: '/tmp/features/alpha/e2e/current.spec.ts',
+    tests: [{ name: 'cannot use ${operation}', line: 42, bodySource: '', steps: [], readable: readableTest('cannot use ${operation}') }],
+    discoveryError: 'Playwright could not enumerate the test cases.',
+    discoveryDiagnostics: 'Cannot find module ./fixtures/login',
+  }])
+  const total = vi.fn()
+  await act(async () => root.render(<TestCasesColumn feature="alpha" activeRunStatus="queued" activeRunSummary={undefined} onTotalTestsChange={total} />))
+  expect(container.textContent).toContain('View discovery error')
+  expect(container.textContent).toContain('Cannot find module ./fixtures/login')
+  expect(container.textContent).toContain('Source definitions · incomplete')
+  expect(container.textContent).toContain('cannot use ${operation}')
+  expect(total).toHaveBeenLastCalledWith(0)
+  expect(container.querySelector('[data-testid="test-presentation"]')).toBeNull()
+})
+
+it('retains a suite’s last discovered list when returning from another suite after discovery fails', async () => {
+  const test = (name: string) => ({ name, line: 42, bodySource: '', steps: [], readable: readableTest(name) })
+  vi.mocked(getFeatureTests).mockResolvedValueOnce([{ file: '/alpha/a.spec.ts', tests: [test('resolved alpha')] }])
+    .mockResolvedValueOnce([{ file: '/beta/b.spec.ts', tests: [test('resolved beta')] }])
+    .mockResolvedValue([{ file: '/alpha/a.spec.ts', tests: [test('${alpha}')], discoveryError: 'Discovery failed' }])
+  const render = (feature: string) => act(async () => root.render(<TestCasesColumn feature={feature} activeRunStatus={undefined} activeRunSummary={undefined} />))
+  await render('alpha'); await render('beta'); await render('alpha')
+  expect(container.textContent).toContain('Showing the previous test list')
+  expect(container.textContent).toContain('resolved alpha')
+  expect(container.textContent).not.toContain('resolved beta')
+  expect(container.textContent).not.toContain('${alpha}')
+})

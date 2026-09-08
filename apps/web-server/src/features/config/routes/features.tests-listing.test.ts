@@ -93,6 +93,7 @@ describe('GET /api/features/:name/tests', () => {
     expect(res.statusCode).toBe(200)
     expect(res.json()[0]).toMatchObject({
       discoveryError: expect.stringContaining('could not enumerate'),
+      discoveryDiagnostics: expect.stringContaining('exit'),
       tests: [expect.objectContaining({ name: 'cannot use ${operation}' })],
     })
     await app.close()

@@ -28,6 +28,10 @@ export interface ToastItem {
    *  reads slightly stronger (warning-tinted border + a "needs input" eyebrow).
    *  Non-sticky toasts keep the 8s auto-dismiss. */
   sticky?: boolean
+  /** Durable notifications are read on open, and deleted only by dismissal. */
+  dismissOnOpen?: boolean
+  actionLabel?: string
+  dismissLabel?: string
 }
 
 export const TOAST_MS = 8000
@@ -67,7 +71,7 @@ export function ToastHost({ toasts, onDismiss }: { toasts: ToastItem[]; onDismis
           }}
           onClick={() => {
             t.onClick?.()
-            onDismiss(t.id)
+            if (t.dismissOnOpen !== false) onDismiss(t.id)
           }}
         >
           <span
@@ -85,11 +89,12 @@ export function ToastHost({ toasts, onDismiss }: { toasts: ToastItem[]; onDismis
               </div>
             )}
             <div className="truncate text-[12px] font-medium" style={{ color: 'var(--text-primary)' }}>{t.title}</div>
+            {t.actionLabel && <button type="button" className="cl-button mt-1 px-2 py-1 text-xs">{t.actionLabel}</button>}
             {t.body && <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{t.body}</div>}
           </div>
           <button
             type="button"
-            aria-label="Dismiss"
+            aria-label={t.dismissLabel ?? 'Dismiss'}
             className="cl-icon-button h-5 w-5 shrink-0 text-[11px]"
             onClick={(e) => {
               e.stopPropagation()

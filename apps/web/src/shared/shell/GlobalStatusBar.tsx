@@ -17,10 +17,14 @@ import { isActiveRunStatus } from '@shared/run-state'
 import { McpHealthBadge } from './McpHealthBadge'
 import { ConnectionBadge } from './ConnectionBadge'
 import { StatusChip } from '../ui/StatusChip'
+import { Tooltip } from '../ui/Tooltip'
 import type { FlightIndexEntry, PlanFeaturesTask } from '../api/client'
 
 interface Props {
   activeRunDetail: RunDetail | null
+  notificationControl?: React.ReactNode
+  specReviewRunId?: string | null
+  specReviewRunDetail?: RunDetail | null
   /** Every feature — feeds the dirty-tests review panel. */
   features?: Feature[]
   onOpenCleanup?: () => void
@@ -64,7 +68,7 @@ interface Props {
    *  collapsible action cluster deliberately — collapsing the actions must not
    *  hide the only exit. */
   returnFlight?: string | null
-  /** Label for that chip — the flight's feature name. */
+  /** Destination for the back button's tooltip — the flight's feature name. */
   returnFlightLabel?: string | null
   onReturnToFlight?: (flightId: string) => void
   /** The changed-tests review panel's open-state, driven off the route
@@ -92,7 +96,7 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onOpenPortify, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight, specReviewOpen, onSpecReviewOpenChange }: Props) {
+export function GlobalStatusBar({ notificationControl, specReviewRunId, specReviewRunDetail, activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onOpenPortify, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight, specReviewOpen, onSpecReviewOpenChange }: Props) {
   const { connection, runs } = useRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Deployed-env verification runs (record-only) get their own pill (R27) —
@@ -159,12 +163,34 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
   const isActive = isActiveRunStatus(status)
   const services = activeRunDetail?.manifest.services ?? []
   const servicesActive = isActive
+  const returnFlightTooltip = returnFlightLabel
+    ? `Go back to the “${returnFlightLabel}” flight.`
+    : 'Go back to the flight you came from.'
 
   return (
     <div className="relative">
       <div
         className="cl-shell-bar flex items-center gap-3 px-4 py-2 overflow-hidden"
       >
+      {/* Keep the drill-through exit before the wordmark, separate from status
+          indicators and outside the collapsible action cluster. */}
+      {returnFlight && onReturnToFlight && (
+        <div className="shrink-0 border-r pr-3" style={{ borderColor: 'var(--border-default)' }}>
+          <Tooltip label={returnFlightTooltip}>
+            <button
+              type="button"
+              data-testid="return-to-flight"
+              onClick={() => onReturnToFlight(returnFlight)}
+              className="cl-icon-button h-7 w-7"
+              aria-label={returnFlightTooltip}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            </button>
+          </Tooltip>
+        </div>
+      )}
       <span className="shrink-0 inline-flex items-center gap-2">
         <span
           aria-hidden="true"
@@ -176,7 +202,8 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
         />
         <span className="cl-wordmark">Canary Lab</span>
       </span>
-      <ConnectionBadge state={connection} />
+      {notificationControl}
+        <ConnectionBadge state={connection} />
       <McpHealthBadge />
       {services.length > 0 && (
         <div className="shrink-0">
@@ -185,23 +212,6 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
             state={servicesActive ? 'running' : 'idle'}
           />
         </div>
-      )}
-      {/* R83: the way back to the flight a stage drill-through left. Only the
-          run detail actually needs it (it's a workspace column, so it has no
-          close of its own — the coverage ledger fixes its own Close instead),
-          but it renders on any non-flight view for one consistent exit. Same
-          `cl-button` the flight header's "All flights" uses — a nav action, not
-          a status. */}
-      {returnFlight && onReturnToFlight && (
-        <button
-            type="button"
-            data-testid="return-to-flight"
-            onClick={() => onReturnToFlight(returnFlight)}
-            className="cl-button shrink-0 max-w-[220px] truncate px-2.5 py-1 text-xs"
-            title={`Back to the ${returnFlightLabel ?? 'flight'} flight you came from`}
-          >
-          ← {returnFlightLabel ?? 'Flight'}
-        </button>
       )}
       {reviewSuites.size > 0 && (
         <div className="shrink-0">
@@ -345,7 +355,7 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
       </div>
       </div>
       {servicesOpen && <ServicesDialog onClose={() => setServicesOpen(false)} />}
-      {reviewOpen && <DirtyReviewDialog features={features} pendingRuns={pendingRuns} onClose={() => setReviewOpen(false)} />}
+      {reviewOpen && <DirtyReviewDialog focusRunId={specReviewRunId} focusRunDetail={specReviewRunDetail} features={features} pendingRuns={pendingRuns} onClose={() => setReviewOpen(false)} />}
       {benchmarkOpen && (
         <BenchmarkWindow
           onClose={() => setBenchmarkOpen(false)}

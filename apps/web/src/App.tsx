@@ -27,8 +27,7 @@ import { presentedIndexStages, resolveFeatureFlightAction } from './features/fli
 import { derivedFlightFeature, derivedFlightToken, useDerivedFeatureStages } from './features/flights/lib/derived-stages'
 import { derivePendingFeatures } from './features/flights/lib/pending-features'
 import type { RepoOption } from './features/flights/components/RepoMultiPicker'
-import { ToastHost } from '@/shared/ui/atoms'
-import { useFlightToasts } from './features/flights/state/use-flight-toasts'
+import { NotificationCenter } from './features/notifications/NotificationCenter'
 import { useInvalidation } from './shared/state/invalidation'
 import { useWorkspaceNavigation } from './shared/state/use-workspace-navigation'
 import { useWorkspaceData } from './shared/state/use-workspace-data'
@@ -277,26 +276,6 @@ export function App() {
     return [...seen.values()]
   }, [features])
 
-  // R51/R68: attention toasts — diff flight statuses on every index refresh and
-  // toast a flight the moment it starts needing the user (waiting-for-approval,
-  // or a non-user / non-queue pause). These are STICKY (never auto-dismiss) so a
-  // laptop-sleep-reconnect nag isn't gone by the time the user looks. R68 fixes:
-  //  - the seed pass no longer swallows already-waiting flights: on first load,
-  //    if N flights already need input, fire ONE aggregate sticky toast (a storm
-  //    of per-flight toasts on boot would be noise);
-  //  - a flight FIRST SEEN in an attention state after seed fires its own toast
-  //    (the old code skipped `was === undefined`, so a reconnect that revealed a
-  //    freshly-parked flight never toasted);
-  //  - queued flights never toast (they wait on capacity, not the user).
-  // An individual flight's toast is suppressed only while THAT flight's detail is
-  // on screen; the aggregate + other flights' toasts still show.
-  // The attention-toast diff (seed/aggregate/transition/suppress rules) lives in
-  // the pure `diffFlightToasts`; the hook owns the toast list + prev-key ref.
-  const { toasts, dismissToast } = useFlightToasts(flights, view, selectedFlightId, {
-    openFlight: (id) => openFlight(id),
-    openFlightsView: () => setView('flights'),
-  })
-
   const demoExportRun = useMemo(() => {
     const feature = demo.workflows.find((workflow) => workflow.id === 'export')?.internalAction
     if (!feature || feature.kind !== 'export') return null
@@ -494,6 +473,7 @@ export function App() {
             <RunDetailColumn
               runId={selectedRunId}
               onOpenPlaywrightSettings={(f) => setConfigFor(f, 'playwright')}
+              onOpenSpecReview={() => setSpecReviewOpen(true)}
               onOpenEvaluationReport={openEvaluationReport}
               totalTests={specTotalTests}
               /* Honoured only when the focus belongs to the run being shown, so a
@@ -535,6 +515,12 @@ export function App() {
         returnFlight={returnFlight}
         returnFlightLabel={returnFlightLabel}
         onReturnToFlight={openFlight}
+        notificationControl={<NotificationCenter open={nav.notificationsOpen} suppressToast={nav.routedDialog !== null} onOpenChange={nav.setNotificationsOpen} onNavigate={(target) => {
+          if (target.kind === 'flight') openFlight(target.flightId)
+          else { navigateToRun(target.feature, target.runId); setSpecReviewOpen(target.kind === 'test-review') }
+        }} />}
+        specReviewRunId={selectedRunId}
+        specReviewRunDetail={statusRunDetail.detail}
         specReviewOpen={specReviewOpen}
         onSpecReviewOpenChange={setSpecReviewOpen}
       />
@@ -603,7 +589,6 @@ export function App() {
           : <ResizablePanels panels={panels} />}
         </Suspense>
       </div>
-      <ToastHost toasts={toasts} onDismiss={dismissToast} />
       <DemoDialog
         open={demoOpen}
         onClose={() => setDemoOpen(false)}

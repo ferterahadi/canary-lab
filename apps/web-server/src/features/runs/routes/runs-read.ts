@@ -32,6 +32,12 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     return deps.store.list({ feature: req.query.feature })
   })
 
+  app.get<{ Params: { runId: string } }>('/api/runs/:runId/queue', async (req, reply) => {
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) return reply.code(404).send({ error: 'run not found' })
+    return { diagnostics: detail.manifest.status === 'queued' ? deps.queueDiagnostics?.(req.params.runId) ?? null : null }
+  })
+
   app.get<{ Params: { runId: string } }>('/api/runs/:runId', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
     if (!detail) {

@@ -189,6 +189,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
           // surfaces keyed to flights that are NOT the list (a stage's artifact
           // reads), which is what the `flights` topic invalidates.
           if (event.type === 'flights-changed') invalidate('flights')
+          if (event.type === 'notifications-changed') invalidate('notifications')
           if (event.type === 'pre-flight-changed') refreshPreFlights()
           // canary-lab.config.json changed — in this tab or another client.
           // The demo launcher reads `showDemo` from it, so the status-bar pill
@@ -210,6 +211,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
           refreshPreFlights()
           invalidate('project-config')
           invalidate('onboarding')
+          invalidate('notifications')
         },
       })
     } catch {

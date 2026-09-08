@@ -19,6 +19,7 @@ const base: NavState = {
   configTab: null,
   verifyOpen: false,
   specReviewOpen: false,
+  notificationsOpen: false,
   flightStartFor: null,
   flightStartFresh: false,
   flightStartNew: false,
@@ -295,4 +296,11 @@ describe('resolveActivityTarget', () => {
     expect(resolveActivityTarget('other', { kind: 'portifying' }, flights))
       .toEqual({ kind: 'flight', flightId: 'feature:other', stage: 'portify' })
   })
+})
+
+
+it('rehydrates the notification inbox and serializes it as a routed dialog', () => {
+  const state = initialNavState(persisted({ dialog: 'notifications' }))
+  expect(state.notificationsOpen).toBe(true)
+  expect(navToPersistedView(state).dialog).toBe('notifications')
 })
