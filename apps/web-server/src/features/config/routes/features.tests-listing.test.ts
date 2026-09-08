@@ -86,6 +86,18 @@ async function build(opts: { spawner?: PlaywrightListSpawner; dirtySpecStore?: D
 }
 
 describe('GET /api/features/:name/tests', () => {
+  it('marks source-only fallback as incomplete when Playwright discovery fails', async () => {
+    writeFeature('loop', { spec: 'for (const operation of ["GET /a", "GET /b"]) test(`cannot use ${operation}`, async () => {})' })
+    const app = await build({ spawner: failingSpawner })
+    const res = await app.inject({ method: 'GET', url: '/api/features/loop/tests' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()[0]).toMatchObject({
+      discoveryError: expect.stringContaining('could not enumerate'),
+      tests: [expect.objectContaining({ name: 'cannot use ${operation}' })],
+    })
+    await app.close()
+  })
+
   // A spec whose body is nested deeply enough to overflow the AST extractor's
   // recursive visitor. `extractTestsFromSource` catches the RangeError and
   // surfaces it as `parseError`, which lets us drive the route's parseError

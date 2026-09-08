@@ -268,6 +268,29 @@ async function render(flightId: string, extraProps: Record<string, unknown> = {}
 }
 
 describe('trailer model (R14–R18)', () => {
+  it.each([
+    ['authoring', 'specs-coverage', 'Writing'],
+    ['mapping', 'specs-coverage', 'Mapping'],
+    ['condensing', 'docs', 'Condensing'],
+    ['exporting', 'evaluation-export', 'Exporting'],
+  ])('follows live %s over completed flight evidence', async (kind, rowKey, label) => {
+    // A completed report must not hide a new standalone pass over this suite.
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+    }))
+    await render('fl_1', { activity: new Map([['checkout', { kind, external: true }]]) })
+    expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toContain(label)
+    expect(container.querySelector(`[data-testid="stage-rail-${rowKey}"]`)?.getAttribute('aria-current')).toBe('true')
+    expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toBe('Running')
+
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scout"]')?.click() })
+    expect(container.querySelector('[data-testid="stage-rail-scout"]')?.getAttribute('aria-current')).toBe('true')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="rail-resume-follow"]')?.click() })
+    expect(container.querySelector(`[data-testid="stage-rail-${rowKey}"]`)?.getAttribute('aria-current')).toBe('true')
+  })
+
   it('R20: a live agent stage shows the timeline; a settled one answers with facts', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       currentStage: 'prd-summary',

@@ -224,6 +224,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     //    `${var}` substituted). On failure, fall back to AST-only output.
     const pwList = await listPlaywrightTests(feature.featureDir, {
       spawner: deps.playwrightListSpawner,
+      onDiagnostics: (diagnostic) => app.log.warn({ feature: feature.name, diagnostic }, 'test discovery failed'),
       env: envsetProcessEnv(feature.featureDir, feature.envs?.[0], (err) => {
         app.log.warn({ err, feature: feature.name }, 'ignoring invalid feature envset config while listing tests')
       }),
@@ -236,6 +237,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
         return {
           file,
           tests: result.tests.map(withCodeDisplay),
+          discoveryError: 'Playwright could not enumerate the test cases. The source definitions may omit generated cases.',
           ...(result.parseError ? { parseError: result.parseError } : {}),
         }
       })

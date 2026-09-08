@@ -46,8 +46,10 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
   // The spec list refetches when a `tests-changed` event fires for the selected
   // feature (App gates the invalidation to the visible feature).
   const refreshKey = useInvalidationKey('tests')
-  const [specs, setSpecs] = useState<FeatureSpecFile[] | null>(null)
+  const [loaded, setLoaded] = useState<{ feature: string; specs: FeatureSpecFile[] } | null>(null)
+  const specs = loaded?.feature === feature ? loaded.specs : null
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [retryKey, setRetryKey] = useState(0)
   const [expandedTest, setExpandedTest] = useState<ExpandedTestSelection | null>(null)
   // Per-test changed-line numbers for each dirty spec file (diffed against git
   // HEAD server-side), keyed by that file's path. Fetched lazily, once per file.
@@ -55,45 +57,57 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
 
   useEffect(() => {
     if (!feature) {
-      setSpecs(null)
+      setLoaded(null)
       setLoadError(null)
       setExpandedTest(null)
       return
     }
     let cancelled = false
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    let attempts = 0
     setExpandedTest((current) => current?.feature === feature
       ? current
       : { feature, key: null, autoExpandPending: true })
-    setSpecs(null)
     setLoadError(null)
     setDirtyDiffs({})
-    api.getFeatureTests(feature)
-      .then((data) => {
-        if (cancelled) return
-        const availableKeys = new Set(
-          data.flatMap((spec) => spec.tests.map((test) => workspaceTestKey(spec.file, test))),
-        )
-        setSpecs(data)
-        setExpandedTest((current) => {
-          if (current?.feature !== feature || current.autoExpandPending) {
-            return {
-              feature,
-              key: availableKeys.values().next().value ?? null,
-              autoExpandPending: false,
+    const failed = (message: string): void => {
+      if (cancelled) return
+      setLoadError(message)
+      // A file-save event can arrive while the author is still writing the
+      // suite. Retry briefly, keeping the last resolved list visible.
+      if (attempts < 3) retryTimer = setTimeout(load, 1000)
+    }
+    const load = (): void => {
+      attempts += 1
+      api.getFeatureTests(feature)
+        .then((data) => {
+          if (cancelled) return
+          const discoveryError = data.find((spec) => spec.discoveryError)?.discoveryError
+          if (discoveryError) { failed(discoveryError); return }
+          const availableKeys = new Set(
+            data.flatMap((spec) => spec.tests.map((test) => workspaceTestKey(spec.file, test))),
+          )
+          setLoaded({ feature, specs: data })
+          setLoadError(null)
+          setExpandedTest((current) => {
+            if (current?.feature !== feature || current.autoExpandPending) {
+              return {
+                feature,
+                key: availableKeys.values().next().value ?? null,
+                autoExpandPending: false,
+              }
             }
-          }
-          if (current.key !== null && !availableKeys.has(current.key)) {
-            return { feature, key: null, autoExpandPending: false }
-          }
-          return current
+            if (current.key !== null && !availableKeys.has(current.key)) {
+              return { feature, key: null, autoExpandPending: false }
+            }
+            return current
+          })
         })
-      })
-      .catch((err) => {
-        if (cancelled) return
-        setLoadError(formatLoadError(err))
-      })
-    return () => { cancelled = true }
-  }, [feature, refreshKey])
+        .catch((err) => failed(formatLoadError(err)))
+    }
+    load()
+    return () => { cancelled = true; clearTimeout(retryTimer) }
+  }, [feature, refreshKey, retryKey])
 
   useEffect(() => {
     if (!feature) return
@@ -161,12 +175,15 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
         />
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
-        {loadError ? (
-          <div className="rounded-md border px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
+        {loadError && (
+          <div role="status" className="mb-2 rounded-md border px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
             {loadError}
+            {displaySpecs && <span> Showing the previous test list until discovery succeeds.</span>}
+            <button type="button" className="cl-button ml-2 px-2 py-1" onClick={() => setRetryKey((key) => key + 1)}>Retry</button>
           </div>
-        ) : !displaySpecs ? (
-          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading...</div>
+        )}
+        {!displaySpecs ? (
+          !loadError && <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading...</div>
         ) : displaySpecs.length === 0 ? (
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No spec files found.</div>
         ) : (

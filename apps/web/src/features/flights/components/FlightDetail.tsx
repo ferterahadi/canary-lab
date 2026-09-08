@@ -12,7 +12,7 @@ import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type E
 import { ACTIVITY_STAGE, type FeatureActivity, type FeatureExternalHistory } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageRailRows, stageStatusTone } from './stage-meta'
+import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageRailRows, stageRowKey, stageStatusTone } from './stage-meta'
 import { stageStateLine } from './StageStatusLines'
 import {
   buildDerivedManifest,
@@ -274,10 +274,10 @@ export function FlightDetail({
 
   // The rail hides conductor plumbing (R21) and merges run+heal into one user
   // step (R22) — selection and auto-pick both work on these visible rows.
-  // While a run for this feature is live, the run row reads `running` (blue +
-  // pulse) instead of its settled verdict — the icon must never show a green
-  // tick over a run that is still working (R64).
+  // Standalone work can restart a completed step. The rail and Follow must
+  // read the same live activity as the chip, not just the saved flight verdict.
   const featureActivity = flight ? activity?.get(flight.feature) : undefined
+  const activityRowKey = featureActivity ? stageRowKey(ACTIVITY_STAGE[featureActivity.kind]) : undefined
   const featureExternalHistory = flight ? externalHistory?.get(flight.feature) : undefined
   // A run is intentionally the louder feature-level activity, so that map may
   // hide a simultaneous Portify job. Read Portify's own index as well: the
@@ -294,9 +294,9 @@ export function FlightDetail({
   const derivedActiveRunId = derivedFeature && runLive ? featureActivity.runId : undefined
   const railRows = useMemo(() => {
     let rows = flight ? stageRailRows(flight.stages) : []
-    if (runLive) {
+    if (activityRowKey) {
       rows = rows.map((candidate) => (
-        candidate.key === 'run' && candidate.status !== 'running'
+        candidate.key === activityRowKey && candidate.status !== 'running'
           ? { ...candidate, status: 'running' as const }
           : candidate
       ))
@@ -308,7 +308,7 @@ export function FlightDetail({
       rows = rows.map((candidate) => candidate.key === 'portify' ? { ...candidate, status } : candidate)
     }
     return rows
-  }, [flight, runLive, featurePortify])
+  }, [flight, activityRowKey, featurePortify])
 
   // Default the selected stage to the one that needs eyes: waiting → running →
   // first failed → the row that resumes next → last done. The user's explicit

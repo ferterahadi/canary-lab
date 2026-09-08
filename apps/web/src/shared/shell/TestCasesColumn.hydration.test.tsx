@@ -8,6 +8,7 @@ import { readableTest } from '../api/__fixtures__/readable-test'
 import fixture from '@/features/runs/utils/__fixtures__/cns-wa-snapshot.json'
 import type { RunManifest, RunSummary } from '../api/types'
 import { TestCasesColumn } from './TestCasesColumn'
+import { InvalidationProvider, useInvalidation } from '../state/invalidation'
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
@@ -55,9 +56,49 @@ afterEach(() => {
     root.unmount()
   })
   container.remove()
+  vi.useRealTimers()
 })
 
 describe('TestCasesColumn', () => {
+  it('keeps expanded cases through a failed discovery refresh and recovers without a reload', async () => {
+    vi.useFakeTimers()
+    const file = '/tmp/features/alpha/e2e/current.spec.ts'
+    const test = (name: string) => ({ name, line: 42, bodySource: '', steps: [], readable: readableTest(name) })
+    const resolved = [{ file, tests: [test('cannot use GET /a'), test('cannot use GET /b')] }]
+    vi.mocked(getFeatureTests).mockResolvedValueOnce(resolved)
+      .mockResolvedValueOnce([{ file, tests: [test('cannot use ${operation}')], discoveryError: 'Playwright could not enumerate the test cases.' }])
+      .mockResolvedValueOnce([{ file, tests: [...resolved[0].tests, test('new case')] }])
+    function View() {
+      const { invalidate } = useInvalidation()
+      return <>
+        <button onClick={() => invalidate('tests')}>Refresh tests</button>
+        <TestCasesColumn feature="alpha" activeRunStatus={undefined} activeRunSummary={undefined} />
+      </>
+    }
+    await act(async () => { root.render(<InvalidationProvider><View /></InvalidationProvider>) })
+    await act(async () => { container.querySelector<HTMLButtonElement>('button')?.click() })
+    expect(container.textContent).toContain('Showing the previous test list')
+    expect(container.textContent).toContain('cannot use GET /a')
+    expect(container.textContent).toContain('cannot use GET /b')
+    expect(container.textContent).not.toContain('${operation}')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(container.textContent).toContain('new case')
+    expect(container.textContent).not.toContain('could not enumerate')
+  })
+
+  it('bounds discovery retries and offers a manual retry without showing incomplete definitions', async () => {
+    vi.useFakeTimers()
+    vi.mocked(getFeatureTests).mockResolvedValue([{ file: '/tmp/a.spec.ts', tests: [], discoveryError: 'Discovery unavailable' }])
+    await act(async () => { root.render(<TestCasesColumn feature="alpha" activeRunStatus={undefined} activeRunSummary={undefined} />) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+    expect(getFeatureTests).toHaveBeenCalledTimes(3)
+    expect(container.textContent).toContain('Discovery unavailable')
+    const retry = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Retry')
+    expect(retry).toBeTruthy()
+    await act(async () => { retry?.click() })
+    expect(getFeatureTests).toHaveBeenCalledTimes(4)
+  })
+
   it('hydrates selected run summary tests by title when source lines drift', async () => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {
