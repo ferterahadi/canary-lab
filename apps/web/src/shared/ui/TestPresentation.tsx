@@ -1,3 +1,4 @@
+import { TestLanguageSwitch } from './TestLanguageSwitch'
 import { useMemo, useState } from 'react'
 import type { FormattedCodeDisplay, FormattedDisplayLine } from '@shared/code-display-format'
 import type { ExtractedTest, ReadableSource } from '../api/types'
@@ -12,7 +13,7 @@ export function TestPresentation({
   test,
   sourceFile,
   executionHighlight,
-  changedLines,
+  changedLines: suppliedChangedLines,
   showOpenButton = true,
 }: {
   test: ExtractedTest
@@ -21,6 +22,9 @@ export function TestPresentation({
   changedLines?: Set<number>
   showOpenButton?: boolean
 }) {
+  const changedLines = useMemo(() => suppliedChangedLines ?? (test.sourceChanges
+    ? new Set(test.sourceChanges.changedLines.map((line) => line - testBodyLine(test) + 1))
+    : undefined), [suppliedChangedLines, test])
   const [mode, setMode] = useState<PresentationMode>('english')
   const [selectedSource, setSelectedSource] = useState<ReadableSourceSelection | null>(null)
 
@@ -80,37 +84,7 @@ export function TestPresentation({
   return (
     <div data-testid="test-presentation">
       <div className="mb-2 flex min-w-0 items-center gap-2 border-b pb-2" style={{ borderColor: 'var(--border-subtle)' }}>
-        <div className="cl-lang-switch" role="tablist" aria-label="Test description format" data-mode={mode}>
-          <span className="cl-lang-switch-thumb" aria-hidden="true" />
-          {/* Glyphs, not words: `Aa` reads as prose, `</>` as code. The
-              accessible name stays the full word via aria-label/title. */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'english'}
-            aria-label="English"
-            title="English"
-            data-active={mode === 'english' ? 'true' : 'false'}
-            data-testid="test-presentation-english-tab"
-            className="cl-lang-switch-btn"
-            onClick={() => setMode('english')}
-          >
-            Aa
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'code'}
-            aria-label="Code"
-            title="Code"
-            data-active={mode === 'code' ? 'true' : 'false'}
-            data-testid="test-presentation-code-tab"
-            className="cl-lang-switch-btn"
-            onClick={() => setMode('code')}
-          >
-            {'</>'}
-          </button>
-        </div>
+        <TestLanguageSwitch mode={mode} onChange={setMode} />
         {mode === 'english' && test.readable.completeness === 'partial' && (
           <span className="min-w-0 truncate text-[10px]" style={{ color: 'var(--text-muted)' }}>
             Some syntax could not be translated

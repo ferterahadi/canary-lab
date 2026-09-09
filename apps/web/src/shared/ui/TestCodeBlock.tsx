@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { FormattedDisplayLine } from '@shared/code-display-format'
-import { useTheme } from '../lib/theme'
 import type { ExtractedStep } from '../api/types'
 import * as api from '../api/client'
-import { getCodeHighlighter, codeThemeFor } from './code-highlighter'
+import { useCodeHighlight } from './use-code-highlight'
 import type { StoryCodeLineNumber } from './readable-story-sequence'
 import {
   colorClassForStatus,
@@ -61,21 +60,7 @@ export function ShikiCode({
    *  highlight when both refer to the same row. */
   changedLines?: Set<number>
 }) {
-  const { resolved } = useTheme()
-  const [html, setHtml] = useState<string | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    const themeName = codeThemeFor(resolved)
-    getCodeHighlighter().then((hl) => {
-      if (cancelled) return
-      try {
-        setHtml(hl.codeToHtml(source, { lang: 'typescript', theme: themeName }))
-      } catch {
-        setHtml(null)
-      }
-    }).catch(() => { if (!cancelled) setHtml(null) })
-    return () => { cancelled = true }
-  }, [source, resolved])
+  const html = useCodeHighlight(source)?.html ?? null
 
   const openClickedLine = (target: EventTarget | null, openAt: OpenSourceAtLine): void => {
     const line = (target as HTMLElement | null)?.closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine
@@ -394,4 +379,13 @@ function bodyLineForSourceLine(startLine: number, source: string, sourceLine?: n
   const line = sourceLine - startLine + 1
   if (line < 1 || line > source.split('\n').length) return null
   return line
+}
+
+/** A row from the same escaped Shiki output used by ShikiCode. Tokenization
+ * happens on the whole file, never independently on a diff fragment. */
+export function ShikiSourceLine({ source, html }: { source: string; html?: string }) {
+  return html === undefined ? <span>{source || '\u00a0'}</span>
+    // Shiki escapes source before producing these token spans.
+    // eslint-disable-next-line no-restricted-syntax
+    : <span dangerouslySetInnerHTML={{ __html: html || '&nbsp;' }} />
 }

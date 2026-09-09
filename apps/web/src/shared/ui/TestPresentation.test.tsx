@@ -13,6 +13,7 @@ import { TestPresentation } from './TestPresentation'
 
 vi.mock('shiki/core', () => ({
   createHighlighterCore: async () => ({
+    getTheme: () => ({}),
     codeToHtml: (code: string, options: { theme: string }) => (
       `<pre class="shiki" data-shiki-theme="${options.theme}"><code>${code.split('\n').map((line) => `<span class="line">${line}</span>`).join('\n')}</code></pre>`
     ),
@@ -186,6 +187,18 @@ describe('TestPresentation', () => {
     expect(codeBlock?.classList.contains('overflow-hidden')).toBe(true)
     expect(codeBlock?.classList.contains('overflow-x-auto')).toBe(false)
     expect(codeBlock?.classList.contains('overflow-y-hidden')).toBe(false)
+  })
+
+  it('uses source change markers without a caller converting absolute lines', async () => {
+    await act(async () => root.render(<TestPresentation
+      test={{ ...TEST, sourceChanges: { changedLines: [11], count: 1 } }}
+      sourceFile="/repo/e2e/checkout.spec.ts"
+    />))
+    expect(container.querySelector('[data-testid="readable-modified-open-checkout"]')?.textContent).toBe('MODIFIED')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="test-presentation-code-tab"]')!.click()
+    })
+    expect(container.querySelector('[data-testid="test-presentation-code"] [data-changed-line="true"]')).toBeTruthy()
   })
 
   it('shows changed executable steps in English and calls out changed source with no English step', async () => {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { CoverageJobKind, CoverageJobManifest, CoverageLedger, ExtractedTest, FeatureTests, GapType, TestCoverage, TestStrength } from '@/shared/api/types'
+import type { CoverageJobKind, CoverageJobManifest, CoverageLedger, FeatureTests, GapType, TestCoverage, TestStrength } from '@/shared/api/types'
 import type { AgentModelsConfig, AgentStagePlans, FlightStageKey, FlightStageStatus, ModelAgentKind, ModelStageKey } from '@/shared/api/client'
 import { EMPTY_AGENT_MODELS } from '@shared/agent-models'
 import { ModelLaunchGate } from '@/features/config'
@@ -12,6 +12,7 @@ import { useInvalidationKey } from '@/shared/state/invalidation'
 import { Hovered, RequirementCard, TestCard, TestCardSkeleton, compareRequirements, testColor } from './CoverageCards'
 import { CoverageEmptyMain, CoverageHeader, HeadlinePill, readRailPref, writeRailPref } from './CoverageHeader'
 import { COVERAGE_CSS } from './coverage-ledger-css'
+import { coverageTestSources, type CoverageTestSource } from './coverage-test-sources'
 
 // The two stages a coverage generation spawns (the summary job chains the
 // mapping engine) — the models gate scopes its rows to them.
@@ -34,6 +35,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   // external agent mapping coverage) without a manual refresh — bumps on every
   // `coverage-changed` workspace event (cl_ws-driven-state).
   const coverageRefreshKey = useInvalidationKey('coverage')
+  const testsRefreshKey = useInvalidationKey('tests')
   const [ledger, setLedger] = useState<CoverageLedger | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -255,46 +257,35 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   const [specSource, setSpecSource] = useState<FeatureTests | null>(null)
   const [specSourceLoading, setSpecSourceLoading] = useState(false)
   const [specSourceError, setSpecSourceError] = useState<string | null>(null)
-  const specSourceReq = useRef(false)
-  const ensureSpecSource = useCallback(() => {
-    if (specSourceReq.current) return
-    specSourceReq.current = true
+  const [specSourceRequested, setSpecSourceRequested] = useState(false)
+  const ensureSpecSource = useCallback(() => setSpecSourceRequested(true), [])
+  useEffect(() => {
+    if (!specSourceRequested) return
+    let cancelled = false
+    setSpecSource(null)
     setSpecSourceLoading(true)
+    setSpecSourceError(null)
     api.getFeatureTests(feature)
-      .then((r) => { setSpecSource(r); setSpecSourceError(null) })
-      .catch((e: unknown) => setSpecSourceError(e instanceof Error ? e.message : 'Failed to load test source'))
-      .finally(() => setSpecSourceLoading(false))
-  }, [feature])
+      .then((result) => { if (!cancelled) setSpecSource(result) })
+      .catch((error: unknown) => {
+        if (!cancelled) setSpecSourceError(error instanceof Error ? error.message : 'Failed to load test source')
+      })
+      .finally(() => { if (!cancelled) setSpecSourceLoading(false) })
+    return () => { cancelled = true }
+  }, [feature, specSourceRequested, testsRefreshKey, coverageRefreshKey])
 
-  // Match a ledger test to its extracted body. The ledger's `file` is relative
-  // and prefers a helper `sourceFile` (so does the route via `sourceFile ?? file`),
-  // so key on (basename, line) — identical AST line on both sides — with an exact
-  // name as a secondary fallback. Each entry keeps the ABSOLUTE file for open-in-editor.
-  const sourceByTest = useMemo(() => {
-    const base = (p: string) => p.split(/[\\/]/).pop() ?? p
-    const byLoc = new Map<string, { test: ExtractedTest; absFile: string }>()
-    const byName = new Map<string, { test: ExtractedTest; absFile: string }>()
-    for (const sf of specSource ?? []) {
-      for (const t of sf.tests) {
-        const absFile = t.sourceFile ?? sf.file
-        const entry = { test: t, absFile }
-        byLoc.set(`${base(absFile)}:${t.line}`, entry)
-        if (!byName.has(t.name)) byName.set(t.name, entry)
-      }
-    }
-    return { base, byLoc, byName }
-  }, [specSource])
+  // Generated titles need discovery before expansion; literal titles keep the
+  // existing lazy source load. Never substitute a guessed loop value.
+  useEffect(() => {
+    if (ledger?.tests.some((test) => test.name.includes('${'))) ensureSpecSource()
+  }, [ledger, ensureSpecSource])
 
-  const lookupSource = useCallback(
-    (t: TestCoverage) => {
-      if (t.file && t.line != null) {
-        const hit = sourceByTest.byLoc.get(`${sourceByTest.base(t.file)}:${t.line}`)
-        if (hit) return hit
-      }
-      return sourceByTest.byName.get(t.name) ?? null
-    },
-    [sourceByTest],
-  )
+  const testRows = useMemo(() => (ledger?.tests ?? []).flatMap<{ test: TestCoverage; source: CoverageTestSource | null }>((test) => {
+    const sources = coverageTestSources(specSource ?? [], test)
+    return sources.length
+      ? sources.map((source) => ({ test, source }))
+      : [{ test, source: null }]
+  }), [ledger, specSource])
 
   // The two-way highlight relation: a hovered test lights its requirements; a
   // hovered requirement lights its tests.
@@ -386,6 +377,12 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
           {ledger.tests.length === 0 && (
             <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No tests found in this suite&apos;s specs.</div>
           )}
+          {(specSourceError || specSource?.some((spec) => spec.discoveryError)) && (
+            <div className="clcov-source-note" role="status">
+              Couldn’t load discovered cases. Showing source definitions; generated titles may be unresolved.
+              {specSourceError && ` ${specSourceError}`}
+            </div>
+          )}
           {orphanTests.length > 0 && (
             <div data-testid="orphan-tests-note" style={{ marginBottom: 10, fontSize: 11, color: 'var(--warning)' }}>
               {orphanTests.length} orphan test{orphanTests.length > 1 ? 's' : ''} (no requirement) — regenerate coverage to map them.
@@ -393,9 +390,9 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
           )}
           {/* The strength summary/filter moved up to the stat header (above the
               tests column), mirroring the gap legend above the requirements column. */}
-          {(strengthFilter ? ledger.tests.filter((t) => (t.strength ?? 'shallow') === strengthFilter) : ledger.tests).map((t) => (
+          {(strengthFilter ? testRows.filter(({ test }) => (test.strength ?? 'shallow') === strengthFilter) : testRows).map(({ test: t, source }) => (
             <TestCard
-              key={t.name}
+              key={`${t.name}:${source?.test.name ?? t.name}`}
               test={t}
               testNumber={testNumbering.get(testNumberKey(t.file, t.line))}
               color={colorByTest.get(t.name)!}
@@ -403,7 +400,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
               dimmed={Boolean(hovered) && !activeTestNames.has(t.name)}
               onHover={(on) => setHovered(on ? { kind: 'test', key: t.name } : null)}
               onExpand={ensureSpecSource}
-              source={lookupSource(t)}
+              source={source}
               sourceLoading={specSourceLoading}
               sourceError={specSourceError}
               onReqClick={focusRequirement}

@@ -426,6 +426,7 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
   sourceError: string | null
   onReqClick: (id: string) => void
 }) {
+  const cardName = source?.test.name ?? test.name
   const [expanded, setExpanded] = useState(false)
   const toggle = () => {
     setExpanded((cur) => {
@@ -436,7 +437,7 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
   return (
     <div
       className="clcov-card"
-      data-testid={`test-${test.name}`}
+      data-testid={`test-${cardName}`}
       data-active={active ? 'true' : 'false'}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
@@ -458,7 +459,7 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
         role="button"
         tabIndex={0}
         aria-expanded={expanded}
-        data-testid={`test-toggle-${test.name}`}
+        data-testid={`test-toggle-${cardName}`}
         onClick={toggle}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
       >
@@ -466,14 +467,14 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
         <span className="clcov-testid"><TestIdBadge n={testNumber} /></span>
         {/* Name is the identity; the expanded shared presentation owns the
             file:line locator and Code mode's editor action. */}
-        <strong className="clcov-req-title">{stripLeadingTestOrdinal(test.name)}</strong>
+        <strong className="clcov-req-title">{stripLeadingTestOrdinal(cardName)}</strong>
       </div>
       {/* One compact meta row: strength (what the test IS) + the requirement links it
           COVERS + the @path tags. Click a @req chip to jump to that requirement. */}
       <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 7 }}>
         {test.strength && (
           <span
-            data-testid={`strength-${test.name}`}
+            data-testid={`strength-${cardName}`}
             title={STRENGTH_META[test.strength].title}
             className="flex items-center gap-1"
             style={{ fontSize: 10, fontWeight: 600, color: STRENGTH_META[test.strength].color, background: `color-mix(in srgb, ${STRENGTH_META[test.strength].color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${STRENGTH_META[test.strength].color} 45%, transparent)`, borderRadius: 999, padding: '1px 8px' }}
@@ -483,14 +484,14 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
           </span>
         )}
         {test.requirements.length === 0 ? (
-          <span data-testid={`orphan-${test.name}`} style={{ fontSize: 10, fontWeight: 600, color: 'var(--warning)', background: 'color-mix(in srgb, var(--warning) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
+          <span data-testid={`orphan-${cardName}`} style={{ fontSize: 10, fontWeight: 600, color: 'var(--warning)', background: 'color-mix(in srgb, var(--warning) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
         ) : (
           test.requirements.map((id) => (
             <button
               key={id}
               type="button"
               className="clcov-reqtag"
-              data-testid={`reqtag-${test.name}-${id}`}
+              data-testid={`reqtag-${cardName}-${id}`}
               title={`Jump to requirement ${id}`}
               onClick={(e) => { e.stopPropagation(); onReqClick(id) }}
               style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 11%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 30%, var(--border-default))`, color: 'var(--text-primary)' }}
@@ -502,7 +503,7 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
         ))}
       </div>
       {expanded && (
-        <div className="clcov-source" data-testid={`test-source-${test.name}`}>
+        <div className="clcov-source" data-testid={`test-source-${cardName}`}>
           {source ? (
             <TestPresentation
               test={source.test}

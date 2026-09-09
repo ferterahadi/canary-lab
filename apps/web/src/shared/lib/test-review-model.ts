@@ -7,14 +7,14 @@ const contains = (test: { line: number; endLine: number }, line?: number): boole
 
 /** English uses the same translator as test cards. Untranslated source stays
  * visible; navigation stays keyed to source rows even when wording is equal. */
-export function englishLines(source: ReviewSource): Map<number, string> {
-  const lines = new Map<number, string>()
+export function englishLines(source: ReviewSource): Map<number, Array<{ step: ReadableStoryItem; depth: number }> | null> {
+  const lines = new Map<number, Array<{ step: ReadableStoryItem; depth: number }> | null>()
   const visit = (items: ReadableStoryItem[], depth: number): void => {
     for (const item of items) {
       if (item.source.file && !source.tests.some((test) => contains(test, item.source.startLine))) continue
-      lines.set(item.source.startLine, `${'  '.repeat(depth)}${item.text}`)
+      lines.set(item.source.startLine, [...(lines.get(item.source.startLine) ?? []), { step: item, depth }])
       if (item.kind === 'flow') visit(item.children, depth + 1)
-      else for (let line = item.source.startLine + 1; line <= item.source.endLine; line++) lines.set(line, '')
+      else for (let line = item.source.startLine + 1; line <= item.source.endLine; line++) if (!lines.has(line)) lines.set(line, null)
     }
   }
   for (const test of source.tests) visit(test.readable.story?.steps ?? [], 0)

@@ -4,7 +4,7 @@ import { compareText, type TextPart } from '@/shared/lib/comparison-diff'
 export type ComparisonRow =
   | { id: string; kind: 'section'; label: ReactNode }
   | { id: string; kind: 'message'; label: ReactNode; assessment?: ReactNode; message: ReactNode }
-  | { id: string; kind?: 'values'; label?: ReactNode; assessment?: ReactNode; before: string | null; after: string | null; description?: ReactNode; code?: boolean; testId?: string; beforeLine?: number; afterLine?: number; selected?: boolean; sourceChanged?: boolean; fullSource?: boolean }
+  | { id: string; kind?: 'values'; label?: ReactNode; assessment?: ReactNode; before: string | null; after: string | null; description?: ReactNode; code?: boolean; testId?: string; beforeLine?: number; afterLine?: number; selected?: boolean; sourceChanged?: boolean; fullSource?: boolean; beforeContent?: ReactNode; afterContent?: ReactNode }
 
 export function ComparisonTable({ rows, beforeLabel = 'Before', afterLabel = 'After', labelHeading = 'Change', code = false, ariaLabel = 'Before and after comparison', review = false, scrollRef, onScroll }: {
   rows: ComparisonRow[]
@@ -36,8 +36,8 @@ function ComparisonValueRow({ row, labelled, review }: { row: Extract<Comparison
   return <tr id={row.id} data-testid={row.testId} data-selected={row.selected || undefined} data-source-changed={row.sourceChanged || undefined} className={row.code ? 'cl-comparison-code' : undefined}>
     {labelled && <th scope="row" className="cl-comparison-label">{row.label}{row.description && <p className="mt-1 font-normal text-secondary">{row.description}</p>}</th>}
     {review && <td>{row.assessment}</td>}
-    <td>{row.beforeLine != null && <span className="cl-context-line">{row.beforeLine}</span>}<ComparisonValue fullSource={row.fullSource} value={row.before} parts={parts.before} side="before" changed={row.before !== row.after} /></td>
-    <td>{row.afterLine != null && <span className="cl-context-line">{row.afterLine}</span>}<ComparisonValue fullSource={row.fullSource} value={row.after} parts={parts.after} side="after" changed={row.before !== row.after} /></td>
+    <td>{row.beforeLine != null && <span className="cl-context-line">{row.beforeLine}</span>}{row.beforeContent ?? <ComparisonValue fullSource={row.fullSource} value={row.before} parts={parts.before} side="before" changed={row.before !== row.after} />}</td>
+    <td>{row.afterLine != null && <span className="cl-context-line">{row.afterLine}</span>}{row.afterContent ?? <ComparisonValue fullSource={row.fullSource} value={row.after} parts={parts.after} side="after" changed={row.before !== row.after} />}</td>
   </tr>
 }
 

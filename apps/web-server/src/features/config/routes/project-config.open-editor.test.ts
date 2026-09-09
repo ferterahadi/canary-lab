@@ -123,6 +123,54 @@ describe('POST /api/open-editor', () => {
     }
   })
 
+  it.each(['absolute', 'relative'])('opens a project doc with an %s symlink target outside the root', async (kind) => {
+    const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-linked-doc-'))
+    const target = path.join(fs.realpathSync(externalDir), 'guide.md')
+    fs.writeFileSync(target, '# Integration guide\n')
+    const docsDir = path.join(projectRoot, 'docs')
+    fs.mkdirSync(docsDir)
+    const file = path.join(docsDir, 'guide.md')
+    fs.symlinkSync(kind === 'relative' ? path.relative(docsDir, target) : target, file)
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST', url: '/api/open-editor',
+        payload: { file, editor: 'cursor', line: 4, column: 2 },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ opened: true, editor: 'cursor' })
+      expect(spawnMock).toHaveBeenCalledWith('cursor', ['-g', `${target}:4:2`], expect.any(Object))
+
+      // Linking a document permits access through its project entry, not by
+      // submitting arbitrary outside paths directly or using parent traversal.
+      for (const outside of [target, `${projectRoot}/../${path.basename(externalDir)}/guide.md`]) {
+        spawnMock.mockClear()
+        const denied = await app.inject({
+          method: 'POST', url: '/api/open-editor', payload: { file: outside, editor: 'cursor' },
+        })
+        expect(denied.statusCode).toBe(400)
+        expect(spawnMock).not.toHaveBeenCalled()
+      }
+    } finally {
+      fs.rmSync(externalDir, { recursive: true, force: true })
+      await app.close()
+    }
+  })
+
+  it('returns not found for a dangling project symlink without launching an editor', async () => {
+    const file = path.join(projectRoot, 'missing-link.md')
+    fs.symlinkSync(path.join(projectRoot, 'missing.md'), file)
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/open-editor', payload: { file } })
+      expect(r.statusCode).toBe(404)
+      expect(r.json()).toEqual({ error: 'file not found' })
+      expect(spawnMock).not.toHaveBeenCalled()
+    } finally {
+      await app.close()
+    }
+  })
+
   it('rejects directories inside the project root', async () => {
     const app = await makeApp()
     try {

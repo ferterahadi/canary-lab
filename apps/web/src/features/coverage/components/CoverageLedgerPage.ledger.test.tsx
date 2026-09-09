@@ -17,6 +17,7 @@ import { ABSENT_LEDGER, LEDGER, fire } from './__fixtures__/CoverageLedgerPage.p
 // deterministically with line spans instead of loading the real wasm.
 vi.mock('shiki/core', () => ({
   createHighlighterCore: async () => ({
+    getTheme: () => ({}),
     codeToHtml: (code: string) => (
       `<pre class="shiki one-dark-pro"><code>${
         code.split('\n').map((line) => `<span class="line">${line}</span>`).join('\n')
@@ -429,6 +430,36 @@ describe('CoverageLedgerPage', () => {
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
     await mount()
     expect(container.querySelector('[data-testid="req-toggle-R1"]')).toBeNull()
+  })
+
+  it('shows every discovered channel title at one declaration and keeps its requirement link', async () => {
+    const ledger = structuredClone(LEDGER)
+    const template = '${channel}: a new app can read its own empty conversation scope'
+    ledger.tests = [{ ...ledger.tests[0], name: template, line: 75 }]
+    ledger.requirements[0].annotatedTestNames = [template]
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(ledger)
+    const title = (channel: string) => `${channel}: a new app can read its own empty conversation scope`
+    vi.mocked(api.getFeatureTests).mockResolvedValue([{
+      file: '/repo/features/checkout/e2e/cart.spec.ts',
+      tests: ['whatsapp', 'line'].map((channel) => ({
+        name: title(channel), line: 75, bodyLine: 75,
+        bodySource: '{ expect(response.status()).toBe(200) }', steps: [],
+        readable: readableTest(title(channel), []),
+      })),
+    }])
+    await mount()
+    expect(api.getFeatureTests).toHaveBeenCalledOnce()
+    const pane = container.querySelector('[data-testid="tests-pane"]')!
+    expect(pane.textContent).not.toContain('${channel}')
+    for (const channel of ['whatsapp', 'line']) {
+      const card = pane.querySelector(`[data-testid="test-${title(channel)}"]`)!
+      expect(card).toBeTruthy()
+      expect(card.textContent).toContain('@req-R1')
+      await act(async () => { card.querySelector<HTMLElement>('[role="button"]')!.click() })
+      expect(card.querySelector('[data-testid="test-presentation"]')).toBeTruthy()
+      act(() => { card.querySelector<HTMLButtonElement>('.clcov-reqtag')!.click() })
+      expect(container.querySelector('[data-testid="req-R1"]')?.getAttribute('data-focus')).toBe('true')
+    }
   })
 
   it('offers no expand toggle for a requirement with no extra detail', async () => {

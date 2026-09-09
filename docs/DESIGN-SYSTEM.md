@@ -276,6 +276,8 @@ set `scrollbar-gutter: stable` so the appearing bar doesn't jump the layout.
 | **`TestIdBadge`** | `#N` mono badge on `--bg-selected` — source-order identity, rendered identically in every view. |
 | **`ComparisonTable` / `ComparisonLegend`** | Shared before/after table for test names, assertions, patches, and configuration values. Changed words use red `del` / green `ins` highlights with − / + markers; unchanged text stays neutral. `null` means absent; an empty string stays an empty value. Section rows group related changes. |
 | **`DiffView`** | Adapts captured unified patches to `ComparisonTable`, retaining file/hunk metadata and context. |
+| **`SourceComparisonTable`** | Whole-file aligned source comparison using the cards' `ReadableStoryText` and Shiki source tokens. Source edits use line-level removed/added highlights; `ComparisonTable` keeps its default word comparison for other consumers. |
+| **`TestLanguageSwitch`** | Shared Aa / </> English/Code tabs for test cards and source review, with accessible English and Code labels. |
 | **`Tooltip`**, **`TestCodeBlock`** (Shiki), **`ResizablePanels`** / **`VerticalSplit`**, **`ThemeToggle`** | |
 
 In comparison tables, red and green mean removed and added, respectively. They
@@ -284,11 +286,15 @@ weakening hint separate. Label both comparison baselines explicitly when known.
 
 Test review uses two equal Before/After columns for complete source, with source
 line gutters and a sticky header. English and Code share the selected source change;
-Previous/Next scrolls within that context. A fixed assessment area explains the
-selected change. Full file exposes imports and shared setup. The dialog is up to
-1440px wide and 88vh high, with a permanent advisory row, toolbar, and suite-scoped
-footer. On narrow screens the source table scrolls horizontally. Edited test cards
-stay neutral, with a direct review action; amber denotes an advisory weakening hint.
+Previous/Next scrolls through the whole file, including imports and shared setup.
+A fixed assessment area explains the selected change only after source loads;
+loading or unavailable source never implies no changes. The dialog is up to
+2560px wide (94vw maximum) and 96vh high, with a compact 184px suite/file rail,
+one toolbar, and a suite-scoped footer. The toolbar contains the explicit baseline
+selector, shared English/Code tabs, change navigation, and one editor action.
+Advisory disclosure opens from the header. On narrow screens the rail moves above
+the review and the source table scrolls horizontally. Edited test cards stay neutral;
+amber denotes an advisory weakening hint.
 Red and green inside code describe removed and added content only.
 
 **Chip vs Pill:** `Chip` is read-only, `StatusPill` is a clickable action with a

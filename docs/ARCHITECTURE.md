@@ -191,8 +191,12 @@ Flights adds search and an attention filter. Test review keeps suite/file select
 in a rail and presents complete source in two fixed before/after columns. The
 read-only test-review API reads Git HEAD or the explicitly selected run snapshot,
 then derives English, source alignment, and advisory assessments from those same
-versions. English and Code share source-based change navigation. Full file includes
-imports and shared setup; the selected change's assessment appears below the source.
+versions. English and Code share source-based change navigation across the whole
+file, including imports and shared setup; the selected change's assessment appears
+below the source. `SourceComparisonTable` retains aligned source rows while sharing
+`ReadableStoryText`, `useCodeHighlight` (full-source Shiki tokenization), and
+`TestLanguageSwitch` with the ordinary test cards. The compact baseline selector
+and one editor action leave the wide dialog primarily for the comparison.
 Missing snapshots are disclosed rather than replaced with a different baseline.
 `ComparisonTable` also serves configuration previews and captured patches through
 `DiffView`. Red means removed and green means added, independently of execution.

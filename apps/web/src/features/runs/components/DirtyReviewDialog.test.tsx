@@ -25,7 +25,7 @@ beforeEach(() => {
 })
 afterEach(() => { act(() => root.unmount()); container.remove() })
 const buttons = () => [...document.querySelectorAll<HTMLButtonElement>('button')]
-const button = (label: string) => buttons().find((item) => item.textContent?.trim() === label)!
+const button = (label: string) => buttons().find((item) => item.getAttribute('aria-label') === label || item.textContent?.trim() === label)!
 async function render(props: Partial<Parameters<typeof DirtyReviewDialog>[0]> = {}) {
   await act(async () => root.render(<DirtyReviewDialog features={[feature()]} onClose={vi.fn()} {...props} />))
 }
@@ -33,20 +33,23 @@ const click = async (label: string) => act(async () => button(label).click())
 it('shows a whole test with equal before/after columns, unchanged context and exact source edits', async () => {
   await render()
   await click('Code')
-  expect([...document.querySelectorAll('thead th')].map((item) => item.textContent)).toEqual(['Before · Committed', 'After · Current workspace'])
+  expect([...document.querySelectorAll('thead th')].map((item) => item.textContent)).toEqual(['Before · Git HEAD', 'After · Working copy'])
   expect(document.querySelector('tbody')?.textContent).toContain('const context = x')
-  expect(document.querySelector('del')?.textContent).toBe('1')
-  expect(document.querySelector('ins')?.textContent).toBe('2')
+  expect(document.querySelector('del')?.textContent).toBe('  expect(x).toBe(1)')
+  expect(document.querySelector('ins')?.textContent).toBe('  expect(x).toBe(2)')
   expect(document.body.textContent).toContain('Change 1 of 2')
   expect(document.body.textContent).toContain('Different expected values are not ordered by strength')
-  expect(document.body.textContent).not.toContain('import { test')
+  expect(document.querySelector('tbody')?.textContent).toContain('import { test')
+  expect(document.querySelector('[aria-label="Test context"]')).toBeNull()
+  expect(document.querySelector('.cl-comparison-legend')).toBeNull()
+  expect(document.querySelector('[aria-label="Open workspace in editor"]')).toBeNull()
+  expect(button('Code').className).toBe('cl-lang-switch-btn')
 })
 it('keeps the selected change when switching English and Code and exposes full-file setup', async () => {
   await render()
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Next change"]')!.click())
   await click('Code'); await click('English')
   expect(document.body.textContent).toContain('Change 2 of 2')
-  await act(async () => { const select = document.querySelector<HTMLSelectElement>('[aria-label="Test context"]')!; select.value = 'file'; select.dispatchEvent(new Event('change', { bubbles: true })) })
   expect(document.querySelector('tbody')?.textContent).toContain('import { test')
 })
 it('opens the requested suite and source line and keeps file focus on live refresh', async () => {
@@ -95,7 +98,7 @@ it('keeps restore and adopt explicit and bound to the selected live run', async 
 it('uses the selected run snapshot only when reviewing differences from that run', async () => {
   await render({ pendingRuns: [run], focusRunDetail: detail, focusRunId: 'run-1' })
   expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', undefined)
-  await click('Different from this run')
+  await act(async () => { const select = document.querySelector<HTMLSelectElement>('[aria-label="Compare with"]')!; select.value = 'run'; select.dispatchEvent(new Event('change', { bubbles: true })) })
   expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', 'run-1')
 })
 it('supports a committed file that differs from a completed run without showing live-run levers', async () => {
@@ -109,17 +112,45 @@ it('discloses missing source and retries instead of presenting it as removed cod
   await render()
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Snapshot unavailable')
   expect(document.querySelector('del')).toBeNull()
+  expect(document.body.textContent).not.toContain('This file matches')
+  expect(document.body.textContent).not.toContain('No changes')
+  expect(button('Next change').disabled).toBe(true)
   await click('Retry')
   expect(document.querySelector('table')).not.toBeNull()
 })
+it('does not claim the baseline matches while source is still loading', async () => {
+  vi.mocked(api.getTestFileReview).mockReturnValue(new Promise(() => {}))
+  await render()
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('Loading complete test source')
+  expect(document.body.textContent).not.toContain('This file matches')
+  expect(document.body.textContent).not.toContain('No changes')
+})
 it('opens the existing editor at the test source without creating a new screen', async () => {
   vi.mocked(api.openEditor).mockResolvedValue({ opened: true, editor: 'cursor' })
-  await render(); await click('Edit in editor ↗')
-  expect(api.openEditor).toHaveBeenCalledWith({ file: '/tmp/features/alpha/e2e/a.spec.ts', line: 3 })
+  await render(); await click('Edit in editor')
+  expect(api.openEditor).toHaveBeenCalledWith({ file: '/tmp/features/alpha/e2e/a.spec.ts', line: 5 })
 })
 it('retains the advisory disclosure and an honest empty cold load', async () => {
   await render({ features: [] })
   expect(document.body.textContent).toContain('No changed test files')
-  await click('About this hint')
+  await click('About assessments')
   expect(document.querySelector('[data-testid="dirty-review-hint-copy"]')?.textContent).toContain('Advisory')
+})
+
+it('starts a linked file at its requested change and persists navigation through the existing focus callback', async () => {
+  const onFocus = vi.fn()
+  await render({ focus: { file: 'e2e/a.spec.ts', line: 7, mode: 'code' }, onFocus })
+  expect(document.body.textContent).toContain('Change 2 of 2')
+  await act(async () => button('Previous change').click())
+  expect(onFocus).toHaveBeenLastCalledWith({ file: 'e2e/a.spec.ts', line: 5, mode: 'code' })
+  expect(document.body.textContent).toContain('Change 1 of 2')
+})
+it('shows one accurate whole-file empty state when the selected baseline matches', async () => {
+  const review = testFileReview(); review.before = review.after; review.patch = ''; review.assessment.tests = []
+  vi.mocked(api.getTestFileReview).mockResolvedValue(review)
+  await render()
+  expect(document.body.textContent).toContain('This file matches Git HEAD.')
+  expect(button('Previous change').disabled).toBe(true)
+  expect(button('Next change').disabled).toBe(true)
+  expect(document.body.textContent).not.toContain('Choose another test')
 })

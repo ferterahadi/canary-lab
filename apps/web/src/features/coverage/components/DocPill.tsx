@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Tooltip } from '@/shared/ui/Tooltip'
 
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
@@ -57,35 +58,47 @@ export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen
         </svg>
       </span>
       <div className="min-w-0 flex-1">
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, lineHeight: 1.3 }} className="truncate" title={linked && linkTarget ? `↗ ${linkTarget}` : `${dirPrefix}${relPath}`}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, lineHeight: 1.3 }} className="truncate" title={`${dirPrefix}${relPath}`}>
           <span style={{ color: broken ? 'var(--danger)' : 'var(--text-primary)', fontWeight: 600 }}>{relPath}</span>
-          {linked && (
-            <span
-              data-testid={`doc-linked-${relPath}`}
-              className="ml-1.5 rounded px-1 py-[1px] text-[9px] font-semibold"
-              style={{ color: broken ? 'var(--danger)' : 'var(--accent)', border: `1px solid color-mix(in srgb, ${broken ? 'var(--danger)' : 'var(--accent)'} 40%, transparent)` }}
-            >
-              {broken ? 'link broken' : 'symlink ↗'}
-            </span>
-          )}
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
-          {generated ? 'Generated PRD artifact' : linked ? 'Linked doc — the original stays the live source' : 'Source doc'} · {formatBytes(sizeBytes)}
+          {broken ? 'Broken link' : generated ? 'Generated PRD artifact' : 'Source doc'} · {formatBytes(sizeBytes)}
         </div>
       </div>
-      {onRemove && (
-        <button
-          type="button"
-          data-testid={`remove-doc-${relPath}`}
-          onClick={(e) => { e.stopPropagation(); onRemove() }}
-          disabled={busy}
-          aria-label={`Remove ${relPath}`}
-          title={removeTitle}
-          className="cl-icon-button h-6 w-6 shrink-0"
-          style={{ color: 'var(--text-muted)' }}
-        >
-          ✕
-        </button>
+      {(linked || onRemove) && (
+        <div className="flex shrink-0 flex-col items-end gap-1 self-stretch">
+          {linked && (
+            <Tooltip label={`${broken ? 'Broken symlink — the original file could not be found.' : 'Symlinked file — the original stays the live source.'}${linkTarget ? ` Target: ${linkTarget}` : ''}`}>
+              <span
+                data-testid={`doc-linked-${relPath}`}
+                className="flex h-4 w-6 items-center justify-center"
+                tabIndex={0}
+                aria-label={broken ? 'Broken symlink' : 'Symlinked file'}
+                title=""
+                style={{ color: broken ? 'var(--danger)' : 'var(--accent)', cursor: 'help' }}
+              >
+                <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                </svg>
+              </span>
+            </Tooltip>
+          )}
+          {onRemove && (
+            <button
+              type="button"
+              data-testid={`remove-doc-${relPath}`}
+              onClick={(e) => { e.stopPropagation(); onRemove() }}
+              disabled={busy}
+              aria-label={`Remove ${relPath}`}
+              title={removeTitle}
+              className="cl-icon-button h-6 w-6 shrink-0"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

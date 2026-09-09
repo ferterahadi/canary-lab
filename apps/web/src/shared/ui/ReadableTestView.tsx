@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type {
   ReadableSource,
   ReadableStoryFlowKind,
@@ -180,14 +180,7 @@ function StoryRow({
         >
           {localSequenceLabel}
         </span>
-        <span
-          data-testid={`readable-story-role-${step.id}`}
-          style={{ color: storyKeywordColor(step), fontWeight: 600 }}
-        >
-          {keyword}
-        </span>
-        <span className="min-w-0 whitespace-pre-wrap break-words">
-          {step.spans.map((span, index) => <StorySpan key={index} span={span} />)}
+        <ReadableStoryText step={step}>
           {fileNote && <span style={{ color: 'var(--text-muted)' }}> {`// ${fileNote}`}</span>}
           {changed && (
             <span
@@ -216,7 +209,7 @@ function StoryRow({
               {executionLabel}
             </span>
           )}
-        </span>
+        </ReadableStoryText>
       </button>
       {step.kind === 'flow' && step.children.length > 0 && (
         <StorySequence
@@ -326,4 +319,17 @@ function sourceLabel(source: ReadableSource): string {
     ? `L${source.startLine}`
     : `L${source.startLine}–${source.endLine}`
   return `${fileName(source.file)}:${line}`
+}
+
+/** The semantic row shared by test stories and source-aligned English diffs. */
+export function ReadableStoryText({ step, children }: { step: ReadableStoryItem; children?: ReactNode }) {
+  return <>
+    <span data-testid={`readable-story-role-${step.id}`} style={{ color: storyKeywordColor(step), fontWeight: 600 }}>
+      {storyKeyword(step)}
+    </span>
+    <span className="min-w-0 whitespace-pre-wrap break-words">
+      {step.spans.map((span, index) => <StorySpan key={index} span={span} />)}
+      {children}
+    </span>
+  </>
 }

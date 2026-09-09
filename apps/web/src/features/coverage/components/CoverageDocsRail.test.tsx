@@ -102,6 +102,28 @@ describe('CoverageDocsRail', () => {
     expect(container.querySelector('[data-testid="doc-pill-_prd-summary.json"]')).toBeTruthy()
   })
 
+  it('explains a linked doc only on icon hover and opens its project entry path', async () => {
+    const listing = structuredClone(LISTING)
+    listing.docs[0] = { ...listing.docs[0], linked: true, linkTarget: '/original/prd.md' }
+    vi.mocked(api.listFeatureDocs).mockResolvedValue(listing)
+    await mount()
+    const card = container.querySelector<HTMLElement>('[data-testid="doc-pill-prd.md"]')!
+    const icon = card.querySelector<HTMLElement>('[data-testid="doc-linked-prd.md"]')!
+    expect(icon.querySelector('svg')).toBeTruthy()
+    expect(icon.closest('.truncate')).toBeNull()
+    expect(card.textContent).toBe('prd.mdSource doc · 1.2 KB')
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+
+    act(() => { icon.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.querySelector('[role="tooltip"]')?.textContent)
+      .toBe('Symlinked file — the original stays the live source. Target: /original/prd.md')
+    act(() => { icon.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })) })
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+
+    await act(async () => { card.click() })
+    expect(api.openEditor).toHaveBeenCalledWith({ file: listing.docs[0].absPath })
+  })
+
   it('collapsed shows the toggle and hides the doc list', async () => {
     await mount({ open: false })
     expect(container.querySelector('[data-testid="docs-rail"]')).toBeTruthy()

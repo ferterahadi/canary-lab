@@ -160,7 +160,7 @@ export function Modal({
    *  to the chosen viewport inset. */
   height?: number | string
   /** Viewport margin in vh; dense source review can reserve more reading room. */
-  viewportInset?: 6 | 10
+  viewportInset?: 2 | 6 | 10
   /** ARIA role for the dialog surface — `alertdialog` for error/confirmation
    *  interruptions, `dialog` (default) otherwise. */
   role?: 'dialog' | 'alertdialog'
