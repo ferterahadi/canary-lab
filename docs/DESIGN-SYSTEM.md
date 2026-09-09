@@ -274,7 +274,20 @@ set `scrollbar-gutter: stable` so the appearing bar doesn't jump the layout.
 | **`OptionRow`** | The one pickable-row look: `OPTION_ROW_CLASS` + `optionRowStyle({ selected, disabled })` — neutral surface, selection = `--bg-selected` and nothing else (no accent: every row in a picker is clickable, so accent-tinting the picked one inverts what accent means), locked rows carry a cursor not an opacity. Class + style rather than a component so the caller picks the element: a `<button>` for a plain pick (`StageRow`), a `role="radio"` `<div>` when the row owns a control (the heal modes carry a stepper). |
 | **`StepList` / `StepRow`** | Vertical rail + beads. States `done · active · pending · warn · failed`; 15px indicator cell masks the rail. |
 | **`TestIdBadge`** | `#N` mono badge on `--bg-selected` — source-order identity, rendered identically in every view. |
-| **`Tooltip`**, **`DiffView`**, **`TestCodeBlock`** (Shiki), **`ResizablePanels`** / **`VerticalSplit`**, **`ThemeToggle`** | |
+| **`ComparisonTable` / `ComparisonLegend`** | Shared before/after table for test names, assertions, patches, and configuration values. Changed words use red `del` / green `ins` highlights with − / + markers; unchanged text stays neutral. `null` means absent; an empty string stays an empty value. Section rows group related changes. |
+| **`DiffView`** | Adapts captured unified patches to `ComparisonTable`, retaining file/hunk metadata and context. |
+| **`Tooltip`**, **`TestCodeBlock`** (Shiki), **`ResizablePanels`** / **`VerticalSplit`**, **`ThemeToggle`** | |
+
+In comparison tables, red and green mean removed and added, respectively. They
+describe edits, not pass/fail results or the strength of an assertion. Keep any
+weakening hint separate. Label both comparison baselines explicitly when known.
+
+Test review enables the table's `review` layout: a 120px Change column, a 140px
+Assessment column, and equal Before/After columns. The same columns remain visible
+for loading, unavailable source, and empty filter results. The dialog is up to
+1440px wide and 80vh high, with a permanent advisory row, toolbar, and suite-scoped
+footer. Only the table body scrolls; headers stick within its scroll container.
+On narrow screens the table scrolls horizontally instead of squeezing the columns.
 
 **Chip vs Pill:** `Chip` is read-only, `StatusPill` is a clickable action with a
 count. Different interaction models — don't merge them.

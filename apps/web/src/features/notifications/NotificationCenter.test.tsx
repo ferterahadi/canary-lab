@@ -23,11 +23,15 @@ beforeEach(() => {
 })
 afterEach(() => { act(() => root.unmount()); container.remove() })
 const button = (text: string) => [...document.querySelectorAll('button')].find((b) => b.textContent === text)!
+const labelled = (label: string) => document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!
+// Resolved messages sit behind a collapsed group, so a test about one has to
+// open it the way a reader would.
+const openResolved = async () => act(async () => [...document.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Resolved'))!.click())
 
 it('opens the exact pending run, marks the notification read, and does not delete it on navigation', async () => {
   const navigate = vi.fn(), open = vi.fn()
   await act(async () => root.render(<NotificationCenter open onOpenChange={open} onNavigate={navigate} />))
-  await act(async () => button('Review test changes →').click())
+  await act(async () => labelled('Review test changes').click())
   expect(navigate).toHaveBeenCalledWith(target)
   expect(open).toHaveBeenCalledWith(false)
   expect(api.readNotification).toHaveBeenCalledWith('n1')
@@ -37,10 +41,10 @@ it('opens the exact pending run, marks the notification read, and does not delet
 it('deletes through the persistent API and removes the row only after success', async () => {
   await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={vi.fn()} />))
   api.deleteNotification.mockRejectedValueOnce(new Error('Disk is read-only'))
-  await act(async () => button('Delete permanently').click())
+  await act(async () => labelled('Delete permanently').click())
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Disk is read-only')
   expect(document.querySelector('[data-testid="notification-n1"]')).not.toBeNull()
-  await act(async () => button('Delete permanently').click())
+  await act(async () => labelled('Delete permanently').click())
   expect(document.querySelector('[data-testid="notification-n1"]')).toBeNull()
   expect(document.body.textContent).toContain('No notifications')
 })
@@ -84,7 +88,8 @@ it('opens the run instead of asking for another review after a notification reso
   rows = rows.map((row) => ({ ...row, resolvedAt: '2026-09-08T12:00:00Z' }))
   const navigate = vi.fn()
   await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={navigate} />))
-  await act(async () => button('Open run →').click())
+  await openResolved()
+  await act(async () => labelled('Open run').click())
   expect(navigate).toHaveBeenCalledWith({ kind: 'run', feature: 'shop', runId: 'run-1' })
 })
 
@@ -95,7 +100,7 @@ it('has no manual note creation and opens a feature-level weakening hint without
   expect([...document.querySelectorAll('button')].some((element) => /\+ Add/.test(element.textContent ?? ''))).toBe(false)
   expect(document.querySelector('form')).toBeNull()
   expect(document.body.textContent).toContain('Test integrity · Hint')
-  await act(async () => button('Review test changes →').click())
+  await act(async () => labelled('Review test changes').click())
   expect(navigate).toHaveBeenCalledWith({ kind: 'test-review', feature: 'shop' })
 })
 
@@ -103,8 +108,13 @@ it('orders weakening hints before ordinary attention and filters read and resolv
   rows.push({ id: 'weak', title: 'Possible weakening', body: 'Review', severity: 'danger', target: { kind: 'test-review', feature: 'shop' }, createdAt: '2026-09-07T10:00:00Z' })
   rows.push({ id: 'done', title: 'Resolved', body: '', target, resolvedAt: 'now', createdAt: '2026-09-09T10:00:00Z' })
   await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={vi.fn()} />))
+  await openResolved()
   expect([...document.querySelectorAll('[data-testid^="notification-"]')].map((element) => element.getAttribute('data-testid'))).toEqual(['notification-center', 'notification-weak', 'notification-n1', 'notification-done'])
-  await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="notification-weak"] button:nth-child(2)')!.click())
+  // Only the row to act on first carries the filled accent; the rest stay ghost
+  // buttons, so the fill reads as "start here" rather than "this is a button".
+  expect(document.querySelector('[data-testid="notification-weak"] [aria-label="Review test changes"]')?.className).toContain('cl-button-primary')
+  expect(document.querySelector('[data-testid="notification-n1"] [aria-label="Review test changes"]')?.className).not.toContain('cl-button-primary')
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="notification-weak"] [aria-label="Mark read"]')!.click())
   await act(async () => [...document.querySelectorAll<HTMLButtonElement>('nav[aria-label="Notification filter"] button')][1].click())
   expect(document.querySelector('[data-testid="notification-weak"]')).toBeNull()
   expect(document.querySelector('[data-testid="notification-done"]')).toBeNull()
@@ -115,6 +125,7 @@ it('opens a resolved feature-only alert as the suite, not an active review', asy
   rows = [{ id: 'resolved', title: 'Tests changed', body: '', target: { kind: 'test-review', feature: 'shop' }, resolvedAt: 'now', createdAt: '2026-09-09T10:00:00Z' }]
   const navigate = vi.fn()
   await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={navigate} />))
-  await act(async () => button('Open suite →').click())
+  await openResolved()
+  await act(async () => labelled('Open suite').click())
   expect(navigate).toHaveBeenCalledWith({ kind: 'feature', feature: 'shop' })
 })

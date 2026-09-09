@@ -135,6 +135,17 @@ describe('listPlaywrightTests', () => {
     expect(calls).toBe(1)
   })
 
+  it('fresh verification bypasses and invalidates a cached success when dependencies break', async () => {
+    const success = jsonSpawner({ config: { rootDir: tmpDir }, suites: [
+      { file: 'case.spec.ts', specs: [{ title: 'preserved case', line: 1 }] },
+    ] })
+    expect(await listPlaywrightTests(tmpDir, { spawner: success })).toHaveLength(1)
+    // A missing dependency need not change any spec file's signature.
+    expect(await listPlaywrightTests(tmpDir, { spawner: stderrFailSpawner(), fresh: true })).toBeNull()
+    expect(await listPlaywrightTests(tmpDir, { spawner: stderrFailSpawner() })).toBeNull()
+    expect(await listPlaywrightTests(tmpDir, { spawner: success, fresh: true })).toHaveLength(1)
+  })
+
   it('walks suites that have only nested suites (no direct specs)', async () => {
     const entries = await listPlaywrightTests(tmpDir, {
       spawner: jsonSpawner({

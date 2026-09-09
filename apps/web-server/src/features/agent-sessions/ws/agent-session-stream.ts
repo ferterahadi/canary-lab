@@ -57,7 +57,7 @@ interface StreamSocket {
  *  route below resolves a ref differently but streams it identically, so the
  *  wiring lives here once — a new frame type (like `subagent`) then reaches
  *  every surface without touching seven call sites. */
-function attachTail(
+export function attachTail(
   socket: StreamSocket,
   opts: { ref: AgentSessionRef | null; discoverRef: () => AgentSessionRef | null },
 ): void {

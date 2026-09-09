@@ -25,3 +25,16 @@ Two awareness signals can ride a run result. Neither changes the verdict, and yo
 
 - dirtyTests (a test spec changed since the last green run): relay its message to the user VERBATIM (e.g. "⚠️ Tests have been modified, please review.⚠️") — once, alongside the pass/fail outcome. Do NOT block, gate, re-run, or revert on it: the user reviews or commits the change.
 - specEdits (a spec changed AFTER this run started): the run executed a copy of the suite taken at run start, so the edited spec was NOT tested — the result you see says nothing about it. Relay specEdits.message and follow specEdits.nextSteps: restore the spec to what the run started with, or ask the human to adopt the edits in Canary Lab (adopting re-runs the suite against them). No MCP tool can adopt or approve a spec edit, and a passed run with pending specEdits is a pass of the ORIGINAL suite — never report the edited tests as passed. specEdits.hints lists what the strength differential read: a kind:"weaker" hint means an assertion was removed or loosened relative to what ran — restore it, a weaker assertion is never a repair; kind:"cannot-classify" means review by hand. Hints are advisory and carry specEdits.disclosure (one AI labelled, a second AI checked blind, no human) — quote it if you quote a hint.
+
+
+## Discovery repair (test list cannot load)
+
+Use start_discovery_repair with feature, mode: external, and your stable session_id.
+Poll get_discovery_repair until promptReady, then read promptPath. Report meaningful
+inspection/edit milestones through update_discovery_repair action: progress (at
+least once a minute during long work), so Canary shows live progress without a
+refresh. Stop editing before action: verify; Canary independently lists tests.
+Read the result: succeeded restores the existing Tests list; failed returns the
+latest diagnostic. Stop editing and report action: blocked when unable to proceed.
+Never weaken tests, run test bodies, or claim success from your own exit message.
+Use the shipped canary-lab-repair-discovery skill for the complete workflow.

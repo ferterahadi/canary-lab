@@ -356,6 +356,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // registered above; for `start_run` we reuse `app.inject()` rather than
   // duplicating the 270-line orchestrator-construction code.
   await app.register(registerMcpRoutes, {
+    discoveryRepairRequest: async (request) => {
+      const response = await app.inject({ method: request.method, url: request.url, payload: request.payload as Record<string, unknown> | undefined })
+      return { statusCode: response.statusCode, body: response.json() }
+    },
     store: runStore,
     broker: externalHealBroker,
     featuresDir,

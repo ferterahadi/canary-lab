@@ -14,6 +14,7 @@ import type { AgentSessionEvent, SubagentIdentity } from '@/shared/api/client'
 // silently routed a draft source to the flight-plan endpoint.
 
 export type AgentSessionSocketSource =
+  | { kind: 'discovery-repair'; taskId: string }
   | { kind: 'run'; runId: string }
   | { kind: 'benchmark'; benchmarkId: string }
   | { kind: 'portify'; workflowId: string }
@@ -61,6 +62,8 @@ export interface AgentSessionConnection {
 // fully covered.
 function urlFor(base: string, source: AgentSessionSocketSource): string {
   switch (source.kind) {
+    case 'discovery-repair':
+      return `${base}/ws/discovery-repairs/${encodeURIComponent(source.taskId)}/agent-session`
     case 'run':
       return `${base}/ws/runs/${encodeURIComponent(source.runId)}/agent-session`
     case 'benchmark':

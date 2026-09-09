@@ -6,7 +6,7 @@ import { Modal } from '@/shared/ui/atoms'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
 import { useRun } from '../state/RunsContext'
 import { WEAKER_HINT_COPY, featureTone, specTone } from '../utils/spec-integrity'
-import { SpecChangeReview, SpecToneChip } from './SpecChangeReview'
+import { SpecChangeReview, SpecToneChip, type ReviewScrollPosition } from './SpecChangeReview'
 
 interface Props {
   features: Feature[]
@@ -59,6 +59,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   const [error, setError] = useState<string | null>(null)
   const [hintOpen, setHintOpen] = useState(false)
   const [workspaceOpenError, setWorkspaceOpenError] = useState<string | null>(null)
+  const scrollPositions = useRef(new Map<string, ReviewScrollPosition>())
   const hadCards = useRef(false)
   useEffect(() => {
     if (cards.length > 0) hadCards.current = true
@@ -86,6 +87,8 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   const weaker = specs.some((item) => specTone(item) === 'weaker')
   const tone = spec ? specTone(spec) : selected?.feature ? featureTone(selected.feature) : null
   const run = selected?.run
+  const commitFileCount = selected?.feature?.dirty?.specs.length ?? 0
+  const reviewKey = JSON.stringify([selected?.name, spec?.file])
 
   return (
     <>
@@ -94,35 +97,36 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
         portal
         onClose={onClose}
         title="Tests changed"
-        description={selected ? `${selected.name} · Review the changes before relying on the previous result.` : 'Review changed test files and the assertions they enforce.'}
+        description="Review edits against their baseline."
         ariaLabel="Changed test files"
         testId="dirty-review-dialog"
-        width={1080}
-        height={680}
+        width={1440}
+        height="80vh"
         bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
         headerActions={<button type="button" onClick={() => { void openWorkspace() }} aria-label="Open workspace in editor" title="Open workspace in editor" className="cl-icon-button h-7 w-7 shrink-0">↗</button>}
-        subheader={<>
-          {workspaceOpenError && <p role="alert" className="px-5 py-2 text-xs text-danger">{workspaceOpenError}</p>}
-          {weaker && <div className="flex items-center gap-3 border-b border-line px-5 py-3 text-[11px] text-secondary">
-            <p className="flex-1"><strong className="font-medium text-danger">Possible weakening.</strong> Advisory only; the hint does not change the run verdict.</p>
-            <button className="shrink-0 text-primary underline decoration-line-strong underline-offset-4" onClick={() => setHintOpen(true)}>About this hint</button>
-          </div>}
-        </>}
-        footer={selected && <div className="flex w-full flex-wrap items-center justify-between gap-3" data-testid="dirty-review-actions">
-          <div className="max-w-sm text-[11px] leading-relaxed text-secondary">
-            {run ? <p data-testid={`dirty-review-pending-${selected.name}`}>Pending against run {shortRunRef(run.runId)} · {run.pendingSpecEdits ?? 0} {run.pendingSpecEdits === 1 ? 'edit' : 'edits'} not executed — the verdict is from the run-start snapshot</p> : <p>Committing saves edits in Git. It does not adopt them into an active run.</p>}
-            {error && <p role="alert" className="mt-1 text-danger">{error}</p>}
+        subheader={<div className="cl-review-advisory">
+          <p className="min-w-0 flex-1">{weaker && <strong className="font-medium text-danger">Possible weakening. </strong>}Assessments are advisory; they do not change the run verdict.</p>
+          <button className="shrink-0 text-primary underline decoration-line-strong underline-offset-4" onClick={() => setHintOpen(true)}>About this hint</button>
+        </div>}
+        footer={selected && <div className="cl-review-footer" data-testid="dirty-review-actions">
+          <div className="cl-review-commit-context">
+            <p className="truncate text-xs font-medium text-primary" title={selected.name}>{selected.name}</p>
+            {run ? <p data-testid={`dirty-review-pending-${selected.name}`}>Pending against run {shortRunRef(run.runId)} · {run.pendingSpecEdits ?? 0} {run.pendingSpecEdits === 1 ? 'edit' : 'edits'} not executed — the verdict is from the run-start snapshot</p> : <p>Commits all changed spec files in this suite. It does not adopt them into an active run.</p>}
           </div>
-          <div className="ml-auto flex flex-wrap gap-2">
-            {selected.feature && <button className="cl-button px-3 py-1.5 text-xs" disabled={busy} title="Stage and commit exactly these spec files" onClick={() => { void act(() => api.commitDirtySpecs(selected.name)) }}>Commit changes</button>}
+          <div className="cl-review-commit-buttons">
             {run && <>
               <button className="cl-button px-3 py-1.5 text-xs" disabled={busy} onClick={() => { void act(() => api.restoreSpecEdits(run.runId)) }}>Restore original tests</button>
               <button className="cl-button-primary px-3 py-1.5 text-xs" disabled={busy} onClick={() => { void act(() => api.adoptSpecEdits(run.runId)) }}>Adopt &amp; rerun</button>
             </>}
+            {selected.feature && <button className="cl-button px-3 py-1.5 text-xs" disabled={busy || commitFileCount === 0} title={`Commit all ${commitFileCount} changed spec files in ${selected.name}, including files not opened here`} onClick={() => { void act(async () => {
+              const result = await api.commitDirtySpecs(selected.name)
+              if (!result.committed) setError(result.reason ?? 'No spec changes were committed.')
+            }) }}>Commit suite · {commitFileCount} {commitFileCount === 1 ? 'file' : 'files'}</button>}
           </div>
+          <div className="cl-review-action-message">{(error || workspaceOpenError) && <p role="alert" className="text-danger">{error || workspaceOpenError}</p>}</div>
         </div>}
       >
-        {cards.length === 0 ? <div className="p-5"><EmptyState icon={EmptyGlyph.journal} title="No changed test files" body="Every suite matches its comparison baseline, and no live run is holding an edit it has not executed." testId="dirty-review-empty" /></div> : <div className="cl-dialog-panes min-h-0 flex-1">
+        {cards.length === 0 ? <div className="p-5"><EmptyState icon={EmptyGlyph.journal} title="No changed test files" body="Every suite matches its comparison baseline, and no live run is holding an edit it has not executed." testId="dirty-review-empty" /></div> : <div className="cl-dialog-panes cl-review-panes min-h-0 flex-1">
           <nav className="cl-dialog-rail overflow-auto p-3 scrollbar-thin" aria-label="Changed test files">
             <p className="mb-3 px-2 text-[10px] uppercase tracking-wider text-secondary">Suites · {cards.length}</p>
             {cards.map((card) => {
@@ -136,8 +140,8 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
               </div>
             })}
           </nav>
-          <section className="min-h-0 min-w-0 overflow-auto p-5 scrollbar-thin" style={{ scrollbarGutter: 'stable' }} data-testid={`dirty-review-card-${selected.name}`} data-pending={run ? 'true' : undefined} data-tone={tone ?? undefined}>
-            {spec ? <SpecChangeReview key={`${selected.name}:${spec.file}`} spec={spec} /> : <p role={runError ? 'alert' : undefined} className="text-xs text-secondary">{runError ?? 'Loading changed test files…'}</p>}
+          <section className="cl-review-content" data-testid={`dirty-review-card-${selected.name}`} data-pending={run ? 'true' : undefined} data-tone={tone ?? undefined}>
+            <SpecChangeReview key={reviewKey} spec={spec} error={runError} initialScrollPosition={scrollPositions.current.get(reviewKey) ?? { top: 0, left: 0 }} onScrollPosition={(position) => scrollPositions.current.set(reviewKey, position)} />
           </section>
         </div>}
       </Modal>

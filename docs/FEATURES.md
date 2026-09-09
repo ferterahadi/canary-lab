@@ -50,6 +50,31 @@ current test source:
 - Pass, fail, running, and changed-test states remain attached to the real test.
   Static English child nodes never claim execution evidence they do not have.
 
+## Discovery errors
+
+The Tests panel lists cases with Playwright before displaying them. If a config
+or import fails, choose **In Canary Lab** to run the configured repair agent, or
+copy `/canary-lab-repair-discovery <suite>` from **In your agent** into Claude or
+Codex with the Canary Lab skills and MCP connection installed.
+
+Both paths show progress in the same Tests column through the shared agent session
+viewer. External agents claim the repair and report milestones to Canary; updates
+appear without refreshing, including when the repair started outside the browser.
+After editing stops, Canary independently lists the tests. Success brings back the
+existing test list; failure brings back the error and repair actions. Repair history
+remains available. **Copy repair prompt**, **View repair prompt**, and **Retry
+discovery** also support manual recovery.
+
+Repairs preserve tests and assertions and address configuration or import failures.
+Verification runs discovery only. The previous run's counts remain execution history;
+listing cases does not run them. Lost contact with an external agent does not release
+its ownership: continue that session, or have it stop and report that it is blocked.
+
+Keep runtime credential reads and service connections in hooks or fixtures so
+discovery works before environment setup. Use persistent repository paths in suite
+configuration and envset targets, and resolve repo-owned files through
+`resolveRunRepoPath` when a run may use an isolated checkout.
+
 ## Folder layout
 
 ```text

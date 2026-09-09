@@ -106,7 +106,7 @@ describe('DirtyReviewDialog', () => {
     expect(c.textContent).toContain("was await expect(total).toHaveText('$148.50')")
     expect(c.textContent).toContain('now await expect(total).toBeVisible()')
     expect(c.textContent).toContain('@checkout-1')
-    expect(c.textContent).toContain('reshaped')
+    expect(c.textContent).toContain('Assertion changed')
     expect(c.textContent).toContain('vs run start')
   })
 
@@ -123,12 +123,14 @@ describe('DirtyReviewDialog', () => {
     expect(copy).toMatch(/one AI labelled, a second AI checked blind, no human/)
   })
 
-  it('an equivalent reading is neutral: no danger, no hint copy, a rename shown as was → now', () => {
+  it('an equivalent reading keeps a neutral hint and shows the rename in before/after columns', () => {
     render({ features: [feature('cart', [EQUIVALENT_SPEC])] })
     expect(card('cart')?.getAttribute('data-tone')).toBe('changed')
     expect(document.querySelector('[data-testid="dirty-review-hint-copy"]')).toBeNull()
     expect(document.querySelector('[data-testid="dirty-review-tone-changed"]')?.textContent).toContain('Changed')
-    expect(card('cart')?.textContent).toContain('adds item → adds an item')
+    expect(card('cart')?.querySelector('[data-side="before"]')?.textContent).toBe('was adds item')
+    expect(card('cart')?.querySelector('[data-side="after"]')?.textContent).toBe('now adds an item')
+    expect(card('cart')?.querySelector('ins')?.textContent).toBe('an ')
     expect(card('cart')?.textContent).toContain('vs committed')
   })
 
@@ -155,9 +157,9 @@ describe('DirtyReviewDialog', () => {
     expect(names).toEqual(['dirty-review-suite-z-pending', 'dirty-review-suite-a-clean-name'])
     expect(document.querySelector('[data-testid="dirty-review-pending-z-pending"]')?.textContent)
       .toMatch(/Pending against run z6kc · 2 edits not executed — the verdict is from the run-start snapshot/)
-    expect(buttons()).toEqual(['Commit changes', 'Restore original tests', 'Adopt & rerun'])
+    expect(buttons()).toEqual(['Restore original tests', 'Adopt & rerun', 'Commit suite · 1 file'])
     act(() => document.querySelector<HTMLButtonElement>('[data-testid="dirty-review-suite-a-clean-name"] button')!.click())
-    expect(buttons()).toEqual(['Commit changes'])
+    expect(buttons()).toEqual(['Commit suite · 1 file'])
   })
 
   it('shows the selected run pending files before feature-level dirty data catches up', () => {
@@ -179,7 +181,7 @@ describe('DirtyReviewDialog', () => {
 
   it('Restore and Adopt call the run-scoped levers with the run id; Commit calls the feature route', async () => {
     render({ features: [feature('shop', [WEAKER_SPEC])], pendingRuns: [run('shop', 1)] })
-    const [commit, restore, adopt] = actionButtons()
+    const [restore, adopt, commit] = actionButtons()
     await act(async () => { restore.click() })
     expect(api.restoreSpecEdits).toHaveBeenCalledWith('2026-09-07T0100-z6kc')
     await act(async () => { adopt.click() })
@@ -226,16 +228,24 @@ describe('DirtyReviewDialog', () => {
   })
 })
 
-it('puts suspected weakening before renamed tests and shows the other changes on demand', () => {
+it('keeps every assessment in one table, with weaker changes first and an optional filter', () => {
   const spec: DirtySpecSummary = { ...WEAKER_SPEC, strength: { ...WEAKER_SPEC.strength!, tests: [...EQUIVALENT_SPEC.strength!.tests, ...WEAKER_SPEC.strength!.tests] } }
   render({ features: [feature('shop', [spec])] })
-  expect(card('shop')?.textContent).toContain('applies voucher')
-  expect(card('shop')?.textContent).not.toContain('adds an item')
-  const toggle = [...card('shop')!.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Other changes'))!
-  act(() => toggle.click())
-  expect(card('shop')?.textContent).toContain('adds item → adds an item')
-  expect(card('shop')?.querySelectorAll('pre')).toHaveLength(2)
-  expect(card('shop')?.querySelector('pre')?.className).not.toContain('truncate')
+  const table = card('shop')!.querySelector('table')!
+  expect(card('shop')!.querySelectorAll('table')).toHaveLength(1)
+  expect([...table.querySelectorAll('thead th')].map((node) => node.textContent)).toEqual(['Change', 'Assessment', 'Before · Run start', 'After · Current test'])
+  expect([...table.querySelectorAll('[data-assessment]')].map((node) => node.getAttribute('data-assessment'))).toEqual(['weaker', 'equivalent'])
+  expect(table.querySelector('[data-side="before"]')?.textContent).toBe("was await expect(total).toHaveText('$148.50')")
+  expect(table.querySelector('[data-side="after"]')?.textContent).toBe('now await expect(total).toBeVisible()')
+  expect(table.textContent).toContain('adds an item')
+  const select = card('shop')!.querySelector('select')!
+  act(() => { select.value = 'equivalent'; select.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect(table.textContent).not.toContain('applies voucher')
+  expect(table.querySelector('[data-side="before"]')?.textContent).toBe('was adds item')
+  expect(table.querySelector('[data-side="after"]')?.textContent).toBe('now adds an item')
+  act(() => { select.value = 'all'; select.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect(table.textContent).toContain('applies voucher')
+  expect(table.textContent).toContain('adds an item')
 })
 
 it('opens the requested suite and keeps its file selection when live data refreshes', () => {
@@ -249,4 +259,101 @@ it('opens the requested suite and keeps its file selection when live data refres
   act(() => root.render(<DirtyReviewDialog features={[a, { ...b }]} focusFeature="b" onClose={vi.fn()} />))
   expect(card('b')?.textContent).toContain('adds an item')
   expect(card('b')?.textContent).not.toContain('applies voucher')
+})
+
+it('keeps duplicate new names as distinct rows in one rename table across refreshes', () => {
+  const spec: DirtySpecSummary = { ...EQUIVALENT_SPEC, strength: { ...EQUIVALENT_SPEC.strength!, tests: [
+    { kind: 'renamed', name: 'same title', wasNamed: '@variant-a old title', verdict: 'equivalent', changes: [] },
+    { kind: 'renamed', name: 'same title', wasNamed: '@variant-b old title', verdict: 'equivalent', changes: [] },
+  ] } }
+  render({ features: [feature('shop', [spec])] })
+  render({ features: [feature('shop', [structuredClone(spec)])] })
+  expect(card('shop')?.querySelectorAll('table')).toHaveLength(1)
+  expect([...card('shop')!.querySelectorAll('[data-side="before"]')].map((cell) => cell.textContent))
+    .toEqual(['was @variant-a old title', 'was @variant-b old title'])
+  expect([...card('shop')!.querySelectorAll('[data-side="after"]')].map((cell) => cell.textContent))
+    .toEqual(['now same title', 'now same title'])
+})
+
+it('shows added, deleted, disabled and enabled tests without inventing assertion source', () => {
+  const spec: DirtySpecSummary = { ...EQUIVALENT_SPEC, strength: { ...EQUIVALENT_SPEC.strength!, tests: [
+    { kind: 'added', name: 'new test', verdict: 'unclassifiable', reason: 'No readable assertion', changes: [] },
+    { kind: 'deleted', name: 'old test', verdict: 'equivalent', changes: [] },
+    { kind: 'disabled', name: 'paused test', verdict: 'equivalent', changes: [] },
+    { kind: 'enabled', name: 'resumed test', verdict: 'equivalent', changes: [] },
+  ] } }
+  render({ features: [feature('shop', [spec])] })
+  expect(card('shop')?.textContent).toContain('Cannot classify')
+  expect(card('shop')?.textContent).toContain('No readable assertion')
+  expect([...card('shop')!.querySelectorAll('[data-side="before"]')].map((cell) => cell.textContent))
+    .toEqual(['Not present', 'was old test', 'was Enabled', 'was Disabled'])
+  expect([...card('shop')!.querySelectorAll('[data-side="after"]')].map((cell) => cell.textContent))
+    .toEqual(['now new test', 'Not present', 'now Disabled', 'now Enabled'])
+  expect(card('shop')?.querySelector('[data-testid="dirty-review-change"]')).toBeNull()
+})
+
+it('shows every tracked suite file in the commit scope even when the run displays fewer files', async () => {
+  const entry = run('shop', 1)
+  render({ features: [feature('shop', [WEAKER_SPEC, EQUIVALENT_SPEC])], pendingRuns: [entry], focusRunDetail: {
+    manifest: { runId: entry.runId, specEdits: { pending: [WEAKER_SPEC] } },
+  } as unknown as import('@/shared/api/types').RunDetail })
+  const commit = actionButtons().find((button) => button.textContent === 'Commit suite · 2 files')!
+  expect(commit.title).toContain('all 2 changed spec files in shop')
+  expect(commit.title).toContain('including files not opened here')
+  await act(async () => commit.click())
+  expect(api.commitDirtySpecs).toHaveBeenCalledWith('shop')
+  expect(api.adoptSpecEdits).not.toHaveBeenCalled()
+})
+
+it('reports a no-op commit response rather than implying the suite was committed', async () => {
+  vi.mocked(api.commitDirtySpecs).mockResolvedValueOnce({ committed: false, reason: 'no modified specs' })
+  render({ features: [feature('shop', [WEAKER_SPEC])] })
+  await act(async () => actionButtons()[0].click())
+  expect(document.querySelector('[role="alert"]')?.textContent).toBe('no modified specs')
+  expect(actionButtons()[0].disabled).toBe(false)
+})
+
+it('restores scroll position per file and leaves a new file at the top', () => {
+  render({ features: [feature('shop', [WEAKER_SPEC, EQUIVALENT_SPEC])] })
+  const chooseFile = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('.cl-review-file')].find((button) => button.textContent?.includes(name))!
+  const scroller = () => card('shop')!.querySelector<HTMLDivElement>('.cl-comparison-review')!
+  act(() => { scroller().scrollTop = 140; scroller().scrollLeft = 90; scroller().dispatchEvent(new Event('scroll')) })
+  act(() => chooseFile('cart.spec.ts').click())
+  expect(scroller().scrollTop).toBe(0)
+  expect(scroller().scrollLeft).toBe(0)
+  act(() => chooseFile('checkout.spec.ts').click())
+  expect(scroller().scrollTop).toBe(140)
+  expect(scroller().scrollLeft).toBe(90)
+})
+
+it('preserves the four-column structure for loading, missing source, and an empty filter', () => {
+  render({ pendingRuns: [run('loading', 1)] })
+  const headers = () => [...document.querySelectorAll('.cl-comparison thead th')].map((node) => node.textContent)
+  expect(headers()).toEqual(['Change', 'Assessment', 'Before · Unavailable', 'After · Current test'])
+  expect(card('loading')?.textContent).toContain('Loading changed test files')
+  render({ features: [feature('legacy', [{ file: 'old.spec.ts', affectedTests: ['named test'] }])] })
+  expect(headers()).toEqual(['Change', 'Assessment', 'Before · Unavailable', 'After · Current test'])
+  expect(card('legacy')?.querySelector('tbody')?.textContent).toContain('Unavailable')
+  expect(card('legacy')?.querySelector('tbody')?.textContent).not.toContain('Not present')
+  const filter = card('legacy')!.querySelector('select')!
+  act(() => { filter.value = 'stronger'; filter.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect(headers()).toHaveLength(4)
+  expect(card('legacy')?.textContent).toContain('No changes match this assessment')
+})
+
+it('filters by each assertion assessment without relabelling it with the test verdict', () => {
+  const weak = WEAKER_SPEC.strength!.tests[0]
+  const spec: DirtySpecSummary = { ...WEAKER_SPEC, strength: { ...WEAKER_SPEC.strength!, tests: [{ ...weak, changes: [
+    { ...weak.changes[0], verdict: 'stronger' },
+    { kind: 'removed', verdict: 'unclassifiable', before: { line: 5, source: 'customCheck()', reason: 'Unknown helper' }, reason: 'Unknown helper' },
+  ] }] } }
+  render({ features: [feature('mixed', [spec])] })
+  const filter = card('mixed')!.querySelector('select')!
+  act(() => { filter.value = 'stronger'; filter.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect([...card('mixed')!.querySelectorAll('tbody [data-assessment]')].map((node) => node.getAttribute('data-assessment'))).toEqual(['stronger'])
+  expect(card('mixed')?.querySelector('tbody')?.textContent).toContain('applies voucher')
+  expect(card('mixed')?.querySelector('tbody')?.textContent).not.toContain('customCheck()')
+  act(() => { filter.value = 'unclassifiable'; filter.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect(card('mixed')?.querySelector('tbody')?.textContent).toContain('Cannot classify: Unknown helper')
+  expect(card('mixed')?.querySelector('tbody')?.textContent).toContain('customCheck()')
 })

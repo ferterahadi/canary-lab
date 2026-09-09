@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
 import { featuresRoutes } from './routes/features'
+import { discoveryRepairRoutes } from './routes/discovery-repair'
+import { discoveryRepairStore } from './logic/discovery-repair-store'
 import { featureConfigRoutes } from './routes/feature-config'
 import { projectConfigRoutes } from './routes/project-config'
 import { agentProbeRoutes } from './routes/agent-probe'
@@ -73,12 +75,17 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
   } = ctx
 
   await app.register(featuresRoutes, { featuresDir, logsDir, dirtySpecStore })
+  await app.register(discoveryRepairRoutes, { projectRoot, featuresDir, logsDir, workspaceEvents })
   // A suite's `name` IS its identity — renaming it must carry every record that
   // stamped the old name along, or the history orphans behind a name nothing
   // resolves (a flight row and its suite showing up as two separate things).
   // Refused outright while live work still holds the old name: a running
   // orchestrator/conductor addresses its feature by name and would lose it.
+  const activeDiscoveryRepair = (featureName: string) => discoveryRepairStore(logsDir).list()
+    .find((r) => r.feature === featureName && (r.status === 'repairing' || r.status === 'verifying'))
   const featureRenameBlockedBy = (featureName: string): string | null => {
+    const repair = activeDiscoveryRepair(featureName)
+    if (repair) return `discovery repair ${repair.id} is active — finish it before renaming the suite`
     const run = runStore.list({ feature: featureName }).find((r) => isActiveRunStatus(r.status))
     if (run) return `run ${run.runId} is ${run.status} — stop it before renaming the suite`
     const flight = flightStore
@@ -90,7 +97,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
   await app.register(featureConfigRoutes, {
     featuresDir,
     workspaceEvents,
-    isRepoActive: (featureName) => runStore
+    isRepoActive: (featureName) => Boolean(activeDiscoveryRepair(featureName)) || runStore
       .list({ feature: featureName })
       .some((run) => isActiveRunStatus(run.status)),
     // R76: deleting a suite deletes its flight history with it.
@@ -99,7 +106,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
       blockedBy: featureRenameBlockedBy,
       apply: (from, to) => renameFeatureRecords(from, to, {
         logsDir,
-        stores: [flightStore, coverageJobStore, portifyStore, benchmarkStore, dirtySpecStore, sharedAgentJobStore(logsDir)],
+        stores: [flightStore, coverageJobStore, portifyStore, benchmarkStore, dirtySpecStore, sharedAgentJobStore(logsDir), discoveryRepairStore(logsDir)],
         activeWork: featureRenameBlockedBy,
       }).moved,
     },

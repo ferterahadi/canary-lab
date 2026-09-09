@@ -16,6 +16,9 @@ export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
 export const DEFAULT_CANARY_LAB_MCP_PROFILE: CanaryLabMcpProfile = 'compact'
 
 export type CanaryLabMcpToolName =
+  | 'start_discovery_repair'
+  | 'get_discovery_repair'
+  | 'update_discovery_repair'
   | 'list_features'
   | 'list_runs'
   | 'get_run'
@@ -98,6 +101,9 @@ export interface CanaryLabMcpExecCallEvent {
 }
 
 export const REPAIR_TOOLS = [
+  'start_discovery_repair',
+  'get_discovery_repair',
+  'update_discovery_repair',
   // Cross-workflow like list_features: every profile can read its own full guide,
   // because the initialize lead is capped at INSTRUCTIONS_DELIVERED_WINDOW.
   'get_workflow_guide',

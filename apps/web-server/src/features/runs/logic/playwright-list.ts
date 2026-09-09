@@ -58,7 +58,7 @@ export type PlaywrightListSpawner = (featureDir: string) => PlaywrightListSpawn
 
 export const defaultPlaywrightListSpawner: PlaywrightListSpawner = (featureDir) => ({
   command: 'npx',
-  args: ['playwright', 'test', '--list', '--reporter=json'],
+  args: ['--no-install', 'playwright', 'test', '--list', '--reporter=json'],
   cwd: featureDir,
 })
 
@@ -136,6 +136,8 @@ export function discoveryFailureOutput(stdout: string, stderr: string): string {
 }
 
 export interface ListPlaywrightTestsOpts {
+  /** Repair verification must execute Playwright even when spec timestamps match. */
+  fresh?: boolean
   spawner?: PlaywrightListSpawner
   timeoutMs?: number
   env?: NodeJS.ProcessEnv
@@ -149,6 +151,7 @@ export async function listPlaywrightTests(
   featureDir: string,
   opts: ListPlaywrightTestsOpts = {},
 ): Promise<PlaywrightListEntry[] | null> {
+  if (opts.fresh) cache.delete(featureDir)
   const signature = cacheSignature(featureDir)
   const cached = cache.get(featureDir)
   if (cached && cached.signature === signature) return cached.entries

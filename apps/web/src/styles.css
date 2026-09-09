@@ -1396,34 +1396,94 @@ body {
   outline-offset: -2px;
 }
 
-.cl-review-diff {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  overflow: hidden;
-  border: 1px solid var(--border-strong);
+/* All comparisons share one table. Diff hue describes an edit, never a verdict. */
+.cl-comparison-wrap, .cl-comparison-legend {
+  --comparison-removed: color-mix(in srgb, var(--danger) 70%, var(--text-primary));
+  --comparison-added: color-mix(in srgb, var(--success) 70%, var(--text-primary));
+}
+
+.cl-comparison-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: var(--bg-surface);
 }
 
-.cl-review-diff > div + div {
-  border-left: 1px solid var(--border-strong);
+.cl-comparison {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+  color: var(--text-primary);
 }
 
-.cl-review-diff-label {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-default);
+.cl-comparison th, .cl-comparison td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.cl-comparison thead th, .cl-comparison-section td {
+  background: var(--bg-elevated);
   color: var(--text-secondary);
   font-size: 11px;
+  font-weight: 500;
 }
 
-.cl-review-diff pre {
-  min-height: 88px;
-  padding: 12px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.8;
+.cl-comparison tbody tr { border-top: 1px solid var(--border-default); }
+.cl-comparison th + th, .cl-comparison td + td, .cl-comparison th + td { border-left: 1px solid var(--border-default); }
+.cl-comparison .cl-comparison-label { width: 22%; font-size: 11px; font-weight: 400; }
+.cl-comparison-value { white-space: pre-wrap; line-height: 1.7; }
+.cl-comparison-code .cl-comparison-value { font-family: var(--font-mono); }
+.cl-comparison-empty { color: var(--text-secondary); font-family: var(--font-sans); font-size: 11px; }
+.cl-comparison del, .cl-comparison ins {
+  text-decoration: none;
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.cl-comparison del { color: var(--comparison-removed); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.cl-comparison ins { color: var(--comparison-added); background: color-mix(in srgb, var(--success) 12%, transparent); }
+.cl-comparison del::before { content: '−'; }
+.cl-comparison ins::before { content: '+'; }
+.cl-comparison del::before, .cl-comparison ins::before { display: inline-block; font-size: 10px; margin-right: 3px; user-select: none; }
+.cl-comparison-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--text-secondary); font-size: 11px; }
+.cl-comparison-legend > :first-child { color: var(--comparison-removed); }
+.cl-comparison-legend > :nth-child(2) { color: var(--comparison-added); }
+
+/* Test review keeps its chrome outside the one table scroller. Fixed columns
+   and reserved message space make file changes independent of content size. */
+.cl-review-advisory { display: flex; align-items: center; gap: 12px; height: 40px; flex-shrink: 0; padding: 0 20px; border-bottom: 1px solid var(--border-default); color: var(--text-secondary); font-size: 11px; }
+.cl-review-content { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: 0 20px 16px; }
+.cl-review-toolbar { flex-shrink: 0; }
+.cl-review-file-heading { display: flex; align-items: center; gap: 8px; height: 48px; }
+.cl-review-table-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 48px; }
+.cl-review-table-controls .cl-comparison-legend > :last-child { display: none; }
+.cl-comparison-review { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; overflow-anchor: none; }
+.cl-comparison-review .cl-comparison { min-width: 780px; }
+.cl-comparison-review .cl-comparison .cl-comparison-label { width: auto; }
+.cl-comparison-review thead th { position: sticky; top: 0; z-index: 1; box-shadow: inset 0 -1px var(--border-default); }
+.cl-review-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 48px 20px; align-items: center; column-gap: 20px; width: 100%; }
+.cl-review-commit-context { min-width: 0; font-size: 11px; color: var(--text-secondary); }
+.cl-review-commit-context > p + p { max-height: 32px; overflow: auto; }
+.cl-review-commit-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.cl-review-action-message { grid-column: 1 / -1; height: 20px; overflow: auto; font-size: 11px; }
+
+@media (max-width: 760px) {
+  .cl-review-advisory { height: 64px; }
+  .cl-review-content { padding-inline: 12px; }
+  .cl-review-file-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; height: 48px; gap: 0 8px; }
+  .cl-review-file-heading h3 { grid-column: 1 / -1; }
+  .cl-review-file-heading > :not(h3) { justify-self: start; }
+  .cl-review-file-heading > :last-child { justify-self: end; }
+  .cl-review-table-controls { height: 36px; justify-content: flex-end; }
+  .cl-review-table-controls .cl-comparison-legend { display: none; }
+  .cl-review-footer { grid-template-columns: minmax(0, 1fr); grid-template-rows: 48px 68px 20px; gap: 4px; }
+}
+
+@media (max-width: 480px) {
+  .cl-comparison th, .cl-comparison td { padding: 8px; }
 }
 
 @media (max-width: 640px) {
@@ -1438,14 +1498,9 @@ body {
     border-bottom: 1px solid var(--border-default);
   }
 
-  .cl-review-diff {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  .cl-review-panes { grid-template-rows: 120px minmax(0, 1fr); }
+  .cl-review-panes > .cl-dialog-rail { height: 120px; max-height: 120px; }
 
-  .cl-review-diff > div + div {
-    border-left: 0;
-    border-top: 1px solid var(--border-strong);
-  }
 }
 
 .cl-mcp-promo-modal {

@@ -11,6 +11,7 @@ export type WorkspaceEvent =
   | { type: 'feature-renamed'; from: string; to: string }
   | { type: 'features-changed' }
   | { type: 'tests-changed'; feature: string }
+  | { type: 'discovery-repair-changed'; feature: string }
   | { type: 'envsets-changed'; feature: string }
   | { type: 'coverage-changed'; feature: string }
   | { type: 'tests-dirty-changed'; feature: string }

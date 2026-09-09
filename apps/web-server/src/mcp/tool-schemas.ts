@@ -102,6 +102,7 @@ export type McpStartRunOutcome =
     }
 
 export interface CanaryLabMcpDeps {
+  discoveryRepairRequest?: (opts: { method: 'GET' | 'POST'; url: string; payload?: unknown }) => Promise<{ statusCode: number; body: unknown }>
   store: RunStore
   broker: ExternalHealBroker
   featuresDir: string

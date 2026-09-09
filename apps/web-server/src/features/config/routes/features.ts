@@ -18,6 +18,7 @@ import {
   loadConfig,
 } from '../../runs/logic/runtime/env-switcher/switch'
 import type { EnvSetsConfig } from '../../runs/logic/runtime/env-switcher/types'
+import { buildDiscoveryRepairPrompt } from '../logic/discovery-repair-prompt'
 
 export interface FeaturesRouteDeps {
   featuresDir: string
@@ -235,7 +236,13 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     })
 
     if (pwList === null) {
-      return specFiles.map((file) => {
+      const discoveryRepairPrompt = buildDiscoveryRepairPrompt(feature, discoveryDiagnostics ?? 'Playwright could not enumerate the test cases.')
+      if (specFiles.length === 0) return [{
+        file: path.join(feature.featureDir, 'playwright.config.ts'), tests: [],
+        discoveryError: 'Playwright could not enumerate the test cases.',
+        discoveryDiagnostics, discoveryRepairPrompt,
+      }]
+      return specFiles.map((file, index) => {
         // astByFile has an entry for every specFile (populated above).
         const result = astByFile.get(file)!
         return {
@@ -243,6 +250,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
           tests: result.tests.map(withCodeDisplay),
           discoveryError: 'Playwright could not enumerate the test cases. The source definitions may omit generated cases.',
           ...(discoveryDiagnostics ? { discoveryDiagnostics } : {}),
+          ...(index === 0 ? { discoveryRepairPrompt } : {}),
           ...(result.parseError ? { parseError: result.parseError } : {}),
         }
       })
@@ -325,7 +333,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
   })
 }
 
-function envsetProcessEnv(
+export function envsetProcessEnv(
   featureDir: string,
   envName: string | undefined,
   warn: (err: unknown) => void,

@@ -27,6 +27,7 @@ export type { SystemGroup } from './AgentSessionRows'
 // "session not yet on disk" by retrying internally on the server.
 
 export type AgentSessionSource =
+  | { kind: 'discovery-repair'; taskId: string; live?: boolean }
   | { kind: 'run'; runId: string; live?: boolean }
   | { kind: 'benchmark'; benchmarkId: string; live?: boolean }
   | { kind: 'portify'; workflowId: string; live?: boolean }
@@ -302,6 +303,7 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
     }
 
     const fetchSnapshot = async (): Promise<AgentSessionResponse | AgentSessionAbsence | null> => {
+      if (source.kind === 'discovery-repair') return api.getDiscoveryRepairAgentSession(source.taskId)
       if (source.kind === 'run') return api.getAgentSession(source.runId)
       if (source.kind === 'benchmark') return api.getBenchmarkAgentSession(source.benchmarkId)
       if (source.kind === 'portify') return api.getPortifyAgentSession(source.workflowId)
@@ -356,7 +358,9 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
         let snapshotLen = snapshot && !isAgentSessionAbsence(snapshot) ? snapshot.events.length : 0
         let seenFromWs = 0
         conn = connectAgentSessionStream({
-          source: source.kind === 'run'
+          source: source.kind === 'discovery-repair'
+            ? { kind: 'discovery-repair', taskId: source.taskId }
+            : source.kind === 'run'
             ? { kind: 'run', runId: source.runId }
             : source.kind === 'benchmark'
               ? { kind: 'benchmark', benchmarkId: source.benchmarkId }
@@ -780,6 +784,7 @@ function LiveTail({ label, since }: { label: string; since?: string }) {
 }
 
 function sourceCacheKey(source: AgentSessionSource): string {
+  if (source.kind === 'discovery-repair') return `discovery-repair:${source.taskId}:${source.live ? '1' : '0'}`
   if (source.kind === 'run') return `run:${source.runId}:${source.live ? '1' : '0'}`
   if (source.kind === 'benchmark') return `benchmark:${source.benchmarkId}:${source.live ? '1' : '0'}`
   if (source.kind === 'portify') return `portify:${source.workflowId}:${source.live ? '1' : '0'}`
@@ -790,6 +795,7 @@ function sourceCacheKey(source: AgentSessionSource): string {
 }
 
 function sourceIdentityKey(source: AgentSessionSource): string {
+  if (source.kind === 'discovery-repair') return `discovery-repair:${source.taskId}`
   if (source.kind === 'run') return `run:${source.runId}`
   if (source.kind === 'benchmark') return `benchmark:${source.benchmarkId}`
   if (source.kind === 'portify') return `portify:${source.workflowId}`

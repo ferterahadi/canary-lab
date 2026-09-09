@@ -121,6 +121,7 @@ export function IconButton({
   children,
   variant = 'ghost',
   size = 'sm',
+  disabled,
 }: {
   onClick: () => void
   ariaLabel: string
@@ -128,6 +129,9 @@ export function IconButton({
   children: ReactNode
   variant?: 'ghost' | 'danger'
   size?: 'sm' | 'md'
+  /** For a row control whose store is mid-mutation — keeps a second click
+   *  from firing while the first write is still in flight. */
+  disabled?: boolean
 }) {
   const sizeCls = size === 'md' ? 'h-7 w-7' : 'h-6 w-6'
   const restColor = variant === 'danger' ? 'var(--danger)' : 'var(--text-muted)'
@@ -138,7 +142,8 @@ export function IconButton({
       aria-label={ariaLabel}
       title={title ?? ariaLabel}
       onClick={onClick}
-      className={`inline-flex ${sizeCls} shrink-0 items-center justify-center rounded-md transition-colors duration-150`}
+      disabled={disabled}
+      className={`inline-flex ${sizeCls} shrink-0 items-center justify-center rounded-md transition-colors duration-150 disabled:opacity-50`}
       style={{ color: restColor }}
       onMouseEnter={(e) => { e.currentTarget.style.color = hoverColor }}
       onMouseLeave={(e) => { e.currentTarget.style.color = restColor }}

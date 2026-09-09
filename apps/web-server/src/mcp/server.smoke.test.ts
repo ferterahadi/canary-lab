@@ -28,6 +28,9 @@ const inertPtyFactory: PtyFactory = () => ({
 const uniqueSorted = (values: string[]): string[] => Array.from(new Set(values)).sort()
 
 const REPAIR_TOOLS = uniqueSorted([
+  'start_discovery_repair',
+  'get_discovery_repair',
+  'update_discovery_repair',
   'get_workflow_guide',
   'abort_run',
   'boot_services',

@@ -221,6 +221,7 @@ export interface FeatureSpecFile {
   parseError?: string
   discoveryError?: string
   discoveryDiagnostics?: string
+  discoveryRepairPrompt?: string
 }
 
 export type FeatureTests = FeatureSpecFile[]

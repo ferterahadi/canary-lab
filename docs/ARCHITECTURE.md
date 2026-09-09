@@ -188,9 +188,17 @@ review. Its button opens the existing changed-tests dialog with that run first.
 Notifications, Flights, Services, and test review use the shared centered `Modal`
 with task-specific widths, keyboard focus containment, and a pinned header/footer.
 Flights adds search and an attention filter. Test review keeps suite/file selection
-in a rail and expands suspected weakening ahead of other changes, with wrapping
-before/after assertion source. Commit, restore, and adopt still act on the selected
-suite/run. Closing Services leaves sessions running; stopping is a separate action.
+in a rail and shows all changes in one before/after table with an Assessment
+column. Weaker and unclassifiable changes sort first; a filter selects individual
+row assessments. Names, execution state, and assertion source share fixed columns,
+including loading and unavailable states. The header and footer stay fixed, the
+table header stays visible while scrolling, and each file retains its scroll position.
+The shared
+`ComparisonTable` highlights changed words and also serves configuration previews
+and captured patches through `DiffView`. Diff colors describe edits, not verdicts.
+Commit names the selected suite and counts all its tracked dirty spec files,
+including files outside the selected run's pending list. Restore and adopt act on
+the selected run. Closing Services leaves sessions running; stopping is a separate action.
 
 ## Run Lifecycle
 
@@ -846,6 +854,30 @@ deliberate vocabulary audit before that compiler version can change. The detaile
 contracts live in the [controlled-English grammar](controlled-english/controlled-english-grammar.md),
 [semantic boundaries](controlled-english/semantic-boundaries.md), and
 [coverage report](controlled-english/coverage-report.md).
+
+## Discovery Repair
+
+Discovery repair is owned by the config feature's `DiscoveryRepairService` and
+`FileBackedTaskStore`, under `<logsDir>/discovery-repairs/<id>/`. It does not create
+or update a test run. One agent owns each suite repair until editing stops.
+Internal agents use the shared `runAgentProcess`; external agents use
+`start_discovery_repair`, `get_discovery_repair`, and `update_discovery_repair`
+through MCP. Both paths receive the same discovery-repair prompt template.
+
+The Tests column has a discovery-error state and a repairing state. The latter
+uses `AgentSessionView` for internal session activity or external milestone
+reports. `/ws/features/:name/discovery-repairs` subscribes before a repair exists
+and replays the durable snapshot on every reconnect. Store writes also broadcast
+`discovery-repair-changed`; successful verification broadcasts `tests-changed`.
+
+Canary verifies with fresh Playwright discovery, bypassing the previous cache.
+Empty rosters and missing cases from a previous successful repair roster fail
+verification. Success restores the existing test list automatically; failure
+restores the error and repair actions. Discovery does not execute test bodies or
+change previous run verdicts. Restart reconciles internal work and interrupted
+verification to failure; an external editor with ready instructions retains its
+ownership until it explicitly stops. Lost contact alone cannot authorize another
+writer.
 
 ## Keep-in-Sync Invariants
 

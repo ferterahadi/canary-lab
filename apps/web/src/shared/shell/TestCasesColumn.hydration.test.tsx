@@ -10,6 +10,8 @@ import type { RunManifest, RunSummary } from '../api/types'
 import { TestCasesColumn } from './TestCasesColumn'
 import { InvalidationProvider, useInvalidation } from '../state/invalidation'
 
+vi.mock('./use-discovery-repair', () => ({ useDiscoveryRepair: () => ({ repairs: [], start: async () => {}, starting: false, error: null }) }))
+
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
   return {
@@ -93,7 +95,7 @@ describe('TestCasesColumn', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
     expect(getFeatureTests).toHaveBeenCalledTimes(3)
     expect(container.textContent).toContain('Discovery unavailable')
-    const retry = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Retry')
+    const retry = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Retry discovery')
     expect(retry).toBeTruthy()
     await act(async () => { retry?.click() })
     expect(getFeatureTests).toHaveBeenCalledTimes(4)
@@ -285,4 +287,23 @@ it('retains a suite’s last discovered list when returning from another suite a
   expect(container.textContent).toContain('resolved alpha')
   expect(container.textContent).not.toContain('resolved beta')
   expect(container.textContent).not.toContain('${alpha}')
+})
+
+it('copies the server repair prompt and offers manual copy when clipboard access fails', async () => {
+  const prompt = 'Repair alpha discovery. Diagnostic: missing fixture. Preserve every assertion.'
+  const writeText = vi.fn().mockRejectedValueOnce(new Error('clipboard unavailable')).mockResolvedValue(undefined)
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  vi.mocked(getFeatureTests).mockResolvedValue([{
+    file: '/alpha/a.spec.ts', tests: [], discoveryError: 'Discovery failed', discoveryRepairPrompt: prompt,
+  }])
+  await act(async () => root.render(<TestCasesColumn feature="alpha" activeRunStatus={undefined} activeRunSummary={undefined} />))
+  const copy = () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Copy repair prompt')!
+  await act(async () => copy().click())
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('copy it manually')
+  expect(container.textContent).toContain('View repair prompt')
+  expect(container.textContent).toContain(prompt)
+  await act(async () => copy().click())
+  expect(writeText).toHaveBeenLastCalledWith(prompt)
+  expect(container.textContent).toContain('Copied repair prompt')
+  expect(container.querySelector('[role="alert"]')).toBeNull()
 })

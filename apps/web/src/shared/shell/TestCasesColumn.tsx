@@ -1,3 +1,7 @@
+import { discoveryRepairActive } from '@shared/discovery-repair'
+import { useDiscoveryRepair } from './use-discovery-repair'
+import { DiscoveryRepairActivity } from './DiscoveryRepairActivity'
+import { Section, CopyField } from '../ui/atoms'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api/client'
 import { useInvalidationKey } from '../state/invalidation'
@@ -46,12 +50,21 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
   // The spec list refetches when a `tests-changed` event fires for the selected
   // feature (App gates the invalidation to the visible feature).
   const refreshKey = useInvalidationKey('tests')
+  const repairState = useDiscoveryRepair(feature)
+  const latestRepair = repairState.repairs[0]
+  const activeRepair = repairState.repairs.find(discoveryRepairActive)
+  const [showRepairHistory, setShowRepairHistory] = useState(false)
+  const repairCompletion = latestRepair && !discoveryRepairActive(latestRepair) ? latestRepair.id + latestRepair.updatedAt : ''
   const [loaded, setLoaded] = useState<{ feature: string; specs: FeatureSpecFile[] } | null>(null)
   const specs = loaded?.feature === feature ? loaded.specs : null
   const previousLists = useRef(new Map<string, FeatureSpecFile[]>())
   const [discovery, setDiscovery] = useState<{ feature: string; specs: FeatureSpecFile[] } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [retryKey, setRetryKey] = useState(0)
+  const [manualRetryAfter, setManualRetryAfter] = useState('')
+  useEffect(() => { if (repairCompletion) setRetryKey((key) => key + 1) }, [repairCompletion])
+  const [promptCopied, setPromptCopied] = useState(false)
+  const [copyError, setCopyError] = useState<string | null>(null)
   const [expandedTest, setExpandedTest] = useState<ExpandedTestSelection | null>(null)
   // Per-test changed-line numbers for each dirty spec file (diffed against git
   // HEAD server-side), keyed by that file's path. Fetched lazily, once per file.
@@ -71,6 +84,8 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
       ? current
       : { feature, key: null, autoExpandPending: true })
     setLoadError(null)
+    setPromptCopied(false)
+    setCopyError(null)
     setDiscovery(null)
     setLoaded(previousLists.current.has(feature) ? { feature, specs: previousLists.current.get(feature)! } : null)
     setDirtyDiffs({})
@@ -150,7 +165,20 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
 
   const displaySpecs = specs
   const incompleteSpecs = discovery?.feature === feature ? discovery.specs : []
-  const diagnostics = incompleteSpecs.find((spec) => spec.discoveryDiagnostics)?.discoveryDiagnostics
+  const repairFailure = latestRepair?.status === 'failed' && manualRetryAfter !== repairCompletion ? latestRepair.diagnostic : null
+  const discoveryError = loadError || repairFailure
+  const diagnostics = repairFailure || incompleteSpecs.find((spec) => spec.discoveryDiagnostics)?.discoveryDiagnostics
+  const repairPrompt = incompleteSpecs.find((spec) => spec.discoveryRepairPrompt)?.discoveryRepairPrompt
+  const copyRepairPrompt = async (): Promise<void> => {
+    if (!repairPrompt) return
+    try {
+      await navigator.clipboard.writeText(repairPrompt)
+      setPromptCopied(true)
+      setCopyError(null)
+    } catch {
+      setCopyError('Could not copy. Open the repair prompt below and copy it manually.')
+    }
+  }
   const isRunActivelyTesting = activeRunStatus === 'running'
   const passedCount = (displaySpecs ?? []).reduce(
     (acc, spec) => acc + spec.tests.filter(
@@ -183,12 +211,31 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
         />
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
-        {loadError && (
+        {repairState.error && <p role="status" className="mb-2 text-xs text-warning">{repairState.error}</p>}
+        {activeRepair ? <DiscoveryRepairActivity repair={activeRepair} /> : <>
+        {latestRepair && <details className="mb-2 text-xs" open={showRepairHistory} onToggle={(event) => setShowRepairHistory(event.currentTarget.open)}>
+          <summary className="cursor-pointer text-accent">Repair history</summary>
+          {showRepairHistory && <DiscoveryRepairActivity repair={latestRepair} />}
+        </details>}
+        {discoveryError && (
           <div role="status" className="mb-2 rounded-md border px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
             <div className="font-medium text-primary">Test discovery failed</div>
-            <p className="mt-1">{loadError}</p>
+            <p className="mt-1">{discoveryError}</p>
             <p className="mt-1">{displaySpecs ? 'Showing the previous test list until discovery succeeds.' : 'A complete test list is unavailable. This is a discovery error, not a test result.'}</p>
-            <p className="mt-1">Review the discovery error, fix the configuration or import it identifies, then retry.</p>
+            <div className="mt-3"><Section title="Two ways to repair it" bodyClassName="divide-y divide-[var(--border-default)]">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-3"><div>In Canary Lab<p className="text-[11px] text-muted">Runs in this workspace.</p></div><button type="button" className="cl-button px-2 py-1" disabled={repairState.starting} onClick={() => { void repairState.start() }}>{repairState.starting ? 'Starting…' : latestRepair?.status === 'failed' ? 'Resume repair' : 'Repair in Canary Lab'}</button></div>
+              <div className="flex flex-col gap-1 px-3 py-3"><div>In your agent <span className="text-[11px] text-muted">· Paste in Claude or Codex.</span></div><CopyField value={`/canary-lab-repair-discovery ${feature}`} label="discovery repair command" /></div>
+            </Section></div>
+            <details className="mt-2"><summary className="cursor-pointer text-accent">Manual recovery</summary><div className="mt-2 flex flex-wrap gap-2">
+              {repairPrompt && <button type="button" className="cl-button px-2 py-1" onClick={copyRepairPrompt}>{promptCopied ? 'Copied repair prompt' : 'Copy repair prompt'}</button>}
+              <button type="button" className="cl-button px-2 py-1" onClick={() => { setManualRetryAfter(repairCompletion); setRetryKey((key) => key + 1) }}>Retry discovery</button>
+            </div>
+            </details>
+            {copyError && <p role="alert" className="mt-2 text-danger">{copyError}</p>}
+            {repairPrompt && <details className="mt-2">
+              <summary className="cursor-pointer text-accent">View repair prompt</summary>
+              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px]">{repairPrompt}</pre>
+            </details>}
             {diagnostics && <details className="mt-2">
               <summary className="cursor-pointer text-accent">View discovery error</summary>
               <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px]">{diagnostics}</pre>
@@ -202,7 +249,6 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
                 {spec.parseError && <p className="text-danger">{spec.parseError}</p>}
               </div>)}
             </details>}
-            <button type="button" className="cl-button mt-2 px-2 py-1" onClick={() => setRetryKey((key) => key + 1)}>Retry</button>
           </div>
         )}
         {!displaySpecs ? (
@@ -280,6 +326,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
             })}
           </div>
         )}
+        </>}
       </div>
     </div>
   )
