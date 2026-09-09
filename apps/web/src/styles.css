@@ -1357,8 +1357,7 @@ body {
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-popover);
   animation: fm-fade-up 180ms ease-out;
-  /* Every dialog keeps a 10% viewport band above and below; individual
-     surfaces may be shorter, but none may grow into that reserved space. */
+  /* The default inset is 10vh; dense source review explicitly uses 6vh. */
   max-height: 80vh;
 }
 
@@ -1726,3 +1725,16 @@ body {
   font-size: 14px;
   font-weight: 600;
 }
+
+/* Full-context test review keeps the source columns and controls stationary. */
+.cl-context-toolbar { flex-shrink: 0; display: grid; gap: 12px; padding: 16px 20px 12px; border-bottom: 1px solid var(--border-default); }
+.cl-context-table { display: flex; overflow: hidden; padding: 0 20px; }
+.cl-context-table .cl-comparison-wrap { flex: 1; min-width: 0; overflow: auto; border-radius: 0; scrollbar-gutter: stable; overflow-anchor: none; }
+.cl-context-table .cl-comparison { min-width: 680px; table-layout: fixed; }
+.cl-context-table .cl-comparison th { position: sticky; top: 0; z-index: 1; background: var(--bg-elevated); width: 50%; }
+.cl-context-table .cl-comparison td { position: relative; padding: 5px 12px 5px 46px; vertical-align: top; }
+.cl-context-line { position: absolute; left: 8px; top: 7px; color: var(--text-muted); font: 10px var(--font-mono); }
+.cl-context-table tr[data-selected] td { box-shadow: inset 3px 0 var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.cl-context-table tr[data-source-changed] .cl-context-line { color: var(--accent); font-weight: 600; }
+.cl-context-assessment { flex: 0 0 76px; overflow: auto; padding: 12px 20px; border-top: 1px solid var(--border-default); font-size: 11px; line-height: 1.6; }
+.cl-context-toolbar button[aria-pressed="true"] { background: var(--bg-selected); color: var(--text-primary); border-color: var(--accent); }

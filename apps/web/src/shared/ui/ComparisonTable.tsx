@@ -4,7 +4,7 @@ import { compareText, type TextPart } from '@/shared/lib/comparison-diff'
 export type ComparisonRow =
   | { id: string; kind: 'section'; label: ReactNode }
   | { id: string; kind: 'message'; label: ReactNode; assessment?: ReactNode; message: ReactNode }
-  | { id: string; kind?: 'values'; label?: ReactNode; assessment?: ReactNode; before: string | null; after: string | null; description?: ReactNode; code?: boolean; testId?: string }
+  | { id: string; kind?: 'values'; label?: ReactNode; assessment?: ReactNode; before: string | null; after: string | null; description?: ReactNode; code?: boolean; testId?: string; beforeLine?: number; afterLine?: number; selected?: boolean; sourceChanged?: boolean; fullSource?: boolean }
 
 export function ComparisonTable({ rows, beforeLabel = 'Before', afterLabel = 'After', labelHeading = 'Change', code = false, ariaLabel = 'Before and after comparison', review = false, scrollRef, onScroll }: {
   rows: ComparisonRow[]
@@ -33,18 +33,18 @@ export function ComparisonTable({ rows, beforeLabel = 'Before', afterLabel = 'Af
 
 function ComparisonValueRow({ row, labelled, review }: { row: Extract<ComparisonRow, { before: string | null }>; labelled: boolean; review: boolean }) {
   const parts = useMemo(() => compareText(row.before ?? '', row.after ?? ''), [row.before, row.after])
-  return <tr data-testid={row.testId} className={row.code ? 'cl-comparison-code' : undefined}>
+  return <tr id={row.id} data-testid={row.testId} data-selected={row.selected || undefined} data-source-changed={row.sourceChanged || undefined} className={row.code ? 'cl-comparison-code' : undefined}>
     {labelled && <th scope="row" className="cl-comparison-label">{row.label}{row.description && <p className="mt-1 font-normal text-secondary">{row.description}</p>}</th>}
     {review && <td>{row.assessment}</td>}
-    <td><ComparisonValue value={row.before} parts={parts.before} side="before" changed={row.before !== row.after} /></td>
-    <td><ComparisonValue value={row.after} parts={parts.after} side="after" changed={row.before !== row.after} /></td>
+    <td>{row.beforeLine != null && <span className="cl-context-line">{row.beforeLine}</span>}<ComparisonValue fullSource={row.fullSource} value={row.before} parts={parts.before} side="before" changed={row.before !== row.after} /></td>
+    <td>{row.afterLine != null && <span className="cl-context-line">{row.afterLine}</span>}<ComparisonValue fullSource={row.fullSource} value={row.after} parts={parts.after} side="after" changed={row.before !== row.after} /></td>
   </tr>
 }
 
-function ComparisonValue({ value, parts, side, changed }: { value: string | null; parts: TextPart[]; side: 'before' | 'after'; changed: boolean }) {
+function ComparisonValue({ value, parts, side, changed, fullSource }: { fullSource?: boolean; value: string | null; parts: TextPart[]; side: 'before' | 'after'; changed: boolean }) {
   const Tag = side === 'before' ? 'del' : 'ins'
   return <div className="cl-comparison-value" data-side={side}>
-    {value === null ? <span className="cl-comparison-empty">Not present</span> : <>
+    {fullSource && value === null ? <span className="sr-only">No corresponding line</span> : fullSource && value === '' ? <span aria-label="Blank line">{'\u00a0'}</span> : value === null ? <span className="cl-comparison-empty">Not present</span> : <>
       <span className="sr-only">{side === 'before' ? 'was ' : 'now '}</span>
       {value === '' ? (changed ? <Tag>Empty value</Tag> : <span className="cl-comparison-empty">Empty value</span>) : parts.map((part, index) => part.changed
         ? <Tag key={index} aria-label={`${side === 'before' ? 'Removed' : 'Added'}: ${part.text}`}>{part.text}</Tag>

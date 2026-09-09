@@ -468,3 +468,13 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(window.location.search).not.toContain('models=')
   })
 })
+
+it('round-trips a test review source, language and baseline without leaking them into other dialogs', () => {
+  const reviewFocus = { file: 'e2e/conversations.spec.ts', line: 79, mode: 'code' as const, baseline: 'run' as const }
+  persistView(view({ dialog: 'tests-review', feature: 'shop', run: 'run-1', reviewFocus }))
+  expect(readPersistedView().reviewFocus).toEqual(reviewFocus)
+  expect(JSON.parse(localStorage.getItem(KEY)!)).not.toHaveProperty('reviewFocus')
+  persistView(view({ dialog: null, feature: 'shop' }))
+  expect(readPersistedView().reviewFocus).toBeUndefined()
+  expect(window.location.search).not.toContain('review')
+})

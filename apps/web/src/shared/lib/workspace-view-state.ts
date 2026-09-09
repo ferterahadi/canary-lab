@@ -86,7 +86,10 @@ export interface RunOpenTarget {
   tab?: RunArrivalTab
 }
 
+export interface ReviewFocus { file?: string; line?: number; mode?: 'english' | 'code'; baseline?: 'run' }
+
 export interface PersistedView {
+  reviewFocus?: ReviewFocus
   view: WorkspaceView
   feature: string | null
   /** Selected run id (URL only). */
@@ -202,10 +205,12 @@ export function readPersistedView(): PersistedView {
     // `from` names the flight a drill-through left — meaningless on the flights
     // view itself, dropped there.
     const returnFlight = v === 'flights' ? null : params.get('from') || null
+    const reviewFocus = dialog === 'tests-review' && params.get('reviewFile') ? { ...(params.get('reviewBase') === 'run' ? { baseline: 'run' as const } : {}), file: params.get('reviewFile')!, line: /^[1-9]\d*$/.test(params.get('reviewLine') ?? '') ? Number(params.get('reviewLine')) : undefined, mode: params.get('reviewMode') === 'code' ? 'code' as const : 'english' as const } : undefined
+    const review = reviewFocus ? { reviewFocus } : {}
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.
-    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, modelsAgent, focusTest, runTab, returnFlight }
-    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, modelsAgent, focusTest, runTab, returnFlight }
+    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, modelsAgent, focusTest, runTab, returnFlight, ...review }
+    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, modelsAgent, focusTest, runTab, returnFlight, ...review }
   } catch { /* ignore */ }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -245,6 +250,10 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'tab', state.dialog === 'config' ? state.configTab : null)
     // `models` only qualifies the settings dialog — drop it otherwise, so a
     // matrix pick can't outlive the settings dialog it was stacked over.
+    setOrDelete(params, 'reviewBase', state.dialog === 'tests-review' ? state.reviewFocus?.baseline ?? null : null)
+    setOrDelete(params, 'reviewFile', state.dialog === 'tests-review' ? state.reviewFocus?.file ?? null : null)
+    setOrDelete(params, 'reviewLine', state.dialog === 'tests-review' && state.reviewFocus?.line ? String(state.reviewFocus.line) : null)
+    setOrDelete(params, 'reviewMode', state.dialog === 'tests-review' ? state.reviewFocus?.mode ?? null : null)
     setOrDelete(params, 'models', state.dialog === 'settings' ? state.modelsAgent : null)
     // `test` only qualifies a selected run — drop it otherwise, so switching runs
     // can't leave a previous run's failure pinned in the URL.

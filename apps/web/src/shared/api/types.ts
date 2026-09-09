@@ -201,6 +201,7 @@ export interface ExtractedStep {
 export interface ExtractedTest {
   name: string
   line: number
+  endLine?: number
   bodySource: string
   /** First source line represented by bodySource. Older payloads omit it. */
   bodyLine?: number

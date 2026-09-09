@@ -621,3 +621,11 @@ describe('TestPresentation', () => {
     expect(container.querySelector('[data-shiki-theme="one-dark-pro"]')).not.toBeNull()
   })
 })
+
+it('retains the recorded failure when the same source line is also edited', async () => {
+  await act(async () => root.render(<TestPresentation test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" changedLines={new Set([2])} executionHighlight={{ kind: 'failed', bodyLine: 2 }} />))
+  await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="test-presentation-code-tab"]')!.click() })
+  const line = container.querySelector('[data-execution-highlight="failed"]')
+  expect(line?.getAttribute('data-changed-line')).toBe('true')
+  expect(line?.getAttribute('style')).toContain('var(--danger)')
+})

@@ -1,3 +1,4 @@
+import { testFileReview } from '../api/__fixtures__/test-review'
 // @vitest-environment happy-dom
 
 import { act } from 'react'
@@ -6,7 +7,7 @@ import { createRoot, type Root } from 'react-dom/client'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, getFeatureDirtyDiff, getFeatureTests } from '../api/client'
+import { ApiError, getTestFileReview, getFeatureTests } from '../api/client'
 import { readableTest } from '../api/__fixtures__/readable-test'
 
 import type { FeatureTests } from '../api/types'
@@ -18,7 +19,7 @@ vi.mock('../api/client', async () => {
   return {
     ...actual,
     getFeatureTests: vi.fn(),
-    getFeatureDirtyDiff: vi.fn(),
+    getTestFileReview: vi.fn(),
   }
 })
 
@@ -51,7 +52,7 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   vi.mocked(getFeatureTests).mockReset()
-  vi.mocked(getFeatureDirtyDiff).mockReset().mockResolvedValue({ tests: [] })
+  vi.mocked(getTestFileReview).mockReset().mockRejectedValue(new Error('No baseline'))
 })
 
 afterEach(() => {
@@ -524,7 +525,7 @@ describe('TestCasesColumn', () => {
     expect(failedEnglish?.getAttribute('style')).toContain('var(--danger)')
   })
 
-  it('rings only the test named in affectedTests, not every card in the spec', async () => {
+  it('offers review only for the changed test without a failure outline', async () => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {
         file: '/tmp/features/alpha/e2e/a.spec.ts',
@@ -550,7 +551,9 @@ describe('TestCasesColumn', () => {
       const button = Array.from(container.querySelectorAll('button')).find((el) => el.textContent?.includes(name))
       return button?.closest('.cl-card') as HTMLElement | null
     }
-    expect(cardFor('b')?.style.boxShadow).toContain('var(--danger)')
+    expect(cardFor('b')?.style.boxShadow ?? '').not.toContain('var(--danger)')
+    expect(cardFor('b')?.textContent).toContain('Review changes')
+    expect(cardFor('a')?.textContent).not.toContain('Review changes')
     expect(cardFor('a')?.style.boxShadow ?? '').not.toContain('var(--danger)')
   })
 
@@ -563,9 +566,7 @@ describe('TestCasesColumn', () => {
         ],
       },
     ])
-    vi.mocked(getFeatureDirtyDiff).mockResolvedValue({
-      tests: [{ name: 'a', changedLines: [3] }],
-    })
+    vi.mocked(getTestFileReview).mockResolvedValue(testFileReview())
 
     await act(async () => {
       root.render(

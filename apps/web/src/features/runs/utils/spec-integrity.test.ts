@@ -51,16 +51,16 @@ describe('specTone / featureTone', () => {
 })
 
 describe('SPEC_TONE', () => {
-  it('only the weaker tone carries danger, and calls itself a hint with its false-positive rate', () => {
-    expect(SPEC_TONE.weaker.color).toBe('var(--danger)')
+  it('the weaker tone carries amber, and calls itself a hint with its false-positive rate', () => {
+    expect(SPEC_TONE.weaker.color).toBe('var(--warning)')
     expect(SPEC_TONE.weaker.title).toMatch(/^Hint:/)
     expect(SPEC_TONE.weaker.title).toMatch(/false positive 2\.4%/)
     expect(SPEC_TONE.weaker.title).toMatch(/no human/)
     expect(SPEC_TONE.changed.color).not.toContain('danger')
-    expect(SPEC_TONE.stronger.color).toBe('var(--success)')
+    expect(SPEC_TONE.stronger.color).toBe('var(--text-secondary)')
   })
 
-  it('uses the storyboard glyphs: ! rose, ~ muted, ↑ emerald', () => {
+  it('pairs advisory glyphs with distinct text labels', () => {
     expect([SPEC_TONE.weaker.glyph, SPEC_TONE.changed.glyph, SPEC_TONE.stronger.glyph]).toEqual(['!', '~', '↑'])
   })
 })

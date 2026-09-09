@@ -2,7 +2,14 @@
 // Split out of client.ts; see that barrel for the shared surface.
 
 import type { Feature } from './types'
+import type { TestFileReview } from '@shared/test-review'
 import { defaultOpts, request, type ClientOptions } from './internal'
+
+export function getTestFileReview(feature: string, file: string, runId?: string, opts?: ClientOptions): Promise<TestFileReview> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const query = new URLSearchParams({ file, ...(runId ? { runId } : {}) })
+  return request(`${baseUrl}/api/features/${encodeURIComponent(feature)}/test-review?${query}`, { method: 'GET' }, fetchImpl)
+}
 
 export function listFeatures(opts?: ClientOptions): Promise<Feature[]> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)

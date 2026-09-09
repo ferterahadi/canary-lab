@@ -6,7 +6,7 @@ import { INTEGRITY_HINT_COPY, INTEGRITY_HINT_DISCLOSURE, INTEGRITY_HINT_FALSE_PO
 // status-bar pill, the features-column badge, the review dialog), so a suite
 // never shows one tone in the bar and another in the column. Three tones, not
 // four: the differential's verdicts collapse to what a reader must DO about
-// them. `weaker` is the only one that earns danger, and it is a hint (D13) —
+// them. `weaker` earns an amber advisory cue, and it is a hint (D13) —
 // `equivalent`, `unclassifiable` and "no verdict readable" all read as the same
 // neutral "changed", because with the classifier's recall none of them is
 // evidence that nothing weakened; a human still decides.
@@ -33,12 +33,12 @@ export function featureTone(feature: Feature): SpecEditTone | null {
 }
 
 /** The glyph, hue and wording each tone carries — the same triple everywhere.
- *  Hues are the status vocabulary: rose = integrity risk, emerald = verified,
+ *  Hues are the status vocabulary: amber = advisory attention,
  *  muted = changed with nothing to alarm about. */
 export const SPEC_TONE: Record<SpecEditTone, { glyph: string; color: string; label: string; title: string }> = {
   weaker: {
     glyph: '!',
-    color: 'var(--danger)',
+    color: 'var(--warning)',
     label: 'Weaker',
     title: `Hint: an edit reads weaker than what ran — false positive ${INTEGRITY_HINT_FALSE_POSITIVE_RATE}. ${INTEGRITY_HINT_DISCLOSURE}`,
   },
@@ -46,11 +46,11 @@ export const SPEC_TONE: Record<SpecEditTone, { glyph: string; color: string; lab
     glyph: '~',
     color: 'var(--text-muted)',
     label: 'Changed',
-    title: 'Test files changed since the last green run — review before trusting the result',
+    title: 'Test files changed in the workspace — review before trusting the result',
   },
   stronger: {
     glyph: '↑',
-    color: 'var(--success)',
+    color: 'var(--text-secondary)',
     label: 'Stronger',
     title: 'Every edit reads stronger than what ran — review and commit',
   },

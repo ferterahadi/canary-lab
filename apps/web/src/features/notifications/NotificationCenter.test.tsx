@@ -60,9 +60,11 @@ it('shows a retryable loading failure rather than an empty inbox', async () => {
 
 it('opens a toast without deleting its message; the close button permanently deletes it', async () => {
   const open = vi.fn()
-  await act(async () => root.render(<NotificationCenter open={false} onOpenChange={open} onNavigate={vi.fn()} />))
-  await act(async () => button('Open notifications').click())
-  expect(open).toHaveBeenCalledWith(true)
+  const navigate = vi.fn()
+  await act(async () => root.render(<NotificationCenter open={false} onOpenChange={open} onNavigate={navigate} />))
+  await act(async () => button('Review test changes').click())
+  expect(open).toHaveBeenCalledWith(false)
+  expect(navigate).toHaveBeenCalledWith(rows[0].target)
   expect(api.deleteNotification).not.toHaveBeenCalled()
   rows = rows.map(({ readAt: _readAt, ...row }) => row)
   act(() => root.unmount()); root = createRoot(container)

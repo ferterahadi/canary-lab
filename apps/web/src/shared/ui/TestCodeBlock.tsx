@@ -150,10 +150,10 @@ function FallbackCodeLines({
     const changed = changedLines?.has(lineNumber) === true
     const active = lineHighlight?.lines.has(lineNumber) === true
     const highlightColors = lineHighlight ? codeLineHighlightColors(lineHighlight.kind) : undefined
-    const style = changed
-      ? { background: 'color-mix(in srgb, var(--danger) 16%, transparent)', boxShadow: 'inset 2px 0 0 var(--danger)' }
-      : active && highlightColors
-        ? { background: highlightColors.background, boxShadow: `inset 2px 0 0 ${highlightColors.bar}` }
+    const style = active && highlightColors
+      ? { background: highlightColors.background, boxShadow: `inset 2px 0 0 ${highlightColors.bar}` }
+      : changed
+        ? { background: 'color-mix(in srgb, var(--success) 16%, transparent)', boxShadow: 'inset 2px 0 0 var(--success)' }
         : selected
           ? { background: 'color-mix(in srgb, var(--accent) 14%, transparent)', boxShadow: 'inset 2px 0 0 var(--accent)' }
           : undefined
@@ -246,12 +246,12 @@ function decorateShikiLines(
     const number = codeLineNumber(lineNo, mapped.sourceLines, storyLineNumbers, shownStorySequences)
     const selected = sourceRangeIncludesAny(selectedSourceRange, mapped.sourceLines)
     const attrs = ` data-code-line="${number.physical}" data-code-sequence="${number.sequence}" data-code-sequence-label="${number.label}"${number.title ? ` title="${number.title}"` : ''}${mapped.sourceLine !== null ? ` data-source-line="${mapped.sourceLine}"` : ''}${selected ? ' data-selected-line="true"' : ''}`
-    if (changedLines?.has(lineNo)) {
-      return `<span class="line"${attrs} data-changed-line="true" style="background:color-mix(in srgb, var(--danger) 16%, transparent);box-shadow:inset 2px 0 0 var(--danger)"`
-    }
     if (lineHighlight?.lines.has(lineNo)) {
       const colors = codeLineHighlightColors(lineHighlight.kind)
-      return `<span class="line"${attrs} data-active-line="true" data-execution-highlight="${lineHighlight.kind}" style="background:${colors.background};box-shadow:inset 2px 0 0 ${colors.bar}"`
+      return `<span class="line"${attrs} ${changedLines?.has(lineNo) ? 'data-changed-line="true" ' : ''}data-active-line="true" data-execution-highlight="${lineHighlight.kind}" style="background:${colors.background};box-shadow:inset 2px 0 0 ${colors.bar}"`
+    }
+    if (changedLines?.has(lineNo)) {
+      return `<span class="line"${attrs} data-changed-line="true" style="background:color-mix(in srgb, var(--success) 16%, transparent);box-shadow:inset 2px 0 0 var(--success)"`
     }
     if (selected) {
       return `<span class="line"${attrs} style="background:color-mix(in srgb, var(--accent) 14%, transparent);box-shadow:inset 2px 0 0 var(--accent)"`

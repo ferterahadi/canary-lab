@@ -282,12 +282,14 @@ In comparison tables, red and green mean removed and added, respectively. They
 describe edits, not pass/fail results or the strength of an assertion. Keep any
 weakening hint separate. Label both comparison baselines explicitly when known.
 
-Test review enables the table's `review` layout: a 120px Change column, a 140px
-Assessment column, and equal Before/After columns. The same columns remain visible
-for loading, unavailable source, and empty filter results. The dialog is up to
-1440px wide and 80vh high, with a permanent advisory row, toolbar, and suite-scoped
-footer. Only the table body scrolls; headers stick within its scroll container.
-On narrow screens the table scrolls horizontally instead of squeezing the columns.
+Test review uses two equal Before/After columns for complete source, with source
+line gutters and a sticky header. English and Code share the selected source change;
+Previous/Next scrolls within that context. A fixed assessment area explains the
+selected change. Full file exposes imports and shared setup. The dialog is up to
+1440px wide and 88vh high, with a permanent advisory row, toolbar, and suite-scoped
+footer. On narrow screens the source table scrolls horizontally. Edited test cards
+stay neutral, with a direct review action; amber denotes an advisory weakening hint.
+Red and green inside code describe removed and added content only.
 
 **Chip vs Pill:** `Chip` is read-only, `StatusPill` is a clickable action with a
 count. Different interaction models — don't merge them.

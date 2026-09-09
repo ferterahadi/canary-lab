@@ -188,17 +188,24 @@ review. Its button opens the existing changed-tests dialog with that run first.
 Notifications, Flights, Services, and test review use the shared centered `Modal`
 with task-specific widths, keyboard focus containment, and a pinned header/footer.
 Flights adds search and an attention filter. Test review keeps suite/file selection
-in a rail and shows all changes in one before/after table with an Assessment
-column. Weaker and unclassifiable changes sort first; a filter selects individual
-row assessments. Names, execution state, and assertion source share fixed columns,
-including loading and unavailable states. The header and footer stay fixed, the
-table header stays visible while scrolling, and each file retains its scroll position.
-The shared
-`ComparisonTable` highlights changed words and also serves configuration previews
-and captured patches through `DiffView`. Diff colors describe edits, not verdicts.
-Commit names the selected suite and counts all its tracked dirty spec files,
-including files outside the selected run's pending list. Restore and adopt act on
-the selected run. Closing Services leaves sessions running; stopping is a separate action.
+in a rail and presents complete source in two fixed before/after columns. The
+read-only test-review API reads Git HEAD or the explicitly selected run snapshot,
+then derives English, source alignment, and advisory assessments from those same
+versions. English and Code share source-based change navigation. Full file includes
+imports and shared setup; the selected change's assessment appears below the source.
+Missing snapshots are disclosed rather than replaced with a different baseline.
+`ComparisonTable` also serves configuration previews and captured patches through
+`DiffView`. Red means removed and green means added, independently of execution.
+Test and suite review buttons open this dialog directly; its file, source line,
+language, and comparison baseline survive refresh in the URL. Modified cards keep
+their execution styling, and possible weakening uses an amber advisory cue.
+Commit names the selected suite and counts all its tracked dirty spec files.
+A successful commit leaves a saved receipt; the uncommitted review cue clears on
+live refresh. Differences from a selected run remain independently inspectable:
+saving in Git never validates new tests or changes an existing run verdict.
+Restore and adopt remain explicit live-run actions. Editing opens the existing
+editor; validation uses the existing Run flow. Closing Services leaves sessions
+running; stopping is a separate action.
 
 ## Run Lifecycle
 

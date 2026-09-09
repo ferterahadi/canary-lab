@@ -34,6 +34,7 @@ export interface ExtractedStep {
 export interface ExtractedTest {
   name: string
   line: number
+  endLine?: number
   bodySource: string
   /** First source line represented by bodySource. Distinct from the test call
    *  line when a multiline declaration places its callback on a later line. */
@@ -881,6 +882,7 @@ export function extractTestsFromSource(
       tests.push({
         name,
         line,
+        endLine: src.getLineAndCharacterOfPosition(call.getEnd()).line + 1,
         bodySource,
         bodyLine,
         steps: body ? extractStepsFrom(body, src) : [],

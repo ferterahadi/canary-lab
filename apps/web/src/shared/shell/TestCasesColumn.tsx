@@ -4,6 +4,7 @@ import { DiscoveryRepairActivity } from './DiscoveryRepairActivity'
 import { Section, CopyField } from '../ui/atoms'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api/client'
+import { rowsForTest, sourceRows, testSelections } from '../lib/test-review-model'
 import { useInvalidationKey } from '../state/invalidation'
 import type { DirtySpecSummary, ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
 import {
@@ -26,7 +27,7 @@ import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../t
 import { sourceFileInRun } from '@/features/runs'
 import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
 
-type DirtyDiff = { name: string; changedLines: number[] }[]
+type DirtyDiff = { name: string; line: number; changedLines: number[]; count: number }[]
 type TestCardExecutionHighlight = TestExecutionLineHighlight & { sourceLine: number }
 
 interface ExpandedTestSelection {
@@ -38,15 +39,16 @@ interface ExpandedTestSelection {
 interface Props {
   feature: string | null
   activeRunSummary: RunSummary | undefined
-  activeRunManifest?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot'>
+  activeRunManifest?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'specEdits' | 'runId'>
   activeRunStatus: RunStatus | undefined
+  onReviewTest?: (file: string, line?: number, baseline?: 'run') => void
   onTotalTestsChange?: (n: number) => void
   /** Spec files flagged as modified, each with the test title(s) actually
-   *  affected — only those test cards get the red "modified" treatment. */
+   *  affected — only those test cards get a direct review action. */
   dirtySpecs?: DirtySpecSummary[]
 }
 
-export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, activeRunStatus, onTotalTestsChange, dirtySpecs = [] }: Props) {
+export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, activeRunStatus, onTotalTestsChange, onReviewTest, dirtySpecs = [] }: Props) {
   // The spec list refetches when a `tests-changed` event fires for the selected
   // feature (App gates the invalidation to the visible feature).
   const refreshKey = useInvalidationKey('tests')
@@ -130,17 +132,40 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
     return () => { cancelled = true; clearTimeout(retryTimer) }
   }, [feature, refreshKey, retryKey])
 
+  const dirtyRevision = JSON.stringify(dirtySpecs)
   useEffect(() => {
-    if (!feature) return
-    for (const spec of dirtySpecs) {
-      if (spec.file in dirtyDiffs) continue
-      api.getFeatureDirtyDiff(feature, spec.file)
-        .then((res) => setDirtyDiffs((prev) => ({ ...prev, [spec.file]: res.tests })))
-        .catch(() => setDirtyDiffs((prev) => ({ ...prev, [spec.file]: [] })))
+    let cancelled = false
+    setDirtyDiffs({})
+    if (feature) for (const spec of JSON.parse(dirtyRevision) as DirtySpecSummary[]) {
+      api.getTestFileReview(feature, spec.file).then((review) => {
+        if (cancelled) return
+        const rows = sourceRows(review)
+        const tests = testSelections(review, rows).filter((item) => item.side === 'after').map((item) => {
+          const changes = rowsForTest(rows, item, review).filter((row) => row.change != null)
+          return { name: item.test.name, line: item.test.line, count: new Set(changes.map((row) => row.change)).size,
+            changedLines: changes.flatMap((row) => row.afterLine == null ? [] : [row.afterLine]) }
+        })
+        setDirtyDiffs((previous) => ({ ...previous, [spec.file]: tests }))
+      }).catch(() => { /* The direct review action exposes the error and retry. */ })
     }
-    // dirtyDiffs is read only to skip already-fetched files, not to react to.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [feature, dirtySpecs])
+    return () => { cancelled = true }
+  }, [feature, dirtyRevision, refreshKey])
+
+  const [runDifferences, setRunDifferences] = useState<string[]>([])
+  const runId = activeRunManifest?.suiteSnapshot?.kind === 'taken' ? activeRunManifest.runId : undefined
+  const runFiles = JSON.stringify((specs ?? []).map((spec) => spec.file))
+  useEffect(() => {
+    let cancelled = false
+    setRunDifferences([])
+    if (feature && runId) {
+      const featureDir = activeRunManifest?.featureDir
+      const files = (JSON.parse(runFiles) as string[]).map((file) => featureDir && file.startsWith(`${featureDir}/`) ? file.slice(featureDir.length + 1) : file)
+      for (const file of files) void api.getTestFileReview(feature, file, runId).then((review) => {
+        if (!cancelled && review.before.source !== review.after.source) setRunDifferences((previous) => [...previous, file])
+      }).catch(() => { /* A missing snapshot is already disclosed in the run detail. */ })
+    }
+    return () => { cancelled = true }
+  }, [feature, runId, runFiles, refreshKey, dirtyRevision, activeRunManifest?.featureDir])
 
   const totalTests = specs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
   useEffect(() => {
@@ -202,6 +227,8 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
             </span>
           )}
         </div>
+        {dirtySpecs.length > 0 && onReviewTest && <button className="cl-button px-2 py-1 text-[11px]" onClick={() => onReviewTest(dirtySpecs[0].file)}>Review {dirtySpecs.length} {dirtySpecs.length === 1 ? 'file' : 'files'}</button>}
+        {runDifferences.length > 0 && onReviewTest && <button className="cl-button px-2 py-1 text-[11px]" title="Current tests differ from the selected run’s snapshot. Saving in Git does not validate them." onClick={() => onReviewTest(runDifferences[0], undefined, 'run')}>Different from this run</button>}
         <TestsHeaderIndicator
           summary={activeRunSummary}
           totalTests={totalTests}
@@ -259,14 +286,12 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
           <div className="space-y-1.5">
             {displaySpecs.flatMap((spec) => {
               // Test-level dirty: only the test(s) named in the matching dirty
-              // spec's `affectedTests` get the red treatment, not the whole file.
+              // spec's `affectedTests` get a direct review action.
               const dirtySpec = dirtySpecs.find((d) => spec.file === d.file || spec.file.endsWith(`/${d.file}`))
               return spec.tests.map((t) => {
-                const testDirty = dirtySpec?.affectedTests.includes(t.name) ?? false
-                const diffLines = testDirty
-                  ? dirtyDiffs[dirtySpec?.file ?? '']?.find((d) => d.name === t.name)?.changedLines
-                  : undefined
-                const changedLines = diffLines ? new Set(diffLines) : undefined
+                const diff = dirtyDiffs[dirtySpec?.file ?? '']?.find((item) => item.line === t.line)
+                const testDirty = diff ? diff.count > 0 : dirtySpec?.affectedTests.includes(t.name) ?? false
+                const changedLines = diff ? new Set(diff.changedLines.map((line) => line - (t.bodyLine ?? t.line) + 1)) : undefined
                 // `t.id` used to be read here as a preferred key. The tests
                 // endpoint builds each entry from name/line/bodySource/steps and
                 // never sets an id, so the fallback was the only live arm — and
@@ -314,6 +339,8 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
                     executionHighlight={executionHighlight}
                     expanded={isExpanded}
                     dirty={testDirty}
+                    changeCount={diff?.count}
+                    onReview={dirtySpec && onReviewTest ? () => onReviewTest(dirtySpec.file, t.line) : undefined}
                     changedLines={changedLines}
                     onToggle={() => setExpandedTest({
                       feature,
@@ -387,6 +414,8 @@ function TestCard({
   executionHighlight,
   expanded,
   dirty = false,
+  changeCount,
+  onReview,
   changedLines,
   onToggle,
 }: {
@@ -399,8 +428,10 @@ function TestCard({
   executionHighlight?: TestCardExecutionHighlight
   expanded: boolean
   dirty?: boolean
+  changeCount?: number
+  onReview?: () => void
   /** Lines in `test.bodySource` that differ from the git HEAD version — see
-   *  `changedLineNumbers`. Rendered as a danger-tinted diff highlight. */
+   *  `changedLineNumbers`. Rendered as changed source, independently of execution status. */
   changedLines?: Set<number>
   onToggle: () => void
 }) {
@@ -418,12 +449,7 @@ function TestCard({
     <div
       className={`cl-card cl-card-hover transition-all duration-150 ${colorClassForStatus(status)}`}
       style={{
-        // A modified spec rings the card in danger and tints it — overriding the
-        // run-status colour, since "this test changed" outranks its last verdict.
-        background: dirty
-          ? 'color-mix(in srgb, var(--danger) 8%, transparent)'
-          : expanded || isRunningTest ? 'var(--bg-selected)' : undefined,
-        ...(dirty ? { boxShadow: 'inset 0 0 0 1px var(--danger)' } : {}),
+        background: expanded || isRunningTest ? 'var(--bg-selected)' : undefined,
       }}
     >
       <button
@@ -458,6 +484,10 @@ function TestCard({
         </span>
         <StepStatusBadge status={status} />
       </button>
+      {dirty && <div className="flex items-center justify-between gap-2 px-3 pb-2 text-[11px] text-secondary">
+        <span>Test edited · execution status unchanged</span>
+        <button className="cl-button shrink-0 px-2 py-1" onClick={onReview}>Review {changeCount ? `${changeCount} ${changeCount === 1 ? 'change' : 'changes'}` : 'changes'}</button>
+      </div>}
       {expanded && (
         <div className="space-y-2 px-3 pb-3">
           {lineMessage && (

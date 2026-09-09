@@ -1,3 +1,4 @@
+import type { ReviewFocus } from '../lib/workspace-view-state'
 import { useEffect, useState } from 'react'
 import type { Feature, RunDetail } from '../api/types'
 import { BenchmarkPill, BenchmarkWindow, useBenchmarks } from '@/features/benchmark'
@@ -74,6 +75,9 @@ interface Props {
    *  (`?dialog=tests-review`) so a refresh keeps it open — see
    *  cl_route-every-surface. Uncontrolled (local state) when absent, which keeps
    *  the bar's own tests and any host without routing working unchanged. */
+  reviewFocus?: ReviewFocus
+  onReviewFocus?: (focus: ReviewFocus) => void
+  onReviewFeature?: (name: string) => void
   specReviewOpen?: boolean
   onSpecReviewOpenChange?: (open: boolean) => void
 }
@@ -95,7 +99,7 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ notificationControl, specReviewRunId, specReviewFeature, specReviewRunDetail, activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onOpenPortify, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight, specReviewOpen, onSpecReviewOpenChange }: Props) {
+export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocus, onReviewFeature, specReviewRunId, specReviewFeature, specReviewRunDetail, activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onOpenPortify, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight, specReviewOpen, onSpecReviewOpenChange }: Props) {
   const { connection, runs } = useRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Deployed-env verification runs (record-only) get their own pill (R27) —
@@ -114,7 +118,7 @@ export function GlobalStatusBar({ notificationControl, specReviewRunId, specRevi
     setLocalSpecReviewOpen(open)
     onSpecReviewOpenChange?.(open)
   }
-  const pendingRuns = runs.filter((r) => isActiveRunStatus(r.status) && (r.pendingSpecEdits ?? 0) > 0)
+  const pendingRuns = runs.filter((r) => (isActiveRunStatus(r.status) && (r.pendingSpecEdits ?? 0) > 0) || (reviewFocus?.baseline === 'run' && r.runId === specReviewRunId))
   // The right-hand action cluster collapses into a single toggle. Default
   // expanded (actions stay glanceable); the choice persists across reloads.
   const [actionsExpanded, setActionsExpanded] = useState<boolean>(() => {
@@ -339,7 +343,7 @@ export function GlobalStatusBar({ notificationControl, specReviewRunId, specRevi
       </div>
       </div>
       {servicesOpen && <ServicesDialog onClose={() => setServicesOpen(false)} />}
-      {reviewOpen && <DirtyReviewDialog focusFeature={specReviewFeature} focusRunId={specReviewRunId} focusRunDetail={specReviewRunDetail} features={features} pendingRuns={pendingRuns} onClose={() => setReviewOpen(false)} />}
+      {reviewOpen && <DirtyReviewDialog onChooseFeature={onReviewFeature} focus={reviewFocus} onFocus={onReviewFocus} focusFeature={specReviewFeature} focusRunId={specReviewRunId} focusRunDetail={specReviewRunDetail} features={features} pendingRuns={pendingRuns} onClose={() => setReviewOpen(false)} />}
       {benchmarkOpen && (
         <BenchmarkWindow
           onClose={() => setBenchmarkOpen(false)}

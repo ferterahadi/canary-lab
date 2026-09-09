@@ -45,7 +45,7 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
   }
   const row = (item: WorkspaceNotification, lead: boolean) => {
     const hint = !item.resolvedAt && item.severity === 'danger'
-    const state: RowState = item.resolvedAt || item.severity === 'neutral' || !item.target ? 'idle' : hint ? 'failed' : 'warning'
+    const state: RowState = item.resolvedAt || item.severity === 'neutral' || !item.target ? 'idle' : 'warning'
     const target = item.target
     const action = target?.kind === 'flight' ? 'Open flight'
       : target?.kind === 'test-review' && !item.resolvedAt ? 'Review test changes'
@@ -106,15 +106,15 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
     <>
       <StatusPill
         name="Notifications"
-        dotState={inbox.error || hasWeakerHint ? 'failed' : unread.length ? 'warning' : 'idle'}
+        dotState={inbox.error ? 'failed' : unread.length ? 'warning' : 'idle'}
         count={unread.length}
-        countTone={hasWeakerHint ? 'danger' : undefined}
+        countTone={hasWeakerHint ? 'boot' : undefined}
         onClick={() => onOpenChange(true)}
         title={inbox.error ?? `${items.length} notifications. Open the inbox to review messages.`}
         ariaLabel={inbox.error ? 'Notifications unavailable — open to retry' : `Notifications, ${unread.length} unread`}
       />
       {!open && !suppressToast && latest && (
-        <ToastHost toasts={[{ id: latest.id, title: latest.title, body: latest.body, sticky: true, dismissOnOpen: false, dismissLabel: 'Delete notification permanently', actionLabel: 'Open notifications', onClick: () => { onOpenChange(true); void inbox.read(latest.id) } }]} onDismiss={(id) => { void inbox.remove(id) }} />
+        <ToastHost toasts={[{ id: latest.id, title: latest.title, body: latest.body, sticky: true, dismissOnOpen: false, dismissLabel: 'Delete notification permanently', actionLabel: latest.target?.kind === 'test-review' ? 'Review test changes' : 'Open details', onClick: () => openItem(latest) }]} onDismiss={(id) => { void inbox.remove(id) }} />
       )}
       <Modal
         open={open}

@@ -19,6 +19,7 @@ import {
 } from '../../runs/logic/runtime/env-switcher/switch'
 import type { EnvSetsConfig } from '../../runs/logic/runtime/env-switcher/types'
 import { buildDiscoveryRepairPrompt } from '../logic/discovery-repair-prompt'
+import { testReviewRoutes } from './test-review'
 
 export interface FeaturesRouteDeps {
   featuresDir: string
@@ -37,6 +38,7 @@ export interface FeaturesRouteDeps {
 }
 
 export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {
+  await testReviewRoutes(app, deps)
   app.get('/api/features', async () => {
     const features = loadFeatures(deps.featuresDir)
     return features.map((f) => ({

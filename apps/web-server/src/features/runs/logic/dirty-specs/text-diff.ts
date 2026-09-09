@@ -25,7 +25,15 @@ function parseAddedLines(diffOutput: string): Set<number> {
 }
 
 export async function diffChangedLines(oldText: string, newText: string): Promise<Set<number>> {
-  if (oldText === newText) return new Set()
+  try { return parseAddedLines(await diffSourceText(oldText, newText)) } catch {
+    // Legacy line-only callers have no error channel; full review uses the
+    // throwing diffSourceText API so a failed comparison cannot look clean.
+    return new Set()
+  }
+}
+
+export async function diffSourceText(oldText: string, newText: string, context = 0): Promise<string> {
+  if (oldText === newText) return ''
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-text-diff-'))
   try {
     const oldPath = path.join(dir, 'old')
@@ -38,9 +46,9 @@ export async function diffChangedLines(oldText: string, newText: string): Promis
     fs.writeFileSync(newPath, withTrailingNewline(newText))
     // Exit code is 1 when the files differ (not an error) and 0 when they
     // don't — only treat other codes (bad invocation) as "nothing to report".
-    const res = await runGit(dir, ['diff', '--no-index', '--unified=0', oldPath, newPath])
-    if (res.code > 1) return new Set()
-    return parseAddedLines(res.stdout)
+    const res = await runGit(dir, ['diff', '--no-index', `--unified=${context}`, oldPath, newPath])
+    if (res.code > 1) throw new Error('Could not compare test source')
+    return res.stdout
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }

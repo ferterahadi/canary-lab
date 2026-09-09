@@ -643,33 +643,33 @@ describe('FeaturesColumn modified-tests badge', () => {
     expect(featureRow('calm').className).not.toMatch(/cl-list-row-(dirty|changed)/)
   })
 
-  it('! rose with the danger row wash for a weaker reading — labelled as a hint', () => {
+  it('shows an amber review action for weaker hints without a failure outline', () => {
     render([dirty('shop', ['equivalent', 'weaker'])])
     const b = badge('shop')!
-    expect(b.textContent).toBe('!')
+    expect(b.textContent).toBe('Review')
     expect(b.getAttribute('data-tone')).toBe('weaker')
-    expect(b.getAttribute('aria-label')).toBe('Tests weaker')
-    expect(b.getAttribute('style')).toContain('--danger')
-    expect(featureRow('shop').className).toContain('cl-list-row-dirty')
+    expect(b.getAttribute('aria-label')).toBe('Review test changes in shop')
+    expect(b.getAttribute('style')).toContain('--warning')
+    expect(featureRow('shop').className).toContain('cl-list-row-changed')
   })
 
   it('~ muted with a neutral wash for equivalent, cannot-classify, or no verdict', () => {
     render([dirty('a', ['equivalent']), dirty('b', ['unclassifiable']), dirty('c', [undefined]), dirty('d', ['stronger', 'equivalent'])])
     for (const name of ['a', 'b', 'c', 'd']) {
       const b = badge(name)!
-      expect(b.textContent, name).toBe('~')
+      expect(b.textContent, name).toBe('Review')
       expect(b.getAttribute('style'), name).not.toContain('--danger')
       expect(featureRow(name).className, name).toContain('cl-list-row-changed')
       expect(featureRow(name).className, name).not.toContain('cl-list-row-dirty')
     }
   })
 
-  it('↑ emerald when every edit reads stronger', () => {
+  it('keeps stronger hints neutral because they are not execution results', () => {
     render([dirty('up', ['stronger', 'stronger'])])
     const b = badge('up')!
-    expect(b.textContent).toBe('↑')
-    expect(b.getAttribute('style')).toContain('--success')
-    expect(b.getAttribute('aria-label')).toBe('Tests stronger')
+    expect(b.textContent).toBe('Review')
+    expect(b.getAttribute('style')).toContain('--text-secondary')
+    expect(b.getAttribute('aria-label')).toBe('Review test changes in up')
     expect(featureRow('up').className).toContain('cl-list-row-changed')
   })
 })

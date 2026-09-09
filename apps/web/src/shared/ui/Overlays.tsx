@@ -126,6 +126,7 @@ export function Modal({
   meta,
   width = 480,
   height,
+  viewportInset = 10,
   role = 'dialog',
   ariaLabel,
   testId,
@@ -156,8 +157,10 @@ export function Modal({
   /** Fixed height (or a px number) instead of shrinking to fit content — for a
    *  multi-tab/paginated dialog whose body height should stay stable as the
    *  active section's content amount changes. Every dialog remains constrained
-   *  to the shared 80vh viewport cap. */
+   *  to the chosen viewport inset. */
   height?: number | string
+  /** Viewport margin in vh; dense source review can reserve more reading room. */
+  viewportInset?: 6 | 10
   /** ARIA role for the dialog surface — `alertdialog` for error/confirmation
    *  interruptions, `dialog` (default) otherwise. */
   role?: 'dialog' | 'alertdialog'
@@ -198,7 +201,8 @@ export function Modal({
   const hasHeader = Boolean(title || eyebrow || meta || status || icon || description)
   const node = (
     <div
-      className="cl-modal-backdrop fixed inset-0 z-50 flex items-center justify-center px-4 py-[10vh]"
+      className="cl-modal-backdrop fixed inset-0 z-50 flex items-center justify-center px-4"
+      style={{ paddingBlock: `${viewportInset}vh` }}
       onClick={onClose}
     >
       <div
@@ -212,6 +216,7 @@ export function Modal({
         style={{
           width,
           maxWidth: '94vw',
+          maxHeight: `${100 - 2 * viewportInset}vh`,
           ...(height ? { height } : {}),
           background: 'var(--bg-elevated)',
         }}

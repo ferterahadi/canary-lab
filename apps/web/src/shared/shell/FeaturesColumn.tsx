@@ -23,6 +23,7 @@ interface Props {
    *  "services up" treatment instead of the running/healing tint. */
   activeRunExecutionType?: ExecutionType | null
   activeRunWaitingLabel?: string
+  onReviewFeature?: (name: string) => void
   onSelectFeature: (name: string) => void
   onFeaturesChanged?: (preferredFeature?: string | null) => void
   /** Opens the Requirement Coverage ledger for a feature (R8 column entry point). */
@@ -131,6 +132,7 @@ export function FeaturesColumn({
   activeRunExecutionType,
   activeRunWaitingLabel,
   onSelectFeature,
+  onReviewFeature,
   onFeaturesChanged,
   onOpenCoverage,
   onStartNewFlight,
@@ -217,7 +219,7 @@ export function FeaturesColumn({
                     activeRunExecutionType={activeRunExecutionType}
                     activeRunWaitingLabel={activeRunWaitingLabel}
                     coverageHeadline={coverageHeadlines[f.name]}
-                    onSelectFeature={onSelectFeature}
+                    onSelectFeature={onSelectFeature} onReviewFeature={onReviewFeature}
                     onOpenCoverage={onOpenCoverage}
                     onOpenFlight={onOpenFlight}
                     flightAction={flightAction}
@@ -236,7 +238,7 @@ export function FeaturesColumn({
                 activeRunExecutionType={activeRunExecutionType}
                 activeRunWaitingLabel={activeRunWaitingLabel}
                 coverageHeadlines={coverageHeadlines}
-                onSelectFeature={onSelectFeature}
+                onSelectFeature={onSelectFeature} onReviewFeature={onReviewFeature}
                 onOpenCoverage={onOpenCoverage}
                 onOpenFlight={onOpenFlight}
                 flightAction={flightAction}
@@ -304,6 +306,7 @@ function FeatureRow({
   activeRunWaitingLabel,
   coverageHeadline,
   onSelectFeature,
+  onReviewFeature,
   onOpenCoverage,
   onOpenFlight,
   flightAction,
@@ -316,6 +319,7 @@ function FeatureRow({
   activeRunExecutionType?: ExecutionType | null
   activeRunWaitingLabel?: string
   coverageHeadline?: string | null
+  onReviewFeature?: (name: string) => void
   onSelectFeature: (name: string) => void
   onOpenCoverage?: (feature: string) => void
   onOpenFlight?: (flightId: string) => void
@@ -327,11 +331,10 @@ function FeatureRow({
   // clicking the row resumes the flight.
   if (f.pending) return <PendingFeatureRow feature={f} onOpenFlight={onOpenFlight} />
   const isSelected = f.name === selectedFeature
-  // The suite's modified-tests reading (null = clean). Only `weaker` earns the
-  // danger row wash and ring; a changed or stronger suite gets a quiet neutral
-  // wash — it still needs a human's commit, but nothing about it is an alarm.
+  // Dirty state never overrides execution colour. The review button carries
+  // advisory attention separately, so pending tests cannot read as failures.
   const tone = featureTone(f)
-  const rowCue = tone === 'weaker' ? ' cl-list-row-dirty' : tone ? ' cl-list-row-changed' : ''
+  const rowCue = tone ? ' cl-list-row-changed' : ''
   const isActive = Boolean(activeRunFeature) && f.name === activeRunFeature
   const runState = isActive
     ? (activeRunStatus === 'queued' ? 'queued' : activeRunExecutionType === 'boot'
@@ -378,20 +381,20 @@ function FeatureRow({
       title={isActive && activeRunWaitingLabel ? activeRunWaitingLabel : runState ? (runState === 'queued' ? 'Queued' : runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : inFlight ? flight?.title : undefined}
     >
       {tone && (
-        <Tooltip label={`${SPEC_TONE[tone].title} — review in the status bar`}>
-          <span
-            aria-label={`Tests ${SPEC_TONE[tone].label.toLowerCase()}`}
+        <Tooltip label={`${SPEC_TONE[tone].title} — click to review test changes`}>
+          <button type="button" onClick={() => { onSelectFeature(f.name); onReviewFeature?.(f.name) }}
+            aria-label={`Review test changes in ${f.name}`}
             data-testid={`dirty-badge-${f.name}`}
             data-tone={tone}
-            className="ml-1.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded text-[11px] font-semibold leading-none"
+            className="ml-1.5 flex shrink-0 items-center justify-center self-center rounded px-1 py-1 text-[10px] leading-none"
             style={{
               color: SPEC_TONE[tone].color,
               background: `color-mix(in srgb, ${SPEC_TONE[tone].color} 14%, transparent)`,
               border: `1px solid color-mix(in srgb, ${SPEC_TONE[tone].color} 35%, transparent)`,
             }}
           >
-            {SPEC_TONE[tone].glyph}
-          </span>
+            Review
+          </button>
         </Tooltip>
       )}
       {f.portified && (
@@ -504,6 +507,7 @@ function FeatureGroupAccordion({
   activeRunWaitingLabel,
   coverageHeadlines,
   onSelectFeature,
+  onReviewFeature,
   onOpenCoverage,
   onOpenFlight,
   flightAction,
@@ -516,6 +520,7 @@ function FeatureGroupAccordion({
   activeRunExecutionType?: ExecutionType | null
   activeRunWaitingLabel?: string
   coverageHeadlines: Record<string, string | null>
+  onReviewFeature?: (name: string) => void
   onSelectFeature: (name: string) => void
   onOpenCoverage?: (feature: string) => void
   onOpenFlight?: (flightId: string) => void
@@ -558,7 +563,7 @@ function FeatureGroupAccordion({
               activeRunExecutionType={activeRunExecutionType}
               activeRunWaitingLabel={activeRunWaitingLabel}
               coverageHeadline={coverageHeadlines[f.name]}
-              onSelectFeature={onSelectFeature}
+              onSelectFeature={onSelectFeature} onReviewFeature={onReviewFeature}
               onOpenCoverage={onOpenCoverage}
               onOpenFlight={onOpenFlight}
               flightAction={flightAction}

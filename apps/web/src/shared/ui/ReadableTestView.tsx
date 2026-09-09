@@ -163,12 +163,12 @@ function StoryRow({
           background: executionKind
             ? `color-mix(in srgb, ${executionColor} 18%, transparent)`
             : changed
-              ? 'color-mix(in srgb, var(--danger) 16%, transparent)'
+              ? 'color-mix(in srgb, var(--success) 16%, transparent)'
               : selected ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : undefined,
           boxShadow: executionKind
             ? `inset 2px 0 0 ${executionColor}`
             : changed
-              ? 'inset 2px 0 0 var(--danger)'
+              ? 'inset 2px 0 0 var(--success)'
               : selected ? 'inset 2px 0 0 var(--accent)' : undefined,
         }}
       >
@@ -194,9 +194,9 @@ function StoryRow({
               data-testid={`readable-modified-${step.id}`}
               className="ml-2 inline-flex rounded border px-1 text-[9px] font-semibold leading-[1.4]"
               style={{
-                color: 'var(--danger)',
-                borderColor: 'color-mix(in srgb, var(--danger) 65%, transparent)',
-                background: 'color-mix(in srgb, var(--danger) 10%, transparent)',
+                color: 'var(--success)',
+                borderColor: 'color-mix(in srgb, var(--success) 65%, transparent)',
+                background: 'color-mix(in srgb, var(--success) 10%, transparent)',
                 fontFamily: 'var(--font-mono)',
               }}
             >

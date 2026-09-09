@@ -3,6 +3,7 @@ import {
   onViewChangedInOtherTab,
   persistView,
   readPersistedView,
+  type ReviewFocus,
   type ConfigTab,
   type ModelsAgent,
   type RouteDialog,
@@ -44,6 +45,8 @@ export interface WorkspaceNavigation {
   configTab: ConfigTab | null
   verifyOpen: boolean
   /** Whether the changed-tests review is open (routed ?dialog=tests-review). */
+  reviewFocus?: ReviewFocus
+  setReviewFocus: (focus: ReviewFocus | undefined) => void
   specReviewOpen: boolean
   notificationsOpen: boolean
   setNotificationsOpen: (open: boolean) => void
@@ -136,6 +139,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   }, [])
   const [verifyOpen, setVerifyOpen] = useState<boolean>(SEED.verifyOpen)
   const [notificationsOpen, setNotificationsOpen] = useState<boolean>(SEED.notificationsOpen)
+  const [reviewFocus, setReviewFocus] = useState<ReviewFocus | undefined>(PERSISTED.reviewFocus)
   const [specReviewOpen, setSpecReviewOpen] = useState<boolean>(SEED.specReviewOpen)
   const [flightStartFor, setFlightStartForState] = useState<string | null>(SEED.flightStartFor)
   const [flightStartFresh, setFlightStartFresh] = useState<boolean>(SEED.flightStartFresh)
@@ -200,7 +204,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   // Persist the full route to the URL on every change (durable tier also mirrors
   // to localStorage for cross-tab sync).
   useEffect(() => {
-    persistView(navToPersistedView(state))
+    persistView({ ...navToPersistedView(state), reviewFocus })
     // Intentionally keyed on the primitive fields, not the freshly-built `state`
     // object (new identity every render).
     // configTab is listed explicitly: the `dialog` value stays 'config' while
@@ -211,7 +215,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // same while the focused test changes, so keying on selectedRunId alone
     // would leave the URL's `test` param stale. runTab is the same case —
     // re-opening the SAME run on a different tab must rewrite `runtab`.
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, configTab, modelsFor, focusTest, runTab, returnFlight])
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, configTab, modelsFor, focusTest, runTab, returnFlight, reviewFocus])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -281,6 +285,8 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     resumePlanTaskId,
     focusTest,
     runTab,
+    reviewFocus,
+    setReviewFocus,
     routedDialog: dialog,
     setView,
     setSelectedFeature,

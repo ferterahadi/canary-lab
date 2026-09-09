@@ -52,7 +52,7 @@ export function App() {
     selectedFlightId, setSelectedFlightId,
     configFor, setConfigFor, configTab, setConfigTab,
     verifyOpen, setVerifyOpen,
-    specReviewOpen, setSpecReviewOpen,
+    specReviewOpen, setSpecReviewOpen, reviewFocus, setReviewFocus,
     flightStartFor, flightStartFresh, flightStartStage, setFlightStartFor,
     flightStartNew, setFlightStartNew,
     demoOpen, setDemoOpen,
@@ -408,6 +408,7 @@ export function App() {
             setSelectedFeature(name)
             setSelectedRunId(allRuns.find((r) => r.feature === name && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null)
           }}
+          onReviewFeature={(name) => { setSelectedFeature(name); setReviewFocus(undefined); setSpecReviewOpen(true) }}
           onFeaturesChanged={refreshFeatures}
           versionStatus={versionStatus}
           onOpenCoverage={openCoverageFor}
@@ -434,6 +435,7 @@ export function App() {
           activeRunSummary={summaryForSelectedFeature}
           activeRunManifest={statusRunDetail.detail?.manifest}
           activeRunStatus={statusForSelectedFeature}
+          onReviewTest={(file, line, baseline) => { setReviewFocus({ file, line, baseline, mode: 'english' }); setSpecReviewOpen(true) }}
           onTotalTestsChange={setSpecTotalTests}
           dirtySpecs={features.find((f) => f.name === selectedFeature)?.dirty?.specs ?? []}
         />
@@ -520,13 +522,14 @@ export function App() {
           else {
             if ('runId' in target && target.runId) navigateToRun(target.feature, target.runId)
             else { setSelectedFeature(target.feature); setSelectedRunId(null); setView('workspace') }
+            setReviewFocus(undefined)
             setSpecReviewOpen(target.kind === 'test-review')
           }
         }} />}
         specReviewRunId={selectedRunId}
         specReviewFeature={selectedFeature}
         specReviewRunDetail={statusRunDetail.detail}
-        specReviewOpen={specReviewOpen}
+        reviewFocus={reviewFocus} onReviewFocus={setReviewFocus} onReviewFeature={(name) => { setSelectedFeature(name); setSelectedRunId(allRuns.find((run) => run.feature === name && run.executionType !== 'boot' && run.executionType !== 'benchmark')?.runId ?? null) }} specReviewOpen={specReviewOpen}
         onSpecReviewOpenChange={setSpecReviewOpen}
       />
       <div className="min-h-0 flex-1">
