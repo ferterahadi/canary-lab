@@ -453,7 +453,17 @@ describe('useWorkspaceData — workspace events', () => {
     expect(api.listFeatures.mock.calls.length).toBe(before + 2)
   })
 
-  it('re-reads features on envset and dirty-test changes', async () => {
+  it('refreshes source markers after a selected suite commit changes its dirty state', async () => {
+    api.listFeatures.mockResolvedValue([feature('checkout')])
+    await mount({ initialSelectedFeature: 'checkout' })
+    harness.featureRef.current = 'checkout'
+    await fire({ type: 'tests-dirty-changed', feature: 'search' })
+    expect(harness.invalidated).toEqual([])
+    await fire({ type: 'tests-dirty-changed', feature: 'checkout' })
+    expect(harness.invalidated).toEqual([['tests', undefined]])
+  })
+
+  it('re-reads features on envset and dirty-test changes' , async () => {
     await mount()
     const before = api.listFeatures.mock.calls.length
 

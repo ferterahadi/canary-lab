@@ -10,7 +10,7 @@ import type { TestPredicate, TestGuard,
 import { collectTestPredicates, guardFrom, TEST_DECLARATORS } from './verification-strength/predicates'
 import {
   translateReadableTest,
-  translateReadableTestFromAst,
+  createReadableTestAstTranslator,
   type ReadableHelperInput,
 } from './readable-tests/translator'
 import { parseSource } from './controlled-english/compiler-context'
@@ -35,6 +35,7 @@ export interface ExtractedTest {
   name: string
   line: number
   endLine?: number
+  sourceChanges?: { changedLines: number[]; count: number }
   bodySource: string
   /** First source line represented by bodySource. Distinct from the test call
    *  line when a multiline declaration places its callback on a later line. */
@@ -72,8 +73,10 @@ export interface ExtractResult {
 }
 
 export interface ExtractedTestMetadata {
+  requirements?: string[]
   name: string
   line: number
+  endLine: number
   bodySource: string
   bodyLine: number
 }
@@ -698,6 +701,11 @@ function testDeclarationsFrom(src: ts.SourceFile, options: DeclarationWalkOption
   return declarations
 }
 
+/** Share annotation precedence between metadata and the English presentation. */
+function testAnnotationsAt(call: ts.CallExpression, sourceFile: ts.SourceFile): TestAnnotations {
+  return mergeAnnotations(parseTestTags(call), parseTestAnnotations(leadingCommentText(call, sourceFile)))
+}
+
 /** The integrity scanner needs only stable test names and callback bodies. Keep
  * that evidence path syntax-only: rendering prose or building a TypeChecker
  * cannot change a content hash and must not delay server readiness. */
@@ -706,12 +714,17 @@ export function extractTestMetadataFromSource(file: string, source: string): Ext
     const { sourceFile } = parseSource(file, source)
     return {
       file,
-      tests: testDeclarationsFrom(sourceFile).map(({ name, line, bodySource, bodyLine }) => ({
-        name,
-        line,
-        bodySource,
-        bodyLine,
-      })),
+      tests: testDeclarationsFrom(sourceFile).map(({ call, name, line, bodySource, bodyLine }) => {
+        const { requirements } = testAnnotationsAt(call, sourceFile)
+        return {
+          name,
+          line,
+          endLine: sourceFile.getLineAndCharacterOfPosition(call.getEnd()).line + 1,
+          bodySource,
+          bodyLine,
+          ...(requirements ? { requirements } : {}),
+        }
+      }),
     }
   } catch (err) {
     return {
@@ -853,24 +866,15 @@ export function extractTestsFromSource(
     const src = semanticContext.sourceFile
     const tests: ExtractedTest[] = []
     const readableHelpers = topLevelReadableHelpers(file, src)
+    const translateAst = createReadableTestAstTranslator({ file, sourceFile: src, helpers: readableHelpers, semanticContext })
     for (const declaration of testDeclarationsFrom(src)) {
       const { call, body, name, line, bodySource, bodyLine } = declaration
       // Playwright tags are primary (R1); comment annotations are the migration
       // fallback. Union both so a half-migrated spec still works.
-      const annotations = mergeAnnotations(
-        parseTestTags(call),
-        parseTestAnnotations(leadingCommentText(call, src)),
-      )
+      const annotations = testAnnotationsAt(call, src)
       const assertions = body ? collectAssertionSnippets(body, src) : []
       const readable = body && ts.isBlock(body)
-        ? translateReadableTestFromAst({
-            file,
-            title: name,
-            sourceFile: src,
-            body,
-            helpers: readableHelpers,
-            semanticContext,
-          })
+        ? translateAst(name, body)
         : translateReadableTest({
             file,
             title: name,

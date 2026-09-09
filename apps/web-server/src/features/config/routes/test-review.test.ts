@@ -84,3 +84,8 @@ it('re-reads edits and committed baselines; commit clears the comparison but not
   fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), before)
   expect((await get()).json<TestFileReview>().after.source).toBe(before)
 })
+it('returns only a lightweight difference flag when full review context is not needed', async () => {
+  expect((await get('file=e2e/a.spec.ts&summary=true')).json()).toEqual({ changed: true })
+  git('add', '.'); git('commit', '-qm', 'accept edits')
+  expect((await get('file=e2e/a.spec.ts&summary=true')).json()).toEqual({ changed: false })
+})

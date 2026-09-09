@@ -19,6 +19,7 @@ import {
 } from '../../runs/logic/runtime/env-switcher/switch'
 import type { EnvSetsConfig } from '../../runs/logic/runtime/env-switcher/types'
 import { buildDiscoveryRepairPrompt } from '../logic/discovery-repair-prompt'
+import { attachSourceChanges } from '../logic/test-source-changes'
 import { testReviewRoutes } from './test-review'
 
 export interface FeaturesRouteDeps {
@@ -220,7 +221,11 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     for (const file of specFiles) {
       let source = ''
       try { source = fs.readFileSync(file, 'utf-8') } catch { /* unreadable */ }
-      astByFile.set(file, extractTestsFromSource(file, source, feature.semanticRules))
+      const result = extractTestsFromSource(file, source, feature.semanticRules)
+      try { await attachSourceChanges(feature.featureDir, file, source, result.tests) } catch (err) {
+        app.log.warn({ err, file }, 'test source change markers unavailable')
+      }
+      astByFile.set(file, result)
     }
 
     // 2. Ask Playwright to enumerate the resolved test list (loops expanded,
@@ -277,7 +282,11 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       if (astByFile.has(entry.originFile) || originAstByFile.has(entry.originFile)) continue
       let source = ''
       try { source = fs.readFileSync(entry.originFile, 'utf-8') } catch { /* unreadable */ }
-      originAstByFile.set(entry.originFile, extractTestsFromSource(entry.originFile, source, feature.semanticRules))
+      const result = extractTestsFromSource(entry.originFile, source, feature.semanticRules)
+      try { await attachSourceChanges(feature.featureDir, entry.originFile, source, result.tests) } catch (err) {
+        app.log.warn({ err, file: entry.originFile }, 'test source change markers unavailable')
+      }
+      originAstByFile.set(entry.originFile, result)
     }
 
     function lookupAstByLine(file: string, line: number): ExtractedTest | undefined {
@@ -310,6 +319,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
             : lookupAstByLine(file, entry.line)
           const test: ExtractedTest = {
             name: entry.title,
+            sourceChanges: fromAst?.sourceChanges,
+            endLine: fromAst?.endLine,
             line: isHelperDefined ? entry.originLine : entry.line,
             bodySource: fromAst?.bodySource ?? '',
             bodyLine: fromAst?.bodyLine ?? (isHelperDefined ? entry.originLine : entry.line),

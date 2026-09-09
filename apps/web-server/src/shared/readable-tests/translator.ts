@@ -614,9 +614,21 @@ export function translateReadableTest(input: ReadableTestInput): ReadableTest {
   return translatedTest(input.title, nodes, translateStory(body.statements, context))
 }
 
+/** One extraction owns one helper compilation. Each test still receives fresh
+ * recursion state; nothing is cached across edits or semantic-rule changes. */
+export function createReadableTestAstTranslator(input: Omit<ReadableTestAstInput, 'title' | 'body'>): (title: string, body: ts.Block) => ReadableTest {
+  const semanticContext = input.semanticContext ?? compileSemanticSource(input.file, input.sourceFile.getFullText(), {
+    semanticRules: input.semanticRules,
+    compilerOptions: input.compilerOptions,
+    absoluteSourceRanges: true,
+  })
+  const helpers = parseHelpers(input.helpers ?? [], semanticContext.config, input.compilerOptions)
+  return (title, body) => translateReadableTestFromAst({ ...input, semanticContext, title, body }, helpers)
+}
+
 /** Uses an already-parsed test callback so AST extraction and readable
  * translation share the same source tree and exact positions. */
-export function translateReadableTestFromAst(input: ReadableTestAstInput): ReadableTest {
+export function translateReadableTestFromAst(input: ReadableTestAstInput, preparedHelpers?: Map<string, ParsedHelper>): ReadableTest {
   const semanticContext = input.semanticContext ?? compileSemanticSource(
     input.file,
     input.sourceFile.getFullText(),
@@ -641,7 +653,7 @@ export function translateReadableTestFromAst(input: ReadableTestAstInput): Reada
     sourceFile,
     semanticContext,
     compilerOptions: input.compilerOptions,
-    helpers: parseHelpers(input.helpers ?? [], semanticContext.config, input.compilerOptions),
+    helpers: preparedHelpers ?? parseHelpers(input.helpers ?? [], semanticContext.config, input.compilerOptions),
     activeHelpers: new Set(),
   }
   const nodes = body.statements.map((statement, index) => translateStatement(statement, [index], context))

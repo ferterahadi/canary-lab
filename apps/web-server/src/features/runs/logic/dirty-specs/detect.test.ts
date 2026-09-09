@@ -216,6 +216,7 @@ describe('computeDirty', () => {
             ...result.tests,
             {
               name: 'phantom test',
+              endLine: 0,
               bodySource: 'unused',
               bodyLine: 0,
               line: 0,

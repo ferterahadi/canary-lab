@@ -181,7 +181,10 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
             // A generated PRD summary lights the derived rail (prdSummary evidence).
             refreshFeatures(selectedFeatureRef.current)
           }
-          if (event.type === 'tests-dirty-changed') refreshFeatures(selectedFeatureRef.current)
+          if (event.type === 'tests-dirty-changed') {
+            refreshFeatures(selectedFeatureRef.current)
+            if (selectedFeatureRef.current === event.feature) invalidate('tests')
+          }
           if (event.type === 'verification-config-changed' && selectedFeatureRef.current === event.feature) invalidate('verification')
           if (event.type === 'journal-changed') invalidate('journal', event.runId)
           if (event.type === 'version-changed') refreshVersion()

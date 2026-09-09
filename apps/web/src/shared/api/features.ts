@@ -11,6 +11,12 @@ export function getTestFileReview(feature: string, file: string, runId?: string,
   return request(`${baseUrl}/api/features/${encodeURIComponent(feature)}/test-review?${query}`, { method: 'GET' }, fetchImpl)
 }
 
+export function getTestFileDifference(feature: string, file: string, runId: string, opts?: ClientOptions): Promise<{ changed: boolean }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const query = new URLSearchParams({ file, runId, summary: 'true' })
+  return request(`${baseUrl}/api/features/${encodeURIComponent(feature)}/test-review?${query}`, { method: 'GET' }, fetchImpl)
+}
+
 export function listFeatures(opts?: ClientOptions): Promise<Feature[]> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<Feature[]>(`${baseUrl}/api/features`, { method: 'GET' }, fetchImpl)

@@ -143,7 +143,7 @@ describe('ReadableTestView', () => {
 
     const changed = container.querySelector<HTMLElement>('[data-testid="readable-story-item-action-submit"]')
     expect(changed?.dataset.changedSource).toBe('true')
-    expect(changed?.getAttribute('style')).toContain('var(--success)')
+    expect(changed?.getAttribute('style')).toContain('var(--warning)')
     expect(changed?.getAttribute('aria-label')).toContain('Modified since the committed test')
     expect(container.querySelector('[data-testid="readable-modified-action-submit"]')?.textContent).toBe('MODIFIED')
     expect(container.querySelector('[data-testid="readable-story-item-setup-identifiers"]')?.getAttribute('data-changed-source')).toBeNull()

@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+import * as semanticCompiler from './controlled-english/semantic-context'
 
 import {
   extractTestMetadataFromSource,
@@ -369,12 +370,14 @@ describe('extractTestMetadataFromSource', () => {
         {
           name: 'first',
           line: 1,
+          endLine: 1,
           bodyLine: 1,
           bodySource: '{ expect(1).toBe(1) }',
         },
         {
           name: 'second',
           line: 2,
+          endLine: 2,
           bodyLine: 2,
           bodySource: '{ expect(2).toBe(2) }',
         },
@@ -427,4 +430,32 @@ describe('parseTestAnnotations', () => {
     const out = parseTestAnnotations('// @variant email, sms')
     expect(out.variants).toEqual(['email', 'sms'])
   })
+})
+
+it('reads requirement tags and comment fallbacks without constructing English', () => {
+  const source = `// @requirement R2
+  test('tagged', { tag: ['@req-R1', '@path-happy'] }, () => { expect(1).toBe(1) })
+  test('untagged', () => {})`
+  const metadata = extractTestMetadataFromSource('a.spec.ts', source).tests
+  expect(metadata.map((test) => test.requirements)).toEqual([['R1', 'R2'], undefined])
+  expect(metadata.map((test) => test.requirements)).toEqual(extractTestsFromSource('a.spec.ts', source).tests.map((test) => test.requirements))
+  expect(metadata.every((test) => !('readable' in test))).toBe(true)
+})
+
+it('compiles shared English helpers once per source extraction and refreshes them on edit', () => {
+  const compile = vi.spyOn(semanticCompiler, 'compileSemanticSource')
+  const source = `function sharedAction() { console.log('original') }
+  test('first', () => { sharedAction() })
+  test('second', () => { sharedAction() })`
+  try {
+    const first = extractTestsFromSource('a.spec.ts', source)
+    expect(first.tests).toHaveLength(2)
+    expect(compile).toHaveBeenCalledTimes(2)
+    expect(JSON.stringify(first.tests[0].readable)).toContain('original')
+    expect(JSON.stringify(first.tests[1].readable)).toContain('original')
+    const edited = extractTestsFromSource('a.spec.ts', source.replace('original', 'edited'))
+    expect(compile).toHaveBeenCalledTimes(4)
+    expect(JSON.stringify(edited.tests[0].readable)).toContain('edited')
+    expect(JSON.stringify(edited.tests[1].readable)).toContain('edited')
+  } finally { compile.mockRestore() }
 })

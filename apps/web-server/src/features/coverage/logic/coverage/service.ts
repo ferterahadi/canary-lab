@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { loadFeatures, listSpecFiles } from '../../../../shared/feature-loader'
-import { extractTestsFromSource } from '../../../../shared/ast-extractor'
+import { extractTestsFromSource, extractTestMetadataFromSource } from '../../../../shared/ast-extractor'
 import type { CoverageLedger, PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
 import { computeCoverageLedger, type CoverageTestInput } from './ledger'
 import { lastRunOutcomeForTitle, readLatestRunOutcomes } from '../../../runs/logic/runtime/run-outcomes'
@@ -123,8 +123,12 @@ export function readPersistedCoverageState(featureDir: string): PersistedCoverag
   const summary = readPrdSummary(featureDir)
   if (!summary) return 'absent'
   const runState = readCoverageRunState(featureDir)
-  const hasAnnotatedTests = collectTests(featureDir).tests
-    .some((test) => (test.requirements?.length ?? 0) > 0)
+  // The suite list needs annotation presence, not a translated coverage ledger.
+  const hasAnnotatedTests = listSpecFiles(featureDir).some((file) => {
+    let source: string
+    try { source = fs.readFileSync(file, 'utf8') } catch { return false }
+    return extractTestMetadataFromSource(file, source).tests.some((test) => (test.requirements?.length ?? 0) > 0)
+  })
   return derivePersistedCoverageState({
     hasAnnotatedTests,
     hasCoverageRun: runState !== null,

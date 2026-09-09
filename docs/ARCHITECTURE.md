@@ -196,9 +196,19 @@ imports and shared setup; the selected change's assessment appears below the sou
 Missing snapshots are disclosed rather than replaced with a different baseline.
 `ComparisonTable` also serves configuration previews and captured patches through
 `DiffView`. Red means removed and green means added, independently of execution.
-Test and suite review buttons open this dialog directly; its file, source line,
-language, and comparison baseline survive refresh in the URL. Modified cards keep
-their execution styling, and possible weakening uses an amber advisory cue.
+The Tests header and suite review buttons open this dialog directly; its file, source line,
+language, and comparison baseline survive refresh in the URL. Modified cards show
+a small amber dot beside their title and keep their execution styling; review stays
+in the Tests header instead of repeating a message and button on each card. Modified source lines and their labels use amber in both
+English and Code; actual failure highlights take precedence. Source markers travel
+with the current tests response so they cannot lag behind the displayed code.
+Inline markers use syntax metadata and a source diff, without translating the
+baseline or computing assessments. Run difference indicators request only a boolean;
+full before/after context is loaded when Review opens. Suite-list coverage presence
+and requirement labels also read syntax metadata, without translating test bodies.
+The English viewer compiles shared helpers once per source extraction and rebuilds
+them on the next edit. Possible weakening also uses
+an amber advisory cue.
 Commit names the selected suite and counts all its tracked dirty spec files.
 A successful commit leaves a saved receipt; the uncommitted review cue clears on
 live refresh. Differences from a selected run remain independently inspectable:

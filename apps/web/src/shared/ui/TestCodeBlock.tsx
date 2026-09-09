@@ -153,7 +153,7 @@ function FallbackCodeLines({
     const style = active && highlightColors
       ? { background: highlightColors.background, boxShadow: `inset 2px 0 0 ${highlightColors.bar}` }
       : changed
-        ? { background: 'color-mix(in srgb, var(--success) 16%, transparent)', boxShadow: 'inset 2px 0 0 var(--success)' }
+        ? { background: 'color-mix(in srgb, var(--warning) 16%, transparent)', boxShadow: 'inset 2px 0 0 var(--warning)' }
         : selected
           ? { background: 'color-mix(in srgb, var(--accent) 14%, transparent)', boxShadow: 'inset 2px 0 0 var(--accent)' }
           : undefined
@@ -251,7 +251,7 @@ function decorateShikiLines(
       return `<span class="line"${attrs} ${changedLines?.has(lineNo) ? 'data-changed-line="true" ' : ''}data-active-line="true" data-execution-highlight="${lineHighlight.kind}" style="background:${colors.background};box-shadow:inset 2px 0 0 ${colors.bar}"`
     }
     if (changedLines?.has(lineNo)) {
-      return `<span class="line"${attrs} data-changed-line="true" style="background:color-mix(in srgb, var(--success) 16%, transparent);box-shadow:inset 2px 0 0 var(--success)"`
+      return `<span class="line"${attrs} data-changed-line="true" style="background:color-mix(in srgb, var(--warning) 16%, transparent);box-shadow:inset 2px 0 0 var(--warning)"`
     }
     if (selected) {
       return `<span class="line"${attrs} style="background:color-mix(in srgb, var(--accent) 14%, transparent);box-shadow:inset 2px 0 0 var(--accent)"`

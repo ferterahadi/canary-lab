@@ -348,3 +348,22 @@ test('configured client', async () => {
     expect(body[0].tests[0].name).toBe('plain')
   })
 })
+it('ships matching source and markers for each expanded Playwright test', async () => {
+  const source = 'for (const channel of ["line", "whatsapp"]) {\n  test(`reads ${channel}`, () => {\n    expect(1).toBe(1)\n  })\n}'
+  const dir = writeFeature('markers', { spec: source })
+  git(dir, ['init', '-q']); git(dir, ['config', 'user.email', 'test@example.test']); git(dir, ['config', 'user.name', 'Test'])
+  git(dir, ['add', '.']); git(dir, ['commit', '-qm', 'baseline'])
+  fs.writeFileSync(path.join(dir, 'e2e/a.spec.ts'), source.replace('    expect(1)', '    console.log("this")\n    expect(1)'))
+  const app = await build({ spawner: jsonSpawner((featureDir) => ({
+    config: { rootDir: featureDir },
+    suites: [{ file: 'e2e/a.spec.ts', specs: ['line', 'whatsapp'].map((channel) => ({ file: 'e2e/a.spec.ts', line: 2, title: `reads ${channel}` })) }],
+  })) })
+  const response = await app.inject('/api/features/markers/tests')
+  const tests = response.json()[0].tests
+  expect(tests).toHaveLength(2)
+  for (const test of tests) {
+    expect(test.bodySource).toContain('console.log("this")')
+    expect(test.sourceChanges).toEqual({ changedLines: [3], count: 1 })
+  }
+  await app.close()
+})

@@ -1,54 +1,9 @@
-import type { ReviewSource, ReviewTestSource, TestFileReview } from '@shared/test-review'
+import type { ReviewSource, TestFileReview } from '@shared/test-review'
 import type { ReadableStoryItem } from '@shared/readable-tests/types'
-import { comparisonPatchRows } from '@/shared/lib/comparison-diff'
+import type { ContextRow } from '@shared/test-source-diff'
+export { sourceRows, rowsForTest, testSelections, type ContextRow } from '@shared/test-source-diff'
 
-export interface ContextRow {
-  id: string
-  before: string | null
-  after: string | null
-  beforeLine?: number
-  afterLine?: number
-  change?: number
-}
-
-export function sourceRows(review: TestFileReview): ContextRow[] {
-  const pairs = review.patch ? comparisonPatchRows(review.patch).filter((row) => row.kind === 'values')
-    : review.after.source.split('\n').map((text) => ({ kind: 'values' as const, before: text, after: text }))
-  let beforeLine = 0
-  let afterLine = 0
-  let change = 0
-  let wasChanged = false
-  return pairs.map((pair, index) => {
-    const changed = pair.before !== pair.after
-    if (changed && !wasChanged) change++
-    wasChanged = changed
-    return { id: `source-${index}`, before: pair.before, after: pair.after,
-      beforeLine: pair.before === null ? undefined : ++beforeLine,
-      afterLine: pair.after === null ? undefined : ++afterLine,
-      ...(changed ? { change } : {}) }
-  })
-}
-
-export interface TestSelection { key: string; test: ReviewTestSource; side: 'before' | 'after' }
-const contains = (test: ReviewTestSource, line?: number): boolean => line != null && line >= test.line && line <= test.endLine
-
-/** Test boundaries come from the source, not names: generated cases and renamed
- * tests can share a name or change it while retaining their code context. */
-export function testSelections(review: TestFileReview, rows: ContextRow[]): TestSelection[] {
-  return [
-    ...review.after.tests.map((test) => ({ key: `after:${test.line}`, test, side: 'after' as const })),
-    ...review.before.tests.filter((test) => !rows.some((row) => contains(test, row.beforeLine) && review.after.tests.some((after) => contains(after, row.afterLine))))
-      .map((test) => ({ key: `before:${test.line}`, test, side: 'before' as const })),
-  ]
-}
-
-export function rowsForTest(rows: ContextRow[], selected: TestSelection | undefined, review: TestFileReview): ContextRow[] {
-  if (!selected) return rows
-  const own = selected.side === 'after' ? 'afterLine' : 'beforeLine'
-  const other = selected.side === 'after' ? 'beforeLine' : 'afterLine'
-  const opposite = review[selected.side === 'after' ? 'before' : 'after'].tests.filter((test) => rows.some((row) => contains(selected.test, row[own]) && contains(test, row[other])))
-  return rows.filter((row) => contains(selected.test, row[own]) || opposite.some((test) => contains(test, row[other])))
-}
+const contains = (test: { line: number; endLine: number }, line?: number): boolean => line != null && line >= test.line && line <= test.endLine
 
 /** English uses the same translator as test cards. Untranslated source stays
  * visible; navigation stays keyed to source rows even when wording is equal. */

@@ -1,9 +1,9 @@
 // The `@requirement` ids a live spec's tests carry, by test name. One reader for the
 // two surfaces that attach a requirement to a strength verdict — the run's
 // integrity hints and the feature list's dirty summary — so both read the tags
-// from the same live source with the same extractor. The full extractor (not the
-// metadata one) is what parses `@requirement <id>`.
-import { extractTestsFromSource } from '../../../../shared/ast-extractor'
+// from the same live source with syntax-only annotation parsing. Requirement
+// lookups must not translate every test and block a source-edit refresh.
+import { extractTestMetadataFromSource } from '../../../../shared/ast-extractor'
 
 export type TestRequirements = Map<string, string[] | undefined>
 
@@ -25,5 +25,5 @@ export function testRequirementsReader(
 }
 
 export function testRequirementsOf(rel: string, source: string): TestRequirements {
-  return new Map(extractTestsFromSource(rel, source).tests.map((t) => [t.name, t.requirements]))
+  return new Map(extractTestMetadataFromSource(rel, source).tests.map((t) => [t.name, t.requirements]))
 }

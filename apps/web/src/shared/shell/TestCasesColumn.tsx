@@ -4,7 +4,6 @@ import { DiscoveryRepairActivity } from './DiscoveryRepairActivity'
 import { Section, CopyField } from '../ui/atoms'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api/client'
-import { rowsForTest, sourceRows, testSelections } from '../lib/test-review-model'
 import { useInvalidationKey } from '../state/invalidation'
 import type { DirtySpecSummary, ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
 import {
@@ -27,7 +26,6 @@ import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../t
 import { sourceFileInRun } from '@/features/runs'
 import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
 
-type DirtyDiff = { name: string; line: number; changedLines: number[]; count: number }[]
 type TestCardExecutionHighlight = TestExecutionLineHighlight & { sourceLine: number }
 
 interface ExpandedTestSelection {
@@ -68,9 +66,6 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
   const [promptCopied, setPromptCopied] = useState(false)
   const [copyError, setCopyError] = useState<string | null>(null)
   const [expandedTest, setExpandedTest] = useState<ExpandedTestSelection | null>(null)
-  // Per-test changed-line numbers for each dirty spec file (diffed against git
-  // HEAD server-side), keyed by that file's path. Fetched lazily, once per file.
-  const [dirtyDiffs, setDirtyDiffs] = useState<Record<string, DirtyDiff>>({})
 
   useEffect(() => {
     if (!feature) {
@@ -90,7 +85,6 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
     setCopyError(null)
     setDiscovery(null)
     setLoaded(previousLists.current.has(feature) ? { feature, specs: previousLists.current.get(feature)! } : null)
-    setDirtyDiffs({})
     const failed = (message: string): void => {
       if (cancelled) return
       setLoadError(message)
@@ -133,23 +127,6 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
   }, [feature, refreshKey, retryKey])
 
   const dirtyRevision = JSON.stringify(dirtySpecs)
-  useEffect(() => {
-    let cancelled = false
-    setDirtyDiffs({})
-    if (feature) for (const spec of JSON.parse(dirtyRevision) as DirtySpecSummary[]) {
-      api.getTestFileReview(feature, spec.file).then((review) => {
-        if (cancelled) return
-        const rows = sourceRows(review)
-        const tests = testSelections(review, rows).filter((item) => item.side === 'after').map((item) => {
-          const changes = rowsForTest(rows, item, review).filter((row) => row.change != null)
-          return { name: item.test.name, line: item.test.line, count: new Set(changes.map((row) => row.change)).size,
-            changedLines: changes.flatMap((row) => row.afterLine == null ? [] : [row.afterLine]) }
-        })
-        setDirtyDiffs((previous) => ({ ...previous, [spec.file]: tests }))
-      }).catch(() => { /* The direct review action exposes the error and retry. */ })
-    }
-    return () => { cancelled = true }
-  }, [feature, dirtyRevision, refreshKey])
 
   const [runDifferences, setRunDifferences] = useState<string[]>([])
   const runId = activeRunManifest?.suiteSnapshot?.kind === 'taken' ? activeRunManifest.runId : undefined
@@ -160,8 +137,8 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
     if (feature && runId) {
       const featureDir = activeRunManifest?.featureDir
       const files = (JSON.parse(runFiles) as string[]).map((file) => featureDir && file.startsWith(`${featureDir}/`) ? file.slice(featureDir.length + 1) : file)
-      for (const file of files) void api.getTestFileReview(feature, file, runId).then((review) => {
-        if (!cancelled && review.before.source !== review.after.source) setRunDifferences((previous) => [...previous, file])
+      for (const file of files) void api.getTestFileDifference(feature, file, runId).then((review) => {
+        if (!cancelled && review.changed) setRunDifferences((previous) => [...previous, file])
       }).catch(() => { /* A missing snapshot is already disclosed in the run detail. */ })
     }
     return () => { cancelled = true }
@@ -285,12 +262,10 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
         ) : (
           <div className="space-y-1.5">
             {displaySpecs.flatMap((spec) => {
-              // Test-level dirty: only the test(s) named in the matching dirty
-              // spec's `affectedTests` get a direct review action.
-              const dirtySpec = dirtySpecs.find((d) => spec.file === d.file || spec.file.endsWith(`/${d.file}`))
+              const dirtySpec = dirtySpecs.find((item) => spec.file === item.file || spec.file.endsWith(`/${item.file}`))
               return spec.tests.map((t) => {
-                const diff = dirtyDiffs[dirtySpec?.file ?? '']?.find((item) => item.line === t.line)
-                const testDirty = diff ? diff.count > 0 : dirtySpec?.affectedTests.includes(t.name) ?? false
+                const diff = t.sourceChanges
+                const modified = diff ? diff.count > 0 : dirtySpec?.affectedTests.includes(t.name) ?? false
                 const changedLines = diff ? new Set(diff.changedLines.map((line) => line - (t.bodyLine ?? t.line) + 1)) : undefined
                 // `t.id` used to be read here as a preferred key. The tests
                 // endpoint builds each entry from name/line/bodySource/steps and
@@ -338,9 +313,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
                     runningStep={runningTest?.step}
                     executionHighlight={executionHighlight}
                     expanded={isExpanded}
-                    dirty={testDirty}
-                    changeCount={diff?.count}
-                    onReview={dirtySpec && onReviewTest ? () => onReviewTest(dirtySpec.file, t.line) : undefined}
+                    modified={modified}
                     changedLines={changedLines}
                     onToggle={() => setExpandedTest({
                       feature,
@@ -413,9 +386,7 @@ function TestCard({
   runningStep,
   executionHighlight,
   expanded,
-  dirty = false,
-  changeCount,
-  onReview,
+  modified,
   changedLines,
   onToggle,
 }: {
@@ -427,9 +398,7 @@ function TestCard({
   runningStep?: RunSummaryRunningStep
   executionHighlight?: TestCardExecutionHighlight
   expanded: boolean
-  dirty?: boolean
-  changeCount?: number
-  onReview?: () => void
+  modified: boolean
   /** Lines in `test.bodySource` that differ from the git HEAD version — see
    *  `changedLineNumbers`. Rendered as changed source, independently of execution status. */
   changedLines?: Set<number>
@@ -466,11 +435,18 @@ function TestCard({
         </span>
         <TestIdBadge n={testNumber} />
         <div
-          className="flex-1 min-w-0 truncate text-sm font-medium"
+          className="flex flex-1 min-w-0 items-center gap-2 text-sm font-medium"
           title={test.name}
           style={{ color: 'var(--text-primary)' }}
         >
-          {stripLeadingTestOrdinal(test.name)}
+          {modified && <span
+            role="img"
+            aria-label="Modified since the committed test"
+            title="Modified since the committed test"
+            data-testid="test-modified-dot"
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
+          />}
+          <span className="truncate">{stripLeadingTestOrdinal(test.name)}</span>
         </div>
         <span
           className="shrink-0"
@@ -484,10 +460,6 @@ function TestCard({
         </span>
         <StepStatusBadge status={status} />
       </button>
-      {dirty && <div className="flex items-center justify-between gap-2 px-3 pb-2 text-[11px] text-secondary">
-        <span>Test edited · execution status unchanged</span>
-        <button className="cl-button shrink-0 px-2 py-1" onClick={onReview}>Review {changeCount ? `${changeCount} ${changeCount === 1 ? 'change' : 'changes'}` : 'changes'}</button>
-      </div>}
       {expanded && (
         <div className="space-y-2 px-3 pb-3">
           {lineMessage && (

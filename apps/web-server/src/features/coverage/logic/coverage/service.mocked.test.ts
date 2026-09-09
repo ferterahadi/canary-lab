@@ -17,7 +17,7 @@ vi.mock('../../../../shared/ast-extractor', async (importOriginal) => {
   }
 })
 
-import { computeFeatureCoverage, runCoverageEngine as runCoverageEngineReal, regeneratePrdSummary as regeneratePrdSummaryReal, clearPrdSummary, buildCoverageMappingContext, applyExternalCoverageMappings, applyExternalSummary } from './service'
+import { readPersistedCoverageState, computeFeatureCoverage, runCoverageEngine as runCoverageEngineReal, regeneratePrdSummary as regeneratePrdSummaryReal, clearPrdSummary, buildCoverageMappingContext, applyExternalCoverageMappings, applyExternalSummary } from './service'
 
 import { extractTestsFromSource } from '../../../../shared/ast-extractor'
 
@@ -515,4 +515,13 @@ describe('applyExternalSummary — !found.featureDir branch (service.ts line 515
       applyExternalSummary({ featuresDir, feature: 'empty_featdir', requirements: [] })
     ).toThrow(/empty_featdir/)
   })
+})
+
+it('reads suite-list mapping evidence without invoking the English presentation extractor', () => {
+  const dir = writeFeature('metadata')
+  fs.writeFileSync(path.join(dir, 'docs', '_prd-summary.json'), JSON.stringify({ requirementsHash: 'h1', requirements: [] }))
+  fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('tagged', { tag: ['@req-R1'] }, () => {})")
+  vi.mocked(extractTestsFromSource).mockImplementation(() => { throw new Error('English is not needed for metadata') })
+  expect(readPersistedCoverageState(dir)).toBe('fresh')
+  expect(extractTestsFromSource).not.toHaveBeenCalled()
 })

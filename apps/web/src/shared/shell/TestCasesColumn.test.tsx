@@ -1,4 +1,3 @@
-import { testFileReview } from '../api/__fixtures__/test-review'
 // @vitest-environment happy-dom
 
 import { act } from 'react'
@@ -7,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, getTestFileReview, getFeatureTests } from '../api/client'
+import { ApiError, getTestFileReview, getTestFileDifference, getFeatureTests } from '../api/client'
 import { readableTest } from '../api/__fixtures__/readable-test'
 
 import type { FeatureTests } from '../api/types'
@@ -20,6 +19,7 @@ vi.mock('../api/client', async () => {
     ...actual,
     getFeatureTests: vi.fn(),
     getTestFileReview: vi.fn(),
+    getTestFileDifference: vi.fn(),
   }
 })
 
@@ -52,6 +52,7 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   vi.mocked(getFeatureTests).mockReset()
+  vi.mocked(getTestFileDifference).mockReset().mockResolvedValue({ changed: false })
   vi.mocked(getTestFileReview).mockReset().mockRejectedValue(new Error('No baseline'))
 })
 
@@ -525,7 +526,8 @@ describe('TestCasesColumn', () => {
     expect(failedEnglish?.getAttribute('style')).toContain('var(--danger)')
   })
 
-  it('offers review only for the changed test without a failure outline', async () => {
+  it('keeps review in the Tests header without repeating it on edited cards', async () => {
+    const review = vi.fn()
     vi.mocked(getFeatureTests).mockResolvedValue([
       {
         file: '/tmp/features/alpha/e2e/a.spec.ts',
@@ -543,6 +545,7 @@ describe('TestCasesColumn', () => {
           activeRunSummary={undefined}
           activeRunStatus={undefined}
           dirtySpecs={[{ file: 'e2e/a.spec.ts', affectedTests: ['b'] }]}
+          onReviewTest={review}
         />,
       )
     })
@@ -552,7 +555,14 @@ describe('TestCasesColumn', () => {
       return button?.closest('.cl-card') as HTMLElement | null
     }
     expect(cardFor('b')?.style.boxShadow ?? '').not.toContain('var(--danger)')
-    expect(cardFor('b')?.textContent).toContain('Review changes')
+    expect(cardFor('b')?.querySelector('[data-testid="test-modified-dot"]')).not.toBeNull()
+    expect(cardFor('a')?.querySelector('[data-testid="test-modified-dot"]')).toBeNull()
+    expect(cardFor('b')?.textContent).not.toContain('Review changes')
+    expect(container.textContent).not.toContain('Test edited · execution status unchanged')
+    const reviewButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Review 1 file')!
+    expect(reviewButton.closest('.cl-card')).toBeNull()
+    await act(async () => { reviewButton.click() })
+    expect(review).toHaveBeenCalledWith('e2e/a.spec.ts')
     expect(cardFor('a')?.textContent).not.toContain('Review changes')
     expect(cardFor('a')?.style.boxShadow ?? '').not.toContain('var(--danger)')
   })
@@ -562,11 +572,10 @@ describe('TestCasesColumn', () => {
       {
         file: '/tmp/features/alpha/e2e/a.spec.ts',
         tests: [
-          { name: 'a', line: 3, bodySource: '{\n  const x = 1\n  expect(x).toBe(2)\n}', steps: [], readable: readableTest('a') },
+          { name: 'a', line: 3, bodySource: '{\n  const x = 1\n  expect(x).toBe(2)\n}', sourceChanges: { changedLines: [5], count: 1 }, steps: [], readable: readableTest('a') },
         ],
       },
     ])
-    vi.mocked(getTestFileReview).mockResolvedValue(testFileReview())
 
     await act(async () => {
       root.render(
@@ -587,6 +596,8 @@ describe('TestCasesColumn', () => {
     const changedLines = container.querySelectorAll('[data-changed-line="true"]')
     expect(changedLines).toHaveLength(1)
     expect(changedLines[0].textContent).toContain('toBe(2)')
+    expect(changedLines[0].getAttribute('style')).toContain('var(--warning)')
+    expect(getTestFileReview).not.toHaveBeenCalled()
   })
 
   it('renders an error when feature tests fail to load', async () => {

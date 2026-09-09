@@ -31,7 +31,7 @@ function readSource(file: string): string {
 }
 
 export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {
-  app.get<{ Params: { name: string }; Querystring: { file?: string; runId?: string } }>('/api/features/:name/test-review', async (req, reply) => {
+  app.get<{ Params: { name: string }; Querystring: { file?: string; runId?: string; summary?: string } }>('/api/features/:name/test-review', async (req, reply) => {
     const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
     if (!feature) return reply.code(404).send({ error: 'Suite not found' })
     const file = req.query.file
@@ -67,6 +67,7 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
         beforeSource = source.stdout
       } else beforeSource = ''
     }
+    if (req.query.summary === 'true') return { changed: beforeSource !== afterSource }
     const extract = (source: string): ReviewSource => {
       const result = extractTestsFromSource(file, source, feature.semanticRules)
       return { source, tests: result.tests.map((test) => ({ name: test.name, line: test.line, endLine: test.endLine ?? test.line, readable: test.readable })), ...(result.parseError ? { parseError: result.parseError } : {}) }
