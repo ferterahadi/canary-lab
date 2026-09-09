@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { WorkspaceNotification } from '@/shared/api/notifications'
 
-const api = vi.hoisted(() => ({ getNotifications: vi.fn(), addNotification: vi.fn(), deleteNotification: vi.fn(), readNotification: vi.fn() }))
+const api = vi.hoisted(() => ({ getNotifications: vi.fn(), deleteNotification: vi.fn(), readNotification: vi.fn() }))
 vi.mock('@/shared/api/notifications', () => api)
 import { NotificationCenter } from './NotificationCenter'
 import { useNotifications } from './use-notifications'
@@ -19,7 +19,6 @@ beforeEach(() => {
   api.getNotifications.mockImplementation(async () => [...rows])
   api.deleteNotification.mockImplementation(async (id) => { rows = rows.filter((row) => row.id !== id) })
   api.readNotification.mockImplementation(async (id) => { rows = rows.map((row) => row.id === id ? { ...row, readAt: 'now' } : row) })
-  api.addNotification.mockImplementation(async (title, body) => { const note = { id: 'n2', title, body, createdAt: '2026-09-08T11:00:00Z' }; rows.push(note); return note })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(() => { act(() => root.unmount()); container.remove() })
@@ -68,16 +67,16 @@ it('opens a toast without deleting its message; the close button permanently del
   expect(api.deleteNotification).toHaveBeenCalledWith('n1')
 })
 
-it('adds notes through the same owner and ignores an older fetch arriving after a mutation', async () => {
+it('ignores an older fetch arriving after a read mutation', async () => {
   let state!: ReturnType<typeof useNotifications>
   function Probe() { state = useNotifications(); return null }
   let stale!: (rows: WorkspaceNotification[]) => void
   api.getNotifications.mockImplementationOnce(() => new Promise((resolve) => { stale = resolve }))
   await act(async () => root.render(<Probe />))
-  await act(async () => { await state.add('Check service', 'Tomorrow') })
-  expect(state.items.some((item) => item.title === 'Check service')).toBe(true)
+  await act(async () => { await state.read('n1') })
+  expect(state.items[0].readAt).toBe('now')
   await act(async () => stale([]))
-  expect(state.items.some((item) => item.title === 'Check service')).toBe(true)
+  expect(state.items[0].readAt).toBe('now')
 })
 
 
@@ -87,4 +86,35 @@ it('opens the run instead of asking for another review after a notification reso
   await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={navigate} />))
   await act(async () => button('Open run →').click())
   expect(navigate).toHaveBeenCalledWith({ kind: 'run', feature: 'shop', runId: 'run-1' })
+})
+
+it('has no manual note creation and opens a feature-level weakening hint without inventing a run', async () => {
+  rows = [{ id: 'weak', title: 'shop: tests may have been weakened', body: 'A hint, not a verdict.', target: { kind: 'test-review', feature: 'shop' }, severity: 'danger', createdAt: '2026-09-09T10:00:00Z' }]
+  const navigate = vi.fn()
+  await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={navigate} />))
+  expect([...document.querySelectorAll('button')].some((element) => /\+ Add/.test(element.textContent ?? ''))).toBe(false)
+  expect(document.querySelector('form')).toBeNull()
+  expect(document.body.textContent).toContain('Test integrity · Hint')
+  await act(async () => button('Review test changes →').click())
+  expect(navigate).toHaveBeenCalledWith({ kind: 'test-review', feature: 'shop' })
+})
+
+it('orders weakening hints before ordinary attention and filters read and resolved items', async () => {
+  rows.push({ id: 'weak', title: 'Possible weakening', body: 'Review', severity: 'danger', target: { kind: 'test-review', feature: 'shop' }, createdAt: '2026-09-07T10:00:00Z' })
+  rows.push({ id: 'done', title: 'Resolved', body: '', target, resolvedAt: 'now', createdAt: '2026-09-09T10:00:00Z' })
+  await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={vi.fn()} />))
+  expect([...document.querySelectorAll('[data-testid^="notification-"]')].map((element) => element.getAttribute('data-testid'))).toEqual(['notification-center', 'notification-weak', 'notification-n1', 'notification-done'])
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="notification-weak"] button:nth-child(2)')!.click())
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('nav[aria-label="Notification filter"] button')][1].click())
+  expect(document.querySelector('[data-testid="notification-weak"]')).toBeNull()
+  expect(document.querySelector('[data-testid="notification-done"]')).toBeNull()
+  expect(document.querySelector('[data-testid="notification-n1"]')).not.toBeNull()
+})
+
+it('opens a resolved feature-only alert as the suite, not an active review', async () => {
+  rows = [{ id: 'resolved', title: 'Tests changed', body: '', target: { kind: 'test-review', feature: 'shop' }, resolvedAt: 'now', createdAt: '2026-09-09T10:00:00Z' }]
+  const navigate = vi.fn()
+  await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={navigate} />))
+  await act(async () => button('Open suite →').click())
+  expect(navigate).toHaveBeenCalledWith({ kind: 'feature', feature: 'shop' })
 })

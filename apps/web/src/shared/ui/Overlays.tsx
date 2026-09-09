@@ -10,7 +10,7 @@
  */
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { CloseIcon } from './Icons'
 import { StatusDot, StatusDotState } from './atoms'
 
@@ -67,6 +67,54 @@ export function useEscapeToClose(onClose: () => void, enabled = true): void {
   }, [enabled])
 }
 
+const focusLayers: HTMLElement[] = []
+let bodyOverflow = ''
+
+/** Only the top modal owns keyboard focus; nested confirmations return to the
+ * control that opened them, and the last modal restores the page scroll. */
+function useModalFocus(ref: RefObject<HTMLDivElement | null>, open: boolean): void {
+  useEffect(() => {
+    const surface = ref.current
+    if (!open || !surface) return
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    if (focusLayers.length === 0) {
+      bodyOverflow = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+    }
+    const childIndex = focusLayers.findIndex((layer) => surface.contains(layer))
+    if (childIndex < 0) focusLayers.push(surface)
+    else focusLayers.splice(childIndex, 0, surface)
+    if (focusLayers.at(-1) === surface) surface.focus()
+    const focusable = (): HTMLElement[] => [...surface.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )].filter((node) => !node.closest('[hidden], [inert], [aria-hidden="true"]') && getComputedStyle(node).display !== 'none' && getComputedStyle(node).visibility !== 'hidden')
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Tab' || focusLayers.at(-1) !== surface) return
+      const nodes = focusable()
+      const index = nodes.indexOf(document.activeElement as HTMLElement)
+      if (nodes.length === 0 || index < 0 || (event.shiftKey ? index === 0 : index === nodes.length - 1)) {
+        event.preventDefault()
+        const next = event.shiftKey ? nodes.at(-1) ?? surface : nodes[0] ?? surface
+        next.focus()
+      }
+    }
+    const onFocus = (event: FocusEvent): void => {
+      if (focusLayers.at(-1) === surface && !surface.contains(event.target as Node)) surface.focus()
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('focusin', onFocus)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('focusin', onFocus)
+      const index = focusLayers.indexOf(surface)
+      const wasTop = index === focusLayers.length - 1
+      focusLayers.splice(index, 1)
+      if (focusLayers.length === 0) document.body.style.overflow = bodyOverflow
+      if (wasTop && previous?.isConnected) previous.focus()
+    }
+  }, [open, ref])
+}
+
 export function Modal({
   open,
   onClose,
@@ -85,6 +133,8 @@ export function Modal({
   subheader,
   footer,
   stableScrollGutter,
+  portal = false,
+  bodyClassName,
   children,
 }: {
   open: boolean
@@ -135,22 +185,30 @@ export function Modal({
    *  launcher's collapsible step list) doesn't jump sideways as the scrollbar
    *  appears and disappears. */
   stableScrollGutter?: boolean
+  /** Escape transformed/overflow-hidden status-bar ancestors. */
+  portal?: boolean
+  /** Pane layouts own their scroll regions instead of the default body. */
+  bodyClassName?: string
   children?: ReactNode
 }) {
   useEscapeToClose(onClose, open)
+  const surfaceRef = useRef<HTMLDivElement>(null)
+  useModalFocus(surfaceRef, open)
   if (!open) return null
   const hasHeader = Boolean(title || eyebrow || meta || status || icon || description)
-  return (
+  const node = (
     <div
       className="cl-modal-backdrop fixed inset-0 z-50 flex items-center justify-center px-4 py-[10vh]"
       onClick={onClose}
     >
       <div
+        ref={surfaceRef}
+        tabIndex={-1}
         role={role}
         aria-label={ariaLabel ?? title}
         aria-modal="true"
         data-testid={testId}
-        className="cl-modal relative flex max-h-[80vh] flex-col overflow-hidden rounded-lg"
+        className="cl-modal relative flex max-h-[80vh] flex-col overflow-hidden rounded-lg outline-none"
         style={{
           width,
           maxWidth: '94vw',
@@ -207,7 +265,7 @@ export function Modal({
         {subheader}
         {children != null && (
           <div
-            className="min-h-0 flex-1 overflow-y-auto scrollbar-thin"
+            className={bodyClassName ?? 'min-h-0 flex-1 overflow-y-auto scrollbar-thin'}
             style={stableScrollGutter ? { scrollbarGutter: 'stable' } : undefined}
           >
             {children}
@@ -221,6 +279,7 @@ export function Modal({
       </div>
     </div>
   )
+  return portal ? createPortal(node, document.body) : node
 }
 
 export function ConfirmModal({
@@ -234,6 +293,7 @@ export function ConfirmModal({
   onCancel,
   busy = false,
   confirmDisabled = false,
+  portal = false,
 }: {
   open: boolean
   title: string
@@ -245,10 +305,12 @@ export function ConfirmModal({
   onCancel: () => void
   busy?: boolean
   confirmDisabled?: boolean
+  portal?: boolean
 }) {
   return (
     <Modal
       open={open}
+      portal={portal}
       onClose={onCancel}
       title={title}
       status={variant === 'danger' ? 'failed' : undefined}

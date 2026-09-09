@@ -43,7 +43,7 @@ export function deriveRunViewModel(
   const events = detail?.lifecycleEvents ?? []
   const displayStatus = deriveDisplayStatus(status, transient)
   const waiting = transient ? undefined : runWaitingState(input)
-  const headline = waiting?.label ?? transientHeadline(transient, executionType) ?? lifecycle?.headline ?? fallbackHeadline(status, executionType)
+  const headline = (waiting?.kind === 'queued' ? undefined : waiting?.label) ?? transientHeadline(transient, executionType) ?? lifecycle?.headline ?? fallbackHeadline(status, executionType)
   const subtext = waiting?.detail ?? lifecycle?.detail
   const alert = primaryAlert(status, lifecycle?.abortReason?.service, executionType)
 

@@ -39,7 +39,6 @@ export function useNotifications() {
 
   return {
     items, error, loading, busy, refresh,
-    add: (title: string, body: string) => act(() => api.addNotification(title, body)),
     remove: (id: string) => act(() => api.deleteNotification(id)),
     read: (id: string) => act(() => api.readNotification(id)),
   }

@@ -357,64 +357,25 @@ describe('GlobalStatusBar', () => {
   })
 })
 
-// The changed-tests pill reads two sources: suites whose specs differ from the
-// baseline (the feature list) and suites whose LIVE run holds edits it has not
-// executed (the runs index, D9). A suite in both counts once.
-describe('GlobalStatusBar changed-tests pill', () => {
-  const dirty = (name: string, verdict: 'weaker' | 'equivalent') => ({
-    name, description: '', repos: [], envs: [],
-    dirty: { status: 'dirty' as const, specs: [{ file: 'e2e/a.spec.ts', affectedTests: ['a'], strength: { verdict, baseline: 'head' as const, tests: [] } }] },
-  })
-  const pill = () => [...container.querySelectorAll('button')]
-    .find((b) => /Tests (changed|weakened)/.test(b.textContent ?? ''))
+// Test-review entry now lives in Notifications; the route still owns the dialog.
+describe('GlobalStatusBar notifications and test review', () => {
+  const dirty = { name: 'checkout', description: '', repos: [], envs: [], dirty: { status: 'dirty', specs: [{ file: 'e2e/a.spec.ts', affectedTests: ['a'], strength: { verdict: 'weaker', baseline: 'head', tests: [] } }] } }
 
-  it('is absent when nothing changed and no run holds a pending edit', async () => {
-    await act(async () => { root.render(<GlobalStatusBar activeRunDetail={null} features={[]} />) })
-    expect(pill()).toBeUndefined()
-  })
-
-  it('counts a suite once when its specs are dirty AND its live run holds the same edit pending', async () => {
+  it('places Notifications in the right cluster and removes the separate changed-tests pill', async () => {
     mockRuns.value = [{ runId: 'r1', feature: 'checkout', status: 'healing', startedAt: '', pendingSpecEdits: 1 }]
-    await act(async () => {
-      root.render(<GlobalStatusBar activeRunDetail={null} features={[dirty('checkout', 'equivalent') as never]} />)
-    })
-    expect(pill()?.textContent).toContain('Tests changed')
-    expect(pill()?.textContent).toContain('1 awaiting adopt')
-    expect(pill()?.querySelector('.rounded-full.px-1')?.textContent).toBe('1')
+    await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} features={[dirty as never]} notificationControl={<button>Notifications</button>} />))
+    const inbox = container.querySelector('[data-testid="status-bar-notifications"]')!
+    expect(inbox.textContent).toBe('Notifications')
+    expect(inbox.parentElement?.className).toContain('ml-auto')
+    expect([...container.querySelectorAll('button')].some((button) => /Tests (changed|weakened)/.test(button.textContent ?? ''))).toBe(false)
+    expect(inbox.closest('[aria-hidden]')).toBeNull()
   })
 
-  it('a finished run with recorded pending edits does not light the pill — only a live one can adopt', async () => {
-    mockRuns.value = [{ runId: 'r1', feature: 'checkout', status: 'failed', startedAt: '', pendingSpecEdits: 2 }]
-    await act(async () => { root.render(<GlobalStatusBar activeRunDetail={null} features={[]} />) })
-    expect(pill()).toBeUndefined()
-  })
-
-  it('turns danger only when a suite reads weaker', async () => {
-    await act(async () => {
-      root.render(<GlobalStatusBar activeRunDetail={null} features={[dirty('a', 'equivalent') as never, dirty('b', 'weaker') as never]} />)
-    })
-    expect(pill()?.textContent).toContain('Tests weakened')
-    expect(pill()?.getAttribute('style')).toContain('--danger')
-  })
-
-  it('renders the review open from the routed open-state alone — a cold ?dialog=tests-review load', async () => {
+  it('renders the review from its routed open-state and reports closing to the host', async () => {
     const onOpenChange = vi.fn()
-    await act(async () => {
-      root.render(<GlobalStatusBar activeRunDetail={null} features={[dirty('a', 'equivalent') as never]} specReviewOpen onSpecReviewOpenChange={onOpenChange} />)
-    })
-    expect(container.querySelector('[aria-label="Changed test files"]')).not.toBeNull()
-    // Closing goes back through the host, which owns the route.
-    await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Changed test files"] button[aria-label="Close"]')?.click() })
+    await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} features={[dirty as never]} specReviewOpen onSpecReviewOpenChange={onOpenChange} />))
+    expect(document.querySelector('[role="dialog"][aria-label="Changed test files"]')).not.toBeNull()
+    await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"][aria-label="Changed test files"] button[aria-label="Close"]')!.click())
     expect(onOpenChange).toHaveBeenCalledWith(false)
-  })
-
-  it('opens the review panel from the pill, and reports the open-state to a routing host', async () => {
-    const onOpenChange = vi.fn()
-    await act(async () => {
-      root.render(<GlobalStatusBar activeRunDetail={null} features={[dirty('a', 'equivalent') as never]} onSpecReviewOpenChange={onOpenChange} />)
-    })
-    await act(async () => { pill()?.click() })
-    expect(onOpenChange).toHaveBeenCalledWith(true)
-    expect(container.querySelector('[aria-label="Changed test files"]')).not.toBeNull()
   })
 })

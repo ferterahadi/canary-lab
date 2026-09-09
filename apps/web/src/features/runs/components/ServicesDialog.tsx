@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { RunDetail, RunIndexEntry } from '@/shared/api/types'
 import { useActiveBootSessions, useRun, useRuns } from '../state/RunsContext'
-import { SlideOverPanel, StatusDot } from '@/shared/ui/atoms'
+import { ConfirmModal, Modal, StatusDot } from '@/shared/ui/atoms'
 import { RunDetailColumn } from './RunDetailColumn'
 
 interface Props {
@@ -17,6 +17,9 @@ export function ServicesDialog({ onClose }: Props) {
   const { sessions } = useActiveBootSessions()
   const { abort } = useRuns()
   const [picked, setPicked] = useState<string | null>(null)
+  const [stopIds, setStopIds] = useState<string[] | null>(null)
+  const [stopping, setStopping] = useState(false)
+  const [stopError, setStopError] = useState<string | null>(null)
 
   // Default to the first session; fall back automatically when the picked one
   // is stopped (and leaves the active list).
@@ -24,42 +27,49 @@ export function ServicesDialog({ onClose }: Props) {
     ? picked
     : sessions[0]?.runId ?? null
 
-  const stopAll = (): void => { for (const s of sessions) void abort(s.runId) }
+  const stop = async (): Promise<void> => {
+    if (!stopIds) return
+    setStopping(true)
+    setStopError(null)
+    try {
+      await Promise.all(stopIds.map((id) => abort(id)))
+      setStopIds(null)
+    } catch (error) {
+      setStopError(error instanceof Error ? error.message : 'Could not stop services')
+    } finally { setStopping(false) }
+  }
+  const requestStop = (ids: string[]): void => { setStopError(null); setStopIds(ids) }
 
   return (
-    <SlideOverPanel
+    <>
+    <Modal
+      open
+      portal
       onClose={onClose}
+      title="Services"
+      description="Apps booted for manual testing · no Playwright"
       ariaLabel="Services"
-      width={960}
-      header={
-        <>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold">Services</h2>
-            <p className="mt-0.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-              Apps booted for manual testing · no Playwright
-            </p>
-          </div>
-          {sessions.length > 0 && (
-            <button type="button" onClick={stopAll} className="rounded px-2 py-1 text-xs" style={{ color: 'var(--danger)' }}>
-              Stop all &amp; revert
-            </button>
-          )}
-          <button type="button" aria-label="Close services" onClick={onClose} className="rounded px-2 py-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
-            Close
-          </button>
-        </>
-      }
-      footer="Pick a session to read its per-service logs. Stop tears it down and reverts the envset."
+      width={1000}
+      height={600}
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
+      footer={<div className="flex w-full flex-wrap items-center justify-between gap-3">
+        <p className="text-[11px] text-secondary">Closing keeps services running. Stop tears down the session and reverts its environment.</p>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {sessions.length > 1 && <button className="px-2 py-1.5 text-xs text-danger" onClick={() => requestStop(sessions.map((session) => session.runId))}>Stop all &amp; revert</button>}
+          {selectedId && <button className="cl-button px-3 py-1.5 text-xs text-danger" onClick={() => requestStop([selectedId])}>Stop session &amp; revert</button>}
+          <button className="cl-button px-3 py-1.5 text-xs" onClick={onClose}>Done</button>
+        </div>
+      </div>}
     >
       {sessions.length === 0 ? (
         <div className="px-3 py-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
           No services booted. Use a suite&apos;s <span style={{ color: 'var(--boot)' }}>Run ▸ Boot</span> to bring an app up.
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1">
+        <div className="cl-dialog-panes min-h-0 flex-1">
           {/* Left rail: session list */}
           <aside
-            className="w-[232px] shrink-0 overflow-auto border-r p-2 scrollbar-thin"
+            className="cl-dialog-rail overflow-auto p-2 scrollbar-thin"
             style={{ borderColor: 'var(--border-default)' }}
           >
             <ul className="flex flex-col gap-1">
@@ -69,7 +79,6 @@ export function ServicesDialog({ onClose }: Props) {
                     session={s}
                     selected={s.runId === selectedId}
                     onSelect={() => setPicked(s.runId)}
-                    onStop={() => void abort(s.runId)}
                   />
                 </li>
               ))}
@@ -77,12 +86,25 @@ export function ServicesDialog({ onClose }: Props) {
           </aside>
 
           {/* Right pane: the full rich detail for the selected session. */}
-          <div className="min-w-0 flex-1">
-            {selectedId ? <RunDetailColumn runId={selectedId} /> : null}
+          <div className="min-h-0 min-w-0 overflow-hidden">
+            {selectedId ? <RunDetailColumn key={selectedId} runId={selectedId} /> : null}
           </div>
         </div>
       )}
-    </SlideOverPanel>
+    </Modal>
+    <ConfirmModal
+      open={stopIds !== null}
+      portal
+      title={stopIds?.length === 1 ? `Stop ${sessions.find((session) => session.runId === stopIds[0])?.feature ?? 'session'}?` : 'Stop all services?'}
+      message={<><p>This stops the selected apps and reverts their session environments. You can boot them again later.</p>{stopError && <p role="alert" className="mt-2 text-danger">{stopError}</p>}</>}
+      confirmLabel="Stop & revert"
+      cancelLabel="Keep running"
+      variant="danger"
+      busy={stopping}
+      onConfirm={() => { void stop() }}
+      onCancel={() => { if (!stopping) setStopIds(null) }}
+    />
+    </>
   )
 }
 
@@ -97,12 +119,10 @@ function SessionRailRow({
   session,
   selected,
   onSelect,
-  onStop,
 }: {
   session: RunIndexEntry
   selected: boolean
   onSelect: () => void
-  onStop: () => void
 }) {
   // useRun loads + reads this session's detail (lifecycle phase, transient).
   const { detail, status, transient } = useRun(session.runId)
@@ -111,13 +131,11 @@ function SessionRailRow({
   const booting = label !== 'services up'
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
       onClick={onSelect}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect() } }}
       aria-pressed={selected}
-      className="cursor-pointer rounded-md px-2.5 py-2 transition-colors"
+      className="w-full cursor-pointer rounded-md px-2.5 py-2 text-left transition-colors"
       style={{ background: selected ? 'var(--bg-selected)' : 'transparent' }}
     >
       <div className="flex items-center gap-2">
@@ -131,17 +149,8 @@ function SessionRailRow({
         >
           {label}
         </span>
-        <button
-          type="button"
-          disabled={stopping}
-          onClick={(e) => { e.stopPropagation(); onStop() }}
-          className="ml-auto rounded px-1.5 py-0.5 text-[10px] font-medium disabled:opacity-60"
-          style={{ color: 'var(--danger)' }}
-          title="Stop & revert"
-        >
-          {stopping ? 'Stopping…' : 'Stop'}
-        </button>
+
       </div>
-    </div>
+    </button>
   )
 }

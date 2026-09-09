@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { FlightIndexEntry, FlightStageKey, FlightStageStatus, PlanFeaturesTask } from '@/shared/api/client'
-import { ChevronRightIcon, SlideOverPanel } from '@/shared/ui/atoms'
+import { ChevronRightIcon, Modal } from '@/shared/ui/atoms'
+import { flightNeedsAttention } from '@shared/flights/attention'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import type { FeatureActivity } from '../state/feature-activity'
 import { Chip } from '@/shared/ui/StatusChip'
@@ -66,48 +67,49 @@ export function FlightsPickerDialog({
   onPickPreFlight: (taskId: string) => void
   onClose: () => void
 }) {
+  const [query, setQuery] = useState('')
+  const [attentionOnly, setAttentionOnly] = useState(false)
   const rows = featureActivityRows(flights, activity, features)
+  const needsAttention = (row: FeatureActivityRow): boolean =>
+    Boolean(row.activity?.waiting && row.activity.waiting.kind !== 'queued') || Boolean(row.flight && flightNeedsAttention(row.flight))
+  const search = query.trim().toLowerCase()
+  const filtered = rows.filter((row) => row.feature.toLowerCase().includes(search) && (!attentionOnly || needsAttention(row)))
+  const filtering = Boolean(search || attentionOnly)
+  const attentionCount = rows.filter(needsAttention).length + preFlights.filter((task) => task.status === 'done').length
   // R55: split into the flat top-level bucket + collapsible group sections.
-  const { ungrouped, groups } = groupPickerRows(rows, features)
+  const { ungrouped, groups } = groupPickerRows(filtered, features)
   // Pre-flights precede any feature, so they sit above the feature rows —
   // sorted worst-first (a settled "to review" above a still-planning one).
-  const preFlightRows = [...preFlights].sort((a, b) => preFlightChipState(a).rank - preFlightChipState(b).rank)
+  const preFlightRows = preFlights.filter((task) => (!attentionOnly || task.status === 'done') && `${task.repoPaths.join(' ')} ${task.description}`.toLowerCase().includes(search)).sort((a, b) => preFlightChipState(a).rank - preFlightChipState(b).rank)
 
   // Portalled to <body>: the status-bar action cluster is overflow-hidden and
   // carries a transform during its collapse animation.
   return (
-    <SlideOverPanel
+    <Modal
+      open
+      portal
       onClose={onClose}
+      title="Flights"
+      description={`${FLIGHT_OVERVIEW} Pick a flight to follow its stages and answer checkpoints.`}
       ariaLabel="Open flights"
       testId="flights-task-menu"
-      portal
-      header={
-        <>
-          <div className="min-w-0 flex-1">
-            <h2 className="flex items-center gap-1.5 text-[13.5px] font-semibold">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
-                <path d="M22 2 11 13" />
-                <path d="M22 2 15 22l-4-9-9-4Z" />
-              </svg>
-              Flights
-            </h2>
-            <p className="mt-0.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-              {FLIGHT_OVERVIEW} Pick a flight to follow its stages and answer checkpoints.
-            </p>
-          </div>
-          <button type="button" aria-label="Close flights picker" onClick={onClose} className="cl-button px-2 py-1 text-xs">
-            Close
-          </button>
-        </>
+      width={780}
+      height={600}
+      stableScrollGutter
+      subheader={
+        <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
+          <input className="cl-input min-w-0 flex-1 px-3 py-2 text-xs" aria-label="Search flights" placeholder="Search flights…" value={query} onChange={(event) => setQuery(event.target.value)} />
+          <button className={`${attentionOnly ? 'cl-button-primary' : 'cl-button'} px-3 py-2 text-xs`} aria-pressed={attentionOnly} onClick={() => setAttentionOnly(!attentionOnly)}>Needs input <span className="ml-1">{attentionCount}</span></button>
+        </div>
       }
-      footer="Canary checks every step itself — the app booted, coverage was met, the run went green. The agent only suggests; Canary decides."
+      footer={<p className="mr-auto text-[11px] text-secondary">Stage indicators reflect evidence collected by Canary.</p>}
     >
-      {rows.length === 0 && preFlightRows.length === 0 ? (
+      {filtered.length === 0 && preFlightRows.length === 0 ? (
         <div className="px-4 py-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-          No flights yet. Fly a suite from its row in the suites list — or start one from a terminal:
-          <div className="cl-code-shell mt-2 px-2 py-1.5 text-[11px]">
-            npx canary-lab flight ../your-repo "what to test"
-          </div>
+          {filtering ? <><p>No matching flights.</p><button className="cl-button mt-3 px-3 py-1.5" onClick={() => { setQuery(''); setAttentionOnly(false) }}>Clear filters</button></> : <>
+            No flights yet. Fly a suite from its row in the suites list — or start one from a terminal:
+            <div className="cl-code-shell mt-2 px-2 py-1.5 text-[11px]">npx canary-lab flight ../your-repo "what to test"</div>
+          </>}
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto p-2 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
@@ -133,7 +135,8 @@ export function FlightsPickerDialog({
           )}
           {groups.map((section) => (
             <PickerGroupSection
-              key={section.group!}
+              key={`${section.group}:${filtering}`}
+              expandInitially={filtering}
               section={section}
               onPick={onPick}
               onPickActivity={onPickActivity}
@@ -142,7 +145,7 @@ export function FlightsPickerDialog({
           ))}
         </div>
       )}
-    </SlideOverPanel>
+    </Modal>
   )
 }
 
@@ -203,17 +206,19 @@ export const GROUPS_OPEN_STORAGE_KEY = 'cl-flight-groups-open'
  *  without expanding it), and an explicit user toggle is remembered. */
 export function PickerGroupSection({
   section,
+  expandInitially = false,
   onPick,
   onPickActivity,
   onStartFlight,
 }: {
   section: PickerGroup
+  expandInitially?: boolean
   onPick: (flightId: string | null) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
   onStartFlight: (feature: string) => void
 }) {
   const group = section.group!
-  const [open, setOpen] = useState(() => readGroupOpen(GROUPS_OPEN_STORAGE_KEY, group, false))
+  const [open, setOpen] = useState(() => expandInitially || readGroupOpen(GROUPS_OPEN_STORAGE_KEY, group, false))
   const toggle = (): void => setOpen((v) => { const next = !v; writeGroupOpen(GROUPS_OPEN_STORAGE_KEY, group, next); return next })
   // The worst row drives the section's summary chip (same comparator).
   const worst = section.rows.reduce((acc, r) =>

@@ -60,6 +60,7 @@ describe('DirtySpecStore', () => {
     const rec = await store.recompute('checkout', featureDir)
     expect(rec.status).toBe('dirty')
     expect(store.isDirty('checkout')).toBe(true)
+    expect(store.list()).toEqual([rec])
     expect(events).toContain('changed')
 
     // record persisted to disk atomically

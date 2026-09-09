@@ -517,9 +517,14 @@ export function App() {
         onReturnToFlight={openFlight}
         notificationControl={<NotificationCenter open={nav.notificationsOpen} suppressToast={nav.routedDialog !== null} onOpenChange={nav.setNotificationsOpen} onNavigate={(target) => {
           if (target.kind === 'flight') openFlight(target.flightId)
-          else { navigateToRun(target.feature, target.runId); setSpecReviewOpen(target.kind === 'test-review') }
+          else {
+            if ('runId' in target && target.runId) navigateToRun(target.feature, target.runId)
+            else { setSelectedFeature(target.feature); setSelectedRunId(null); setView('workspace') }
+            setSpecReviewOpen(target.kind === 'test-review')
+          }
         }} />}
         specReviewRunId={selectedRunId}
+        specReviewFeature={selectedFeature}
         specReviewRunDetail={statusRunDetail.detail}
         specReviewOpen={specReviewOpen}
         onSpecReviewOpenChange={setSpecReviewOpen}

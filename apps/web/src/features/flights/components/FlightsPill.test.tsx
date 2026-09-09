@@ -611,3 +611,23 @@ it('shows an adoption wait as review needed, and returns to active when the wait
   expect(container.textContent).toContain('Flights · 1 active')
   expect(container.textContent).not.toContain('review needed')
 })
+
+it('searches inside collapsed groups and filters attention without treating queued or external work as a question', () => {
+  const entries = [
+    flight({ flightId: 'paused', feature: 'batch-paused', status: 'paused', pauseReason: 'stage-failed' }),
+    flight({ flightId: 'queued', feature: 'batch-queued', status: 'paused', pauseReason: 'queued' }),
+    flight({ flightId: 'external', feature: 'batch-external', status: 'waiting-for-approval', stageProducer: 'external' }),
+  ]
+  act(() => root.render(<FlightsPill flights={entries} features={entries.map((entry) => ({ name: entry.feature, group: 'Batch' }))} onOpenFlight={vi.fn()} open />))
+  const input = document.querySelector<HTMLInputElement>('[aria-label="Search flights"]')!
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'batch')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  expect(document.querySelectorAll('[data-testid^="flight-open-"]')).toHaveLength(3)
+  const filter = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.startsWith('Needs input'))!
+  act(() => filter.click())
+  expect(document.querySelector('[data-testid="flight-open-paused"]')).not.toBeNull()
+  expect(document.querySelector('[data-testid="flight-open-queued"]')).toBeNull()
+  expect(document.querySelector('[data-testid="flight-open-external"]')).toBeNull()
+})

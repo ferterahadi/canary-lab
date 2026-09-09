@@ -7,7 +7,7 @@ import { runWaitingState } from '../utils/run-waiting-state'
 
 export function queueExplanation(d: RunQueueDiagnostics): string {
   if (d.reason === 'repo-collision') return 'Another run is using the same repository. This run starts after that repository is released.'
-  if (d.reason === 'run-limit') return `The concurrent run limit is ${d.maxConcurrentRuns}; ${d.activeRuns.length} runs currently count toward it.`
+  if (d.reason === 'run-limit') return `The concurrent run limit is ${d.maxConcurrentRuns}; ${d.activeRuns.length} ${d.activeRuns.length === 1 ? 'run currently counts' : 'runs currently count'} toward it.`
   if (d.reason === 'ready') return 'Capacity is available at this check. The run is still queued; the scheduler checks again when an active run finishes.'
   return `The ${d.reason === 'memory' ? 'available-memory' : 'CPU'} budget allows ${d.slotBudget} estimated slots. Active runs use ${d.usedSlots}; this run needs ${d.candidateCost} more. Each service and test runner counts as one slot.`
 }

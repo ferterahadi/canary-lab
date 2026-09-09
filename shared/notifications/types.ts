@@ -1,6 +1,7 @@
 export type NotificationTarget =
   | { kind: 'flight'; flightId: string }
-  | { kind: 'test-review'; feature: string; runId: string }
+  | { kind: 'feature'; feature: string }
+  | { kind: 'test-review'; feature: string; runId?: string }
   | { kind: 'run'; feature: string; runId: string }
 
 export interface WorkspaceNotification {
@@ -10,6 +11,7 @@ export interface WorkspaceNotification {
   createdAt: string
   readAt?: string
   resolvedAt?: string
+  severity?: 'neutral' | 'warning' | 'danger'
   target?: NotificationTarget
 }
 
@@ -18,5 +20,5 @@ export interface WorkspaceNotification {
 export interface NotificationSource {
   key: string
   signature: string
-  message?: Pick<WorkspaceNotification, 'title' | 'body' | 'target'>
+  message?: Pick<WorkspaceNotification, 'title' | 'body' | 'target' | 'severity'>
 }

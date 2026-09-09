@@ -1,3 +1,4 @@
+import type { RunWaitingState } from '@/features/runs'
 import type { ReactNode } from 'react'
 import type { FlightStage, FlightStageKey, FlightStageStatus, SpecsCoverageProgress } from '@/shared/api/client'
 import { capitalizeFirst } from '@/shared/lib/format'
@@ -117,7 +118,12 @@ export const STAGE_STATUS_LABEL: Record<FlightStageStatus, string> = {
 /** The one stage-status treatment (R14): icon + label chip in the stage's tone,
  *  with the live dot while generating. Every surface that shows a stage's state
  *  renders this — never a hand-rolled chip. */
-export function StageStatusChip({ status }: { status: FlightStageStatus }) {
+export function stagePresentationStatus(status: FlightStageStatus, waiting?: RunWaitingState): FlightStageStatus {
+  return waiting?.kind === 'queued' ? 'pending' : waiting ? 'waiting-for-approval' : status
+}
+
+export function StageStatusChip({ status: recordedStatus, waiting }: { status: FlightStageStatus; waiting?: RunWaitingState }) {
+  const status = stagePresentationStatus(recordedStatus, waiting)
   const tone = stageStatusTone(status)
   return (
     <Chip
@@ -128,7 +134,7 @@ export function StageStatusChip({ status }: { status: FlightStageStatus }) {
       icon={status === 'running'
         ? <StatusDot state="running" className="shrink-0" />
         : <span aria-hidden="true">{STAGE_ICON[status]}</span>}
-      label={capitalizeFirst(STAGE_STATUS_LABEL[status])}
+      label={waiting?.label ?? capitalizeFirst(STAGE_STATUS_LABEL[status])}
     />
   )
 }

@@ -60,11 +60,12 @@ describe('durable notifications', () => {
     expect(events.publish).not.toHaveBeenCalled()
   })
 
-  it('persists user notes and read state, and treats repeat deletion/read as a no-op', () => {
+  it('persists read state, and treats repeat deletion/read as a no-op', () => {
     const store = new NotificationStore(dir, events)
-    const note = store.add('Check deployment', 'After lunch')
+    store.reconcile([source])
+    const note = store.list()[0]
     new NotificationStore(dir, events).markRead(note.id)
-    expect(store.list()[0]).toMatchObject({ title: 'Check deployment', body: 'After lunch', readAt: expect.any(String) })
+    expect(store.list()[0]).toMatchObject({ title: 'checkout paused', body: 'Test run failed', readAt: expect.any(String) })
     events.publish.mockClear()
     store.markRead(note.id)
     store.markRead('missing')
@@ -85,16 +86,14 @@ describe('durable notifications', () => {
     expect(() => store.list()).toThrow('Cannot read')
   })
 
-  it('validates manual input, exposes read/delete routes, and emits updates after persistence', async () => {
+  it('rejects manual creation, exposes read/delete routes, and emits updates after persistence', async () => {
     const app = Fastify()
-    await app.register(notificationRoutes, { store: new NotificationStore(dir, events) })
+    const store = new NotificationStore(dir, events)
+    store.reconcile([source])
+    await app.register(notificationRoutes, { store })
     try {
-      expect((await app.inject({ method: 'POST', url: '/api/notifications', payload: { title: '   ' } })).statusCode).toBe(400)
-      expect((await app.inject({ method: 'POST', url: '/api/notifications', payload: { title: 'x'.repeat(201) } })).statusCode).toBe(400)
-      const create = await app.inject({ method: 'POST', url: '/api/notifications', payload: { title: '  Follow up  ', body: ' tomorrow ' } })
-      expect(create.statusCode).toBe(201)
-      const { id } = create.json()
-      expect(create.json()).toMatchObject({ title: 'Follow up', body: 'tomorrow' })
+      expect((await app.inject({ method: 'POST', url: '/api/notifications', payload: { title: 'Follow up' } })).statusCode).toBe(404)
+      const { id } = store.list()[0]
       expect((await app.inject({ method: 'POST', url: `/api/notifications/${id}/read` })).statusCode).toBe(204)
       expect((await app.inject('/api/notifications')).json()[0].readAt).toBeTruthy()
       expect((await app.inject({ method: 'DELETE', url: `/api/notifications/${id}` })).statusCode).toBe(204)
@@ -112,6 +111,7 @@ it('records source transitions without a browser and detaches subscriptions on s
   const app = Fastify()
   await register(app, {
     logsDir: dir, workspaceEvents: events,
+    dirtySpecStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
     runStore: { list: () => runs, onEvent: (fn: () => void) => runListeners.add(fn), offEvent: (fn: () => void) => runListeners.delete(fn) },
     flightStore: { list: () => [], onEvent: (fn: () => void) => flightListeners.add(fn), offEvent: (fn: () => void) => flightListeners.delete(fn) },
   } as unknown as import('../../server-context').ServerContext)
@@ -123,4 +123,34 @@ it('records source transitions without a browser and detaches subscriptions on s
   } finally { await app.close() }
   expect(runListeners.size).toBe(0)
   expect(flightListeners.size).toBe(0)
+})
+
+it('persists test-change alerts from dirty-store events, preserves deletion, and resolves recovery', async () => {
+  const { register } = await import('./index')
+  const dirtyListeners = new Set<() => void>()
+  let changes = [{ featureId: 'shop', status: 'dirty' as 'dirty' | 'clean', dirtySpecs: [{ strength: { verdict: 'weaker' } }] }]
+  const app = Fastify()
+  await register(app, {
+    logsDir: dir, workspaceEvents: events,
+    runStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
+    flightStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
+    dirtySpecStore: { list: () => changes, onEvent: (fn: () => void) => dirtyListeners.add(fn), offEvent: (fn: () => void) => dirtyListeners.delete(fn) },
+  } as unknown as import('../../server-context').ServerContext)
+  try {
+    const [initial] = (await app.inject('/api/notifications')).json()
+    expect(initial).toMatchObject({ severity: 'danger', target: { kind: 'test-review', feature: 'shop' } })
+    await app.inject({ method: 'DELETE', url: `/api/notifications/${initial.id}` })
+    for (const fn of dirtyListeners) fn()
+    expect((await app.inject('/api/notifications')).json()).toEqual([])
+    changes = [{ ...changes[0], status: 'clean' }]
+    for (const fn of dirtyListeners) fn()
+    changes = [{ ...changes[0], status: 'dirty' }]
+    for (const fn of dirtyListeners) fn()
+    const [next] = (await app.inject('/api/notifications')).json()
+    expect(next.id).not.toBe(initial.id)
+    changes = [{ ...changes[0], status: 'clean' }]
+    for (const fn of dirtyListeners) fn()
+    expect((await app.inject('/api/notifications')).json()[0].resolvedAt).toBeTruthy()
+  } finally { await app.close() }
+  expect(dirtyListeners.size).toBe(0)
 })

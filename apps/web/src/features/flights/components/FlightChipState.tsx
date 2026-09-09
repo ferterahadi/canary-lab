@@ -267,6 +267,7 @@ export interface FeatureFlightAction {
   /** The flight is parked on a checkpoint: blocked on the human rather than
    *  merely busy, so the row wash sits a step heavier (amber, not sky). */
   attention: boolean
+  queued?: boolean
 }
 
 /** Resolve the shortcut for one suite, or null when there is no flight to open.
@@ -295,6 +296,7 @@ export function resolveFeatureFlightAction(
     label: chip.label,
     title: chip.title,
     live: chip.live,
+    ...(activity?.waiting?.kind === 'queued' || (flight?.status === 'paused' && flight.pauseReason === 'queued') ? { queued: true } : {}),
     // Read off the flight record rather than the chip's rank, so the "blocked on
     // the human" wash tracks the same condition featureChipState branches on —
     // a hand-off is busy, not blocked, so it takes the sky `live` wash instead.

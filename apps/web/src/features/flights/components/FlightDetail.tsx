@@ -7,12 +7,12 @@ import { StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
-import { ACTIVITY_CHIP } from './FlightChipState'
+import { ACTIVITY_CHIP, featureChipState } from './FlightChipState'
 import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
 import { ACTIVITY_STAGE, type FeatureActivity, type FeatureExternalHistory } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageRailRows, stageRowKey, stageStatusTone } from './stage-meta'
+import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageRailRows, stageRowKey, stageStatusTone, stagePresentationStatus } from './stage-meta'
 import { stageStateLine } from './StageStatusLines'
 import {
   buildDerivedManifest,
@@ -401,10 +401,11 @@ export function FlightDetail({
     && externalMutationOwner == null
   const takeoverRequested = externalWorkCheckpoint != null
     && typeof (externalWorkCheckpoint.data as ExternalWorkCheckpointData | undefined)?.takeoverRequestedAt === 'string'
+  const waitingChip = featureActivity?.waiting ? featureChipState(flight, featureActivity) : null
   const suiteActivityChip = externalSuiteWork && featureActivity ? ACTIVITY_CHIP[featureActivity.kind] : null
-  const tone = agentHolding
+  const tone = waitingChip?.tone ?? (agentHolding
     ? FLIGHT_STATUS_TONE['running']
-    : suiteActivityChip?.tone ?? FLIGHT_STATUS_TONE[flight.status]
+    : suiteActivityChip?.tone ?? FLIGHT_STATUS_TONE[flight.status])
   const evalStage = flight.stages.find((s) => s.key === 'evaluation-export') ?? null
   return (
     <>
@@ -442,7 +443,7 @@ export function FlightDetail({
             // R81: a derived flight was never paused or interrupted — its steps
             // were simply completed outside the conductor, so it must not
             // borrow the record-only "paused by you / a stage failed" copy.
-            title={agentHolding
+            title={waitingChip ? waitingChip.title : agentHolding
               ? EXTERNAL_WORK_COPY.headerTitle
               : suiteActivityChip
               ? suiteActivityChip.title
@@ -455,8 +456,8 @@ export function FlightDetail({
                 : flight.pauseReason === 'restart' ? 'Interrupted by a server restart — Continue resumes it'
                 : 'A step failed — Continue retries it')
               : undefined}
-            icon={flight.status === 'running' || agentHolding || suiteActivityChip ? <StatusDot state="running" className="shrink-0" /> : undefined}
-            label={agentHolding
+            icon={waitingChip ? <StatusDot state={featureActivity?.waiting?.kind === 'queued' ? 'idle' : 'warning'} className="shrink-0" /> : flight.status === 'running' || agentHolding || suiteActivityChip ? <StatusDot state="running" className="shrink-0" /> : undefined}
+            label={waitingChip ? capitalizeFirst(waitingChip.label) : agentHolding
               ? EXTERNAL_WORK_COPY.headerLabel
               : suiteActivityChip
               ? capitalizeFirst(suiteActivityChip.label)
@@ -680,7 +681,9 @@ export function FlightDetail({
           </div>
           {railRows.map((s) => {
             const selected = s.key === stageKey
-            const t = stageStatusTone(s.status)
+            const rowWaiting = s.key === activityRowKey ? featureActivity?.waiting : undefined
+            const displayStatus = stagePresentationStatus(s.status, rowWaiting)
+            const t = stageStatusTone(displayStatus)
             // A merged row's duration sums its primary + folded companion
             // (run→heal, scaffold→env-capture, docs→prd-summary) — R61. Work
             // time, not wall clock: checkpoint parks and pauses don't count.
@@ -691,7 +694,7 @@ export function FlightDetail({
             // it rides here instead, under the static blurb, so hovering a rail
             // row still answers both "what is this step" and "what's it done".
             const stateLine = primary ? stageStateLine(primary, flight, folded) : null
-            const tooltip = stateLine ? `${STAGE_BLURB[s.key]}\n\n${stateLine}` : STAGE_BLURB[s.key]
+            const tooltip = rowWaiting ? `${rowWaiting.label}. ${rowWaiting.detail}` : stateLine ? `${STAGE_BLURB[s.key]}\n\n${stateLine}` : STAGE_BLURB[s.key]
             return (
               <Fragment key={s.key}>
                 {s.key === 'portify' && (
@@ -713,7 +716,7 @@ export function FlightDetail({
                   {/* Status hue stays a computed token string (one source of
                       truth in stageStatusTone), so this one keeps `color`. */}
                   <span className="w-3 shrink-0 text-center font-semibold" style={{ color: t }} aria-hidden="true">
-                    {STAGE_ICON[s.status]}
+                    {STAGE_ICON[displayStatus]}
                   </span>
                   <span className={`min-w-0 flex-1 truncate${s.status === 'pending' ? ' text-muted' : ''}`}>
                     {s.label}
@@ -731,7 +734,8 @@ export function FlightDetail({
                       {duration}
                     </span>
                   )}
-                  {s.status === 'running' && <StatusDot state="running" className="shrink-0" />}
+                  {rowWaiting && <span className="shrink-0 text-[10px]" style={{ color: t }}>{rowWaiting.label}</span>}
+                  {displayStatus === 'running' && <StatusDot state="running" className="shrink-0" />}
                 </button>
               </Fragment>
             )

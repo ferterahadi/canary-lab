@@ -334,7 +334,7 @@ function FeatureRow({
   const rowCue = tone === 'weaker' ? ' cl-list-row-dirty' : tone ? ' cl-list-row-changed' : ''
   const isActive = Boolean(activeRunFeature) && f.name === activeRunFeature
   const runState = isActive
-    ? (activeRunExecutionType === 'boot'
+    ? (activeRunStatus === 'queued' ? 'queued' : activeRunExecutionType === 'boot'
         ? 'booted'
         : activeRunStatus === 'healing' ? 'healing' : 'running')
     : null
@@ -349,6 +349,7 @@ function FeatureRow({
   // A resting/finished flight gets nothing — every flown suite carrying a
   // permanent tint would make the column noise again.
   const inFlight = Boolean(flight?.live || flight?.attention)
+  const showFlightChip = inFlight || flight?.queued === true
   // The action cluster FLOATS over the row's right edge instead of sitting in
   // flow, so three icons cost the suite name zero width at rest — in a column
   // of long `cns_*` names that width is the column's actual content. The name
@@ -361,11 +362,11 @@ function FeatureRow({
   // left an in-flight row with ~18px of readable name on hover (204px row − 72px
   // chip − 100px reservation). Subtract what the chip yields; the cluster floats
   // over the chip's box as it fades, so the icons still land clear of the text.
-  const chipWidth = inFlight ? 72 + 6 : 0
+  const chipWidth = showFlightChip ? 72 + 6 : 0
   const actionsWidth = Math.max(0, actionCount * 28 + (actionCount - 1) * 2 + 12 - chipWidth)
   return (
     <li
-      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${inFlight ? (flight?.attention ? ' cl-list-row-inflight-attention' : ' cl-list-row-inflight') : ''}${runState && !activeRunWaitingLabel ? ` cl-list-row-${runState}` : ''}${rowCue}`}
+      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${inFlight ? (flight?.attention ? ' cl-list-row-inflight-attention' : ' cl-list-row-inflight') : ''}${runState && runState !== 'queued' && !activeRunWaitingLabel ? ` cl-list-row-${runState}` : ''}${rowCue}`}
       style={{
         // An in-flight suite reads at full text contrast like a selected one: at 6%
         // the wash alone is nearly invisible on the dark theme, so the brighter
@@ -374,7 +375,7 @@ function FeatureRow({
         fontWeight: isSelected ? 500 : 400,
         ['--feature-row-actions' as string]: `${actionsWidth}px`,
       }}
-      title={isActive && activeRunWaitingLabel ? activeRunWaitingLabel : runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : inFlight ? flight?.title : undefined}
+      title={isActive && activeRunWaitingLabel ? activeRunWaitingLabel : runState ? (runState === 'queued' ? 'Queued' : runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : inFlight ? flight?.title : undefined}
     >
       {tone && (
         <Tooltip label={`${SPEC_TONE[tone].title} — review in the status bar`}>
@@ -419,9 +420,9 @@ function FeatureRow({
         {f.name}
       </button>
       {runState && (
-        <span className="sr-only">{activeRunWaitingLabel ?? (runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running')}</span>
+        <span className="sr-only">{activeRunWaitingLabel ?? (runState === 'queued' ? 'Queued' : runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running')}</span>
       )}
-      {inFlight && flight && (
+      {showFlightChip && flight && (
         /* In flow, not floating — it keeps its box while fading under the hover
            action cluster, so the row can't reflow as the pointer arrives. */
         <span className="feature-row__flight-chip mr-1.5 shrink-0 self-center" data-testid={`flight-chip-${f.name}`}>

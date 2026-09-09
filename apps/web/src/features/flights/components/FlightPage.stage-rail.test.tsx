@@ -268,6 +268,18 @@ async function render(flightId: string, extraProps: Record<string, unknown> = {}
 }
 
 describe('trailer model (R14–R18)', () => {
+  it('keeps Follow on a queued run while every visible stage chip says Queued', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'done', currentStage: null, stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })) }))
+    await render('fl_1', { activity: new Map([['checkout', { kind: 'running', runId: 'q', waiting: { kind: 'queued', label: 'Queued', shortLabel: 'queued', detail: 'Services have not started.' } }]]) })
+    expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toContain('Queued')
+    expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toContain('Queued')
+    expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).not.toContain('Running')
+    const rail = container.querySelector('[data-testid="stage-rail-run"]')
+    expect(rail?.getAttribute('aria-current')).toBe('true')
+    expect(rail?.textContent).toContain('Queued')
+    expect(rail?.querySelector('.animate-pulse')).toBeNull()
+  })
+
   it.each([
     ['authoring', 'specs-coverage', 'Writing'],
     ['mapping', 'specs-coverage', 'Mapping'],

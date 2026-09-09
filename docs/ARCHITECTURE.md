@@ -171,16 +171,26 @@ the shared atomic writer so a crash cannot persist a message without its dedupli
 state. The server owns writes; client tabs subscribe to `notifications-changed` and
 refetch on reconnect. The dialog is addressable as `?dialog=notifications`.
 
-Flight attention transitions and healing runs with pending test edits create
+Flight attention transitions, active runs with pending test edits, and feature-level test changes create
 messages even when the browser is closed. Reading a message preserves it. Deleting
 one removes its content permanently while retaining the source signature, so
 refreshing or restarting cannot recreate it. A later quiet-to-attention transition
-creates a new message. Recovery marks retained messages resolved. Users can also
-add plain-text notes. Notification actions navigate to the relevant flight or test
+creates a new message. Recovery marks retained messages resolved. The right-side
+Notifications control is the single entry point for test-change alerts, including
+advisory weakening hints. A pending run owns the alert for its feature so the same
+files do not create a second active message. Manual note creation is not available.
+Notification actions navigate to the relevant flight or test
 review; they never change the run verdict or adopt test edits themselves.
 
 The run detail keeps a visible review banner above its tabs while it awaits test
 review. Its button opens the existing changed-tests dialog with that run first.
+
+Notifications, Flights, Services, and test review use the shared centered `Modal`
+with task-specific widths, keyboard focus containment, and a pinned header/footer.
+Flights adds search and an attention filter. Test review keeps suite/file selection
+in a rail and expands suspected weakening ahead of other changes, with wrapping
+before/after assertion source. Commit, restore, and adopt still act on the selected
+suite/run. Closing Services leaves sessions running; stopping is a separate action.
 
 ## Run Lifecycle
 
@@ -432,7 +442,12 @@ Runs beyond a CPU/free-RAM heuristic are parked as `queued` (status `queued`, wi
 `CANARY_MAX_CONCURRENT_RUNS`. The scheduler is
 `apps/web-server/src/features/runs/logic/runtime/run-scheduler.ts` (decision logic in `admission.ts`);
 it's wired into the `startRun` factory in `server.ts` and promotes on the RunStore
-`finalized` event.
+`finalized` event. `GET /api/runs/:runId/queue` reads the scheduler's current
+admission inputs without starting work: run limit, resource budget, or repository
+conflict, with the active runs consuming capacity. The run banner refreshes this
+snapshot when the runs stream changes or the user requests it, and displays its
+check time. Queued chips and flight steps remain neutral; they never imply that
+services or tests are executing.
 
 ### Getting Started ownership
 

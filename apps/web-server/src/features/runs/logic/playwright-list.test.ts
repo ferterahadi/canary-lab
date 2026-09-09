@@ -1,3 +1,4 @@
+import { discoveryFailureOutput } from './playwright-list'
 import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -240,5 +241,17 @@ describe('listPlaywrightTests', () => {
       }),
     })
     expect(entries![0].file).toBe(path.resolve(tmpDir, 'spec.ts'))
+  })
+})
+
+
+describe('discoveryFailureOutput', () => {
+  it('surfaces the Playwright error messages without burying them under the config dump', () => {
+    const report = { config: { workers: 20 }, errors: [{ message: "Cannot find module './fixture'" }, { message: 'No tests found' }, null] }
+    expect(discoveryFailureOutput(JSON.stringify(report), 'npm notice')).toBe("Cannot find module './fixture'\n\nNo tests found")
+  })
+  it('preserves bounded raw diagnostics when the output has no structured errors', () => {
+    for (const stdout of ['compile failed', 'null', '{"errors":[{}]}']) expect(discoveryFailureOutput(stdout, 'stderr')).toBe(`stderr\n${stdout}`)
+    expect(discoveryFailureOutput('x'.repeat(10000), '')).toHaveLength(8000)
   })
 })

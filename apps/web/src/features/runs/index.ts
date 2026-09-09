@@ -5,7 +5,6 @@
 // this feature's contract, so add one deliberately.
 
 export { DirtyReviewDialog } from './components/DirtyReviewDialog'
-export { DirtyTestsPill } from './components/DirtyTestsPill'
 export { ExternalDraftAgentPanel } from './components/ExternalDraftAgentPanel'
 export { RunDetailColumn } from './components/RunDetailColumn'
 export { RunRow } from './components/RunRow'

@@ -539,7 +539,7 @@ export function StageDetail({
             )}
           </ModelPlanPopover>
         )}
-        <StageStatusChip status={row.status} />
+        <StageStatusChip status={row.status} waiting={activity && stageRowKey(ACTIVITY_STAGE[activity.kind]) === stage.key ? activity.waiting : undefined} />
         {/* Advanced setup appears once the config EXISTS on disk — approved
             (done) or pre-existing (skipped, the scaffold had nothing to do).
             Not while generating, and not at the approval checkpoint: there the

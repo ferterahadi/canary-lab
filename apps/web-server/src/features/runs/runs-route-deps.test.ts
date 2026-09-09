@@ -477,6 +477,7 @@ describe('startRun — same-repo collision', () => {
     const queued = h.runStore.get(runId)!.manifest
     expect(queued.status).toBe('queued')
     expect(queued.queueReason).toBe('repo-collision')
+    expect(h.deps.queueDiagnostics?.(runId)).toMatchObject({ reason: 'repo-collision', conflictingRunId: 'active-1', activeRuns: [expect.objectContaining({ feature: 'other' })] })
     expect(h.scheduling.scheduler.isQueued(runId)).toBe(true)
     expect(orchHarness.options).toEqual([])
 

@@ -45,14 +45,6 @@ export class NotificationStore {
     return this.read().items.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }
 
-  add(title: string, body: string): WorkspaceNotification {
-    const data = this.read()
-    const item = { id: randomUUID(), title, body, createdAt: new Date().toISOString() }
-    data.items.push(item)
-    this.save(data)
-    return item
-  }
-
   remove(id: string): void {
     const data = this.read()
     const items = data.items.filter((item) => item.id !== id)
@@ -85,7 +77,7 @@ export class NotificationStore {
         const item = data.items.find((item) => item.id === previous.notificationId)
         // Keep a retained message accurate as more files change, without
         // resetting read state or recreating a deleted message.
-        if (item && source.message && (item.title !== source.message.title || item.body !== source.message.body || JSON.stringify(item.target) !== JSON.stringify(source.message.target))) {
+        if (item && source.message && (item.title !== source.message.title || item.body !== source.message.body || item.severity !== source.message.severity || JSON.stringify(item.target) !== JSON.stringify(source.message.target))) {
           Object.assign(item, source.message)
           changed = true
         }

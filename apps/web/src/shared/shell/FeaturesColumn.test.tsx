@@ -505,6 +505,13 @@ describe('FeaturesColumn in-flight row cue', () => {
     expect(container.querySelector('[data-testid="flight-chip-alpha"]')).toBeTruthy()
   })
 
+  it('keeps a queued chip visible without the running or attention wash', () => {
+    const row = renderRow(flight({ queued: true, label: 'queued', tone: 'var(--text-muted)' }))
+    expect(container.querySelector('[data-testid="flight-chip-alpha"]')?.textContent).toContain('Queued')
+    expect(row?.className).not.toContain('cl-list-row-inflight')
+    expect(row?.querySelector('.animate-pulse')).toBeNull()
+  })
+
   it('takes the heavier attention wash when the flight is parked on a checkpoint', () => {
     const row = renderRow(flight({ attention: true, tone: 'var(--warning)', label: 'to approve' }))
     expect(row?.className).toContain('cl-list-row-inflight-attention')

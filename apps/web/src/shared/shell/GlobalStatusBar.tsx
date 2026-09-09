@@ -5,8 +5,6 @@ import { CleanupPill } from '@/features/cleanup'
 import { type DerivedStage, type FeatureActivity, FlightsPill } from '@/features/flights'
 import {
   DirtyReviewDialog,
-  DirtyTestsPill,
-  featureTone,
   ServicesDialog,
   useActiveBootSessions,
   useActiveVerifyRuns,
@@ -24,6 +22,7 @@ interface Props {
   activeRunDetail: RunDetail | null
   notificationControl?: React.ReactNode
   specReviewRunId?: string | null
+  specReviewFeature?: string | null
   specReviewRunDetail?: RunDetail | null
   /** Every feature — feeds the dirty-tests review panel. */
   features?: Feature[]
@@ -96,7 +95,7 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ notificationControl, specReviewRunId, specReviewRunDetail, activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onOpenPortify, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight, specReviewOpen, onSpecReviewOpenChange }: Props) {
+export function GlobalStatusBar({ notificationControl, specReviewRunId, specReviewFeature, specReviewRunDetail, activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onOpenPortify, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight, specReviewOpen, onSpecReviewOpenChange }: Props) {
   const { connection, runs } = useRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Deployed-env verification runs (record-only) get their own pill (R27) —
@@ -115,13 +114,7 @@ export function GlobalStatusBar({ notificationControl, specReviewRunId, specRevi
     setLocalSpecReviewOpen(open)
     onSpecReviewOpenChange?.(open)
   }
-  // Suites with modified test files, plus suites whose live run holds spec edits
-  // it has not executed (D9 `specEdits.pending`) — one pill reads both. The
-  // weaker count is the only thing that turns it danger, and it is a hint (D13).
-  const dirtyFeatures = features.filter((f) => f.dirty?.status === 'dirty')
   const pendingRuns = runs.filter((r) => isActiveRunStatus(r.status) && (r.pendingSpecEdits ?? 0) > 0)
-  const reviewSuites = new Set([...dirtyFeatures.map((f) => f.name), ...pendingRuns.map((r) => r.feature)])
-  const weakerSuites = dirtyFeatures.filter((f) => featureTone(f) === 'weaker').length
   // The right-hand action cluster collapses into a single toggle. Default
   // expanded (actions stay glanceable); the choice persists across reloads.
   const [actionsExpanded, setActionsExpanded] = useState<boolean>(() => {
@@ -202,7 +195,6 @@ export function GlobalStatusBar({ notificationControl, specReviewRunId, specRevi
         />
         <span className="cl-wordmark">Canary Lab</span>
       </span>
-      {notificationControl}
         <ConnectionBadge state={connection} />
       <McpHealthBadge />
       {services.length > 0 && (
@@ -213,17 +205,9 @@ export function GlobalStatusBar({ notificationControl, specReviewRunId, specRevi
           />
         </div>
       )}
-      {reviewSuites.size > 0 && (
-        <div className="shrink-0">
-          <DirtyTestsPill
-            suites={reviewSuites.size}
-            weakerSuites={weakerSuites}
-            pendingSuites={new Set(pendingRuns.map((r) => r.feature)).size}
-            onOpen={() => setReviewOpen(true)}
-          />
-        </div>
-      )}
-      <div className="ml-auto hidden min-w-0 items-center justify-end sm:flex">
+      <div className="ml-auto flex min-w-0 items-center justify-end gap-2">
+        {/* The inbox stays visible when the optional action cluster collapses. */}
+        <div className="shrink-0" data-testid="status-bar-notifications">{notificationControl}</div>
         {/* Collapsible action cluster. Defaults to expanded (so the actions
             stay glanceable); the toggle tucks them behind a single control and
             the choice persists. Benchmark sits at the right end, nearest the
@@ -235,7 +219,7 @@ export function GlobalStatusBar({ notificationControl, specReviewRunId, specRevi
           // animation, but reserves vertical room so a pill's top-right overlay
           // attention dot (StatusPill overlayDot, pinned at -top-1) isn't clipped
           // by that same overflow. The negative margin cancels the layout effect.
-          className="flex min-w-0 items-center gap-2 overflow-hidden py-1.5 -my-1.5"
+          className="hidden min-w-0 items-center gap-2 overflow-hidden py-1.5 -my-1.5 sm:flex"
           aria-hidden={!actionsExpanded}
           style={{
             maxWidth: actionsExpanded ? 800 : 0,
@@ -355,7 +339,7 @@ export function GlobalStatusBar({ notificationControl, specReviewRunId, specRevi
       </div>
       </div>
       {servicesOpen && <ServicesDialog onClose={() => setServicesOpen(false)} />}
-      {reviewOpen && <DirtyReviewDialog focusRunId={specReviewRunId} focusRunDetail={specReviewRunDetail} features={features} pendingRuns={pendingRuns} onClose={() => setReviewOpen(false)} />}
+      {reviewOpen && <DirtyReviewDialog focusFeature={specReviewFeature} focusRunId={specReviewRunId} focusRunDetail={specReviewRunDetail} features={features} pendingRuns={pendingRuns} onClose={() => setReviewOpen(false)} />}
       {benchmarkOpen && (
         <BenchmarkWindow
           onClose={() => setBenchmarkOpen(false)}

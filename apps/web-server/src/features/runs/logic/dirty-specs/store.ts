@@ -101,6 +101,13 @@ export class DirtySpecStore {
     return this.store.get(featureId)
   }
 
+  list(): DirtySpecRecord[] {
+    return this.store.list().flatMap((entry) => {
+      const record = this.get(entry.id)
+      return record ? [record] : []
+    })
+  }
+
   /** Whether the feature currently has modified specs — the flag both surfaces read. */
   isDirty(featureId: string): boolean {
     return this.get(featureId)?.status === 'dirty'

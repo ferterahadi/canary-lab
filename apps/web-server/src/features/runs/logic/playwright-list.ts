@@ -120,6 +120,21 @@ function collectSpecs(
   }
 }
 
+/** Playwright puts discovery errors after its full config in JSON stdout.
+ *  Surface those messages first so a missing import is not buried in settings. */
+export function discoveryFailureOutput(stdout: string, stderr: string): string {
+  try {
+    const report: unknown = JSON.parse(stdout)
+    if (report && typeof report === 'object' && 'errors' in report && Array.isArray(report.errors)) {
+      const messages = report.errors.flatMap((error: unknown) => (
+        error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' ? [error.message] : []
+      ))
+      if (messages.length) return messages.join('\n\n').slice(0, 8000)
+    }
+  } catch { /* Non-JSON compile errors still carry useful stdout/stderr. */ }
+  return `${stderr}\n${stdout}`.trim().slice(0, 8000)
+}
+
 export interface ListPlaywrightTestsOpts {
   spawner?: PlaywrightListSpawner
   timeoutMs?: number
@@ -177,8 +192,8 @@ export async function listPlaywrightTests(
       // `--list` exits 0 when discovery succeeded; any non-zero indicates a
       // discovery failure and stdout may not be valid JSON.
       if (code === 0) { settle(out); return }
-      // Attach stderr to help debugging; consumers ignore the value but logs help.
-      if (settle(null, `playwright test --list exited with code ${code}\n${err}\n${out}`.trim()) && err) {
+      // The UI needs the actual discovery error, not the preceding config dump.
+      if (settle(null, `playwright test --list exited with code ${code}\n${discoveryFailureOutput(out, err)}`.trim()) && err) {
         process.stderr.write(`[playwright-list] exit ${code}: ${err.slice(0, 500)}\n`)
       }
     })
