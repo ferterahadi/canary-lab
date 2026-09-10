@@ -66,7 +66,7 @@ export function RepoScanPanel({
   return (
     <section
       data-testid="repo-scan-panel"
-      className={`flex flex-col gap-2.5 ${STAGE_COLUMN}`}
+      className={`flex flex-col gap-3 ${STAGE_COLUMN}`}
       title="Repos and intent froze when this flight started. Change… reopens them and re-flies from the start."
     >
       <div
@@ -88,7 +88,7 @@ export function RepoScanPanel({
                 disabled={mutationLockedReason != null}
                 // The negative margin grows the HIT area to ~24px without moving
                 // the text — a bare 14px link was the pane's smallest target.
-                className="-my-1.5 py-1.5 text-[10.5px] underline-offset-2 transition-colors hover:underline text-accent disabled:cursor-not-allowed disabled:opacity-45"
+                className="-my-1.5 py-1.5 cl-type-meta underline-offset-2 transition-colors hover:underline text-accent disabled:cursor-not-allowed disabled:opacity-45"
                 title={mutationLockedReason ?? 'Change what this flight tests — reopens intent and repos prefilled, then re-flies from the start'}
               >
                 Change…
@@ -96,10 +96,10 @@ export function RepoScanPanel({
             </DisabledControlTooltip>
           )}
         </div>
-        <h3 className="mb-1.5 text-[12.5px] font-semibold">Intent · what to test</h3>
+        <h3 className="mb-1.5 cl-type-title text-primary">Intent · what to test</h3>
         <p
           data-testid="flight-intent"
-          className="m-0 max-w-[76ch] text-[12px] leading-relaxed text-secondary"
+          className="m-0 cl-type-body leading-relaxed text-secondary"
         >
           {flight.description}
         </p>
@@ -125,13 +125,13 @@ export function RepoScanPanel({
                 sub={
                   <span className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-2 gap-y-0.5">
                     <span className="cl-rubric">Location</span>
-                    <span className="max-w-[340px] truncate text-[10px] text-secondary font-mono" title={p}>
+                    <span className="max-w-[340px] truncate cl-type-meta text-secondary font-mono" title={p}>
                       {p}
                     </span>
                     {envs.length > 0 && (
                       <>
                         <span className="cl-rubric">Env</span>
-                        <span className="max-w-[340px] truncate text-[10px] text-secondary font-mono" title={envs.join('\n')}>
+                        <span className="max-w-[340px] truncate cl-type-meta text-secondary font-mono" title={envs.join('\n')}>
                           {envs.join(' · ')}
                         </span>
                       </>
@@ -143,7 +143,7 @@ export function RepoScanPanel({
           })}
         </StepList>
         {orphans.length > 0 && (
-          <div className="mt-2 border-t pt-2 text-[10px] border-line text-muted font-mono" title={orphans.join('\n')}>
+          <div className="mt-2 border-t pt-2 cl-type-meta border-line text-muted font-mono" title={orphans.join('\n')}>
             env outside repos: {orphans.map(repoBaseName).join(' · ')}
           </div>
         )}

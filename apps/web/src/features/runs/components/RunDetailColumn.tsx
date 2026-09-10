@@ -7,6 +7,7 @@ import { useInvalidationKey } from '@/shared/state/invalidation'
 import { deriveRunViewModel } from '../utils/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
+import { EMPTY_COPY, healNoTranscriptCopy, type EmptyCopy } from '@/shared/ui/empty-state-copy'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { ExternalHealPanel } from './ExternalHealPanel'
 import { ChangesTab } from './ChangesTab'
@@ -29,27 +30,11 @@ type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'chan
 
 /** Why this run has no repair transcript. A run that passed never spawned an
  *  agent at all — saying so is the whole answer, where "no structured session
- *  log found" reads as a missing file the user should go hunting for. */
-export function healEmptyCopy(status: RunStatus, healCycles: number): { title: string; body: string; tone: 'neutral' | 'good' } {
-  if (healCycles === 0 && status === 'passed') {
-    return {
-      title: 'No repairs needed',
-      body: 'Every test passed on the first attempt, so no repair agent was ever started. Nothing was changed in your code.',
-      tone: 'good',
-    }
-  }
-  if (healCycles === 0) {
-    return {
-      title: 'No repair agent ran',
-      body: 'This run ended before a repair cycle started — it was aborted, or heal is switched off for this suite.',
-      tone: 'neutral',
-    }
-  }
-  return {
-    title: 'No transcript found',
-    body: `This run went through ${healCycles} repair ${healCycles === 1 ? 'cycle' : 'cycles'}, but no session log for it could be read. If the run only just ended, the agent CLI may still be writing one — reopen this tab. The Journal tab holds what each cycle concluded either way.`,
-    tone: 'neutral',
-  }
+ *  log found" reads as a missing file the user should go hunting for. The three
+ *  answers are three different `EmptyReason`s, which is why they can't collapse. */
+export function healEmptyCopy(status: RunStatus, healCycles: number): EmptyCopy {
+  if (healCycles === 0) return status === 'passed' ? EMPTY_COPY.healPassed : EMPTY_COPY.healNeverRan
+  return healNoTranscriptCopy(healCycles)
 }
 
 export function RunDetailColumn({
@@ -187,6 +172,13 @@ export function RunDetailColumn({
             {m.runId}
           </span>
           <span
+            className="min-w-0 shrink truncate text-xs"
+            title={m.feature}
+            style={{ color: 'var(--text-muted)' }}
+          >
+            {m.feature}
+          </span>
+          <span
             className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
             style={{
               background: isVerify ? 'var(--accent-soft)' : isBootRun ? 'var(--boot-soft)' : 'var(--bg-selected)',
@@ -195,13 +187,6 @@ export function RunDetailColumn({
             }}
           >
             {isVerify ? 'Verify' : isBootRun ? 'Boot' : 'Run'}
-          </span>
-          <span
-            className="min-w-0 shrink truncate text-xs"
-            title={m.feature}
-            style={{ color: 'var(--text-muted)' }}
-          >
-            {m.feature}
           </span>
         </div>
         {m.status === 'queued' && <RunQueueBanner key={m.runId} runId={m.runId} />}
@@ -264,7 +249,7 @@ export function RunDetailColumn({
               <PaneTerminal
                 runId={m.runId}
                 paneId={`service:${activeService.safeName}`}
-                emptyState={{ title: 'Nothing logged yet', hint: 'This service’s stdout and stderr stream here the moment it writes its first line.' }}
+                emptyState={{ idle: EMPTY_COPY.paneServiceIdle, missing: EMPTY_COPY.paneServiceMissing }}
               />
             )}
           </RunPane>
@@ -322,7 +307,7 @@ export function RunDetailColumn({
                   runId={m.runId}
                   paneId="agent"
                   onExit={handleAgentPaneExit}
-                  emptyState={{ title: 'No repair agent running', hint: 'If the tests fail, the agent starts here and its reasoning streams live.' }}
+                  emptyState={{ idle: EMPTY_COPY.paneAgentIdle, missing: EMPTY_COPY.paneAgentMissing }}
                 />
               )}
               </div>

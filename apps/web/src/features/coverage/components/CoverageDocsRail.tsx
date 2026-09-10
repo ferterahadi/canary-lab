@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type JSX } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent, type JSX } from 'react'
 import * as api from '@/shared/api/client'
 import type { FeatureDocsListing } from '@/shared/api/types'
 import { DocPill, EmptyDropzone } from './DocPill'
@@ -101,6 +101,12 @@ interface Props {
    *  _prd-summary.md now exists, so re-list the docs (items 1+2: the pill must
    *  appear live, without a manual refresh). */
   reloadKey?: number
+}
+
+/** Joins names the way a sentence would: "a", "a and b", "a, b and c". */
+function joinNatural(items: string[]): string {
+  if (items.length < 2) return items.join('')
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 }
 
 // CoverageDocsRail — a collapsible LEFT RAIL that owns ONLY source-doc CRUD for a
@@ -279,11 +285,9 @@ export function CoverageDocsRail(props: Props): JSX.Element {
         }}
       />
 
-      {/* Header */}
-      <div
-        className="flex items-center gap-2"
-        style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-default)' }}
-      >
+      {/* Header — a tight label bar. The rail is only 320px wide, so it spends
+          its height on docs rather than on chrome. */}
+      <div className="cl-panel-header flex items-center gap-2" style={{ padding: '8px 14px' }}>
         <h2 className="cl-kicker">Source docs</h2>
         <button
           type="button"
@@ -291,7 +295,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
           onClick={onToggle}
           title="Collapse source docs"
           aria-label="Collapse source docs"
-          className="cl-icon-button ml-auto h-7 w-7 shrink-0"
+          className="cl-icon-button ml-auto h-6 w-6 shrink-0"
           style={{ color: 'var(--text-muted)' }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -312,7 +316,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
               display: 'inline-block',
             }}
           >
-            No PRD summary yet
+            No requirements read yet
           </div>
         )}
         {!summaryAbsent && summaryStale && drift && (
@@ -325,8 +329,15 @@ export function CoverageDocsRail(props: Props): JSX.Element {
               borderRadius: 'var(--radius-md)', padding: '6px 10px',
             }}
           >
-            <span style={{ fontFamily: 'var(--font-mono)' }}>{drift.changedDocs.join(', ')}</span>
-            {' '}changed → affects {drift.affectedArtifacts.join(' + ')}
+            {drift.changedDocs.map((doc, i) => (
+              <Fragment key={doc}>
+                {i > 0 && (i === drift.changedDocs.length - 1 ? ' and ' : ', ')}
+                <span style={{ fontFamily: 'var(--font-mono)' }}>{doc}</span>
+              </Fragment>
+            ))}
+            {drift.changedDocs.length === 1 ? ' has' : ' have'} changed, so the{' '}
+            {joinNatural(drift.affectedArtifacts)}{' '}
+            {drift.affectedArtifacts.length === 1 ? 'no longer matches' : 'no longer match'} your docs.
           </div>
         )}
 

@@ -51,11 +51,11 @@ describe('specTone / featureTone', () => {
 })
 
 describe('SPEC_TONE', () => {
-  it('the weaker tone carries amber, and calls itself a hint with its false-positive rate', () => {
+  it('uses brief, human review copy while keeping the weaker signal advisory', () => {
     expect(SPEC_TONE.weaker.color).toBe('var(--warning)')
-    expect(SPEC_TONE.weaker.title).toMatch(/^Hint:/)
-    expect(SPEC_TONE.weaker.title).toMatch(/false positive 2\.4%/)
-    expect(SPEC_TONE.weaker.title).toMatch(/no human/)
+    expect(SPEC_TONE.weaker.title).toBe('Tests may be weaker than the version that ran. This hint does not change the result. AI-only, blind-checked review: 2.4% false positives.')
+    expect(SPEC_TONE.changed.title).toBe('Tests changed after the run. Review before relying on this result.')
+    expect(SPEC_TONE.stronger.title).toBe('Tests look stronger than the version that ran. Review and commit the changes.')
     expect(SPEC_TONE.changed.color).not.toContain('danger')
     expect(SPEC_TONE.stronger.color).toBe('var(--text-secondary)')
   })

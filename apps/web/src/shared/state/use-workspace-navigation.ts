@@ -31,6 +31,8 @@ const PERSISTED = readPersistedView()
 const SEED = initialNavState(PERSISTED)
 
 export interface WorkspaceNavigation {
+  currentTests: boolean
+  setCurrentTests: (current: boolean) => void
   view: WorkspaceView
   selectedFeature: string | null
   selectedRunId: string | null
@@ -124,6 +126,7 @@ export interface WorkspaceNavigation {
 }
 
 export function useWorkspaceNavigation(): WorkspaceNavigation {
+  const [currentTests, setCurrentTests] = useState(PERSISTED.currentTests ?? false)
   const [view, setView] = useState<WorkspaceView>(SEED.view)
   const [selectedFeature, setSelectedFeature] = useState<string | null>(SEED.feature)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(SEED.run)
@@ -204,7 +207,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   // Persist the full route to the URL on every change (durable tier also mirrors
   // to localStorage for cross-tab sync).
   useEffect(() => {
-    persistView({ ...navToPersistedView(state), reviewFocus })
+    persistView({ ...navToPersistedView(state), reviewFocus, ...(currentTests ? { currentTests: true } : {}) })
     // Intentionally keyed on the primitive fields, not the freshly-built `state`
     // object (new identity every render).
     // configTab is listed explicitly: the `dialog` value stays 'config' while
@@ -215,7 +218,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // same while the focused test changes, so keying on selectedRunId alone
     // would leave the URL's `test` param stale. runTab is the same case —
     // re-opening the SAME run on a different tab must rewrite `runtab`.
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, configTab, modelsFor, focusTest, runTab, returnFlight, reviewFocus])
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, configTab, modelsFor, focusTest, runTab, returnFlight, reviewFocus, currentTests])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -264,6 +267,8 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   }, [])
 
   return {
+    currentTests,
+    setCurrentTests,
     view,
     selectedFeature,
     selectedRunId,

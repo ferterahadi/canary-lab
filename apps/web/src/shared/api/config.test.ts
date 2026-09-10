@@ -241,3 +241,9 @@ describe('config api', () => {
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/features/myfeat/portify-overlay', { method: 'DELETE' })
   })
 })
+
+it('requests recorded tests for the selected run', async () => {
+  const fetchImpl = vi.fn().mockResolvedValue(ok([]))
+  await getFeatureTests('suite', { baseUrl: 'http://x', fetchImpl }, 'run 1')
+  expect(fetchImpl).toHaveBeenCalledWith('http://x/api/features/suite/tests?runId=run%201', { method: 'GET' })
+})

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { JournalEntry } from '@/shared/api/types'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
+import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { RunPane } from './RunPane'
 import {
   classifyOutcome,
@@ -58,18 +59,9 @@ export function JournalTab({ feature, runId, refreshKey = 0, healCycles = 0 }: P
         </div>
       )}
       {!entries ? (
-        <EmptyState icon={EmptyGlyph.journal} title="Loading journal…" />
+        <EmptyState {...EMPTY_COPY.journalLoading} icon={EmptyGlyph.journal} />
       ) : entries.length === 0 ? (
-        <EmptyState
-          icon={healCycles > 0 ? EmptyGlyph.journal : EmptyGlyph.check}
-          tone={healCycles > 0 ? 'neutral' : 'good'}
-          title={healCycles > 0 ? 'No journal entries were written' : 'Nothing to repair'}
-          body={
-            healCycles > 0
-              ? 'The repair agent ran on this run but left no journal entry. Its reasoning is still in the Heal agent tab.'
-              : 'The journal records one entry per repair attempt — what the agent believed was broken, what it changed, and whether that fixed it. This run never needed one.'
-          }
-        />
+        <EmptyState {...(healCycles > 0 ? EMPTY_COPY.journalNoEntries : EMPTY_COPY.journalPassed)} />
       ) : (
         <ul className="space-y-3">
           {entries.map((entry, i) => (

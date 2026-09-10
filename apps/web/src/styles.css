@@ -391,6 +391,27 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
 }
+.cl-execution-label {
+  display: inline-flex;
+  margin-left: 0.5rem;
+  padding: 0 0.25rem;
+  border: 1px solid;
+  border-radius: 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.cl-execution-label-failed {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 65%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+.cl-execution-label-running {
+  color: var(--running);
+  border-color: color-mix(in srgb, var(--running) 65%, transparent);
+  background: color-mix(in srgb, var(--running) 10%, transparent);
+}
 /* The English pane's canvas — `.shiki-block pre`'s twin for frame, inset, and
    typography. Both representations wrap to the available panel width.
    Horizontal inset lives on the rows so selection washes bleed edge-to-edge
@@ -708,6 +729,52 @@ body {
   color: var(--text-muted);
 }
 
+/* ── Named type steps ──────────────────────────────────────────────────────
+   The dense operator-console scale, named by ROLE so a surface picks a step
+   instead of a number. Five steps in all — title (12.5) → body (12) → data
+   (11.5) → meta (11), with `.cl-rubric` (10 mono caps) as the kicker above a
+   card. Adopted by the flight-detail stage panes; the rest of the app still
+   spells sizes inline, so treat a raw `text-[Npx]` as un-migrated, not as a
+   sixth step.
+
+   These declare font-size and line-height ONLY — never colour. Every `.cl-*`
+   rule here sits outside `@layer`, which beats Tailwind's layered utilities:
+   `.cl-button`'s own `color` is why a `text-accent` beside it never rendered.
+   Leaving colour out keeps `text-secondary` / `text-muted` / `text-danger`
+   working next to a step. */
+
+/* Title — names one card. Same metrics as `.cl-frame-heading`, which is the
+   older twin that also bakes in `--text-primary`; a card titled in a status
+   hue (a failed stage, a robustness finding) needs the colour left free, so
+   the flight panes spell every title with this step plus a colour utility. */
+.cl-type-title {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+/* Prose — a sentence a person reads: panel blurbs, state sentences, the
+   explanation under a checkpoint's question. */
+.cl-type-body {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Data — a value, a row, a name the machine produced: config values, service
+   rows, file paths, test titles, matrix cells. The most common step. */
+.cl-type-data {
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+/* Meta — supporting text subordinate to a data row it sits with: ports,
+   timestamps, counts, inline errors, footnotes. */
+.cl-type-meta {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .cl-divider {
   color: var(--border-strong);
 }
@@ -805,6 +872,22 @@ body {
   text-transform: uppercase;
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+/* The neutral twin — a quiet badge beside a card's title ("Locked — approved",
+   a fork path's note). Same metrics as the accent badge so two badges on one
+   line are the same object in two tones; it used to be spelled inline at 9px
+   and 9.5px, a hair smaller than the accent chip right next to it. */
+.cl-badge-neutral {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border: 1px solid var(--border-default);
   border-radius: 4px;
   padding: 1px 6px;
   white-space: nowrap;
@@ -1299,6 +1382,18 @@ body {
   color: var(--text-primary);
 }
 
+.cl-tab .cl-count-chip {
+  /* Inside a tab a count is a bare numeral, not a pill. The standalone chip's
+     `min-width` plus pill padding leave ~14px of empty background after a
+     single digit, and the active tab's accent underline spans the whole
+     button — so the bar ran on past the number it underlines, worst on the
+     short "All" tab, and the two tabs read as differently aligned. */
+  min-width: 0;
+  margin-left: 2px;
+  padding: 0;
+  background: none;
+}
+
 .cl-tab-active {
   color: var(--text-primary);
 }
@@ -1753,6 +1848,9 @@ body {
 .cl-review-source-line > del, .cl-review-source-line > ins { display: block; margin-inline: -6px; padding-inline: 6px; text-decoration: none; border-radius: 0; color: inherit; }
 .cl-review-source-line > del::before, .cl-review-source-line > ins::before { position: absolute; left: 34px; }
 .cl-review-story-line { display: grid; grid-template-columns: 9ch minmax(0, 1fr); gap: 8px; }
+.cl-review-story-link { width: 100%; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.cl-review-story-link:hover, .cl-review-story-link:focus-visible { background: var(--bg-selected); outline: 1px solid var(--accent); }
+.cl-review-source-line[data-source-selected] { background: var(--bg-selected); outline: 1px solid var(--accent); }
 .cl-context-assessment { flex: 0 0 auto; max-height: 72px; overflow: auto; padding: 8px 12px; border-top: 1px solid var(--border-default); font-size: 11px; line-height: 1.6; }
 .cl-review-footer { grid-template-rows: auto; min-height: 36px; row-gap: 4px; }
 .cl-review-action-message { height: auto; }

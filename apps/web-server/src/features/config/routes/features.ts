@@ -20,6 +20,7 @@ import {
 import type { EnvSetsConfig } from '../../runs/logic/runtime/env-switcher/types'
 import { buildDiscoveryRepairPrompt } from '../logic/discovery-repair-prompt'
 import { attachSourceChanges } from '../logic/test-source-changes'
+import { recordedTestList } from '../logic/recorded-test-list'
 import { testReviewRoutes } from './test-review'
 import type { FeaturesRouteDeps } from './features-route-deps'
 
@@ -182,13 +183,14 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     return { error: 'config file not found' }
   })
 
-  app.get<{ Params: { name: string } }>('/api/features/:name/tests', async (req, reply) => {
+  app.get<{ Params: { name: string }; Querystring: { runId?: string } }>('/api/features/:name/tests', async (req, reply) => {
     const features = loadFeatures(deps.featuresDir)
     const feature = features.find((f) => f.name === req.params.name)
     if (!feature) {
       reply.code(404)
       return { error: 'feature not found' }
     }
+    const recorded = req.query.runId ? recordedTestList(deps.logsDir, feature.name, req.query.runId) : undefined
     const codeDisplayCache = new Map<string, ReturnType<typeof formatCodeForDisplayWithLineMap>>()
     const withCodeDisplay = (test: ExtractedTest): ExtractedTest => {
       if (!test.bodySource) return test
@@ -201,16 +203,18 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       }
       return { ...test, codeDisplay }
     }
-    const specFiles = listSpecFiles(feature.featureDir)
+    const specFiles = recorded ? [...new Set(recorded.tests.map((test) => test.file))] : listSpecFiles(feature.featureDir)
 
     // 1. Run AST over each spec to gather (line -> { bodySource, steps }) for
     //    enrichment. This is the single source of body/step extraction.
     const astByFile = new Map<string, ReturnType<typeof extractTestsFromSource>>()
+    const unavailableSources = new Set<string>()
     for (const file of specFiles) {
       let source = ''
-      try { source = fs.readFileSync(file, 'utf-8') } catch { /* unreadable */ }
+      if (recorded && !recorded.dir) unavailableSources.add(file)
+      else try { source = fs.readFileSync(file, 'utf-8') } catch { if (recorded) unavailableSources.add(file) }
       const result = extractTestsFromSource(file, source, feature.semanticRules)
-      try { await attachSourceChanges(feature.featureDir, file, source, result.tests) } catch (err) {
+      try { if (!recorded) await attachSourceChanges(feature.featureDir, file, source, result.tests) } catch (err) {
         app.log.warn({ err, file }, 'test source change markers unavailable')
       }
       astByFile.set(file, result)
@@ -226,7 +230,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     // in one place instead of a `??` and a conditional spread whose empty arms
     // nothing can reach.
     let discoveryDiagnostics = 'Playwright could not enumerate the test cases.'
-    const pwList = await listPlaywrightTests(feature.featureDir, {
+    const pwList = recorded?.tests ?? await listPlaywrightTests(feature.featureDir, {
       spawner: deps.playwrightListSpawner,
       onDiagnostics: (diagnostic) => {
         discoveryDiagnostics = diagnostic
@@ -278,7 +282,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       let source = ''
       try { source = fs.readFileSync(entry.originFile, 'utf-8') } catch { /* unreadable */ }
       const result = extractTestsFromSource(entry.originFile, source, feature.semanticRules)
-      try { await attachSourceChanges(feature.featureDir, entry.originFile, source, result.tests) } catch (err) {
+      try { if (!recorded) await attachSourceChanges(feature.featureDir, entry.originFile, source, result.tests) } catch (err) {
         app.log.warn({ err, file: entry.originFile }, 'test source change markers unavailable')
       }
       originAstByFile.set(entry.originFile, result)
@@ -335,6 +339,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       return {
         file,
         tests,
+        ...(unavailableSources.has(file) ? { recordedSourceUnavailable: true } : {}),
         ...(ast.parseError ? { parseError: ast.parseError } : {}),
       }
     })

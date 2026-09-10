@@ -1,0 +1,319 @@
+{
+  "manifest": {
+    "runId": "2026-07-01T0245-o456",
+    "feature": "cns_better_auth",
+    "featureDir": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth",
+    "status": "passed"
+  },
+  "summary": {
+    "complete": true,
+    "total": 23,
+    "passed": 23,
+    "passedNames": [
+      "test-case-v4-match-caller-reads-own-transaction-200",
+      "test-case-v4-mismatch-different-app-credential-gets-403",
+      "test-case-v4-admin-bypass-admin-reads-any-app-200",
+      "test-case-v4-null-owner-unodwned-transaction-is-inaccessibsle-to-non-admin-403",
+      "test-case-v4-unknown-owner-transaction-with-app-unknown-is-inaccessible-to-non-admin-403",
+      "test-case-v4-post-idempotent-return-foreign-owned-transaction-gets-403",
+      "test-case-v4-post-fresh-transaction-owner-absent-is-allowed",
+      "test-case-v4-broadcast-idempotent-return-foreign-owned-transaction-gets-403",
+      "test-case-v4-broadcast-fresh-transaction-owner-absent-is-allowed",
+      "test-case-a-v1-re-send-under-another-app-s-transaction-does-not-reassign-ownership",
+      "test-case-first-send-stamps-the-owner-and-a-re-send-by-the-same-owner-keeps-it",
+      "test-case-an-admin-re-send-under-another-app-s-transaction-does-not-reassign-ownership",
+      "test-case-v1-first-send-stamps-the-caller-app-as-owner-owner-reads-v2-200-others-403",
+      "test-case-v1-unaffected-different-app-still-gets-200-on-v1",
+      "test-case-v2-read-unaffected-a-foreign-app-reads-a-foreign-owned-transaction-on-v2-200",
+      "test-case-sender-v4-foreign-app-read-of-another-app-s-sender-gets-403",
+      "test-case-sender-v4-owner-reads-own-sender-200",
+      "test-case-sender-v4-admin-reads-another-app-s-sender-200-admin-bypass",
+      "test-case-sender-v2-foreign-app-still-gets-200-on-the-open-version",
+      "test-case-sender-v4-list-owner-sees-its-own-sender",
+      "test-case-sender-v4-list-foreign-app-does-not-see-another-app-s-sender",
+      "test-case-sender-v4-list-admin-sees-all-incl-foreign",
+      "test-case-sender-v4-subscription-type-foreign-app-gets-403"
+    ],
+    "passedIds": [
+      "test-id-z6fvs0",
+      "test-id-sp87ep",
+      "test-id-h6kdyz",
+      "test-id-1alovym",
+      "test-id-4o1aj1",
+      "test-id-1spnsse",
+      "test-id-1f667y6",
+      "test-id-69odrz",
+      "test-id-19nykrm",
+      "test-id-13jvlem",
+      "test-id-e4mi67",
+      "test-id-1xwkwbc",
+      "test-id-ffgskq",
+      "test-id-rhkwp1",
+      "test-id-3skk0u",
+      "test-id-1bf79fd",
+      "test-id-kv7qrp",
+      "test-id-u1vji1",
+      "test-id-1emh388",
+      "test-id-1dvrebz",
+      "test-id-l9e8ph",
+      "test-id-424vt0",
+      "test-id-z0k0fh"
+    ],
+    "knownTests": [
+      {
+        "id": "test-id-z6fvs0",
+        "name": "test-case-v4-match-caller-reads-own-transaction-200",
+        "title": "v4 match - caller reads own transaction → 200",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "v4 message reads",
+          "v4 match - caller reads own transaction → 200"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:119"
+      },
+      {
+        "id": "test-id-sp87ep",
+        "name": "test-case-v4-mismatch-different-app-credential-gets-403",
+        "title": "v4 mismatch - different app credential gets 403",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "v4 message reads",
+          "v4 mismatch - different app credential gets 403"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:127"
+      },
+      {
+        "id": "test-id-h6kdyz",
+        "name": "test-case-v4-admin-bypass-admin-reads-any-app-200",
+        "title": "v4 admin bypass - admin reads any app → 200",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "v4 message reads",
+          "v4 admin bypass - admin reads any app → 200"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:135"
+      },
+      {
+        "id": "test-id-1alovym",
+        "name": "test-case-v4-null-owner-unodwned-transaction-is-inaccessibsle-to-non-admin-403",
+        "title": "v4 null-owner - unodwned transaction is inaccessibsle to non-admin → 403",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "v4 message reads",
+          "v4 null-owner - unodwned transaction is inaccessibsle to non-admin → 403"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:145"
+      },
+      {
+        "id": "test-id-4o1aj1",
+        "name": "test-case-v4-unknown-owner-transaction-with-app-unknown-is-inaccessible-to-non-admin-403",
+        "title": "v4 Unknown-owner - transaction with app=\"Unknown\" is inaccessible to non-admin → 403",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "v4 message reads",
+          "v4 Unknown-owner - transaction with app=\"Unknown\" is inaccessible to non-admin → 403"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:153"
+      },
+      {
+        "id": "test-id-1spnsse",
+        "name": "test-case-v4-post-idempotent-return-foreign-owned-transaction-gets-403",
+        "title": "v4 POST idempotent-return - foreign-owned transaction gets 403",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "v4 idempotent POST sends (inverted rule)",
+          "v4 POST idempotent-return - foreign-owned transaction gets 403"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:165"
+      },
+      {
+        "id": "test-id-1f667y6",
+        "name": "test-case-v4-post-fresh-transaction-owner-absent-is-allowed",
+        "title": "v4 POST fresh transaction (owner absent) is allowed",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "v4 idempotent POST sends (inverted rule)",
+          "v4 POST fresh transaction (owner absent) is allowed"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:178"
+      },
+      {
+        "id": "test-id-69odrz",
+        "name": "test-case-v4-broadcast-idempotent-return-foreign-owned-transaction-gets-403",
+        "title": "v4 broadcast idempotent-return - foreign-owned transaction gets 403",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "v4 idempotent POST sends (inverted rule)",
+          "v4 broadcast idempotent-return - foreign-owned transaction gets 403"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:194"
+      },
+      {
+        "id": "test-id-19nykrm",
+        "name": "test-case-v4-broadcast-fresh-transaction-owner-absent-is-allowed",
+        "title": "v4 broadcast fresh transaction (owner absent) is allowed",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "v4 idempotent POST sends (inverted rule)",
+          "v4 broadcast fresh transaction (owner absent) is allowed"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:207"
+      },
+      {
+        "id": "test-id-13jvlem",
+        "name": "test-case-a-v1-re-send-under-another-app-s-transaction-does-not-reassign-ownership",
+        "title": "a v1 re-send under another app's transaction does not reassign ownership",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "ownership is immutable (no reassign/null-wipe)",
+          "a v1 re-send under another app's transaction does not reassign ownership"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:221"
+      },
+      {
+        "id": "test-id-e4mi67",
+        "name": "test-case-first-send-stamps-the-owner-and-a-re-send-by-the-same-owner-keeps-it",
+        "title": "first send stamps the owner and a re-send by the same owner keeps it",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "ownership is immutable (no reassign/null-wipe)",
+          "first send stamps the owner and a re-send by the same owner keeps it"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:247"
+      },
+      {
+        "id": "test-id-1xwkwbc",
+        "name": "test-case-an-admin-re-send-under-another-app-s-transaction-does-not-reassign-ownership",
+        "title": "an admin re-send under another app's transaction does not reassign ownership",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "ownership is immutable (no reassign/null-wipe)",
+          "an admin re-send under another app's transaction does not reassign ownership"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:274"
+      },
+      {
+        "id": "test-id-ffgskq",
+        "name": "test-case-v1-first-send-stamps-the-caller-app-as-owner-owner-reads-v2-200-others-403",
+        "title": "v1 first send stamps the caller app as owner (owner reads v2 200, others 403)",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "v1 sends stamp tracker ownership on first create",
+          "v1 first send stamps the caller app as owner (owner reads v2 200, others 403)"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:295"
+      },
+      {
+        "id": "test-id-rhkwp1",
+        "name": "test-case-v1-unaffected-different-app-still-gets-200-on-v1",
+        "title": "v1 unaffected - different app still gets 200 on v1",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "v1 reads stay open",
+          "v1 unaffected - different app still gets 200 on v1"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:320"
+      },
+      {
+        "id": "test-id-3skk0u",
+        "name": "test-case-v2-read-unaffected-a-foreign-app-reads-a-foreign-owned-transaction-on-v2-200",
+        "title": "v2 read unaffected - a foreign app reads a foreign-owned transaction on /v2 → 200",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "legacy v2 reads are now open (guarded surface moved to v4)",
+          "v2 read unaffected - a foreign app reads a foreign-owned transaction on /v2 → 200"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:335"
+      },
+      {
+        "id": "test-id-1bf79fd",
+        "name": "test-case-sender-v4-foreign-app-read-of-another-app-s-sender-gets-403",
+        "title": "sender V4 - foreign app read of another app's sender gets 403",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "sender config scoping (new version enforces, old stays open)",
+          "sender V4 - foreign app read of another app's sender gets 403"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:350"
+      },
+      {
+        "id": "test-id-kv7qrp",
+        "name": "test-case-sender-v4-owner-reads-own-sender-200",
+        "title": "sender V4 - owner reads own sender → 200",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "sender config scoping (new version enforces, old stays open)",
+          "sender V4 - owner reads own sender → 200"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:361"
+      },
+      {
+        "id": "test-id-u1vji1",
+        "name": "test-case-sender-v4-admin-reads-another-app-s-sender-200-admin-bypass",
+        "title": "sender V4 - admin reads another app's sender → 200 (admin bypass)",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "sender config scoping (new version enforces, old stays open)",
+          "sender V4 - admin reads another app's sender → 200 (admin bypass)"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:372"
+      },
+      {
+        "id": "test-id-1emh388",
+        "name": "test-case-sender-v2-foreign-app-still-gets-200-on-the-open-version",
+        "title": "sender V2 - foreign app still gets 200 on the open version",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "sender config scoping (new version enforces, old stays open)",
+          "sender V2 - foreign app still gets 200 on the open version"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:385"
+      },
+      {
+        "id": "test-id-1dvrebz",
+        "name": "test-case-sender-v4-list-owner-sees-its-own-sender",
+        "title": "sender V4 list - owner sees its own sender",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "sender config V4 — full surface (R13)",
+          "sender V4 list - owner sees its own sender"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:404"
+      },
+      {
+        "id": "test-id-l9e8ph",
+        "name": "test-case-sender-v4-list-foreign-app-does-not-see-another-app-s-sender",
+        "title": "sender V4 list - foreign app does NOT see another app's sender",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "sender config V4 — full surface (R13)",
+          "sender V4 list - foreign app does NOT see another app's sender"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:414"
+      },
+      {
+        "id": "test-id-424vt0",
+        "name": "test-case-sender-v4-list-admin-sees-all-incl-foreign",
+        "title": "sender V4 list - admin sees all (incl. foreign)",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "sender config V4 — full surface (R13)",
+          "sender V4 list - admin sees all (incl. foreign)"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:424"
+      },
+      {
+        "id": "test-id-z0k0fh",
+        "name": "test-case-sender-v4-subscription-type-foreign-app-gets-403",
+        "title": "sender V4 subscription-type - foreign app gets 403",
+        "titlePath": [
+          "cns_better_auth.spec.ts",
+          "sender config V4 — full surface (R13)",
+          "sender V4 subscription-type - foreign app gets 403"
+        ],
+        "location": "/Users/oddle/Documents/canary-lab-workspace/features/cns_better_auth/e2e/cns_better_auth.spec.ts:434"
+      }
+    ],
+    "failed": []
+  }
+}

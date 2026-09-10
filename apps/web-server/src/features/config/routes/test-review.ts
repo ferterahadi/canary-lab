@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify'
 import type { TestFileReview, ReviewSource } from '../../../../../../shared/test-review'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { extractTestsFromSource, extractTestPredicatesFromSource } from '../../../shared/ast-extractor'
+import { translateReadableSource } from '../../../shared/readable-tests/translator'
 import { diffSpecPredicates } from '../../../shared/verification-strength/differential'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { readManifest } from '../../runs/logic/runtime/manifest'
@@ -74,7 +75,7 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
       // emits helper-defined entries with no AST match; every test that comes
       // out of `extractTestsFromSource` — the only producer here — carries one.
       // A `?? test.line` fallback would be an arm nothing could reach.
-      return { source, tests: result.tests.map((test) => ({ name: test.name, line: test.line, endLine: test.endLine!, readable: test.readable })), ...(result.parseError ? { parseError: result.parseError } : {}) }
+      return { source, ...(!result.parseError ? { story: translateReadableSource(file, source, feature.semanticRules) } : {}), tests: result.tests.map((test) => ({ name: test.name, line: test.line, endLine: test.endLine!, readable: test.readable })), ...(result.parseError ? { parseError: result.parseError } : {}) }
     }
     const result: TestFileReview = {
       file, currentPath, baseline,

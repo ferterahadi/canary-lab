@@ -49,7 +49,6 @@ vi.mock('@/shared/api/client', async () => {
     listCoverageJobs: vi.fn(),
     getFeatureTests: vi.fn(),
     openEditor: vi.fn(),
-    acceptRequirementWording: vi.fn(),
   }
 })
 
@@ -155,15 +154,18 @@ describe('CoverageLedgerPage', () => {
     // R1: happy claimed, sad declared but unclaimed. At rest that is two segments
     // (one filled) and "1/2"; the gap class is the tooltip, not a chip.
     const cov = container.querySelector('[data-testid="cov-R1"]')
-    expect([...cov!.querySelectorAll('[data-seg]')].map((el) => el.getAttribute('data-seg'))).toEqual(['on', 'off'])
+    expect([...cov!.querySelectorAll('[data-seg]')].map((el) => el.getAttribute('data-seg'))).toEqual(['claimed', 'off'])
     expect(cov?.textContent).toContain('1/2')
-    expect(cov?.getAttribute('title')).toContain('Path gap')
+    act(() => { cov?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toContain('Path gap')
     expect(container.querySelector('[data-testid="gap-R1"]')).toBeNull()
-    // The path chips live in the detail: covered shows a ✓, uncovered just the name.
-    expect(container.querySelector('[data-testid="path-R1-happy"]')).toBeNull()
+    // The detail names the missing path on its own band, marked and worded — the
+    // same square the strip uses, so nothing has to be translated across the caret.
+    expect(container.querySelector('[data-testid="behaviour-happy-R1"]')).toBeNull()
     act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
-    expect(container.querySelector('[data-testid="path-R1-happy"]')?.textContent?.trim()).toBe('happy ✓')
-    expect(container.querySelector('[data-testid="path-R1-sad"]')?.textContent?.trim()).toBe('sad')
+    expect(container.querySelector('[data-testid="behaviour-happy-R1"]')?.textContent).toContain('has a test · not yet passed')
+    expect(container.querySelector('[data-testid="behaviour-unhappy-R1"]')?.textContent).toContain('no test')
+    expect(container.querySelector('[data-testid="channel-grid-R1"]')).toBeNull()
   })
 
   it('clicking a @req tag on a test card focuses + scrolls to that requirement', async () => {
@@ -207,8 +209,8 @@ describe('CoverageLedgerPage', () => {
   it('shows the derived state headline and names the changed docs (R22 — drift in the rail)', async () => {
     await mount()
     expect(container.querySelector('[data-testid="coverage-state-headline"]')?.textContent).toBe('Stale')
-    expect(container.querySelector('[data-testid="docs-rail-drift"]')?.textContent).toContain('prd.md changed')
-    expect(container.querySelector('[data-testid="docs-rail-drift"]')?.textContent).toContain('PRD summary + coverage ledger')
+    expect(container.querySelector('[data-testid="docs-rail-drift"]')?.textContent)
+      .toBe('prd.md has changed, so the PRD summary and coverage ledger no longer match your docs.')
   })
 
   it('renders the unified layout: docs rail + requirements + tests, no tabs (R22)', async () => {
@@ -425,7 +427,9 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="req-detail-R1"]')).toBeNull()
   })
 
-  it('hides an N/A path block instead of rendering a hollow "N/A"', async () => {
+  // A hollow "N/A" is never rendered as prose — but the band itself stays, because
+  // the coverage fraction under it still has to be attributable to a promise.
+  it('drops an N/A prose line and keeps the band its coverage belongs to', async () => {
     const led = structuredClone(LEDGER)
     led.requirements[0].requirement.happyPath = 'token matches the pattern'
     led.requirements[0].requirement.unhappyPath = 'N/A — internal bug, format tests catch it'
@@ -435,10 +439,11 @@ describe('CoverageLedgerPage', () => {
     const detail = container.querySelector('[data-testid="req-detail-R1"]')
     expect(detail?.textContent).toContain('token matches the pattern')
     expect(detail?.textContent).not.toContain('N/A')
-    expect(detail?.textContent).not.toContain('Unhappy path')
+    expect(container.querySelector('[data-testid="behaviour-unhappy-R1"] .clcov-path-text')).toBeNull()
+    expect(container.querySelector('[data-testid="behaviour-unhappy-R1"]')?.textContent).toContain('no test')
   })
 
-  it('renders neither prose block when every path prose is N/A — the detail is just text + paths', async () => {
+  it('renders no prose at all when every path prose is N/A — the bands are just names + marks', async () => {
     const led = structuredClone(LEDGER)
     led.requirements[0].requirement.happyPath = 'N/A'
     led.requirements[0].requirement.unhappyPath = 'n/a — nothing to assert'
@@ -448,8 +453,7 @@ describe('CoverageLedgerPage', () => {
     const detail = container.querySelector('[data-testid="req-detail-R1"]')
     expect(detail?.textContent).toContain(led.requirements[0].requirement.text)
     expect(detail?.textContent).not.toContain('N/A')
-    expect(detail?.textContent).not.toContain('Happy path')
-    expect(detail?.textContent).not.toContain('Unhappy path')
+    expect(detail?.querySelectorAll('.clcov-path-text').length).toBe(0)
   })
 
   it('shows every discovered channel title at one declaration and keeps its requirement link', async () => {
@@ -488,7 +492,7 @@ describe('CoverageLedgerPage', () => {
     act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R3"]')?.click() })
     const detail = container.querySelector('[data-testid="req-detail-R3"]')
     expect(detail?.textContent).toContain(LEDGER.requirements[2].requirement.text)
-    expect(detail?.querySelector('[data-testid^="path-R3-"]')).toBeTruthy()
+    expect(detail?.querySelector('[data-testid^="behaviour-marks-"]')).toBeTruthy()
   })
 
   it('expands a test to fetch its shared English presentation lazily, with Code one action away', async () => {
@@ -564,11 +568,11 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="test-source-sends receipt"]')?.textContent).toContain('Source not found')
   })
 
-  // --- The time axis (D11) on the page: worst-first sort + the human-only Accept lever. ---
+  // --- The time axis (D11) on the page: worst-first sort. ---
 
   it('sorts a requirement whose tests were weakened since the proof above every other row', async () => {
     const led = structuredClone(LEDGER)
-    led.requirements[1].enforcement = { state: 'tests-weakened', provenAt: { runId: 'run-1', at: '2026-09-02T00:00:00.000Z' }, testsChangedAt: { at: '2026-09-03T00:00:00.000Z', tests: ['sends receipt'], verdict: 'weaker' }, wordingChangedAt: '2026-09-01T00:00:00.000Z', accepted: 'none' }
+    led.requirements[1].enforcement = { state: 'tests-weakened', provenAt: { runId: 'run-1', at: '2026-09-02T00:00:00.000Z' }, testsChangedAt: { at: '2026-09-03T00:00:00.000Z', tests: ['sends receipt'], verdict: 'weaker' }, wordingChangedAt: '2026-09-01T00:00:00.000Z' }
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
     await mount()
     const ids = [...container.querySelectorAll('[data-testid^="req-R"]')].map((el) => el.getAttribute('data-testid'))
@@ -576,21 +580,5 @@ describe('CoverageLedgerPage', () => {
     expect(ids[0]).toBe('req-R2')
   })
 
-  it('Accept wording posts the acceptance for that requirement and re-pulls the ledger', async () => {
-    const led = structuredClone(LEDGER)
-    led.requirements[1].enforcement = { state: 'proven-unchanged', provenAt: { runId: 'run-1', at: '2026-09-02T00:00:00.000Z' }, wordingChangedAt: '2026-09-01T00:00:00.000Z', accepted: 'none' }
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
-    vi.mocked(api.acceptRequirementWording).mockResolvedValue({ feature: 'checkout', requirementId: 'R2', acceptedAt: '2026-09-07T00:00:00.000Z', acceptedFingerprint: 'fp' })
-    await mount()
-    const pulls = vi.mocked(api.getFeatureCoverage).mock.calls.length
-    // The lever lives in the expanded detail.
-    act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R2"]')?.click() })
-    const button = container.querySelector('[data-testid="accept-R2"]') as HTMLButtonElement
-    expect(button).toBeTruthy()
-    await act(async () => { button.click() })
-    await act(async () => { await Promise.resolve() })
-    expect(api.acceptRequirementWording).toHaveBeenCalledWith('checkout', 'R2')
-    expect(vi.mocked(api.getFeatureCoverage).mock.calls.length).toBeGreaterThan(pulls)
-  })
 
 })

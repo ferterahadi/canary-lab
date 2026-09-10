@@ -42,16 +42,11 @@ export function deriveRequirementEnforcement(
   else if (ms(wordingChangedAt) > provenMs) state = 'wording-ahead'
   else state = 'proven-unchanged'
 
-  const accepted: RequirementEnforcement['accepted'] = requirement.acceptedAt === undefined
-    ? 'none'
-    : requirement.acceptedFingerprint === requirement.fingerprint ? 'current' : 'outdated'
-
   return {
     state,
     ...(history.provenAt ? { provenAt: history.provenAt } : {}),
     ...(latest ? { testsChangedAt: latest } : {}),
     wordingChangedAt,
-    accepted,
   }
 }
 

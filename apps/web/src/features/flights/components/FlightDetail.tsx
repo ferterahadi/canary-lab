@@ -352,7 +352,7 @@ export function FlightDetail({
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 text-xs text-muted">
         <div>Couldn't open this flight. {error}</div>
-        <button type="button" onClick={onBackToList} className="cl-button px-2.5 py-1 text-xs">All flights</button>
+        <button type="button" onClick={onBackToList} className="cl-button px-2.5 py-1">All flights</button>
       </div>
     )
   }
@@ -483,7 +483,7 @@ export function FlightDetail({
               data-testid="flight-primary-respond"
               onClick={respondJump}
               disabled={externalMutationOwner != null}
-              className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+              className="cl-button-primary px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-45"
               title={externalMutationOwner
                 ? externalMutationTooltip(externalMutationOwner, 'answer this checkpoint')
                 : 'Jump to the question the flight is waiting on'}
@@ -512,7 +512,7 @@ export function FlightDetail({
               // the only safe way to transfer ownership without discarding the
               // external agent's eventual result.
               disabled={externalMutationOwner != null}
-              className="cl-button px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+              className="cl-button px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-45"
               title={externalMutationOwner
                 ? externalMutationTooltip(externalMutationOwner, 'pause this work')
                 : 'Stops everything — the agent, the test run, and any repair. Continue starts this step again.'}
@@ -539,7 +539,7 @@ export function FlightDetail({
               data-testid="flight-run-parallel-setup"
               onClick={startParallelSetup}
               disabled={parallelSetupStarting}
-              className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-wait disabled:opacity-65"
+              className="cl-button-primary px-2.5 py-1 disabled:cursor-wait disabled:opacity-65"
               title="Start Parallel setup now. The remaining Flight can continue at the same time."
             >
               {parallelSetupStarting ? 'Starting…' : 'Run Parallel Setup'}
@@ -569,7 +569,7 @@ export function FlightDetail({
                   data-testid="derived-conduct"
                   onClick={() => onStartFlight?.(derivedFeature, 'fresh', null)}
                   disabled={externalMutationOwner != null}
-                  className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+                  className="cl-button-primary px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-45"
                   title={externalMutationOwner
                     ? externalMutationTooltip(externalMutationOwner, 'start or continue a flight')
                     : 'Every step is done — start a fresh flight to fly it again'}
@@ -608,7 +608,7 @@ export function FlightDetail({
           className="flex items-center gap-2 border-b px-4 py-1.5 text-[11px] border-line text-danger"
         >
           <span className="min-w-0 flex-1 truncate" title={actionError}>{actionError}</span>
-          <button type="button" onClick={() => setActionError(null)} className="cl-button min-h-6 shrink-0 px-2 py-0.5 text-[10.5px]">Dismiss</button>
+          <button type="button" onClick={() => setActionError(null)} className="cl-button min-h-6 shrink-0 px-2 py-0.5">Dismiss</button>
         </div>
       )}
 
@@ -665,7 +665,7 @@ export function FlightDetail({
               data-testid={selectedStage === null ? 'rail-following' : 'rail-resume-follow'}
               aria-pressed={selectedStage === null}
               onClick={() => setSelectedStage(null)}
-              className="cl-button flex shrink-0 items-center gap-1 px-1.5 py-1 text-[10px] leading-none"
+              className="cl-button flex shrink-0 items-center gap-1 px-1.5 py-1 leading-none"
               style={selectedStage === null
                 ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))', background: 'var(--bg-selected)' }
                 : undefined}
@@ -812,11 +812,11 @@ export function stageDrillThrough(
   // source docs are approved, and offering a ledger then opens an empty one.
   if (stage.key === 'docs' && drill.onOpenCoverage && companion?.status === 'done') {
     const open = drill.onOpenCoverage
-    return { label: 'Open test coverage →', onClick: () => open(flight.feature) }
+    return { label: 'Test coverage →', onClick: () => open(flight.feature) }
   }
   if (stage.key === 'specs-coverage' && drill.onOpenCoverage && stage.status !== 'pending') {
     const open = drill.onOpenCoverage
-    return { label: 'Open test coverage →', onClick: () => open(flight.feature) }
+    return { label: 'Test coverage →', onClick: () => open(flight.feature) }
   }
   // Flight owns the Parallel-readiness workflow, including live work, review
   // and save. This drill is only a supporting-config lens: the Ports tab holds
@@ -825,7 +825,7 @@ export function stageDrillThrough(
   // parked. `pending` alone isn't "never ran": an interrupted stage reverts to
   // pending and keeps its startedAt, and that's exactly when you want the tab.
   if (stage.key === 'portify' && onOpenConfig && (stage.status !== 'pending' || stage.startedAt != null)) {
-    return { label: 'Open port settings →', onClick: () => onOpenConfig(flight.feature, 'ports') }
+    return { label: 'Port settings →', onClick: () => onOpenConfig(flight.feature, 'ports') }
   }
   return null
 }

@@ -150,7 +150,7 @@ describe('CoverageCompositionPanel', () => {
     const group = container.querySelector('[data-testid="composition-strength"]')
     // Two voices, two levels: the name is the frame heading, the population is
     // the quiet rubric figure over the column it totals.
-    expect(group?.querySelector('.cl-frame-heading')?.textContent).toBe('Test depth')
+    expect(group?.querySelector('.cl-type-title')?.textContent).toBe('Test depth')
     expect(group?.querySelector('.cl-rubric')?.textContent).toBe('4 tests')
     expect(row('composition-strength', 'shallow')).toContain('Shallow1')
     expect(row('composition-strength', 'solid')).toContain('Solid2')
@@ -160,7 +160,7 @@ describe('CoverageCompositionPanel', () => {
   it('names each gap KIND separately — path and variant gaps decide different next tests', async () => {
     await render(MIXED)
     const gaps = container.querySelector('[data-testid="composition-gaps"]')
-    expect(gaps?.querySelector('.cl-frame-heading')?.textContent).toBe('Requirement coverage')
+    expect(gaps?.querySelector('.cl-type-title')?.textContent).toBe('Requirement coverage')
     expect(gaps?.querySelector('.cl-rubric')?.textContent).toBe('10 requirements')
     expect(row('composition-gaps', 'covered')).toContain('Covered6')
     expect(row('composition-gaps', 'path-incomplete')).toContain('Path gap2')
@@ -206,9 +206,9 @@ describe('CoverageCompositionPanel', () => {
     // Both groups, in the settled order, without the population counts they
     // cannot yet know.
     const strengthGroup = container.querySelector('[data-testid="composition-strength"]')
-    expect(strengthGroup?.querySelector('.cl-frame-heading')?.textContent).toBe('Test depth')
+    expect(strengthGroup?.querySelector('.cl-type-title')?.textContent).toBe('Test depth')
     expect(strengthGroup?.querySelector('.cl-rubric')).toBeNull()
-    expect(container.querySelector('[data-testid="composition-gaps"]')?.querySelector('.cl-frame-heading')?.textContent)
+    expect(container.querySelector('[data-testid="composition-gaps"]')?.querySelector('.cl-type-title')?.textContent)
       .toBe('Requirement coverage')
     // Every bucket row of the settled card is present, and each carries a
     // placeholder rather than a zero — an unmeasured bucket must not read as a

@@ -1,6 +1,6 @@
 import path from 'path'
-import type { FlightIndexEntry, FlightManifest, FlightStageKey } from './types'
-import { isActiveFlightStatus, isTerminalFlightStatus } from './types'
+import type { FlightIndexEntry, FlightManifest, FlightStage, FlightStageKey, FlightStatus } from './types'
+import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, isTerminalFlightStatus } from './types'
 import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../shared/lib/file-backed-task-store'
 
 // File-backed, event-emitting store for Flight background jobs. A thin
@@ -86,6 +86,60 @@ function repoSetsIntersect(a: string[], b: string[]): boolean {
   return b.some((p) => set.has(norm(p)))
 }
 
+/** Stage records for pipeline steps that did not exist when this flight was
+ *  written, inserted as `pending` in canonical order.
+ *
+ *  A flight's stage array is minted once, at start, from the stage keys of that
+ *  build and is never re-derived. So a flight flown before `robustness` shipped
+ *  carries no record for it, and every surface that walks the array — the
+ *  picker's mini rail, the flight rail, "continue from a step" — omits the step
+ *  silently instead of showing it unrun. The gap reads as "this pipeline has no
+ *  such step", which is false.
+ *
+ *  `pending` and not `skipped`: the stage genuinely never ran, and `skipped`
+ *  would assert a decision nobody made. A backfilled step is therefore
+ *  re-enterable, which is the honest offer — the flight really has not done it.
+ *
+ *  Returns the SAME array when nothing is missing, so the caller can skip the
+ *  rewrite. */
+function backfillMissingStages(stages: FlightStage[]): FlightStage[] {
+  const byKey = new Map(stages.map((stage) => [stage.key, stage]))
+  if (FLIGHT_STAGE_KEYS.every((key) => byKey.has(key))) return stages
+  const knownKeys = new Set<string>(FLIGHT_STAGE_KEYS)
+  return [
+    ...FLIGHT_STAGE_KEYS.map((key) => byKey.get(key) ?? { key, status: 'pending' as const }),
+    // A record written by a NEWER build can carry a key this one has never
+    // heard of (an older tarball installed over the same workspace). Keep it:
+    // the rewrite must not be the thing that deletes a stage's history.
+    ...stages.filter((stage) => !knownKeys.has(stage.key)),
+  ]
+}
+
+/** Older aborts only settled the flight, leaving the interrupted stage live.
+ *  Repair those records so a terminal flight cannot render a blue "running"
+ *  stage or retain an answerable checkpoint. Returns the SAME array when there
+ *  was nothing to settle. */
+function settleLegacyTerminalStages(stages: FlightStage[], status: FlightStatus): FlightStage[] {
+  if (!isTerminalFlightStatus(status)) return stages
+  let repaired = false
+  const settled = stages.map((stage) => {
+    if (stage.status !== 'running' && stage.status !== 'waiting-for-approval') return stage
+    repaired = true
+    // Same no-banking rule as the restart reconcile above: whenever this
+    // stage actually stopped, it wasn't now.
+    return {
+      ...stage,
+      status: 'pending' as const,
+      checkpoint: undefined,
+      activeSince: undefined,
+      timings: Object.fromEntries(
+        Object.entries(stage.timings ?? {}).map(([key, timer]) => [key, { elapsedMs: timer.elapsedMs }]),
+      ),
+    }
+  })
+  return repaired ? settled : stages
+}
+
 export class FlightRunStore implements FlightStore {
   private readonly listeners = new Set<(event: FlightStoreEvent) => void>()
   private readonly store: FileBackedTaskStore<FlightManifest>
@@ -129,34 +183,21 @@ export class FlightRunStore implements FlightStore {
         }),
       },
     })
-    this.repairLegacyTerminalStages()
+    this.repairLegacyRecords()
     this.store.onEvent((e: TaskStoreEvent) => this.emit({ kind: e.kind, flightId: e.id }))
   }
 
-  /** Older aborts only settled the flight, leaving the interrupted stage live.
-   *  Repair those persisted records at open so a terminal flight cannot render
-   *  a blue "running" stage or retain an answerable checkpoint. */
-  private repairLegacyTerminalStages(): void {
+  /** Bring persisted records up to today's shape at open, before anything
+   *  reads them — a stale record is repaired once and rewritten, rather than
+   *  every reader learning to cope with each historical shape. */
+  private repairLegacyRecords(): void {
     for (const entry of this.store.list()) {
       const manifest = this.store.get(entry.id)
-      if (!manifest || !isTerminalFlightStatus(manifest.status)) continue
-      let repaired = false
-      const stages = manifest.stages.map((stage) => {
-        if (stage.status !== 'running' && stage.status !== 'waiting-for-approval') return stage
-        repaired = true
-        // Same no-banking rule as the restart reconcile above: whenever this
-        // stage actually stopped, it wasn't now.
-        return {
-          ...stage,
-          status: 'pending' as const,
-          checkpoint: undefined,
-          activeSince: undefined,
-          timings: Object.fromEntries(
-            Object.entries(stage.timings ?? {}).map(([key, timer]) => [key, { elapsedMs: timer.elapsedMs }]),
-          ),
-        }
-      })
-      if (repaired) this.store.save({ ...manifest, stages })
+      if (!manifest) continue
+      const stages = settleLegacyTerminalStages(backfillMissingStages(manifest.stages), manifest.status)
+      // Identity, not deep equality: both repairs hand back the ORIGINAL array
+      // when they changed nothing, so an unchanged record is never rewritten.
+      if (stages !== manifest.stages) this.store.save({ ...manifest, stages })
     }
   }
 

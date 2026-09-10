@@ -13,6 +13,35 @@ export const PANEL_CARD_STYLE: CSSProperties = {
   background: 'var(--bg-surface)',
   boxShadow: 'var(--shadow-panel)',
 }
+
+/** A card that needs the user — a checkpoint's question, a stage error, a
+ *  robustness finding — is the same slab in a louder tone, not a differently
+ *  shaped one. Four such cards each hand-rolled `p-3` (12px all round) beside
+ *  PanelCard's `px-3 py-2.5`, so the one card the user MUST read sat 2px
+ *  taller than every card around it. `warning` keeps the plain surface (the
+ *  border alone asks the question); `danger` earns the tint. */
+export type PanelCardTone = 'default' | 'warning' | 'danger'
+
+// `default` adds nothing: PANEL_CARD_STYLE's inline border/background already
+// win over any utility, so a class here would be dead weight.
+const PANEL_CARD_TONE: Record<PanelCardTone, string> = {
+  default: '',
+  warning: 'border-warning/45',
+  danger: 'border-danger/45 bg-danger/6',
+}
+
+/** Chrome for a toned card. `default` keeps the token style object (the shadow
+ *  and surface come from PANEL_CARD_STYLE); a toned card states its border and
+ *  background as token utilities, so only the shadow carries over. */
+export function panelCardClass(tone: PanelCardTone = 'default'): string {
+  return `${PANEL_CARD_CLASS} ${PANEL_CARD_TONE[tone]}`.trimEnd()
+}
+
+export function panelCardStyle(tone: PanelCardTone = 'default'): CSSProperties {
+  return tone === 'default'
+    ? PANEL_CARD_STYLE
+    : { boxShadow: 'var(--shadow-panel)', ...(tone === 'warning' ? { background: 'var(--bg-surface)' } : {}) }
+}
 // The card's label voice is the system rubric (mono 10px caps, styles.css) so
 // stage cards and workspace sub-captions read as one register.
 export const PANEL_KICKER_CLASS = 'cl-rubric'

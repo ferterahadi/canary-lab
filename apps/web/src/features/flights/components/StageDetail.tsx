@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import type { ExternalWorkCheckpointData, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
 import * as api from '@/shared/api/client'
 import type { RobustnessFinding } from '@shared/robustness/jobs'
@@ -55,11 +56,6 @@ export { AgentBlock, SpecsPassTimeline, StageActivityRail, specsPhaseSub, trunca
  *  transcript in the user's own client, and a cleaned agent history leaves none
  *  at all — so the generic "nothing ran here" would contradict the proof panels
  *  directly above the rail. */
-const PORTIFY_NO_TRANSCRIPT = {
-  title: 'Nothing to replay here',
-  body: 'What the port work produced is the side-by-side boot and the port changes above.',
-}
-
 /** A standalone external task has no Canary-owned transcript. Translate its
  *  durable producer record into one compact row on the shared Activity rail. */
 export function externalSessionActivity(
@@ -525,45 +521,80 @@ export function StageDetail({
       {/* min-h-6 (=the .cl-button height) locks the actions row height, so
           neither the chip nor an action button drops when a stage carries one
           (Advanced setup, drill-through, download) versus the plain chip-only
-          stages. */}
-      <div data-testid="stage-actions" className="order-last flex min-h-6 shrink-0 items-center gap-2">
+          stages.
+
+          The lane is a FIXED width, not the cluster's own. Sized to its content
+          it stole a variable slice of the column: a chip-only stage left the
+          column at its 92ch cap while Suite setup's extra "⚙ Advanced setup"
+          button pushed the cards 19px narrower, so switching tabs re-flowed
+          every card's right edge. A fixed lane makes that slice the same on
+          every stage — and a cluster too wide for it wraps to a second line
+          inside the lane (`flex-wrap`), which costs nothing: the lane sits in
+          the empty gutter beside cards that are top-aligned anyway, so nothing
+          below it moves.
+
+          220px is that lane sized to the widest cluster that must stay on ONE
+          line: the status chip (90px at "Needs approval", 118px at the longest
+          waiting label) + gap + the longest action label ("⚙ Advanced setup",
+          114px) = 212. At 180 it was 17px short of the old
+          "Open test coverage →", so Requirements and Tests & coverage dropped
+          their button under a lonely "✓ Done" — a wrap that reads as a mistake
+          rather than a composition. The column measures 988px against a card
+          capped at 851px (STAGE_COLUMN's 92ch), so the extra 40px comes out of
+          empty gutter, not card width.
+
+          The models chip takes its OWN line (below) so this line always holds
+          the same two things. No stage carries both "⚙ Advanced setup" and a
+          drill-through, and a waiting chip only appears while the stage runs —
+          when `stageDrillThrough` returns nothing — so 212 really is the
+          ceiling. */}
+      <div data-testid="stage-actions" className="order-last flex min-h-6 w-[220px] shrink-0 flex-wrap items-center justify-end gap-2">
         {/* The models this step's agents were pinned to — a passive fact, so it
-            sits ahead of the status chip and the action buttons rather than
-            among them. A step left on the agent default shows nothing at all,
-            which is what makes the chip mean "this one was deliberately tuned".
-            ONE chip that opens the plan, not one chip per spawn: a bare
-            `opus · high` named a model with no subject, and a merged row put
-            two such subjectless chips side by side. Spelling the subject inline
-            instead just traded that for a header full of prose. The panel is
-            the strip's, via ModelPlanPopover — same spawn → knobs rows, scoped
-            to this step. */}
+            gets its OWN line above the status chip and the action buttons
+            rather than a place among them. A step left on the agent default
+            shows nothing at all, which is what makes the chip mean "this one
+            was deliberately tuned". ONE chip that opens the plan, not one chip
+            per spawn: a bare `opus · high` named a model with no subject, and a
+            merged row put two such subjectless chips side by side. Spelling the
+            subject inline instead just traded that for a header full of prose.
+            The panel is the strip's, via ModelPlanPopover — same spawn → knobs
+            rows, scoped to this step.
+
+            Why a line of its own: it is the widest thing in the cluster, so
+            sharing the line made the wrap point depend on which stage you were
+            looking at — the status chip and its action landed together on some
+            stages and split across two lines on others. Now the split is always
+            the same one: what this step was tuned to, then what it did and
+            where to go. */}
         {modelChips.length > 0 && (
-          <ModelPlanPopover
-            /* The stage's chips live in a right-aligned cluster; a left-anchored
-               panel would hang off the pane. */
-            align="right"
-            panelTestId="stage-models-plan"
-            rows={modelChips.map((chip) => ({ key: chip.stage, label: chip.label, value: chip.value }))}
-          >
-            {({ open, toggle }) => (
-              <Chip
-                testId="stage-models"
-                chrome="border"
-                labelColor="var(--text-secondary)"
-                fontWeight={400}
-                onClick={toggle}
-                expanded={open}
-                title={`${modelChips.length} model choice${modelChips.length === 1 ? '' : 's'} this step's agents were pinned to when this flight started — click for which agent runs on what`}
-                label={(
-                  <span className="inline-flex items-baseline gap-1.5">
-                    <span className="cl-rubric">models</span>
-                    <span className="font-mono">{modelChips.length}</span>
-                    <span aria-hidden="true" className="text-[9px] text-muted">▾</span>
-                  </span>
-                )}
-              />
-            )}
-          </ModelPlanPopover>
+          <div className="flex w-full justify-end">
+            <ModelPlanPopover
+              /* The stage's chips live in a right-aligned cluster; a
+                 left-anchored panel would hang off the pane. */
+              align="right"
+              panelTestId="stage-models-plan"
+              rows={modelChips.map((chip) => ({ key: chip.stage, label: chip.label, value: chip.value }))}
+            >
+              {({ open, toggle }) => (
+                <Chip
+                  testId="stage-models"
+                  chrome="border"
+                  labelColor="var(--text-secondary)"
+                  fontWeight={400}
+                  onClick={toggle}
+                  expanded={open}
+                  title={`${modelChips.length} model choice${modelChips.length === 1 ? '' : 's'} this step's agents were pinned to when this flight started — click for which agent runs on what`}
+                  label={(
+                    <span className="inline-flex items-baseline gap-1.5">
+                      <span className="cl-rubric">models</span>
+                      <span className="font-mono">{modelChips.length}</span>
+                      <span aria-hidden="true" className="text-[9px] text-muted">▾</span>
+                    </span>
+                  )}
+                />
+              )}
+            </ModelPlanPopover>
+          </div>
         )}
         <StageStatusChip status={row.status} waiting={activity && stageRowKey(ACTIVITY_STAGE[activity.kind]) === stage.key ? activity.waiting : undefined} />
         {/* Advanced setup appears once the config EXISTS on disk — approved
@@ -581,7 +612,7 @@ export function StageDetail({
                  gate below; only editable once the flight is idle. */
               disabled={flight.status === 'running' || externalMutationOwner != null}
               onClick={() => onOpenConfig(flight.feature)}
-              className="cl-button min-h-6 shrink-0 px-2 py-0.5 text-[11px]"
+              className="cl-button min-h-6 shrink-0 px-2 py-0.5"
               title={externalMutationOwner
                 ? externalMutationTooltip(externalMutationOwner, 'change advanced setup')
                 : flight.status === 'running'
@@ -597,7 +628,7 @@ export function StageDetail({
             type="button"
             data-testid={`stage-drill-${stage.key}`}
             onClick={drillThrough.onClick}
-            className="cl-button min-h-6 shrink-0 px-2 py-0.5 text-[11px] text-accent"
+            className="cl-button min-h-6 shrink-0 px-2 py-0.5"
           >
             {drillThrough.label}
           </button>
@@ -856,7 +887,7 @@ export function StageDetail({
           externalSessions={externalSessions}
           open={activityOpen}
           onOpenChange={onActivityOpenChange}
-          {...(stage.key === 'portify' ? { empty: PORTIFY_NO_TRANSCRIPT } : {})}
+          {...(stage.key === 'portify' ? { empty: EMPTY_COPY.portifyNoTranscript } : {})}
         />
       )}
     </div>

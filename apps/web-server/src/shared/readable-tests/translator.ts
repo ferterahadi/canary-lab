@@ -557,16 +557,28 @@ function translateStatement(
 function translateStory(
   statements: readonly ts.Statement[],
   context: TranslationContext,
+  complete = false,
 ): ReadableTestStory | undefined {
-  const translateCandidate = (
-    candidate: ReturnType<typeof storyCandidates>[number],
-  ): ReadableStoryItem => {
+  type Candidate = ReturnType<typeof storyCandidates>[number]
+
+  function translateCandidates(candidates: Candidate[]): ReadableStoryItem[] {
+    return candidates.flatMap((candidate) => {
+      const item = translateCandidate(candidate)
+      if (candidate.kind !== 'flow' || candidate.flowKind !== 'condition') return [item]
+      const alternative = candidate.children.find(
+        (child) => child.kind === 'flow' && child.flowKind === 'otherwise',
+      )
+      return alternative ? [item, translateCandidate(alternative)] : [item]
+    })
+  }
+
+  function translateCandidate(candidate: Candidate): ReadableStoryItem {
     const source = sourceFor(candidate.node, context.sourceFile, context.file, context.lineOffset)
     const base = {
       id: stableNodeId(source, [-1, ...candidate.path]),
       role: candidate.role,
-      text: candidate.text,
-      spans: candidate.spans,
+      text: candidate.kind === 'flow' && candidate.flowKind === 'otherwise' ? 'Else' : candidate.text,
+      spans: candidate.kind === 'flow' && candidate.flowKind === 'otherwise' ? [{ text: 'Else', kind: 'keyword' as const }] : candidate.spans,
       fidelity: candidate.fidelity,
       source,
     }
@@ -575,14 +587,32 @@ function translateStory(
           ...base,
           kind: 'flow',
           flowKind: candidate.flowKind,
-          children: candidate.children.map(translateCandidate),
+          ...((ts.isForOfStatement(candidate.node) || ts.isForInStatement(candidate.node) || ts.isForStatement(candidate.node))
+            && ts.isBlock(candidate.node.statement) ? {
+              headerEndLine: context.lineOffset + context.sourceFile.getLineAndCharacterOfPosition(candidate.node.statement.getStart(context.sourceFile)).line,
+            } : {}),
+          children: translateCandidates(candidate.kind === 'flow' && candidate.flowKind === 'condition'
+            ? candidate.children.flatMap((child) => child.kind === 'flow' && child.flowKind === 'then'
+              ? child.children
+              : child.kind === 'flow' && child.flowKind === 'otherwise' ? [] : [child])
+            : candidate.children),
         }
       : base
   }
   const story: ReadableTestStory = {
-    steps: storyCandidates(statements, context.sourceFile).map(translateCandidate),
+    steps: translateCandidates(storyCandidates(statements, context.sourceFile, complete ? context.semanticContext : undefined)),
   }
   return story.steps.length ? story : undefined
+}
+
+/** File review includes declarations and registration, not just test callbacks. */
+export function translateReadableSource(file: string, source: string, semanticRules?: ReadableSemanticRuleConfig): ReadableTestStory {
+  const semanticContext = compileSemanticSource(file, source, { semanticRules })
+  const context: TranslationContext = {
+    file, lineOffset: 1, sourceFile: semanticContext.sourceFile, semanticContext,
+    helpers: new Map(), activeHelpers: new Set(),
+  }
+  return translateStory(context.sourceFile.statements, context, true) ?? { steps: [] }
 }
 
 function translatedTest(

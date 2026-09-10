@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act } from 'react'
+import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, getFeatureDirtyDiff, getFeatureTests } from '../api/client'
@@ -18,6 +18,7 @@ vi.mock('../api/client', async () => {
     ...actual,
     getFeatureTests: vi.fn(),
     getFeatureDirtyDiff: vi.fn(),
+    getTestFileDifference: vi.fn().mockResolvedValue({ changed: false }),
   }
 })
 
@@ -256,7 +257,7 @@ it('hydrates the recorded snapshot results without confusing them with live sour
   expect(badges.filter((t) => t.endsWith('SKIPPED'))).toHaveLength(9)
   expect(badges.filter((t) => t.endsWith('PENDING'))).toHaveLength(0)
   expect(container.textContent).toMatch(/77\s*\/\s*98/)
-  expect(container.textContent).toContain('Last execution')
+  expect(container.textContent).toContain('Selected run')
 })
 
 it('shows discovery diagnostics and incomplete definitions without presenting them as test results', async () => {
@@ -306,4 +307,112 @@ it('copies the server repair prompt and offers manual copy when clipboard access
   expect(writeText).toHaveBeenLastCalledWith(prompt)
   expect(container.textContent).toContain('Copied repair prompt')
   expect(container.querySelector('[role="alert"]')).toBeNull()
+})
+
+// Names were changed from @req/@variant tags to a whatsapp: prefix after
+// this recorded run. Loading workspace source made all 98 results pending.
+it('keeps all recorded verdicts when current test names changed', async () => {
+  const { default: recorded } = await import('@/features/runs/utils/__fixtures__/cns-wa-renamed.json')
+  const summary = recorded.summary as RunSummary
+  const files = new Map<string, { name: string; line: number; bodySource: string; steps: []; readable: ReturnType<typeof readableTest> }[]>()
+  for (const test of summary.knownTests!) {
+    const match = /^(.*):(\d+)$/.exec(test.location!)!
+    const entries = files.get(match[1]) ?? []
+    entries.push({ name: test.title!, line: Number(match[2]), bodySource: '{}', steps: [], readable: readableTest(test.title!) })
+    files.set(match[1], entries)
+  }
+  const saved = [...files].map(([file, tests]) => ({ file, tests }))
+  vi.mocked(getFeatureTests).mockImplementation(async (_feature, _opts, runId) => runId ? saved : [{
+    file: 'current.spec.ts', tests: [{ name: 'whatsapp: renamed current test', line: 1, bodySource: '{}', steps: [], readable: readableTest('current') }],
+  }])
+  await act(async () => root.render(<TestCasesColumn feature="cns-wa-merchant" activeRunStatus="failed" activeRunManifest={recorded.manifest as RunManifest} activeRunSummary={summary} />))
+  expect(getFeatureTests).toHaveBeenCalledWith('cns-wa-merchant', undefined, recorded.manifest.runId)
+  const labels = [...container.querySelectorAll('button')].map((button) => button.textContent ?? '')
+  expect(labels.filter((text) => text.endsWith('passed'))).toHaveLength(85)
+  expect(labels.filter((text) => text.endsWith('failed'))).toHaveLength(4)
+  expect(labels.filter((text) => text.endsWith('skipped'))).toHaveLength(9)
+  expect(labels.filter((text) => text.endsWith('pending'))).toHaveLength(0)
+  expect(container.textContent).not.toContain('renamed current test')
+  expect(container.textContent).toContain('85/98')
+
+  vi.mocked(getFeatureTests).mockRejectedValue(new ApiError(409, { error: 'Snapshot unavailable' }))
+  await act(async () => root.render(<TestCasesColumn feature="cns-wa-merchant" activeRunStatus="failed" activeRunManifest={{ ...recorded.manifest, runId: 'missing' } as RunManifest} activeRunSummary={summary} />))
+  expect(container.textContent).toContain('Recorded tests unavailable')
+  expect(container.textContent).not.toContain('a new app can read')
+  expect(container.textContent).not.toContain('Repair in Canary Lab')
+  expect(container.textContent).toContain('Snapshot unavailable')
+  expect(container.textContent).toContain('Reload recorded tests')
+  expect(container.textContent).not.toContain('Retry discovery')
+})
+
+it('loads the recorded roster when it arrives after the run booted', async () => {
+  const manifest = { runId: 'booting-run', featureDir: '/workspace/features/suite', suiteSnapshot: { kind: 'taken', dir: '/workspace/logs/runs/booting-run/suite', takenAt: '', digest: '' } } as RunManifest
+  vi.mocked(getFeatureTests).mockResolvedValueOnce([])
+  await act(async () => root.render(<TestCasesColumn feature="suite" activeRunStatus="running" activeRunManifest={manifest} activeRunSummary={undefined} />))
+  expect(container.textContent).toContain('Waiting for this run to record its test list.')
+  const name = 'recorded test'
+  const file = `${manifest.suiteSnapshot!.kind === 'taken' ? manifest.suiteSnapshot!.dir : ''}/e2e/a.spec.ts`
+  vi.mocked(getFeatureTests).mockResolvedValue([{ file, tests: [{ name, line: 1, bodySource: '{}', steps: [], readable: readableTest(name) }] }])
+  const summary: RunSummary = { complete: false, total: 1, passed: 0, failed: [], passedIds: [], knownTests: [{ id: 'one', name: 'test-case-recorded-test', title: name, location: `${file}:1` }] }
+  await act(async () => root.render(<TestCasesColumn feature="suite" activeRunStatus="running" activeRunManifest={manifest} activeRunSummary={summary} />))
+  expect(container.textContent).not.toContain('Recorded tests unavailable')
+  expect(container.textContent).toContain(name)
+  expect(getFeatureTests).toHaveBeenCalledTimes(2)
+})
+
+it('shows the 23 recorded legacy auth passes without offering current source as evidence', async () => {
+  const { default: legacy } = await import('@/features/runs/utils/__fixtures__/cns-legacy-auth.json')
+  const summary = legacy.summary as RunSummary
+  const specs = summary.knownTests!.map((known) => {
+    const [, file, line] = /^(.*?):(\d+)$/.exec(known.location!)!
+    return { file, recordedSourceUnavailable: true, tests: [{ name: known.title!, line: Number(line), bodySource: '', steps: [], readable: readableTest(known.title!) }] }
+  })
+  vi.mocked(getFeatureTests).mockResolvedValue(specs)
+  await act(async () => root.render(<TestCasesColumn feature={legacy.manifest.feature} activeRunManifest={legacy.manifest as RunManifest} activeRunStatus="passed" activeRunSummary={summary} />))
+  expect(container.textContent).toContain('23/23')
+  expect([...container.querySelectorAll('button')].filter((button) => button.textContent?.endsWith('passed'))).toHaveLength(23)
+  expect(container.textContent).toContain('Historical source is unavailable')
+  expect(container.textContent).toContain('Source was not retained for this test')
+  expect(container.textContent).not.toContain('Recorded tests unavailable')
+  expect(container.textContent).not.toContain('Retry discovery')
+  expect(container.querySelector('[aria-label="Open in editor"]')).toBeNull()
+})
+
+it('explains an aborted run with no roster without inviting discovery retries', async () => {
+  vi.mocked(getFeatureTests).mockResolvedValue([])
+  const manifest = { runId: 'aborted-before-start', featureDir: '/workspace/features/suite' } as RunManifest
+  await act(async () => root.render(<TestCasesColumn feature="suite" activeRunManifest={manifest} activeRunStatus="aborted" activeRunSummary={undefined} />))
+  expect(container.textContent).toContain('This run has no recorded test list')
+  expect(container.textContent).not.toContain('Retry discovery')
+  expect(container.textContent).not.toContain('No spec files found')
+  expect(container.textContent).not.toContain('HTTP 409')
+})
+
+it('lets an empty historical run open current tests without inheriting its verdicts', async () => {
+  vi.mocked(getFeatureTests).mockImplementation(async (_feature, _opts, runId) => runId ? [] : [{
+    file: '/workspace/features/suite/e2e/current.spec.ts',
+    tests: [{ name: 'current test', line: 1, bodySource: 'expect(200).toBe(200)', steps: [], readable: readableTest('current test') }],
+  }])
+  const manifest = { runId: 'old-run', featureDir: '/workspace/features/suite' } as RunManifest
+  function View() {
+    const [current, setCurrent] = useState(false)
+    return <TestCasesColumn feature="suite" currentTests={current} onCurrentTestsChange={setCurrent} activeRunManifest={current ? undefined : manifest} activeRunStatus={current ? undefined : 'aborted'} activeRunSummary={undefined} />
+  }
+  await act(async () => root.render(<View />))
+  expect(container.textContent).toContain('This run has no recorded test list')
+  const click = async (label: string) => act(async () => {
+    const button = [...container.querySelectorAll('button')].find((button) => button.textContent === label)
+    expect(button).toBeTruthy()
+    button!.click()
+  })
+  await click('View current tests')
+  expect(getFeatureTests).toHaveBeenLastCalledWith('suite', undefined, undefined)
+  expect(container.textContent).toContain('current test')
+  expect(container.textContent).toContain('Current source')
+  expect(container.textContent).not.toContain('pending')
+  expect(container.textContent).not.toContain('passed')
+  await click('View recorded results')
+  expect(getFeatureTests).toHaveBeenLastCalledWith('suite', undefined, 'old-run')
+  expect(container.textContent).toContain('This run has no recorded test list')
+  expect(container.textContent).not.toContain('expect(200)')
 })

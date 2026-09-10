@@ -234,7 +234,8 @@ describe('durable stage substage timings', () => {
 
     const reopened = new FlightRunStore(tmpDir)
     reopened.reconcileInterrupted(now)
-    expect(reopened.get(flightId)!.stages[0].timings).toEqual({ authoring: { elapsedMs: 2_000 } })
+    const stage = reopened.get(flightId)!.stages.find((s) => s.key === 'specs-coverage')!
+    expect(stage.timings).toEqual({ authoring: { elapsedMs: 2_000 } })
   })
 })
 

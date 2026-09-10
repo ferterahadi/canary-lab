@@ -138,7 +138,7 @@ export function EmptyDropzone({ onPick, dragging, busy, title = 'Add source docs
       </span>
       <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>{title}</span>
       <span style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-        Drop spec, ticket, or notes files here — or click to browse. Accepts <code>.md</code>, <code>.txt</code>, <code>.pdf</code>, <code>.docx</code>.
+        Drop a spec, a ticket, or your notes here — or click to browse. Takes <code>.md</code>, <code>.txt</code>, <code>.pdf</code>, <code>.docx</code>.
       </span>
     </button>
   )

@@ -1,6 +1,6 @@
 import type { DirtySpecSummary, Feature } from '@/shared/api/types'
 import type { StrengthVerdict } from '@shared/verification-strength/types'
-import { INTEGRITY_HINT_COPY, INTEGRITY_HINT_DISCLOSURE, INTEGRITY_HINT_FALSE_POSITIVE_RATE } from '@shared/verification-strength/disclosure'
+import { INTEGRITY_HINT_COPY, INTEGRITY_HINT_FALSE_POSITIVE_RATE } from '@shared/verification-strength/disclosure'
 import { ROBUSTNESS_ENVELOPE_RELATIVE_PATH } from '@shared/robustness/types'
 
 // One reading of a feature's modified specs for the three review surfaces (the
@@ -41,19 +41,19 @@ export const SPEC_TONE: Record<SpecEditTone, { glyph: string; color: string; lab
     glyph: '!',
     color: 'var(--warning)',
     label: 'Weaker',
-    title: `Hint: an edit reads weaker than what ran — false positive ${INTEGRITY_HINT_FALSE_POSITIVE_RATE}. ${INTEGRITY_HINT_DISCLOSURE}`,
+    title: `Tests may be weaker than the version that ran. This hint does not change the result. AI-only, blind-checked review: ${INTEGRITY_HINT_FALSE_POSITIVE_RATE} false positives.`,
   },
   changed: {
     glyph: '~',
     color: 'var(--text-muted)',
     label: 'Changed',
-    title: 'Test files changed in the workspace — review before trusting the result',
+    title: 'Tests changed after the run. Review before relying on this result.',
   },
   stronger: {
     glyph: '↑',
     color: 'var(--text-secondary)',
     label: 'Stronger',
-    title: 'Every edit reads stronger than what ran — review and commit',
+    title: 'Tests look stronger than the version that ran. Review and commit the changes.',
   },
 }
 

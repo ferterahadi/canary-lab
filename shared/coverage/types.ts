@@ -105,12 +105,6 @@ export interface Requirement {
    *  trusted. Absent when no source doc overlaps the wording (an invented or
    *  fully-inferred requirement), and on summaries written before D11. */
   source?: RequirementSource
-  /** A human accepted this wording from the ledger (D11 acceptance). Carried
-   *  verbatim across regenerates on the surviving id; `acceptedFingerprint` is
-   *  the meaning that was accepted, so a later wording change is visible as a
-   *  mismatch against `fingerprint` rather than silently re-accepted. */
-  acceptedAt?: string
-  acceptedFingerprint?: string
   /** When the requirement's MEANING last changed (D11 time axis): the generation
    *  time of the summary that introduced it or moved its fingerprint. A survivor
    *  from a pre-D11 summary carries none — readers fall back to `generatedAt`
@@ -322,9 +316,6 @@ export interface RequirementEnforcement {
   /** `Requirement.wordingChangedAt`, or the summary's generation time for a
    *  pre-D11 survivor that carries none. */
   wordingChangedAt: string
-  /** Whether a human accepted this wording (D11): the current fingerprint, an
-   *  older one (the wording moved since), or never. */
-  accepted: 'none' | 'current' | 'outdated'
 }
 
 /** Ledger-level roll-up of the time axis: "proven in run <id>: n/N". */

@@ -251,15 +251,15 @@ describe('spec-edit boundary — humans adopt, hints advise', () => {
     }
   })
 
-  it('no MCP source reaches the human-only adopt/restore/approve/accept routes or the orchestrator levers', () => {
+  it('no MCP source reaches human-only spec-edit actions or retired requirement confirmation', () => {
     const sources = findSources(MCP_SRC)
     expect(sources.length).toBeGreaterThan(20)
     for (const file of sources) {
       const text = fs.readFileSync(file, 'utf8')
       // Compact profile's `exec` dispatches by internal tool name, so a route
       // reached through app.inject() would be reachable from every client.
-      // The D11 acceptance route joins the list: an agent must not accept the
-      // wording its own coverage is judged against.
+      // Keep the retired requirement-confirmation action forbidden too; removing
+      // its UI must never transfer that action to an agent.
       expect(text, path.relative(REPO_ROOT, file)).not.toMatch(/adopt-spec-edits|restore-spec-edits|approve-dirty|commit-dirty|adoptSpecEdits\(|restoreSpecEdits\(|requirements\/[^'"`]*\/accept|acceptRequirementWording\(/)
     }
   })

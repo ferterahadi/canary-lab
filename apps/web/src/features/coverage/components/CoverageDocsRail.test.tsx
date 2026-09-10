@@ -261,10 +261,19 @@ describe('CoverageDocsRail', () => {
     expect(onDocsChanged).toHaveBeenCalled()
   })
 
-  it('shows the stale drift line naming changed docs + affected artifacts', async () => {
+  it('reads the stale drift as a sentence naming the changed doc + what it invalidated', async () => {
     await mount({ open: true, summaryStale: true, drift: { changedDocs: ['prd.md'], affectedArtifacts: ['PRD summary', 'coverage ledger'] } })
     const drift = container.querySelector('[data-testid="docs-rail-drift"]')
-    expect(drift?.textContent).toContain('prd.md')
-    expect(drift?.textContent).toContain('PRD summary + coverage ledger')
+    expect(drift?.textContent).toBe('prd.md has changed, so the PRD summary and coverage ledger no longer match your docs.')
+  })
+
+  it('pluralises the drift sentence for several docs and a single artifact', async () => {
+    await mount({
+      open: true,
+      summaryStale: true,
+      drift: { changedDocs: ['prd.md', 'api.md', 'guide.md'], affectedArtifacts: ['coverage ledger'] },
+    })
+    const drift = container.querySelector('[data-testid="docs-rail-drift"]')
+    expect(drift?.textContent).toBe('prd.md, api.md and guide.md have changed, so the coverage ledger no longer matches your docs.')
   })
 })

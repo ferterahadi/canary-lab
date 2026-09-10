@@ -328,6 +328,68 @@ describe('ReadableTestView', () => {
       .toContain('Step 01.1.1.1')
   })
 
+  it('aligns Else with its sibling If and indents only their branch steps', () => {
+    const branches: ReadableTest = {
+      ...STORY,
+      story: {
+        steps: [
+          {
+            id: 'condition-flow',
+            kind: 'flow',
+            flowKind: 'condition',
+            role: 'action',
+            text: 'If the order is ready',
+            spans: [{ text: 'If the order is ready' }],
+            fidelity: 'derived',
+            source: source(40, 'if (order.ready) submitOrder()'),
+            children: [{
+              id: 'submit-order',
+              role: 'action',
+              text: 'Submit order',
+              spans: [{ text: 'Submit order' }],
+              fidelity: 'derived',
+              source: source(40, 'submitOrder()'),
+            }],
+          },
+          {
+            id: 'else-flow',
+            kind: 'flow',
+            flowKind: 'otherwise',
+            role: 'action',
+            text: 'Else',
+            spans: [{ text: 'Else', kind: 'keyword' }],
+            fidelity: 'derived',
+            source: source(41, 'else waitForOrder()'),
+            children: [{
+              id: 'wait-order',
+              role: 'action',
+              text: 'Wait for order',
+              spans: [{ text: 'Wait for order' }],
+              fidelity: 'derived',
+              source: source(41, 'waitForOrder()'),
+            }],
+          },
+        ],
+      },
+    }
+
+    act(() => root.render(
+      <ReadableTestView
+        test={branches}
+        executionHighlight={{ kind: 'failed', nodeId: 'submit-order' }}
+      />,
+    ))
+
+    const rows = Array.from(container.querySelectorAll('[data-story-sequence]'))
+    expect(rows.map((row) => row.getAttribute('data-story-depth'))).toEqual(['0', '1', '0', '1'])
+    expect(rows.map((row) => row.querySelector('[data-testid^="readable-story-role-"]')?.textContent))
+      .toEqual(['IF', 'ACTION', 'ELSE', 'ACTION'])
+    const failedRow = container.querySelector<HTMLElement>('[data-execution-highlight="failed"]')
+    expect(failedRow?.style.marginLeft).toBe('-1.25rem')
+    expect(failedRow?.style.width).toBe('calc(100% + 1.25rem)')
+    expect(failedRow?.style.paddingLeft).toBe('calc(0.5rem + 1.25rem)')
+  })
+
   it('opens the exact source for an ordered row and shows selection state', () => {
     const onSourceSelect = vi.fn()
     act(() => root.render(

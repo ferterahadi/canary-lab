@@ -200,8 +200,8 @@ one state:
 | `proof-stale` | A mapped test changed after the proof, or no run ever proved it |
 | `wording-ahead` | The wording changed after the tests and the proof |
 
-A human can accept a requirement's wording from the ledger; the acceptance is
-recorded with the wording's fingerprint, so a later change shows as outdated.
+Requirements show their source document and section when available. Wording
+fingerprints track changes automatically; no requirement confirmation is needed.
 
 Coverage depth is separate from both. Canary Lab classifies the strongest
 assertion layer in each test—application log, internal state, application API or

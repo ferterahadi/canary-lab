@@ -101,8 +101,8 @@ describe('assembleSummary — wordingChangedAt', () => {
   })
 })
 
-describe('assembleSummary — acceptance survives a regenerate', () => {
-  it('carries acceptedAt + acceptedFingerprint verbatim onto the surviving id', () => {
+describe('assembleSummary — legacy acceptance metadata', () => {
+  it('keeps the requirement id and tracks wording changes without carrying retired acceptance fields', () => {
     const docs = collection([{ relPath: 'checkout.md', content: SPEC }])
     const first = assembleSummary(docs, null, [{ title: 'A', text: 'a', pathTypes: ['happy'] }], undefined, '2026-09-01T00:00:00.000Z')
     const accepted = {
@@ -111,9 +111,10 @@ describe('assembleSummary — acceptance survives a regenerate', () => {
     }
     const second = assembleSummary(docs, accepted, [{ id: 'R1', title: 'A', text: 'a — reworded', pathTypes: ['happy'] }], undefined, '2026-09-07T00:00:00.000Z')
     const r = second.requirements[0]
-    expect(r.acceptedAt).toBe('2026-09-02T00:00:00.000Z')
-    expect(r.acceptedFingerprint).toBe(first.requirements[0].fingerprint)
-    // The wording moved past the accepted fingerprint — visible, never silently re-accepted.
-    expect(r.fingerprint).not.toBe(r.acceptedFingerprint)
+    expect(r.id).toBe('R1')
+    expect(r).not.toHaveProperty('acceptedAt')
+    expect(r).not.toHaveProperty('acceptedFingerprint')
+    expect(r.fingerprint).not.toBe(first.requirements[0].fingerprint)
+    expect(r.wordingChangedAt).toBe('2026-09-07T00:00:00.000Z')
   })
 })

@@ -22,20 +22,6 @@ export function getFeatureCoverage(feature: string, opts?: ClientOptions): Promi
   )
 }
 
-/** A human accepts a requirement's wording from the ledger (D11). UI-only lever. */
-export function acceptRequirementWording(
-  feature: string,
-  requirementId: string,
-  opts?: ClientOptions,
-): Promise<{ feature: string; requirementId: string; acceptedAt: string; acceptedFingerprint: string }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(
-    `${baseUrl}/api/features/${encodeURIComponent(feature)}/requirements/${encodeURIComponent(requirementId)}/accept`,
-    { method: 'POST' },
-    fetchImpl,
-  )
-}
-
 export function listFeatureDocs(feature: string, opts?: ClientOptions): Promise<FeatureDocsListing> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<FeatureDocsListing>(

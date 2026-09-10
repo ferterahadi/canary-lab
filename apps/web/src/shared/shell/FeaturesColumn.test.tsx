@@ -672,4 +672,13 @@ describe('FeaturesColumn modified-tests badge', () => {
     expect(b.getAttribute('aria-label')).toBe('Review test changes in up')
     expect(featureRow('up').className).toContain('cl-list-row-changed')
   })
+
+  it('uses a plain-language tooltip for the parallel-ready marker', () => {
+    render([{ name: 'parallel', repos: [], envs: [], portified: true }])
+    const badge = container.querySelector<HTMLElement>('[data-testid="portified-badge-parallel"]')!
+
+    act(() => { badge.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe('Ready for parallel runs.')
+  })
 })

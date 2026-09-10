@@ -1,6 +1,7 @@
 import { discoveryRepairActive } from '@shared/discovery-repair'
 import type { DiscoveryRepairView } from '../api/discovery-repair'
 import { AgentSessionView } from '../ui/AgentSessionView'
+import { EMPTY_COPY } from '../ui/empty-state-copy'
 
 export function DiscoveryRepairActivity({ repair }: { repair: DiscoveryRepairView }) {
   const active = discoveryRepairActive(repair)
@@ -13,7 +14,7 @@ export function DiscoveryRepairActivity({ repair }: { repair: DiscoveryRepairVie
       source={owner.kind === 'internal' && repair.sessionRef ? { kind: 'discovery-repair', taskId: repair.id, live: active && repair.status !== 'verifying' } : undefined}
       systemRows={{ pre: repair.log.slice(0, 1), post: repair.log.slice(1) }}
       externalSessions={owner.kind === 'external' ? [{ ...owner, status: active ? 'running' : repair.status === 'succeeded' ? 'done' : 'failed', message: repair.message, startedAt: repair.createdAt, endedAt: repair.endedAt }] : []}
-      empty={{ title: repair.message }}
+      empty={{ ...EMPTY_COPY.discoveryNoActivity, detail: <span title={repair.message}>{repair.message}</span> }}
     />
   </div>
 }

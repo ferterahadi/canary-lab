@@ -11,13 +11,21 @@ export function englishLines(source: ReviewSource): Map<number, Array<{ step: Re
   const lines = new Map<number, Array<{ step: ReadableStoryItem; depth: number }> | null>()
   const visit = (items: ReadableStoryItem[], depth: number): void => {
     for (const item of items) {
-      if (item.source.file && !source.tests.some((test) => contains(test, item.source.startLine))) continue
+      if (!source.story && item.source.file && !source.tests.some((test) => contains(test, item.source.startLine))) continue
+      if (item.kind === 'flow' && item.flowKind === 'then') {
+        visit(item.children, depth)
+        continue
+      }
       lines.set(item.source.startLine, [...(lines.get(item.source.startLine) ?? []), { step: item, depth }])
-      if (item.kind === 'flow') visit(item.children, depth + 1)
+      if (item.kind === 'flow') {
+        visit(item.children, depth + 1)
+        for (let line = item.source.startLine + 1; line <= (item.headerEndLine ?? item.source.startLine); line++) if (!lines.has(line)) lines.set(line, null)
+      }
       else for (let line = item.source.startLine + 1; line <= item.source.endLine; line++) if (!lines.has(line)) lines.set(line, null)
     }
   }
-  for (const test of source.tests) visit(test.readable.story?.steps ?? [], 0)
+  if (source.story) visit(source.story.steps, 0)
+  else for (const test of source.tests) visit(test.readable.story?.steps ?? [], 0)
   return lines
 }
 

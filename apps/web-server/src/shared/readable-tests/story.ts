@@ -1,4 +1,8 @@
 import ts from 'typescript'
+import { UnsupportedSyntaxKindError, statementEnglish } from '../controlled-english/ast-to-ir'
+import { renderEnglish } from '../controlled-english/english-renderer'
+import type { SemanticContext } from '../controlled-english/semantic-context'
+import { hasStructuralCallback, sourceAssertionText, sourceConditionText, sourceDeclarationText, sourceExpressionText, sourceFunctionText, sourceLoopText, sourceStatementText, testRegistration } from './source-language'
 import type {
   ReadableStoryFlowKind,
   ReadableStoryItem,
@@ -640,10 +644,10 @@ function isWordCharacter(value: string | undefined): boolean {
 
 type StorySpanKind = NonNullable<ReadableStorySpan['kind']>
 
-const STORY_LITERAL_PATTERN = /“[^”]*”|\b(?:true|false|null|undefined|NaN)\b/gi
+const STORY_LITERAL_PATTERN = /“[^”]*”|"(?:\\.|[^"\\])*"|\b(?:true|false|null|undefined|NaN)\b/gi
 const STORY_NUMBER_PATTERN = /\b\d+(?:[.,]\d+)?(?:\s+(?:milliseconds?|seconds?|minutes?|hours?))?\b/gi
 const STORY_OPERATOR_PATTERN = /\b(?:does not contain an item equal to|contains an item equal to|does not exactly equal|is not an instance of|is an instance of|does not contain text|does not have length|does not have count|does not have value|does not have text|is not greater than|is not less than|does not contain|does not include|does not match|does not equal|exactly equals|is greater than|is less than|is at least|is at most|contains text|has length|has count|has value|has text|starts with|ends with|contains|includes|matches|equals|is not|is)\b/gi
-const STORY_KEYWORD_PATTERN = /\b(?:after each pass|for up to|for each|if available|when available|when missing|with message|asynchronously|sequentially|otherwise|retrying|saving|until|using|whether|while|when|then|once|if)\b/gi
+const STORY_KEYWORD_PATTERN = /\b(?:after each pass|for up to|for each|if available|when available|when missing|with message|asynchronously|sequentially|otherwise|retrying|saving|until|using|whether|while|when|then|once|else|if)\b/gi
 const STORY_LEADING_VERB_PATTERN = /^[A-Za-z]+(?:-[A-Za-z]+)?/
 
 function markSpan(
@@ -770,6 +774,9 @@ function lowerInitial(text: string): string {
 }
 
 function conditionStoryText(expression: ts.Expression, sourceFile: ts.SourceFile): string | undefined {
+  if (ts.isPrefixUnaryExpression(expression) && expression.operator === ts.SyntaxKind.ExclamationToken) {
+    return `${exactIdentifierText(sourceExpressionText(expression.operand))} is falsy`
+  }
   const rendered = renderExpression(expression, sourceFile)
   if (rendered.fidelity === 'unresolved') return undefined
   return ts.isIdentifier(expression)
@@ -980,6 +987,7 @@ function collectionMutationDescription(
 export function storyCandidates(
   statements: readonly ts.Statement[],
   sourceFile: ts.SourceFile,
+  completeContext?: SemanticContext,
 ): StoryCandidate[] {
   const aliases = new Map<string, string>()
 
@@ -1037,7 +1045,21 @@ export function storyCandidates(
     basePath: number[],
     options: WalkOptions,
   ): StoryCandidate[] {
-    return nested.flatMap((statement, index) => walkStatement(statement, [...basePath, index], options))
+    return nested.flatMap((statement, index) => {
+      const path = [...basePath, index]
+      const candidates = walkStatement(statement, path, options)
+      if (candidates.length || !completeContext) return candidates
+      try {
+        const text = renderEnglish(statementEnglish(statement))
+        const role: StoryRole = renderAssertionStatement(statement, sourceFile) ? 'check' : ts.isExpressionStatement(statement) ? 'action' : 'setup'
+        return [{ kind: 'step' as const, node: statement, path, role,
+          text, spans: storySpans(text, variablePhrases(statement, text, aliases), true), fidelity: 'derived' as const }]
+      } catch (error) {
+        if (!(error instanceof UnsupportedSyntaxKindError)) throw error
+        // Unrecognized or malformed syntax retains its exact source in review.
+        return []
+      }
+    })
   }
 
   function callbackCandidates(
@@ -1270,7 +1292,7 @@ export function storyCandidates(
       fidelity: 'derived',
     }, expressionCandidates(expression.whenFalse, [...path, 1], options, assigned))
     const children = [whenTrue, whenFalse].filter((candidate): candidate is StoryFlowCandidate => Boolean(candidate))
-    const condition = conditionStoryText(expression.condition, sourceFile) ?? 'the condition is true'
+    const condition = completeContext ? exactIdentifierText(sourceConditionText(expression.condition)) : conditionStoryText(expression.condition, sourceFile) ?? 'the condition is true'
     return flowCandidate(statement, path, 'condition', {
       role: 'action',
       text: `If ${condition}`,
@@ -1331,6 +1353,31 @@ export function storyCandidates(
   }
 
   function walkStatement(statement: ts.Statement, path: number[], options: WalkOptions): StoryCandidate[] {
+    if (completeContext) {
+      if (ts.isFunctionDeclaration(statement)) {
+        const text = sourceFunctionText(statement)
+        return [{ kind: 'flow', flowKind: 'scope', node: statement, path, role: 'setup', text,
+          spans: storySpans(text, variablePhrases(statement, text, aliases), true), fidelity: 'derived',
+          children: statement.body ? walkStatements(statement.body.statements, [...path, 0], options) : [] }]
+      }
+      const assertion = sourceAssertionText(statement)
+      if (assertion) return [{ kind: 'step', node: statement, path, role: 'check', text: assertion,
+        spans: storySpans(assertion, variablePhrases(statement, assertion, aliases), true), fidelity: 'derived' }]
+      if (renderAssertionStatement(statement, sourceFile)) return []
+      const declaration = sourceDeclarationText(statement)
+      if (declaration) return [{ kind: 'step', node: statement, path, role: 'setup',
+        text: declaration, spans: storySpans(declaration, variablePhrases(statement, declaration, aliases), true), fidelity: 'derived' }]
+      const registration = testRegistration(statement, completeContext)
+      if (registration) {
+        const children = callbackCandidates(registration.callback, [...path, 0], options)
+        return [{ kind: 'flow', flowKind: 'scope', node: statement, path, role: 'setup',
+          text: registration.text, spans: storySpans(registration.text, variablePhrases(statement, registration.text, aliases), true), fidelity: 'derived', children }]
+      }
+      const call = callFromStatement(statement)
+      // Unknown callback APIs retain their entire signature and body. Promoting
+      // only their children would hide the condition under which they execute.
+      if (call && hasStructuralCallback(call) && !authoredStep(statement)) return []
+    }
     if (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) return []
     if (ts.isBlock(statement)) {
       return walkStatements(statement.statements, path, options)
@@ -1365,7 +1412,7 @@ export function storyCandidates(
             }, walkStatement(statement.elseStatement, [...path, 1], options))
           : undefined,
       ].filter((candidate): candidate is StoryFlowCandidate => Boolean(candidate))
-      const condition = conditionStoryText(statement.expression, sourceFile) ?? 'the condition is true'
+      const condition = completeContext ? exactIdentifierText(sourceConditionText(statement.expression)) : conditionStoryText(statement.expression, sourceFile) ?? 'the condition is true'
       const flow = flowCandidate(statement, path, 'condition', {
         role: 'action',
         text: `If ${condition}`,
@@ -1430,7 +1477,7 @@ export function storyCandidates(
       const children = walkStatement(statement.statement, [...path, 0], { ...options, breakTarget: 'loop' })
       const flow = flowCandidate(statement, path, 'loop', {
         role: 'action',
-        text: loopStoryText(statement, sourceFile),
+        text: completeContext ? exactIdentifierText(sourceLoopText(statement)) : loopStoryText(statement, sourceFile),
         fidelity: 'derived',
       }, children)
       return flow ? [flow] : []
@@ -1440,7 +1487,7 @@ export function storyCandidates(
     if (step) {
       // The authored label is the concise action. Keep nested setup and checks,
       // but do not repeat every implementation action underneath it.
-      const children = walkStatements(step.body.statements, [...path, 0], { includeActions: false })
+      const children = walkStatements(step.body.statements, [...path, 0], { includeActions: Boolean(completeContext) })
       const description: StoryDescription = { role: 'action', text: step.label, fidelity: 'exact' }
       const flow = flowCandidate(statement, path, 'scope', description, children)
       const candidate = flow ?? stepCandidate(statement, path, description, options)
@@ -1491,6 +1538,10 @@ export function storyCandidates(
       }, options)
       return candidate ? [candidate] : []
     }
+
+    const sourceText = completeContext && sourceStatementText(statement)
+    if (sourceText) return [{ kind: 'step', node: statement, path, role: 'action', text: sourceText,
+      spans: storySpans(sourceText, variablePhrases(statement, sourceText, aliases), true), fidelity: 'derived' }]
 
     const alias = variableAlias(statement)
     if (alias) aliases.set(alias.name, polishStoryText(alias.text))

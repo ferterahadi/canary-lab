@@ -3,7 +3,7 @@ import type { RobustnessFinding, RobustnessJobManifest } from '@shared/robustnes
 import type { RobustnessAtomKind, RobustnessEnvelope } from '@shared/robustness/types'
 import { reproLine } from '@shared/robustness/shrink'
 import { MatrixCell, type MatrixCellState } from '@/features/benchmark'
-import { PanelCard } from '@/shared/ui/PanelCard'
+import { PanelCard, panelCardClass, panelCardStyle } from '@/shared/ui/PanelCard'
 import { SkeletonPanel, type AwaitingState } from '@/shared/ui/Skeleton'
 import { STAGE_COLUMN, StageColumn } from './stage-meta'
 import { plural } from './StageFacts'
@@ -78,13 +78,13 @@ export function RobustnessMatrixPanel({ job, awaiting }: { job: RobustnessJobMan
   const cols = `minmax(0, 1fr) repeat(${atoms.length}, 84px)`
   return (
     <StageColumn>
-      <PanelCard kicker={kicker} testId="robustness-matrix" aside={<span className="text-[11px] text-muted">{atoms.map((a) => ATOM_LABEL[a]).join(' · ')}</span>}>
+      <PanelCard kicker={kicker} testId="robustness-matrix" aside={<span className="cl-type-meta text-muted">{atoms.map((a) => ATOM_LABEL[a]).join(' · ')}</span>}>
         {files.length === 0 ? (
-          <p data-testid="robustness-matrix-empty" className="m-0 text-[12px] text-secondary">
+          <p data-testid="robustness-matrix-empty" className="m-0 cl-type-body text-secondary">
             {running ? 'No cell has failed or been skipped so far.' : 'No cell failed or was skipped.'}
           </p>
         ) : (
-          <div className="rounded border border-line overflow-hidden text-[12px]">
+          <div className="rounded border border-line overflow-hidden cl-type-data">
             <div className="grid items-center px-3 py-1.5 cl-rubric border-b border-line" style={{ gridTemplateColumns: cols }}>
               <span>Spec file</span>
               {atoms.map((atom) => <span key={atom} className="text-center">{ATOM_LABEL[atom]}</span>)}
@@ -101,7 +101,7 @@ export function RobustnessMatrixPanel({ job, awaiting }: { job: RobustnessJobMan
           </div>
         )}
         {job.skipped.length > 0 && (
-          <ul data-testid="robustness-skipped" className="m-0 mt-2 list-none p-0 text-[11px] text-secondary">
+          <ul data-testid="robustness-skipped" className="m-0 mt-2 list-none p-0 cl-type-meta text-secondary">
             {job.skipped.map((s) => (
               <li key={`${s.cell.specFile}:${s.cell.atom}`} className="truncate" title={s.reason}>
                 <span className="font-mono">{s.cell.specFile}</span> · {ATOM_LABEL[s.cell.atom]} — not judged: {s.reason}
@@ -109,7 +109,7 @@ export function RobustnessMatrixPanel({ job, awaiting }: { job: RobustnessJobMan
             ))}
           </ul>
         )}
-        <p data-testid="robustness-matrix-footer" className="m-0 mt-2 text-[11px] text-muted">
+        <p data-testid="robustness-matrix-footer" className="m-0 mt-2 cl-type-meta text-muted">
           {running
             ? `${job.cells.done} of ${plural(job.cells.planned, 'cell')} run so far`
             : `${clean} of ${plural(job.cells.planned, 'cell')} held — a clean cell leaves no record`}
@@ -166,27 +166,28 @@ function FindingCard({ finding, onSendToRepair, sending }: {
     <section
       data-testid="robustness-finding"
       data-status={finding.status}
-      className={`flex flex-col gap-2 rounded-lg border border-danger/45 bg-danger/6 p-3 ${STAGE_COLUMN}`}
+      className={`flex flex-col gap-2 ${panelCardClass('danger')} ${STAGE_COLUMN}`}
+      style={panelCardStyle('danger')}
     >
       <div className="flex min-w-0 items-center gap-2">
         <span aria-hidden="true" className="text-danger">✕</span>
-        <span className="min-w-0 truncate text-[12.5px] font-semibold text-danger" title={finding.cell.specFile}>
+        <span className="min-w-0 truncate cl-type-title text-danger" title={finding.cell.specFile}>
           <span className="font-mono">{finding.cell.specFile}</span> · {ATOM_LABEL[finding.cell.atom]}
         </span>
-        <span data-testid="robustness-finding-status" className="ml-auto shrink-0 text-[11px] text-secondary">{findingStatusLabel(finding)}</span>
+        <span data-testid="robustness-finding-status" className="ml-auto shrink-0 cl-type-meta text-secondary">{findingStatusLabel(finding)}</span>
       </div>
-      <ul data-testid="robustness-finding-tests" className="m-0 list-none p-0 text-[12px]">
+      <ul data-testid="robustness-finding-tests" className="m-0 list-none p-0 cl-type-data">
         {finding.failedTests.map((title) => <li key={title} className="truncate" title={title}>{title}</li>)}
       </ul>
       {finding.requirements.length > 0 && (
-        <div data-testid="robustness-finding-requirements" className="flex flex-wrap gap-1 text-[10.5px] text-muted font-mono">
+        <div data-testid="robustness-finding-requirements" className="flex flex-wrap gap-1 cl-type-meta text-muted font-mono">
           {finding.requirements.map((req) => <span key={req}>{req}</span>)}
         </div>
       )}
       <div className="flex min-w-0 items-center gap-2 border-t border-line pt-2">
         <div className="min-w-0 flex-1">
           <div className="cl-rubric">{settled ? 'Smallest envelope that still fails' : 'Envelope it failed under'}</div>
-          <div data-testid="robustness-finding-repro" className="truncate text-[11.5px] font-mono" title={repro}>{repro}</div>
+          <div data-testid="robustness-finding-repro" className="truncate cl-type-data font-mono" title={repro}>{repro}</div>
         </div>
         {onSendToRepair && settled && (
           <button
@@ -194,7 +195,7 @@ function FindingCard({ finding, onSendToRepair, sending }: {
             data-testid="robustness-send-to-repair"
             disabled={sending}
             onClick={() => onSendToRepair(finding)}
-            className="cl-button min-h-6 shrink-0 px-2 py-0.5 text-[11px] text-danger"
+            className="cl-button min-h-6 shrink-0 px-2 py-0.5"
             title="Start a test run under this envelope so the repair agent works on a failure that reproduces"
           >
             {sending ? 'Starting…' : 'Send to repair'}
@@ -207,13 +208,13 @@ function FindingCard({ finding, onSendToRepair, sending }: {
             type="button"
             data-testid="robustness-trace-toggle"
             onClick={() => setTraceOpen((open) => !open)}
-            className="cl-button min-h-6 px-2 py-0.5 text-[11px] text-secondary"
+            className="cl-button min-h-6 px-2 py-0.5"
             aria-expanded={traceOpen}
           >
             {traceOpen ? 'Hide' : 'Show'} shrink trace — {plural(shrink.probes, 'probe')}{shrink.budgetExhausted ? ', budget exhausted' : ''}
           </button>
           {traceOpen && (
-            <ol data-testid="robustness-trace" className="m-0 mt-1.5 list-none p-0 text-[11px] text-secondary">
+            <ol data-testid="robustness-trace" className="m-0 mt-1.5 list-none p-0 cl-type-meta text-secondary">
               {shrink.steps.map((step) => (
                 <li key={step.probe} className="flex min-w-0 items-baseline gap-2 py-0.5">
                   <span className="shrink-0 font-mono text-muted">{step.probe === 0 ? 'check' : `#${step.probe}`}</span>

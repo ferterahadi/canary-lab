@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { FlightManifest, FlightStage, FlightStageErrorDetail, FlightStageRemedy } from '@/shared/api/client'
-import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '@/shared/ui/PanelCard'
+import { PANEL_CARD_CLASS, PANEL_CARD_STYLE, panelCardClass, panelCardStyle } from '@/shared/ui/PanelCard'
 import { stageLabel, STAGE_COLUMN, stageStateLine } from './stage-meta'
 import { CheckpointControls } from './CheckpointControls'
 import { truncate } from './StageDetail'
@@ -55,20 +55,21 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
   return (
     <section
       data-testid="stage-error"
-      className={`flex flex-col gap-2.5 rounded-lg border border-danger/45 bg-danger/6 p-3 ${STAGE_COLUMN}`}
+      className={`flex flex-col gap-2 ${panelCardClass('danger')} ${STAGE_COLUMN}`}
+      style={panelCardStyle('danger')}
     >
       <div className="flex items-center gap-2">
         <span aria-hidden="true" className="text-danger">✕</span>
-        <span data-testid="stage-error-title" className="text-[12.5px] font-semibold text-danger">
+        <span data-testid="stage-error-title" className="cl-type-title text-danger">
           {stageLabel} failed
         </span>
       </div>
-      <p className="text-[12px] text-secondary">
+      <p className="cl-type-body text-secondary">
         This step stopped on the error below. Fix it, then hit Continue at the top to try again.
       </p>
       <pre
         data-testid="stage-error-detail"
-        className="max-h-[200px] overflow-auto whitespace-pre-wrap break-words rounded border p-2 text-[10.5px] border-line bg-canvas text-secondary font-mono"
+        className="max-h-[200px] overflow-auto whitespace-pre-wrap break-words rounded border p-2 cl-type-meta border-line bg-canvas text-secondary font-mono"
       >
         {detail}
       </pre>
@@ -79,7 +80,7 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
           </div>
           <pre
             data-testid="stage-error-log-tail"
-            className="m-0 max-h-[220px] overflow-auto whitespace-pre rounded border p-2 text-[10.5px] leading-relaxed border-line bg-canvas text-secondary font-mono"
+            className="m-0 max-h-[220px] overflow-auto whitespace-pre rounded border p-2 cl-type-meta leading-relaxed border-line bg-canvas text-secondary font-mono"
           >
             {errorDetail.logTail}
           </pre>
@@ -91,11 +92,11 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
             type="button"
             data-testid="stage-error-open-log"
             onClick={() => { api.openEditor({ file: errorDetail.logPath }).catch(() => {}) }}
-            className="cl-button min-h-6 shrink-0 px-2 py-0.5 text-[11px] text-accent"
+            className="cl-button min-h-6 shrink-0 px-2 py-0.5"
           >
             Open full service log
           </button>
-          <span className="min-w-0 truncate text-[10px] text-muted font-mono" title={errorDetail.logPath}>
+          <span className="min-w-0 truncate cl-type-meta text-muted font-mono" title={errorDetail.logPath}>
             {errorDetail.logPath}
           </span>
         </div>
@@ -107,12 +108,12 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
           </div>
           {remedy.repos.length === 0 ? (
             // The error is stale: every repo is clean again (fixed by hand).
-            <p className="text-[12px] text-secondary">
+            <p className="cl-type-body text-secondary">
               The repos are clean again — hit Continue at the top to try again.
             </p>
           ) : (
             <>
-              <p className="text-[12px] text-secondary">
+              <p className="cl-type-body text-secondary">
                 Clear the uncommitted changes and the flight will try this step again.
               </p>
               <div className="rounded border border-line">
@@ -124,8 +125,8 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
                     title={repo.path}
                   >
                     <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
-                    <span className="text-[11.5px] text-primary font-mono">{repo.name}</span>
-                    <span className="ml-auto text-[10px] text-muted font-mono">
+                    <span className="cl-type-data text-primary font-mono">{repo.name}</span>
+                    <span className="ml-auto cl-type-meta text-muted font-mono">
                       {repo.modified} modified
                     </span>
                   </div>
@@ -139,7 +140,7 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
                     disabled={remedyBusy !== null || mutationLockedReason != null}
                     title={mutationLockedReason}
                     onClick={() => runRemedy('stash')}
-                    className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+                    className="cl-button-primary px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-45"
                   >
                     {remedyBusy === 'stash' ? 'Stashing…' : 'Stash and continue'}
                   </button>
@@ -151,19 +152,19 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
                     disabled={remedyBusy !== null || mutationLockedReason != null}
                     title={mutationLockedReason}
                     onClick={() => runRemedy('commit')}
-                    className="cl-button px-2.5 py-1 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-45"
+                    className="cl-button px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-45"
                   >
                     {remedyBusy === 'commit' ? 'Committing…' : 'Commit and continue'}
                   </button>
                 </DisabledControlTooltip>
               </div>
-              <p className="text-[10.5px] text-muted">
+              <p className="cl-type-meta text-muted">
                 Stash is undoable — <span className="font-mono">git stash pop</span>. Commit uses <span className="font-mono">"canary-lab: wip"</span>.
               </p>
             </>
           )}
           {remedyError && (
-            <p data-testid="stage-remedy-error" className="text-[11px] text-danger">{remedyError}</p>
+            <p data-testid="stage-remedy-error" className="cl-type-meta text-danger">{remedyError}</p>
           )}
         </div>
       )}
@@ -235,7 +236,7 @@ export function StagePausedPanel({ kind }: {
         <span aria-hidden="true" className="cl-status-dot bg-warning" style={{ height: '0.45rem', width: '0.45rem' }} />
         {heading}
       </div>
-      <p className="m-0 text-[12px] leading-snug text-primary">{sentence}</p>
+      <p className="m-0 cl-type-body text-primary">{sentence}</p>
     </section>
   )
 }

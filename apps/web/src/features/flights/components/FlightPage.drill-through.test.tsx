@@ -392,9 +392,11 @@ describe('stage summary + drill-through (R6)', () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
     })
     const link = container.querySelector<HTMLButtonElement>('[data-testid="run-hero-spec-edits"]')
-    expect(link?.textContent).toContain('Verdict from')
+    // The rung names the fact (label over value); the link IS the value.
+    const rung = link?.closest('[title]')
+    expect(rung?.textContent).toContain('Verdict from')
     expect(link?.textContent).toContain('run-start snapshot · 2 pending edits · 1 hint')
-    expect(link?.closest('[title]')?.getAttribute('title')).toMatch(/2 spec edits made since the run started were not executed/)
+    expect(rung?.getAttribute('title')).toMatch(/2 spec edits made since the run started were not executed/)
     await act(async () => { link?.click() })
     expect(onOpenSpecReview).toHaveBeenCalledTimes(1)
   })
@@ -511,7 +513,7 @@ describe('stage summary + drill-through (R6)', () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
     })
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toContain('already swappable')
-    expect(container.querySelector('[data-testid="stage-drill-portify"]')?.textContent).toBe('Open port settings →')
+    expect(container.querySelector('[data-testid="stage-drill-portify"]')?.textContent).toBe('Port settings →')
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-portify"]')?.click()
     })

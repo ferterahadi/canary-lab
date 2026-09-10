@@ -53,11 +53,31 @@ it('finds an assessment when the edit is inside a multiline assertion rather tha
   expect(assessmentsForRows(review, [{ id: 'inner', before: 'count: 1', after: 'count: 2', beforeLine: 2, afterLine: 2 }])).toEqual([change])
 })
 
-it('retains both condition and then when the shared English story maps them to the same source line', () => {
+it('flattens the redundant then row in older stories without dropping its actions', () => {
   const review = testFileReview()
   const source = { file: review.file, startLine: 4, endLine: 6, snippet: '' }
-  review.after.tests[0].readable.story = { steps: [{ id: 'if', kind: 'flow', role: 'setup', flowKind: 'condition', text: 'If enabled', spans: [], fidelity: 'exact', source, children: [{ id: 'then', kind: 'flow', role: 'setup', flowKind: 'then', text: 'When true', spans: [], fidelity: 'exact', source, children: [] }] }] }
-  expect(englishLines(review.after).get(4)?.map(({ step }) => step.id)).toEqual(['if', 'then'])
+  review.after.tests[0].readable.story = { steps: [{ id: 'if', kind: 'flow', role: 'setup', flowKind: 'condition', text: 'If enabled', spans: [], fidelity: 'exact', source, children: [{ id: 'then', kind: 'flow', role: 'setup', flowKind: 'then', text: 'When true', spans: [], fidelity: 'exact', source, children: [{ id: 'action', role: 'action', text: 'Act', spans: [], fidelity: 'exact', source: { ...source, startLine: 5, endLine: 5 } }] }] }] }
+  expect(englishLines(review.after).get(4)?.map(({ step }) => step.id)).toEqual(['if'])
+  expect(englishLines(review.after).get(5)).toMatchObject([{ depth: 1, step: { id: 'action' } }])
+})
+
+it('uses whole-file English outside test bodies without duplicating callback stories', () => {
+  const review = testFileReview()
+  review.after.story = { steps: [{ id: 'import', role: 'setup', text: 'Import test', spans: [], fidelity: 'derived', source: { file: review.file, startLine: 1, endLine: 2, snippet: '' } }] }
+  expect(englishLines(review.after).get(1)).toMatchObject([{ step: { id: 'import' }, depth: 0 }])
+  expect(englishLines(review.after).get(2)).toBeNull()
+  expect(englishLines(review.after).has(5)).toBe(false)
+})
+it('suppresses translated multiline loop headers without suppressing body statements on the last header line', () => {
+  const review = testFileReview()
+  review.after.story = { steps: [{ id: 'loop', kind: 'flow', flowKind: 'loop', role: 'setup', headerEndLine: 6,
+    text: 'Build this list in order', spans: [], fidelity: 'derived', source: { file: review.file, startLine: 3, endLine: 8, snippet: '' },
+    children: [{ id: 'body', role: 'action', text: 'Call consume', spans: [], fidelity: 'derived', source: { file: review.file, startLine: 6, endLine: 6, snippet: 'consume()' } }] }] }
+  const lines = englishLines(review.after)
+  expect(lines.get(4)).toBeNull()
+  expect(lines.get(5)).toBeNull()
+  expect(lines.get(6)?.[0].step.id).toBe('body')
+  expect(lines.has(7)).toBe(false)
 })
 
 it('keeps code fallback for missing stories and helper steps outside the reviewed tests', () => {

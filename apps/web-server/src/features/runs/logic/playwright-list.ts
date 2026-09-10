@@ -196,8 +196,17 @@ export async function listPlaywrightTests(
       // discovery failure and stdout may not be valid JSON.
       if (code === 0) { settle(out); return }
       // The UI needs the actual discovery error, not the preceding config dump.
-      if (settle(null, `playwright test --list exited with code ${code}\n${discoveryFailureOutput(out, err)}`.trim()) && err) {
-        process.stderr.write(`[playwright-list] exit ${code}: ${err.slice(0, 500)}\n`)
+      const failure = discoveryFailureOutput(out, err)
+      // Both the gate and the payload read `failure`, never `err`: Playwright
+      // reports discovery errors inside its JSON stdout and leaves stderr to
+      // the package runner, which on npm 12 always writes a `npm notice run`
+      // banner there. Echoing `err` printed that banner in place of the
+      // failure, and gating on it made the banner itself the trigger. The
+      // console is the only place a human sees this — the server runs
+      // `logger: false`, so the callers' `app.log.warn` is a no-op — so the
+      // line names the directory, since one process lists every feature.
+      if (settle(null, `playwright test --list exited with code ${code}\n${failure}`.trim()) && failure) {
+        process.stderr.write(`[playwright-list] exit ${code} in ${inv.cwd}: ${failure.slice(0, 500)}\n`)
       }
     })
   })

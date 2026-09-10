@@ -5,7 +5,9 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { connectPane, type PaneConnection } from '../api/pane-socket'
 import * as api from '@/shared/api/client'
 import { currentResolvedTheme, subscribeTheme, type ResolvedTheme } from '@/shared/lib/theme'
-import { paneTerminalNotice } from '../utils/pane-terminal-message'
+import { isMissingLogError, paneTerminalNotice } from '../utils/pane-terminal-message'
+import { EmptyState } from '@/shared/ui/EmptyState'
+import type { EmptyCopy } from '@/shared/ui/empty-state-copy'
 
 const TERM_THEMES: Record<ResolvedTheme, ITheme> = {
   dark: {
@@ -29,11 +31,14 @@ interface Props {
   paneId: string
   onExit?: (code: number) => void
   /**
-   * Placeholder shown over the terminal while it has streamed no output yet —
-   * so an idle pane reads as "nothing here yet" instead of a blank black box.
-   * Omit it (e.g. the heal-agent pane) to keep the bare terminal.
+   * The pane's two empty states, both rendered through the shared `EmptyState`
+   * so an xterm pane and a React pane are indistinguishable when both are
+   * blank. `idle` is "no output has arrived yet"; `missing` is "the server says
+   * this run's buffer was never written or is gone". Required rather than
+   * optional: all three call sites supply it, and an omitted one is a blank
+   * black box with nothing to explain it.
    */
-  emptyState?: { title: string; hint?: string }
+  emptyState: { idle: EmptyCopy; missing: EmptyCopy }
 }
 
 // How long to wait after mount before showing the empty-state placeholder.
@@ -56,6 +61,10 @@ export function PaneTerminal({ runId, paneId, onExit, emptyState }: Props) {
   // again until new output arrives.
   const [hasOutput, setHasOutput] = useState(false)
   const [graceElapsed, setGraceElapsed] = useState(false)
+  // Set by the server's `log not available`, which is the pane reporting that it
+  // has nothing to stream — deliberately NOT routed through `markOutput`, or the
+  // placeholder it is meant to caption would be suppressed by its own arrival.
+  const [missingLog, setMissingLog] = useState(false)
 
   useEffect(() => {
     const container = containerRef.current
@@ -65,6 +74,7 @@ export function PaneTerminal({ runId, paneId, onExit, emptyState }: Props) {
     hadOutputRef.current = false
     setHasOutput(false)
     setGraceElapsed(false)
+    setMissingLog(false)
     const graceTimer = setTimeout(() => setGraceElapsed(true), EMPTY_STATE_GRACE_MS)
     // Flip to "has output" exactly once, on the false→true transition, so a
     // chatty pane (the Ink heal-agent TUI emits dozens of frames/sec) doesn't
@@ -192,9 +202,14 @@ export function PaneTerminal({ runId, paneId, onExit, emptyState }: Props) {
         noticeKeysRef.current = new Set()
         hadOutputRef.current = false
         setHasOutput(false)
+        setMissingLog(false)
       },
       onError: (err) => {
-        const notice = paneTerminalNotice(paneId, err)
+        if (isMissingLogError(err)) {
+          setMissingLog(true)
+          return
+        }
+        const notice = paneTerminalNotice(err)
         if (noticeKeysRef.current.has(notice.key)) return
         noticeKeysRef.current.add(notice.key)
         markOutput()
@@ -300,45 +315,19 @@ export function PaneTerminal({ runId, paneId, onExit, emptyState }: Props) {
     }
   }, [runId, paneId, onExit])
 
-  const showEmptyState = Boolean(emptyState) && !hasOutput && graceElapsed
+  const showEmptyState = !hasOutput && graceElapsed
 
   return (
     <div className="relative h-full w-full" style={{ background: 'var(--bg-base)' }}>
       <div ref={containerRef} className="h-full w-full p-2" />
-      {showEmptyState && emptyState && (
-        <PaneEmptyState title={emptyState.title} hint={emptyState.hint} />
-      )}
-    </div>
-  )
-}
-
-// Centered placeholder layered over the (empty) terminal. `pointer-events-none`
-// keeps the xterm underneath fully interactive — the moment output streams in,
-// `showEmptyState` flips false and this unmounts.
-function PaneEmptyState({ title, hint }: { title: string; hint?: string }) {
-  return (
-    <div className="pointer-events-none absolute inset-0 flex select-none flex-col items-center justify-center gap-2.5 px-6 text-center">
-      <span style={{ color: 'var(--text-muted)', opacity: 0.55 }}>
-        <TerminalGlyph />
-      </span>
-      <div className="text-[13px] font-medium" style={{ color: 'var(--text-secondary)' }}>
-        {title}
-      </div>
-      {hint && (
-        <div className="max-w-[280px] text-[11.5px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-          {hint}
+      {/* `pointer-events-none` keeps the xterm underneath fully interactive — the
+          moment output streams in, `showEmptyState` flips false and this unmounts. */}
+      {showEmptyState && (
+        <div className="pointer-events-none absolute inset-0 select-none">
+          <EmptyState {...(missingLog ? emptyState.missing : emptyState.idle)} />
         </div>
       )}
     </div>
   )
 }
 
-function TerminalGlyph() {
-  return (
-    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <path d="M7 9l3 3-3 3" />
-      <path d="M13 15h4" />
-    </svg>
-  )
-}

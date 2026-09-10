@@ -8,10 +8,11 @@ import { branchForService, branchLabel } from '../utils/run-detail-playback'
 import { type RunViewModel } from '../utils/run-view-model'
 import { isRestartableRunStatus } from '@shared/run-state'
 import { RecoveryTimeline, alertClass, useTimelineNow } from './RunDiagnosticsPanels'
-import { EmptyGlyph } from '@/shared/ui/EmptyState'
+import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
+import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { ReviewEvaluationMenu } from './ReviewEvaluationMenu'
 import { RunPane } from './RunPane'
-import { EmptyPane, SectionHeader } from './RunPlaybackPanels'
+import { SectionHeader } from './RunPlaybackPanels'
 import { ServiceCard } from './RunServicePanels'
 import { isAssertionExportable, isTerminalRunStatus } from './run-export-links'
 
@@ -265,11 +266,7 @@ export function RunLogsTab({
   return (
     <RunPane padded>
       {rows.length === 0 ? (
-        <EmptyPane
-          icon={EmptyGlyph.timeline}
-          title="No lifecycle events yet"
-          body="Canary Lab records one row per moment that matters — a service coming up, the test process starting, a recovery attempt, the final verdict. The first one lands as soon as this run does something."
-        />
+        <EmptyState {...EMPTY_COPY.lifecycle} icon={EmptyGlyph.timeline} />
       ) : (
         <RecoveryTimeline
           rows={rows}

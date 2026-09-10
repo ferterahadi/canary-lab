@@ -1365,7 +1365,7 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('Tests written')
     expect(container.querySelector('[data-testid="coverage-composition-skeleton"]')).toBeNull()
     const composition = container.querySelector('[data-testid="coverage-composition"]')
-    expect(composition?.querySelector('.cl-frame-heading')?.textContent).toBe('Test depth')
+    expect(composition?.querySelector('.cl-type-title')?.textContent).toBe('Test depth')
     expect(composition?.textContent).toContain('1 test')
   })
 })

@@ -53,12 +53,12 @@ describe('RunPane', () => {
 describe('healEmptyCopy', () => {
   it('reads a passing run with no cycles as a good outcome, not a missing file', () => {
     const copy = healEmptyCopy('passed', 0)
-    expect(copy.tone).toBe('good')
+    expect(copy.reason).toBe('nothing-to-report')
     expect(copy.title).toBe('No repairs needed')
   })
 
   it('distinguishes a run that never reached a repair cycle', () => {
-    expect(healEmptyCopy('aborted', 0)).toMatchObject({ title: 'No repair agent ran', tone: 'neutral' })
+    expect(healEmptyCopy('aborted', 0)).toMatchObject({ title: 'No repair agent ran', reason: 'never-ran' })
   })
 
   it('names the cycle count when the transcript itself is missing', () => {

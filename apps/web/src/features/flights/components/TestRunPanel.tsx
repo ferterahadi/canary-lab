@@ -170,6 +170,11 @@ export function TestRunPanel({
                chip, or in the meta line) printed the same fraction twice, a
                hand's width apart. */
             passCount="hidden"
+            /* The card's opening line, not an item in a list: no gutter, no
+               fill. Its title, the stats line under it and the failure rows all
+               start on the card's own left edge — and on the same column as the
+               Previous runs titles below. */
+            chrome="headline"
             /* Guarded on `runId` like the `onOpenFixes` wiring above: the hero
                also renders from a synthesized entry before the run list
                resolves, and this used to hand `onOpenRun` an undefined id in
@@ -186,7 +191,14 @@ export function TestRunPanel({
         <FailingTests
           failing={failing}
           knownTests={summary?.knownTests}
-          {...(onOpenRun && runId ? { onOpenTest: (name: string) => onOpenRun(feature, runId, { test: name }) } : {})}
+          {...(onOpenRun && runId
+            ? {
+                onOpenTest: (name: string) => onOpenRun(feature, runId, { test: name }),
+                /* The remainder past the sixth goes to the same place a row
+                   does, minus the per-test landing. */
+                onOpenAll: () => onOpenRun(feature, runId),
+              }
+            : {})}
         />
 
         {/* No run id means there is no run to control — the surrounding branch
@@ -249,9 +261,11 @@ interface RunStat {
   testId?: string
 }
 
-/** The latest run's numbers, in the identity row's own register: 11px, muted
- *  label + neutral value, `·` separated — the same vocabulary RunRow's meta line
- *  uses, one line under it and aligned to the same text column.
+/** The latest run's numbers as a quiet ladder under the identity row: each
+ *  fact is a muted 11px label over its value, set in the data step, on the same
+ *  text column as the title. Facts stand a column apart instead of running as
+ *  one `·`-separated sentence — five label/value pairs in a wrapping line read
+ *  as a single cramped string, and the eye had to find the labels inside it.
  *
  *  These three facts used to render as `FactTile`s — boxed on `bg-elevated`,
  *  22px figures, with a progress bar and a ten-segment stepper. That is the
@@ -284,8 +298,8 @@ interface RunStat {
 function RunHeroSkeleton({ awaiting }: { awaiting: AwaitingState }) {
   return (
     <div data-testid="test-run-hero-skeleton" className="flex flex-col">
-      {/* Identity row — RunRow's gutter, dot size and two-line text column. */}
-      <div className="flex items-center gap-2 py-2" style={{ paddingInline: HERO_ROW.GUTTER }}>
+      {/* Identity row — RunRow's dot size and two-line text column, flush. */}
+      <div className="flex items-center gap-2 pb-0.5">
         <SkeletonBead awaiting={awaiting} size={8.8} />
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
           <SkeletonBar awaiting={awaiting} width="28%" height={10} />
@@ -293,18 +307,23 @@ function RunHeroSkeleton({ awaiting }: { awaiting: AwaitingState }) {
         </div>
       </div>
 
-      {/* Tests · Repairs · Services land on this bar, not beside it. */}
-      <div style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}>
-        <SkeletonBar awaiting={awaiting} width="40%" height={8} />
+      {/* Tests · Repairs · Services land in these rungs: a short label over a
+          shorter value, a column apart, exactly where RunStatsLine puts them. */}
+      <div className="mt-3 flex gap-x-7" style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}>
+        {[64, 72, 80].map((w) => (
+          <div key={w} className="flex flex-col gap-1.5">
+            <SkeletonBar awaiting={awaiting} width={`${w}px`} height={7} />
+            <SkeletonBar awaiting={awaiting} width={`${Math.round(w * 0.6)}px`} height={9} />
+          </div>
+        ))}
       </div>
 
-      {/* The per-test rows, in FailureRow's dot lane and hairline dividers. */}
-      <ul className="m-0 mt-3 flex list-none flex-col p-0">
+      {/* The per-test rows, in FailureRow's dot lane. */}
+      <ul className="m-0 mt-4 flex list-none flex-col p-0">
         {['64%', '46%'].map((width) => (
           <li
             key={width}
-            className="flex items-start gap-2 border-t border-line-subtle py-2 first:border-t-0"
-            style={{ paddingInline: HERO_ROW.GUTTER }}
+            className="flex items-start gap-2 py-1.5"
           >
             <span className="mt-[5px] flex shrink-0 items-center justify-center" style={{ width: HERO_ROW.DOT }}>
               <SkeletonBead awaiting={awaiting} size={6} />
@@ -322,39 +341,39 @@ function RunHeroSkeleton({ awaiting }: { awaiting: AwaitingState }) {
 
 function RunStatsLine({ stats }: { stats: RunStat[] }) {
   return (
-    <div
+    <dl
       data-testid="run-hero-stats"
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 pr-3 text-[11px] leading-tight"
+      className="m-0 mt-3 flex flex-wrap gap-x-7 gap-y-2.5"
       style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}
     >
-      {stats.map((s, i) => (
-        <span key={s.label} className="flex items-center gap-1.5" {...(s.title ? { title: s.title } : {})}>
-          {i > 0 && <span aria-hidden="true" className="select-none text-muted opacity-50">·</span>}
-          {s.onClick ? (
-            // The line's one interactive segment. It stays in the line's register
-            // (11px, muted label) and takes the accent only on the value + arrow —
-            // accent MEANS "click me" here, which is exactly what this is, and the
-            // neutral numbers beside it stay reference data.
-            <button
-              type="button"
-              onClick={s.onClick}
-              {...(s.testId ? { 'data-testid': s.testId } : {})}
-              className="flex items-center gap-1.5 rounded text-[11px] hover:underline"
-            >
-              <span className="text-muted">{s.label}</span>
-              <span className="tabular-nums text-accent">{s.value}</span>
-              <span aria-hidden="true" className="text-accent">→</span>
-            </button>
-          ) : (
-            <>
-              <span className="text-muted">{s.label}</span>
-              <span className={`tabular-nums ${s.bad ? 'text-danger' : 'text-secondary'}`}>{s.value}</span>
-              {s.note ? <span className="text-muted">({s.note})</span> : null}
-            </>
-          )}
-        </span>
+      {stats.map((s) => (
+        <div key={s.label} className="flex min-w-0 flex-col gap-0.5" {...(s.title ? { title: s.title } : {})}>
+          <dt className="cl-type-meta whitespace-nowrap text-muted">{s.label}</dt>
+          <dd className="m-0 flex items-baseline gap-1.5 cl-type-data">
+            {s.onClick ? (
+              // The ladder's one interactive rung. It stays in the ladder's
+              // register and takes the accent only on the value + arrow —
+              // accent MEANS "click me" here, which is exactly what this is, and
+              // the neutral numbers beside it stay reference data.
+              <button
+                type="button"
+                onClick={s.onClick}
+                {...(s.testId ? { 'data-testid': s.testId } : {})}
+                className="flex items-baseline gap-1 rounded cl-type-data hover:underline"
+              >
+                <span className="tabular-nums font-medium text-accent">{s.value}</span>
+                <span aria-hidden="true" className="text-accent">→</span>
+              </button>
+            ) : (
+              <>
+                <span className={`tabular-nums font-medium ${s.bad ? 'text-danger' : 'text-primary'}`}>{s.value}</span>
+                {s.note ? <span className="cl-type-meta text-muted">{s.note}</span> : null}
+              </>
+            )}
+          </dd>
+        </div>
       ))}
-    </div>
+    </dl>
   )
 }
 
@@ -511,7 +530,7 @@ function RunControls({
             data-testid="run-stage-cancel-heal"
             disabled={mutationLockedReason != null}
             onClick={() => { api.cancelHealRun(runId).catch(onError) }}
-            className="cl-button px-2 py-0.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-45"
+            className="cl-button px-2 py-0.5 disabled:cursor-not-allowed disabled:opacity-45"
             title={mutationLockedReason ?? 'Stops the repair and keeps the failing result. The flight will ask what to do next.'}
           >
             Cancel repair
@@ -525,7 +544,7 @@ function RunControls({
             data-testid="run-stage-stop"
             disabled={mutationLockedReason != null}
             onClick={() => { api.stopRun(runId).catch(onError) }}
-            className="cl-button px-2 py-0.5 text-[11px] text-danger disabled:cursor-not-allowed disabled:opacity-45"
+            className="cl-button px-2 py-0.5 disabled:cursor-not-allowed disabled:opacity-45"
             title={mutationLockedReason ?? 'Ends this run only — the flight keeps going and asks what to do next. Pause stops everything.'}
           >
             ⏹ Stop run

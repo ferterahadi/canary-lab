@@ -272,7 +272,7 @@ function scenario() {
       const firstIf = statements[0] as ts.IfStatement
       expect(composeIfHeader(firstIf, context).text).toBe('If `status` strictly equals `200`:')
       expect(composeIfPath('then', firstIf.thenStatement, context).text).toBe('Then:')
-      expect(composeIfPath('otherwise', firstIf.elseStatement!, context).text).toBe('Otherwise:')
+      expect(composeIfPath('otherwise', firstIf.elseStatement!, context).text).toBe('Else:')
       expect(composeIfHeader(statements[1] as ts.IfStatement, context).text).toBe('If `ready` is truthy:')
 
       expect(composeIfHeader(statements[2] as ts.IfStatement, context).text).toBe('If `left = right` is truthy:')

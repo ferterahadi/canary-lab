@@ -114,6 +114,8 @@ export interface ReadableStoryFlow extends ReadableStoryItemBase {
   kind: 'flow'
   role: ReadableStoryRole
   flowKind: ReadableStoryFlowKind
+  /** Last source line described by the header; the body has its own rows. */
+  headerEndLine?: number
   children: ReadableStoryItem[]
 }
 

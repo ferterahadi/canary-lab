@@ -67,6 +67,15 @@ afterEach(() => {
 })
 
 describe('useWorkspaceNavigation — seeding from the route', () => {
+  it('restores current test browsing and switches back without changing the selected run', async () => {
+    await mount(persisted({ feature: 'checkout', run: 'old-run', currentTests: true }))
+    expect(nav.currentTests).toBe(true)
+    expect(viewState.persistView).toHaveBeenLastCalledWith(expect.objectContaining({ run: 'old-run', currentTests: true }))
+    await act(async () => nav.setCurrentTests(false))
+    expect(nav.currentTests).toBe(false)
+    expect(nav.selectedRunId).toBe('old-run')
+    expect(viewState.persistView.mock.lastCall![0].currentTests).toBeUndefined()
+  })
   it('starts on the persisted view, feature, run and flight', async () => {
     await mount(persisted({ view: 'flights', feature: 'checkout', run: 'r1', flight: 'fl-1', flightStage: 'run' }))
 

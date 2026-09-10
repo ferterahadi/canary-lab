@@ -108,7 +108,7 @@ describe('branching', () => {
       name: 'if with else-if chain',
       source: 'if (a) { one(); } else if (b) { two(); } else { three(); }',
       english:
-        'if `a` is truthy\nthen:\n    call `one` with no arguments\notherwise:\n    if `b` is truthy\n    then:\n        call `two` with no arguments\n    otherwise:\n        call `three` with no arguments',
+        'if `a` is truthy\nthen:\n    call `one` with no arguments\nelse:\n    if `b` is truthy\n    then:\n        call `two` with no arguments\n    else:\n        call `three` with no arguments',
     },
     { name: 'if with a non-block branch', source: 'if (ready) start();', english: 'if `ready` is truthy\nthen:\n    call `start` with no arguments' },
     {
@@ -301,7 +301,7 @@ switch (mode) { case 'a': run(); break; default: wait(); }
 
     expect(renderEnglish(statementHeaderEnglish(decision))).toBe('if `ready` is truthy')
     expect(renderEnglish(ifPathHeaderEnglish(decision, 'then'))).toBe('then')
-    expect(renderEnglish(ifPathHeaderEnglish(decision, 'otherwise'))).toBe('otherwise')
+    expect(renderEnglish(ifPathHeaderEnglish(decision, 'otherwise'))).toBe('else')
     expect(renderEnglish(statementHeaderEnglish(selection))).toBe('switch on `mode`')
     expect(renderEnglish(switchPathHeaderEnglish(selection, 0))).toBe('when case matches string "a"')
     expect(renderEnglish(switchPathHeaderEnglish(selection, 1))).toBe('the default case')

@@ -20,6 +20,17 @@ afterEach(() => {
 })
 
 describe('workspace-view-state (R12)', () => {
+  it('keeps current test browsing URL-local while preserving the selected run', () => {
+    persistView(view({ feature: 'checkout', run: 'old-run', currentTests: true }))
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', run: 'old-run', currentTests: true }))
+    expect(window.location.search).toContain('tests=current')
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ view: 'workspace', feature: 'checkout' })
+    persistView(view({ feature: 'checkout', run: 'old-run', currentTests: false }))
+    expect(window.location.search).not.toContain('tests=')
+    expect(readPersistedView().run).toBe('old-run')
+    persistView(view({ view: 'coverage', feature: 'checkout', currentTests: true }))
+    expect(window.location.search).not.toContain('tests=')
+  })
   it('defaults to the workspace view with no feature', () => {
     expect(readPersistedView()).toEqual(view({}))
   })

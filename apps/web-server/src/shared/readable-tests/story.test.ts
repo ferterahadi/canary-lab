@@ -563,7 +563,6 @@ describe('readable test story', () => {
     expect(storyItems(translated).filter((item) => item.kind === 'flow').map((item) => item.flowKind))
       .toEqual(expect.arrayContaining([
         'condition',
-        'then',
         'otherwise',
         'switch',
         'case',
@@ -728,14 +727,12 @@ describe('readable test story', () => {
       'If value is null or undefined',
       'Load default',
       'If primary is true',
-      'When the condition is true',
       'Read primary, saving the result as selected',
-      'When the condition is false',
+      'Else',
       'Read fallback, saving the result as selected',
       'If ready is true',
-      'When the condition is true',
       'Send preferred',
-      'When the condition is false',
+      'Else',
       'Send alternate',
       'Call handler when available',
       'Flush on service using batch when available',
@@ -744,6 +741,21 @@ describe('readable test story', () => {
       'Multiply retries by 2',
       'Conditionally set result to fallback when its current value is null or undefined',
       'Remove the property at key from payload',
+    ])
+
+    const topLevel = translated.story?.steps ?? []
+    const primaryIfIndex = topLevel.findIndex((step) => step.text === 'If primary is true')
+    const primaryIf = topLevel[primaryIfIndex]
+    const primaryElse = topLevel[primaryIfIndex + 1]
+    if (!primaryIf || primaryIf.kind !== 'flow' || !primaryElse || primaryElse.kind !== 'flow') {
+      throw new Error('Expected sibling If and Else flows')
+    }
+    expect(primaryIf.children.map((step) => step.text)).toEqual([
+      'Read primary, saving the result as selected',
+    ])
+    expect(primaryElse).toMatchObject({ flowKind: 'otherwise', text: 'Else' })
+    expect(primaryElse.children.map((step) => step.text)).toEqual([
+      'Read fallback, saving the result as selected',
     ])
   })
 })

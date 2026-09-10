@@ -133,13 +133,39 @@ no `--font-size-*` token yet, so sizes appear as Tailwind arbitrary values.
 | 13.5 | — | Wordmark only |
 | 22 | `text-[22px]` | The one outlier — `StageFact`'s `big` metric value |
 
+### Named steps (the migration target)
+
+Four steps named by ROLE, plus `.cl-rubric` as the kicker above a card — five in
+all. A surface on the steps picks a role, not a number, and re-tuning the role
+re-tunes every surface on it. **Adopted by the flight-detail stage panes**
+(`features/flights/components/**`); the rest of the app still spells sizes
+inline, so a raw `text-[Npx]` elsewhere is un-migrated, not a sixth step.
+
+| Class | px | Role |
+| --- | --- | --- |
+| `.cl-type-title` | 12.5/600 | Titles one card |
+| `.cl-type-body` | 12 | A sentence a person reads — panel blurbs, a checkpoint's explanation |
+| `.cl-type-data` | 11.5 | A value the machine produced — config values, service rows, file paths, test titles, matrix cells |
+| `.cl-type-meta` | 11 | Supporting text subordinate to the row it sits with — ports, timestamps, counts, inline errors, footnotes |
+| `.cl-rubric` | mono 10 caps | The kicker naming a card |
+
+Each step declares **font-size and line-height only, never colour** — so
+`text-secondary` / `text-muted` / `text-danger` still work beside it. That is
+deliberate: every `.cl-*` rule sits outside `@layer` and therefore beats
+Tailwind's layered utilities, which is why `.cl-button`'s own `color` silently
+swallowed a `text-accent` written next to it for years (see the audit below).
+
+A raw `text-[Npx]` is still correct for **glyph geometry** — an icon sized to
+its box (a 3×3 help mark, a `▾` caret, an icon button's arrow) is not type.
+
 ### Named voices
 
 | Class | Spec | Use |
 | --- | --- | --- |
 | `.cl-kicker` | sans 13px/600, `-0.005em` | Section heading |
-| `.cl-frame-heading` | sans 12.5px/600 | Heading inside a framed section |
+| `.cl-frame-heading` | sans 12.5px/600 | Older twin of `.cl-type-title` that also bakes in `--text-primary` — fine where the title is never toned; a status-hued title needs the step instead |
 | `.cl-rubric` | **mono 10px/500 caps, `.08em`** | Sub-caption under a title, `PanelCard` kicker. Mono caps because it reads as data, not literature. |
+| `.cl-badge-accent` / `.cl-badge-neutral` | 10px/600 caps, 1px 6px | The two tones of a small badge beside a card title. Same metrics, so two badges on one line are one object in two tones |
 | `.cl-wordmark` | sans 13.5px/600 | App wordmark |
 | `.cl-italic-affix` | sans 10.5px caps muted | Legacy — renders as a quiet label, no italics |
 
@@ -149,6 +175,12 @@ no `--font-size-*` token yet, so sizes appear as Tailwind arbitrary values.
 
 **Spacing** — no token scale; Tailwind's 4px-based utilities. Vertical rhythm is
 tight: **8–12px gaps** (`gap-2` / `gap-2.5` / `gap-3`), panel padding `px-3 py-2.5`.
+
+A stage pane runs on **two levels only**: card-to-card is `gap-3` (12px), and
+blocks inside a card are `gap-2` (8px). Sub-blocks inside a block (a label+value
+pair, a control group) stay content-tuned at 4–6px. Panels used to stack their
+own cards at `gap-2.5` while the stage column stacked them at `gap-3`, so a
+card's spacing depended on which component happened to emit it.
 
 **Radius**
 
@@ -345,7 +377,8 @@ command that produced it — re-run before trusting a number.
 | Radius / fonts | ✅ | Token names match Tailwind's theme vars, so the utilities resolve to them automatically |
 | Shadow / overlay | ✅ | Two shadow levels, one backdrop |
 | **Status hues** | ✅ | **Was 210 raw palette classes; all rewritten to token utilities.** Zero remain outside the xterm theme |
-| Typography size | 🔥 None | **457** arbitrary `text-[Npx]` uses across 12 distinct sizes; no named type scale |
+| Typography size | ➖ Partial | Named steps exist (`.cl-type-*`) and the flight-detail stage panes are on them; the rest of the app still spells sizes inline. Re-run the count below before trusting a number |
+| **Cascade layer** | 🔥 Broken | Every `.cl-*` rule sits **outside `@layer`**, so it beats Tailwind's layered utilities. A `text-[11px]` or `text-accent` written beside `.cl-button` (which declares its own `font-size` and `color`) never rendered — 24 such utilities were dead in the flight components alone |
 | Spacing | ➖ Tailwind only | A handful of arbitrary `p-[…]` / `gap-[…]` escapes; everything else is on Tailwind's 4px scale |
 | Hardcoded hex | ✅ Contained | Literal colors remain only in token declarations, terminal rendering, two external-client brand colors, and CSS mask values |
 
@@ -356,7 +389,22 @@ rg -o '(bg|text|border)-(rose|amber|emerald|sky|violet|blue|red|green|slate|zinc
 
 ### Remaining work
 
-**Replace arbitrary font sizes with named steps.** Twelve sizes are more than the design needs. Reduce them to about five roles. Tailwind reserves `--text-*` for font sizes, while this project currently uses `--text-primary`, `--text-secondary`, and `--text-muted` for colors. Rename or avoid those color variables before adding type tokens.
+**Finish the migration to named steps.** The five roles exist and the
+flight-detail panes are on them; every other surface still spells sizes inline.
+Migrate a surface at a time, folding its sizes into title → body → data → meta
+(+ `.cl-rubric`) and leaving raw values only for glyph geometry. Note that
+Tailwind reserves `--text-*` for font sizes while this project uses
+`--text-primary` / `-secondary` / `-muted` for colours, so the steps are plain
+classes rather than theme tokens — rename those colour variables before
+attempting real `--font-size-*` tokens.
+
+**Decide what to do about the unlayered `.cl-*` rules.** They currently win over
+every Tailwind utility, which silently defeats a per-instance override. Wrapping
+them in `@layer components` is the correct cascade and would let a utility win —
+but it also brings every currently-dead utility in the app to life at once, so it
+needs its own pass with visual verification, not a drive-by change. Until then,
+a `.cl-*` class that declares a property owns it: override by adding a variant
+class (the way `.cl-button-primary` does), never by a utility beside it.
 
 Spacing is intentionally left on Tailwind's own 4px scale — there is no
 competing project scale for it to drift from.

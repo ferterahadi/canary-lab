@@ -1,0 +1,1362 @@
+{
+  "manifest": {
+    "runId": "2026-09-07T1051-j7u7",
+    "featureDir": "/Users/oddle/Documents/canary-lab-workspace/features/cns-wa",
+    "suiteSnapshot": {
+      "kind": "taken",
+      "dir": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite",
+      "takenAt": "2026-09-07T10:51:22.998Z",
+      "digest": "8752e0d75095dfb1c22c6a74d9a623f8dd7e715e93028dae490d182bfecc7f1a"
+    }
+  },
+  "summary": {
+    "complete": true,
+    "total": 98,
+    "passed": 85,
+    "passedIds": [
+      "test-id-1vlv642",
+      "test-id-r834vw",
+      "test-id-ruaiku",
+      "test-id-1dxskre",
+      "test-id-1k2kkc4",
+      "test-id-rxi937",
+      "test-id-4hdh1m",
+      "test-id-8y0joc",
+      "test-id-1mysrgn",
+      "test-id-16vs8nd",
+      "test-id-160zd58",
+      "test-id-17ymgdg",
+      "test-id-156dtv4",
+      "test-id-114se93",
+      "test-id-1gmzrfn",
+      "test-id-46aggv",
+      "test-id-adzxs7",
+      "test-id-1gclojg",
+      "test-id-rnqr2",
+      "test-id-e4dqtx",
+      "test-id-b0ffb7",
+      "test-id-yt5wpb",
+      "test-id-1p7084d",
+      "test-id-8vaip6",
+      "test-id-6rmd3s",
+      "test-id-10jgl6n",
+      "test-id-1g3zric",
+      "test-id-1acof7w",
+      "test-id-1a7kxtn",
+      "test-id-u2gktk",
+      "test-id-1s5hfiv",
+      "test-id-3an6w1",
+      "test-id-1snt7pq",
+      "test-id-9t3bzo",
+      "test-id-4vkwt5",
+      "test-id-1ukwf5r",
+      "test-id-p4lw08",
+      "test-id-1v1z645",
+      "test-id-11h0uw",
+      "test-id-1ifkkzm",
+      "test-id-69utzf",
+      "test-id-rbsybv",
+      "test-id-1n24tdy",
+      "test-id-48zbqn",
+      "test-id-sea8dv",
+      "test-id-1vfzwuy",
+      "test-id-1rk5p9a",
+      "test-id-1yr8j39",
+      "test-id-1s78sno",
+      "test-id-1nuepiz",
+      "test-id-1nuvhqk",
+      "test-id-1w76qhq",
+      "test-id-7yxyz",
+      "test-id-wfdn6v",
+      "test-id-8g7kjw",
+      "test-id-12n3ig3",
+      "test-id-g8p0c8",
+      "test-id-1ygayzc",
+      "test-id-1x93lb9",
+      "test-id-1eqt1jv",
+      "test-id-zijv58",
+      "test-id-uu3813",
+      "test-id-avnbpb",
+      "test-id-1n5obls",
+      "test-id-1mpslnk",
+      "test-id-bxv3ya",
+      "test-id-sf495j",
+      "test-id-vzd61g",
+      "test-id-1l0g2nv",
+      "test-id-9tpbjs",
+      "test-id-1435jr3",
+      "test-id-sjqilk",
+      "test-id-1nvxd9b",
+      "test-id-ntgu2o",
+      "test-id-d0k0qb",
+      "test-id-5nmqru",
+      "test-id-1hk2ksc",
+      "test-id-hy6e5t",
+      "test-id-1c2xcnw",
+      "test-id-op1s47",
+      "test-id-2sjkqw",
+      "test-id-1d5hm1z",
+      "test-id-1vwrwox",
+      "test-id-92x7dh",
+      "test-id-1wriokk"
+    ],
+    "passedNames": [
+      "test-case-req-r1-path-sad-variant-whatsapp-the-inbox-refuses-a-missing-app-credential",
+      "test-case-req-r1-path-sad-variant-whatsapp-the-inbox-refuses-a-unknown-app-credential",
+      "test-case-req-r4-path-happy-variant-whatsapp-the-inbox-accepts-a-first-page-with-a-limit-of-50",
+      "test-case-req-r4-path-happy-variant-whatsapp-the-inbox-accepts-a-first-page-with-a-limit-of-500",
+      "test-case-req-r4-path-sad-variant-whatsapp-the-inbox-refuses-offset-page",
+      "test-case-req-r4-path-sad-variant-whatsapp-the-inbox-refuses-zero-limit",
+      "test-case-req-r4-path-sad-variant-whatsapp-the-inbox-refuses-fractional-limit",
+      "test-case-req-r4-path-sad-variant-whatsapp-the-inbox-refuses-oversized-limit",
+      "test-case-req-r4-path-sad-variant-whatsapp-the-inbox-refuses-malformed-cursor",
+      "test-case-req-r20-path-sad-variant-whatsapp-the-inbox-requires-entity-id",
+      "test-case-req-r20-path-sad-variant-whatsapp-the-inbox-requires-entity-type",
+      "test-case-req-r21-path-sad-variant-whatsapp-an-administrator-receives-not-found-for-an-absent-thread",
+      "test-case-req-r16-path-happy-variant-whatsapp-the-provider-callback-route-acknowledges-an-empty-notification-with-http-200",
+      "test-case-req-r16-path-sad-variant-whatsapp-the-unsupported-webhook-spelling-does-not-replace-the-callback-route",
+      "test-case-req-r17-path-happy-meta-verification-returns-only-the-raw-challenge-as-plain-text",
+      "test-case-req-r17-path-sad-meta-verification-refuses-a-wrong-token",
+      "test-case-req-r17-path-sad-meta-verification-refuses-a-empty-token",
+      "test-case-req-r17-path-sad-meta-verification-refuses-a-invalid-subscription-mode",
+      "test-case-req-r20-path-happy-variant-whatsapp-the-approved-canary-thread-exposes-its-merchant-identity-and-activity",
+      "test-case-req-r3-path-happy-path-sad-variant-whatsapp-a-thread-is-visible-to-its-owner-but-hidden-from-another-app",
+      "test-case-req-r3-req-r25-path-sad-variant-whatsapp-another-app-cannot-reply-to-the-approved-thread-or-mark-an-absent-thread",
+      "test-case-req-r21-path-happy-variant-whatsapp-thread-messages-retain-their-documented-content-fields-and-newest-first-order",
+      "test-case-req-r27-path-happy-variant-whatsapp-the-displayed-reply-window-expires-twenty-four-hours-after-guest-activity",
+      "test-case-req-r4-path-sad-variant-whatsapp-a-real-fixture-thread-refuses-missing-page",
+      "test-case-req-r4-path-sad-variant-whatsapp-a-real-fixture-thread-refuses-missing-limit",
+      "test-case-req-r4-path-sad-variant-whatsapp-a-real-fixture-thread-refuses-limit-below-fifty",
+      "test-case-req-r22-path-sad-variant-whatsapp-a-malformed-cursor-is-refused-on-the-owned-synthetic-thread",
+      "test-case-req-r26-path-sad-variant-whatsapp-staff-replies-refuse-empty-text-before-any-provider-send",
+      "test-case-req-r26-path-sad-variant-whatsapp-staff-replies-refuse-text-above-the-channel-limit-before-any-provider-send",
+      "test-case-req-r26-path-sad-variant-whatsapp-staff-replies-refuse-an-empty-idempotency-key-before-any-provider-send",
+      "test-case-req-r13-req-r15-path-happy-variant-whatsapp-the-configured-canary-sender-accepts-an-approved-template-for-the-approved-recipient",
+      "test-case-req-r14-path-happy-variant-whatsapp-the-accepted-template-has-a-real-provider-resource-and-an-observable-send-outcome",
+      "test-case-req-r14-path-happy-variant-whatsapp-a-real-delivery-callback-confirms-the-approved-template-reached-its-destination",
+      "test-case-req-r33-path-happy-variant-whatsapp-version-1-returns-the-same-newly-sent-message",
+      "test-case-req-r33-path-happy-variant-whatsapp-version-1-accepts-the-event-history-request-exactly-as-the-guide-documents",
+      "test-case-req-r33-path-happy-variant-whatsapp-version-4-returns-the-same-newly-sent-message",
+      "test-case-req-r33-path-happy-variant-whatsapp-version-4-accepts-the-event-history-request-exactly-as-the-guide-documents",
+      "test-case-req-r33-path-happy-variant-whatsapp-event-history-with-explicit-event-names-correlates-to-the-test-message",
+      "test-case-req-r3-req-r33-path-sad-variant-whatsapp-another-app-cannot-read-the-newly-sent-message",
+      "test-case-req-r34-path-happy-variant-whatsapp-stats-return-counters-scoped-to-this-test-transaction",
+      "test-case-req-r34-path-sad-variant-whatsapp-reversed-stats-dates-are-refused-with-a-useful-error",
+      "test-case-req-r13-path-sad-variant-whatsapp-a-transactional-request-with-missing-template-is-refused",
+      "test-case-req-r13-path-sad-variant-whatsapp-a-transactional-request-with-empty-template-is-refused",
+      "test-case-req-r13-path-sad-variant-whatsapp-a-transactional-request-with-invalid-recipient-is-refused",
+      "test-case-req-r3-req-r13-path-sad-variant-whatsapp-a-malformed-foreign-request-is-rejected-by-body-validation-before-ownership-checks",
+      "test-case-req-r15-path-sad-whatsapp-has-no-broadcast-endpoint",
+      "test-case-req-r23-path-happy-variant-whatsapp-the-approved-real-canary-thread-can-be-marked-read-and-reopened-without-another-write",
+      "test-case-req-r2-req-r1-path-happy-variant-whatsapp-a-newly-issued-app-token-authenticates-and-only-its-hash-is-stored",
+      "test-case-req-r2-path-sad-an-app-identity-cannot-be-created-twice-or-recover-its-original-token",
+      "test-case-req-r2-path-sad-credential-creation-requires-the-administrator-key",
+      "test-case-req-r1-path-sad-variant-whatsapp-a-missing-app-token-cannot-read-merchant-configuration",
+      "test-case-req-r1-path-sad-variant-whatsapp-a-unknown-app-token-cannot-read-merchant-configuration",
+      "test-case-req-r5-req-r6-req-r8-path-happy-international-numbers-are-normalized-and-valid-server-metadata-is-retained",
+      "test-case-req-r5-req-r7-req-r8-path-happy-a-meta-cloud-server-can-be-stored-and-read-without-registering-a-provider-number",
+      "test-case-req-r7-path-happy-create-single-server-and-list-responses-never-disclose-provider-secrets",
+      "test-case-req-r5-req-r8-path-sad-server-provisioning-rejects-incorrect-provider-casing",
+      "test-case-req-r5-req-r8-path-sad-server-provisioning-rejects-an-empty-server-name",
+      "test-case-req-r5-req-r8-path-sad-server-provisioning-rejects-unrecognized-metadata",
+      "test-case-req-r6-path-sad-a-malformed-phone-number-is-refused-before-it-becomes-an-inbound-routing-key",
+      "test-case-req-r6-path-sad-another-spelling-of-an-occupied-number-cannot-create-a-second-server",
+      "test-case-req-r3-path-happy-variant-whatsapp-owners-can-read-their-server-while-lists-preserve-app-ownership",
+      "test-case-req-r3-path-happy-variant-whatsapp-an-administrator-bearer-credential-can-bypass-merchant-ownership",
+      "test-case-req-r3-path-sad-variant-whatsapp-another-app-cannot-read-or-replace-a-merchant-server",
+      "test-case-req-r4-path-happy-variant-whatsapp-list-pagination-is-zero-indexed-and-accepts-both-documented-limits",
+      "test-case-req-r4-path-sad-variant-whatsapp-server-and-sender-lists-refuse-invalid-pagination-with-no-parameters",
+      "test-case-req-r4-path-sad-variant-whatsapp-server-and-sender-lists-refuse-invalid-pagination-limit-50",
+      "test-case-req-r4-path-sad-variant-whatsapp-server-and-sender-lists-refuse-invalid-pagination-page-0",
+      "test-case-req-r4-path-sad-variant-whatsapp-server-and-sender-lists-refuse-invalid-pagination-limit-49-page-0",
+      "test-case-req-r4-path-sad-variant-whatsapp-server-and-sender-lists-refuse-invalid-pagination-limit-501-page-0",
+      "test-case-req-r4-path-sad-variant-whatsapp-server-and-sender-lists-refuse-invalid-pagination-limit-50-page-1",
+      "test-case-req-r9-path-happy-a-new-sender-binds-to-the-chosen-server-and-exposes-its-registration-timestamps",
+      "test-case-req-r9-path-sad-incomplete-bird-connection-details-produce-a-recorded-provisioning-failure",
+      "test-case-req-r9-path-sad-a-sender-cannot-bind-to-a-missing-server",
+      "test-case-req-r3-req-r9-path-sad-variant-whatsapp-another-app-cannot-bind-a-sender-to-a-merchant-server",
+      "test-case-req-r10-path-happy-a-merchant-may-retry-creation-of-its-own-sender-without-creating-another-row",
+      "test-case-req-r10-path-happy-a-sender-name-is-independent-across-apps",
+      "test-case-req-r12-path-happy-administrators-can-create-a-fresh-merchant-template-without-altering-existing-templates",
+      "test-case-req-r12-path-happy-administrators-can-create-a-fresh-global-template-without-altering-existing-templates",
+      "test-case-req-r12-path-sad-every-partial-or-empty-template-scope-is-rejected-without-writing-a-row",
+      "test-case-req-r12-path-sad-an-app-bearer-credential-cannot-change-administrator-only-templates",
+      "test-case-req-r35-req-r3-path-happy-variant-whatsapp-retiring-this-run-sender-removes-it-from-lists-while-keeping-its-historical-identity",
+      "test-case-req-r35-req-r3-path-sad-variant-whatsapp-a-foreign-app-cannot-retire-or-read-another-merchant-sender",
+      "test-case-req-r27-req-r30-path-sad-variant-whatsapp-a-closed-thread-refuses-a-valid-keyed-reply-without-changing-messages",
+      "test-case-req-r27-req-r30-path-sad-variant-whatsapp-a-closed-thread-refuses-a-valid-keyless-reply-without-changing-messages",
+      "test-case-req-r25-path-sad-variant-whatsapp-caller-addressing-fields-are-removed-by-the-real-reply-request-contract"
+    ],
+    "skippedIds": [
+      "test-id-gv3vmo",
+      "test-id-17f0xqe",
+      "test-id-e0utek",
+      "test-id-1ffg8k7",
+      "test-id-2qgkdb",
+      "test-id-azu1y3",
+      "test-id-11vamzj",
+      "test-id-i7hrsn",
+      "test-id-2azsh0"
+    ],
+    "skippedNames": [
+      "test-case-req-r16-req-r18-req-r20-req-r21-path-happy-variant-whatsapp-signed-synthetic-guest-messages-appear-once-in-the-correct-merchant-inbox",
+      "test-case-req-r18-path-sad-variant-whatsapp-wrong-signatures-and-mismatched-receiving-identities-are-not-persisted",
+      "test-case-req-r19-path-happy-path-sad-variant-whatsapp-a-replayed-synthetic-provider-message-remains-one-stored-inbound",
+      "test-case-req-r22-path-happy-variant-whatsapp-new-activity-between-cursor-pages-does-not-duplicate-or-lose-existing-messages",
+      "test-case-req-r3-path-sad-variant-whatsapp-another-app-cannot-read-the-fictional-fixture-thread",
+      "test-case-req-r24-path-happy-meta-acknowledges-the-approved-thread-read-receipt-when-it-has-unread-messages",
+      "test-case-req-r26-req-r27-req-r28-req-r29-path-happy-variant-whatsapp-an-open-approved-thread-accepts-the-exact-approved-reply-and-replays-its-message-id",
+      "test-case-req-r41-path-happy-variant-whatsapp-the-successful-reply-exposes-the-documented-idempotentreplay-field",
+      "test-case-req-r30-path-happy-variant-whatsapp-two-keyless-replies-produce-distinct-message-and-provider-identifiers"
+    ],
+    "knownTests": [
+      {
+        "id": "test-id-4k545j",
+        "name": "test-case-req-r1-path-happy-variant-whatsapp-a-new-app-can-read-its-own-empty-conversation-scope",
+        "title": "@req-R1 @path-happy @variant-whatsapp a new app can read its own empty conversation scope",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R1 @path-happy @variant-whatsapp a new app can read its own empty conversation scope"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R1 @path-happy @variant-whatsapp a new app can read its own empty conversation scope",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:71"
+      },
+      {
+        "id": "test-id-1vlv642",
+        "name": "test-case-req-r1-path-sad-variant-whatsapp-the-inbox-refuses-a-missing-app-credential",
+        "title": "@req-R1 @path-sad @variant-whatsapp the inbox refuses a missing app credential",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R1 @path-sad @variant-whatsapp the inbox refuses a missing app credential"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R1 @path-sad @variant-whatsapp the inbox refuses a missing app credential",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:84"
+      },
+      {
+        "id": "test-id-r834vw",
+        "name": "test-case-req-r1-path-sad-variant-whatsapp-the-inbox-refuses-a-unknown-app-credential",
+        "title": "@req-R1 @path-sad @variant-whatsapp the inbox refuses a unknown app credential",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R1 @path-sad @variant-whatsapp the inbox refuses a unknown app credential"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R1 @path-sad @variant-whatsapp the inbox refuses a unknown app credential",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:84"
+      },
+      {
+        "id": "test-id-ruaiku",
+        "name": "test-case-req-r4-path-happy-variant-whatsapp-the-inbox-accepts-a-first-page-with-a-limit-of-50",
+        "title": "@req-R4 @path-happy @variant-whatsapp the inbox accepts a first page with a limit of 50",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R4 @path-happy @variant-whatsapp the inbox accepts a first page with a limit of 50"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R4 @path-happy @variant-whatsapp the inbox accepts a first page with a limit of 50",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:93"
+      },
+      {
+        "id": "test-id-1dxskre",
+        "name": "test-case-req-r4-path-happy-variant-whatsapp-the-inbox-accepts-a-first-page-with-a-limit-of-500",
+        "title": "@req-R4 @path-happy @variant-whatsapp the inbox accepts a first page with a limit of 500",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R4 @path-happy @variant-whatsapp the inbox accepts a first page with a limit of 500"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R4 @path-happy @variant-whatsapp the inbox accepts a first page with a limit of 500",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:93"
+      },
+      {
+        "id": "test-id-1k2kkc4",
+        "name": "test-case-req-r4-path-sad-variant-whatsapp-the-inbox-refuses-offset-page",
+        "title": "@req-R4 @path-sad @variant-whatsapp the inbox refuses offset page",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R4 @path-sad @variant-whatsapp the inbox refuses offset page"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R4 @path-sad @variant-whatsapp the inbox refuses offset page",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:118"
+      },
+      {
+        "id": "test-id-rxi937",
+        "name": "test-case-req-r4-path-sad-variant-whatsapp-the-inbox-refuses-zero-limit",
+        "title": "@req-R4 @path-sad @variant-whatsapp the inbox refuses zero limit",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R4 @path-sad @variant-whatsapp the inbox refuses zero limit"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R4 @path-sad @variant-whatsapp the inbox refuses zero limit",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:118"
+      },
+      {
+        "id": "test-id-4hdh1m",
+        "name": "test-case-req-r4-path-sad-variant-whatsapp-the-inbox-refuses-fractional-limit",
+        "title": "@req-R4 @path-sad @variant-whatsapp the inbox refuses fractional limit",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R4 @path-sad @variant-whatsapp the inbox refuses fractional limit"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R4 @path-sad @variant-whatsapp the inbox refuses fractional limit",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:118"
+      },
+      {
+        "id": "test-id-8y0joc",
+        "name": "test-case-req-r4-path-sad-variant-whatsapp-the-inbox-refuses-oversized-limit",
+        "title": "@req-R4 @path-sad @variant-whatsapp the inbox refuses oversized limit",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R4 @path-sad @variant-whatsapp the inbox refuses oversized limit"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R4 @path-sad @variant-whatsapp the inbox refuses oversized limit",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:118"
+      },
+      {
+        "id": "test-id-1mysrgn",
+        "name": "test-case-req-r4-path-sad-variant-whatsapp-the-inbox-refuses-malformed-cursor",
+        "title": "@req-R4 @path-sad @variant-whatsapp the inbox refuses malformed cursor",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R4 @path-sad @variant-whatsapp the inbox refuses malformed cursor"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R4 @path-sad @variant-whatsapp the inbox refuses malformed cursor",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:118"
+      },
+      {
+        "id": "test-id-16vs8nd",
+        "name": "test-case-req-r20-path-sad-variant-whatsapp-the-inbox-requires-entity-id",
+        "title": "@req-R20 @path-sad @variant-whatsapp the inbox requires entity-id",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R20 @path-sad @variant-whatsapp the inbox requires entity-id"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R20 @path-sad @variant-whatsapp the inbox requires entity-id",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:126"
+      },
+      {
+        "id": "test-id-160zd58",
+        "name": "test-case-req-r20-path-sad-variant-whatsapp-the-inbox-requires-entity-type",
+        "title": "@req-R20 @path-sad @variant-whatsapp the inbox requires entity-type",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R20 @path-sad @variant-whatsapp the inbox requires entity-type"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R20 @path-sad @variant-whatsapp the inbox requires entity-type",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:126"
+      },
+      {
+        "id": "test-id-17ymgdg",
+        "name": "test-case-req-r21-path-sad-variant-whatsapp-an-administrator-receives-not-found-for-an-absent-thread",
+        "title": "@req-R21 @path-sad @variant-whatsapp an administrator receives not found for an absent thread",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R21 @path-sad @variant-whatsapp an administrator receives not found for an absent thread"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R21 @path-sad @variant-whatsapp an administrator receives not found for an absent thread",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:135"
+      },
+      {
+        "id": "test-id-156dtv4",
+        "name": "test-case-req-r16-path-happy-variant-whatsapp-the-provider-callback-route-acknowledges-an-empty-notification-with-http-200",
+        "title": "@req-R16 @path-happy @variant-whatsapp the provider callback route acknowledges an empty notification with HTTP 200",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R16 @path-happy @variant-whatsapp the provider callback route acknowledges an empty notification with HTTP 200"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R16 @path-happy @variant-whatsapp the provider callback route acknowledges an empty notification with HTTP 200",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:146"
+      },
+      {
+        "id": "test-id-114se93",
+        "name": "test-case-req-r16-path-sad-variant-whatsapp-the-unsupported-webhook-spelling-does-not-replace-the-callback-route",
+        "title": "@req-R16 @path-sad @variant-whatsapp the unsupported webhook spelling does not replace the callback route",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R16 @path-sad @variant-whatsapp the unsupported webhook spelling does not replace the callback route"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R16 @path-sad @variant-whatsapp the unsupported webhook spelling does not replace the callback route",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:154"
+      },
+      {
+        "id": "test-id-1gmzrfn",
+        "name": "test-case-req-r17-path-happy-meta-verification-returns-only-the-raw-challenge-as-plain-text",
+        "title": "@req-R17 @path-happy Meta verification returns only the raw challenge as plain text",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R17 @path-happy Meta verification returns only the raw challenge as plain text"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R17 @path-happy Meta verification returns only the raw challenge as plain text",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:160"
+      },
+      {
+        "id": "test-id-46aggv",
+        "name": "test-case-req-r17-path-sad-meta-verification-refuses-a-wrong-token",
+        "title": "@req-R17 @path-sad Meta verification refuses a wrong token",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R17 @path-sad Meta verification refuses a wrong token"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R17 @path-sad Meta verification refuses a wrong token",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:175"
+      },
+      {
+        "id": "test-id-adzxs7",
+        "name": "test-case-req-r17-path-sad-meta-verification-refuses-a-empty-token",
+        "title": "@req-R17 @path-sad Meta verification refuses a empty token",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R17 @path-sad Meta verification refuses a empty token"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R17 @path-sad Meta verification refuses a empty token",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:175"
+      },
+      {
+        "id": "test-id-1gclojg",
+        "name": "test-case-req-r17-path-sad-meta-verification-refuses-a-invalid-subscription-mode",
+        "title": "@req-R17 @path-sad Meta verification refuses a invalid subscription mode",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R17 @path-sad Meta verification refuses a invalid subscription mode"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R17 @path-sad Meta verification refuses a invalid subscription mode",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:175"
+      },
+      {
+        "id": "test-id-rnqr2",
+        "name": "test-case-req-r20-path-happy-variant-whatsapp-the-approved-canary-thread-exposes-its-merchant-identity-and-activity",
+        "title": "@req-R20 @path-happy @variant-whatsapp the approved Canary thread exposes its merchant identity and activity",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R20 @path-happy @variant-whatsapp the approved Canary thread exposes its merchant identity and activity"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R20 @path-happy @variant-whatsapp the approved Canary thread exposes its merchant identity and activity",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:182"
+      },
+      {
+        "id": "test-id-e4dqtx",
+        "name": "test-case-req-r3-path-happy-path-sad-variant-whatsapp-a-thread-is-visible-to-its-owner-but-hidden-from-another-app",
+        "title": "@req-R3 @path-happy @path-sad @variant-whatsapp a thread is visible to its owner but hidden from another app",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R3 @path-happy @path-sad @variant-whatsapp a thread is visible to its owner but hidden from another app"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R3 @path-happy @path-sad @variant-whatsapp a thread is visible to its owner but hidden from another app",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:192"
+      },
+      {
+        "id": "test-id-b0ffb7",
+        "name": "test-case-req-r3-req-r25-path-sad-variant-whatsapp-another-app-cannot-reply-to-the-approved-thread-or-mark-an-absent-thread",
+        "title": "@req-R3 @req-R25 @path-sad @variant-whatsapp another app cannot reply to the approved thread or mark an absent thread",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R3 @req-R25 @path-sad @variant-whatsapp another app cannot reply to the approved thread or mark an absent thread"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R3 @req-R25 @path-sad @variant-whatsapp another app cannot reply to the approved thread or mark an absent thread",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:204"
+      },
+      {
+        "id": "test-id-yt5wpb",
+        "name": "test-case-req-r21-path-happy-variant-whatsapp-thread-messages-retain-their-documented-content-fields-and-newest-first-order",
+        "title": "@req-R21 @path-happy @variant-whatsapp thread messages retain their documented content fields and newest-first order",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R21 @path-happy @variant-whatsapp thread messages retain their documented content fields and newest-first order"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R21 @path-happy @variant-whatsapp thread messages retain their documented content fields and newest-first order",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:214"
+      },
+      {
+        "id": "test-id-1p7084d",
+        "name": "test-case-req-r27-path-happy-variant-whatsapp-the-displayed-reply-window-expires-twenty-four-hours-after-guest-activity",
+        "title": "@req-R27 @path-happy @variant-whatsapp the displayed reply window expires twenty-four hours after guest activity",
+        "titlePath": [
+          "conversations.spec.ts",
+          "@req-R27 @path-happy @variant-whatsapp the displayed reply window expires twenty-four hours after guest activity"
+        ],
+        "listLine": "conversations.spec.ts \u203a @req-R27 @path-happy @variant-whatsapp the displayed reply window expires twenty-four hours after guest activity",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:228"
+      },
+      {
+        "id": "test-id-gv3vmo",
+        "name": "test-case-req-r16-req-r18-req-r20-req-r21-path-happy-variant-whatsapp-signed-synthetic-guest-messages-appear-once-in-the-correct-merchant-inbox",
+        "title": "@req-R16 @req-R18 @req-R20 @req-R21 @path-happy @variant-whatsapp signed synthetic guest messages appear once in the correct merchant inbox",
+        "titlePath": [
+          "conversations.spec.ts",
+          "Synthetic WhatsApp fixture thread",
+          "@req-R16 @req-R18 @req-R20 @req-R21 @path-happy @variant-whatsapp signed synthetic guest messages appear once in the correct merchant inbox"
+        ],
+        "listLine": "conversations.spec.ts \u203a Synthetic WhatsApp fixture thread \u203a @req-R16 @req-R18 @req-R20 @req-R21 @path-happy @variant-whatsapp signed synthetic guest messages appear once in the correct merchant inbox",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:352"
+      },
+      {
+        "id": "test-id-17f0xqe",
+        "name": "test-case-req-r18-path-sad-variant-whatsapp-wrong-signatures-and-mismatched-receiving-identities-are-not-persisted",
+        "title": "@req-R18 @path-sad @variant-whatsapp wrong signatures and mismatched receiving identities are not persisted",
+        "titlePath": [
+          "conversations.spec.ts",
+          "Synthetic WhatsApp fixture thread",
+          "@req-R18 @path-sad @variant-whatsapp wrong signatures and mismatched receiving identities are not persisted"
+        ],
+        "listLine": "conversations.spec.ts \u203a Synthetic WhatsApp fixture thread \u203a @req-R18 @path-sad @variant-whatsapp wrong signatures and mismatched receiving identities are not persisted",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:367"
+      },
+      {
+        "id": "test-id-e0utek",
+        "name": "test-case-req-r19-path-happy-path-sad-variant-whatsapp-a-replayed-synthetic-provider-message-remains-one-stored-inbound",
+        "title": "@req-R19 @path-happy @path-sad @variant-whatsapp a replayed synthetic provider message remains one stored inbound",
+        "titlePath": [
+          "conversations.spec.ts",
+          "Synthetic WhatsApp fixture thread",
+          "@req-R19 @path-happy @path-sad @variant-whatsapp a replayed synthetic provider message remains one stored inbound"
+        ],
+        "listLine": "conversations.spec.ts \u203a Synthetic WhatsApp fixture thread \u203a @req-R19 @path-happy @path-sad @variant-whatsapp a replayed synthetic provider message remains one stored inbound",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:385"
+      },
+      {
+        "id": "test-id-1ffg8k7",
+        "name": "test-case-req-r22-path-happy-variant-whatsapp-new-activity-between-cursor-pages-does-not-duplicate-or-lose-existing-messages",
+        "title": "@req-R22 @path-happy @variant-whatsapp new activity between cursor pages does not duplicate or lose existing messages",
+        "titlePath": [
+          "conversations.spec.ts",
+          "Synthetic WhatsApp fixture thread",
+          "@req-R22 @path-happy @variant-whatsapp new activity between cursor pages does not duplicate or lose existing messages"
+        ],
+        "listLine": "conversations.spec.ts \u203a Synthetic WhatsApp fixture thread \u203a @req-R22 @path-happy @variant-whatsapp new activity between cursor pages does not duplicate or lose existing messages",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:399"
+      },
+      {
+        "id": "test-id-2qgkdb",
+        "name": "test-case-req-r3-path-sad-variant-whatsapp-another-app-cannot-read-the-fictional-fixture-thread",
+        "title": "@req-R3 @path-sad @variant-whatsapp another app cannot read the fictional fixture thread",
+        "titlePath": [
+          "conversations.spec.ts",
+          "Synthetic WhatsApp fixture thread",
+          "@req-R3 @path-sad @variant-whatsapp another app cannot read the fictional fixture thread"
+        ],
+        "listLine": "conversations.spec.ts \u203a Synthetic WhatsApp fixture thread \u203a @req-R3 @path-sad @variant-whatsapp another app cannot read the fictional fixture thread",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:432"
+      },
+      {
+        "id": "test-id-8vaip6",
+        "name": "test-case-req-r4-path-sad-variant-whatsapp-a-real-fixture-thread-refuses-missing-page",
+        "title": "@req-R4 @path-sad @variant-whatsapp a real fixture thread refuses missing page",
+        "titlePath": [
+          "conversations.spec.ts",
+          "Validation on the existing approved WhatsApp thread",
+          "@req-R4 @path-sad @variant-whatsapp a real fixture thread refuses missing page"
+        ],
+        "listLine": "conversations.spec.ts \u203a Validation on the existing approved WhatsApp thread \u203a @req-R4 @path-sad @variant-whatsapp a real fixture thread refuses missing page",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:451"
+      },
+      {
+        "id": "test-id-6rmd3s",
+        "name": "test-case-req-r4-path-sad-variant-whatsapp-a-real-fixture-thread-refuses-missing-limit",
+        "title": "@req-R4 @path-sad @variant-whatsapp a real fixture thread refuses missing limit",
+        "titlePath": [
+          "conversations.spec.ts",
+          "Validation on the existing approved WhatsApp thread",
+          "@req-R4 @path-sad @variant-whatsapp a real fixture thread refuses missing limit"
+        ],
+        "listLine": "conversations.spec.ts \u203a Validation on the existing approved WhatsApp thread \u203a @req-R4 @path-sad @variant-whatsapp a real fixture thread refuses missing limit",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:451"
+      },
+      {
+        "id": "test-id-10jgl6n",
+        "name": "test-case-req-r4-path-sad-variant-whatsapp-a-real-fixture-thread-refuses-limit-below-fifty",
+        "title": "@req-R4 @path-sad @variant-whatsapp a real fixture thread refuses limit below fifty",
+        "titlePath": [
+          "conversations.spec.ts",
+          "Validation on the existing approved WhatsApp thread",
+          "@req-R4 @path-sad @variant-whatsapp a real fixture thread refuses limit below fifty"
+        ],
+        "listLine": "conversations.spec.ts \u203a Validation on the existing approved WhatsApp thread \u203a @req-R4 @path-sad @variant-whatsapp a real fixture thread refuses limit below fifty",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:451"
+      },
+      {
+        "id": "test-id-1g3zric",
+        "name": "test-case-req-r22-path-sad-variant-whatsapp-a-malformed-cursor-is-refused-on-the-owned-synthetic-thread",
+        "title": "@req-R22 @path-sad @variant-whatsapp a malformed cursor is refused on the owned synthetic thread",
+        "titlePath": [
+          "conversations.spec.ts",
+          "Validation on the existing approved WhatsApp thread",
+          "@req-R22 @path-sad @variant-whatsapp a malformed cursor is refused on the owned synthetic thread"
+        ],
+        "listLine": "conversations.spec.ts \u203a Validation on the existing approved WhatsApp thread \u203a @req-R22 @path-sad @variant-whatsapp a malformed cursor is refused on the owned synthetic thread",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:457"
+      },
+      {
+        "id": "test-id-1acof7w",
+        "name": "test-case-req-r26-path-sad-variant-whatsapp-staff-replies-refuse-empty-text-before-any-provider-send",
+        "title": "@req-R26 @path-sad @variant-whatsapp staff replies refuse empty text before any provider send",
+        "titlePath": [
+          "conversations.spec.ts",
+          "Validation on the existing approved WhatsApp thread",
+          "@req-R26 @path-sad @variant-whatsapp staff replies refuse empty text before any provider send"
+        ],
+        "listLine": "conversations.spec.ts \u203a Validation on the existing approved WhatsApp thread \u203a @req-R26 @path-sad @variant-whatsapp staff replies refuse empty text before any provider send",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:468"
+      },
+      {
+        "id": "test-id-1a7kxtn",
+        "name": "test-case-req-r26-path-sad-variant-whatsapp-staff-replies-refuse-text-above-the-channel-limit-before-any-provider-send",
+        "title": "@req-R26 @path-sad @variant-whatsapp staff replies refuse text above the channel limit before any provider send",
+        "titlePath": [
+          "conversations.spec.ts",
+          "Validation on the existing approved WhatsApp thread",
+          "@req-R26 @path-sad @variant-whatsapp staff replies refuse text above the channel limit before any provider send"
+        ],
+        "listLine": "conversations.spec.ts \u203a Validation on the existing approved WhatsApp thread \u203a @req-R26 @path-sad @variant-whatsapp staff replies refuse text above the channel limit before any provider send",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:468"
+      },
+      {
+        "id": "test-id-u2gktk",
+        "name": "test-case-req-r26-path-sad-variant-whatsapp-staff-replies-refuse-an-empty-idempotency-key-before-any-provider-send",
+        "title": "@req-R26 @path-sad @variant-whatsapp staff replies refuse an empty idempotency key before any provider send",
+        "titlePath": [
+          "conversations.spec.ts",
+          "Validation on the existing approved WhatsApp thread",
+          "@req-R26 @path-sad @variant-whatsapp staff replies refuse an empty idempotency key before any provider send"
+        ],
+        "listLine": "conversations.spec.ts \u203a Validation on the existing approved WhatsApp thread \u203a @req-R26 @path-sad @variant-whatsapp staff replies refuse an empty idempotency key before any provider send",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:468"
+      },
+      {
+        "id": "test-id-1s5hfiv",
+        "name": "test-case-req-r13-req-r15-path-happy-variant-whatsapp-the-configured-canary-sender-accepts-an-approved-template-for-the-approved-recipient",
+        "title": "@req-R13 @req-R15 @path-happy @variant-whatsapp the configured Canary sender accepts an approved template for the approved recipient",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R13 @req-R15 @path-happy @variant-whatsapp the configured Canary sender accepts an approved template for the approved recipient"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R13 @req-R15 @path-happy @variant-whatsapp the configured Canary sender accepts an approved template for the approved recipient",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:14"
+      },
+      {
+        "id": "test-id-3an6w1",
+        "name": "test-case-req-r14-path-happy-variant-whatsapp-the-accepted-template-has-a-real-provider-resource-and-an-observable-send-outcome",
+        "title": "@req-R14 @path-happy @variant-whatsapp the accepted template has a real provider resource and an observable send outcome",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R14 @path-happy @variant-whatsapp the accepted template has a real provider resource and an observable send outcome"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R14 @path-happy @variant-whatsapp the accepted template has a real provider resource and an observable send outcome",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:32"
+      },
+      {
+        "id": "test-id-1snt7pq",
+        "name": "test-case-req-r14-path-happy-variant-whatsapp-a-real-delivery-callback-confirms-the-approved-template-reached-its-destination",
+        "title": "@req-R14 @path-happy @variant-whatsapp a real delivery callback confirms the approved template reached its destination",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R14 @path-happy @variant-whatsapp a real delivery callback confirms the approved template reached its destination"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R14 @path-happy @variant-whatsapp a real delivery callback confirms the approved template reached its destination",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:48"
+      },
+      {
+        "id": "test-id-9t3bzo",
+        "name": "test-case-req-r33-path-happy-variant-whatsapp-version-1-returns-the-same-newly-sent-message",
+        "title": "@req-R33 @path-happy @variant-whatsapp version 1 returns the same newly sent message",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R33 @path-happy @variant-whatsapp version 1 returns the same newly sent message"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R33 @path-happy @variant-whatsapp version 1 returns the same newly sent message",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:58"
+      },
+      {
+        "id": "test-id-4vkwt5",
+        "name": "test-case-req-r33-path-happy-variant-whatsapp-version-1-accepts-the-event-history-request-exactly-as-the-guide-documents",
+        "title": "@req-R33 @path-happy @variant-whatsapp version 1 accepts the event-history request exactly as the guide documents",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R33 @path-happy @variant-whatsapp version 1 accepts the event-history request exactly as the guide documents"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R33 @path-happy @variant-whatsapp version 1 accepts the event-history request exactly as the guide documents",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:63"
+      },
+      {
+        "id": "test-id-1ukwf5r",
+        "name": "test-case-req-r33-path-happy-variant-whatsapp-version-4-returns-the-same-newly-sent-message",
+        "title": "@req-R33 @path-happy @variant-whatsapp version 4 returns the same newly sent message",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R33 @path-happy @variant-whatsapp version 4 returns the same newly sent message"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R33 @path-happy @variant-whatsapp version 4 returns the same newly sent message",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:58"
+      },
+      {
+        "id": "test-id-p4lw08",
+        "name": "test-case-req-r33-path-happy-variant-whatsapp-version-4-accepts-the-event-history-request-exactly-as-the-guide-documents",
+        "title": "@req-R33 @path-happy @variant-whatsapp version 4 accepts the event-history request exactly as the guide documents",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R33 @path-happy @variant-whatsapp version 4 accepts the event-history request exactly as the guide documents"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R33 @path-happy @variant-whatsapp version 4 accepts the event-history request exactly as the guide documents",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:63"
+      },
+      {
+        "id": "test-id-1v1z645",
+        "name": "test-case-req-r33-path-happy-variant-whatsapp-event-history-with-explicit-event-names-correlates-to-the-test-message",
+        "title": "@req-R33 @path-happy @variant-whatsapp event history with explicit event names correlates to the test message",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R33 @path-happy @variant-whatsapp event history with explicit event names correlates to the test message"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R33 @path-happy @variant-whatsapp event history with explicit event names correlates to the test message",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:71"
+      },
+      {
+        "id": "test-id-11h0uw",
+        "name": "test-case-req-r3-req-r33-path-sad-variant-whatsapp-another-app-cannot-read-the-newly-sent-message",
+        "title": "@req-R3 @req-R33 @path-sad @variant-whatsapp another app cannot read the newly sent message",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R3 @req-R33 @path-sad @variant-whatsapp another app cannot read the newly sent message"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R3 @req-R33 @path-sad @variant-whatsapp another app cannot read the newly sent message",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:79"
+      },
+      {
+        "id": "test-id-1ifkkzm",
+        "name": "test-case-req-r34-path-happy-variant-whatsapp-stats-return-counters-scoped-to-this-test-transaction",
+        "title": "@req-R34 @path-happy @variant-whatsapp stats return counters scoped to this test transaction",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R34 @path-happy @variant-whatsapp stats return counters scoped to this test transaction"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R34 @path-happy @variant-whatsapp stats return counters scoped to this test transaction",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:84"
+      },
+      {
+        "id": "test-id-69utzf",
+        "name": "test-case-req-r34-path-sad-variant-whatsapp-reversed-stats-dates-are-refused-with-a-useful-error",
+        "title": "@req-R34 @path-sad @variant-whatsapp reversed stats dates are refused with a useful error",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R34 @path-sad @variant-whatsapp reversed stats dates are refused with a useful error"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R34 @path-sad @variant-whatsapp reversed stats dates are refused with a useful error",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:94"
+      },
+      {
+        "id": "test-id-rbsybv",
+        "name": "test-case-req-r13-path-sad-variant-whatsapp-a-transactional-request-with-missing-template-is-refused",
+        "title": "@req-R13 @path-sad @variant-whatsapp a transactional request with missing template is refused",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R13 @path-sad @variant-whatsapp a transactional request with missing template is refused"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R13 @path-sad @variant-whatsapp a transactional request with missing template is refused",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:101"
+      },
+      {
+        "id": "test-id-1n24tdy",
+        "name": "test-case-req-r13-path-sad-variant-whatsapp-a-transactional-request-with-empty-template-is-refused",
+        "title": "@req-R13 @path-sad @variant-whatsapp a transactional request with empty template is refused",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R13 @path-sad @variant-whatsapp a transactional request with empty template is refused"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R13 @path-sad @variant-whatsapp a transactional request with empty template is refused",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:101"
+      },
+      {
+        "id": "test-id-48zbqn",
+        "name": "test-case-req-r13-path-sad-variant-whatsapp-a-transactional-request-with-invalid-recipient-is-refused",
+        "title": "@req-R13 @path-sad @variant-whatsapp a transactional request with invalid recipient is refused",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R13 @path-sad @variant-whatsapp a transactional request with invalid recipient is refused"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R13 @path-sad @variant-whatsapp a transactional request with invalid recipient is refused",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:101"
+      },
+      {
+        "id": "test-id-sea8dv",
+        "name": "test-case-req-r3-req-r13-path-sad-variant-whatsapp-a-malformed-foreign-request-is-rejected-by-body-validation-before-ownership-checks",
+        "title": "@req-R3 @req-R13 @path-sad @variant-whatsapp a malformed foreign request is rejected by body validation before ownership checks",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R3 @req-R13 @path-sad @variant-whatsapp a malformed foreign request is rejected by body validation before ownership checks"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R3 @req-R13 @path-sad @variant-whatsapp a malformed foreign request is rejected by body validation before ownership checks",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:108"
+      },
+      {
+        "id": "test-id-1vfzwuy",
+        "name": "test-case-req-r15-path-sad-whatsapp-has-no-broadcast-endpoint",
+        "title": "@req-R15 @path-sad WhatsApp has no broadcast endpoint",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R15 @path-sad WhatsApp has no broadcast endpoint"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R15 @path-sad WhatsApp has no broadcast endpoint",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:113"
+      },
+      {
+        "id": "test-id-1rk5p9a",
+        "name": "test-case-req-r23-path-happy-variant-whatsapp-the-approved-real-canary-thread-can-be-marked-read-and-reopened-without-another-write",
+        "title": "@req-R23 @path-happy @variant-whatsapp the approved real Canary thread can be marked read and reopened without another write",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R23 @path-happy @variant-whatsapp the approved real Canary thread can be marked read and reopened without another write"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R23 @path-happy @variant-whatsapp the approved real Canary thread can be marked read and reopened without another write",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:126"
+      },
+      {
+        "id": "test-id-azu1y3",
+        "name": "test-case-req-r24-path-happy-meta-acknowledges-the-approved-thread-read-receipt-when-it-has-unread-messages",
+        "title": "@req-R24 @path-happy Meta acknowledges the approved thread read receipt when it has unread messages",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R24 @path-happy Meta acknowledges the approved thread read receipt when it has unread messages"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R24 @path-happy Meta acknowledges the approved thread read receipt when it has unread messages",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:135"
+      },
+      {
+        "id": "test-id-11vamzj",
+        "name": "test-case-req-r26-req-r27-req-r28-req-r29-path-happy-variant-whatsapp-an-open-approved-thread-accepts-the-exact-approved-reply-and-replays-its-message-id",
+        "title": "@req-R26 @req-R27 @req-R28 @req-R29 @path-happy @variant-whatsapp an open approved thread accepts the exact approved reply and replays its message ID",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R26 @req-R27 @req-R28 @req-R29 @path-happy @variant-whatsapp an open approved thread accepts the exact approved reply and replays its message ID"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R26 @req-R27 @req-R28 @req-R29 @path-happy @variant-whatsapp an open approved thread accepts the exact approved reply and replays its message ID",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:140"
+      },
+      {
+        "id": "test-id-i7hrsn",
+        "name": "test-case-req-r41-path-happy-variant-whatsapp-the-successful-reply-exposes-the-documented-idempotentreplay-field",
+        "title": "@req-R41 @path-happy @variant-whatsapp the successful reply exposes the documented idempotentReplay field",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R41 @path-happy @variant-whatsapp the successful reply exposes the documented idempotentReplay field"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R41 @path-happy @variant-whatsapp the successful reply exposes the documented idempotentReplay field",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:166"
+      },
+      {
+        "id": "test-id-2azsh0",
+        "name": "test-case-req-r30-path-happy-variant-whatsapp-two-keyless-replies-produce-distinct-message-and-provider-identifiers",
+        "title": "@req-R30 @path-happy @variant-whatsapp two keyless replies produce distinct message and provider identifiers",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R30 @path-happy @variant-whatsapp two keyless replies produce distinct message and provider identifiers"
+        ],
+        "listLine": "delivery.spec.ts \u203a @req-R30 @path-happy @variant-whatsapp two keyless replies produce distinct message and provider identifiers",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/delivery.spec.ts:172"
+      },
+      {
+        "id": "test-id-1yr8j39",
+        "name": "test-case-req-r2-req-r1-path-happy-variant-whatsapp-a-newly-issued-app-token-authenticates-and-only-its-hash-is-stored",
+        "title": "@req-R2 @req-R1 @path-happy @variant-whatsapp a newly issued app token authenticates and only its hash is stored",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R2 @req-R1 @path-happy @variant-whatsapp a newly issued app token authenticates and only its hash is stored"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R2 @req-R1 @path-happy @variant-whatsapp a newly issued app token authenticates and only its hash is stored",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:119"
+      },
+      {
+        "id": "test-id-1s78sno",
+        "name": "test-case-req-r2-path-sad-an-app-identity-cannot-be-created-twice-or-recover-its-original-token",
+        "title": "@req-R2 @path-sad an app identity cannot be created twice or recover its original token",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R2 @path-sad an app identity cannot be created twice or recover its original token"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R2 @path-sad an app identity cannot be created twice or recover its original token",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:134"
+      },
+      {
+        "id": "test-id-1nuepiz",
+        "name": "test-case-req-r2-path-sad-credential-creation-requires-the-administrator-key",
+        "title": "@req-R2 @path-sad credential creation requires the administrator key",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R2 @path-sad credential creation requires the administrator key"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R2 @path-sad credential creation requires the administrator key",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:144"
+      },
+      {
+        "id": "test-id-1nuvhqk",
+        "name": "test-case-req-r1-path-sad-variant-whatsapp-a-missing-app-token-cannot-read-merchant-configuration",
+        "title": "@req-R1 @path-sad @variant-whatsapp a missing app token cannot read merchant configuration",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R1 @path-sad @variant-whatsapp a missing app token cannot read merchant configuration"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R1 @path-sad @variant-whatsapp a missing app token cannot read merchant configuration",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:152"
+      },
+      {
+        "id": "test-id-1w76qhq",
+        "name": "test-case-req-r1-path-sad-variant-whatsapp-a-unknown-app-token-cannot-read-merchant-configuration",
+        "title": "@req-R1 @path-sad @variant-whatsapp a unknown app token cannot read merchant configuration",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R1 @path-sad @variant-whatsapp a unknown app token cannot read merchant configuration"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R1 @path-sad @variant-whatsapp a unknown app token cannot read merchant configuration",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:152"
+      },
+      {
+        "id": "test-id-7yxyz",
+        "name": "test-case-req-r5-req-r6-req-r8-path-happy-international-numbers-are-normalized-and-valid-server-metadata-is-retained",
+        "title": "@req-R5 @req-R6 @req-R8 @path-happy international numbers are normalized and valid server metadata is retained",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R5 @req-R6 @req-R8 @path-happy international numbers are normalized and valid server metadata is retained"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R5 @req-R6 @req-R8 @path-happy international numbers are normalized and valid server metadata is retained",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:159"
+      },
+      {
+        "id": "test-id-wfdn6v",
+        "name": "test-case-req-r5-req-r7-req-r8-path-happy-a-meta-cloud-server-can-be-stored-and-read-without-registering-a-provider-number",
+        "title": "@req-R5 @req-R7 @req-R8 @path-happy a Meta Cloud server can be stored and read without registering a provider number",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R5 @req-R7 @req-R8 @path-happy a Meta Cloud server can be stored and read without registering a provider number"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R5 @req-R7 @req-R8 @path-happy a Meta Cloud server can be stored and read without registering a provider number",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:168"
+      },
+      {
+        "id": "test-id-8g7kjw",
+        "name": "test-case-req-r7-path-happy-create-single-server-and-list-responses-never-disclose-provider-secrets",
+        "title": "@req-R7 @path-happy create, single-server and list responses never disclose provider secrets",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R7 @path-happy create, single-server and list responses never disclose provider secrets"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R7 @path-happy create, single-server and list responses never disclose provider secrets",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:186"
+      },
+      {
+        "id": "test-id-12n3ig3",
+        "name": "test-case-req-r5-req-r8-path-sad-server-provisioning-rejects-incorrect-provider-casing",
+        "title": "@req-R5 @req-R8 @path-sad server provisioning rejects incorrect provider casing",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R5 @req-R8 @path-sad server provisioning rejects incorrect provider casing"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R5 @req-R8 @path-sad server provisioning rejects incorrect provider casing",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:203"
+      },
+      {
+        "id": "test-id-g8p0c8",
+        "name": "test-case-req-r5-req-r8-path-sad-server-provisioning-rejects-an-empty-server-name",
+        "title": "@req-R5 @req-R8 @path-sad server provisioning rejects an empty server name",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R5 @req-R8 @path-sad server provisioning rejects an empty server name"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R5 @req-R8 @path-sad server provisioning rejects an empty server name",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:203"
+      },
+      {
+        "id": "test-id-1ygayzc",
+        "name": "test-case-req-r5-req-r8-path-sad-server-provisioning-rejects-unrecognized-metadata",
+        "title": "@req-R5 @req-R8 @path-sad server provisioning rejects unrecognized metadata",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R5 @req-R8 @path-sad server provisioning rejects unrecognized metadata"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R5 @req-R8 @path-sad server provisioning rejects unrecognized metadata",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:203"
+      },
+      {
+        "id": "test-id-1x93lb9",
+        "name": "test-case-req-r6-path-sad-a-malformed-phone-number-is-refused-before-it-becomes-an-inbound-routing-key",
+        "title": "@req-R6 @path-sad a malformed phone number is refused before it becomes an inbound routing key",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R6 @path-sad a malformed phone number is refused before it becomes an inbound routing key"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R6 @path-sad a malformed phone number is refused before it becomes an inbound routing key",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:211"
+      },
+      {
+        "id": "test-id-1eqt1jv",
+        "name": "test-case-req-r6-path-sad-another-spelling-of-an-occupied-number-cannot-create-a-second-server",
+        "title": "@req-R6 @path-sad another spelling of an occupied number cannot create a second server",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R6 @path-sad another spelling of an occupied number cannot create a second server"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R6 @path-sad another spelling of an occupied number cannot create a second server",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:218"
+      },
+      {
+        "id": "test-id-zijv58",
+        "name": "test-case-req-r3-path-happy-variant-whatsapp-owners-can-read-their-server-while-lists-preserve-app-ownership",
+        "title": "@req-R3 @path-happy @variant-whatsapp owners can read their server while lists preserve app ownership",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R3 @path-happy @variant-whatsapp owners can read their server while lists preserve app ownership"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R3 @path-happy @variant-whatsapp owners can read their server while lists preserve app ownership",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:227"
+      },
+      {
+        "id": "test-id-uu3813",
+        "name": "test-case-req-r3-path-happy-variant-whatsapp-an-administrator-bearer-credential-can-bypass-merchant-ownership",
+        "title": "@req-R3 @path-happy @variant-whatsapp an administrator bearer credential can bypass merchant ownership",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R3 @path-happy @variant-whatsapp an administrator bearer credential can bypass merchant ownership"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R3 @path-happy @variant-whatsapp an administrator bearer credential can bypass merchant ownership",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:239"
+      },
+      {
+        "id": "test-id-avnbpb",
+        "name": "test-case-req-r3-path-sad-variant-whatsapp-another-app-cannot-read-or-replace-a-merchant-server",
+        "title": "@req-R3 @path-sad @variant-whatsapp another app cannot read or replace a merchant server",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R3 @path-sad @variant-whatsapp another app cannot read or replace a merchant server"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R3 @path-sad @variant-whatsapp another app cannot read or replace a merchant server",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:245"
+      },
+      {
+        "id": "test-id-1n5obls",
+        "name": "test-case-req-r4-path-happy-variant-whatsapp-list-pagination-is-zero-indexed-and-accepts-both-documented-limits",
+        "title": "@req-R4 @path-happy @variant-whatsapp list pagination is zero-indexed and accepts both documented limits",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R4 @path-happy @variant-whatsapp list pagination is zero-indexed and accepts both documented limits"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R4 @path-happy @variant-whatsapp list pagination is zero-indexed and accepts both documented limits",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:255"
+      },
+      {
+        "id": "test-id-1mpslnk",
+        "name": "test-case-req-r4-path-sad-variant-whatsapp-server-and-sender-lists-refuse-invalid-pagination-with-no-parameters",
+        "title": "@req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination with no parameters",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination with no parameters"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination with no parameters",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:269"
+      },
+      {
+        "id": "test-id-bxv3ya",
+        "name": "test-case-req-r4-path-sad-variant-whatsapp-server-and-sender-lists-refuse-invalid-pagination-limit-50",
+        "title": "@req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination limit=50",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination limit=50"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination limit=50",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:269"
+      },
+      {
+        "id": "test-id-sf495j",
+        "name": "test-case-req-r4-path-sad-variant-whatsapp-server-and-sender-lists-refuse-invalid-pagination-page-0",
+        "title": "@req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination page=0",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination page=0"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination page=0",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:269"
+      },
+      {
+        "id": "test-id-vzd61g",
+        "name": "test-case-req-r4-path-sad-variant-whatsapp-server-and-sender-lists-refuse-invalid-pagination-limit-49-page-0",
+        "title": "@req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination limit=49&page=0",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination limit=49&page=0"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination limit=49&page=0",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:269"
+      },
+      {
+        "id": "test-id-1l0g2nv",
+        "name": "test-case-req-r4-path-sad-variant-whatsapp-server-and-sender-lists-refuse-invalid-pagination-limit-501-page-0",
+        "title": "@req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination limit=501&page=0",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination limit=501&page=0"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination limit=501&page=0",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:269"
+      },
+      {
+        "id": "test-id-9tpbjs",
+        "name": "test-case-req-r4-path-sad-variant-whatsapp-server-and-sender-lists-refuse-invalid-pagination-limit-50-page-1",
+        "title": "@req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination limit=50&page=-1",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination limit=50&page=-1"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R4 @path-sad @variant-whatsapp server and sender lists refuse invalid pagination limit=50&page=-1",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:269"
+      },
+      {
+        "id": "test-id-1435jr3",
+        "name": "test-case-req-r9-path-happy-a-new-sender-binds-to-the-chosen-server-and-exposes-its-registration-timestamps",
+        "title": "@req-R9 @path-happy a new sender binds to the chosen server and exposes its registration timestamps",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R9 @path-happy a new sender binds to the chosen server and exposes its registration timestamps"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R9 @path-happy a new sender binds to the chosen server and exposes its registration timestamps",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:277"
+      },
+      {
+        "id": "test-id-sjqilk",
+        "name": "test-case-req-r9-path-sad-incomplete-bird-connection-details-produce-a-recorded-provisioning-failure",
+        "title": "@req-R9 @path-sad incomplete Bird connection details produce a recorded provisioning failure",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R9 @path-sad incomplete Bird connection details produce a recorded provisioning failure"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R9 @path-sad incomplete Bird connection details produce a recorded provisioning failure",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:287"
+      },
+      {
+        "id": "test-id-1nvxd9b",
+        "name": "test-case-req-r9-path-sad-a-sender-cannot-bind-to-a-missing-server",
+        "title": "@req-R9 @path-sad a sender cannot bind to a missing server",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R9 @path-sad a sender cannot bind to a missing server"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R9 @path-sad a sender cannot bind to a missing server",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:295"
+      },
+      {
+        "id": "test-id-ntgu2o",
+        "name": "test-case-req-r3-req-r9-path-sad-variant-whatsapp-another-app-cannot-bind-a-sender-to-a-merchant-server",
+        "title": "@req-R3 @req-R9 @path-sad @variant-whatsapp another app cannot bind a sender to a merchant server",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R3 @req-R9 @path-sad @variant-whatsapp another app cannot bind a sender to a merchant server"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R3 @req-R9 @path-sad @variant-whatsapp another app cannot bind a sender to a merchant server",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:302"
+      },
+      {
+        "id": "test-id-d0k0qb",
+        "name": "test-case-req-r10-path-happy-a-merchant-may-retry-creation-of-its-own-sender-without-creating-another-row",
+        "title": "@req-R10 @path-happy a merchant may retry creation of its own sender without creating another row",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R10 @path-happy a merchant may retry creation of its own sender without creating another row"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R10 @path-happy a merchant may retry creation of its own sender without creating another row",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:310"
+      },
+      {
+        "id": "test-id-5nmqru",
+        "name": "test-case-req-r10-path-happy-a-sender-name-is-independent-across-apps",
+        "title": "@req-R10 @path-happy a sender name is independent across apps",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R10 @path-happy a sender name is independent across apps"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R10 @path-happy a sender name is independent across apps",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:318"
+      },
+      {
+        "id": "test-id-1hk2ksc",
+        "name": "test-case-req-r12-path-happy-administrators-can-create-a-fresh-merchant-template-without-altering-existing-templates",
+        "title": "@req-R12 @path-happy administrators can create a fresh merchant template without altering existing templates",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R12 @path-happy administrators can create a fresh merchant template without altering existing templates"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R12 @path-happy administrators can create a fresh merchant template without altering existing templates",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:337"
+      },
+      {
+        "id": "test-id-hy6e5t",
+        "name": "test-case-req-r12-path-happy-administrators-can-create-a-fresh-global-template-without-altering-existing-templates",
+        "title": "@req-R12 @path-happy administrators can create a fresh global template without altering existing templates",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R12 @path-happy administrators can create a fresh global template without altering existing templates"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R12 @path-happy administrators can create a fresh global template without altering existing templates",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:337"
+      },
+      {
+        "id": "test-id-1c2xcnw",
+        "name": "test-case-req-r12-path-sad-every-partial-or-empty-template-scope-is-rejected-without-writing-a-row",
+        "title": "@req-R12 @path-sad every partial or empty template scope is rejected without writing a row",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R12 @path-sad every partial or empty template scope is rejected without writing a row"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R12 @path-sad every partial or empty template scope is rejected without writing a row",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:351"
+      },
+      {
+        "id": "test-id-op1s47",
+        "name": "test-case-req-r12-path-sad-an-app-bearer-credential-cannot-change-administrator-only-templates",
+        "title": "@req-R12 @path-sad an app bearer credential cannot change administrator-only templates",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R12 @path-sad an app bearer credential cannot change administrator-only templates"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R12 @path-sad an app bearer credential cannot change administrator-only templates",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:362"
+      },
+      {
+        "id": "test-id-2sjkqw",
+        "name": "test-case-req-r35-req-r3-path-happy-variant-whatsapp-retiring-this-run-sender-removes-it-from-lists-while-keeping-its-historical-identity",
+        "title": "@req-R35 @req-R3 @path-happy @variant-whatsapp retiring this run sender removes it from lists while keeping its historical identity",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R35 @req-R3 @path-happy @variant-whatsapp retiring this run sender removes it from lists while keeping its historical identity"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R35 @req-R3 @path-happy @variant-whatsapp retiring this run sender removes it from lists while keeping its historical identity",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:369"
+      },
+      {
+        "id": "test-id-1d5hm1z",
+        "name": "test-case-req-r35-req-r3-path-sad-variant-whatsapp-a-foreign-app-cannot-retire-or-read-another-merchant-sender",
+        "title": "@req-R35 @req-R3 @path-sad @variant-whatsapp a foreign app cannot retire or read another merchant sender",
+        "titlePath": [
+          "provisioning.spec.ts",
+          "Merchant WhatsApp configuration",
+          "@req-R35 @req-R3 @path-sad @variant-whatsapp a foreign app cannot retire or read another merchant sender"
+        ],
+        "listLine": "provisioning.spec.ts \u203a Merchant WhatsApp configuration \u203a @req-R35 @req-R3 @path-sad @variant-whatsapp a foreign app cannot retire or read another merchant sender",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/provisioning.spec.ts:395"
+      },
+      {
+        "id": "test-id-1vwrwox",
+        "name": "test-case-req-r27-req-r30-path-sad-variant-whatsapp-a-closed-thread-refuses-a-valid-keyed-reply-without-changing-messages",
+        "title": "@req-R27 @req-R30 @path-sad @variant-whatsapp a closed thread refuses a valid keyed reply without changing messages",
+        "titlePath": [
+          "whatsapp-gaps.spec.ts",
+          "@req-R27 @req-R30 @path-sad @variant-whatsapp a closed thread refuses a valid keyed reply without changing messages"
+        ],
+        "listLine": "whatsapp-gaps.spec.ts \u203a @req-R27 @req-R30 @path-sad @variant-whatsapp a closed thread refuses a valid keyed reply without changing messages",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/whatsapp-gaps.spec.ts:26"
+      },
+      {
+        "id": "test-id-92x7dh",
+        "name": "test-case-req-r27-req-r30-path-sad-variant-whatsapp-a-closed-thread-refuses-a-valid-keyless-reply-without-changing-messages",
+        "title": "@req-R27 @req-R30 @path-sad @variant-whatsapp a closed thread refuses a valid keyless reply without changing messages",
+        "titlePath": [
+          "whatsapp-gaps.spec.ts",
+          "@req-R27 @req-R30 @path-sad @variant-whatsapp a closed thread refuses a valid keyless reply without changing messages"
+        ],
+        "listLine": "whatsapp-gaps.spec.ts \u203a @req-R27 @req-R30 @path-sad @variant-whatsapp a closed thread refuses a valid keyless reply without changing messages",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/whatsapp-gaps.spec.ts:26"
+      },
+      {
+        "id": "test-id-1wriokk",
+        "name": "test-case-req-r25-path-sad-variant-whatsapp-caller-addressing-fields-are-removed-by-the-real-reply-request-contract",
+        "title": "@req-R25 @path-sad @variant-whatsapp caller addressing fields are removed by the real reply request contract",
+        "titlePath": [
+          "whatsapp-gaps.spec.ts",
+          "@req-R25 @path-sad @variant-whatsapp caller addressing fields are removed by the real reply request contract"
+        ],
+        "listLine": "whatsapp-gaps.spec.ts \u203a @req-R25 @path-sad @variant-whatsapp caller addressing fields are removed by the real reply request contract",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/whatsapp-gaps.spec.ts:46"
+      },
+      {
+        "id": "test-id-851d2a",
+        "name": "test-case-req-r31-req-r32-path-happy-variant-whatsapp-the-real-outbound-service-sends-the-authenticated-guest-envelope-to-staging-reserve",
+        "title": "@req-R31 @req-R32 @path-happy @variant-whatsapp the real outbound service sends the authenticated guest envelope to staging Reserve",
+        "titlePath": [
+          "whatsapp-gaps.spec.ts",
+          "@req-R31 @req-R32 @path-happy @variant-whatsapp the real outbound service sends the authenticated guest envelope to staging Reserve"
+        ],
+        "listLine": "whatsapp-gaps.spec.ts \u203a @req-R31 @req-R32 @path-happy @variant-whatsapp the real outbound service sends the authenticated guest envelope to staging Reserve",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/whatsapp-gaps.spec.ts:58"
+      },
+      {
+        "id": "test-id-xf4186",
+        "name": "test-case-req-r9-path-happy-variant-whatsapp-a-fresh-sender-reaches-verified-using-the-already-verified-test-number-without-provider-registration",
+        "title": "@req-R9 @path-happy @variant-whatsapp a fresh sender reaches verified using the already verified test number without provider registration",
+        "titlePath": [
+          "whatsapp-gaps.spec.ts",
+          "@req-R9 @path-happy @variant-whatsapp a fresh sender reaches verified using the already verified test number without provider registration"
+        ],
+        "listLine": "whatsapp-gaps.spec.ts \u203a @req-R9 @path-happy @variant-whatsapp a fresh sender reaches verified using the already verified test number without provider registration",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/whatsapp-gaps.spec.ts:80"
+      },
+      {
+        "id": "test-id-lifflj",
+        "name": "test-case-req-r11-req-r7-path-happy-variant-whatsapp-the-test-server-exposes-each-available-provider-health-field-without-secrets",
+        "title": "@req-R11 @req-R7 @path-happy @variant-whatsapp the test server exposes each available provider health field without secrets",
+        "titlePath": [
+          "whatsapp-gaps.spec.ts",
+          "@req-R11 @req-R7 @path-happy @variant-whatsapp the test server exposes each available provider health field without secrets"
+        ],
+        "listLine": "whatsapp-gaps.spec.ts \u203a @req-R11 @req-R7 @path-happy @variant-whatsapp the test server exposes each available provider health field without secrets",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/whatsapp-gaps.spec.ts:101"
+      }
+    ],
+    "failed": [
+      {
+        "id": "test-id-4k545j",
+        "name": "test-case-req-r1-path-happy-variant-whatsapp-a-new-app-can-read-its-own-empty-conversation-scope",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/conversations.spec.ts:71"
+      },
+      {
+        "id": "test-id-851d2a",
+        "name": "test-case-req-r31-req-r32-path-happy-variant-whatsapp-the-real-outbound-service-sends-the-authenticated-guest-envelope-to-staging-reserve",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/whatsapp-gaps.spec.ts:58"
+      },
+      {
+        "id": "test-id-xf4186",
+        "name": "test-case-req-r9-path-happy-variant-whatsapp-a-fresh-sender-reaches-verified-using-the-already-verified-test-number-without-provider-registration",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/whatsapp-gaps.spec.ts:80"
+      },
+      {
+        "id": "test-id-lifflj",
+        "name": "test-case-req-r11-req-r7-path-happy-variant-whatsapp-the-test-server-exposes-each-available-provider-health-field-without-secrets",
+        "location": "/Users/oddle/Documents/canary-lab-workspace/logs/runs/2026-09-07T1051-j7u7/suite/e2e/whatsapp-gaps.spec.ts:101"
+      }
+    ]
+  }
+}

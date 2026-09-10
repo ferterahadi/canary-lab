@@ -22,8 +22,8 @@ import { readPrdSummary } from './prd-summary'
 
 export { LEGACY_MAPPINGS_JSON, applyExternalCoverageMappings, buildCoverageMappingContext, flagMappingIssues, hasPrdSummary, runCoverageEngine } from './coverage-engine'
 export type { ApplyExternalCoverageArgs, ApplyExternalCoverageResult, CoverageMappingContext, CoverageMappingTest, MappingTestSource, RunCoverageEngineArgs, RunCoverageEngineDeps, RunCoverageEngineResult } from './coverage-engine'
-export { acceptRequirementWording, applyExternalSummary, buildSummaryAuthoringContext, clearPrdSummary, listFeatureDocs, regeneratePrdSummary } from './feature-docs'
-export type { AcceptRequirementWordingArgs, AcceptRequirementWordingResult, ApplyExternalSummaryArgs, ApplyExternalSummaryResult, BuildSummaryAuthoringResult, FeatureDoc, FeatureDocsListing, RegeneratePrdSummaryArgs, RegeneratePrdSummaryDeps, RegeneratePrdSummaryResult, SummaryAuthoringContext, SummaryAuthoringDoc } from './feature-docs'
+export { applyExternalSummary, buildSummaryAuthoringContext, clearPrdSummary, listFeatureDocs, regeneratePrdSummary } from './feature-docs'
+export type { ApplyExternalSummaryArgs, ApplyExternalSummaryResult, BuildSummaryAuthoringResult, FeatureDoc, FeatureDocsListing, RegeneratePrdSummaryArgs, RegeneratePrdSummaryDeps, RegeneratePrdSummaryResult, SummaryAuthoringContext, SummaryAuthoringDoc } from './feature-docs'
 
 // The single computation layer for the Requirement Coverage Ledger. Both the REST
 // route (routes/coverage.ts) and the MCP tools (mcp/tools.ts) call these — so

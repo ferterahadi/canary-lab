@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react'
 import type { FlightStageKey, SpecsCoverageProgress as SpecsCoverageProgressT } from '@/shared/api/client'
 import { AgentSessionView, type AgentSessionSegmentSource, type AgentSessionSource, type ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
+import { EMPTY_COPY, type EmptyCopy } from '@/shared/ui/empty-state-copy'
 import { StatusDot } from '@/shared/ui/atoms'
 import { useResizableHeight } from '@/shared/ui/use-resizable-height'
 import { PanelCard } from '@/shared/ui/PanelCard'
@@ -39,7 +40,7 @@ interface StageActivityRailProps {
    *  and still have no session to replay — the agent ran in the user's own
    *  client, or its log was cleaned — and saying nothing ran contradicts the
    *  panels above it. */
-  empty?: { title: string; body?: string }
+  empty?: EmptyCopy
 }
 
 /** The stage's activity band (R66): ONE consolidated block, identical for every
@@ -185,10 +186,10 @@ function useExportTaskRows(taskId: string | null): string[] {
  *  that has not started and one that finished leaving nothing to replay are
  *  different facts, and saying "nothing ran" for the second contradicts the
  *  evidence panels above it. */
-function noActivityCopy(live: boolean, settled: boolean): { title: string; body: string } {
-  if (live) return { title: 'Waiting for activity', body: 'Updates will appear here as this step runs.' }
-  if (!settled) return { title: 'No activity yet', body: 'This step has not started.' }
-  return { title: 'No activity recorded', body: 'There is no session or system log to replay for this step.' }
+function noActivityCopy(live: boolean, settled: boolean): EmptyCopy {
+  if (live) return EMPTY_COPY.stageWaiting
+  if (!settled) return EMPTY_COPY.stageNotStarted
+  return EMPTY_COPY.stageNoActivity
 }
 
 interface SplitSystemRows {

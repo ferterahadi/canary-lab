@@ -439,7 +439,7 @@ export function composeIfPath(
   node: ts.Node,
   context: SemanticContext,
 ): ReadableEnglishBlock {
-  const text = role === 'then' ? 'Then:' : 'Otherwise:'
+  const text = role === 'then' ? 'Then:' : 'Else:'
   return block(
     'control-flow',
     [prose(text, ['branch'], 'keyword')],

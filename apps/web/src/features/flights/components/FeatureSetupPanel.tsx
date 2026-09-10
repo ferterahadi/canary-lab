@@ -180,7 +180,7 @@ export function FeatureSetupPanel({
     // Two cards, because that is what a written config renders: the services
     // digest and the Playwright digest.
     return awaiting ? (
-      <section data-testid="feature-setup-skeleton" className={`flex flex-col gap-2.5 ${STAGE_COLUMN}`}>
+      <section data-testid="feature-setup-skeleton" className={`flex flex-col gap-3 ${STAGE_COLUMN}`}>
         <SkeletonPanel kicker="Services" awaiting={awaiting} testId="setup-services-skeleton" variant="rows" rows={2} />
         <SkeletonPanel kicker="Playwright" awaiting={awaiting} testId="setup-playwright-skeleton" rows={3} />
       </section>
@@ -188,7 +188,7 @@ export function FeatureSetupPanel({
   }
 
   return (
-    <section data-testid="feature-setup-panel" className={`flex flex-col gap-2.5 ${STAGE_COLUMN}`}>
+    <section data-testid="feature-setup-panel" className={`flex flex-col gap-3 ${STAGE_COLUMN}`}>
       {/* R58 + Repo-scan shape: ONE services card mirroring the repos card —
           kicker, then a block per repo (the Advanced setup Service unit):
           editable name, location, branch picker, start command(s). */}
@@ -221,7 +221,7 @@ export function FeatureSetupPanel({
           <div className={PANEL_KICKER_CLASS}>
             Playwright
           </div>
-          <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11.5px]">
+          <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 cl-type-data">
             <NumberRow label="Workers" value={typeof pw.workers === 'number' ? pw.workers : null} editable={editable} lockedTitle={lockedTitle} onSave={(n) => setPw({ workers: n })} testId="setup-pw-workers" />
             <NumberRow label="Retries" value={typeof pw.retries === 'number' ? pw.retries : null} editable={editable} lockedTitle={lockedTitle} onSave={(n) => setPw({ retries: n })} testId="setup-pw-retries" />
             <ModeRow label="Video" value={typeof pwUse?.video === 'string' ? pwUse.video : null} editable={editable} lockedTitle={lockedTitle} onSave={(v) => setPw({ video: v })} testId="setup-pw-video" />
@@ -262,7 +262,7 @@ export function FeatureSetupPanel({
           re-announcing a control sitting a few pixels above it — and the fact it
           stated (edits write the same on-disk config both ways) is what the
           panel DOES, not something the user has to be told before editing. */}
-      {error && <div className="text-[11px] text-danger">{error}</div>}
+      {error && <div className="cl-type-meta text-danger">{error}</div>}
     </section>
   )
 }
@@ -334,7 +334,7 @@ export function ServiceBlock({ feature, block, allowEdit, lockedTitle, refreshKe
       className={`flex min-w-0 flex-col ${divider ? 'mt-2 border-t pt-2' : ''}`}
       style={divider ? { borderColor: 'var(--border-default)' } : undefined}
     >
-      <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11.5px]">
+      <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 cl-type-data">
         <RowLabel label="Name" />
         <div className="flex min-w-0 items-center gap-2">
           <div className="min-w-0 flex-1">
@@ -342,7 +342,7 @@ export function ServiceBlock({ feature, block, allowEdit, lockedTitle, refreshKe
               <NameInput value={block.name} onSave={onRename} testId={`setup-service-name-${block.name}`} />
             ) : (
               // Input-matching metrics (transparent chrome) — see ReadRow.
-              <span className="block truncate rounded border border-transparent px-2 py-1 text-[11.5px] font-semibold font-mono" title={block.name}>
+              <span className="block truncate rounded border border-transparent px-2 py-1 cl-type-data font-semibold font-mono" title={block.name}>
                 {block.name}
               </span>
             )}
@@ -355,7 +355,7 @@ export function ServiceBlock({ feature, block, allowEdit, lockedTitle, refreshKe
               title={allowEdit ? (editing ? 'Done editing' : 'Edit name, branch and start command') : lockedTitle}
               disabled={!allowEdit}
               onClick={() => setEditing(!editing)}
-              className="cl-button shrink-0 px-1.5 py-0.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-45"
+              className="cl-button shrink-0 px-1.5 py-0.5 disabled:cursor-not-allowed disabled:opacity-45"
             >
               {editing ? '✓' : '✎'}
             </button>
@@ -409,7 +409,7 @@ export function NameInput({ value, onSave, testId }: {
       onBlur={() => { if (draft.trim() !== '' && draft.trim() !== value) onSave(draft.trim()) }}
       onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
       spellCheck={false}
-      className="cl-input w-full px-2 py-1 text-[11.5px] font-mono"
+      className="cl-input w-full px-2 py-1 cl-type-data font-mono"
     />
   )
 }
@@ -441,7 +441,7 @@ export function BranchRow({ feature, repoName, value, refreshKey, onSave, testId
         branches={branchSuggestions(status)}
         placeholder={status?.currentBranch ?? undefined}
         testId={testId}
-        inputClassName="cl-input w-full px-2 py-1 text-[11.5px]"
+        inputClassName="cl-input w-full px-2 py-1 cl-type-data"
         inputStyle={{ fontFamily: 'var(--font-mono)' }}
         onChange={setDraft}
         onSelect={commit}
@@ -473,7 +473,7 @@ export function SetupField({ label, value, editable, onSave, testId }: {
         onBlur={() => { if (draft.trim() !== '' && draft !== value) onSave(draft) }}
         onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
         spellCheck={false}
-        className="w-full rounded border bg-transparent px-2 py-1 text-[11.5px] outline-none border-line text-primary font-mono"
+        className="w-full rounded border bg-transparent px-2 py-1 cl-type-data outline-none border-line text-primary font-mono"
       />
     </>
   )
@@ -503,7 +503,7 @@ export function NumberRow({ label, value, editable, lockedTitle, onSave, testId 
             const n = Number(e.target.value)
             if (Number.isFinite(n) && n >= 0 && n !== value) onSave(n)
           }}
-          className="cl-input w-20 px-2 py-1 text-[11.5px] disabled:cursor-not-allowed disabled:opacity-45"
+          className="cl-input w-20 px-2 py-1 cl-type-data disabled:cursor-not-allowed disabled:opacity-45"
         />
       </DisabledControlTooltip>
     </>
@@ -531,7 +531,7 @@ export function ModeRow({ label, value, modes = PW_MODES, editable, lockedTitle,
           disabled={!editable}
           title={!editable ? lockedTitle : undefined}
           onChange={(e) => onSave(e.target.value)}
-          className="themed-select cl-input w-44 px-2 py-1 text-[11.5px] disabled:cursor-not-allowed disabled:opacity-45"
+          className="themed-select cl-input w-44 px-2 py-1 cl-type-data disabled:cursor-not-allowed disabled:opacity-45"
         >
           {[...new Set([value, ...modes])].map((mode) => (
             <option key={mode} value={mode}>{mode}</option>

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '@/shared/api/client'
 import { readableTest } from '@/shared/api/__fixtures__/readable-test'
 import type { CoverageLedger } from '@/shared/api/types'
+import { RAIL_PREF_KEY } from './CoverageHeader'
 import { CoverageLedgerPage } from './CoverageLedgerPage'
 
 ;
@@ -116,6 +117,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => { root.unmount() })
   container.remove()
+  localStorage.removeItem(RAIL_PREF_KEY)
   vi.clearAllMocks()
 })
 
@@ -181,6 +183,36 @@ describe('CoverageLedgerPage — empty (ABSENT summary)', () => {
     expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
   })
 
+  // The empty pane teaches the three-step exercise; with the rail open it can point
+  // at it ("on the left"), so it offers no button of its own.
+  it('reads as the three-step exercise and leaves the way in to the open rail', async () => {
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(EMPTY_LEDGER))
+    vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
+    await mount()
+    await act(async () => { await Promise.resolve() })
+    const main = container.querySelector('[data-testid="coverage-empty-main"]') as HTMLElement
+    expect([...main.querySelectorAll('.clcov-empty-name')].map((el) => el.textContent))
+      .toEqual(['Add your docs', 'Press Generate', 'Read the results'])
+    expect(main.textContent).toContain('Source docs on the left')
+    expect(container.querySelector('[data-testid="coverage-empty-open-rail"]')).toBeNull()
+  })
+
+  // Rail collapsed: "on the left" would point at a 46px strip, so the pane carries a
+  // real way in instead — never a dead-end (cl_ui-design-philosophy).
+  it('offers a way into the collapsed rail, and opening it retires the button', async () => {
+    localStorage.setItem(RAIL_PREF_KEY, 'closed')
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(EMPTY_LEDGER))
+    vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
+    await mount()
+    await act(async () => { await Promise.resolve() })
+    const open = container.querySelector<HTMLButtonElement>('[data-testid="coverage-empty-open-rail"]')
+    expect(open).toBeTruthy()
+    expect(container.querySelector('[data-testid="coverage-empty-main"]')?.textContent).not.toContain('on the left')
+    await act(async () => { open?.click(); await Promise.resolve() })
+    expect(container.querySelector('[data-testid="doc-file-input"]')).toBeTruthy() // rail is open now
+    expect(container.querySelector('[data-testid="coverage-empty-open-rail"]')).toBeNull()
+  })
+
   it('generates from the rail once a doc exists and starts the chained job', async () => {
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(EMPTY_LEDGER))
     vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [{ relPath: 'spec.md', absPath: '/repo/features/checkout/docs/spec.md', generated: false, sizeBytes: 9 }], hasPrdSummary: false, sourceDocCount: 1, docsDrift: false })
@@ -201,11 +233,16 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
     vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: false })
   })
 
-  // The variant accordion lives in the expanded detail; the row itself only shows
-  // one segment per applicable path×variant cell.
+  // Channels live in the expanded detail as a GRID — channels down, paths across.
+  // They used to be a chip row repeated under each promise, printing the same four
+  // names twice in two disconnected lists, so "is `line` tested anywhere?" meant
+  // scanning both. A channel is a property of the requirement, not of one promise.
   function expandR6(): void {
     act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R6"]')?.click() })
   }
+
+  const rowSegs = (variant: string) =>
+    [...container.querySelectorAll(`[data-testid="channel-R6-${variant}"] [data-seg]`)].map((el) => el.getAttribute('data-seg'))
 
   it('shows one segment per applicable path×variant cell at rest', async () => {
     await mount()
@@ -213,47 +250,87 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
     const segs = [...cov!.querySelectorAll('[data-seg]')].map((el) => el.getAttribute('data-seg'))
     // 2 paths × 4 channels, email covered on both.
     expect(segs.length).toBe(8)
-    expect(segs.filter((v) => v === 'on').length).toBe(2)
+    expect(segs.filter((v) => v === 'claimed').length).toBe(2)
     expect(cov?.textContent).toContain('2/8')
-    expect(container.querySelector('[data-testid="variant-grid-R6"]')).toBeNull()
+    expect(container.querySelector('[data-testid="channel-grid-R6"]')).toBeNull()
   })
 
-  it('shows a clickable path pill per path with a covered/total variant count, cells hidden until opened', async () => {
+  it('opens to one row per channel and one column per path, with the paths named', async () => {
     await mount()
     expandR6()
-    expect(container.querySelector('[data-testid="variant-grid-R6"]')).toBeTruthy()
-    const happy = container.querySelector('[data-testid="variant-path-R6-happy"]')
-    expect(happy?.textContent).toContain('happy')
-    expect(happy?.textContent).toContain('1/4') // only email of {email,whatsapp,call,line}
-    // Variant cells are collapsed — nothing is rendered until a pill is opened.
-    expect(container.querySelector('[data-testid="cell-R6-happy-email"]')).toBeNull()
+    const grid = container.querySelector('[data-testid="channel-grid-R6"]') as HTMLElement
+    expect(grid).toBeTruthy()
+    expect(grid.textContent).toContain('Per channel')
+    expect([...grid.querySelectorAll('.clcov-grid-col')].map((el) => el.textContent)).toEqual(['happy', 'sad'])
+    expect([...grid.querySelectorAll('.clcov-grid-name')].map((el) => el.textContent)).toEqual(['whatsapp', 'call', 'line', 'email'])
+    expect(rowSegs('email')).toEqual(['claimed', 'claimed'])
+    expect(rowSegs('whatsapp')).toEqual(['off', 'off'])
   })
 
-  it('expands one path at a time to reveal its variant cells', async () => {
+  // Worst-first, like every other list of work here: the channels with the most
+  // missing tests lead, and the fully covered one sinks.
+  it('leads with the channel that is missing the most, so the gap is read first', async () => {
     await mount()
     expandR6()
-    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="variant-path-R6-happy"]')?.click() })
-    expect(container.querySelector('[data-testid="cell-R6-happy-email"]')?.getAttribute('data-covered')).toBe('true')
-    expect(container.querySelector('[data-testid="cell-R6-happy-whatsapp"]')?.getAttribute('data-covered')).toBe('false')
-    // Opening sad closes happy — only one path's cells show at a time.
-    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="variant-path-R6-sad"]')?.click() })
-    expect(container.querySelector('[data-testid="cell-R6-happy-email"]')).toBeNull()
-    expect(container.querySelector('[data-testid="cell-R6-sad-email"]')?.getAttribute('data-covered')).toBe('true')
-    // Clicking the open pill again collapses it.
-    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="variant-path-R6-sad"]')?.click() })
-    expect(container.querySelector('[data-testid="cell-R6-sad-email"]')).toBeNull()
+    const first = container.querySelector('[data-testid="channel-grid-R6"] .clcov-grid-row') as HTMLElement
+    expect(first.querySelector('.clcov-grid-name')?.textContent).toBe('whatsapp')
   })
 
-  it('names the gap "Variant gap" in the row tooltip and keeps the missing channels in the pill tooltip', async () => {
+  // A column label that doesn't sit over its own marks isn't a header. happy-dom
+  // lays nothing out, so the testable form of "one column resolution" is that the
+  // template is declared once, on the container the head and rows are subgrids of.
+  // The path tracks are content-sized (`minmax(22px,auto)`), never a fixed width:
+  // at 22px a label as ordinary as `happy` overflowed into the next column, so the
+  // head read `happyedge` and no label sat over the marks it names.
+  it('declares the column template once, so the labels and the marks share it', async () => {
+    await mount()
+    expandR6()
+    const grid = container.querySelector('[data-testid="channel-grid-R6"]') as HTMLElement
+    expect(grid.style.gridTemplateColumns).toBe('minmax(64px,auto) repeat(2,minmax(22px,auto)) minmax(0,1fr)')
+    const lines = [...grid.querySelectorAll('.clcov-grid-head, .clcov-grid-row')] as HTMLElement[]
+    expect(lines.length).toBe(5)
+    for (const line of lines) expect(line.style.gridTemplateColumns).toBe('')
+  })
+
+  // At two or three channels an axis lookup costs more than the sentence does.
+  it('ends each channel row with the word its marks add up to', async () => {
+    await mount()
+    expandR6()
+    expect(container.querySelector('[data-testid="channel-R6-email"] .clcov-grid-word')?.textContent).toBe('has a test · not yet passed')
+    expect(container.querySelector('[data-testid="channel-R6-line"] .clcov-grid-word')?.textContent).toBe('no test')
+  })
+
+  // The grid owns every mark once there is a channel dimension, so a band that has
+  // no prose of its own has nothing left to say — it would be a name over blank space.
+  it('drops the prose-less bands when the grid is carrying the coverage', async () => {
+    await mount()
+    expandR6()
+    expect(container.querySelector('[data-testid="behaviour-R6"]')).toBeNull()
+  })
+
+  it('keeps a band that has prose, but leaves its marks to the grid', async () => {
+    const withProse = structuredClone(VARIANT_LEDGER)
+    withProse.requirements[0].requirement.happyPath = 'Every channel honours the scope.'
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(withProse)
+    await mount()
+    expandR6()
+    const happy = container.querySelector('[data-testid="behaviour-happy-R6"]') as HTMLElement
+    expect(happy.textContent).toContain('Every channel honours the scope.')
+    expect(container.querySelector('[data-testid="behaviour-marks-happy-R6"]')).toBeNull()
+    expect(container.querySelector('[data-testid="behaviour-unhappy-R6"]')).toBeNull()
+  })
+
+  it('names the gap "Variant gap" in the row tooltip and the missing channels in the verdict', async () => {
     await mount()
     const cov = container.querySelector('[data-testid="cov-R6"]')
-    expect(cov?.getAttribute('title')).toContain('Variant gap')
+    act(() => { cov?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toContain('Variant gap')
     expect(cov?.textContent).not.toContain('whatsapp')
     expect(container.querySelector('[data-testid="gap-R6"]')).toBeNull()
     expandR6()
-    const happy = container.querySelector('[data-testid="variant-path-R6-happy"]')
-    expect(happy?.getAttribute('title')).toContain('whatsapp')
-    expect(happy?.getAttribute('title')).toContain('line')
+    // Each mark still names its own case on hover, and the verdict names the set.
+    expect(container.querySelector('[data-testid="channel-R6-whatsapp"] [data-seg]')?.getAttribute('title')).toBe('happy · whatsapp — no test')
+    expect(container.querySelector('[data-testid="proof-verdict-R6"]')).toBeNull()
   })
 
   it('counts the requirement in the variant-incomplete breakdown segment', async () => {
@@ -262,7 +339,7 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
     expect(badge?.textContent).toContain('1')
   })
 
-  it('renders a single-path variant requirement as one pill that expands to its chips', async () => {
+  it('renders a single-path variant requirement as a one-column grid', async () => {
     const single = structuredClone(VARIANT_LEDGER)
     single.requirements[0].requirement.pathTypes = ['happy']
     single.requirements[0].pathCoverage = [{ path: 'happy', covered: true }]
@@ -275,14 +352,13 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(single)
     await mount()
     expandR6()
-    expect(container.querySelector('[data-testid="variant-path-R6-happy"]')?.textContent).toContain('1/4')
-    expect(container.querySelector('[data-testid="cell-R6-happy-email"]')).toBeNull()
-    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="variant-path-R6-happy"]')?.click() })
-    expect(container.querySelector('[data-testid="cell-R6-happy-email"]')?.getAttribute('data-covered')).toBe('true')
-    expect(container.querySelector('[data-testid="cell-R6-happy-whatsapp"]')?.getAttribute('data-covered')).toBe('false')
+    const grid = container.querySelector('[data-testid="channel-grid-R6"]') as HTMLElement
+    expect([...grid.querySelectorAll('.clcov-grid-col')].map((el) => el.textContent)).toEqual(['happy'])
+    expect(rowSegs('email')).toEqual(['claimed'])
+    expect(rowSegs('whatsapp')).toEqual(['off'])
   })
 
-  it('excludes N/A variants from the count and renders them as n/a with the reason', async () => {
+  it('excludes N/A channels from the count and sinks them to the bottom with the reason', async () => {
     // email covered + whatsapp/call/line N/A (no surface) → 1/1 applicable, covered.
     const na = structuredClone(VARIANT_LEDGER)
     na.requirements[0].gapType = 'covered'
@@ -307,14 +383,13 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
     // The row counts applicable cells only → 2/2 segments, both filled.
     expect(container.querySelector('[data-testid="cov-R6"]')?.textContent).toContain('2/2')
     expandR6()
-    // Count is over applicable variants only → 1/1, not 1/4.
-    const happy = container.querySelector('[data-testid="variant-path-R6-happy"]')
-    expect(happy?.textContent).toContain('1/1')
-    expect(happy?.getAttribute('title')).toContain('N/A')
-    act(() => { (happy as HTMLButtonElement)?.click() })
-    const cell = container.querySelector('[data-testid="cell-R6-happy-whatsapp"]')
-    expect(cell?.getAttribute('data-covered')).toBe('na')
-    expect(cell?.textContent).toContain('n/a')
-    expect(cell?.getAttribute('title')).toContain('no V4 config endpoint')
+    // N/A is never a gap, so it never competes for the top of a worst-first list.
+    expect([...container.querySelectorAll('[data-testid="channel-grid-R6"] .clcov-grid-name')].map((el) => el.textContent))
+      .toEqual(['email', 'whatsapp', 'call', 'line'])
+    const row = container.querySelector('[data-testid="channel-R6-whatsapp"]') as HTMLElement
+    expect(row.dataset.na).toBe('true')
+    expect(rowSegs('whatsapp')).toEqual(['na', 'na'])
+    expect(row.textContent).toContain('n/a — no V4 config endpoint')
+    expect(row.querySelector('[data-seg]')?.getAttribute('title')).toContain('no V4 config endpoint')
   })
 })

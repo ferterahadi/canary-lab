@@ -94,6 +94,9 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
       setFeatures(data)
       const runs = allRunsRef.current
       if (preferredFeature && data.some((f) => f.name === preferredFeature)) {
+        // Reconnect and metadata refreshes target the current suite too. Keep
+        // its explicit run selection, including one awaiting the runs snapshot.
+        if (selectedFeatureRef.current === preferredFeature && selectedRunIdRef.current) return
         pendingRunSelectionRef.current = null
         setSelectedFeature(preferredFeature)
         setSelectedRunId(runs.find((r) => r.feature === preferredFeature && NON_TEST(r))?.runId ?? null)

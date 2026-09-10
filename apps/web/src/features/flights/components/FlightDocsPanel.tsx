@@ -124,7 +124,7 @@ export function FlightDocsPanel({
   const liveLine = summaryStage ? agentActivityLine(summaryStage) : null
   const showDistilled = summaryStatus !== undefined && summaryStatus !== 'pending'
   return (
-    <section data-testid="flight-docs-panel" className={`flex flex-col gap-2.5 ${STAGE_COLUMN}`}>
+    <section data-testid="flight-docs-panel" className={`flex flex-col gap-3 ${STAGE_COLUMN}`}>
       <div className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
         <div className="flex items-center gap-2">
           <div className={PANEL_KICKER_CLASS}>
@@ -134,7 +134,7 @@ export function FlightDocsPanel({
           {approved && (
             <span
               data-testid="docs-locked-chip"
-              className="mb-1 rounded border px-1.5 py-px text-[9.5px] font-medium text-muted border-line"
+              className="cl-badge-neutral mb-1"
             >
               Locked — approved
             </span>
@@ -143,7 +143,7 @@ export function FlightDocsPanel({
         {docs.sourceDocs.length === 0 ? (
           awaiting
             ? <SkeletonRows awaiting={awaiting} rows={2} sub={false} />
-            : <div className="text-[11px] text-muted">No source docs.</div>
+            : <div className="cl-type-meta text-muted">No source docs.</div>
         ) : (
           <div className="flex flex-col gap-2">
             {docs.sourceDocs.map((d) => (
@@ -164,11 +164,11 @@ export function FlightDocsPanel({
           </div>
         )}
         {approved && (
-          <p className="mt-2 text-[10.5px] text-muted">
+          <p className="mt-2 cl-type-meta text-muted">
             To change these, use Continue → From a step… → Requirements. Everything after that step is redone.
           </p>
         )}
-        {docs.error && <div className="mt-2 text-[11px] text-danger">{docs.error}</div>}
+        {docs.error && <div className="mt-2 cl-type-meta text-danger">{docs.error}</div>}
       </div>
 
       {/* The output half. Rendered from `summaryStatus` alone (not from the
@@ -183,7 +183,7 @@ export function FlightDocsPanel({
             </div>
             <div className="flex-1" />
             {summaryStatus && (
-              <span className="mb-1 flex items-center gap-1.5 text-[10px] text-muted" data-testid="docs-summary-chip">
+              <span className="mb-1 flex items-center gap-1.5 cl-type-meta text-muted" data-testid="docs-summary-chip">
                 Summary
                 <StageStatusChip status={summaryStatus} />
               </span>
@@ -212,7 +212,7 @@ export function FlightDocsPanel({
             <SkeletonLines awaiting={awaiting} rows={2} />
           ) : (
             <div className="flex min-w-0 flex-col gap-1">
-              <div className="text-[11px] text-muted">
+              <div className="cl-type-meta text-muted">
                 {summaryStatus === 'running'
                   // The live snapshot when there is one. The old copy pointed at
                   // Activity for progress, which is empty for the minutes the
@@ -256,11 +256,11 @@ export function IntentRow({ description }: { description: string }) {
           sentence on the page (mono stays reserved for paths/commands). */}
       <span
         data-testid="fork-intent-text"
-        className={`min-w-0 flex-1 text-[12px] text-secondary ${open ? 'leading-relaxed' : 'truncate'}`}
+        className={`min-w-0 flex-1 cl-type-body text-secondary ${open ? 'leading-relaxed' : 'truncate'}`}
       >
         {description}
       </span>
-      <span className="shrink-0 text-[10.5px] text-accent">
+      <span className="shrink-0 cl-type-meta text-accent">
         {open ? 'Hide' : 'Show'}
       </span>
     </button>
@@ -310,7 +310,7 @@ export function ForkPathCard({ testId, title, blurb, recommended, note, selected
         {selected && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
       </span>
       <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="flex items-center gap-1.5 text-[12.5px] font-semibold">
+        <span className="flex items-center gap-1.5 cl-type-title text-primary">
           {title}
           {recommended && !selected && (
             <span className="cl-badge-accent">
@@ -320,13 +320,13 @@ export function ForkPathCard({ testId, title, blurb, recommended, note, selected
           {note && !selected && (
             <span
               data-testid={`${testId}-note`}
-              className="rounded-full border border-line px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-muted"
+              className="cl-badge-neutral"
             >
               {note}
             </span>
           )}
         </span>
-        <span className="text-[11px] leading-snug text-secondary">{blurb}</span>
+        <span className="cl-type-meta leading-snug text-secondary">{blurb}</span>
       </span>
       </button>
     </DisabledControlTooltip>

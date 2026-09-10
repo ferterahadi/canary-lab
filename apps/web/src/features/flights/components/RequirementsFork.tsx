@@ -3,6 +3,7 @@ import * as api from '@/shared/api/client'
 import type { FlightManifest, PrdSourceAttempt, PrdSourceCheckpointData } from '@/shared/api/client'
 import type { FeatureDocsListing } from '@/shared/api/types'
 import { AddDocsTile, DocPill, DocsDropOverlay, EmptyDropzone, useDocDrop } from '@/features/coverage/components/CoverageDocsRail'
+import { panelCardClass, panelCardStyle } from '@/shared/ui/PanelCard'
 import { STAGE_COLUMN } from './stage-meta'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { ForkPathCard, IntentRow, useFlightDocs } from './FlightDocsPanel'
@@ -37,7 +38,7 @@ export function AttemptVerdict({ attempt }: { attempt: PrdSourceAttempt }) {
       data-testid="prd-source-verdict"
       className="flex items-start gap-2 border-l-2 border-warning bg-warning/7 px-2.5 py-2"
     >
-      <span aria-hidden="true" className="mt-px text-[11px] text-warning">⊘</span>
+      <span aria-hidden="true" className="mt-px cl-type-meta text-warning">⊘</span>
       <div className="flex min-w-0 flex-col gap-1">
         <span
           className="cl-rubric text-warning"
@@ -45,7 +46,7 @@ export function AttemptVerdict({ attempt }: { attempt: PrdSourceAttempt }) {
           {attemptHeadline(attempt)}
         </span>
         {attempt.reason && (
-          <span className="text-[12px] leading-snug text-primary">{attempt.reason}</span>
+          <span className="cl-type-body text-primary">{attempt.reason}</span>
         )}
       </div>
     </div>
@@ -112,13 +113,14 @@ export function RequirementsFork({
   return (
     <section
       data-testid="requirements-fork"
-      className={`relative flex flex-col gap-2.5 rounded-lg border p-3 border-line bg-surface ${STAGE_COLUMN}`}
+      className={`relative flex flex-col gap-2 ${panelCardClass()} ${STAGE_COLUMN}`}
+      style={panelCardStyle()}
       {...dropHandlers}
     >
       {lastAttempt && <AttemptVerdict attempt={lastAttempt} />}
       <div className="flex items-center gap-2">
-        <span aria-hidden="true" className="text-[11px] text-warning">⏸</span>
-        <span className="text-[12.5px] font-semibold">Where should requirements come from?</span>
+        <span aria-hidden="true" className="cl-type-meta text-warning">⏸</span>
+        <span className="cl-type-title text-primary">Where should requirements come from?</span>
       </div>
       <IntentRow description={flight.description} />
       <input
@@ -207,7 +209,7 @@ export function RequirementsFork({
                 data-testid="fork-use-docs"
                 disabled={disabled || docs.sourceDocs.length === 0}
                 onClick={() => respond('continue')}
-                className="cl-button-primary px-2.5 py-1 text-xs"
+                className="cl-button-primary px-2.5 py-1"
                 title={lockedTitle ?? (docs.sourceDocs.length === 0 ? 'Add at least one doc first' : 'Approve these docs and turn them into requirements')}
               >
                 Use these docs
@@ -249,7 +251,7 @@ export function RequirementsFork({
               <span
                 key={startedFlash}
                 data-testid="fork-start-agent-flash"
-                className="cl-flash-fade text-[11px] font-medium text-accent"
+                className="cl-flash-fade cl-type-meta font-medium text-accent"
                 onAnimationEnd={() => setStartedFlash(null)}
               >
                 Agent started — its output shows under Activity below
@@ -265,7 +267,7 @@ export function RequirementsFork({
                   respond(hint)
                   setStartedFlash(Date.now())
                 }}
-                className="cl-button-primary px-2.5 py-1 text-xs"
+                className="cl-button-primary px-2.5 py-1"
                 title={lockedTitle ?? (hint === null ? 'Pick where it should look first' : 'Start the agent with this approach')}
               >
                 {busy ? 'Starting…' : 'Let the agent gather them'}
@@ -276,7 +278,7 @@ export function RequirementsFork({
       )}
 
       {(failure ?? docs.error) && (
-        <div className="text-[11px] text-danger">{failure ?? docs.error}</div>
+        <div className="cl-type-meta text-danger">{failure ?? docs.error}</div>
       )}
       {dragging && mode === 'manual' && <DocsDropOverlay label="Drop to add requirement docs" />}
     </section>

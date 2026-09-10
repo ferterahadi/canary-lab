@@ -277,9 +277,7 @@ function claimOutcome(carriers: CertificateTest[]): ClaimOutcome {
   return 'not-run'
 }
 
-/** Pins the wording a claim was issued against; Phase 5's acceptance records
- *  the same fingerprint, so an accepted requirement and a certified one can be
- *  compared by value. */
+/** Pins the requirement wording a certificate claim was issued against. */
 export function requirementFingerprint(id: string, title: string, text: string): string {
   return createHash('sha256').update(`${id}\n${title}\n${text}`).digest('hex').slice(0, 16)
 }

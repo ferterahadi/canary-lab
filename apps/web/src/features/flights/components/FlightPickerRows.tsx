@@ -106,7 +106,7 @@ export function FlightsPickerDialog({
     >
       {filtered.length === 0 && preFlightRows.length === 0 ? (
         <div className="px-4 py-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-          {filtering ? <><p>No matching flights.</p><button className="cl-button mt-3 px-3 py-1.5" onClick={() => { setQuery(''); setAttentionOnly(false) }}>Clear filters</button></> : <>
+          {filtering ? <p>No matching flights.</p> : <>
             No flights yet. Fly a suite from its row in the suites list — or start one from a terminal:
             <div className="cl-code-shell mt-2 px-2 py-1.5 text-[11px]">npx canary-lab flight ../your-repo "what to test"</div>
           </>}

@@ -135,6 +135,7 @@ function FallbackCodeLines({
     const changed = changedLines?.has(lineNumber) === true
     const active = lineHighlight?.lines.has(lineNumber) === true
     const highlightColors = lineHighlight ? codeLineHighlightColors(lineHighlight.kind) : undefined
+    const executionLabel = active && lineHighlight?.kind === 'failed' ? 'FAILED HERE' : undefined
     const style = active && highlightColors
       ? { background: highlightColors.background, boxShadow: `inset 2px 0 0 ${highlightColors.bar}` }
       : changed
@@ -157,7 +158,10 @@ function FallbackCodeLines({
         title={number.title}
         style={style}
       >
-        <span className="cl-code-line-content">{line}</span>
+        <span className="cl-code-line-content">
+          {line}
+          {executionLabel && <span className="cl-execution-label cl-execution-label-failed">{executionLabel}</span>}
+        </span>
       </span>
     )
   })
@@ -233,7 +237,8 @@ function decorateShikiLines(
     const attrs = ` data-code-line="${number.physical}" data-code-sequence="${number.sequence}" data-code-sequence-label="${number.label}"${number.title ? ` title="${number.title}"` : ''}${mapped.sourceLine !== null ? ` data-source-line="${mapped.sourceLine}"` : ''}${selected ? ' data-selected-line="true"' : ''}`
     if (lineHighlight?.lines.has(lineNo)) {
       const colors = codeLineHighlightColors(lineHighlight.kind)
-      return `<span class="line"${attrs} ${changedLines?.has(lineNo) ? 'data-changed-line="true" ' : ''}data-active-line="true" data-execution-highlight="${lineHighlight.kind}" style="background:${colors.background};box-shadow:inset 2px 0 0 ${colors.bar}"`
+      const executionLabel = lineHighlight.kind === 'failed' ? ' data-execution-label="FAILED HERE"' : ''
+      return `<span class="line"${attrs} ${changedLines?.has(lineNo) ? 'data-changed-line="true" ' : ''}data-active-line="true" data-execution-highlight="${lineHighlight.kind}"${executionLabel} style="background:${colors.background};box-shadow:inset 2px 0 0 ${colors.bar}"`
     }
     if (changedLines?.has(lineNo)) {
       return `<span class="line"${attrs} data-changed-line="true" style="background:color-mix(in srgb, var(--warning) 16%, transparent);box-shadow:inset 2px 0 0 var(--warning)"`
@@ -247,7 +252,12 @@ function decorateShikiLines(
   // gutter. Shiki keeps each source line on one HTML line, so the final closing
   // span before its newline (or </code>) is the line wrapper, not a token span.
   return decorated
-    .replace(/(<span class="line"[^>]*>)(.*)(<\/span>)(?=\n|<\/code>)/g, '$1<span class="cl-code-line-content">$2</span>$3')
+    .replace(/(<span class="line"[^>]*>)(.*)(<\/span>)(?=\n|<\/code>)/g, (_match, opening: string, content: string, closing: string) => {
+      const executionLabel = opening.includes('data-execution-label="FAILED HERE"')
+        ? '<span class="cl-execution-label cl-execution-label-failed">FAILED HERE</span>'
+        : ''
+      return `${opening}<span class="cl-code-line-content">${content}${executionLabel}</span>${closing}`
+    })
     // Grid rows make Shiki's separator newlines visible under pre-wrap; the
     // source rows themselves already preserve every authored newline.
     .replace(/\n(?=<span class="line")/g, '')

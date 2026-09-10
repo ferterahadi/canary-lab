@@ -66,6 +66,72 @@ it('keeps the selected change when switching English and Code and exposes full-f
   expect(document.body.textContent).toContain('Change 2 of 2')
   expect(document.querySelector('tbody')?.textContent).toContain('import { test')
 })
+it.each(['before', 'after'] as const)('opens the exact %s source range when an English sentence is clicked', async (side) => {
+  const review = testFileReview()
+  // The selected sentence is outside the active change and covers two lines.
+  // The click must follow its own source range, not jump to the diff cursor.
+  review[side].story = { steps: [{ id: 'setup', role: 'setup', text: 'Set up x and check it', spans: [{ text: 'Set up x and check it' }], fidelity: 'derived',
+    source: { file: review.file, startLine: 6, endLine: 7, snippet: review[side].source.split('\n').slice(5, 7).join('\n') } }] }
+  vi.mocked(api.getTestFileReview).mockResolvedValue(review)
+  const onFocus = vi.fn()
+  const scrolled: Element[] = []
+  const scrollIntoView = vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) { scrolled.push(this) })
+  try {
+    await render({ onFocus })
+    const target = document.querySelector<HTMLButtonElement>(`[data-side="${side}"][data-source-line="6"] button`)!
+    expect(target.title).toContain('code at line 6')
+    const pane = document.querySelector<HTMLElement>('.cl-comparison-wrap')!
+    pane.scrollTop = 317; pane.scrollLeft = 24
+    await act(async () => target.click())
+    expect(button('Code').getAttribute('aria-selected')).toBe('true')
+    expect(onFocus).toHaveBeenLastCalledWith({ file: review.file, line: 6, mode: 'code' })
+    await render({ onFocus, focus: { file: review.file, line: 6, mode: 'code' } })
+    expect(document.body.textContent).toContain('Change 1 of 2')
+    expect([...document.querySelectorAll('[data-source-selected]')].map((element) => [element.getAttribute('data-side'), element.getAttribute('data-source-line')])).toEqual([[side, '6'], [side, '7']])
+    expect(document.activeElement?.getAttribute('data-source-line')).toBe('6')
+    expect(scrolled.at(-1)).toBe(document.activeElement)
+    expect(document.activeElement?.textContent).toContain('const context = x')
+    pane.scrollTop = 900; pane.scrollLeft = 80
+    await act(async () => document.querySelector<HTMLButtonElement>(`button[data-side="${side}"][data-source-line="7"]`)!.click())
+    expect(button('English').getAttribute('aria-selected')).toBe('true')
+    expect(scrolled.at(-1)?.getAttribute('data-source-line')).toBe('6')
+    expect(pane.scrollTop).toBe(317)
+    expect(pane.scrollLeft).toBe(24)
+    expect(document.activeElement).toBe(document.querySelector(`[data-side="${side}"][data-source-line="6"] button`))
+    await click('Next change')
+    expect(document.querySelector('[data-source-selected]')).toBeNull()
+  } finally { scrollIntoView.mockRestore() }
+})
+it('returns from the original code line to the saved English place after browsing other changes', async () => {
+  await render()
+  expect(button('← Back to English')).toBeUndefined()
+  // Even source retained literally in English mode has a return location.
+  const sentence = document.querySelector<HTMLButtonElement>('[data-side="after"][data-source-line="1"] button')!
+  const pane = document.querySelector<HTMLElement>('.cl-comparison-wrap')!
+  pane.scrollTop = 413; pane.scrollLeft = 17
+  await act(async () => sentence.click())
+  expect(button('← Back to English')).toBeUndefined()
+  expect(document.querySelector('button[data-side="after"][data-source-line="1"]')).not.toBeNull()
+  await click('Next change')
+  expect(document.body.textContent).toContain('Change 2 of 2')
+  pane.scrollTop = 1900; pane.scrollLeft = 60
+  await act(async () => document.querySelector<HTMLButtonElement>('button[data-side="after"][data-source-line="1"]')!.click())
+  expect(button('English').getAttribute('aria-selected')).toBe('true')
+  expect(pane.scrollTop).toBe(413)
+  expect(pane.scrollLeft).toBe(17)
+  expect(document.body.textContent).toContain('Change 1 of 2')
+  expect(document.activeElement).toBe(document.querySelector('[data-side="after"][data-source-line="1"] button'))
+  expect(button('← Back to English')).toBeUndefined()
+  // A later toggle saves the reader's new English scroll position.
+  pane.scrollTop = 522; pane.scrollLeft = 30
+  await click('Code')
+  await click('English')
+  expect(pane.scrollTop).toBe(522)
+  expect(pane.scrollLeft).toBe(30)
+  await click('Next change')
+  await click('Code')
+  expect(document.querySelector('button[data-source-line]')).toBeNull()
+})
 it('opens the requested suite and source line and keeps file focus on live refresh', async () => {
   const onFocus = vi.fn()
   await render({ features: [feature('beta'), feature('alpha', ['e2e/a.spec.ts', 'e2e/b.spec.ts'])], focusFeature: 'alpha', focus: { file: 'e2e/b.spec.ts', line: 3 }, onFocus })

@@ -300,15 +300,6 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
     return { activeReqIds: reqIds, activeTestNames: testNames }
   }, [hovered, ledger])
 
-  // Accept wording (D11) — the human-only lever. The route announces
-  // `coverage-changed`, which re-pulls every open ledger; the explicit refresh
-  // makes THIS page reflect the click even before the socket frame lands.
-  const acceptWording = useCallback((requirementId: string) => {
-    api.acceptRequirementWording(feature, requirementId)
-      .catch(() => undefined) // a 404 means the ledger moved under us — the re-pull below shows the truth
-      .then(() => refresh())
-  }, [feature, refresh])
-
   const visibleReqs = useMemo(() => {
     if (!ledger) return []
     const filtered = gapFilter ? ledger.requirements.filter((r) => r.gapType === gapFilter) : ledger.requirements
@@ -495,7 +486,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
                 {testsPaneEl}
               </div>
             ) : summaryAbsent ? (
-              <CoverageEmptyMain railOpen={railOpen} />
+              <CoverageEmptyMain railOpen={railOpen} onOpenRail={toggleRail} />
             ) : (
               <>
                 <CoverageHeader
@@ -521,7 +512,6 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
                         focused={focusReq?.id === rc.requirement.id}
                         dimmed={Boolean(hovered) && !activeReqIds.has(rc.requirement.id)}
                         onHover={(on) => setHovered(on ? { kind: 'req', key: rc.requirement.id } : null)}
-                        onAccept={() => acceptWording(rc.requirement.id)}
                       />
                     ))}
                   </div>

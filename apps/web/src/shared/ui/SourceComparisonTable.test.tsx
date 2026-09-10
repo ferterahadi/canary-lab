@@ -39,6 +39,45 @@ it('shares the existing English semantic labels and token colors, retaining untr
   expect(container.querySelector('[data-story-span="number"]')?.textContent).toBe('2')
   expect(container.textContent).toContain('import { test, expect }')
 })
+it('links function headings to their declaration and keeps untranslated lines clickable', async () => {
+  const review = testFileReview()
+  review.after.story = { steps: [{ id: 'function', kind: 'flow', flowKind: 'scope', role: 'setup', text: 'Define function helper', spans: [{ text: 'Define function helper' }], fidelity: 'derived',
+    source: { file: review.file, startLine: 3, endLine: 8, snippet: review.after.source }, children: [] }] }
+  const select = vi.fn()
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="english" onSelectSource={select} />))
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-side="after"][data-source-line="3"] button')!.click())
+  expect(select).toHaveBeenLastCalledWith({ side: 'after', line: 3, endLine: 3 })
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-side="before"][data-source-line="1"] button')!.click())
+  expect(select).toHaveBeenLastCalledWith({ side: 'before', line: 1, endLine: 1 })
+  expect(container.querySelector('[data-side="before"][data-source-line="2"] button')).toBeNull()
+})
+it('opens the complete multiline loop header from its English description', async () => {
+  const review = testFileReview()
+  review.after.story = { steps: [{ id: 'loop', kind: 'flow', flowKind: 'loop', role: 'setup', headerEndLine: 6, text: 'Process each item', spans: [], fidelity: 'derived',
+    source: { file: review.file, startLine: 3, endLine: 8, snippet: review.after.source }, children: [] }] }
+  const select = vi.fn()
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="english" onSelectSource={select} />))
+  expect(container.querySelector('[data-side="after"][data-source-line="4"]')?.textContent?.trim()).toBe('')
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-side="after"][data-source-line="3"] button')!.click())
+  expect(select).toHaveBeenLastCalledWith({ side: 'after', line: 3, endLine: 6 })
+})
+it('makes only the original code range clickable to return to English', async () => {
+  const review = testFileReview()
+  const returnToEnglish = vi.fn()
+  const selection = { side: 'after' as const, line: 6, endLine: 7 }
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="code"
+    selection={selection} returnSelection={selection} onReturnToEnglish={returnToEnglish} />))
+  const links = [...container.querySelectorAll<HTMLButtonElement>('button[data-source-line]')]
+  expect(links.map((link) => [link.dataset.side, link.dataset.sourceLine])).toEqual([['after', '6'], ['after', '7']])
+  for (const link of links) {
+    expect(link.type).toBe('button')
+    expect(link.title).toBe('Show English for line 6')
+    await act(async () => link.click())
+  }
+  expect(returnToEnglish).toHaveBeenCalledTimes(2)
+  expect(container.querySelector('[data-side="before"][data-source-line="6"]')?.tagName).toBe('DIV')
+  expect(container.querySelector('[data-side="after"][data-source-line="5"]')?.tagName).toBe('DIV')
+})
 it('renders escaped source and never keeps old highlighted HTML while the new version is loading', async () => {
   const first = 'const oldValue = 1'
   await act(async () => root.render(<ShikiCode source={first} />))

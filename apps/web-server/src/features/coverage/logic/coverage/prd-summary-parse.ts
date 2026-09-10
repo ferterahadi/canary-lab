@@ -295,11 +295,6 @@ export function reconcileRequirementIds(
       // Provenance is re-located at assembly; the survivor's answer stands in until
       // then (and stays when the new wording matches no doc).
       ...(survivedFrom?.source ? { source: survivedFrom.source } : {}),
-      // Acceptance is a HUMAN's mark on a fingerprint — it travels with the id
-      // verbatim; a wording change shows as fingerprint ≠ acceptedFingerprint,
-      // it never re-accepts and never clears (D11).
-      ...(survivedFrom?.acceptedAt ? { acceptedAt: survivedFrom.acceptedAt } : {}),
-      ...(survivedFrom?.acceptedFingerprint ? { acceptedFingerprint: survivedFrom.acceptedFingerprint } : {}),
       ...(survivedFrom?.wordingChangedAt ? { wordingChangedAt: survivedFrom.wordingChangedAt } : {}),
     })
   }

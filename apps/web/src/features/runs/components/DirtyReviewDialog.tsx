@@ -5,6 +5,7 @@ import { useInvalidationKey } from '@/shared/state/invalidation'
 import { shortRunRef } from '@/shared/lib/format'
 import { Modal } from '@/shared/ui/atoms'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
+import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { useRun } from '../state/RunsContext'
 import { WEAKER_HINT_COPY, featureTone, pendingFileScope, specTone } from '../utils/spec-integrity'
 import { SpecToneChip } from './SpecToneChip'
@@ -121,7 +122,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
           {error && <p role="alert" className="cl-review-action-message text-danger">{error}</p>}
         </div>}
       >
-        {cards.length === 0 ? <div className="p-5"><EmptyState icon={EmptyGlyph.journal} title="No changed test files" body="No uncommitted test edits remain. Existing run results still describe the tests that run executed." testId="dirty-review-empty" /></div> : <div className="cl-dialog-panes cl-review-panes min-h-0 flex-1">
+        {cards.length === 0 ? <div className="p-5"><EmptyState {...EMPTY_COPY.dirtyNoTestFiles} icon={EmptyGlyph.journal} testId="dirty-review-empty" /></div> : <div className="cl-dialog-panes cl-review-panes min-h-0 flex-1">
           <nav className="cl-dialog-rail overflow-auto p-2 scrollbar-thin" aria-label="Changed test files">
             <p className="mb-3 px-2 text-[10px] uppercase tracking-wider text-secondary">Suites · {cards.length}</p>
             {cards.map((card) => {

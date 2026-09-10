@@ -35,7 +35,7 @@ type BootRow = Pick<ServiceManifestEntry, 'name' | 'safeName' | 'allocatedPorts'
  *  grow under the reader when the services land. The floor is on the SHARED class
  *  so the two can't drift: it is what the settled row already measures, which is
  *  why adding it changes nothing for that row. */
-const BOOT_ROW = 'flex min-h-[30px] min-w-0 items-center gap-2 py-1.5 text-[12px]'
+const BOOT_ROW = 'flex min-h-[30px] min-w-0 items-center gap-2 py-1.5 cl-type-data'
 
 /** Boot check (Suite setup): which services came up, on which port, and how long
  *  each took. The band above states the total; this names the services, so a
@@ -99,10 +99,10 @@ export function BootCheckPanel({ boot, recorded = [], awaiting }: {
                 <StatusDot state={failed ? 'failed' : 'success'} className="shrink-0" />
                 <span className="min-w-0 flex-1 truncate">{service.name}</span>
                 {port != null && (
-                  <span className="shrink-0 text-[11px] text-muted" style={{ fontFamily: 'var(--font-mono)' }}>:{port}</span>
+                  <span className="shrink-0 cl-type-meta text-muted" style={{ fontFamily: 'var(--font-mono)' }}>:{port}</span>
                 )}
                 <span
-                  className="shrink-0 text-[11px]"
+                  className="shrink-0 cl-type-meta"
                   style={{ color: failed ? 'var(--danger)' : 'var(--text-secondary)' }}
                 >
                   {failed
@@ -147,7 +147,7 @@ export function DoubleBootPanel({ portify, awaiting }: { portify: PortifyManifes
       <PanelCard kicker="Side-by-side proof" testId={proven ? 'double-boot-panel' : 'double-boot-skeleton'}>
         <ul className="m-0 flex list-none flex-col divide-y divide-line-subtle p-0">
           {rows.map((instance, i) => (
-            <li key={i} className="flex min-w-0 items-center gap-2 py-1.5 text-[12px]">
+            <li key={i} className="flex min-w-0 items-center gap-2 py-1.5 cl-type-data">
               {instance
                 ? <StatusDot state={instance.ok ? 'success' : 'failed'} className="shrink-0" />
                 /* 0.55rem is `.cl-status-dot`'s own size — the bead has the knob
@@ -157,7 +157,7 @@ export function DoubleBootPanel({ portify, awaiting }: { portify: PortifyManifes
               <span className="w-[76px] shrink-0">Copy {String.fromCharCode(65 + i)}</span>
               {instance
                 ? (
-                  <span className="min-w-0 flex-1 truncate text-[11px] text-secondary" style={{ fontFamily: 'var(--font-mono)' }}>
+                  <span className="min-w-0 flex-1 truncate cl-type-meta text-secondary" style={{ fontFamily: 'var(--font-mono)' }}>
                     {Object.entries(instance.ports).map(([slot, port]) => `${slot} :${port}`).join(' · ')}
                   </span>
                 )
@@ -167,13 +167,13 @@ export function DoubleBootPanel({ portify, awaiting }: { portify: PortifyManifes
                   </span>
                 )}
               {instance && !instance.ok && instance.failedService && (
-                <span className="shrink-0 text-[11px] text-danger">{instance.failedService} failed</span>
+                <span className="shrink-0 cl-type-meta text-danger">{instance.failedService} failed</span>
               )}
             </li>
           ))}
         </ul>
         {portify?.verification?.failureDetail && (
-          <p className="mt-2 mb-0 text-[11px] text-danger">{portify.verification.failureDetail}</p>
+          <p className="mt-2 mb-0 cl-type-meta text-danger">{portify.verification.failureDetail}</p>
         )}
       </PanelCard>
     </StageColumn>
@@ -209,7 +209,7 @@ export function OverlayPanel({ portify, awaiting }: { portify: PortifyManifest |
         {groups.map((group) => (
           <div key={group.group ?? '·'} className="mb-1.5 last:mb-0">
             {group.group && (
-              <div className="pb-0.5 text-[11px] text-secondary" data-testid={`overlay-group-${group.group}`}>
+              <div className="pb-0.5 cl-type-meta text-secondary" data-testid={`overlay-group-${group.group}`}>
                 {/* CONFIG_GROUP is a WIRE literal (the diff header the capture
                     writes), so it maps to product words at render — "feature"
                     never reaches the screen. */}
@@ -220,7 +220,7 @@ export function OverlayPanel({ portify, awaiting }: { portify: PortifyManifest |
               {group.files.map((file) => {
                 const { dir, base } = splitFilePath(file.path)
                 return (
-                  <li key={file.path} className="flex min-w-0 items-center gap-2 py-0.5 text-[11px]">
+                  <li key={file.path} className="flex min-w-0 items-center gap-2 py-0.5 cl-type-data">
                     {/* Filename only — a deep source path spent the row's whole width
                         on directories nobody reads, and the part that identifies the
                         file sat at the far end. The full path stays one hover away, so
@@ -247,7 +247,7 @@ export function OverlayPanel({ portify, awaiting }: { portify: PortifyManifest |
             </ul>
           </div>
         ))}
-        <p className="mt-2 mb-0 text-[11px] text-muted">
+        <p className="mt-2 mb-0 cl-type-meta text-muted">
           Saved as a patch. It goes on when a run starts and comes off when it ends —
           nothing lands in the product repos.
         </p>
@@ -335,7 +335,7 @@ export function CoverageCompositionPanel({ ledger, awaiting }: { ledger: Coverag
           />
         </div>
         {composed && composed.totals.orphanTests > 0 && (
-          <p className="mt-2.5 mb-0 text-[11px] text-muted" data-testid="composition-orphans">
+          <p className="mt-2.5 mb-0 cl-type-meta text-muted" data-testid="composition-orphans">
             {plural(composed.totals.orphanTests, 'test')} match no requirement — either a missing label,
             or a test for something nobody asked for.
           </p>
@@ -367,7 +367,7 @@ interface CompositionRow {
 /** One distribution: a proportional bar, then a row per bucket. The bar drops its
  *  empty segments (a zero-width sliver is noise); the rows keep theirs, dimmed.
  *
- *  The heading is `.cl-frame-heading` (sans 12.5/600 primary) and NOT the card's
+ *  The heading is the `.cl-type-title` step (sans 12.5/600) and NOT the card's
  *  own `.cl-rubric` kicker. Both groups used to be titled in the very same mono
  *  10px caps muted voice as "What the tests cover" directly above them, which
  *  left the card with no title at all — three identical caps lines, none of them
@@ -394,7 +394,7 @@ function CompositionGroup({ heading, count, rows, testId, awaiting }: {
   return (
     <div data-testid={testId}>
       <div className="flex items-baseline justify-between gap-2 pb-1.5">
-        <h4 className="cl-frame-heading m-0 min-w-0 truncate">{heading}</h4>
+        <h4 className="cl-type-title m-0 min-w-0 truncate text-primary">{heading}</h4>
         {count && <span className="cl-rubric shrink-0 tabular-nums">{count}</span>}
       </div>
       <div className="mb-2 flex h-[3px] gap-[2px]" aria-hidden>
@@ -406,7 +406,7 @@ function CompositionGroup({ heading, count, rows, testId, awaiting }: {
                 <span key={r.key} className="rounded-full" style={{ width: `${((r.count ?? 0) / total) * 100}%`, background: r.color }} />
               ))}
       </div>
-      <dl className="m-0 grid gap-x-2 gap-y-1 text-[11.5px]" style={{ gridTemplateColumns: 'auto 1fr auto' }}>
+      <dl className="m-0 grid gap-x-2 gap-y-1 cl-type-data" style={{ gridTemplateColumns: 'auto 1fr auto' }}>
         {rows.map((r) => {
           // An unmeasured bucket reads like an empty one — quiet dot, quiet
           // label — because that is what it is until the figure arrives.
@@ -448,32 +448,30 @@ export function EvaluationDeliverablePanel({ task, awaiting, probed }: { task: E
   return (
     <StageColumn>
       <PanelCard kicker={kicker} testId="evaluation-deliverable">
-        <dl className="m-0 grid gap-x-3 gap-y-1 text-[12px]" style={{ gridTemplateColumns: 'auto 1fr' }}>
-          <dt className="cl-rubric self-center">From run</dt>
-          <dd className="m-0 min-w-0 truncate" style={{ fontFamily: 'var(--font-mono)' }}>{task.runId}</dd>
-          <dt className="cl-rubric self-center">Built by</dt>
-          <dd className="m-0 min-w-0 truncate text-secondary">{builtBy(task)}</dd>
-          {task.archive && (
-            <>
-              {/* "Size", not "Contains": this row states the download's weight, so
-                  it names the one thing every archive knows. The video count is
-                  its own row rather than a "· 11 videos" tail, which would have
-                  put a count under a label that says size. */}
-              <dt className="cl-rubric self-center">Size</dt>
-              <dd className="m-0 min-w-0 truncate text-secondary">{formatBytes(task.archive.bytes)}</dd>
-              {task.archive.videos > 0 && (
-                <>
-                  <dt className="cl-rubric self-center">Videos</dt>
-                  <dd className="m-0 min-w-0 truncate text-secondary">{plural(task.archive.videos, 'video')}</dd>
-                </>
-              )}
-            </>
-          )}
-        </dl>
-        <div className="mt-2 flex min-w-0 items-center gap-2 border-t border-line-subtle pt-2">
-          <span className="min-w-0 flex-1 truncate text-[11px] text-secondary" style={{ fontFamily: 'var(--font-mono)' }} title={filename}>
-            {filename}
-          </span>
+        {/* The same shape as a row in All reports below — bold identity, one
+            muted line of provenance, the download on the right — because these
+            two cards describe the same kind of thing and used to do it in two
+            voices.
+
+            The FILENAME is the identity: this card hands a file over, so the
+            thing you will find in your downloads folder is the line in bold.
+            The run id moves into the meta line, which is where it belongs once
+            the filename (which contains it) is stated — bolding both put two
+            competing identities on one card.
+
+            The ledger it replaces spent four label/value rows on three short
+            facts: 600px of empty value column over 78px of card height, with
+            "Size" and "Videos" each earning a rubric of their own. They read as
+            one sentence, so they are now one line. */}
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="truncate cl-type-data font-medium" style={{ fontFamily: 'var(--font-mono)' }} title={filename}>
+              {filename}
+            </div>
+            <div className="mt-0.5 truncate cl-type-meta text-muted">
+              {[`run ${task.runId}`, builtBy(task), archiveContents(task)].filter(Boolean).join(' · ')}
+            </div>
+          </div>
           <ArchiveDownloadButton task={task} label="Download" />
         </div>
       </PanelCard>
@@ -516,16 +514,16 @@ export function AllReportsPanel({
               <StatusDot state={task.status === 'failed' ? 'failed' : task.status === 'running' ? 'running' : 'success'} className="shrink-0" />
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-1.5">
-                  <span className="truncate text-[12px] font-medium">Run {task.runId}</span>
+                  <span className="truncate cl-type-data font-medium">Run {task.runId}</span>
                   {/* The flight's own row is marked, not decorated: the status dot
                       is this row's only colour, so the marker stays a quiet label. */}
                   {task.taskId === pinnedTaskId && (
-                    <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-muted">{probed ? 'latest' : 'this flight'}</span>
+                    <span className="cl-badge-neutral shrink-0">{probed ? 'latest' : 'this flight'}</span>
                   )}
                 </div>
                 {/* How the report was built is metadata, not a badge — it reads on
                     the same muted line as size and age. */}
-                <div className="mt-0.5 truncate text-[10.5px] text-muted">
+                <div className="mt-0.5 truncate cl-type-meta text-muted">
                   {task.status === 'failed'
                     /* A failed export has no archive; saying so beats a dead
                        button, and the reason is the only useful thing left. */
@@ -537,7 +535,7 @@ export function AllReportsPanel({
               </div>
               {task.downloadReady
                 ? <ArchiveDownloadButton task={task} />
-                : <span className="shrink-0 pr-1 text-[10.5px] text-muted">{task.status === 'running' ? 'building…' : 'no file yet'}</span>}
+                : <span className="shrink-0 pr-1 cl-type-meta text-muted">{task.status === 'running' ? 'building…' : 'no file yet'}</span>}
             </li>
           ))}
         </ul>
@@ -565,7 +563,7 @@ function ArchiveDownloadButton({ task, label }: { task: EvaluationExportTask; la
       onClick={download}
       aria-label={title}
       title={title}
-      className={label ? 'cl-button shrink-0 px-2 py-0.5 text-[11px]' : 'cl-icon-button h-6 w-6 shrink-0 text-[12px]'}
+      className={label ? 'cl-button shrink-0 px-2 py-0.5' : 'cl-icon-button h-6 w-6 shrink-0 text-[12px]'}
       style={failed ? { color: 'var(--danger)' } : undefined}
     >
       {label ? `⬇ ${label}` : '⬇'}

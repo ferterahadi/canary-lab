@@ -22,7 +22,6 @@ vi.mock('../logic/coverage/service', async (importOriginal) => {
     listFeatureDocs: vi.fn(original.listFeatureDocs),
     clearPrdSummary: vi.fn(original.clearPrdSummary),
     regeneratePrdSummary: vi.fn(original.regeneratePrdSummary),
-    acceptRequirementWording: vi.fn(original.acceptRequirementWording),
   }
 })
 
@@ -36,7 +35,7 @@ vi.mock('../../config/logic/feature-authoring', async (importOriginal) => {
 
 import Fastify, { type FastifyInstance } from 'fastify'
 import { coverageRoutes } from './coverage'
-import { computeFeatureCoverage, listFeatureDocs, clearPrdSummary, regeneratePrdSummary, acceptRequirementWording } from '../logic/coverage/service'
+import { computeFeatureCoverage, listFeatureDocs, clearPrdSummary, regeneratePrdSummary } from '../logic/coverage/service'
 import { computeDocsHash } from '../logic/coverage/docs-collection'
 import { writeCoverageRunState } from '../logic/coverage/run-state'
 import { writeFeatureDoc } from '../../config/logic/feature-authoring'
@@ -57,7 +56,6 @@ beforeEach(async () => {
   vi.mocked(listFeatureDocs).mockReset()
   vi.mocked(clearPrdSummary).mockReset()
   vi.mocked(regeneratePrdSummary).mockReset()
-  vi.mocked(acceptRequirementWording).mockReset()
   vi.mocked(writeFeatureDoc).mockReset()
   app = Fastify()
   await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir })
@@ -100,16 +98,6 @@ describe('coverage route re-throw branches', () => {
     })
 
     const res = await app.inject({ method: 'DELETE', url: '/api/features/checkout/prd-summary' })
-    expect(res.statusCode).toBe(500)
-  })
-
-  it('POST /requirements/:id/accept re-throws errors that carry no statusCode', async () => {
-    // A write failure is neither a missing feature nor a 404-shaped miss → 500,
-    // and no coverage-changed event is announced for a write that did not happen.
-    vi.mocked(acceptRequirementWording).mockImplementation(() => {
-      throw new Error('disk full')
-    })
-    const res = await app.inject({ method: 'POST', url: '/api/features/checkout/requirements/R1/accept' })
     expect(res.statusCode).toBe(500)
   })
 

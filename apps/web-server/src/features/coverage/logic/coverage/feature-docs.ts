@@ -8,7 +8,6 @@ import { type CoverageAgentSession } from './annotate-engine'
 import { stripCoverageTags } from './tag-writer'
 import { COVERAGE_STATE_JSON } from './run-state'
 import { docsDirFor, isGeneratedDoc, readDocsCollection } from './docs-collection'
-import { fingerprintRequirement } from './fingerprints'
 import {
   PRD_SUMMARY_JSON,
   PRD_SUMMARY_MD,
@@ -108,50 +107,6 @@ export function applyExternalSummary(args: ApplyExternalSummaryArgs): ApplyExter
     summary: written,
     written: [path.join('docs', PRD_SUMMARY_JSON), path.join('docs', PRD_SUMMARY_MD)],
   }
-}
-
-// ---------------------------------------------------------------------------
-// Requirement acceptance (D11). A HUMAN marks a requirement's wording accepted
-// from the ledger; the mark is the accepted FINGERPRINT plus when, so a later
-// wording change reads as "accepted wording is older" (fingerprint mismatch)
-// rather than being forgotten or silently re-accepted. Reached only by the UI
-// route — no MCP tool wraps it (pinned by mcp/repair-guardrail.test.ts), for the
-// same reason no tool adopts a spec edit: the agent whose work is being judged
-// must not be the one who accepts the yardstick.
-// ---------------------------------------------------------------------------
-
-export interface AcceptRequirementWordingArgs {
-  featuresDir: string
-  feature: string
-  requirementId: string
-  now?: string
-}
-
-export interface AcceptRequirementWordingResult {
-  feature: string
-  requirementId: string
-  acceptedAt: string
-  acceptedFingerprint: string
-}
-
-export function acceptRequirementWording(args: AcceptRequirementWordingArgs): AcceptRequirementWordingResult {
-  const found = loadFeatures(args.featuresDir).find((f) => f.name === args.feature)
-  if (!found || !found.featureDir) throw new FeatureNotFoundError(args.feature)
-  const summary = readPrdSummary(found.featureDir)
-  if (!summary) {
-    throw Object.assign(new Error(`no PRD summary for "${args.feature}" — nothing to accept`), { statusCode: 404 })
-  }
-  const target = summary.requirements.find((r) => r.id === args.requirementId && !r.deprecated)
-  if (!target) {
-    throw Object.assign(new Error(`requirement ${args.requirementId} not found in "${args.feature}"`), { statusCode: 404 })
-  }
-  const acceptedAt = args.now ?? new Date().toISOString()
-  const acceptedFingerprint = target.fingerprint ?? fingerprintRequirement(target)
-  writePrdSummary(found.featureDir, found.name, {
-    ...summary,
-    requirements: summary.requirements.map((r) => (r.id === target.id ? { ...r, acceptedAt, acceptedFingerprint } : r)),
-  })
-  return { feature: args.feature, requirementId: target.id, acceptedAt, acceptedFingerprint }
 }
 
 export interface FeatureDoc {

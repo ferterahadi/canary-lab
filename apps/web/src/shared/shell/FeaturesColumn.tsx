@@ -381,7 +381,7 @@ function FeatureRow({
       title={isActive && activeRunWaitingLabel ? activeRunWaitingLabel : runState ? (runState === 'queued' ? 'Queued' : runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : inFlight ? flight?.title : undefined}
     >
       {tone && (
-        <Tooltip label={`${SPEC_TONE[tone].title} — click to review test changes`}>
+        <Tooltip label={`${SPEC_TONE[tone].title} Click to review.`}>
           <button type="button" onClick={() => { onSelectFeature(f.name); onReviewFeature?.(f.name) }}
             aria-label={`Review test changes in ${f.name}`}
             data-testid={`dirty-badge-${f.name}`}
@@ -398,7 +398,7 @@ function FeatureRow({
         </Tooltip>
       )}
       {f.portified && (
-        <Tooltip label="Portified">
+        <Tooltip label="Ready for parallel runs.">
           <span
             aria-label="Portified"
             data-testid={`portified-badge-${f.name}`}

@@ -193,9 +193,25 @@ read-only test-review API reads Git HEAD or the explicitly selected run snapshot
 then derives English, source alignment, and advisory assessments from those same
 versions. English and Code share source-based change navigation across the whole
 file, including imports and shared setup; the selected change's assessment appears
-below the source. `SourceComparisonTable` retains aligned source rows while sharing
+below the source. File review uses `translateReadableSource` to include imports,
+declarations, lifecycle hooks, test registrations, and loops around generated tests.
+Function declarations have a signature row and individually translated body statements.
+Arrow callbacks use the same natural grammar as ordinary statements, with block
+bodies explicitly described as running when called. Calls with callback arguments list those arguments in order, while
+spread lists describe item inclusion and conditional inclusion explicitly.
+Multiline loop headers carry their ending source line so English suppresses
+already-described continuation lines and opens the complete header in Code mode.
+It reuses the story walker and falls back to the exhaustive syntax grammar for
+constructs without concise wording. Conditions contain their actions directly;
+the redundant `then` story row is omitted, and `Else` aligns with its sibling `If`.
+`SourceComparisonTable` retains aligned source rows while sharing
 `ReadableStoryText`, `useCodeHighlight` (full-source Shiki tokenization), and
-`TestLanguageSwitch` with the ordinary test cards. The compact baseline selector
+`TestLanguageSwitch` with the ordinary test cards.
+English sentences open Code mode at their source range, highlighting and focusing
+the chosen Before or After side. Clicking that code range returns to the saved
+English sentence, scroll position, and change cursor, even after browsing other
+code changes. The English tab uses the same return action.
+The compact baseline selector
 and one editor action leave the wide dialog primarily for the comparison.
 Missing snapshots are disclosed rather than replaced with a different baseline.
 `ComparisonTable` also serves configuration previews and captured patches through
@@ -878,7 +894,7 @@ The active pipeline is:
    second parser.
 
 Nothing is persisted as a translated sidecar: the server derives the view from the
-current source when it extracts tests. TypeScript is pinned to 5.9.3 because its AST
+selected source when it extracts tests. For a selected run, `GET /api/features/:name/tests?runId=...` uses the reporter’s recorded roster and saved suite source without executing historical spec modules. Older runs without a snapshot still show recorded tests and verdicts, with an explicit source-unavailable notice; they never read current source as historical evidence. A run without a recorded roster shows an empty or waiting state, not a discovery failure. The Tests header can switch to current workspace tests independently of the selected run (`tests=current`, URL-only and restored on refresh); this source view does not inherit historical result badges. Current workspace changes also remain available through test review. Unmatched workspace tests say “no matching result” instead of “pending”. TypeScript is pinned to 5.9.3 because its AST
 is the input language; `compiler-context.ts` and the syntax inventory tests force a
 deliberate vocabulary audit before that compiler version can change. The detailed
 contracts live in the [controlled-English grammar](controlled-english/controlled-english-grammar.md),

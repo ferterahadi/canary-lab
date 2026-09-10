@@ -1014,7 +1014,7 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
           letter-spaced caps compete with the figure instead of labelling it. The
           kicker above the grid still carries the rubric voice, so the card keeps
           its register — this is the tile's own label, one level down. */}
-      <div className="flex min-w-0 items-center gap-1 text-[11.5px] text-muted">
+      <div className="flex min-w-0 items-center gap-1 cl-type-data text-muted">
         <span className="min-w-0 truncate">{f.label}</span>
         {help ? <FactHelpMark /> : null}
       </div>
@@ -1027,14 +1027,14 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
         </div>
       ) : (
         <div
-          className="mt-1 min-w-0 truncate text-[11.5px]"
+          className="mt-1 min-w-0 truncate cl-type-data"
           title={f.title ?? f.value}
           style={{ color: toneColor ?? 'var(--text-secondary)', ...(f.mono ? { fontFamily: 'var(--font-mono)' } : {}) }}
         >
           {f.value}
         </div>
       )}
-      {sub ? <div data-testid="fact-sub" className="mt-1.5 text-[10.5px] text-secondary">{sub}</div> : null}
+      {sub ? <div data-testid="fact-sub" className="mt-1.5 cl-type-meta text-secondary">{sub}</div> : null}
     </div>
   )
   return help ? <Tooltip label={help}>{tile}</Tooltip> : tile

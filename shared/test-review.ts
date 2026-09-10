@@ -1,4 +1,4 @@
-import type { ReadableTest } from './readable-tests/types'
+import type { ReadableTest, ReadableTestStory } from './readable-tests/types'
 import type { SpecDiff } from './verification-strength/types'
 
 export interface ReviewTestSource {
@@ -11,6 +11,8 @@ export interface ReviewTestSource {
 export interface ReviewSource {
   source: string
   tests: ReviewTestSource[]
+  /** Whole-file English, including module setup and test registration. */
+  story?: ReadableTestStory
   parseError?: string
 }
 

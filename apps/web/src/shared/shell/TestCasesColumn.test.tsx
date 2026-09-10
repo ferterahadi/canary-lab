@@ -515,7 +515,8 @@ describe('TestCasesColumn', () => {
     const failedCode = container.querySelector<HTMLElement>('[data-execution-highlight="failed"]')
     expect(failedCode?.dataset.activeLine).toBe('true')
     expect(failedCode?.getAttribute('style')).toContain('var(--danger)')
-    expect(container.textContent).toContain('Last failed line · line 7')
+    expect(failedCode?.textContent).toContain('FAILED HERE')
+    expect(container.textContent).not.toContain('Last failed line')
 
     await act(async () => {
       ;(container.querySelector('[data-testid="test-presentation-english-tab"]') as HTMLButtonElement).click()

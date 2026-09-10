@@ -5,10 +5,10 @@ import type { FeatureTests } from './types'
 import type { AgentModelsConfig, KnownModelOption } from '@shared/agent-models'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
 
-export function getFeatureTests(name: string, opts?: ClientOptions): Promise<FeatureTests> {
+export function getFeatureTests(name: string, opts?: ClientOptions, runId?: string): Promise<FeatureTests> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<FeatureTests>(
-    `${baseUrl}/api/features/${encodeURIComponent(name)}/tests`,
+    `${baseUrl}/api/features/${encodeURIComponent(name)}/tests${runId ? `?runId=${encodeURIComponent(runId)}` : ''}`,
     { method: 'GET' },
     fetchImpl,
   )

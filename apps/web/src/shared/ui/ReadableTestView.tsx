@@ -141,6 +141,7 @@ function StoryRow({
   const executionLabel = executionKind === 'running' ? 'RUNNING' : 'FAILED HERE'
   const executionDescription = executionKind === 'running' ? 'Currently running' : 'Last failed here'
   const executionColor = executionKind === 'failed' ? 'var(--danger)' : 'var(--running)'
+  const executionNestingOffset = `${(sequence.length - 1) * 1.25}rem`
   return (
     <li
       data-story-role={step.role}
@@ -160,6 +161,9 @@ function StoryRow({
         onClick={() => onSourceSelect?.({ id: step.id, source: step.source })}
         className="grid w-full grid-cols-[2ch_8ch_minmax(0,1fr)] items-start gap-x-2 px-2 py-0 text-left leading-[1.65] transition-colors hover:bg-running/10"
         style={{
+          marginLeft: executionKind ? `-${executionNestingOffset}` : undefined,
+          width: executionKind ? `calc(100% + ${executionNestingOffset})` : undefined,
+          paddingLeft: executionKind ? `calc(0.5rem + ${executionNestingOffset})` : undefined,
           background: executionKind
             ? `color-mix(in srgb, ${executionColor} 18%, transparent)`
             : changed
@@ -198,13 +202,7 @@ function StoryRow({
           )}
           {executionKind && (
             <span
-              className="ml-2 inline-flex rounded border px-1 text-[9px] font-semibold leading-[1.4]"
-              style={{
-                color: executionColor,
-                borderColor: `color-mix(in srgb, ${executionColor} 65%, transparent)`,
-                background: `color-mix(in srgb, ${executionColor} 10%, transparent)`,
-                fontFamily: 'var(--font-mono)',
-              }}
+              className={`cl-execution-label cl-execution-label-${executionKind}`}
             >
               {executionLabel}
             </span>
@@ -268,7 +266,7 @@ function storyKeyword(step: ReadableStoryItem): string {
     scope: roleLabel(step.role),
     condition: 'IF',
     then: 'THEN',
-    otherwise: 'OTHERWISE',
+    otherwise: 'ELSE',
     switch: 'SWITCH',
     case: 'WHEN',
     loop: 'REPEAT',

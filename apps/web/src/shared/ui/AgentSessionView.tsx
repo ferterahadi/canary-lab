@@ -7,7 +7,8 @@ import { formatElapsedSeconds } from '@/shared/lib/format'
 import { clientKindToDesktopAgent, clientLabel, type ExternalClientKind } from './external-client-branding'
 import { useOpenAgentApp } from './ExternalAgentCard'
 import { EventRow, SystemRow, groupSystemLines, shortSession } from './AgentSessionRows'
-import { EmptyGlyph, EmptyState, type EmptyStateTone } from './EmptyState'
+import { EmptyGlyph, EmptyState } from './EmptyState'
+import { EMPTY_COPY, type EmptyCopy } from './empty-state-copy'
 import { TIMELINE_CSS } from './agent-session-css'
 
 export { Markdown, SubagentThreadRow, SystemRow, formatJson, groupSystemLines, summarizeInput, threadDuration } from './AgentSessionRows'
@@ -84,7 +85,7 @@ interface Props {
   /** Host-supplied copy for the "there is no session" state. A host usually
    *  knows WHY there's no transcript ("this run passed, so no repair agent was
    *  ever spawned") — far more use than the generic fallback below. */
-  empty?: { title: string; body?: string; tone?: EmptyStateTone }
+  empty?: EmptyCopy & { detail?: ReactNode }
 }
 
 interface SingleSessionProps extends Omit<Props, 'sessionSources'> {
@@ -477,15 +478,13 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
   if (error && !state && !hasSystem) {
     return embeddedState(
       <EmptyState
-        icon={EmptyGlyph.agent}
-        title="Couldn't load the session log"
-        body="The agent's transcript is read from the CLI's own session file. This one couldn't be opened."
-        footnote={<code style={{ fontFamily: 'var(--font-mono)' }}>{error}</code>}
+        {...EMPTY_COPY.agentUnreadable}
+        detail={<code style={{ fontFamily: 'var(--font-mono)' }}>{error}</code>}
       />
     )
   }
   if (loading && !state && !hasSystem) {
-    return embeddedState(<EmptyState icon={EmptyGlyph.waiting} title="Loading session…" />)
+    return embeddedState(<EmptyState {...EMPTY_COPY.agentLoading} />)
   }
   if ((!state || (!state.sessionId && state.events.length === 0)) && !hasSystem) {
     if (source?.live) {
@@ -493,11 +492,7 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
         <div className="relative flex h-full min-h-0 flex-col" style={{ background: 'var(--bg-base)' }}>
           {!embedded && <style>{TIMELINE_CSS}</style>}
           <div className="flex min-h-0 flex-1 flex-col">
-            <EmptyState
-              icon={EmptyGlyph.waiting}
-              title="Waiting for the agent's first output"
-              body="The session is starting. Thinking, tool calls, and results stream in here the moment the agent writes its first line — nothing is buffered until the end."
-            />
+            <EmptyState {...EMPTY_COPY.agentWaiting} />
           </div>
           <ol className="agentts-rail agentts-waitrail">
             <LiveTail label="Starting" />
@@ -507,12 +502,7 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
       return embeddedState(waiting)
     }
     return embeddedState(
-      <EmptyState
-        icon={empty?.tone === 'good' ? EmptyGlyph.check : EmptyGlyph.agent}
-        {...(empty?.tone ? { tone: empty.tone } : {})}
-        title={empty?.title ?? 'No agent session was recorded'}
-        body={empty?.body ?? 'Nothing ran here, or it ran outside Canary Lab — there is no transcript to replay.'}
-      />
+      <EmptyState {...(empty ?? EMPTY_COPY.agentNone)} />
     )
   }
 

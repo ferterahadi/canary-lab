@@ -223,6 +223,8 @@ export interface ExtractedTest {
 export interface FeatureSpecFile {
   file: string
   tests: ExtractedTest[]
+  /** Recorded identities are available, but their historical source is not. */
+  recordedSourceUnavailable?: boolean
   parseError?: string
   discoveryError?: string
   discoveryDiagnostics?: string

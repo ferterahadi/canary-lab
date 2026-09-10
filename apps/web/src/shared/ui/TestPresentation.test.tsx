@@ -641,4 +641,5 @@ it('retains the recorded failure when the same source line is also edited', asyn
   const line = container.querySelector('[data-execution-highlight="failed"]')
   expect(line?.getAttribute('data-changed-line')).toBe('true')
   expect(line?.getAttribute('style')).toContain('var(--danger)')
+  expect(line?.textContent).toContain('FAILED HERE')
 })

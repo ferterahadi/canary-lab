@@ -46,14 +46,22 @@ export const FLIGHT_OVERVIEW = 'From a bare repo to tests, coverage evidence, an
  *  centred in a `DOT` -wide lane, so the smaller dot shares the run row's dot
  *  centre and every title in the card starts on `TEXT_INDENT`. */
 export const HERO_ROW = {
-  /** RunRow's `px-3`. */
-  GUTTER: '0.75rem',
   /** RunRow's StatusDot — also the lane a smaller row dot is centred in. */
   DOT: '0.55rem',
   /** RunRow's `gap-2`. */
   GAP: '0.5rem',
-  /** Where every title/meta/stats line in the hero begins. */
-  TEXT_INDENT: 'calc(0.75rem + 0.55rem + 0.5rem)',
+  /** Where every title/meta/stats line in the hero begins, measured from the
+   *  card's own text column: the dot lane plus its gap, nothing else.
+   *
+   *  Nothing in this card carries a gutter of its own any more. It used to add
+   *  RunRow's `px-3` on top of the card's padding, which put four different
+   *  left edges on one pane — card 252, kicker and stats 265, hero title 294,
+   *  previous-run titles 281 — so the one row that should anchor the stage was
+   *  the only thing on it that lined up with nothing. Cancelling that gutter
+   *  with a negative margin fixed the arithmetic and broke the look: a fill and
+   *  a hairline drawn out to the card's border turned the card into a slab
+   *  inside a slab. The rows are flush and unfilled instead. */
+  TEXT_INDENT: 'calc(0.55rem + 0.5rem)',
 } as const
 
 /** The column as a wrapper, so a panel with two render branches cannot cap one

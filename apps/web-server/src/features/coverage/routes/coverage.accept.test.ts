@@ -6,11 +6,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { coverageRoutes } from './coverage'
 import { applyExternalSummary } from '../logic/coverage/feature-docs'
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
-import type { CoverageLedger } from '../../../../../../shared/coverage/types'
-
-// The requirement-acceptance route (D11): the human-only lever that marks a
-// wording accepted from the ledger. It lives beside the other coverage routes
-// and announces itself as `coverage-changed`, so every open ledger re-pulls.
 
 let tmp: string
 let featuresDir: string
@@ -48,22 +43,15 @@ afterEach(async () => {
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
-describe('POST /api/features/:name/requirements/:id/accept', () => {
-  it('accepts the wording, announces coverage-changed, and the ledger reflects it', async () => {
+describe('retired requirement confirmation endpoint', () => {
+  it('rejects the old endpoint without changing the summary, ledger, or workspace events', async () => {
+    const file = path.join(featuresDir, 'checkout', 'docs', '_prd-summary.json')
+    const before = fs.readFileSync(file, 'utf-8')
+    const ledgerBefore = (await app.inject({ method: 'GET', url: '/api/features/checkout/coverage' })).json()
     const res = await app.inject({ method: 'POST', url: '/api/features/checkout/requirements/R1/accept' })
-    expect(res.statusCode).toBe(200)
-    const body = res.json() as { feature: string; requirementId: string; acceptedAt: string; acceptedFingerprint: string }
-    expect(body.requirementId).toBe('R1')
-    expect(body.acceptedFingerprint).toMatch(/^[0-9a-f]{64}$/)
-    expect(events).toEqual([{ type: 'coverage-changed', feature: 'checkout' }])
-
-    const ledger = (await app.inject({ method: 'GET', url: '/api/features/checkout/coverage' })).json() as CoverageLedger
-    expect(ledger.requirements[0].requirement.acceptedAt).toBe(body.acceptedAt)
-  })
-
-  it('404s an unknown requirement and an unknown feature, announcing nothing', async () => {
-    expect((await app.inject({ method: 'POST', url: '/api/features/checkout/requirements/R9/accept' })).statusCode).toBe(404)
-    expect((await app.inject({ method: 'POST', url: '/api/features/nope/requirements/R1/accept' })).statusCode).toBe(404)
+    expect(res.statusCode).toBe(404)
+    expect(fs.readFileSync(file, 'utf-8')).toBe(before)
+    expect((await app.inject({ method: 'GET', url: '/api/features/checkout/coverage' })).json()).toEqual(ledgerBefore)
     expect(events).toEqual([])
   })
 })

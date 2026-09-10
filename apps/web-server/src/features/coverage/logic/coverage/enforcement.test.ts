@@ -80,14 +80,6 @@ describe('deriveRequirementEnforcement — absent facts', () => {
   })
 })
 
-describe('deriveRequirementEnforcement — acceptance', () => {
-  it('reports whether a human accepted the CURRENT wording, an older one, or none', () => {
-    expect(deriveRequirementEnforcement(req(), none, D1).accepted).toBe('none')
-    expect(deriveRequirementEnforcement(req({ acceptedAt: D2, acceptedFingerprint: 'fp-now' }), none, D1).accepted).toBe('current')
-    expect(deriveRequirementEnforcement(req({ acceptedAt: D2, acceptedFingerprint: 'fp-old' }), none, D1).accepted).toBe('outdated')
-  })
-})
-
 describe('applyEnforcement — onto a computed ledger', () => {
   const requirements: Requirement[] = [
     req({ id: 'R1', title: 'Totals' }),
@@ -139,5 +131,23 @@ describe('applyEnforcement — onto a computed ledger', () => {
     const out = applyEnforcement(ledger, { generatedAt: D1, historyFor: () => ({ testChanges: [] }) })
     expect(out.enforcement?.runId).toBeUndefined()
     expect(out.enforcement?.provenUnchanged).toBe(0)
+  })
+})
+
+describe('deriveRequirementEnforcement — legacy confirmation is inert', () => {
+  it.each([
+    { proof: D3, wording: D1, changes: [change(D2)] },
+    { proof: D2, wording: D1, changes: [change(D3, 'weaker')] },
+    { proof: D2, wording: D1, changes: [change(D3)] },
+    { proof: D2, wording: D3, changes: [] },
+  ])('derives the same proof state with or without old acceptance metadata: %j', ({ proof, wording, changes }) => {
+    const requirement = req({ wordingChangedAt: wording })
+    const history = { provenAt: { runId: 'r1', at: proof }, testChanges: changes }
+    const expected = deriveRequirementEnforcement(requirement, history, D1)
+    for (const fingerprint of ['fp-now', 'fp-old']) {
+      const legacy = { ...requirement, acceptedAt: D4, acceptedFingerprint: fingerprint }
+      expect(deriveRequirementEnforcement(legacy, history, D1)).toEqual(expected)
+    }
+    expect(expected).not.toHaveProperty('accepted')
   })
 })

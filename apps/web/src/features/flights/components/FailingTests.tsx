@@ -42,10 +42,19 @@ interface ParsedFailure {
 
 const PATH_DESC: Record<string, string> = { happy: 'happy', sad: 'failure', edge: 'edge-case' }
 
+/** How many failures the summary shows before handing off. A run with 12
+ *  failures rendered 12 two-line rows, which made this band four times taller
+ *  than everything else on the stage put together — the summary became the
+ *  longest surface in the app, which is the thing R82 set out to stop. Six is
+ *  enough to see the shape of the failure (one spec? one requirement? one
+ *  variant?); the rest are one click away, where they can be read properly. */
+const VISIBLE_FAILURES = 6
+
 export function FailingTests({
   failing,
   knownTests,
   onOpenTest,
+  onOpenAll,
   testId = 'run-hero-failing',
 }: {
   failing: RunSummaryFailedEntry[]
@@ -56,21 +65,26 @@ export function FailingTests({
    *  `name` — the same key the run detail's Playwright tab matches playback
    *  tests on, so it lands on this exact test. Omitted → rows are inert text. */
   onOpenTest?: (testName: string) => void
+  /** Open the run detail on the whole list — the destination for the failures
+   *  past `VISIBLE_FAILURES`. Omitted → the remainder is stated, not offered. */
+  onOpenAll?: () => void
   testId?: string
 }) {
   if (failing.length === 0) return null
   const parsed = failing.map((entry) => parseFailure(entry, knownTests))
+  const shown = parsed.slice(0, VISIBLE_FAILURES)
+  const hidden = parsed.length - shown.length
   return (
     // A section of the run hero, not its own card — the run stays ONE object
     // (R80). Same rubric + dashed-rule header the previous-runs band uses.
-    <section className="mt-3 min-w-0" data-testid={testId}>
-      <div className="mb-1 flex items-center gap-2">
+    <section className="mt-4 min-w-0" data-testid={testId}>
+      <div className="mb-1.5 flex items-center gap-2">
         <span className="cl-rubric">Failing tests</span>
         <span className="h-px flex-1 border-t border-dashed border-line" />
         <span className="cl-count-chip">{failing.length}</span>
       </div>
       <ul className="m-0 flex list-none flex-col p-0">
-        {parsed.map((f, i) => (
+        {shown.map((f, i) => (
           <FailureRow
             key={`${f.entry.id ?? f.entry.name}-${i}`}
             failure={f}
@@ -78,6 +92,22 @@ export function FailingTests({
           />
         ))}
       </ul>
+      {hidden > 0 && (
+        <div className="mt-2" style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}>
+          {onOpenAll ? (
+            <button
+              type="button"
+              data-testid={`${testId}-more`}
+              onClick={onOpenAll}
+              className="cl-type-meta text-muted transition-colors hover:text-secondary hover:underline"
+            >
+              {hidden} more on the run detail →
+            </button>
+          ) : (
+            <span className="cl-type-meta text-muted">{hidden} more not shown</span>
+          )}
+        </div>
+      )}
     </section>
   )
 }
@@ -97,27 +127,29 @@ function FailureRow({ failure, onOpen }: { failure: ParsedFailure; onOpen?: () =
           HERO_ROW. Keeps the subordinate weight without a second left edge. */}
       <span
         aria-hidden="true"
-        className="mt-[6px] flex shrink-0 items-center justify-center"
+        className="mt-[5px] flex shrink-0 items-center justify-center"
         style={{ width: HERO_ROW.DOT }}
       >
         <span className="h-1.5 w-1.5 rounded-full bg-danger" />
       </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="line-clamp-2 text-[12px] leading-snug text-primary" title={title}>
+      <span className="flex min-w-0 flex-1 flex-col">
+        {/* The title WRAPS rather than truncating — the words that separate two
+            failures of the same requirement sit at the end of the sentence. */}
+        <span className="line-clamp-2 cl-type-data text-primary group-hover:underline" title={title}>
           {title}
         </span>
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          {tags.map((t) => <TagChip key={`${t.kind}-${t.value}`} tag={t} />)}
+        <span className="mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-2.5 font-mono cl-type-meta">
+          {tags.map((t) => <TagText key={`${t.kind}-${t.value}`} tag={t} />)}
           {shortLoc && (
-            <span className="font-mono text-[10px] text-muted" title={fullLoc ?? shortLoc}>
+            <span className="text-muted" title={fullLoc ?? shortLoc}>
               {shortLoc}
             </span>
           )}
           {typeof entry.durationMs === 'number' && entry.durationMs > 0 && (
-            <span className="font-mono text-[10px] text-muted">{formatMs(entry.durationMs)}</span>
+            <span className="text-muted">{formatMs(entry.durationMs)}</span>
           )}
           {typeof entry.retry === 'number' && entry.retry > 0 && (
-            <span className="font-mono text-[10px] text-warning" title="Playwright retried this test">
+            <span className="text-warning" title="Playwright retried this test">
               retry {entry.retry}
             </span>
           )}
@@ -126,30 +158,40 @@ function FailureRow({ failure, onOpen }: { failure: ParsedFailure; onOpen?: () =
     </>
   )
   return (
-    <li className="border-t border-line-subtle first:border-t-0" data-testid={`failing-test-${entry.name}`}>
+    // No divider, no fill, no rounding: twelve of these inside a card turned it
+    // into a striped data grid boxed inside a panel, and a hairline drawn out to
+    // the card's border read as the card splitting in two. A failure is a line
+    // of text under the run it belongs to — the dot marks it, the hover
+    // underlines the title, and the card keeps ONE surface.
+    <li data-testid={`failing-test-${entry.name}`}>
       {onOpen ? (
         <button
           type="button"
           data-testid={`failing-open-${entry.name}`}
           onClick={onOpen}
           title="Open this failure on the run detail"
-          className="cl-hover-row flex w-full items-start gap-2 rounded py-2 text-left transition-colors"
-          style={{ paddingInline: HERO_ROW.GUTTER }}
+          className="group flex w-full items-start gap-2 py-1.5 text-left"
         >
           {body}
         </button>
       ) : (
-        <div className="flex w-full items-start gap-2 py-2" style={{ paddingInline: HERO_ROW.GUTTER }}>{body}</div>
+        <div className="flex w-full items-start gap-2 py-1.5">{body}</div>
       )}
     </li>
   )
 }
 
-function TagChip({ tag }: { tag: TestTag }) {
-  const req = tag.kind === 'req'
+/** A test's `@req-` / `@path-` / `@variant-` label. Plain mono text, not a
+ *  bordered chip: three of them per row over twelve rows put thirty-six boxes
+ *  in one card, and the `@req-` chip's accent border made every row compete for
+ *  the one accent the card is allowed (the run's own arrow). The literal
+ *  `@req-R4` spelling is what carries the vocabulary across to the coverage
+ *  ledger, and that survives with no chrome at all — a requirement reads one
+ *  step brighter than the incidentals beside it. */
+function TagText({ tag }: { tag: TestTag }) {
   return (
     <span
-      className={`rounded border px-1.5 py-px font-mono text-[10px] ${req ? 'border-accent/30 text-primary' : 'border-line text-muted'}`}
+      className={tag.kind === 'req' ? 'text-secondary' : 'text-muted'}
       title={tag.kind === 'path'
         ? `Exercises the ${PATH_DESC[tag.value] ?? tag.value} path`
         : tag.kind === 'req' ? `Covers requirement ${tag.value}` : `Only tested for: ${tag.value}`}

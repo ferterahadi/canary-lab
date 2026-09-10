@@ -42,6 +42,12 @@ it('returns full source and source-linked English from the same committed/curren
   expect(result.baseline).toBe('head')
   expect(result.after.tests[0]).toMatchObject({ line: 3, endLine: 11 })
   expect(result.after.tests[0].readable.story?.steps.length).toBeGreaterThan(0)
+  expect(result.after.story?.steps.slice(0, 3).map((item) => item.text)).toEqual([
+    'Import test, expect from "@playwright/test"',
+    'Set constant sharedSetup to "keep this context"',
+    'Test: "reads own scope"; with an asynchronous callback; receiving an object with properties request',
+  ])
+  expect(result.before.story?.steps[0].source).toMatchObject({ file: 'e2e/a.spec.ts', startLine: 1, endLine: 1 })
   expect(result.patch).toContain(" const sharedSetup = 'keep this context'")
   expect(result.assessment.tests[0].changes[0]).toMatchObject({ before: { line: 7 }, after: { line: 7 } })
 })

@@ -118,14 +118,25 @@ proof state for Flight and evaluation surfaces. The Coverage headline and gap
 groups remain claim-based. Strictness describes the strongest assertion layer
 in each test.
 
-Each requirement card also carries a time-axis chip and strip: which run last
-proved it, when a mapped test last changed (with the strength verdict), when
-the wording last changed, and where the wording came from. The chip reads
-**Proven, unchanged**, **Tests weakened since proof**, **Proof stale**, or
-**Wording ahead of tests**; weakened requirements sort to the top. **Accept
-wording** records that a human accepted the current wording, so a later change
-shows as outdated instead of being forgotten. The header states how many
-requirements are proven unchanged in the latest run.
+At rest a requirement is one row: its id, its title, one square per case it
+has to cover, and a status dot only when something is wrong. The square carries
+the whole claim-versus-proof distinction — hollow means no test points at that
+case, sky means a test claims it, and green means a run actually passed it.
+A red dot means a mapped test was weakened after the proof; an amber one means
+a requirement that *is* claimed has lost its proof. Weakened requirements sort
+to the top.
+
+Opening a row shows the requirement's own sentence, then one
+block per promise the requirement makes (happy path, unhappy path), then — for
+a requirement that spans channels — a grid with the channels down the side and
+the paths across, worst-covered channel first.
+
+It closes with a short verdict label, such as *Not provable yet* when coverage
+is incomplete,
+*Not proven yet* when tests claim it but no run has passed them, *Proven*,
+*Proof out of date*, or *A test was weakened after the proof*. The three
+underlying dates sit on the verdict's dot. The header states how many requirements are proven unchanged in
+the latest run.
 
 Regenerating the PRD summary preserves surviving requirement IDs. Changes to
 source docs mark the summary and dependent coverage state stale instead of

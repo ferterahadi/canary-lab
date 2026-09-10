@@ -52,6 +52,7 @@ export function RunRow({
   showPorts = true,
   passCount = 'meta',
   arrow = 'hover',
+  chrome = 'row',
 }: {
   run: RunIndexEntry
   detail: RunDetail | undefined
@@ -75,6 +76,15 @@ export function RunRow({
    *  short list whose whole point is going somewhere — the flight run stage's
    *  Previous runs — so the affordance reads at rest. */
   arrow?: 'hover' | 'always'
+  /** `row` (default) is a list item: its own gutter, rounding and hover fill,
+   *  scanned among siblings. `headline` is a card's own opening line — the
+   *  flight run stage's Latest run. It drops the gutter so its text starts on
+   *  the card's OWN left edge (the column the kicker, the stats line and the
+   *  failure rows share), and it drops the fill: a filled band the width of the
+   *  card read as a nested slab, and it cut the run's title off from the stats
+   *  line that belongs to it. Hover underlines the title instead, and the
+   *  always-on arrow carries the affordance at rest. */
+  chrome?: 'row' | 'headline'
 }) {
   const ports = showPorts ? portsLabel(detail) : null
   const note = queueNote(run, detail)
@@ -94,12 +104,17 @@ export function RunRow({
       <button
         type="button"
         onClick={() => onSelect(run)}
-        className="group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left cl-hover-row"
+        className={`group flex w-full items-center gap-2 text-left ${
+          chrome === 'headline' ? 'pb-0.5' : 'rounded-md px-3 py-2 cl-hover-row'
+        }`}
         title={`Go to run ${run.runId}`}
       >
         <StatusDot state={dot.state} pulse={dot.pulse && !waiting} halo={dot.pulse && !waiting} className="shrink-0" />
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-[13px]" style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
+          <span
+            className={`truncate text-[13px] ${chrome === 'headline' ? 'group-hover:underline' : ''}`}
+            style={{ color: 'var(--text-primary)', fontWeight: 500 }}
+          >
             {primaryLabel ?? run.feature}
           </span>
           <span className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>

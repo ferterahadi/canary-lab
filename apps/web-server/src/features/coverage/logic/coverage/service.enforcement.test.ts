@@ -73,7 +73,6 @@ describe('computeFeatureCoverage — the time axis', () => {
       state: 'proven-unchanged',
       provenAt: { runId: 'r1', at: '2026-09-02T00:00:00.000Z' },
       wordingChangedAt: '2026-09-01T00:00:00.000Z',
-      accepted: 'none',
     })
     expect(byId.get('R2')!.enforcement?.state).toBe('wording-ahead')
     expect(ledger.enforcement).toEqual({

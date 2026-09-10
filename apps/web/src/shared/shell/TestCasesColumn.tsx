@@ -29,12 +29,14 @@ import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
 type TestCardExecutionHighlight = TestExecutionLineHighlight & { sourceLine: number }
 
 interface ExpandedTestSelection {
-  feature: string
+  sourceKey: string
   key: string | null
   autoExpandPending: boolean
 }
 
 interface Props {
+  currentTests?: boolean
+  onCurrentTestsChange?: (current: boolean) => void
   feature: string | null
   activeRunSummary: RunSummary | undefined
   activeRunManifest?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'specEdits' | 'runId'>
@@ -46,17 +48,20 @@ interface Props {
   dirtySpecs?: DirtySpecSummary[]
 }
 
-export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, activeRunStatus, onTotalTestsChange, onReviewTest, dirtySpecs = [] }: Props) {
+export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, activeRunStatus, onTotalTestsChange, onReviewTest, currentTests = false, onCurrentTestsChange, dirtySpecs = [] }: Props) {
   // The spec list refetches when a `tests-changed` event fires for the selected
   // feature (App gates the invalidation to the visible feature).
   const refreshKey = useInvalidationKey('tests')
+  const runId = activeRunManifest?.runId
+  const sourceKey = `${feature ?? ''}:${runId ?? 'workspace'}`
+  const recordedRosterKey = runId ? JSON.stringify(activeRunSummary?.knownTests ?? []) : ''
   const repairState = useDiscoveryRepair(feature)
   const latestRepair = repairState.repairs[0]
-  const activeRepair = repairState.repairs.find(discoveryRepairActive)
+  const activeRepair = runId ? undefined : repairState.repairs.find(discoveryRepairActive)
   const [showRepairHistory, setShowRepairHistory] = useState(false)
   const repairCompletion = latestRepair && !discoveryRepairActive(latestRepair) ? latestRepair.id + latestRepair.updatedAt : ''
-  const [loaded, setLoaded] = useState<{ feature: string; specs: FeatureSpecFile[] } | null>(null)
-  const specs = loaded?.feature === feature ? loaded.specs : null
+  const [loaded, setLoaded] = useState<{ sourceKey: string; specs: FeatureSpecFile[] } | null>(null)
+  const specs = loaded?.sourceKey === sourceKey ? loaded.specs : null
   const previousLists = useRef(new Map<string, FeatureSpecFile[]>())
   const [discovery, setDiscovery] = useState<{ feature: string; specs: FeatureSpecFile[] } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -77,14 +82,14 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
     let cancelled = false
     let retryTimer: ReturnType<typeof setTimeout> | undefined
     let attempts = 0
-    setExpandedTest((current) => current?.feature === feature
+    setExpandedTest((current) => current?.sourceKey === sourceKey
       ? current
-      : { feature, key: null, autoExpandPending: true })
+      : { sourceKey, key: null, autoExpandPending: true })
     setLoadError(null)
     setPromptCopied(false)
     setCopyError(null)
     setDiscovery(null)
-    setLoaded(previousLists.current.has(feature) ? { feature, specs: previousLists.current.get(feature)! } : null)
+    setLoaded(previousLists.current.has(sourceKey) ? { sourceKey, specs: previousLists.current.get(sourceKey)! } : null)
     const failed = (message: string): void => {
       if (cancelled) return
       setLoadError(message)
@@ -94,7 +99,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
     }
     const load = (): void => {
       attempts += 1
-      api.getFeatureTests(feature)
+      api.getFeatureTests(feature, undefined, runId)
         .then((data) => {
           if (cancelled) return
           const discoveryError = data.find((spec) => spec.discoveryError)?.discoveryError
@@ -102,20 +107,20 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
           const availableKeys = new Set(
             data.flatMap((spec) => spec.tests.map((test) => workspaceTestKey(spec.file, test))),
           )
-          previousLists.current.set(feature, data)
+          previousLists.current.set(sourceKey, data)
           setDiscovery(null)
-          setLoaded({ feature, specs: data })
+          setLoaded({ sourceKey, specs: data })
           setLoadError(null)
           setExpandedTest((current) => {
-            if (current?.feature !== feature || current.autoExpandPending) {
+            if (current?.sourceKey !== sourceKey || current.autoExpandPending) {
               return {
-                feature,
+                sourceKey,
                 key: availableKeys.values().next().value ?? null,
                 autoExpandPending: false,
               }
             }
             if (current.key !== null && !availableKeys.has(current.key)) {
-              return { feature, key: null, autoExpandPending: false }
+              return { sourceKey, key: null, autoExpandPending: false }
             }
             return current
           })
@@ -124,18 +129,17 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
     }
     load()
     return () => { cancelled = true; clearTimeout(retryTimer) }
-  }, [feature, refreshKey, retryKey])
+  }, [feature, sourceKey, runId, recordedRosterKey, refreshKey, retryKey])
 
   const dirtyRevision = JSON.stringify(dirtySpecs)
 
   const [runDifferences, setRunDifferences] = useState<string[]>([])
-  const runId = activeRunManifest?.suiteSnapshot?.kind === 'taken' ? activeRunManifest.runId : undefined
   const runFiles = JSON.stringify((specs ?? []).map((spec) => spec.file))
   useEffect(() => {
     let cancelled = false
     setRunDifferences([])
-    if (feature && runId) {
-      const featureDir = activeRunManifest?.featureDir
+    if (feature && runId && activeRunManifest?.suiteSnapshot?.kind === 'taken') {
+      const featureDir = activeRunManifest?.suiteSnapshot?.kind === 'taken' ? activeRunManifest.suiteSnapshot.dir : activeRunManifest?.featureDir
       const files = (JSON.parse(runFiles) as string[]).map((file) => featureDir && file.startsWith(`${featureDir}/`) ? file.slice(featureDir.length + 1) : file)
       for (const file of files) void api.getTestFileDifference(feature, file, runId).then((review) => {
         if (!cancelled && review.changed) setRunDifferences((previous) => [...previous, file])
@@ -167,7 +171,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
 
   const displaySpecs = specs
   const incompleteSpecs = discovery?.feature === feature ? discovery.specs : []
-  const repairFailure = latestRepair?.status === 'failed' && manualRetryAfter !== repairCompletion ? latestRepair.diagnostic : null
+  const repairFailure = !runId && latestRepair?.status === 'failed' && manualRetryAfter !== repairCompletion ? latestRepair.diagnostic : null
   const discoveryError = loadError || repairFailure
   const diagnostics = repairFailure || incompleteSpecs.find((spec) => spec.discoveryDiagnostics)?.discoveryDiagnostics
   const repairPrompt = incompleteSpecs.find((spec) => spec.discoveryRepairPrompt)?.discoveryRepairPrompt
@@ -198,12 +202,14 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
       <div className="cl-panel-header flex items-center justify-between gap-2 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <span className="cl-kicker">Tests</span>
-          {activeRunManifest?.suiteSnapshot?.kind === 'taken' && (
-            <span className="text-[10px] text-secondary" title="Statuses are from the selected run’s suite snapshot. The source below is the current workspace; edits made afterward have not been verified.">
-              Last execution
+          {currentTests && <span className="text-[10px] text-secondary">Current source</span>}
+          {runId && (
+            <span className="text-[10px] text-secondary" title="Tests and statuses are from the selected run. Source is shown only when it was saved with that run.">
+              Selected run
             </span>
           )}
         </div>
+        {(runId || currentTests) && onCurrentTestsChange && <button type="button" className="cl-button px-2 py-1 text-[11px]" onClick={() => onCurrentTestsChange(!currentTests)}>{currentTests ? 'View recorded results' : 'View current tests'}</button>}
         {dirtySpecs.length > 0 && onReviewTest && <button className="cl-button px-2 py-1 text-[11px]" onClick={() => onReviewTest(dirtySpecs[0].file)}>Review {dirtySpecs.length} {dirtySpecs.length === 1 ? 'file' : 'files'}</button>}
         {runDifferences.length > 0 && onReviewTest && <button className="cl-button px-2 py-1 text-[11px]" title="Current tests differ from the selected run’s snapshot. Saving in Git does not validate them." onClick={() => onReviewTest(runDifferences[0], undefined, 'run')}>Different from this run</button>}
         <TestsHeaderIndicator
@@ -215,6 +221,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
         />
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
+        {specs?.some((spec) => spec.recordedSourceUnavailable) && <p role="status" className="mb-3 text-xs text-secondary">Showing recorded tests and results. Historical source is unavailable for some tests in this run.</p>}
         {repairState.error && <p role="status" className="mb-2 text-xs text-warning">{repairState.error}</p>}
         {activeRepair ? <DiscoveryRepairActivity repair={activeRepair} /> : <>
         {latestRepair && <details className="mb-2 text-xs" open={showRepairHistory} onToggle={(event) => setShowRepairHistory(event.currentTarget.open)}>
@@ -223,16 +230,16 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
         </details>}
         {discoveryError && (
           <div role="status" className="mb-2 rounded-md border px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
-            <div className="font-medium text-primary">Test discovery failed</div>
+            <div className="font-medium text-primary">{runId ? 'Recorded tests unavailable' : 'Test discovery failed'}</div>
             <p className="mt-1">{discoveryError}</p>
-            <p className="mt-1">{displaySpecs ? 'Showing the previous test list until discovery succeeds.' : 'A complete test list is unavailable. This is a discovery error, not a test result.'}</p>
-            <div className="mt-3"><Section title="Two ways to repair it" bodyClassName="divide-y divide-[var(--border-default)]">
+            <p className="mt-1">{runId ? 'Open Playwright to inspect the recorded results. Current workspace tests cannot replace this run’s evidence.' : displaySpecs ? 'Showing the previous test list until discovery succeeds.' : 'A complete test list is unavailable. This is a discovery error, not a test result.'}</p>
+            {!runId && <div className="mt-3"><Section title="Two ways to repair it" bodyClassName="divide-y divide-[var(--border-default)]">
               <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-3"><div>In Canary Lab<p className="text-[11px] text-muted">Runs in this workspace.</p></div><button type="button" className="cl-button px-2 py-1" disabled={repairState.starting} onClick={() => { void repairState.start() }}>{repairState.starting ? 'Starting…' : latestRepair?.status === 'failed' ? 'Resume repair' : 'Repair in Canary Lab'}</button></div>
               <div className="flex flex-col gap-1 px-3 py-3"><div>In your agent <span className="text-[11px] text-muted">· Paste in Claude or Codex.</span></div><CopyField value={`/canary-lab-repair-discovery ${feature}`} label="discovery repair command" /></div>
-            </Section></div>
+            </Section></div>}
             <details className="mt-2"><summary className="cursor-pointer text-accent">Manual recovery</summary><div className="mt-2 flex flex-wrap gap-2">
               {repairPrompt && <button type="button" className="cl-button px-2 py-1" onClick={copyRepairPrompt}>{promptCopied ? 'Copied repair prompt' : 'Copy repair prompt'}</button>}
-              <button type="button" className="cl-button px-2 py-1" onClick={() => { setManualRetryAfter(repairCompletion); setRetryKey((key) => key + 1) }}>Retry discovery</button>
+              <button type="button" className="cl-button px-2 py-1" onClick={() => { setManualRetryAfter(repairCompletion); setRetryKey((key) => key + 1) }}>{runId ? 'Reload recorded tests' : 'Retry discovery'}</button>
             </div>
             </details>
             {copyError && <p role="alert" className="mt-2 text-danger">{copyError}</p>}
@@ -258,13 +265,17 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
         {!displaySpecs ? (
           !loadError && <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading...</div>
         ) : displaySpecs.length === 0 ? (
-          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No spec files found.</div>
+          <div role="status" className="text-xs text-secondary">{runId
+            ? isRunActivelyTesting || activeRunStatus === 'queued' || activeRunStatus === 'healing'
+              ? 'Waiting for this run to record its test list.'
+              : 'This run has no recorded test list. Select another run or start a new run to record its tests. Any available execution evidence is in Playwright.'
+            : 'No spec files found.'}</div>
         ) : (
           <div className="space-y-1.5">
             {displaySpecs.flatMap((spec) => {
-              const dirtySpec = dirtySpecs.find((item) => spec.file === item.file || spec.file.endsWith(`/${item.file}`))
+              const dirtySpec = !runId ? dirtySpecs.find((item) => spec.file === item.file || spec.file.endsWith(`/${item.file}`)) : undefined
               return spec.tests.map((t) => {
-                const diff = t.sourceChanges
+                const diff = runId ? undefined : t.sourceChanges
                 const modified = diff ? diff.count > 0 : dirtySpec?.affectedTests.includes(t.name) ?? false
                 const changedLines = diff ? new Set(diff.changedLines.map((line) => line - (t.bodyLine ?? t.line) + 1)) : undefined
                 // `t.id` used to be read here as a preferred key. The tests
@@ -273,7 +284,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
                 // the mirror declared a field the server does not send.
                 const sourceFile = t.sourceFile ?? spec.file
                 const key = workspaceTestKey(spec.file, t)
-                const isExpanded = expandedTest?.feature === feature && expandedTest.key === key
+                const isExpanded = expandedTest?.sourceKey === sourceKey && expandedTest.key === key
                 const testIdentity = summaryIdentityForWorkspaceTest(
                   t.name,
                   t.line,
@@ -308,7 +319,9 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
                     sourceFile={sourceFile}
                     testNumber={testNumbering.get(testNumberKey(sourceFile, t.line))}
                     test={t}
+                    sourceUnavailable={spec.recordedSourceUnavailable}
                     status={statusForTest(testIdentity, activeRunSummary, isRunActivelyTesting)}
+                    showStatus={!currentTests}
                     isRunningTest={isRunningTest}
                     runningStep={runningTest?.step}
                     executionHighlight={executionHighlight}
@@ -316,7 +329,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
                     modified={modified}
                     changedLines={changedLines}
                     onToggle={() => setExpandedTest({
-                      feature,
+                      sourceKey,
                       key: isExpanded ? null : key,
                       autoExpandPending: false,
                     })}
@@ -372,7 +385,13 @@ function summaryIdentityForWorkspaceTest(
 
 function formatLoadError(err: unknown): string {
   if (err instanceof api.ApiError) {
-    return `Unable to load tests for this suite. Server returned HTTP ${err.status}.`
+    const context = `Unable to load tests for this suite. Server returned HTTP ${err.status}.`
+    if (err.body && typeof err.body === 'object') {
+      const body = err.body as { message?: unknown; error?: unknown }
+      const message = typeof body.message === 'string' ? body.message : body.error
+      if (typeof message === 'string') return `${context} ${message}`
+    }
+    return context
   }
   return 'Unable to load tests for this suite.'
 }
@@ -381,7 +400,9 @@ function TestCard({
   sourceFile,
   testNumber,
   test,
+  sourceUnavailable,
   status,
+  showStatus,
   isRunningTest,
   runningStep,
   executionHighlight,
@@ -393,7 +414,9 @@ function TestCard({
   sourceFile: string
   testNumber?: number
   test: ExtractedTest
+  sourceUnavailable?: boolean
   status: StepStatus
+  showStatus: boolean
   isRunningTest: boolean
   runningStep?: RunSummaryRunningStep
   executionHighlight?: TestCardExecutionHighlight
@@ -404,16 +427,13 @@ function TestCard({
   changedLines?: Set<number>
   onToggle: () => void
 }) {
-  const lineColor = executionHighlight?.kind === 'failed' ? 'var(--danger)' : 'var(--running)'
-  const lineMessage = executionHighlight?.kind === 'failed'
-    ? `Last failed line · line ${executionHighlight.sourceLine}`
-    : executionHighlight
-      ? `Running now · line ${executionHighlight.sourceLine}${runningStep?.category ? ` · ${runningStep.category}` : ''}`
-      : isRunningTest
-        ? runningStep?.category
-          ? `Running now · ${runningStep.category} · source line unavailable`
-          : 'Running test · source line unavailable'
-        : undefined
+  const lineMessage = executionHighlight?.kind === 'running'
+    ? `Running now · line ${executionHighlight.sourceLine}${runningStep?.category ? ` · ${runningStep.category}` : ''}`
+    : isRunningTest
+      ? runningStep?.category
+        ? `Running now · ${runningStep.category} · source line unavailable`
+        : 'Running test · source line unavailable'
+      : undefined
   return (
     <div
       className={`cl-card cl-card-hover transition-all duration-150 ${colorClassForStatus(status)}`}
@@ -458,7 +478,7 @@ function TestCard({
         >
           :{test.line}
         </span>
-        <StepStatusBadge status={status} />
+        {showStatus && <StepStatusBadge status={status} />}
       </button>
       {expanded && (
         <div className="space-y-2 px-3 pb-3">
@@ -467,8 +487,8 @@ function TestCard({
               className="rounded-md border px-2 py-1 text-[10px]"
               style={{
                 color: 'var(--text-secondary)',
-                borderColor: lineColor,
-                background: `color-mix(in srgb, ${lineColor} 14%, transparent)`,
+                borderColor: 'var(--running)',
+                background: 'color-mix(in srgb, var(--running) 14%, transparent)',
                 fontFamily: 'var(--font-mono)',
               }}
             >
@@ -487,12 +507,12 @@ function TestCard({
                 : undefined
             }
           >
-            <TestPresentation
+            {sourceUnavailable ? <p className="text-xs text-secondary">Source was not retained for this test. Its status comes from the recorded run.</p> : <TestPresentation
               test={test}
               sourceFile={sourceFile}
               executionHighlight={executionHighlight}
               changedLines={changedLines}
-            />
+            />}
           </div>
         </div>
       )}

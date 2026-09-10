@@ -1,22 +1,73 @@
 import { type ReactNode, useState } from 'react'
 import type { CoverageLedger, GapType, TestCoverage, TestStrength } from '@/shared/api/types'
+import { EmptyGlyph } from '@/shared/ui/EmptyState'
 import { GAP_META, STRENGTH_META, STRENGTH_ORDER, countFor } from './CoverageCards'
 
-// Empty main (summary ABSENT) — the rail holds the docs + Generate CTA, so the
-// main area just points there. Never a dead-end (cl_ui-design-philosophy).
-export function CoverageEmptyMain({ railOpen }: { railOpen: boolean }) {
+// Empty main (summary ABSENT). The rail owns the docs and the Generate button, so
+// this pane's job is to say what the exercise IS — a paragraph floating in a
+// full-screen void said only that something was missing. It reads as the app's own
+// register: a left-aligned block of hairline-separated NAMED bands, the same shape
+// the requirement detail uses, with the shared empty-state mark on top.
+//
+// Not the shared `EmptyState`: that primitive is deliberately actionless and
+// height-locked so side-by-side run panes match, which is the opposite of a
+// full-column takeover that has to teach a three-step flow and offer a way in.
+// It still borrows that component's glyph set and mark treatment, so the two read
+// as one family (cl_reuse-shared-logic).
+export function CoverageEmptyMain({ railOpen, onOpenRail }: { railOpen: boolean; onOpenRail: () => void }) {
   return (
     <div className="min-h-0 flex-1 overflow-auto" style={{ scrollbarGutter: 'stable' }} data-testid="coverage-empty-main">
-      <div style={{ maxWidth: 440, margin: '64px auto 0', padding: '0 24px', textAlign: 'center' }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8 }}>
-          No coverage yet
-        </div>
-        <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 8px' }}>
-          A requirement coverage ledger in one exercise
-        </h2>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
-          {railOpen ? '← Add source docs' : 'Open the Docs rail to add source docs'} in the rail, then <strong style={{ color: 'var(--text-primary)' }}>Generate</strong>.
-          Canary extracts requirements with stable ids and maps your tests to them — summary and coverage together.
+      <div className="clcov-empty">
+        <span aria-hidden="true" className="clcov-empty-mark">{EmptyGlyph.journal}</span>
+        <h2 className="clcov-empty-h">Find out what your tests actually prove</h2>
+        <p className="clcov-empty-p">
+          Canary has nothing to check your tests against yet. Give it the docs that say how
+          this suite is meant to behave, and it works out the rest.
+        </p>
+        <ol className="clcov-empty-steps">
+          <li className="clcov-empty-step">
+            <span className="clcov-empty-n" aria-hidden="true">1</span>
+            <div className="clcov-empty-body">
+              <span className="clcov-empty-name">Add your docs</span>
+              <p className="clcov-empty-say">
+                Drop a spec, a ticket, or a page of notes into Source docs
+                {railOpen ? ' on the left' : ''}. Markdown, plain text, PDF and Word all work.
+              </p>
+              {!railOpen && (
+                <button
+                  type="button"
+                  data-testid="coverage-empty-open-rail"
+                  onClick={onOpenRail}
+                  className="cl-button clcov-empty-act"
+                >
+                  Open Source docs
+                </button>
+              )}
+            </div>
+          </li>
+          <li className="clcov-empty-step">
+            <span className="clcov-empty-n" aria-hidden="true">2</span>
+            <div className="clcov-empty-body">
+              <span className="clcov-empty-name">Press Generate</span>
+              <p className="clcov-empty-say">
+                Canary reads them and writes down what this suite promises, one numbered
+                requirement at a time. You can watch it work.
+              </p>
+            </div>
+          </li>
+          <li className="clcov-empty-step">
+            <span className="clcov-empty-n" aria-hidden="true">3</span>
+            <div className="clcov-empty-body">
+              <span className="clcov-empty-name">Read the results</span>
+              <p className="clcov-empty-say">
+                Every requirement gets a line here: which of your tests cover it, which
+                behaviour nothing tests yet, and how much each test really checks.
+              </p>
+            </div>
+          </li>
+        </ol>
+        <p className="clcov-empty-foot">
+          Nothing is run — this is read from the words in your docs and the tests already on disk.
         </p>
       </div>
     </div>
@@ -28,9 +79,12 @@ export function CoverageEmptyMain({ railOpen }: { railOpen: boolean }) {
 // can take them in at reading size instead of squinting into a dial. Static SVG —
 // headless preview forces reduced-motion. Hue tracks the number: green high, amber
 // mid, rose low — the colour reads the health at a glance.
-const RING_SIZE = 44
 const RING_R = 18
 const RING_STROKE = 4
+// The box hugs the stroke, so the ring carries no invisible padding: 40px of ink used to
+// sit in a 44px box, which made the bar's left gutter read 18px against the 16px on the
+// right, where the strips end flush. Both edges are one 16px inset now.
+const RING_SIZE = RING_R * 2 + RING_STROKE
 
 export function CoverageRing({ pct }: { pct: number }) {
   const mid = RING_SIZE / 2
@@ -40,7 +94,9 @@ export function CoverageRing({ pct }: { pct: number }) {
   const hue = clamped >= 80 ? 'var(--success)' : clamped >= 40 ? 'var(--warning)' : clamped > 0 ? 'var(--danger)' : 'var(--text-muted)'
   return (
     <div style={{ width: RING_SIZE, height: RING_SIZE, flexShrink: 0 }} data-testid="coverage-ring" role="img" aria-label={`${pct}% covered`}>
-      <svg width={RING_SIZE} height={RING_SIZE} viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`} aria-hidden="true">
+      {/* `overflow:visible` because the stroke now ends exactly on the viewBox edge — the
+          default clip would shave its outermost antialiased row on all four sides. */}
+      <svg width={RING_SIZE} height={RING_SIZE} viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`} style={{ overflow: 'visible' }} aria-hidden="true">
         <circle cx={mid} cy={mid} r={RING_R} fill="none" stroke="var(--border-default)" strokeWidth={RING_STROKE} />
         <circle
           cx={mid} cy={mid} r={RING_R} fill="none" stroke={hue} strokeWidth={RING_STROKE}
@@ -99,8 +155,9 @@ export function writeRailPref(open: boolean): void {
   try { localStorage.setItem(RAIL_PREF_KEY, open ? 'open' : 'closed') } catch { /* ignore */ }
 }
 
-// Bar/legend order reads good → gap: the green of `covered` leads, the work sinks
-// right. The legend doubles as the requirement filter.
+// Bar/legend order reads good → gap: the sky of `covered` leads, the work sinks
+// right, and the two gap kinds sit hottest-first (path gap, then variant gap). The
+// legend doubles as the requirement filter.
 export const SEG_ORDER: GapType[] = ['covered', 'path-incomplete', 'variant-incomplete', 'untested']
 
 // Legend items read number-first in plain words ("2 path gaps"), so the count and

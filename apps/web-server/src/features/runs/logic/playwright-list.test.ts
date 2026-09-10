@@ -1,5 +1,5 @@
 import { discoveryFailureOutput } from './playwright-list'
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -109,6 +109,44 @@ describe('listPlaywrightTests', () => {
 
   it('returns null when the spawn exits non-zero (with stderr)', async () => {
     expect(await listPlaywrightTests(tmpDir, { spawner: stderrFailSpawner() })).toBeNull()
+  })
+
+  it('logs the discovery failure from stdout, not the package runner banner on stderr', async () => {
+    // The banner is load-bearing: npm 12 writes `npm notice run ...` to
+    // stderr for every `npx`, so a console line that echoed stderr reported
+    // the banner instead of the failure — the same text for every feature.
+    const report = { config: { workers: 20 }, errors: [{ message: "Cannot find module './fixture'" }] }
+    const spawner: PlaywrightListSpawner = (cwd) => ({
+      command: 'node',
+      args: ['-e', `process.stderr.write('npm notice run pkg@0.1.0 npx'); process.stdout.write(${JSON.stringify(JSON.stringify(report))}); process.exit(1)`],
+      cwd,
+    })
+    const written: string[] = []
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true })
+    let diagnostic = ''
+    try {
+      expect(await listPlaywrightTests(tmpDir, { spawner, onDiagnostics: (text) => { diagnostic = text } })).toBeNull()
+    } finally {
+      spy.mockRestore()
+    }
+    const line = written.find((text) => text.startsWith('[playwright-list]'))
+    expect(line).toContain("Cannot find module './fixture'")
+    expect(line).toContain(tmpDir)
+    expect(line).not.toContain('npm notice')
+    expect(diagnostic).toContain("Cannot find module './fixture'")
+  })
+
+  it('stays silent on the console when a non-zero exit produced no output at all', async () => {
+    // Nothing to report is not the same as a failure worth a console line.
+    const spawner: PlaywrightListSpawner = (cwd) => ({ command: 'node', args: ['-e', 'process.exit(3)'], cwd })
+    const written: string[] = []
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true })
+    try {
+      expect(await listPlaywrightTests(tmpDir, { spawner })).toBeNull()
+    } finally {
+      spy.mockRestore()
+    }
+    expect(written.some((text) => text.startsWith('[playwright-list]'))).toBe(false)
   })
 
   it('returns null when the command cannot be spawned', async () => {

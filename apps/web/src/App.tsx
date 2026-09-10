@@ -432,9 +432,11 @@ export function App() {
       content: (
         <TestCasesColumn
           feature={selectedFeature}
-          activeRunSummary={summaryForSelectedFeature}
-          activeRunManifest={statusRunDetail.detail?.manifest}
-          activeRunStatus={statusForSelectedFeature}
+          activeRunSummary={nav.currentTests ? undefined : summaryForSelectedFeature}
+          activeRunManifest={nav.currentTests ? undefined : statusRunDetail.detail?.manifest}
+          activeRunStatus={nav.currentTests ? undefined : statusForSelectedFeature}
+          currentTests={nav.currentTests}
+          onCurrentTestsChange={selectedRunForFeature ? nav.setCurrentTests : undefined}
           onReviewTest={(file, line, baseline) => { setReviewFocus({ file, line, baseline, mode: 'english' }); setSpecReviewOpen(true) }}
           onTotalTestsChange={setSpecTotalTests}
           dirtySpecs={features.find((f) => f.name === selectedFeature)?.dirty?.specs ?? []}

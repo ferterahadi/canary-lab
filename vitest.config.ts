@@ -22,7 +22,7 @@ const EXPECTED_LOG_NOISE: { match: (log: string) => boolean; tag: string }[] = [
     tag: 'ECONNREFUSED :3000 (HTTP-fallback path under test)',
   },
   {
-    match: (l) => l.includes('[playwright-list] exit 2: boom'),
+    match: (l) => l.includes('[playwright-list]') && l.includes('boom'),
     tag: 'playwright-list fixture failure',
   },
 ]
