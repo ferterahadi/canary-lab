@@ -10,6 +10,10 @@
 
 export const ROBUSTNESS_ENVELOPE_FORMAT = 'canary-lab/robustness-envelope@1'
 
+/** Where the envelope lives inside the suite folder — under the D9 run-start
+ *  snapshot, so a mid-run edit to it is reported pending like a spec edit. */
+export const ROBUSTNESS_ENVELOPE_RELATIVE_PATH = 'robustness/envelope.json'
+
 export type RobustnessAtomKind = 'latency' | 'duplicate' | 'restart'
 
 /** Delay every response through every shim by a fixed number of milliseconds. */

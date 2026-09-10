@@ -103,6 +103,10 @@ export type McpStartRunOutcome =
 
 export interface CanaryLabMcpDeps {
   discoveryRepairRequest?: (opts: { method: 'GET' | 'POST'; url: string; payload?: unknown }) => Promise<{ statusCode: number; body: unknown }>
+  /** Robustness Lab (D16) over MCP: `start_robustness` / `get_robustness`
+   *  reuse the robustness REST routes via app.inject, so admission (green run,
+   *  declared slots, envelope, single-flight) is judged once for every surface. */
+  robustnessRequest?: (opts: { method: 'GET' | 'POST'; url: string; payload?: unknown }) => Promise<{ statusCode: number; body: unknown }>
   store: RunStore
   broker: ExternalHealBroker
   featuresDir: string
@@ -120,6 +124,10 @@ export interface CanaryLabMcpDeps {
     },
     isolation?: 'worktree' | 'queue',
     executionType?: 'run' | 'boot',
+    /** A robustness envelope to boot under (D14/D16 "Send to repair"). Raw
+     *  JSON: the REST route parses it, so a bad envelope is one 400 with one
+     *  reason instead of two validators drifting apart. */
+    perturbation?: unknown,
   ) => Promise<McpStartRunOutcome>
   restartExternalRun?: (
     runId: string,

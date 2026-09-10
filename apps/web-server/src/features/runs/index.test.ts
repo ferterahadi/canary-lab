@@ -13,6 +13,8 @@ import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { ServerContext } from '../../server-context'
 import { journalRoutes } from './routes/journal'
 import { runsRoutes } from './routes/runs'
+import { robustnessRoutes } from './routes/robustness'
+import { robustnessJobStore } from './logic/robustness/store'
 import { externalHealRoutes } from './routes/external-heal'
 import { paneStreamRoutes } from './ws/pane-stream'
 import { runsStreamRoutes } from './ws/runs-stream'
@@ -99,6 +101,7 @@ function makeCtx(): ServerContext {
     runStore,
     benchmarkStore: { marker: 'benchmark-store' },
     dirtySpecStore: new DirtySpecStore(logsDir),
+    robustnessJobStore: robustnessJobStore(logsDir),
     workspaceEvents: { publish: () => { /* nothing subscribes in this suite */ } },
     externalHealBroker,
     gettingStarted: { marker: 'getting-started' },
@@ -128,13 +131,14 @@ async function registerFeature(): Promise<{
 }
 
 describe('runs feature registrar', () => {
-  it('mounts the run loop\'s five plugins with the deps each one needs', async () => {
+  it('mounts the run loop\'s six plugins with the deps each one needs', async () => {
     const { feature, registrations } = await registerFeature()
 
     expect(registrations.map((r) => r.plugin)).toEqual([
       journalRoutes,
       externalHealRoutes,
       runsRoutes,
+      robustnessRoutes,
       paneStreamRoutes,
       runsStreamRoutes,
     ])
@@ -144,8 +148,10 @@ describe('runs feature registrar', () => {
     // structurally identical and behaviourally split.
     expect(registrations[1].opts.broker).toBe(externalHealBroker)
     expect(registrations[2].opts).toMatchObject({ featuresDir, projectRoot: tmpDir, store: runStore })
-    expect(registrations[3].opts).toMatchObject({ registry, logsDir })
-    expect(registrations[4].opts).toEqual({ store: runStore })
+    expect(registrations[3].opts).toMatchObject({ featuresDir, logsDir, store: robustnessJobStore(logsDir) })
+    expect(registrations[3].opts.runCell).toBeTypeOf('function')
+    expect(registrations[4].opts).toMatchObject({ registry, logsDir })
+    expect(registrations[5].opts).toEqual({ store: runStore })
 
     // The handle benchmark and the MCP surface reuse. An empty queue plus a
     // usable `fits` is the scheduler having been constructed here rather than
@@ -154,6 +160,7 @@ describe('runs feature registrar', () => {
     expect(feature.scheduler.fits({ repoPaths: [], cost: 0 })).toEqual({ ok: true })
     expect(feature.attachRunStreams).toBeTypeOf('function')
     expect(feature.restartExternalRun).toBeTypeOf('function')
+    expect(feature.runRobustnessCell).toBeTypeOf('function')
     expect(registrations[2].opts.restartHeal).toBeTypeOf('function')
 
     // The routes really mounted: a request reaches a handler rather than a 404.
@@ -163,7 +170,7 @@ describe('runs feature registrar', () => {
 
   it('resolves a pane\'s broker only while the run still holds one', async () => {
     const { registrations } = await registerFeature()
-    const brokerFor = registrations[3].opts.brokerFor as (runId: string) => PaneBroker | null
+    const brokerFor = registrations[4].opts.brokerFor as (runId: string) => PaneBroker | null
     const broker = new PaneBroker()
     brokers.set('r-1', broker)
 

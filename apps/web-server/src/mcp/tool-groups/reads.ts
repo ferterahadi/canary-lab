@@ -78,7 +78,7 @@ export function registerReadTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('get_run_snapshot', {
-    description: 'Verbose external-heal run snapshot: summary, full counts, failed tests, artifact base, heal prompt map, and the heal index + journal as on-disk PATHS (Read them for the full markdown — never inlined, so a long heal loop can\'t bloat the response). For verbose debugging only; never poll it to wait — block on wait_for_heal_task.',
+    description: 'Verbose external-heal run snapshot: summary, full counts, failed tests, artifact base, heal prompt map, perturbation {envelope, repro} on a perturbed run, and the heal index + journal as on-disk PATHS (Read them for the full markdown — never inlined, so a long heal loop can\'t bloat the response). For verbose debugging only; never poll it to wait — block on wait_for_heal_task.',
     inputSchema: { runId: z.string() },
   }, async ({ runId }) => {
     const detail = deps.store.get(runId)

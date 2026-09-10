@@ -74,6 +74,17 @@ describe('runs api', () => {
     })
   })
 
+  it('startRun carries a robustness envelope as the run\'s perturbation', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'rp' }, 201))
+    const perturbation = { format: 'canary-lab/robustness-envelope@1' as const, latency: { ms: 250 } }
+    await startRun('feat-x', { fetchImpl, env: 'local', perturbation })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ feature: 'feat-x', env: 'local', perturbation }),
+    })
+  })
+
   it('startRun rides the launch-gate model plan in the body', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'rm' }, 201))
     const models = { heal: { model: 'opus', effort: 'high' } }

@@ -11,6 +11,7 @@ export type WorkspaceEvent =
   | { type: 'discovery-repair-changed'; feature: string }
   | { type: 'envsets-changed'; feature: string }
   | { type: 'coverage-changed'; feature: string }
+  | { type: 'robustness-changed'; feature: string }
   | { type: 'tests-dirty-changed'; feature: string }
   | { type: 'verification-config-changed'; feature: string }
   | { type: 'journal-changed'; runId: string }

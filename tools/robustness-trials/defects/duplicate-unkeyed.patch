@@ -1,0 +1,14 @@
+--- a/shared/durable.ts
++++ b/shared/durable.ts
+@@ -52,8 +52,9 @@
+  *  is logged under its key. Reads change nothing and are left alone. */
+ export function durableRequest(store: Durable<Replayable>, req: IncomingMessage, res: ServerResponse): boolean {
+   if (READ_ONLY.has(req.method ?? 'GET')) return false
+-  const header = req.headers['idempotency-key']
+-  const key = Array.isArray(header) ? header[0] : header
++  // Seeded defect (robustness trials): the Idempotency-Key is never honoured,
++  // so a replayed write is applied again — the pre-hardening storefront.
++  const key: string | undefined = undefined
+   const seen = key ? store.state.replies[key] : undefined
+   if (seen) {
+     res.writeHead(seen.status, { 'Content-Type': 'application/json', 'Idempotent-Replayed': 'true' })

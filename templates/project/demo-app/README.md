@@ -39,4 +39,16 @@ From the Canary Lab source checkout, `npm run demo` packs the build, runs the re
 All three read `PORT`, so two demos can heal side by side. `flight-app/` instead
 hardcodes its port to give Parallel readiness real work.
 
+## State and idempotency
+
+Each service keeps its whole state in one JSON file under `.state/` in its working
+directory (`shared/durable.ts`), rewritten as every write is answered and read back
+on boot, so a restart loses nothing. A write that carries an `Idempotency-Key`
+header is applied once; the same key again returns the first reply unchanged. The
+suite sends a fresh key on every write. Checkout also expires a cart nobody has
+touched for `STOREFRONT_CART_IDLE_MS` (default 30000) with 410.
+
+These three properties are what a Canary Lab robustness envelope probes (latency,
+duplicate, restart). They change nothing about the ten seeded contract defects.
+
 This is training material, not a dependency. Delete `demo-app/` after the tour.

@@ -7,7 +7,7 @@ import { plural } from './StageFacts'
 import { currentStageForPair, settledStageStatus } from './stage-metrics'
 import { EXTERNAL_WORK_COPY } from '../lib/external-work'
 import { stageRowKey } from './StageRail'
-import { PORTIFY_PHASE_LINE, evidenceOf, num, portifyProgress, specsCoverageProgress, str } from './stage-meta'
+import { PORTIFY_PHASE_LINE, evidenceOf, num, progressOf, specsCoverageProgress, str } from './stage-meta'
 import { flightRailLabel } from '@shared/flights/stage-labels'
 
 // ─── Auto-repair give-up reason (R80) ───────────────────────────────────────
@@ -418,7 +418,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
       if (running) {
         // The workflow's live phase (see PortifyStageProgress) — older flights
         // have no mirror and fall back to the generic line.
-        const phase = str(portifyProgress(stage), 'status')
+        const phase = str(progressOf(stage), 'status')
         return phase && PORTIFY_PHASE_LINE[phase]
           ? PORTIFY_PHASE_LINE[phase]
           : 'Checking the services start side by side…'
@@ -437,6 +437,26 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
       const runStatus = str(ev, 'finalStatus') ?? str(ev, 'status') ?? flight.runVerdict
       if (cycles != null && cycles > 0) return `${cycles} repair cycle${cycles === 1 ? '' : 's'} — run ${runStatus ?? 'settled'}.`
       return `No repair needed — run ${runStatus ?? 'settled'}.`
+    }
+    case 'robustness': {
+      if (running) {
+        // Live counters ride FlightStage.progress (the adapter republishes the
+        // job's evidence shape on every change); evidence lands only on settle.
+        const live = progressOf(stage)
+        const cells = live.cells as { planned: number; done: number } | undefined
+        const found = num(live, 'findings')
+        return cells
+          ? `Perturbing — ${cells.done} of ${cells.planned} cells run${found ? `, ${plural(found, 'finding')} so far` : ''}…`
+          : 'Booting the tests under perturbation…'
+      }
+      const findings = num(ev, 'findings')
+      const skippedCells = num(ev, 'skipped')
+      const notProven = skippedCells ? ` ${plural(skippedCells, 'cell')} could not be judged.` : ''
+      if (findings == null) return 'Robustness lab finished.'
+      if (findings === 0) return `No findings — every test held under the perturbation envelope.${notProven}`
+      const confirmed = num(ev, 'confirmed') ?? 0
+      const unconfirmed = findings - confirmed
+      return `${plural(findings, 'finding')} — ${confirmed} confirmed 3/3${unconfirmed ? `, ${unconfirmed} unconfirmed` : ''}.${notProven}`
     }
     case 'evaluation-export': {
       if (running) return 'Building the report…'

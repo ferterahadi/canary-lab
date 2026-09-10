@@ -9,6 +9,7 @@ import { FailingTests } from './FailingTests'
 import { FactsGrid, HERO_ROW, STAGE_COLUMN, healEndShort, plural, runHistoryFacts } from './stage-meta'
 import { SkeletonBar, SkeletonBead, type AwaitingState } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { isAuxiliaryExecution } from '@shared/verification'
 
 // R80 — the Test Run hero. Before this, the run stage rendered the SAME run
 // three-to-four times: the "At a glance" facts card, the RunRepairSummary's own
@@ -98,7 +99,7 @@ export function TestRunPanel({
   // The feature's real test runs, newest first (boot/benchmark/verify are
   // plumbing, not test runs). The current run's ordinal reads off this list.
   const featureRuns = useMemo(
-    () => runs.filter((r) => r.feature === feature && r.executionType !== 'boot' && r.executionType !== 'benchmark' && r.executionType !== 'verify'),
+    () => runs.filter((r) => r.feature === feature && !isAuxiliaryExecution(r.executionType) && r.executionType !== 'verify'),
     [runs, feature],
   )
   const idx = runId ? featureRuns.findIndex((r) => r.runId === runId) : -1

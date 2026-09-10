@@ -195,7 +195,11 @@ describe('ChangesTab', () => {
     // One patch holds every file in the repo, so the dialog is per repo.
     expect(text('changes-patch-dialog-mighty-cns')).toContain('11 files in one patch')
     expect(text('changes-patch-files-mighty-cns')).toContain('src/api/f10.ts')
-    expect(container.textContent).toContain('-  broken()')
+    // The patch renders as a before/after comparison (edits, not results), so
+    // both sides of the change are on screen with the colour legend.
+    expect(container.textContent).toContain('broken()')
+    expect(container.textContent).toContain('fixed()')
+    expect(container.textContent).toContain('Color describes edits, not test results.')
   })
 
   it('says plainly that nothing changed rather than rendering an empty tab', async () => {

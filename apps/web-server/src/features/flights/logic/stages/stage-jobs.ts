@@ -6,7 +6,7 @@ import type { StageContext, StageJob } from '../conductor'
 import { stageSidecarDirs } from '../flight-stages'
 import type { FlightStageDeps } from './context'
 
-// The four kinds of work a flight stage can own, each behind the one `StageJob`
+// The five kinds of work a flight stage can own, each behind the one `StageJob`
 // handle. Every stage's teardown is `await job.stop(reason)`; what that means
 // differs per subsystem, and that difference belongs HERE (or further down, in
 // the subsystem itself) rather than in eleven adapters.
@@ -18,7 +18,7 @@ import type { FlightStageDeps } from './context'
 // `editing`. The subsystem knows all of that; the flight does not, and should
 // not have to.
 //
-// All four swallow non-2xx: the caller is a pause, and a teardown that cannot
+// All five swallow non-2xx: the caller is a pause, and a teardown that cannot
 // reach its subsystem must not fail the pause.
 
 /** A run — the Test Run stage's run, and env-capture's dry-run boot, which IS a
@@ -67,6 +67,24 @@ export function evaluationExportJob(deps: FlightStageDeps, taskId: string): Stag
       await deps.inject({
         method: 'POST',
         url: `/api/evaluation-exports/${encodeURIComponent(taskId)}/abort`,
+        payload: {},
+      })
+    },
+  }
+}
+
+/** A Robustness Lab matrix: the cell run in flight plus every cell and shrink
+ *  probe still queued behind it. The abort route settles the record as `aborted`
+ *  with its findings so far — a pause must leave what was found readable — and
+ *  answers idempotently for a job that already settled, so no status read is
+ *  needed here. */
+export function robustnessJob(deps: FlightStageDeps, jobId: string): StageJob {
+  return {
+    id: jobId,
+    async stop() {
+      await deps.inject({
+        method: 'POST',
+        url: `/api/robustness/${encodeURIComponent(jobId)}/abort`,
         payload: {},
       })
     },

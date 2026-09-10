@@ -95,7 +95,7 @@ describe('startFlight', () => {
 
     await completion
 
-    expect(calls).toEqual(['portify', 'run', 'heal', 'evaluation-export'])
+    expect(calls).toEqual(['portify', 'run', 'heal', 'robustness', 'evaluation-export'])
   })
 
   it('keeps the Report downloadable when final Parallel setup fails', async () => {
@@ -280,7 +280,7 @@ describe('startFlight', () => {
         expect(s.skipReason).toBe('stage-entry')
       }
     }
-    expect(calls).toEqual(['run', 'heal', 'evaluation-export'])
+    expect(calls).toEqual(['run', 'heal', 'robustness', 'evaluation-export'])
   })
 
   it('a jump to evaluation-export keeps the validated runId; report-changing jumps reset links', async () => {

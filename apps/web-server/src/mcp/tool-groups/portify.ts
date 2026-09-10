@@ -208,7 +208,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('get_heal_context', {
-    description: 'Compact failure handoff packet an external heal agent needs first: current failures, artifact URLs, heal-index, journal, repo branches, lifecycle, and heal prompt map. Use get_run_snapshot for verbose raw summary/debugging fields.',
+    description: 'Compact failure handoff packet an external heal agent needs first: current failures, artifact URLs, heal-index, journal, repo branches, lifecycle, and heal prompt map — plus perturbation {envelope, repro} when the run was started under a robustness envelope (fix the app\'s tolerance, never the test or the envelope). Use get_run_snapshot for verbose raw summary/debugging fields.',
     inputSchema: {
       runId: z.string(),
       session_id: z.string().optional().describe('External heal session id. When provided, refreshes the session heartbeat.'),

@@ -24,6 +24,11 @@ const EXTERNAL_URL = /https?:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)/i
 const NETWORK = /(request|apicontext|fetch|axios|supertest|response)\b/
 const NAVIGATION = /(page\.|frame\.|browser\.|goto|waitforurl)/
 const UI_ASSERTION = /(page\.|locator|getbyrole|getbytext|getbytestid|tobevisible|tohavetext|tohaveurl|tohavevalue|tocontaintext)/
+// A response-shaped read compared against an HTTP status code. A suite that wraps
+// its calls in a helper (`const created = await api.createProduct(…)`) never names
+// the network in the expect() line — the code it compares against does. Without
+// this the shipped storefront suite graded every test `shallow` (found 2026-09-10).
+const HTTP_STATUS_READ = /\.(status|statuscode)\b[^\n]*\b[1-5]\d\d\b/
 
 /**
  * Classify a single assertion/check snippet into a strictness tier by which
@@ -46,7 +51,7 @@ export function classifyAssertionTier(snippet: string): ClassifiedTier {
   // tier 3 — app/internal API or a UI assertion on the app's own page (the
   // common E2E proxy — the system reports success). A bare fetch/request to a
   // non-external URL counts; the method (GET vs .post()) doesn't matter.
-  if (NETWORK.test(s) || UI_ASSERTION.test(s)) return 3
+  if (NETWORK.test(s) || UI_ASSERTION.test(s) || HTTP_STATUS_READ.test(s)) return 3
 
   return 'unknown'
 }

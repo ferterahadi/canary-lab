@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RunManifest, CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunIndexEntry } from '@/shared/api/types'
 import type { PortifyIndexEntry } from '@/shared/api/client'
+import type { RobustnessJobIndexEntry } from '@shared/robustness/jobs'
 import fixture from '../../runs/utils/__fixtures__/cns-wa-snapshot.json'
 import { deriveFeatureActivity, deriveFeatureExternalHistory } from './feature-activity'
 
@@ -121,11 +122,12 @@ describe('deriveFeatureActivity', () => {
     expect(noRun.get('checkout')?.kind).toBe('portifying')
   })
 
-  it('ignores boots, benchmarks, terminal portify workflows, and resting drafts', () => {
+  it('ignores boots, benchmarks, robustness cells, terminal portify workflows, and resting drafts', () => {
     const map = deriveFeatureActivity({
       activeRuns: [
         run({ feature: 'boot-f', executionType: 'boot' }),
         run({ feature: 'bench-f', executionType: 'benchmark' }),
+        run({ feature: 'cell-f', executionType: 'robustness' }),
       ],
       portifyWorkflows: [portify({ feature: 'saved-f', status: 'saved' })],
       drafts: [draft({ featureName: 'ready-f', status: 'spec-ready' })],
@@ -422,6 +424,7 @@ describe('deriveFeatureExternalHistory', () => {
         run({ feature: 'run-verify', runId: 'r-verify', executionType: 'verify' }),
         run({ feature: 'ignored-boot', runId: 'r-boot', executionType: 'boot' }),
         run({ feature: 'ignored-benchmark', runId: 'r-benchmark', executionType: 'benchmark' }),
+        run({ feature: 'ignored-cell', runId: 'r-cell', executionType: 'robustness' }),
         run({ feature: 'internal-run', runId: 'r-internal' }),
       ],
       runDetails: {
@@ -501,6 +504,7 @@ describe('deriveFeatureExternalHistory', () => {
     expect(history.get('run-verify')?.run?.current).toMatchObject({ kind: 'verifying', status: 'running', clientKind: 'codex' })
     expect(history.has('ignored-boot')).toBe(false)
     expect(history.has('ignored-benchmark')).toBe(false)
+    expect(history.has('ignored-cell')).toBe(false)
     expect(history.has('internal-run')).toBe(false)
   })
 
@@ -534,4 +538,40 @@ it('carries the recorded review wait from run detail into the feature activity',
     portifyWorkflows: [], drafts: [],
   })
   expect(result.get('cns-wa')?.waiting?.label).toBe('Awaiting test review')
+})
+
+describe('deriveFeatureActivity — Robustness lab (D16)', () => {
+  const robustnessJob = (over: Partial<RobustnessJobIndexEntry> = {}): RobustnessJobIndexEntry => ({
+    jobId: 'rj-1',
+    feature: 'checkout',
+    runId: 'run-9',
+    status: 'running',
+    startedAt: '2026-01-01T00:00:00Z',
+    findings: 0,
+    ...over,
+  })
+
+  it('a running matrix job is the "perturbing" verb, pinned to the job and the green run it perturbs', () => {
+    const map = deriveFeatureActivity({ activeRuns: [], portifyWorkflows: [], drafts: [], robustnessJobs: [robustnessJob()] })
+    expect(map.get('checkout')).toEqual({ kind: 'perturbing', jobId: 'rj-1', runId: 'run-9', external: false })
+  })
+
+  it('settled jobs are silent; the job outranks an export and a real test run outranks the job', () => {
+    const settled = deriveFeatureActivity({
+      activeRuns: [], portifyWorkflows: [], drafts: [],
+      robustnessJobs: [robustnessJob({ status: 'done' }), robustnessJob({ jobId: 'rj-2', feature: 'other', status: 'aborted' })],
+    })
+    expect(settled.size).toBe(0)
+
+    const exportTask = { taskId: 't-a', runId: 'r-a', feature: 'checkout', status: 'running' } as EvaluationExportTask
+    const overExport = deriveFeatureActivity({ activeRuns: [], portifyWorkflows: [], drafts: [], exportTasks: [exportTask], robustnessJobs: [robustnessJob()] })
+    expect(overExport.get('checkout')?.kind).toBe('perturbing')
+
+    // The matrix's own cells are auxiliary runs and never the verb; a user's run is.
+    const underRun = deriveFeatureActivity({
+      activeRuns: [run({ runId: 'cell', executionType: 'robustness' }), run({ runId: 'r-user' })],
+      portifyWorkflows: [], drafts: [], robustnessJobs: [robustnessJob()],
+    })
+    expect(underRun.get('checkout')).toEqual({ kind: 'running', runId: 'r-user', external: false })
+  })
 })

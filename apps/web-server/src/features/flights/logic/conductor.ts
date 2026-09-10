@@ -1,5 +1,5 @@
 import type { FlightStore } from './store'
-import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type ExternalWorkCheckpointData, type FlightCheckpointResponse, type FlightExternalAgentSession, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey } from './types'
+import { FLIGHT_STAGE_KEYS, STAGE_DEPENDS_ON, isActiveFlightStatus, type ExternalWorkCheckpointData, type FlightCheckpointResponse, type FlightExternalAgentSession, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey } from './types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { drive } from './flight-drive'
 import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightNotParkedError, FlightStageEntryError, FlightTakeoverRequestedError, stampSystemLine } from './flight-errors'
@@ -179,13 +179,14 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       endedAt: undefined,
       error: undefined,
       runVerdict: preservesReport ? existing.runVerdict : undefined,
-      // A jump straight to evaluation-export was validated AGAINST the old
-      // record's run — that runId is the stage's input, so it must survive
-      // the reset (the deliverable links are dropped and regenerated).
+      // A jump straight to a run-reading stage (the Robustness Lab, the Report)
+      // was validated AGAINST the old record's run — that runId is the stage's
+      // input, so it must survive the reset (the job/deliverable links are
+      // dropped and regenerated).
       links:
         preservesReport
           ? existing.links
-          : mode === 'jump' && args.fromStage === 'evaluation-export'
+          : mode === 'jump' && args.fromStage && STAGE_DEPENDS_ON[args.fromStage].includes('run')
           ? (existing.links?.runId ? { runId: existing.links.runId } : entryLinks)
           : undefined,
     }

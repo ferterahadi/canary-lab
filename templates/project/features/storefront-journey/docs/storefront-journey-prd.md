@@ -57,8 +57,9 @@ These twelve ordered contracts are the whole feature; ten start broken and two
 pass. Other validation and not-found responses make the services realistic but,
 except for J3's unknown SKU, are fixture support—not tests or coverage obligations.
 
-Contracts must be **stateless across reruns**. Services keep data in memory between
-heal cycles, so leaked state would eventually break test setup.
+Contracts must be **stateless across reruns**. Services keep their state between
+heal cycles (in a per-run state file — they are not restarted), so leaked state
+would eventually break test setup.
 
 Each journey must be one ordered Playwright test exposing only its earliest defect;
 each repair reveals the next.

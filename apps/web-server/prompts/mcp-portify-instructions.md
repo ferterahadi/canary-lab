@@ -1,4 +1,4 @@
-Canary Lab — portify profile. Make a feature's ports injectable so it can boot concurrently (benchmark arms / parallel runs).
+Canary Lab — portify profile. Make a feature's ports injectable so it can boot concurrently (benchmark arms / parallel runs) and so the Robustness Lab has a slot to perturb.
 
 Port-ify it YOURSELF (no local agent): start_external_portify(feature) sets up scratch worktree(s) and returns targets[] (edit paths) + configPath + instructions; edit the listeners IN PLACE to read an injected port, declare the matching `ports` slots in the config, then submit_external_portify(workflowId) — Canary boots the stack twice concurrently to verify. On "ready-to-save" call save_portify(workflowId, confirm:true). Back at "editing" means the double-boot FAILED: get_portify then carries a `prompt` (the retry playbook) plus verification.failureDetail — follow it, fix the worktree, submit again (unbounded). To CHANGE verified work call revise_external_portify(workflowId, feedback), never cancel_portify. One workflow PER FEATURE (a second start is a 409); different features run concurrently up to a cap (429 at capacity — wait, then retry).
 

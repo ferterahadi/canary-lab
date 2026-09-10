@@ -8,8 +8,12 @@
 // it through the export tools.
 import type { IntegrityHint } from './hints'
 import type { PredicateStrength, TestGuard, UnparsedExpectation } from './types'
+import type { RobustnessCell, RobustnessJobStatus } from '../robustness/jobs'
+import type { RobustnessEnvelope } from '../robustness/types'
 
-export const BEHAVIOR_CERTIFICATE_FORMAT = 'canary-lab/behavior-certificate@1'
+/** `@2` adds the optional `robustness` block (D16). A `@1` certificate is the
+ *  same document without it; the bundled checker reads both. */
+export const BEHAVIOR_CERTIFICATE_FORMAT = 'canary-lab/behavior-certificate@2'
 /** Where the certificate sits inside the export archive and beside it on disk. */
 export const BEHAVIOR_CERTIFICATE_FILENAME = 'certificate.json'
 /** The zero-dependency Node script bundled next to it. */
@@ -119,6 +123,42 @@ export interface CertificateSpecEdits {
   adopted: Array<{ at: string; by: string; files: string[] }>
 }
 
+/** One Robustness Lab finding against this run's own tests: a cell (spec file ×
+ *  atom) where tests that passed green failed under perturbation. `envelope` is
+ *  the smallest one known to reproduce it — the shrunk envelope when shrink ran,
+ *  the cell's own when it did not. */
+export interface CertificateRobustnessFinding {
+  cell: RobustnessCell
+  /** Titles of the tests that failed in the cell and passed in the run. */
+  tests: string[]
+  /** `@req-*` ids those tests carry. Absent when they carry none. */
+  requirements?: string[]
+  envelope: RobustnessEnvelope
+  /** One line a human can act on. Absent when shrink never ran. */
+  repro?: string
+  /** Re-runs under `envelope` after shrinking: `reproduced` of `asked`. Absent
+   *  when shrink never ran. */
+  confirmations?: { asked: number; reproduced: number }
+}
+
+/** What the Robustness Lab found when it re-ran this run's spec files under the
+ *  suite's perturbation envelope. Findings, never counts of passes: a cell that
+ *  held leaves no record, and a cell the matrix never judged is listed under
+ *  `skipped` or counted in `cells.notRun` — neither is a pass. */
+export interface CertificateRobustness {
+  jobId: string
+  /** How the matrix ended; `notRun` below is non-zero for anything but `done`. */
+  status: Exclude<RobustnessJobStatus, 'running'>
+  envelope: RobustnessEnvelope
+  cells: { planned: number; judged: number; notRun: number }
+  /** Reproduced 3/3 under the shrunk envelope. */
+  findings: CertificateRobustnessFinding[]
+  /** Failed under perturbation at least once but never reproduced 3/3 —
+   *  listed as such, never promoted and never dropped. */
+  unconfirmed: CertificateRobustnessFinding[]
+  skipped: Array<{ cell: RobustnessCell; reason: string }>
+}
+
 export interface BehaviorCertificate {
   format: typeof BEHAVIOR_CERTIFICATE_FORMAT
   issuedAt: string
@@ -130,6 +170,9 @@ export interface BehaviorCertificate {
   claims: CertificateClaim[]
   /** Absent when the run had no snapshot boundary — then `notProven` says so. */
   specEdits?: CertificateSpecEdits
+  /** Absent when no settled Robustness Lab matrix ran against this run — then
+   *  `notProven` says so. */
+  robustness?: CertificateRobustness
   hints: IntegrityHint[]
   disclosure: string
   /** What this certificate does NOT prove — always non-empty. */

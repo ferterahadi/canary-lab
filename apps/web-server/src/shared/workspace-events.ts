@@ -14,6 +14,9 @@ export type WorkspaceEvent =
   | { type: 'discovery-repair-changed'; feature: string }
   | { type: 'envsets-changed'; feature: string }
   | { type: 'coverage-changed'; feature: string }
+  // A Robustness Lab job for the suite was written — started, a cell settled,
+  // a finding shrank, or the job ended (or was reconciled to `aborted` on boot).
+  | { type: 'robustness-changed'; feature: string }
   | { type: 'tests-dirty-changed'; feature: string }
   | { type: 'verification-config-changed'; feature: string }
   | { type: 'journal-changed'; runId: string }

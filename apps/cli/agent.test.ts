@@ -118,11 +118,12 @@ describe('canary-lab agent install', () => {
       'canary-lab-coverage',
       'canary-lab-export',
       'canary-lab-portify',
+      'canary-lab-repair-discovery',
       'canary-lab-run',
       'canary-lab-verify',
     ])
     const allSkillPaths = skillNames.flatMap(mirrors)
-    expect(allSkillPaths).toHaveLength(21)
+    expect(allSkillPaths).toHaveLength(24)
     for (const skillPath of allSkillPaths) {
       const body = fs.readFileSync(skillPath, 'utf-8')
       expect(body).toContain('mcp__Canary_Lab__exec')

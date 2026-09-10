@@ -42,14 +42,18 @@ describe('robustnessEnvelopePath', () => {
 })
 
 describe('defaultRobustnessEnvelope', () => {
-  it('perturbs every declared slot: fixed latency, one duplicate of every write, one restart per slot after its first write', () => {
+  it('perturbs every declared slot: fixed latency, one immediate duplicate of every write, one restart per slot held on its second write', () => {
     expect(defaultRobustnessEnvelope(['api', 'inventory'])).toEqual({
       format: ROBUSTNESS_ENVELOPE_FORMAT,
       latency: { ms: 300 },
-      duplicate: { gapMs: 500, match: 'WRITE /**' },
+      // Sent as the original is forwarded — a replay that lands after the
+      // test's next read is invisible (the suite is faster than any gap).
+      duplicate: { gapMs: 0, match: 'WRITE /**' },
       restart: [
-        { slot: 'api', afterNth: 1, match: 'WRITE /**' },
-        { slot: 'inventory', afterNth: 1, match: 'WRITE /**' },
+        // Held on the second write: a restart before the first one has no
+        // state to lose, so it would test nothing.
+        { slot: 'api', afterNth: 2, match: 'WRITE /**' },
+        { slot: 'inventory', afterNth: 2, match: 'WRITE /**' },
       ],
     })
   })

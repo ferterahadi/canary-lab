@@ -46,6 +46,8 @@ const REPAIR_TOOLS = uniqueSorted([
   'pause_run',
   'signal_run',
   'start_run',
+  'start_robustness',
+  'get_robustness',
   'wait_for_heal_task',
 ])
 
@@ -132,6 +134,8 @@ const FLIGHT_TOOLS = uniqueSorted([
   'claim_heal',
   'wait_for_heal_task',
   'signal_run',
+  // Reads the Robustness lab stage's findings; see FLIGHT_TOOLS in tool-profiles.ts.
+  'get_robustness',
 ])
 
 const PORTIFY_TOOLS = uniqueSorted([

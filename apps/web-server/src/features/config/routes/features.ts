@@ -21,22 +21,10 @@ import type { EnvSetsConfig } from '../../runs/logic/runtime/env-switcher/types'
 import { buildDiscoveryRepairPrompt } from '../logic/discovery-repair-prompt'
 import { attachSourceChanges } from '../logic/test-source-changes'
 import { testReviewRoutes } from './test-review'
+import type { FeaturesRouteDeps } from './features-route-deps'
 
-export interface FeaturesRouteDeps {
-  featuresDir: string
-  // Run history, consulted for the boot half of each row's Suite setup
-  // evidence. Optional so route tests that never exercise runs stay unchanged;
-  // absent simply means no boot has been proven.
-  logsDir?: string
-  // Optional override so tests can stub the Playwright `--list` invocation
-  // without spawning a real `npx playwright test`.
-  playwrightListSpawner?: PlaywrightListSpawner
-  // Test-file integrity store. Absent in tests that don't exercise dirty state;
-  // when present, the feature list carries a `dirty` summary and the approve /
-  // commit routes are live. Mutations emit store change events which the server
-  // bridges to a `tests-dirty-changed` WorkspaceEvent (no direct publish here).
-  dirtySpecStore?: DirtySpecStore
-}
+export type { FeaturesRouteDeps } from './features-route-deps'
+
 
 export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {
   await testReviewRoutes(app, deps)

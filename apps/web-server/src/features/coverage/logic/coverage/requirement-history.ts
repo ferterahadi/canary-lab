@@ -8,6 +8,7 @@ import { readManifest, readRunsIndex } from '../../../runs/logic/runtime/manifes
 import { runDirFor } from '../../../runs/logic/runtime/run-paths'
 import { slugify } from '../../../runs/logic/runtime/summary-reporter'
 import type { RequirementHistory } from './enforcement'
+import { isAuxiliaryExecution } from '../../../../../../../shared/verification'
 
 // Run evidence for the ledger's time axis (D11), read — never stored. The
 // stored ledger is a cache; the run records are the truth, so `provenAt` and
@@ -85,7 +86,7 @@ function readPasses(logsDir: string, runId: string): Set<string> | null {
 
 export function readFeatureRunHistory(logsDir: string, feature: string, opts: ReadFeatureRunHistoryOptions = {}): FeatureRunHistory {
   const entries = readRunsIndex(logsDir)
-    .filter((e) => e.feature === feature && e.executionType !== 'boot' && e.executionType !== 'benchmark')
+    .filter((e) => e.feature === feature && !isAuxiliaryExecution(e.executionType))
     .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))
     .slice(0, opts.maxRuns ?? DEFAULT_MAX_RUNS)
 

@@ -29,6 +29,7 @@ export const FLIGHT_STAGE_KEYS = [
   'portify',
   'run',
   'heal',
+  'robustness',
   'evaluation-export',
 ] as const
 
@@ -52,6 +53,7 @@ export const FLIGHT_EXECUTION_ORDER = [
   'specs-coverage',
   'run',
   'heal',
+  'robustness',
   'evaluation-export',
   'portify',
 ] as const satisfies readonly FlightStageKey[]
@@ -75,6 +77,8 @@ export const FLIGHT_EXECUTION_ORDER = [
  *    requirements — and the envset, because its validate pass compiles the specs.
  *  - `portify` double-boots services: config + envset, nothing else.
  *  - `run` executes specs: config + envset + specs.
+ *  - `robustness` re-runs the GREEN run's spec files under the suite's
+ *    perturbation envelope: it reads the run's inventory and nothing else.
  *  - `evaluation-export` builds its archive from the run record alone.
  *  - `heal` is driven by `run` and is refused as an entry point outright. */
 export const STAGE_DEPENDS_ON: Record<FlightStageKey, readonly FlightStageKey[]> = {
@@ -88,6 +92,7 @@ export const STAGE_DEPENDS_ON: Record<FlightStageKey, readonly FlightStageKey[]>
   'portify': ['scaffold', 'env-capture'],
   'run': ['scaffold', 'env-capture', 'specs-coverage'],
   'heal': ['run'],
+  'robustness': ['run'],
   'evaluation-export': ['run'],
 }
 
@@ -488,6 +493,9 @@ export interface FlightManifest {
   /** Pointers to the flight's deliverables. */
   links?: {
     runId?: string
+    /** The Robustness Lab job this flight started over `runId` — pinned at
+     *  START so a pause can stop it and a resume can re-attach to it. */
+    robustnessJobId?: string
     evaluationTaskId?: string
     /** Absolute path of the evaluation archive — the flight's deliverable. */
     evaluationZip?: string

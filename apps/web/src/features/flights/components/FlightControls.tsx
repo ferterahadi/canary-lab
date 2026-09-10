@@ -22,6 +22,7 @@ const REDO_STAGE_KEY_SET = new Set<FlightStageKey>([
   'docs',
   'specs-coverage',
   'run',
+  'robustness',
   'portify',
   'evaluation-export',
 ])

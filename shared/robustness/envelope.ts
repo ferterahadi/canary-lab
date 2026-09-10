@@ -1,28 +1,32 @@
 import fs from 'fs'
 import path from 'path'
 import { parseRequestMatch } from './request-match'
-import { ROBUSTNESS_ENVELOPE_FORMAT, type DuplicateAtom, type LatencyAtom, type RestartAtom, type RobustnessEnvelope } from './types'
+import { ROBUSTNESS_ENVELOPE_FORMAT, ROBUSTNESS_ENVELOPE_RELATIVE_PATH, type DuplicateAtom, type LatencyAtom, type RestartAtom, type RobustnessEnvelope } from './types'
 
 // Inside features/<suite>/ on purpose: the D9 snapshot copies the whole suite
 // folder (only envsets, node_modules and .git are skipped), so this file rides
 // along and a mid-run edit to it is reported like any other spec edit.
-export const ROBUSTNESS_ENVELOPE_RELATIVE_PATH = 'robustness/envelope.json'
-
 export function robustnessEnvelopePath(featureDir: string): string {
   return path.join(featureDir, ROBUSTNESS_ENVELOPE_RELATIVE_PATH)
 }
 
 /** Written on the stage's first start when the suite has none. Every declared
  *  slot is fronted: fixed latency on all traffic, one replay of every write, one
- *  restart per slot right after its first write — the three questions a
- *  non-idempotent, in-memory service fails. */
+ *  restart per slot held on its SECOND write — the three questions a
+ *  non-idempotent, in-memory service fails. The second write, not the first: the
+ *  shim recycles the service before forwarding the Nth match, so a restart on
+ *  the first write happens before any state exists and can lose nothing. The
+ *  replay is sent the moment the original is forwarded (`gapMs: 0`): a duplicate
+ *  that lands after the test's next read is invisible, and an API suite reads
+ *  back within a millisecond — the 6d live proof saw the shipped storefront's
+ *  seven journeys finish in 265 ms, before a 500 ms replay could arrive. */
 export function defaultRobustnessEnvelope(slots: readonly string[]): RobustnessEnvelope {
   const envelope: RobustnessEnvelope = {
     format: ROBUSTNESS_ENVELOPE_FORMAT,
     latency: { ms: 300 },
-    duplicate: { gapMs: 500, match: 'WRITE /**' },
+    duplicate: { gapMs: 0, match: 'WRITE /**' },
   }
-  if (slots.length > 0) envelope.restart = slots.map((slot) => ({ slot, afterNth: 1, match: 'WRITE /**' }))
+  if (slots.length > 0) envelope.restart = slots.map((slot) => ({ slot, afterNth: 2, match: 'WRITE /**' }))
   return envelope
 }
 
@@ -113,4 +117,4 @@ function validMatch(raw: unknown, field: string): { ok: true; value: string } | 
   return parsed.ok ? { ok: true, value: raw as string } : { ok: false, reason: `${field}: ${parsed.reason}` }
 }
 
-export { ROBUSTNESS_ENVELOPE_FORMAT } from './types'
+export { ROBUSTNESS_ENVELOPE_FORMAT, ROBUSTNESS_ENVELOPE_RELATIVE_PATH } from './types'

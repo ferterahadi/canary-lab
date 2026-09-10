@@ -7,6 +7,7 @@ import type { HealEnd, RunBootFailure, RunFixCapture, RunPrAttempt, RunProposedP
 import type { ExecutionType, VerificationRunMetadata } from '@shared/verification'
 import type { ClientKind } from '@shared/run-mode'
 import type { SpecDiff } from '@shared/verification-strength/types'
+import type { RobustnessEnvelope } from '@shared/robustness/types'
 
 export interface RunIndexEntry {
   runId: string
@@ -121,6 +122,13 @@ export type IntegrityHint =
   | { kind: 'weaker'; file: string; test: string; requirements?: string[]; was: string[]; now: string[] }
   | { kind: 'cannot-classify'; file: string; test?: string; reason: string }
 
+/** Mirrors the server's record: the envelope a perturbed run booted under and
+ *  the shim port that fronted each declared slot. */
+export interface RunPerturbationRecord {
+  envelope: RobustnessEnvelope
+  shimPorts: Record<string, number>
+}
+
 /** Advisory reading of `specEdits.pending` (D13); never changes a status.
  *  `disclosure` says how the detection was checked — show it beside any hint. */
 export interface RunIntegrity {
@@ -177,6 +185,9 @@ export interface RunManifest {
   specEdits?: RunSpecEdits
   /** Written together with `specEdits`; same absence rule. */
   integrity?: RunIntegrity
+  /** The robustness envelope this run booted under and the shim port fronting
+   *  each slot (D14). Absent on an unperturbed run — the common case. */
+  perturbation?: RunPerturbationRecord
   /** Set when the suite was cut short rather than run to completion — the
    *  `healOnFailureThreshold` trip, a user pause, or a cancelled heal. */
   stoppedEarly?: StoppedEarlyInfo

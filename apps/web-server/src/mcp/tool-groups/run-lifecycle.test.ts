@@ -329,7 +329,20 @@ describe('start_run: starting fresh', () => {
       'local',
       { kind: 'external', sessionId: 'sess-1', clientKind: 'claude', conversationName: 'fix checkout', claimable: true },
       'worktree',
+      undefined,
+      undefined,
     )
+    expect(out).toEqual({ runId: 'run-new', reused: false, claimed: true, nextSteps: ['wait_for_heal_task'] })
+  })
+
+  it('forwards a robustness envelope untouched, so the route is the one validator of it', async () => {
+    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const { call } = harness({ startRun })
+    const perturbation = { format: 'canary-lab/robustness-envelope@1', latency: { ms: 262 } }
+
+    const out = await call('start_run', { ...START, perturbation })
+
+    expect(startRun.mock.calls[0]?.[5]).toEqual(perturbation)
     expect(out).toEqual({ runId: 'run-new', reused: false, claimed: true, nextSteps: ['wait_for_heal_task'] })
   })
 
@@ -345,6 +358,8 @@ describe('start_run: starting fresh', () => {
       'checkout',
       undefined,
       { kind: 'external', sessionId: 'sess-1', clientKind: 'claude-pty', claimable: false },
+      undefined,
+      undefined,
       undefined,
     )
     expect(out).toEqual({

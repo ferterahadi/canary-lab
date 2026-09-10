@@ -65,6 +65,8 @@ export type CanaryLabMcpToolName =
   | 'get_failure_detail'
   | 'start_run'
   | 'boot_services'
+  | 'start_robustness'
+  | 'get_robustness'
   | 'pause_run'
   | 'cancel_heal'
   | 'abort_run'
@@ -111,6 +113,10 @@ export const REPAIR_TOOLS = [
   'list_runs',
   'start_run',
   'boot_services',
+  // Robustness Lab: a green run's tests under latency / duplicated writes /
+  // restarts. Findings feed start_run's `perturbation` — the repair loop's job.
+  'start_robustness',
+  'get_robustness',
   'wait_for_heal_task',
   'get_heal_context',
   'get_failure_detail',
@@ -246,6 +252,11 @@ export const FLIGHT_TOOLS = [
   'claim_heal',
   'wait_for_heal_task',
   'signal_run',
+  // The Robustness lab stage is server-conducted and never parks, but its
+  // evidence is a job id: the client that follows the flight must be able to
+  // READ the findings the stage recorded. Starting a matrix or repairing a
+  // finding (start_run + perturbation) stays with the repair workflow.
+  'get_robustness',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
 // Portify DRIVEN STANDALONE — start a workflow from scratch, save or cancel it,

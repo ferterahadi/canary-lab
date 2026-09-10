@@ -287,6 +287,12 @@ const scaffoldPaths = [
   'demo-app/catalog-service/server.ts',
   'demo-app/inventory-service/server.ts',
   'demo-app/checkout-service/server.ts',
+  // The durable-state + idempotency module the three services share, and the
+  // ignore rule for the state files it writes. `gitignore` ships undotted (npm
+  // strips `.gitignore`) and init restores the dot, so the dotted name is what
+  // the scaffold must show.
+  'demo-app/shared/durable.ts',
+  'demo-app/.gitignore',
   'features/storefront-journey/feature.config.cjs',
   'features/storefront-journey/playwright.config.ts',
   'features/storefront-journey/e2e/storefront.spec.ts',

@@ -1,6 +1,6 @@
 ---
 name: canary-lab-run
-description: Use when running or healing an EXISTING Canary Lab feature locally — "run <feature>", "fix the failing run", "rerun 7cvh", "drive the heal loop" — through the repair MCP tools (start_run, wait_for_heal_task, signal_run, get_heal_context, pause_run, cancel_heal, abort_run). Fix failing runs by editing app/service code, not tests. For end-to-end onboarding of a new repo use canary-lab (flight); for deployed-environment checks use canary-lab-verify.
+description: Use when running or healing an EXISTING Canary Lab feature locally — "run <feature>", "fix the failing run", "rerun 7cvh", "drive the heal loop" — through the repair MCP tools (start_run, wait_for_heal_task, signal_run, get_heal_context, pause_run, cancel_heal, abort_run, start_robustness, get_robustness). Fix failing runs by editing app/service code, not tests. For end-to-end onboarding of a new repo use canary-lab (flight); for deployed-environment checks use canary-lab-verify.
 type: skill
 ---
 
@@ -99,6 +99,38 @@ off — opens a **draft pull request** from it. So on `passed`:
   run's `prAttempt`; the diff itself is on the run's **Changes** tab in the Canary Lab UI.
 - A run that ends red, or that gives up after its cycle cap, opens nothing — a fix that didn't
   make the tests pass is not a fix to propose.
+
+## Robustness Lab — defects a green run cannot see
+
+A passing run proves the app under ideal conditions. The Robustness Lab re-runs a
+GREEN run's spec files under a perturbation envelope — added latency, a duplicated
+write, a service restart — injected by a proxy in front of the suite's declared port
+slots. Each cell (spec file × atom) is a full Canary run of the same tests; a cell
+that fails is a finding, shrunk to the smallest envelope that still reproduces it and
+confirmed 3/3. Findings feed this same repair loop; nothing here edits tests.
+
+1. `start_robustness(feature)` — optional `runId` (a PASSED run; default the newest)
+   and `envelope` (default the suite's `robustness/envelope.json`). Refusals name the
+   reason: a matrix already running (read its `jobId` instead), no passing run, no
+   declared port slot (run Parallel setup first), an invalid envelope.
+2. `get_robustness(jobId)` every ~30 s until `status` leaves `running`. Read
+   `cells.done/planned`, `findings[]`, `skipped[]`. A skipped cell was **not judged** —
+   never a pass. An `unconfirmed` finding did not reproduce 3/3 — report it as
+   unconfirmed, never as a defect and never as a pass. `get_robustness(feature)`
+   without `jobId` lists the suite's jobs; a flight's `links.robustnessJobId` names
+   the job its Robustness lab stage ran.
+3. Per confirmed finding: `start_run(feature, perturbation: finding.shrink.envelope
+   ?? finding.envelope, claim_heal: true, session_id, conversation_name)`. The whole
+   suite runs under that envelope so the failure reproduces; the `needs_heal` context
+   carries `context.perturbation` `{envelope, repro}` and the rule in
+   `context.nextSteps`. Then the ordinary loop — fix, `signal_run`,
+   `wait_for_heal_task`; `signal_run` replays the SAME perturbation, so a pass is a
+   pass under the fault.
+
+A perturbation finding is the app's intolerance (a missing idempotency key, no
+timeout, state that does not survive a restart). Fix the app's tolerance — never
+loosen the test, never shrink or delete the envelope, never widen a spec timeout to
+outlast the latency.
 
 ## Guardrails
 

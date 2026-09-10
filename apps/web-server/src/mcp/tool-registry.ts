@@ -10,6 +10,7 @@ import { registerAuthoringTools } from './tool-groups/authoring'
 import { registerWorkflowGuideTools } from './tool-groups/guides'
 import { registerHealFlowTools } from './tool-groups/heal-flow'
 import { registerDiscoveryRepairTools } from './tool-groups/discovery-repair'
+import { registerRobustnessTools } from './tool-groups/robustness'
 import { registerReadTools } from './tool-groups/reads'
 import { registerRunLifecycleTools } from './tool-groups/run-lifecycle'
 import {
@@ -70,6 +71,7 @@ export function createCanaryLabToolRegistry(
   registerRunLifecycleTools(ctx)
   registerHealFlowTools(ctx)
   registerDiscoveryRepairTools(ctx)
+  registerRobustnessTools(ctx)
 
   const missing = FULL_TOOLS.filter((name) => !captured.has(name))
   if (missing.length > 0) {

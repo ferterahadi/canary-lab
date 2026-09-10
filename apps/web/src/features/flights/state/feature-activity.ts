@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunDetail, RunIndexEntry } from '@/shared/api/types'
 import type { FlightStageKey, PortifyIndexEntry, PortifyManifest } from '@/shared/api/client'
+import type { RobustnessJobIndexEntry } from '@shared/robustness/jobs'
 import * as api from '@/shared/api/client'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useEvaluationExports } from '@/features/evaluation'
@@ -8,6 +9,7 @@ import { isActivePortify, usePortify } from '@/features/portify'
 import { useActiveRuns, useRunDetails, useRuns } from '@/features/runs'
 import { runWaitingState, type RunWaitingState } from '@/features/runs'
 import { isActiveWizardTask, useWizardDrafts } from '@/features/wizard'
+import { isAuxiliaryExecution } from '@shared/verification'
 
 // Per-feature "what is happening right now" — the live signal behind the
 // Flight pill. Since the R6/R15/R19 consolidation absorbed the per-feature
@@ -21,7 +23,7 @@ import { isActiveWizardTask, useWizardDrafts } from '@/features/wizard'
 
 export type FeatureActivityKind =
   | 'healing' | 'running' | 'verifying' | 'exporting' | 'portifying'
-  | 'authoring' | 'condensing' | 'mapping'
+  | 'authoring' | 'condensing' | 'mapping' | 'perturbing'
 
 export interface FeatureActivity {
   kind: FeatureActivityKind
@@ -86,6 +88,7 @@ export const ACTIVITY_STAGE: Record<FeatureActivityKind, FlightStageKey> = {
   'condensing': 'prd-summary',
   'mapping': 'specs-coverage',
   'exporting': 'evaluation-export',
+  'perturbing': 'robustness',
   'portifying': 'portify',
   'running': 'run',
   // A deployed-env verification is a run in verify mode — same stage, the run
@@ -128,6 +131,9 @@ export function deriveFeatureActivity(input: {
   drafts: DraftRecord[]
   exportTasks?: EvaluationExportTask[]
   coverageJobs?: CoverageJobIndexEntry[]
+  /** Robustness Lab matrix jobs (D16). Each spawns cell RUNS, which the run
+   *  loop below skips as auxiliary — the job itself is the verb. */
+  robustnessJobs?: RobustnessJobIndexEntry[]
   /** Per-run manifests off the runs stream. They carry the external client
    *  details for active runs; the compact index mirrors `healMode` so terminal
    *  external provenance also survives a cold load. */
@@ -167,12 +173,18 @@ export function deriveFeatureActivity(input: {
       map.set(feature, { kind: 'exporting', taskId: t.taskId, runId: t.runId, external: t.producer === 'external' })
     }
   }
+  // Under a real test run, over the export: the matrix re-boots the suite many
+  // times, so it is the loudest background job, but a run the user started is
+  // what they are waiting on.
+  for (const j of input.robustnessJobs ?? []) {
+    if (j.status === 'running') map.set(j.feature, { kind: 'perturbing', jobId: j.jobId, runId: j.runId, external: false })
+  }
   for (const r of input.activeRuns) {
     // Boots are not runs (they have the Services pill) and benchmark runs
     // drive the benchmark window — neither is feature activity here. A
     // deployed-env verification IS: it's a run in verify mode, and the suite's
     // one live indicator must light for it like any other run.
-    if (r.executionType === 'boot' || r.executionType === 'benchmark') continue
+    if (isAuxiliaryExecution(r.executionType)) continue
     const kind: FeatureActivityKind = r.executionType === 'verify'
       ? 'verifying'
       : r.status === 'healing' ? 'healing' : 'running'
@@ -281,7 +293,7 @@ export function deriveFeatureExternalHistory(input: {
   }
 
   for (const run of input.runs) {
-    if (run.executionType === 'boot' || run.executionType === 'benchmark') continue
+    if (isAuxiliaryExecution(run.executionType)) continue
     const detail = input.runDetails?.[run.runId]
     remember(run.feature, {
       kind: run.executionType === 'verify'
@@ -385,6 +397,14 @@ export function useFeatureWorkState(): FeatureWorkState {
     () => api.listAllCoverageJobs(),
     { cache: 'coverage-jobs' },
   )
+  // Same arrangement for the matrix jobs: their store publishes
+  // `robustness-changed` on every write and the socket bumps `robustness`.
+  const { value: robustnessJobs } = useLiveResource<RobustnessJobIndexEntry[]>(
+    'robustness',
+    'all-jobs',
+    () => api.listAllRobustnessJobs(),
+    { cache: 'robustness-jobs' },
+  )
   return useMemo(() => ({
     activity: deriveFeatureActivity({
       activeRuns: runs,
@@ -392,6 +412,7 @@ export function useFeatureWorkState(): FeatureWorkState {
       drafts,
       exportTasks: tasks,
       coverageJobs: coverageJobs ?? undefined,
+      robustnessJobs: robustnessJobs ?? undefined,
       runDetails,
     }),
     externalHistory: deriveFeatureExternalHistory({
@@ -403,7 +424,7 @@ export function useFeatureWorkState(): FeatureWorkState {
       runDetails,
       portifyDetails,
     }),
-  }), [allRuns, runs, workflows, portifyDetails, drafts, records, tasks, coverageJobs, runDetails])
+  }), [allRuns, runs, workflows, portifyDetails, drafts, records, tasks, coverageJobs, robustnessJobs, runDetails])
 }
 
 /** Compatibility hook for consumers that only need the live verb map. New

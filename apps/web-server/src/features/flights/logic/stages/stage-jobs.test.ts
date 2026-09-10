@@ -5,7 +5,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChildProcess } from 'child_process'
 import { runAgentProcess } from '../../../agent-sessions/logic/agent-process'
-import { agentSpawnJob, evaluationExportJob, portifyJob, runJob } from './stage-jobs'
+import { agentSpawnJob, evaluationExportJob, robustnessJob, portifyJob, runJob } from './stage-jobs'
 import type { FlightInject, FlightStageDeps } from './context'
 import { stageContextStub } from './__fixtures__/stage-context'
 import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../types'
@@ -98,6 +98,18 @@ describe('portifyJob', () => {
     const calls: InjectCall[] = []
     await portifyJob(deps(withStatus(undefined, calls)), 'w-1').stop('pause')
     expect(calls.some((c) => c.url.endsWith('/cancel'))).toBe(false)
+  })
+})
+
+describe('robustnessJob', () => {
+  it('uses the ABORT route, never the delete — findings so far must stay readable after a pause', async () => {
+    const calls: InjectCall[] = []
+    await robustnessJob(deps(makeInject(() => undefined, calls)), 'rj-1').stop('pause')
+    expect(calls).toEqual([{ method: 'POST', url: '/api/robustness/rj-1/abort' }])
+  })
+
+  it('carries the job id as its diagnostic id', () => {
+    expect(robustnessJob(deps(makeInject(() => undefined)), 'rj-7').id).toBe('rj-7')
   })
 })
 
@@ -210,7 +222,7 @@ describe('every stage answers the teardown question', () => {
 
   // A stage with a subsystem pointer it has not set yet owns nothing either — the
   // pointer is what a teardown reaches for.
-  it.each(['env-capture', 'portify', 'run', 'evaluation-export'] as const)(
+  it.each(['env-capture', 'portify', 'run', 'robustness', 'evaluation-export'] as const)(
     '%s owns nothing before it has started its work',
     (key) => {
       expect(adapters[key]!.teardown(ctx)).toBeNull()

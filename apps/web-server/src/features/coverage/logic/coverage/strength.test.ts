@@ -45,6 +45,10 @@ describe('classifyAssertionTier', () => {
   it('tier 3 — internal API response or a UI assertion on the app page', () => {
     expect(classifyAssertionTier('expect(response.status()).toBe(200)')).toBe(3)
     expect(classifyAssertionTier("await expect(page.getByRole('alert')).toBeVisible()")).toBe(3)
+    // A helper-wrapped API suite (the shipped storefront) never names the network
+    // in the expect() line — the HTTP code it compares against does.
+    expect(classifyAssertionTier('expect(created.status).toBe(201)')).toBe(3)
+    expect(classifyAssertionTier('expect(oversell.statusCode).toEqual(409)')).toBe(3)
   })
 
   it('tier 2 — internal state via DB / ORM / fixture', () => {
@@ -60,6 +64,8 @@ describe('classifyAssertionTier', () => {
   it('unknown — no confident structural signal', () => {
     expect(classifyAssertionTier('expect(total).toBe(42)')).toBe('unknown')
     expect(classifyAssertionTier("expect(consoleOutput).toContain('sent')")).toBe('unknown')
+    // A domain `status` field compared against a word is not an HTTP response.
+    expect(classifyAssertionTier("expect(read.body?.status).toBe('open')")).toBe('unknown')
   })
 })
 

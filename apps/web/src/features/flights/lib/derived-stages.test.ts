@@ -32,7 +32,7 @@ describe('deriveFeatureStages', () => {
     const stages = deriveFeatureStages({ evidence: { envCapture: false, prdSummary: false, specs: false } })!
     expect(statusOf(stages, 'similarity')).toBe('done')
     expect(statusOf(stages, 'scout')).toBe('done')
-    for (const key of ['scaffold', 'env-capture', 'docs', 'prd-summary', 'specs-coverage', 'portify', 'run', 'heal', 'evaluation-export']) {
+    for (const key of ['scaffold', 'env-capture', 'docs', 'prd-summary', 'specs-coverage', 'portify', 'run', 'heal', 'robustness', 'evaluation-export']) {
       expect(statusOf(stages, key)).toBe('pending')
     }
   })
@@ -106,6 +106,13 @@ describe('deriveFeatureStages', () => {
     expect(statusOf(stages, 'evaluation-export')).toBe('done')
   })
 
+  it('a completed robustness matrix lights its cell; none leaves it pending', () => {
+    const base = { envCapture: false, prdSummary: false, specs: false }
+    expect(statusOf(deriveFeatureStages({ evidence: { ...base, robustness: true } })!, 'robustness')).toBe('done')
+    expect(statusOf(deriveFeatureStages({ evidence: { ...base, robustness: false } })!, 'robustness')).toBe('pending')
+    expect(statusOf(deriveFeatureStages({ evidence: base })!, 'robustness')).toBe('pending')
+  })
+
   it('uses the external Portify stream as immediate derived-stage evidence', () => {
     const externalPortify = {
       kind: 'portifying' as const,
@@ -133,12 +140,14 @@ describe('deriveFeatureStages', () => {
 })
 
 describe('latestTerminalRunByFeature', () => {
-  it('keeps the newest settled test run per feature, skipping active/boot/benchmark/verify runs', () => {
+  it('keeps the newest settled test run per feature, skipping active/boot/benchmark/robustness/verify runs', () => {
     const map = latestTerminalRunByFeature([
       run({ runId: 'old-pass', startedAt: '2026-01-01T00:00:00Z', status: 'passed' }),
       run({ runId: 'new-fail', startedAt: '2026-01-02T00:00:00Z', status: 'failed' }),
       run({ runId: 'active', startedAt: '2026-01-03T00:00:00Z', status: 'running' }),
       run({ runId: 'boot', startedAt: '2026-01-04T00:00:00Z', executionType: 'boot' }),
+      run({ runId: 'bench', startedAt: '2026-01-04T06:00:00Z', executionType: 'benchmark' }),
+      run({ runId: 'cell', startedAt: '2026-01-04T12:00:00Z', status: 'failed', executionType: 'robustness' }),
       run({ runId: 'verify', startedAt: '2026-01-05T00:00:00Z', executionType: 'verify' }),
       run({ runId: 'other', feature: 'g', startedAt: '2026-01-01T00:00:00Z', status: 'passed' }),
     ])

@@ -11,6 +11,7 @@ import type { RunnerLog } from './runner-log'
 import { type WorktreeHandle } from './repo-worktree'
 import type { PlaywrightSpawner } from './run-spawn'
 import type { RunModelPlan } from './run-model-plan'
+import type { PlaywrightRerunSelection } from './rerun-targets'
 
 export interface ServiceSpec {
   repoName: string
@@ -128,6 +129,11 @@ export interface OrchestratorOptions {
   executionType?: ExecutionType
   verification?: VerificationRunMetadata
   playwrightEnv?: Record<string, string>
+  /** Run only these tests on the FIRST Playwright pass — a Robustness Lab cell
+   *  (one spec file under one atom). Playwright's inventory is then the
+   *  selection, so the verdict is the cell's, not the whole suite's. Absent on
+   *  every ordinary run, which starts with the full suite. */
+  initialSelection?: PlaywrightRerunSelection
   /** Per-run allocated ports keyed by slot name (allocated by the start flow
    *  before construction). Resolves `${port.<slot>}` tokens and is injected as
    *  each service's declared `env`. Released on stop. */

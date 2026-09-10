@@ -232,6 +232,7 @@ describe('useWorkspaceData — refreshFeatures selection', () => {
       allRuns: [
         run('boot-1', 'checkout', 'boot'),
         run('bench-1', 'checkout', 'benchmark'),
+        run('cell-1', 'checkout', 'robustness'),
         run('test-1', 'checkout', 'test'),
       ],
     })
@@ -474,6 +475,12 @@ describe('useWorkspaceData — workspace events', () => {
     expect(harness.invalidated).toEqual([])
   })
 
+  it('invalidates the robustness slot on a robustness job write', async () => {
+    await mount()
+    await fire({ type: 'robustness-changed', feature: 'checkout' })
+    expect(harness.invalidated).toEqual([['robustness', undefined]])
+  })
+
   it('invalidates coverage and re-reads features on a coverage change', async () => {
     await mount()
     const before = api.listFeatures.mock.calls.length
@@ -564,7 +571,7 @@ describe('useWorkspaceData — reconnect resync', () => {
     await act(async () => { socket.opts?.onReconnect?.() })
 
     expect(harness.invalidated).toEqual([
-      ['repos', undefined], ['tests', undefined], ['coverage', undefined],
+      ['repos', undefined], ['tests', undefined], ['coverage', undefined], ['robustness', undefined],
       ['verification', undefined], ['journal', 'r1'], ['flights', undefined],
       ['project-config', undefined], ['onboarding', undefined], ['notifications', undefined],
     ])

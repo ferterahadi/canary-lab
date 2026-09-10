@@ -383,6 +383,24 @@ describe('restoreSpecEdits', () => {
     expect(ctx.signalGate.consume()).toBeNull()
   })
 
+  it('puts a mid-run envelope edit back from the copy and reports no hint for it', () => {
+    // D15: the envelope is suite content under the boundary. Restoring it is the
+    // same lever as restoring a spec; the differential has nothing to say about it.
+    const { ctx, sink } = ctxFor()
+    const live = ctx.feature.featureDir
+    write(live, 'e2e/a.spec.ts', SPEC_A)
+    write(live, 'robustness/envelope.json', '{"format":"canary-lab/robustness-envelope@1","latency":{"ms":300}}')
+    snapshotSuite(ctx)
+    write(live, 'robustness/envelope.json', '{"format":"canary-lab/robustness-envelope@1","latency":{"ms":5}}')
+    recordSpecEdits(ctx)
+    const recorded = sink.patches.at(-1) as { specEdits: RunManifest['specEdits']; integrity: RunManifest['integrity'] }
+    expect(recorded.specEdits?.pending).toEqual([{ file: 'robustness/envelope.json', change: 'modified', affectedTests: [] }])
+    expect(recorded.integrity?.hints).toEqual([])
+
+    expect(restoreSpecEdits(ctx)).toEqual({ ok: true, restored: ['robustness/envelope.json'] })
+    expect(fs.readFileSync(path.join(live, 'robustness', 'envelope.json'), 'utf8')).toBe('{"format":"canary-lab/robustness-envelope@1","latency":{"ms":300}}')
+  })
+
   it('fails closed, re-measures what did change, and warns when a file cannot be rewritten', () => {
     const runnerLog = fakeRunnerLog()
     const { ctx, sink } = ctxFor({ runnerLog })

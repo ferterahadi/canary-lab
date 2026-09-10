@@ -34,6 +34,7 @@ import { useWorkspaceData } from './shared/state/use-workspace-data'
 import { resolveActivityTarget } from './shared/state/nav-state'
 import * as api from './shared/api/client'
 import type { GettingStartedTarget, ModelStageKey, OnboardingWorkflowAction } from './shared/api/client'
+import { isAuxiliaryExecution } from '@shared/verification'
 
 // The two stages a suite run spawns — the models gate scopes its rows to them.
 const RUN_MODEL_STAGES: readonly ModelStageKey[] = ['heal', 'commit']
@@ -186,7 +187,7 @@ export function App() {
   // sessions are excluded — they're not test runs and live in the global
   // Services surface, not the Runs list.
   const featureRuns = useMemo(
-    () => allRuns.filter((r) => r.feature === selectedFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark'),
+    () => allRuns.filter((r) => r.feature === selectedFeature && !isAuxiliaryExecution(r.executionType)),
     [allRuns, selectedFeature],
   )
 
@@ -283,8 +284,7 @@ export function App() {
     // or observational verification is not the normal run Export requires.
     return allRuns.find((run) =>
       run.feature === feature.feature
-      && run.executionType !== 'boot'
-      && run.executionType !== 'benchmark'
+      && !isAuxiliaryExecution(run.executionType)
       && run.executionType !== 'verify'
       && run.status === 'passed') ?? null
   }, [allRuns, demo.workflows])
@@ -406,7 +406,7 @@ export function App() {
           onSelectFeature={(name) => {
             pendingRunSelectionRef.current = null
             setSelectedFeature(name)
-            setSelectedRunId(allRuns.find((r) => r.feature === name && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null)
+            setSelectedRunId(allRuns.find((r) => r.feature === name && !isAuxiliaryExecution(r.executionType))?.runId ?? null)
           }}
           onReviewFeature={(name) => { setSelectedFeature(name); setReviewFocus(undefined); setSpecReviewOpen(true) }}
           onFeaturesChanged={refreshFeatures}
@@ -529,7 +529,7 @@ export function App() {
         specReviewRunId={selectedRunId}
         specReviewFeature={selectedFeature}
         specReviewRunDetail={statusRunDetail.detail}
-        reviewFocus={reviewFocus} onReviewFocus={setReviewFocus} onReviewFeature={(name) => { setSelectedFeature(name); setSelectedRunId(allRuns.find((run) => run.feature === name && run.executionType !== 'boot' && run.executionType !== 'benchmark')?.runId ?? null) }} specReviewOpen={specReviewOpen}
+        reviewFocus={reviewFocus} onReviewFocus={setReviewFocus} onReviewFeature={(name) => { setSelectedFeature(name); setSelectedRunId(allRuns.find((run) => run.feature === name && !isAuxiliaryExecution(run.executionType))?.runId ?? null) }} specReviewOpen={specReviewOpen}
         onSpecReviewOpenChange={setSpecReviewOpen}
       />
       <div className="min-h-0 flex-1">

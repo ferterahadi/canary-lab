@@ -5,6 +5,7 @@ import type { FlightIndexEntry, FlightManifest, PlanFeaturesTask } from '../api/
 import { connectWorkspaceEvents } from '@/shared/api/workspace-socket'
 import { useFlightsStream } from '@/features/flights'
 import type { InvalidationTopic } from './invalidation-bus'
+import { isAuxiliaryExecution } from '@shared/verification'
 
 // Owns the workspace's server-sourced data — the features list, the flights +
 // pre-flights indexes, the version status — plus the refresh helpers, the
@@ -17,7 +18,7 @@ import type { InvalidationTopic } from './invalidation-bus'
 // refs — the data layer stays free of nav STATE, and the render-coupled
 // run-selection reconciliation remains in App where `featureRuns` is derived.
 
-const NON_TEST = (r: RunIndexEntry) => r.executionType !== 'boot' && r.executionType !== 'benchmark'
+const NON_TEST = (r: RunIndexEntry) => !isAuxiliaryExecution(r.executionType)
 
 export interface WorkspaceDataDeps {
   invalidate: (topic: InvalidationTopic, scope?: string) => void
@@ -181,6 +182,9 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
             // A generated PRD summary lights the derived rail (prdSummary evidence).
             refreshFeatures(selectedFeatureRef.current)
           }
+          // The Robustness stage reads the suite's job records (findings, shrink
+          // trace); a write to any of them re-reads the slot.
+          if (event.type === 'robustness-changed') invalidate('robustness')
           if (event.type === 'tests-dirty-changed') {
             refreshFeatures(selectedFeatureRef.current)
             if (selectedFeatureRef.current === event.feature) invalidate('tests')
@@ -205,6 +209,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
           invalidate('repos')
           invalidate('tests')
           invalidate('coverage')
+          invalidate('robustness')
           invalidate('verification')
           const currentRunId = selectedRunIdRef.current
           if (currentRunId) invalidate('journal', currentRunId)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DirtySpecSummary, Feature } from '@/shared/api/types'
-import { SPEC_TONE, featureTone, specTone, worstTone } from './spec-integrity'
+import { SPEC_TONE, featureTone, pendingFileScope, specTone, worstTone } from './spec-integrity'
 
 function spec(verdict?: 'weaker' | 'equivalent' | 'stronger' | 'unclassifiable'): DirtySpecSummary {
   return {
@@ -62,5 +62,17 @@ describe('SPEC_TONE', () => {
 
   it('pairs advisory glyphs with distinct text labels', () => {
     expect([SPEC_TONE.weaker.glyph, SPEC_TONE.changed.glyph, SPEC_TONE.stronger.glyph]).toEqual(['!', '~', '↑'])
+  })
+})
+
+describe('pendingFileScope', () => {
+  it('counts the affected tests of a spec', () => {
+    expect(pendingFileScope({ file: 'e2e/a.spec.ts', affectedTests: ['a'] })).toBe('1 test')
+    expect(pendingFileScope({ file: 'e2e/a.spec.ts', affectedTests: ['a', 'b'] })).toBe('2 tests')
+    expect(pendingFileScope({ file: 'e2e/a.spec.ts', affectedTests: [] })).toBe('0 tests')
+  })
+
+  it('names the robustness envelope for what it is rather than as zero tests', () => {
+    expect(pendingFileScope({ file: 'robustness/envelope.json', affectedTests: [] })).toBe('perturbation envelope')
   })
 })

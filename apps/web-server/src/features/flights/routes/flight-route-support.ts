@@ -16,6 +16,7 @@ import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-con
 import { normalizeStagePlans, type AgentStagePlans, type ModelAgentKind } from '../../agent-sessions/logic/agent-models'
 import { MCP_ORIGIN_HEADER } from './flight-decision-origin'
 import { type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
+import { isAuxiliaryExecution } from '../../../../../../shared/verification'
 
 // Flight REST surface — the same store/conductor the MCP flight tools
 // drive (dual-surface parity). Start is non-blocking: it validates input,
@@ -35,7 +36,7 @@ function standalonePassedRun(logsDir: string | undefined, feature: string) {
   if (!logsDir) return null
   try {
     return listRuns(logsDir, { feature }).find(
-      (r) => r.status === 'passed' && r.executionType !== 'boot' && r.executionType !== 'benchmark' && r.executionType !== 'verify',
+      (r) => r.status === 'passed' && !isAuxiliaryExecution(r.executionType) && r.executionType !== 'verify',
     ) ?? null
   } catch {
     return null
@@ -132,14 +133,15 @@ export function buildStageEntryValidator(featuresDir: string, logsDir?: string) 
 
 /** Links external stage evidence into the record that is about to consume it.
  *  Validation decides whether entry is allowed; this resolver makes the same
- *  passed run the Evaluation Export stage's explicit input. */
+ *  passed run the explicit input of every stage that READS a run (the
+ *  Robustness Lab and the Report — `STAGE_DEPENDS_ON`, not a name list). */
 export function buildStageEntryLinkResolver(logsDir?: string) {
   return (args: {
     feature: string
     fromStage: FlightStageKey
     existing?: FlightManifest | null
   }): FlightManifest['links'] | undefined => {
-    if (args.fromStage !== 'evaluation-export' || args.existing?.links?.runId) return undefined
+    if (!STAGE_DEPENDS_ON[args.fromStage].includes('run') || args.existing?.links?.runId) return undefined
     const run = standalonePassedRun(logsDir, args.feature)
     return run ? { runId: run.runId } : undefined
   }

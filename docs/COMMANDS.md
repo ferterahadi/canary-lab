@@ -100,6 +100,7 @@ Major capabilities share stores, so work started on one surface appears on the o
 |---|---|---|---|---|
 | Flight (end-to-end) | `/canary-lab` | `flight` — `start_flight` / `get_flight` / `respond_flight_checkpoint` | `POST/GET /api/flights*` | Flights pill → flight view |
 | Run + heal | `/canary-lab-run` | `repair` — `start_run` / `wait_for_heal_task` / `signal_run` … | `/api/runs*` | suite Runs column / run detail |
+| Robustness lab | `/canary-lab-run` (Robustness Lab section) | `repair` — `start_robustness` / `get_robustness`; `start_run` with `perturbation` repairs a finding; `flight` reads with `get_robustness` | `POST/GET /api/features/:name/robustness`, `GET /api/robustness*` | Flight → Robustness lab stage (matrix, findings, Send to repair) |
 | Deployed verification | `/canary-lab-verify` | `verify` — `execute_verification` … | `/api/verification*` | Verify dialog |
 | Suite authoring | `/canary-lab-author` | `author` — `create_feature` / draft flow / envsets | `/api/features*` | Flight → Test authoring & coverage stage / config editor |
 | Coverage ledger | `/canary-lab-coverage` | `coverage` — summary/coverage jobs + ledger | `/api/coverage*` | Coverage ledger page (Suites column) |

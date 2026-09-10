@@ -10,6 +10,7 @@ export type {
   SabotageLevel,
   SabotageSkillSummary,
 } from './api/benchmark-types'
+export { Cell as MatrixCell, type MatrixCellState } from './components/BenchmarkArmMatrix'
 export { BenchmarkPill } from './components/BenchmarkPill'
 export { BenchmarkWindow } from './components/BenchmarkWindow'
 export { useBenchmarks } from './state/BenchmarkContext'

@@ -81,6 +81,7 @@ export const STAGE_BLURB: Record<FlightStageKey, string> = {
   'portify': 'Lets each service take its port from settings, so two runs can go at once.',
   'run': 'Starts the app and runs the tests, fixing failures as they come up.',
   'heal': 'Fixes failures by editing the app, then runs the tests again.',
+  'robustness': 'Reruns the passing tests under slow links, repeated writes and restarts, and shrinks each failure to a one-line repro.',
   'evaluation-export': 'Packs the finished run into a report you can download.',
 }
 
@@ -266,9 +267,10 @@ export function portifyWorkflowId(stage: { key: string; evidence?: unknown; prog
   return typeof prog.workflowId === 'string' ? prog.workflowId : null
 }
 
-/** The live phase mirror the portify adapter republishes on change (see
- *  PortifyStageProgress). Empty object for settled/older flights. */
-export function portifyProgress(stage: { progress?: unknown }): Record<string, unknown> {
+/** The live progress mirror an adapter republishes on change — the portify
+ *  phase (PortifyStageProgress) or the robustness cell/finding counters.
+ *  Empty object for settled/older flights; the evidence twin is evidenceOf. */
+export function progressOf(stage: { progress?: unknown }): Record<string, unknown> {
   return (stage.progress ?? {}) as Record<string, unknown>
 }
 

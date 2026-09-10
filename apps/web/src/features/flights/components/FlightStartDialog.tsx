@@ -41,6 +41,7 @@ const PICKABLE: FlightStageKey[] = [
   'specs-coverage',
   'portify',
   'run',
+  'robustness',
   'evaluation-export',
 ]
 

@@ -199,10 +199,10 @@ export function ExecutionTypeBadge({ type }: { type: ExecutionType }) {
     ? { background: 'var(--accent-soft)', color: 'var(--accent)' }
     : type === 'boot'
       ? { background: 'var(--boot-soft)', color: 'var(--boot)' }
-      : type === 'benchmark'
+      : type === 'benchmark' || type === 'robustness'
         ? { background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)' }
         : { background: 'var(--bg-selected)', color: 'var(--text-muted)' }
-  const label = type === 'verify' ? 'Verify' : type === 'boot' ? 'Boot' : type === 'benchmark' ? 'Arm' : 'Run'
+  const label = type === 'verify' ? 'Verify' : type === 'boot' ? 'Boot' : type === 'benchmark' ? 'Arm' : type === 'robustness' ? 'Cell' : 'Run'
   return (
     <span
       className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"

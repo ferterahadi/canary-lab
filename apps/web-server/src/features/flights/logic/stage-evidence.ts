@@ -3,6 +3,7 @@ import path from 'path'
 import { docsDirFor } from '../../coverage/logic/coverage/docs-collection'
 import { readPersistedCoverageState } from '../../coverage/logic/coverage/service'
 import { portInjectability, type PortInjectability } from '../../../../../../shared/launcher/port-injectability'
+import { robustnessJobStore } from '../../runs/logic/robustness/store'
 import type { RepoPrerequisite } from '../../../../../../shared/launcher/types'
 import { listRuns } from '../../runs/logic/run-store'
 import { readManifest } from '../../runs/logic/runtime/manifest'
@@ -133,6 +134,17 @@ export interface FeatureStageEvidence {
    *  that natively reads `PORT` declares its slot outright and needs no
    *  overlay. See shared/launcher/port-injectability.ts. */
   portInjectability: PortInjectability
+  /** A Robustness Lab matrix has run to completion for this suite (robustness
+   *  stage artifact). A failed or aborted job left cells unjudged, so it does
+   *  not count — the stage stays open until a matrix finishes. */
+  robustness: boolean
+}
+
+/** A completed matrix on record for the suite. Reads the index, never the job
+ *  bodies, and consults the process-wide store so the read shares its listener
+ *  set with the workspace bridge. */
+export function hasCompletedRobustnessJob(logsDir: string, feature: string): boolean {
+  return robustnessJobStore(logsDir).forFeature(feature).some((e) => e.status === 'done')
 }
 
 /** `logsDir`/`feature` are optional so callers with no run history to consult
@@ -151,5 +163,6 @@ export function deriveFeatureEvidence(
     specs: hasAuthoredSpecs(featureDir),
     coverageMapping: readPersistedCoverageState(featureDir),
     portInjectability: portInjectability(repos),
+    robustness: logsDir !== undefined && feature !== undefined && hasCompletedRobustnessJob(logsDir, feature),
   }
 }

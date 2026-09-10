@@ -4,8 +4,9 @@ import { useLiveResource } from '@/shared/state/use-live-resource'
 import { usePortify, usePortifyWorkflow } from '@/features/portify'
 import type { FlightManifest, FlightStage } from '@/shared/api/client'
 import type { CoverageLedger, EvaluationExportTask, FeatureDocsListing, RunDetail } from '@/shared/api/types'
+import type { RobustnessJobManifest } from '@shared/robustness/jobs'
 import { asRecord } from './FeatureSetupPanel'
-import { evidenceOf, portifyWorkflowId, str } from './stage-meta'
+import { evidenceOf, portifyWorkflowId, progressOf, str } from './stage-meta'
 import type { StageBandData } from './StageFacts'
 
 // The band's data sources live outside the flight record: the coverage ledger,
@@ -48,6 +49,13 @@ export function useStageBandData(
   const needsConfig = stageKey === 'scout'
   const needsBoot = stageKey === 'scaffold' || stageKey === 'env-capture'
   const needsDocs = stageKey === 'docs'
+  // The job id is pinned at stage START on the flight's links (the adapter's
+  // re-attach pointer) and mirrored into progress and, at settle, evidence — so
+  // a running, settled or resumed stage all name the same record. A probed
+  // derived stage carries it in evidence alone.
+  const robustnessJobId = stageKey === 'robustness'
+    ? str(evidenceOf(stage), 'jobId') ?? flight.links?.robustnessJobId ?? str(progressOf(stage), 'jobId') ?? null
+    : null
 
   // `coverage` is the live trigger: the specs↔coverage loop publishes
   // `coverage-changed` the moment each pass's mapping lands, and the stage stays
@@ -111,6 +119,17 @@ export function useStageBandData(
     return () => { alive = false }
   }, [portifyId, livePortify, loadPortify])
 
+  // `robustness` is bumped on every job write (`robustness-changed`), so the
+  // matrix, its findings and the shrink trace all move while the stage is open.
+  // With no id to read (a derived stage before any matrix settled), the suite's
+  // newest job stands in — findings from a stopped matrix still count.
+  const { value: robustnessJob, loading: robustnessLoading } = useLiveResource<RobustnessJobManifest>(
+    'robustness',
+    stageKey === 'robustness' ? (robustnessJobId ?? feature) : null,
+    async () => robustnessJobId ? api.getRobustnessJob(robustnessJobId) : latestRobustnessJob(feature),
+    { cache: 'robustness-job' },
+  )
+
   // `repos` is bumped on `features-changed`, which is what a config edit
   // publishes — so the digest re-reads itself instead of waiting for a remount.
   const { value: config, loading: configLoading } = useLiveResource<StageBandData['config']>(
@@ -152,11 +171,13 @@ export function useStageBandData(
       || (bootLoading && !boot)
       || (configLoading && !config)
       || (docsLoading && !docSizes)
+      || (robustnessLoading && !robustnessJob)
       || (portifyId != null && !livePortify && hydratedId !== portifyId),
     evalTask,
     ledger,
     boot,
     portify: livePortify ?? null,
+    robustnessJob,
     config,
     docsListing,
     // A zero total means "no docs". The frontend keeps the Source docs slot but
@@ -180,6 +201,12 @@ async function latestBootRunId(feature: string): Promise<string | null> {
   const runs = await api.listRuns({ feature })
   // listRuns is newest-first.
   return runs.find((r) => r.executionType === 'boot')?.runId ?? null
+}
+
+/** The suite's newest matrix job, whatever its status — the list is newest-first. */
+async function latestRobustnessJob(feature: string): Promise<RobustnessJobManifest | null> {
+  const jobs = await api.listRobustnessJobs(feature)
+  return jobs.length > 0 ? api.getRobustnessJob(jobs[0].jobId) : null
 }
 
 /** Service and port-slot counts off the feature config document. Counts the

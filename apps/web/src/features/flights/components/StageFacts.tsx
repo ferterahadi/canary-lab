@@ -5,7 +5,8 @@ import { formatBytes, formatDuration } from '@/shared/lib/format'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { SkeletonBar, type AwaitingState } from '@/shared/ui/Skeleton'
 import { Tooltip, TOOLTIP_ANCHOR_ATTR } from '@/shared/ui/Tooltip'
-import { STAGE_COLUMN, evidenceOf, num, specsCoverageProgress, str } from './stage-meta'
+import type { RobustnessJobManifest } from '@shared/robustness/jobs'
+import { STAGE_COLUMN, evidenceOf, num, progressOf, specsCoverageProgress, str } from './stage-meta'
 import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, overlayDiffStat, runHistoryStats, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
 
 // ─── Stage facts (R20) ──────────────────────────────────────────────────────
@@ -65,6 +66,9 @@ export interface StageBandData {
   boot?: RunDetail | null
   /** The portify workflow, for attempts, instances and the overlay diff. */
   portify?: PortifyManifest | null
+  /** The Robustness Lab job behind the stage — the matrix, its findings and
+   *  the cells it could not judge. */
+  robustnessJob?: RobustnessJobManifest | null
   /** Counts read off the on-disk feature config. */
   config?: { services: number; portSlots: number } | null
   /** The docs stage's full listing — the docs panel and the requirements fork
@@ -108,6 +112,82 @@ export function bootCheckFacts(envEv: Record<string, unknown>): StageFact[] {
 }
 
 
+/** The Robustness Lab counters, in one shape whatever carried them. While the
+ *  matrix runs they ride `progress` (the adapter republishes on every cell);
+ *  once settled they are the stage's evidence — and both are the SAME block the
+ *  server's `robustnessStageEvidence` writes. A stage that recorded neither (a
+ *  matrix that failed or was stopped leaves no evidence) falls back to the job
+ *  record itself, so findings made before the stop still count. */
+export interface RobustnessCounts {
+  planned: number
+  done: number
+  findings: number
+  confirmed: number
+  unconfirmed: number
+  skipped: number
+}
+
+export function robustnessCounts(stage: FlightStage, band: StageBandData = {}): RobustnessCounts | null {
+  const src = stage.status === 'running' ? progressOf(stage) : evidenceOf(stage)
+  const cells = src.cells as { planned: number; done: number } | undefined
+  const findings = num(src, 'findings')
+  const confirmed = num(src, 'confirmed')
+  const unconfirmed = num(src, 'unconfirmed')
+  const skipped = num(src, 'skipped')
+  if (cells && findings != null && confirmed != null && unconfirmed != null && skipped != null) {
+    return { planned: cells.planned, done: cells.done, findings, confirmed, unconfirmed, skipped }
+  }
+  const job = band.robustnessJob
+  if (!job) return null
+  const byStatus = (status: RobustnessJobManifest['findings'][number]['status']) => job.findings.filter((f) => f.status === status).length
+  return {
+    planned: job.cells.planned,
+    done: job.cells.done,
+    findings: job.findings.length,
+    confirmed: byStatus('confirmed'),
+    unconfirmed: byStatus('unconfirmed'),
+    skipped: job.skipped.length,
+  }
+}
+
+/** The Robustness Lab band: how much of the matrix ran, what it found, and how
+ *  much of that reproduced. Findings are never summed into a pass count — a
+ *  full matrix with none is the good case only when nothing was skipped, because
+ *  a cell nobody could judge is not a cell that held. */
+function robustnessFacts(stage: FlightStage, band: StageBandData): StageFact[] {
+  const c = robustnessCounts(stage, band)
+  if (!c) return []
+  const complete = c.done === c.planned && c.planned > 0
+  const proven = complete && c.skipped === 0
+  return [
+    {
+      label: 'Cells run',
+      value: `${c.done}/${c.planned}`,
+      big: true,
+      ...(proven ? { tone: 'good' as const } : c.skipped > 0 ? { tone: 'warn' as const } : {}),
+      ...(c.skipped > 0 ? { sub: `${plural(c.skipped, 'cell')} could not be judged` } : {}),
+    },
+    {
+      label: 'Findings',
+      value: String(c.findings),
+      big: true,
+      ...(c.findings > 0 ? { tone: 'bad' as const } : proven ? { tone: 'good' as const } : {}),
+    },
+    // Nothing to confirm is a settled answer once the matrix is complete; while
+    // it runs, the slot stays a placeholder until a finding exists to confirm.
+    ...(c.findings > 0
+      ? [{
+          label: 'Confirmed',
+          value: `${c.confirmed}/${c.findings}`,
+          big: true as const,
+          ...(c.unconfirmed > 0 ? { tone: 'warn' as const, sub: `${c.unconfirmed} unconfirmed` } : {}),
+        }]
+      : complete
+        ? [{ label: 'Confirmed', value: '—', sub: 'nothing to confirm' }]
+        : []),
+  ]
+}
+
 /** The export task behind an Evaluation Report stage. Recorded evidence and the
  *  read-time probe both carry the id; `links` is the resume path's only carrier
  *  (its evidence records the reused archive, not the task). Resolving the TASK is
@@ -138,6 +218,7 @@ const FACT_SLOTS: Partial<Record<FlightStageKey, readonly string[]>> = {
   'prd-summary': slots('Requirements'),
   'specs-coverage': slots('Mapped coverage', 'Requirements', 'Tests written'),
   'portify': slots('Services injectable', 'Files edited', 'Instances proven'),
+  'robustness': slots('Cells run', 'Findings', 'Confirmed'),
   'evaluation-export': REPORT_FACT_SLOTS,
 }
 
@@ -542,6 +623,8 @@ function measuredStageFacts(
       // numbers a second time in the "At a glance" card above the hero, which is
       // exactly the duplication the hero replaced. So: no stage-level facts.
       return []
+    case 'robustness':
+      return robustnessFacts(stage, band)
     case 'evaluation-export': {
       // The Report measures four distinct evidence axes. This function emits
       // only what was measured; the Report contract keeps every frontend slot
@@ -779,6 +862,10 @@ export const FACT_HELP: Record<string, string> = {
   'Services injectable': 'The service reads its port from settings instead of having it fixed in the code.',
   'Files edited': 'Changes Canary made so ports can be swapped. Kept as a patch you can undo.',
   'Instances proven': 'Two copies of the app ran at once and both answered. That is the real proof.',
+  // Robustness lab
+  'Cells run': 'One cell is one spec file run again under one disturbance — added delay, a repeated request, or a service restart. A cell nobody could judge is listed, not counted as a pass.',
+  'Findings': 'Tests that passed in the green run but failed under a disturbance. The green verdict stands; this is what it did not cover.',
+  'Confirmed': 'A finding is confirmed when its smallest failing disturbance reproduced 3 times out of 3. Unconfirmed ones stay listed with their trace, never dropped.',
   // Test run history
   'Runs performed': 'Every run Canary kept for this suite, not just this flight’s.',
   'Succeeded': 'Runs where every test passed. A stopped run counts as neither a pass nor a fail.',
@@ -827,6 +914,9 @@ export const FACT_GLOSS: Record<string, string> = {
   'Requirements with tests': 'claimed by a test’s label',
   'Tests that passed': 'in the run this report reads',
   'Requirements proven': 'a passing test backs every path',
+  'Cells run': 'spec files × disturbances',
+  'Findings': 'held in the green run, broke here',
+  'Confirmed': 'reproduced 3 of 3',
   'Runs performed': 'this suite’s whole history',
   'Succeeded': 'every test passed',
   'Avg duration': 'finished runs only',

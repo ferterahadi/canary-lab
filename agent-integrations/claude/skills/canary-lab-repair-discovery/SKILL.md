@@ -13,8 +13,17 @@ repair, live UI updates, and discovery verification; you edit the loading error.
 
 ## Connect and identify
 
-Use the connected Canary Lab MCP `exec` tool (usually
-`mcp__Canary_Lab__exec`). Every command below uses this envelope:
+Setup and the plugin expose one public Canary Lab MCP tool: `exec` (usually
+rendered as `mcp__Canary_Lab__exec`); only `exec` is public. Every Canary Lab
+tool name below is the exact `command` value, not a separate public tool. For a
+feature-scoped command, replace both placeholders in this shape:
+
+```json
+{"command":"<exact_tool_name>","arguments":{"feature":"<feature_name>"}}
+```
+
+This is the envelope shape, not every command's complete schema. Add the
+fields that command declares inside `arguments` — the first call here is:
 
 ```json
 {"command":"start_discovery_repair","arguments":{"feature":"<feature>","session_id":"<stable-conversation-id>"}}

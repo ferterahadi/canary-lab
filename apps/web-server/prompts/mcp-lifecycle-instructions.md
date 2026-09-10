@@ -2,7 +2,7 @@ Canary Lab — lifecycle and full profiles: every workflow on one connection. Fi
 
 Before driving a workflow read its guide: get_workflow_guide(workflow:"<name>") — this text is only the index.
 
-- repair — start_run(claim_heal:true, stable session_id, conversation_name) → wait_for_heal_task (blocks; still_waiting is not terminal; never poll get_run_snapshot) → fix the app YOURSELF → signal_run(hypothesis, fixDescription) once per cycle → wait again. The signal requests runner verification; do not start services or run Playwright yourself. Pass counts come from counts.statusLine / counts.passed, never total - failed.
+- repair — start_run(claim_heal:true, stable session_id, conversation_name) → wait_for_heal_task (blocks; still_waiting is not terminal; never poll get_run_snapshot) → fix the app YOURSELF → signal_run(hypothesis, fixDescription) once per cycle → wait again. The signal requests runner verification; do not start services or run Playwright yourself. Pass counts come from counts.statusLine / counts.passed, never total - failed. Robustness Lab: start_robustness → get_robustness → start_run(perturbation) per finding.
 - verify — saved Verify configs: boot_services → execute_verification(targetUrls, playwrightEnvsetId, bootRunId) → get_verification_result.
 - author — create_feature for a NEW suite (call it directly; do not list_features to avoid collisions); for an existing suite write specs into features/<feature>/e2e tagged { tag: ['@req-R2'] }.
 - coverage — write_feature_doc → start/submit_external_summary → start/submit_external_coverage (EVERY test in mappings[] or unmappable[]) → get_feature_coverage and report from that ledger.

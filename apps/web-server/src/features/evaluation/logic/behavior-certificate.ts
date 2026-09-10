@@ -11,11 +11,14 @@ import { strengthOf } from '../../../shared/verification-strength/lattice'
 import { buildTestReviewPacket, statusBucket, NOT_RUN_STATUS, type TestReviewCase } from './test-review-export'
 import { specFileOf } from './test-review/ast'
 import type { CoverageLedger } from '../../../../../../shared/coverage/types'
+import type { RobustnessFinding, RobustnessJobManifest } from '../../../../../../shared/robustness/jobs'
 import { INTEGRITY_HINT_DISCLOSURE } from '../../../../../../shared/verification-strength/disclosure'
 import {
   BEHAVIOR_CERTIFICATE_FORMAT,
   type BehaviorCertificate,
   type CertificateClaim,
+  type CertificateRobustness,
+  type CertificateRobustnessFinding,
   type CertificateRun,
   type CertificateSuite,
   type CertificateTest,
@@ -34,6 +37,10 @@ export interface BuildBehaviorCertificateOptions {
   /** The feature's requirement ledger, when the export attached one. Wording
    *  only: the ledger's `proven` joins the LATEST run and is not this run's. */
   coverage?: CoverageLedger
+  /** The settled Robustness Lab job built from THIS run, when one exists. A
+   *  running job is not evidence yet and is passed as absent; `null` is the
+   *  store's own "no record" and reads the same way. */
+  robustness?: RobustnessJobManifest | null
   now?: () => string
 }
 
@@ -45,12 +52,13 @@ export function buildBehaviorCertificate(detail: RunDetail, options: BuildBehavi
   const extracted = suiteDir ? extractSuite(suiteDir) : new Map<string, ExtractedSpec>()
   const tests = certifyTests(packet.tests, suiteDir, extracted)
   const claims = certifyClaims(tests, options.coverage)
-  const notProven = notProvenBy(suite, manifest.specEdits !== undefined, options.coverage !== undefined, packet.tests, detail)
+  const robustness = options.robustness ? certifyRobustness(options.robustness) : undefined
+  const notProven = notProvenBy(suite, manifest.specEdits !== undefined, options.coverage !== undefined, packet.tests, detail, robustness)
   const run = certifyRun(detail, tests)
   return {
     format: BEHAVIOR_CERTIFICATE_FORMAT,
     issuedAt: (options.now ?? (() => new Date().toISOString()))(),
-    statement: statementFor(run, suite),
+    statement: statementFor(run, suite, robustness),
     run,
     suite,
     tests,
@@ -68,9 +76,37 @@ export function buildBehaviorCertificate(detail: RunDetail, options: BuildBehavi
           },
         }
       : {}),
+    ...(robustness ? { robustness } : {}),
     hints: manifest.integrity?.hints ?? [],
     disclosure: manifest.integrity?.disclosure ?? INTEGRITY_HINT_DISCLOSURE,
     notProven,
+  }
+}
+
+/** The job record re-stated for the certificate: findings split by whether
+ *  they reproduced 3/3, the trace and the driver log left behind. `judged` is
+ *  what the matrix actually ran to a verdict; the matrix's own `done` counter
+ *  advances on a skipped cell too, so skipped cells are subtracted here. */
+function certifyRobustness(job: RobustnessJobManifest): CertificateRobustness {
+  if (job.status === 'running') throw new Error(`robustness job ${job.jobId} is still running and cannot be certified`)
+  const finding = (f: RobustnessFinding): CertificateRobustnessFinding => ({
+    cell: f.cell,
+    tests: f.failedTests,
+    ...(f.requirements.length > 0 ? { requirements: f.requirements } : {}),
+    envelope: f.shrink?.envelope ?? f.envelope,
+    ...(f.shrink ? { repro: f.shrink.repro, confirmations: f.shrink.confirmations } : {}),
+  })
+  const judged = job.cells.done - job.skipped.length
+  return {
+    jobId: job.jobId,
+    status: job.status,
+    envelope: job.envelope,
+    cells: { planned: job.cells.planned, judged, notRun: job.cells.planned - judged },
+    findings: job.findings.filter((f) => f.status === 'confirmed').map(finding),
+    // `found` and `shrinking` only survive in a job that stopped early: the
+    // failure happened once and was never confirmed — unconfirmed, by definition.
+    unconfirmed: job.findings.filter((f) => f.status !== 'confirmed').map(finding),
+    skipped: job.skipped.map((s) => ({ cell: s.cell, reason: s.reason })),
   }
 }
 
@@ -248,14 +284,17 @@ export function requirementFingerprint(id: string, title: string, text: string):
   return createHash('sha256').update(`${id}\n${title}\n${text}`).digest('hex').slice(0, 16)
 }
 
-function statementFor(run: CertificateRun, suite: CertificateSuite): string {
+function statementFor(run: CertificateRun, suite: CertificateSuite, robustness: CertificateRobustness | undefined): string {
   const from = suite.source === 'run-start-snapshot'
     ? `the suite snapshot taken at run start (digest ${suite.digest.slice(0, 16)}…)`
     : suite.source === 'live-feature-dir'
       ? `the live suite directory as it read when this certificate was issued (digest ${suite.digest.slice(0, 16)}…)`
       : 'a suite directory this certificate could not read'
   const { counts } = run
-  return `Canary Lab ran ${counts.declared} declared test${counts.declared === 1 ? '' : 's'} for run ${run.runId} of "${run.feature}" from ${from}: ${counts.passed} passed, ${counts.failed} failed, ${counts.skipped} skipped, ${counts.interrupted} interrupted, ${counts.notRun} never run; the run ended ${run.status}. Each test below is listed with the assertions it enforced, as written in that suite. Counts come from the harness's own result lines — a test the run never reached is listed as not run, never as passed.`
+  const base = `Canary Lab ran ${counts.declared} declared test${counts.declared === 1 ? '' : 's'} for run ${run.runId} of "${run.feature}" from ${from}: ${counts.passed} passed, ${counts.failed} failed, ${counts.skipped} skipped, ${counts.interrupted} interrupted, ${counts.notRun} never run; the run ended ${run.status}. Each test below is listed with the assertions it enforced, as written in that suite. Counts come from the harness's own result lines — a test the run never reached is listed as not run, never as passed.`
+  if (!robustness) return base
+  const { cells, findings, unconfirmed } = robustness
+  return `${base} The Robustness Lab then re-ran the same spec files under the suite's perturbation envelope: ${cells.judged} of ${cells.planned} cell${cells.planned === 1 ? '' : 's'} judged, ${findings.length} finding${findings.length === 1 ? '' : 's'} confirmed by reproducing under the shrunk envelope, ${unconfirmed.length} unconfirmed. A finding names tests that passed here and failed under the fault; a cell that held leaves no record.`
 }
 
 function notProvenBy(
@@ -264,6 +303,7 @@ function notProvenBy(
   hasLedger: boolean,
   roster: TestReviewCase[],
   detail: RunDetail,
+  robustness: CertificateRobustness | undefined,
 ): string[] {
   const out = [
     'The absence of weakening. An agent can weaken a suite by means the differential does not model — deleting a test, narrowing a fixture, changing test data — and a human can adopt a weaker edit. The hints below are advisory; they were checked by AI, not by a human, and they never changed this verdict.',
@@ -279,5 +319,28 @@ function notProvenBy(
   if (!hasLedger) out.push('The requirements’ wording. No requirement ledger was attached, so claims carry ids from test tags only, with no title or text to fingerprint.')
   if (detail.summary?.mergedFromPriorExecution) out.push('That every test passed in one execution. The outcomes span several partial executions — a targeted heal rerun carried untouched results forward.')
   if (roster.some((test) => test.status === NOT_RUN_STATUS)) out.push('Anything about the tests marked not run. The run stopped before reaching them; they are listed so the count stays honest, not as passes.')
+  out.push(...robustnessNotProven(robustness))
+  return out
+}
+
+/** The perturbation axis is certified only as far as a matrix ran: none at all,
+ *  or planned cells it never judged, are named with the count — "robustness:
+ *  <n> cells not run" is the line a reader greps for. */
+function robustnessNotProven(robustness: CertificateRobustness | undefined): string[] {
+  if (!robustness) {
+    return ['Behaviour under perturbation. No Robustness Lab matrix ran against this run, so nothing here speaks to these tests under added latency, duplicated writes or service restarts.']
+  }
+  const out: string[] = []
+  const { cells, unconfirmed, skipped, status } = robustness
+  if (cells.notRun > 0) {
+    const why = status === 'done'
+      ? `${skipped.length} skipped (see robustness.skipped for each reason)`
+      : `the matrix ended ${status} after ${cells.judged} judged${skipped.length > 0 ? `, ${skipped.length} more skipped` : ''}`
+    out.push(`robustness: ${cells.notRun} cell${cells.notRun === 1 ? '' : 's'} not run — ${why}. A cell the matrix never judged is not a pass.`)
+  }
+  if (unconfirmed.length > 0) {
+    out.push(`That the ${unconfirmed.length} unconfirmed robustness finding${unconfirmed.length === 1 ? '' : 's'} ${unconfirmed.length === 1 ? 'is a defect' : 'are defects'}. Each failed under perturbation at least once and did not reproduce 3/3 under its shrunk envelope; listed as unconfirmed, counted as neither a defect nor a pass.`)
+  }
+  out.push('Behaviour outside the certified envelope. Only the atoms in robustness.envelope were exercised, at the knobs recorded there and through a proxy on the suite\'s declared port slots; a tighter envelope, a different fault, or a service without a slot was not tested.')
   return out
 }

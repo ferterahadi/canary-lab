@@ -19,11 +19,18 @@ export interface Cart {
   total: number
 }
 
+// Every write carries a fresh Idempotency-Key, the way a real storefront client
+// does: a retried or replayed request must be applied once, not twice. The
+// services dedupe on it (demo-app/shared/durable.ts); a write sent without one
+// is applied every time it arrives, which is the exposure a robustness
+// envelope's `duplicate` atom exists to find.
 const request = async <T>(url: string, init: RequestInit = {}): Promise<{ status: number; body: T | null }> => {
+  const write = init.method !== undefined && init.method !== 'GET'
   const response = await fetch(url, {
     ...init,
     headers: {
       ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(write ? { 'Idempotency-Key': crypto.randomUUID() } : {}),
       ...init.headers,
     },
   })

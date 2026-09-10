@@ -6,6 +6,7 @@ import { useEvaluationExports } from '@/features/evaluation'
 import { useRuns } from '@/features/runs'
 import { isActivePortify, usePortify } from '@/features/portify'
 import type { FeatureExternalHistory, StageExternalHistory } from '../state/feature-activity'
+import { isAuxiliaryExecution } from '@shared/verification'
 
 // Evidence-derived stage rail for a feature with NO flight record: what has
 // actually been done to this suite, regardless of who did it (flight, standalone UI,
@@ -28,7 +29,7 @@ export interface DerivedStage {
 
 /** Status per stage from workspace evidence. Returns null when the server
  *  payload carries no evidence block (older server) — callers fall back to the
- *  all-pending rail + "not flown" chip. Full 11-key array so `stageRailRows`
+ *  all-pending rail + "not flown" chip. Every stage key, so `stageRailRows`
  *  folds pairs exactly like a flight-record rail. */
 export function deriveFeatureStages(
   feature: Pick<Feature, 'evidence' | 'portified'>,
@@ -93,6 +94,9 @@ export function deriveFeatureStages(
       : 'pending',
     'run': runStatus,
     'heal': runStatus,
+    // A completed matrix on record — the server reads the job index, so a
+    // failed or aborted lab (cells left unjudged) keeps the step open.
+    'robustness': ev.robustness ? 'done' : 'pending',
     'evaluation-export': hasExport ? 'done' : 'pending',
   }
   return FLIGHT_STAGE_KEYS.map((key) => ({
@@ -205,7 +209,7 @@ export function derivedEntryStage(stages: DerivedStage[]): FlightStageKey | null
 export function latestTerminalRunByFeature(runs: RunIndexEntry[]): Map<string, RunIndexEntry> {
   const map = new Map<string, RunIndexEntry>()
   for (const r of runs) {
-    if (r.executionType === 'boot' || r.executionType === 'benchmark' || r.executionType === 'verify') continue
+    if (isAuxiliaryExecution(r.executionType) || r.executionType === 'verify') continue
     if (r.status !== 'passed' && r.status !== 'failed') continue
     const prev = map.get(r.feature)
     if (!prev || r.startedAt.localeCompare(prev.startedAt) > 0) map.set(r.feature, r)

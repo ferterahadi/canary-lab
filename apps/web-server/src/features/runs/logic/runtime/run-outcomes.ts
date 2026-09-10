@@ -3,6 +3,7 @@ import path from 'path'
 import { readRunsIndex } from './manifest'
 import { runDirFor } from './run-paths'
 import { slugify } from './summary-reporter'
+import { isAuxiliaryExecution } from '../../../../../../../shared/verification'
 
 // Per-test outcomes of a feature's LATEST recorded run — the join source for
 // the coverage ledger's `proven` axis ("covered by a test that actually
@@ -39,7 +40,7 @@ export interface LatestRunOutcomes {
  */
 export function readLatestRunOutcomes(logsDir: string, feature: string): LatestRunOutcomes | null {
   const entries = readRunsIndex(logsDir)
-    .filter((e) => e.feature === feature && e.executionType !== 'boot' && e.executionType !== 'benchmark')
+    .filter((e) => e.feature === feature && !isAuxiliaryExecution(e.executionType))
     .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))
   for (const entry of entries) {
     const summaryPath = path.join(runDirFor(logsDir, entry.runId), 'e2e-summary.json')

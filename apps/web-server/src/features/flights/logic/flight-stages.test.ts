@@ -201,7 +201,7 @@ describe('jump', () => {
       expect(s.status).toBe('skipped')
       expect(s.skipReason).toBe('rerun of existing feature')
     }
-    expect(calls).toEqual(['similarity', 'run', 'heal', 'evaluation-export'])
+    expect(calls).toEqual(['similarity', 'run', 'heal', 'robustness', 'evaluation-export'])
   })
 
   it('treats a backwards jump as a machine bug and parks the flight', async () => {
@@ -273,7 +273,7 @@ describe('reopenStages', () => {
     for (const key of ['similarity', 'scout', 'scaffold', 'env-capture'] as const) {
       expect(reopened.stages.find((s) => s.key === key)!.status).toBe('done')
     }
-    for (const key of ['docs', 'prd-summary', 'specs-coverage', 'portify', 'run', 'heal', 'evaluation-export'] as const) {
+    for (const key of ['docs', 'prd-summary', 'specs-coverage', 'portify', 'run', 'heal', 'robustness', 'evaluation-export'] as const) {
       expect(reopened.stages.find((s) => s.key === key)!.status).toBe('pending')
     }
     expect(reopened.links).toBeUndefined()
@@ -392,7 +392,7 @@ describe('restart wipe (R78)', () => {
     expect(fs.existsSync(path.join(flightDir, 'portify'))).toBe(false)
     expect(fs.existsSync(path.join(flightDir, 'run'))).toBe(true)
     expect(fs.existsSync(path.join(flightDir, 'evaluation-export'))).toBe(true)
-    for (const key of ['run', 'heal', 'evaluation-export'] as const) {
+    for (const key of ['run', 'heal', 'robustness', 'evaluation-export'] as const) {
       expect(store.get(jumped.manifest.flightId)!.stages.find((stage) => stage.key === key)?.status).toBe('done')
     }
   })

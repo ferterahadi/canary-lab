@@ -98,7 +98,7 @@ describe('completeExternalEvaluationExport', () => {
     const bare = createExternalEvaluationExportTask({ logsDir, detail: run, sessionId: 's-1' })
     const withoutLedger = await completeExternalEvaluationExport({ logsDir, detail: run, taskId: bare.taskId, rewrite })
     expect(withoutLedger.ok).toBe(true)
-    expect(readEvaluationExportCertificate(logsDir, bare.taskId)).toMatchObject({ format: 'canary-lab/behavior-certificate@1' })
+    expect(readEvaluationExportCertificate(logsDir, bare.taskId)).toMatchObject({ format: 'canary-lab/behavior-certificate@2' })
     expect(readEvaluationExportCertificate(logsDir, bare.taskId)!.notProven.join('\n')).toContain('No requirement ledger')
 
     // A feature root that holds no such feature attaches nothing, and says so the

@@ -188,6 +188,11 @@ describe('buildStageEntryLinkResolver', () => {
     expect(runMocks.listRuns).not.toHaveBeenCalled()
   })
 
+  it('adopts the run for the robustness entry too — every stage that READS the run, not the export by name', () => {
+    useRealIndex([runRow({ runId: 'r7', status: 'passed' })])
+    expect(buildStageEntryLinkResolver(logsDir)({ feature: FEATURE, fromStage: 'robustness' })).toEqual({ runId: 'r7' })
+  })
+
   it('resolves nothing for any other entry stage', () => {
     useRealIndex([runRow({ runId: 'r7', status: 'passed' })])
     expect(buildStageEntryLinkResolver(logsDir)({ feature: FEATURE, fromStage: 'run' })).toBeUndefined()

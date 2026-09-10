@@ -43,6 +43,10 @@ const mocks = vi.hoisted(() => ({
   cancelHealRun: vi.fn(),
   stopRun: vi.fn(),
   restartRun: vi.fn(),
+  getRobustnessJob: vi.fn(),
+  listRobustnessJobs: vi.fn(),
+  startRun: vi.fn(),
+  asRepoCollision: vi.fn(() => null),
   taskById: vi.fn(),
   taskForRun: vi.fn(),
   evaluationTasks: vi.fn((): EvaluationExportTask[] => []),
@@ -81,6 +85,10 @@ vi.mock('@/shared/api/client', () => ({
   cancelHealRun: mocks.cancelHealRun,
   stopRun: mocks.stopRun,
   restartRun: mocks.restartRun,
+  getRobustnessJob: mocks.getRobustnessJob,
+  listRobustnessJobs: mocks.listRobustnessJobs,
+  startRun: mocks.startRun,
+  asRepoCollision: mocks.asRepoCollision,
   ApiError: class ApiError extends Error {
     constructor(message: string, public status = 500, public body: unknown = null) { super(message) }
   },
@@ -1478,5 +1486,129 @@ describe('Parallel readiness follows the workflow live', () => {
     expect(container.querySelector('[data-testid="double-boot-skeleton"] [data-awaiting="unavailable"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="overlay-skeleton"] [data-awaiting="unavailable"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="double-boot-panel"]')).toBeNull()
+  })
+})
+
+describe('Robustness lab stage (D16) — matrix, findings, Send to repair', () => {
+  const FORMAT = 'canary-lab/robustness-envelope@1' as const
+  const finding = {
+    cell: { specFile: 'e2e/checkout.spec.ts', atom: 'latency' as const },
+    failedTests: ['pays with a saved card'],
+    runId: 'run-cell-1',
+    requirements: ['@req-pay-1'],
+    status: 'confirmed' as const,
+    envelope: { format: FORMAT, latency: { ms: 250 } },
+    shrink: {
+      status: 'confirmed' as const,
+      envelope: { format: FORMAT, latency: { ms: 125 } },
+      probes: 1,
+      budgetExhausted: false,
+      confirmations: { asked: 3, reproduced: 3 },
+      steps: [],
+      repro: 'latency 125 ms',
+    },
+    repro: 'latency 125 ms',
+  }
+  const job = {
+    jobId: 'rj-1', feature: 'checkout', runId: 'run-9', status: 'done', startedAt: '2026-09-10T00:00:00Z', endedAt: '2026-09-10T00:10:00Z',
+    envelope: { format: FORMAT, latency: { ms: 250 }, duplicate: { gapMs: 40, match: 'POST /api/**' } },
+    cells: { planned: 4, done: 4 }, findings: [finding], skipped: [], log: '',
+  }
+  const evidence = { jobId: 'rj-1', runId: 'run-9', cells: { planned: 4, done: 4 }, findings: 1, confirmed: 1, unconfirmed: 0, skipped: 0 }
+  const doneFlight = (over: Partial<FlightManifest> = {}) => manifest({
+    status: 'done',
+    currentStage: null,
+    links: { runId: 'run-9', robustnessJobId: 'rj-1' },
+    stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const, ...(key === 'robustness' ? { evidence } : {}) })),
+    ...over,
+  })
+  const open = async (flight: FlightManifest, extraProps: Record<string, unknown> = {}) => {
+    mocks.getFlight.mockResolvedValue(flight)
+    await render('fl_1', extraProps)
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-robustness"]')?.click() })
+  }
+
+  it('reads the job the flight pinned, fills the three tiles, and draws the matrix + the finding card', async () => {
+    mocks.getRobustnessJob.mockResolvedValue(job)
+    await open(doneFlight())
+    expect(mocks.getRobustnessJob).toHaveBeenCalledWith('rj-1')
+    expect(mocks.listRobustnessJobs).not.toHaveBeenCalled()
+    const facts = container.querySelector('[data-testid="stage-facts"]')
+    expect(facts?.querySelectorAll('[data-testid="fact-tile"]')).toHaveLength(3)
+    expect(facts?.textContent).toContain('Cells run')
+    expect(facts?.textContent).toContain('4/4')
+    expect(facts?.textContent).toContain('Confirmed')
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('1 finding — 1 confirmed 3/3.')
+    expect(container.querySelectorAll('[data-testid="robustness-matrix-row"]')).toHaveLength(1)
+    expect(container.querySelector('[data-testid="robustness-matrix-footer"]')?.textContent).toBe('3 of 4 cells held — a clean cell leaves no record')
+    expect(container.querySelector('[data-testid="robustness-finding-repro"]')?.textContent).toBe('latency 125 ms')
+  })
+
+  it('Send to repair starts a run under the shrunk envelope and lands on it', async () => {
+    mocks.getRobustnessJob.mockResolvedValue(job)
+    mocks.startRun.mockResolvedValue({ runId: 'run-repair' })
+    const onOpenRun = vi.fn()
+    await open(doneFlight(), { onOpenRun })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="robustness-send-to-repair"]')?.click() })
+    expect(mocks.startRun).toHaveBeenCalledWith('checkout', { env: 'local', perturbation: { format: FORMAT, latency: { ms: 125 } } })
+    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-repair')
+    expect(container.querySelector('[data-testid="flight-action-error"]')).toBeNull()
+  })
+
+  it('a rejected start lands on the header error line — a collision in the pane\'s words, anything else verbatim', async () => {
+    mocks.getRobustnessJob.mockResolvedValue(job)
+    mocks.startRun.mockRejectedValue(new Error('robustness envelope invalid'))
+    await open(doneFlight())
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="robustness-send-to-repair"]')?.click() })
+    expect(container.querySelector('[data-testid="flight-action-error"]')?.textContent).toContain('robustness envelope invalid')
+
+    mocks.startRun.mockRejectedValue('nope')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="robustness-send-to-repair"]')?.click() })
+    expect(container.querySelector('[data-testid="flight-action-error"]')?.textContent).toContain('nope')
+
+    mocks.asRepoCollision.mockReturnValueOnce({ reason: 'repo_collision_requires_choice' } as never)
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="robustness-send-to-repair"]')?.click() })
+    expect(container.querySelector('[data-testid="flight-action-error"]')?.textContent).toContain('another run of this suite is active')
+  })
+
+  it('an externally driven flight keeps the finding card but drops the action', async () => {
+    mocks.getRobustnessJob.mockResolvedValue(job)
+    await open(doneFlight({ status: 'paused', opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' } as FlightManifest['opts'] }))
+    expect(container.querySelector('[data-testid="robustness-finding"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="robustness-send-to-repair"]')).toBeNull()
+  })
+
+  it('a derived stage with no pinned job reads the suite\'s newest job; none at all leaves the cards absent', async () => {
+    mocks.listRobustnessJobs.mockResolvedValue([{ jobId: 'rj-newest' }, { jobId: 'rj-older' }])
+    mocks.getRobustnessJob.mockResolvedValue({ ...job, jobId: 'rj-newest', status: 'aborted', cells: { planned: 4, done: 2 } })
+    const noPin = doneFlight({ links: { runId: 'run-9' }, stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'robustness' ? 'failed' as const : 'done' as const })) })
+    await open(noPin)
+    expect(mocks.listRobustnessJobs).toHaveBeenCalledWith('checkout')
+    expect(mocks.getRobustnessJob).toHaveBeenCalledWith('rj-newest')
+    // Counters off the job record, since a stopped matrix recorded no evidence.
+    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('2/4')
+    expect(container.querySelector('[data-testid="robustness-finding"]')).not.toBeNull()
+
+    mocks.listRobustnessJobs.mockResolvedValue([])
+    mocks.getRobustnessJob.mockClear()
+    await open(noPin)
+    expect(mocks.getRobustnessJob).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-testid="robustness-matrix"]')).toBeNull()
+    expect(container.querySelector('[data-testid="robustness-finding"]')).toBeNull()
+  })
+
+  it('while the matrix runs, the pane holds its skeletons until the first read lands', async () => {
+    // A job id no earlier test has read: the remount cache is module-level, and
+    // a cached job would paint the cards before this first read lands.
+    mocks.getRobustnessJob.mockReturnValue(new Promise(() => {}))
+    await open(manifest({
+      status: 'running',
+      currentStage: 'robustness',
+      links: { runId: 'run-9', robustnessJobId: 'rj-live' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'robustness' ? 'running' as const : 'done' as const })),
+    }))
+    expect(container.querySelector('[data-testid="robustness-matrix-skeleton"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="robustness-findings-skeleton"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Booting the tests under perturbation…')
   })
 })

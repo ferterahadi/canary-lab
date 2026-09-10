@@ -177,6 +177,24 @@ describe('buildOrchestratorHealPrompt', () => {
     expect(prompt).toBe(promptBody)
   })
 
+  // The spawned heal agent reads only this prompt, so a perturbed run (Send to
+  // repair) has to say so HERE — in the same words the external procedure uses,
+  // or the two agents would be told two different things about one run.
+  it('names the perturbation the run booted under, and says nothing on an unperturbed run', () => {
+    writeRunManifest(runDir, { repoPaths: ['/repo/app'] })
+    const plain = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })({ cycle: 1, outputDir: path.join(runDir, 'out') })
+    expect(plain).not.toContain('PERTURBED')
+    expect(plain).not.toContain('{{')
+
+    writeRunManifest(runDir, {
+      repoPaths: ['/repo/app'],
+      perturbation: { envelope: { format: 'canary-lab/robustness-envelope@1', latency: { ms: 262 }, duplicate: { gapMs: 31, match: 'WRITE /**' } }, shimPorts: { catalog: 40001 } },
+    })
+    const perturbed = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })({ cycle: 1, outputDir: path.join(runDir, 'out') })
+    expect(perturbed).toContain('Playwright failed. Fix service/app code, not tests.\n\nTHIS RUN IS PERTURBED: the services ran behind a proxy applying latency 262 ms · duplicate WRITE /** after 31 ms.')
+    expect(perturbed).toContain('never relax the test or the envelope')
+  })
+
   it('shows the cycle budget ("of N") — default AUTO_HEAL_MAX_CYCLES, overridable', () => {
     // Regression: maxCycles was never threaded from the factory into the
     // addendum, so the PTY agent saw "Cycle N." with no budget to pace against.

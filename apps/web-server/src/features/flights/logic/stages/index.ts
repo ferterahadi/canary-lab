@@ -9,13 +9,14 @@ import { prdSummaryStage } from './prd-summary'
 import { specsCoverageStage } from './specs-coverage'
 import { portifyStage } from './portify'
 import { runStage, healStage } from './run'
+import { robustnessStage } from './robustness'
 import { evaluationExportStage } from './evaluation-export'
 
 export type { FlightStageDeps, FlightInject, FlightAgentSpawner } from './context'
 
 // The flight's stage adapters — each a thin conductor over an existing
 // subsystem (create_feature scaffolding, env capture, PRD/coverage engines,
-// draft-apply validation, portify, runs, evaluation export). No new engines:
+// draft-apply validation, portify, runs, the Robustness Lab, evaluation export). No new engines:
 // an adapter orchestrates and computes the harness-side success predicate;
 // it never lets a stage settle on agent say-so. The contract each adapter
 // implements is the project doc research/flight-stages.md (todo hub →
@@ -33,6 +34,7 @@ export function buildFlightStageAdapters(deps: FlightStageDeps): StageAdapters {
     'portify': portifyStage(deps),
     'run': runStage(deps),
     'heal': healStage(deps),
+    'robustness': robustnessStage(deps),
     'evaluation-export': evaluationExportStage(deps),
   }
 }

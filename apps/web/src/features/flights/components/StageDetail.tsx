@@ -1,4 +1,7 @@
+import { useState } from 'react'
 import type { ExternalWorkCheckpointData, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
+import * as api from '@/shared/api/client'
+import type { RobustnessFinding } from '@shared/robustness/jobs'
 import type { AgentSessionSegmentSource, AgentSessionSource, ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
 import { clientLabel, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
@@ -12,6 +15,7 @@ import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
 import type { FlightDrillThroughs } from './FlightPage'
 import { StageErrorPanel, StagePausedPanel, pausedResumeKind } from './StageStatePanels'
+import { RobustnessFindingsPanel, RobustnessMatrixPanel, robustnessFindingKey } from './RobustnessPanels'
 import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
 import { ACTIVITY_STAGE, type ExternalWorkTrace, type FeatureActivity, type StageExternalHistory } from '../state/feature-activity'
 import { Chip } from '@/shared/ui/StatusChip'
@@ -345,6 +349,28 @@ export function StageDetail({
     : undefined
   const pausedKind = pausedResumeKind(stage, flight, companion)
   const pausedNotice = pausedKind ? <StagePausedPanel kind={pausedKind} /> : null
+  // Send to repair (D16): a finding becomes a run booted under its smallest
+  // failing envelope, so the repair agent works on a failure that reproduces
+  // instead of a green suite. The run route owns admission (collision, queue,
+  // envelope validity); the pane only relays its answer on the header's error
+  // line and lands on the run it started.
+  const [repairSending, setRepairSending] = useState<string | null>(null)
+  const sendToRepair = async (finding: RobustnessFinding): Promise<void> => {
+    setRepairSending(robustnessFindingKey(finding))
+    try {
+      const { runId } = await api.startRun(flight.feature, {
+        env: flight.opts.env,
+        perturbation: finding.shrink?.envelope ?? finding.envelope,
+      })
+      drill.onOpenRun?.(flight.feature, runId)
+    } catch (err) {
+      onActionError?.(api.asRepoCollision(err)
+        ? 'another run of this suite is active — stop it or wait for it, then send again'
+        : err instanceof Error ? err.message : String(err))
+    } finally {
+      setRepairSending(null)
+    }
+  }
   // The merged Run stage renders as the Test Run hero (TestRunPanel) — it owns
   // the run detail poll, so StageDetail no longer fetches it here (R80). The
   // hero renders from this evidence immediately (before its first poll) and
@@ -755,6 +781,21 @@ export function StageDetail({
               </div>
             </StageColumn>
           )}
+        </>
+      )}
+
+      {/* Robustness lab: which cells broke or could not be judged, then one
+          danger-toned card per finding with the action that follows from it. A
+          read-only external flight keeps the cards and drops the action. */}
+      {stage.key === 'robustness' && (
+        <>
+          <RobustnessMatrixPanel job={band.robustnessJob ?? null} awaiting={awaitingData} />
+          <RobustnessFindingsPanel
+            job={band.robustnessJob ?? null}
+            awaiting={awaitingData}
+            sending={repairSending}
+            {...(externalMutationOwner ? {} : { onSendToRepair: sendToRepair })}
+          />
         </>
       )}
 

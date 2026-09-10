@@ -3,6 +3,7 @@
 
 import type { RunQueueDiagnostics } from '@shared/run-queue'
 import type { StageModelChoice } from '@shared/agent-models'
+import type { RobustnessEnvelope } from '@shared/robustness/types'
 import type { AuditList, RunIndexEntry, RunDetail, JournalEntry, RunProposedPr } from './types'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
 
@@ -112,6 +113,10 @@ export function startRun(
     /** Launch-gate override for the run's heal + commit spawns, resolved and
      *  locked on the run record at start. Absent = workspace defaults. */
     models?: { heal?: StageModelChoice; commit?: StageModelChoice }
+    /** Boot the run under a robustness envelope (D14) — the Robustness stage's
+     *  "Send to repair": the finding's shrunk envelope, so the failure the
+     *  matrix found reproduces in a run the repair agent can work on. */
+    perturbation?: RobustnessEnvelope
   },
 ): Promise<{ runId: string }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
@@ -120,6 +125,7 @@ export function startRun(
   if (opts?.isolation) body.isolation = opts.isolation
   if (opts?.mode === 'boot') body.mode = 'boot'
   if (opts?.models) body.models = opts.models
+  if (opts?.perturbation) body.perturbation = opts.perturbation
   if (opts?.gettingStartedSource) body.gettingStartedSource = opts.gettingStartedSource
   if (opts?.gettingStartedWorkflow) body.gettingStartedWorkflow = opts.gettingStartedWorkflow
   return request<{ runId: string }>(

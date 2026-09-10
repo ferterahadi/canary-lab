@@ -81,10 +81,15 @@ The archive also carries a **behavior certificate** (`certificate.json`) with a
 zero-dependency checker beside it (`verify-certificate.mjs`). The certificate
 states which tests ran from which suite snapshot (the run-start copy and its
 digest), what each test asserted and how strongly, how the run ended, which live
-spec edits the verdict never executed, and the advisory hints. It says in its own
-text what it does not prove: the absence of weakening, the completeness of the
-requirement set, or anything the listed assertions did not observe. A third
-party re-checks it without Canary Lab:
+spec edits the verdict never executed, and the advisory hints. When the
+Robustness lab has run against that run, the certificate also carries its
+findings: which tests passed green and failed under latency, a duplicated write
+or a restart, the smallest envelope that still reproduces each, and every cell
+the matrix never judged. It says in its own text what it does not prove: the
+absence of weakening, the completeness of the requirement set, anything the
+listed assertions did not observe, and — when no matrix ran, or cells were not
+run — behaviour under perturbation. A third party re-checks it without Canary
+Lab (the checker reads certificate formats `@1` and `@2`):
 
 ```bash
 node verify-certificate.mjs certificate.json --suite <path-to-the-suite-copy>
@@ -249,7 +254,7 @@ repositories through one server-owned pipeline:
 
 ```text
 similarity → scout → scaffold → env capture → docs → PRD summary
-→ Tests & coverage → Test run → Auto-repair → Report → Parallel setup
+→ Tests & coverage → Test run → Auto-repair → Robustness lab → Report → Parallel setup
 ```
 
 The serial Test run and downloadable Report finish before Parallel setup, so a

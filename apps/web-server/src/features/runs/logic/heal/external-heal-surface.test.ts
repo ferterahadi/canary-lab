@@ -275,10 +275,54 @@ describe('stuck-cycle escalation', () => {
     expect(steps[1]).toContain('EDIT THE WORKTREE')
   })
 
+  // A perturbed run (Send to repair, D16) failed because of latency, a replayed
+  // write or a slot restart the proxy applied. The agent must learn that from a
+  // TYPED field (the UI and a machine read the envelope) and from the procedure
+  // (a skill-less client reads only nextSteps) — and the rule has to sit behind
+  // the repair rule and the worktree rule, which govern every edit after them.
+  it('carries the perturbation envelope with its repro line and says the environment is the point', () => {
+    const detail = detailFor('run-1')
+    const envelope = { format: 'canary-lab/robustness-envelope@1' as const, latency: { ms: 262 }, duplicate: { gapMs: 31, match: 'WRITE /**' } }
+    const perturbed: RunDetail = {
+      ...detail,
+      manifest: { ...detail.manifest, perturbation: { envelope, shimPorts: { catalog: 40001 } } },
+    }
+    const snapshot = buildExternalRunSnapshot({ detail: perturbed, logsDir, projectRoot: tmpDir })
+    expect(snapshot.perturbation).toEqual({ envelope, repro: 'latency 262 ms · duplicate WRITE /** after 31 ms' })
+
+    const context = buildExternalHealContext({ detail: perturbed, logsDir, projectRoot: tmpDir })
+    expect(context.perturbation).toEqual(snapshot.perturbation)
+    const steps = context.nextSteps ?? []
+    expect(steps[0]).toContain('Fix app/service code, not tests')
+    expect(steps[1]).toContain('THIS RUN IS PERTURBED')
+    expect(steps[1]).toContain('latency 262 ms · duplicate WRITE /** after 31 ms')
+    expect(steps[1]).toContain('never relax the test or the envelope')
+    // The slim repeat-cycle packet keeps the typed field: the envelope is per
+    // run, not per cycle, and a stateless client needs it on every packet.
+    expect(slimRepeatHealContext(context).perturbation).toEqual(snapshot.perturbation)
+  })
+
+  it('orders the perturbation rule behind the worktree rule when both apply', () => {
+    const detail = detailFor('run-1')
+    const both: RunDetail = {
+      ...detail,
+      manifest: {
+        ...detail.manifest,
+        worktrees: { app: '/logs/runs/run-1/worktrees/app' },
+        perturbation: { envelope: { format: 'canary-lab/robustness-envelope@1', restart: [{ slot: 'catalog', afterNth: 2, match: 'WRITE /**' }] }, shimPorts: {} },
+      },
+    }
+    const steps = buildExternalHealContext({ detail: both, logsDir, projectRoot: tmpDir }).nextSteps ?? []
+    expect(steps[1]).toContain('EDIT THE WORKTREE')
+    expect(steps[2]).toContain('restart catalog on WRITE /** #2')
+  })
+
   it('states no worktree rule for a run that boots its repos in place', () => {
     const context = buildExternalHealContext({ detail: detailFor('run-1'), logsDir, projectRoot: tmpDir })
     expect(context).not.toHaveProperty('worktrees')
+    expect(context).not.toHaveProperty('perturbation')
     expect((context.nextSteps ?? []).join('\n')).not.toContain('EDIT THE WORKTREE')
+    expect((context.nextSteps ?? []).join('\n')).not.toContain('PERTURBED')
   })
 
   it('omits escalation when the failing set has only repeated twice (one prior attempt)', () => {

@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { buildEvaluationExportArchive } from './evaluation-export-archive'
 import type { RunDetail, PlaywrightArtifact } from '../../runs/logic/run-store'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
+import { robustnessJobStore } from '../../runs/logic/robustness/store'
+import type { RobustnessJobManifest } from '../../../../../../shared/robustness/jobs'
 
 let tmpDir: string | undefined
 
@@ -84,9 +86,9 @@ describe('buildEvaluationExportArchive — the behavior certificate', () => {
     expect(names).toEqual(expect.arrayContaining(['evaluation.html', 'certificate.json', 'verify-certificate.mjs']))
     const inZip = JSON.parse(zipEntries(built.zip).find((e) => e.filename === 'certificate.json')!.data.toString('utf8'))
     expect(inZip).toEqual(JSON.parse(JSON.stringify(built.certificate)))
-    expect(built.certificate.format).toBe('canary-lab/behavior-certificate@1')
+    expect(built.certificate.format).toBe('canary-lab/behavior-certificate@2')
     expect(built.certificate.run.runId).toBe(detail().runId)
-    expect(zipEntries(built.zip).find((e) => e.filename === 'verify-certificate.mjs')!.data.toString('utf8')).toContain('behavior-certificate@1')
+    expect(zipEntries(built.zip).find((e) => e.filename === 'verify-certificate.mjs')!.data.toString('utf8')).toContain('behavior-certificate@2')
     // The checker and the certificate are not report assets: the contents record
     // keeps describing the report the way it did.
     expect(built.contents.assets).toBe(0)
@@ -184,3 +186,44 @@ function zipEntries(zip: Buffer): Array<{ filename: string; data: Buffer }> {
   }
   return entries
 }
+
+describe('buildEvaluationExportArchive — the Robustness Lab job joins the certificate', () => {
+  const job = (over: Partial<RobustnessJobManifest>): RobustnessJobManifest => ({
+    jobId: 'rj-x',
+    feature: 'Checkout Flow',
+    runId: 'run-1',
+    envelope: { format: 'canary-lab/robustness-envelope@1', latency: { ms: 250 } },
+    status: 'done',
+    startedAt: '2026-01-01T00:02:00.000Z',
+    endedAt: '2026-01-01T00:12:00.000Z',
+    cells: { planned: 1, done: 1 },
+    findings: [],
+    skipped: [],
+    log: '',
+    ...over,
+  })
+
+  it('attaches the newest settled job built from THIS run; a running job or another run\'s job reads as no matrix', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-robust-'))
+    const logsDir = path.join(tmpDir, 'logs')
+    fs.mkdirSync(logsDir, { recursive: true })
+    const store = robustnessJobStore(logsDir)
+
+    const none = await buildEvaluationExportArchive(detail(), { logsDir })
+    expect(none.certificate.robustness).toBeUndefined()
+
+    store.save(job({ jobId: 'rj-other-run', runId: 'run-2' }))
+    store.save(job({ jobId: 'rj-running', status: 'running', endedAt: undefined, startedAt: '2026-01-01T00:20:00.000Z' }))
+    const notYet = await buildEvaluationExportArchive(detail(), { logsDir })
+    expect(notYet.certificate.robustness).toBeUndefined()
+    expect(notYet.certificate.notProven.join('\n')).toContain('No Robustness Lab matrix ran against this run')
+
+    store.save(job({ jobId: 'rj-old', status: 'aborted', startedAt: '2026-01-01T00:01:00.000Z', cells: { planned: 1, done: 0 } }))
+    store.save(job({ jobId: 'rj-newest', startedAt: '2026-01-01T00:05:00.000Z' }))
+    const built = await buildEvaluationExportArchive(detail(), { logsDir })
+    expect(built.certificate.robustness?.jobId).toBe('rj-newest')
+    expect(built.certificate.robustness?.cells).toEqual({ planned: 1, judged: 1, notRun: 0 })
+    const inZip = JSON.parse(zipEntries(built.zip).find((e) => e.filename === 'certificate.json')!.data.toString('utf8'))
+    expect(inZip.robustness.jobId).toBe('rj-newest')
+  })
+})

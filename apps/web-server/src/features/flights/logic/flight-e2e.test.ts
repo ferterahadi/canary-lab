@@ -7,6 +7,8 @@ import { startFlight, respondToFlightCheckpoint, deleteFlight, FlightFrozenError
 import { buildFlightStageAdapters } from './stages/index'
 import type { FlightStageDeps } from './stages/context'
 import { writeEvaluationExportTask } from '../../evaluation/logic/evaluation-export-store'
+import { robustnessJobStore } from '../../runs/logic/robustness/store'
+import { ROBUSTNESS_ENVELOPE_FORMAT } from '../../../../../../shared/robustness/types'
 import type { FlightOptions } from './types'
 
 // Integration proof over the real fixture repo (tools/fixtures/first-flight-app):
@@ -144,6 +146,19 @@ function buildDeps(feature: string): { deps: FlightConductorDeps; spawnAgent: Re
         fs.mkdirSync(dir, { recursive: true })
         fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ version: 1, featureName: flightFeature(), agent: 'claude', repos: [{ name: 'first-flight-app' }], capturedAt: 'x' }))
         return { statusCode: 200, json: () => ({}) }
+      }
+      // Robustness lab: the matrix settles at once with nothing found — the
+      // record lands in the real job store, which is what the stage reads back.
+      if (method === 'POST' && url.endsWith('/robustness')) {
+        robustnessJobStore(logsDir).save({
+          jobId: 'rj-fl-1', feature: flightFeature(), runId: 'run-1', envelope: { format: ROBUSTNESS_ENVELOPE_FORMAT, latency: { ms: 300 } },
+          status: 'done', startedAt: '2026-01-01T00:00:00Z', endedAt: '2026-01-01T00:01:00Z',
+          cells: { planned: 1, done: 1 }, findings: [], skipped: [], log: 'matrix from run run-1: 1 spec file × 1 atom (latency) = 1 cell\n',
+        })
+        return { statusCode: 202, json: () => ({ jobId: 'rj-fl-1' }) }
+      }
+      if (method === 'GET' && url === '/api/robustness/rj-fl-1') {
+        return { statusCode: 200, json: () => robustnessJobStore(logsDir).get('rj-fl-1') }
       }
       // Evaluation export: task settles ready with the zip on disk.
       if (method === 'POST' && url.endsWith('/evaluation-export')) {

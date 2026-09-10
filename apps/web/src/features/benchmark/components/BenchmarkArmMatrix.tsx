@@ -48,10 +48,26 @@ export const ARM_MATRIX: { section: string; note: string; rows: ArmRow[] }[] = [
   },
 ]
 
-export function Cell({ on }: { on: boolean }) {
+/** The states one matrix cell can show. `yes`/`no` are the arm matrix's own
+ *  pair (has it / lacks it, a neutral cross); the Robustness Lab adds `failed`
+ *  (a finding, in the danger hue), `skipped` (a cell nobody could judge) and
+ *  `pending` (not run yet), so the two matrices share one glyph vocabulary. */
+export type MatrixCellState = 'yes' | 'no' | 'failed' | 'skipped' | 'pending'
+
+const CELL_GLYPH: Record<MatrixCellState, { glyph: string; color: string; opacity: number }> = {
+  yes: { glyph: '✓', color: 'var(--success)', opacity: 1 },
+  no: { glyph: '✗', color: 'var(--text-muted)', opacity: 0.5 },
+  failed: { glyph: '✗', color: 'var(--danger)', opacity: 1 },
+  skipped: { glyph: '—', color: 'var(--text-muted)', opacity: 1 },
+  pending: { glyph: '·', color: 'var(--text-muted)', opacity: 0.5 },
+}
+
+export function Cell({ on, state, title, testId }: { on?: boolean; state?: MatrixCellState; title?: string; testId?: string }) {
+  const resolved: MatrixCellState = state ?? (on ? 'yes' : 'no')
+  const c = CELL_GLYPH[resolved]
   return (
-    <span style={{ textAlign: 'center', fontWeight: 700, color: on ? 'var(--success)' : 'var(--text-muted)', opacity: on ? 1 : 0.5 }}>
-      {on ? '✓' : '✗'}
+    <span data-testid={testId} data-state={resolved} title={title} style={{ textAlign: 'center', fontWeight: 700, color: c.color, opacity: c.opacity }}>
+      {c.glyph}
     </span>
   )
 }

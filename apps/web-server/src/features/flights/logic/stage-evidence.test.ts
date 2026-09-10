@@ -8,8 +8,11 @@ import {
   hasAuthoredSpecs,
   hasCapturedEnvset,
   hasPrdSummary,
+  hasCompletedRobustnessJob,
 } from './stage-evidence'
 import { runDirFor, runsIndexPath } from '../../runs/logic/runtime/run-paths'
+import { robustnessJobStore } from '../../runs/logic/robustness/store'
+import { ROBUSTNESS_ENVELOPE_FORMAT } from '../../../../../../shared/robustness/types'
 import type { RunManifest } from '../../runs/logic/runtime/manifest'
 
 let featureDir: string
@@ -251,7 +254,17 @@ describe('deriveFeatureEvidence', () => {
       specs: true,
       coverageMapping: 'absent',
       portInjectability: 'none',
+      robustness: false,
     })
+  })
+
+  it('reports robustness only for a COMPLETED matrix — a stopped one judged nothing', () => {
+    const base = { jobId: 'rj', feature: 'shop', runId: 'r1', envelope: { format: ROBUSTNESS_ENVELOPE_FORMAT }, startedAt: '2026-08-07T10:00:00Z', cells: { planned: 1, done: 1 }, findings: [], skipped: [], log: '' } as const
+    robustnessJobStore(logsDir).save({ ...base, jobId: 'rj-aborted', status: 'aborted' })
+    expect(deriveFeatureEvidence(featureDir, logsDir, 'shop').robustness).toBe(false)
+    robustnessJobStore(logsDir).save({ ...base, jobId: 'rj-done', status: 'done' })
+    expect(deriveFeatureEvidence(featureDir, logsDir, 'shop').robustness).toBe(true)
+    expect(hasCompletedRobustnessJob(logsDir, 'other')).toBe(false)
   })
 
   // The shipped healing suite's shape: no env files anywhere to capture, but a
@@ -271,6 +284,7 @@ describe('deriveFeatureEvidence', () => {
       specs: false,
       coverageMapping: 'absent',
       portInjectability: 'none',
+      robustness: false,
     })
   })
 

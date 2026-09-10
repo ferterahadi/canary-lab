@@ -63,15 +63,16 @@ describe('readFeatureRunHistory + historyForTests — provenAt', () => {
     expect(historyForTests(history, TESTS, []).provenAt).toBeUndefined()
   })
 
-  it('skips boot sessions, benchmark arms, other features, and runs without a readable summary; a run without endedAt is timed by its start', () => {
+  it('skips boot sessions, benchmark arms, robustness cells, other features, and runs without a readable summary; a run without endedAt is timed by its start', () => {
     seedIndex([
       { runId: 'boot', startedAt: '2026-09-05T00:00:00Z', executionType: 'boot' },
       { runId: 'bench', startedAt: '2026-09-04T00:00:00Z', executionType: 'benchmark' },
+      { runId: 'cell', startedAt: '2026-09-03T12:00:00Z', executionType: 'robustness' },
       { runId: 'other', startedAt: '2026-09-03T00:00:00Z', feature: 'returns' },
       { runId: 'noread', startedAt: '2026-09-02T00:00:00Z' },
       { runId: 'r1', startedAt: '2026-09-01T00:00:00Z' },
     ])
-    for (const id of ['boot', 'bench', 'other']) seedRun(id, { summary: { passedNames: ['test-case-totals-add-up'], failed: [] } })
+    for (const id of ['boot', 'bench', 'cell', 'other']) seedRun(id, { summary: { passedNames: ['test-case-totals-add-up'], failed: [] } })
     seedRun('r1', { summary: { passedNames: ['test-case-totals-add-up'], failed: [] } })
     const history = readFeatureRunHistory(logsDir, 'checkout')
     expect(historyForTests(history, TESTS, ['totals add up']).provenAt).toEqual({ runId: 'r1', at: '2026-09-01T00:00:00Z' })

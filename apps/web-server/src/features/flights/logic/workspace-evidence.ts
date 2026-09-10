@@ -14,6 +14,9 @@ import { listRuns } from '../../runs/logic/run-store'
 import { findBootProof } from './stage-evidence'
 import { readManifest } from '../../runs/logic/runtime/manifest'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
+import { robustnessJobStore } from '../../runs/logic/robustness/store'
+import { isAuxiliaryExecution } from '../../../../../../shared/verification'
+import { robustnessStageEvidence } from './stages/robustness'
 
 // Read-time stage evidence, probed from the workspace for stages that never
 // recorded their own. Stored evidence is a CACHE of what the conductor measured;
@@ -162,8 +165,7 @@ function portifyEvidence(deps: WorkspaceEvidenceDeps, feature: string, featureDi
 function latestSettledRun(deps: WorkspaceEvidenceDeps, feature: string): { runId: string; status: string } | undefined {
   const runs = listRuns(deps.logsDir, { feature }).filter(
     (r) =>
-      r.executionType !== 'boot' &&
-      r.executionType !== 'benchmark' &&
+      !isAuxiliaryExecution(r.executionType) &&
       r.executionType !== 'verify' &&
       (r.status === 'passed' || r.status === 'failed'),
   )
@@ -191,6 +193,17 @@ function healEvidence(deps: WorkspaceEvidenceDeps, feature: string): EvidenceBlo
     ...(typeof manifest.healCycles === 'number' ? { healCycles: manifest.healCycles } : {}),
     ...(manifest.healEnd ? { healEnd: manifest.healEnd } : {}),
   }
+}
+
+/** The newest COMPLETED Robustness Lab matrix for this feature — a job that ran
+ *  every cell and shrank every finding. A failed or aborted job is not a verdict
+ *  on the suite's tolerance (cells went unjudged), so it leaves the stage open
+ *  rather than lighting it. Same block the conducted stage records. */
+function robustnessEvidence(deps: WorkspaceEvidenceDeps, feature: string): EvidenceBlock | undefined {
+  const store = robustnessJobStore(deps.logsDir)
+  const latest = store.forFeature(feature).find((e) => e.status === 'done')
+  const job = latest ? store.get(latest.jobId) : null
+  return job ? robustnessStageEvidence(job) : undefined
 }
 
 /** The newest completed export archive for this feature, by task recency. Reports
@@ -237,6 +250,7 @@ const PROBES: Partial<Record<FlightStageKey, (deps: WorkspaceEvidenceDeps, featu
   'portify': (deps, feature, featureDir) => portifyEvidence(deps, feature, featureDir),
   'run': (deps, feature) => runEvidence(deps, feature),
   'heal': (deps, feature) => healEvidence(deps, feature),
+  'robustness': (deps, feature) => robustnessEvidence(deps, feature),
   'evaluation-export': (deps, feature) => evaluationExportEvidence(deps, feature),
 }
 

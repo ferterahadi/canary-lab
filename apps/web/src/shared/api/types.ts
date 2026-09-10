@@ -164,6 +164,9 @@ export interface FeatureStageEvidence {
    *  readiness has nothing left to do — no overlay required. Optional: absent
    *  in older payloads. */
   portInjectability?: 'declared' | 'partial' | 'none'
+  /** A Robustness Lab matrix has run to completion for this suite. Optional:
+   *  absent in payloads from a server that predates the stage. */
+  robustness?: boolean
 }
 
 export interface Feature {

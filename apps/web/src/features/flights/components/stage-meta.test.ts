@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { evaluationTaskId, portifyWorkflowId, stageStateLine, stageFacts, runHistoryFacts, healEndLine, healEndShort, formatStageDuration, stageWorkMs } from './stage-meta'
 import { agentActivityLine } from './StageStatusLines'
+import type { StageBandData } from './StageFacts'
 
 import type { FlightManifest, FlightStage, FlightStageStatus } from '@/shared/api/client'
 import type { CoverageLedger, EvaluationExportTask, HealEnd, RunIndexEntry } from '@/shared/api/types'
@@ -195,6 +196,7 @@ describe('stageFacts — the frontend owns one fact contract per stage', () => {
     ['prd-summary', ['Requirements']],
     ['specs-coverage', ['Mapped coverage', 'Requirements', 'Tests written']],
     ['portify', ['Services injectable', 'Files edited', 'Instances proven']],
+    ['robustness', ['Cells run', 'Findings', 'Confirmed']],
     ['evaluation-export', ['Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven']],
   ] as const
 
@@ -1113,5 +1115,90 @@ describe('stageWorkMs / formatStageDuration — the work clock', () => {
     expect(formatStageDuration(undefined, { activeMs: 4_000 })).toBe('4s')
     expect(formatStageDuration(undefined, undefined)).toBeNull()
     expect(formatStageDuration({}, {})).toBeNull()
+  })
+})
+
+describe('stageStateLine — robustness (D16)', () => {
+  const running = (progress?: Record<string, unknown>) => ({ key: 'robustness', status: 'running', progress } as FlightStage)
+  const done = (evidence: Record<string, unknown>) => ({ key: 'robustness', status: 'done', evidence } as FlightStage)
+
+  it('reads the LIVE counters off progress while the matrix runs, never off evidence (which lands only on settle)', () => {
+    expect(stageStateLine(running(), flight())).toBe('Booting the tests under perturbation…')
+    expect(stageStateLine(running({ cells: { planned: 6, done: 2 }, findings: 0 }), flight())).toBe('Perturbing — 2 of 6 cells run…')
+    expect(stageStateLine(running({ cells: { planned: 6, done: 4 }, findings: 2 }), flight())).toBe('Perturbing — 4 of 6 cells run, 2 findings so far…')
+  })
+
+  it('settles on findings by status — confirmed 3/3 vs unconfirmed — plus the cells it could not judge', () => {
+    expect(stageStateLine(done({}), flight())).toBe('Robustness lab finished.')
+    expect(stageStateLine(done({ findings: 0 }), flight())).toBe('No findings — every test held under the perturbation envelope.')
+    expect(stageStateLine(done({ findings: 0, skipped: 2 }), flight())).toBe('No findings — every test held under the perturbation envelope. 2 cells could not be judged.')
+    expect(stageStateLine(done({ findings: 3, confirmed: 2 }), flight())).toBe('3 findings — 2 confirmed 3/3, 1 unconfirmed.')
+    expect(stageStateLine(done({ findings: 1, confirmed: 1, skipped: 1 }), flight())).toBe('1 finding — 1 confirmed 3/3. 1 cell could not be judged.')
+    expect(stageStateLine(done({ findings: 1 }), flight())).toBe('1 finding — 0 confirmed 3/3, 1 unconfirmed.')
+  })
+})
+
+describe('stageFacts — Robustness lab (D16)', () => {
+  const counts = { cells: { planned: 6, done: 6 }, findings: 0, confirmed: 0, unconfirmed: 0, skipped: 0 }
+  const settled = (evidence: Record<string, unknown>, status: FlightStageStatus = 'done') =>
+    ({ key: 'robustness', status, evidence } as FlightStage)
+  const running = (progress?: Record<string, unknown>) => ({ key: 'robustness', status: 'running', progress } as FlightStage)
+  const labels = (facts: ReturnType<typeof stageFacts>) => facts.map((f) => [f.label, f.awaiting ? '…' : f.value, f.tone ?? '', f.sub ?? ''])
+
+  it('a complete matrix with nothing found and nothing skipped is the good case — all three slots settle', () => {
+    expect(labels(stageFacts(settled(counts), flight()))).toEqual([
+      ['Cells run', '6/6', 'good', ''],
+      ['Findings', '0', 'good', ''],
+      ['Confirmed', '—', '', 'nothing to confirm'],
+    ])
+  })
+
+  it('a skipped cell is not a pass: it lowers the tone and is named on the tile, and 0 findings stops being good', () => {
+    expect(labels(stageFacts(settled({ ...counts, skipped: 2 }), flight()))).toEqual([
+      ['Cells run', '6/6', 'warn', '2 cells could not be judged'],
+      ['Findings', '0', '', ''],
+      ['Confirmed', '—', '', 'nothing to confirm'],
+    ])
+  })
+
+  it('findings take the danger tone; Confirmed is the reproduced share with the unconfirmed named', () => {
+    expect(labels(stageFacts(settled({ ...counts, findings: 3, confirmed: 2, unconfirmed: 1 }), flight()))).toEqual([
+      ['Cells run', '6/6', 'good', ''],
+      ['Findings', '3', 'bad', ''],
+      ['Confirmed', '2/3', 'warn', '1 unconfirmed'],
+    ])
+    expect(labels(stageFacts(settled({ ...counts, findings: 1, confirmed: 1 }), flight()))[2]).toEqual(['Confirmed', '1/1', '', ''])
+  })
+
+  it('while running, the counters come off progress and Confirmed stays a placeholder until a finding exists', () => {
+    expect(labels(stageFacts(running({ ...counts, cells: { planned: 6, done: 2 } }), flight()))).toEqual([
+      ['Cells run', '2/6', '', ''],
+      ['Findings', '0', '', ''],
+      ['Confirmed', '…', '', ''],
+    ])
+    // A finding still being shrunk is neither confirmed nor unconfirmed yet —
+    // the share shows, the warning waits for shrink's answer.
+    expect(labels(stageFacts(running({ ...counts, cells: { planned: 6, done: 4 }, findings: 1 }), flight()))[2]).toEqual(['Confirmed', '0/1', '', ''])
+    // Progress that has not landed yet: every slot is a placeholder, not zeros.
+    expect(labels(stageFacts(running(), flight())).every((f) => f[1] === '…')).toBe(true)
+  })
+
+  it('a stage that recorded no counters (a stopped matrix) reads them off the job record in the band', () => {
+    const job = {
+      jobId: 'rj-1', feature: 'checkout', runId: 'run-9', status: 'aborted', startedAt: '2026-09-10T00:00:00Z', log: '',
+      envelope: { format: 'canary-lab/robustness-envelope@1' },
+      cells: { planned: 6, done: 3 },
+      findings: [
+        { status: 'confirmed' }, { status: 'unconfirmed' }, { status: 'found' },
+      ],
+      skipped: [{ cell: { specFile: 'a', atom: 'latency' }, reason: 'aborted' }],
+    } as unknown as NonNullable<StageBandData['robustnessJob']>
+    expect(labels(stageFacts(settled({}, 'failed'), flight(), undefined, { robustnessJob: job }))).toEqual([
+      ['Cells run', '3/6', 'warn', '1 cell could not be judged'],
+      ['Findings', '3', 'bad', ''],
+      ['Confirmed', '1/3', 'warn', '1 unconfirmed'],
+    ])
+    // Neither source: every slot awaited.
+    expect(labels(stageFacts(settled({}, 'failed'), flight())).every((f) => f[1] === '…')).toBe(true)
   })
 })

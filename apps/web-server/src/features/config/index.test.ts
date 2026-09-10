@@ -9,6 +9,7 @@ import { DirtySpecStore } from '../runs/logic/dirty-specs/store'
 import { BenchmarkRunStore } from '../benchmark/logic/runtime/store'
 import { PortifyRunStore } from '../portify/logic/runtime/store'
 import { CoverageJobRunStore } from '../coverage/logic/coverage/jobs/store'
+import { RobustnessJobRunStore } from '../runs/logic/robustness/store'
 import { FlightRunStore } from '../flights/logic/store'
 import type { FlightManifest, FlightStatus } from '../../../../../shared/flights/types'
 import type { CoverageJobManifest } from '../coverage/logic/coverage/jobs/types'
@@ -18,6 +19,7 @@ import { agentJobStore } from '../agent-sessions/logic/agent-jobs/store'
 import type { AgentJobManifest } from '../agent-sessions/logic/agent-jobs/types'
 import type { WorkspaceEventPublisher } from '../../shared/workspace-events'
 import { featuresRoutes } from './routes/features'
+import { discoveryRepairRoutes } from './routes/discovery-repair'
 import { featureConfigRoutes } from './routes/feature-config'
 import { projectConfigRoutes } from './routes/project-config'
 import { agentProbeRoutes } from './routes/agent-probe'
@@ -33,6 +35,7 @@ let runStore: RunStore
 let benchmarkStore: BenchmarkRunStore
 let portifyStore: PortifyRunStore
 let coverageJobStore: CoverageJobRunStore
+let robustnessJobStore: RobustnessJobRunStore
 let flightStore: FlightRunStore
 let dirtySpecStore: DirtySpecStore
 let gettingStarted: unknown
@@ -63,6 +66,7 @@ beforeEach(() => {
   benchmarkStore = new BenchmarkRunStore(logsDir)
   portifyStore = new PortifyRunStore(logsDir)
   coverageJobStore = new CoverageJobRunStore(logsDir)
+  robustnessJobStore = new RobustnessJobRunStore(logsDir)
   flightStore = new FlightRunStore(logsDir)
   dirtySpecStore = new DirtySpecStore(logsDir)
   // Only `.read()` is ever called on it, by the onboarding route.
@@ -85,6 +89,7 @@ function makeCtx(): ServerContext {
     benchmarkStore,
     portifyStore,
     coverageJobStore,
+    robustnessJobStore,
     flightStore,
     dirtySpecStore,
     workspaceEvents,
@@ -143,7 +148,7 @@ async function renameDeps(): Promise<{
   removeFlightRecordsFor: (featureName: string) => { removed: number; error?: string }
 }> {
   const registrations = await registerFeature()
-  const opts = registrations[1].opts
+  const opts = registrations[2].opts
   const rename = opts.featureRename as { blockedBy: Blocked; apply: (from: string, to: string) => number }
   return {
     blockedBy: rename.blockedBy,
@@ -155,24 +160,27 @@ async function renameDeps(): Promise<{
 }
 
 describe('config feature registrar', () => {
-  it('mounts the five configuration surfaces with the stores each one reads', async () => {
+  it('mounts the six configuration surfaces with the stores each one reads', async () => {
     const registrations = await registerFeature()
 
     expect(registrations.map((r) => r.plugin)).toEqual([
       featuresRoutes,
+      discoveryRepairRoutes,
       featureConfigRoutes,
       projectConfigRoutes,
       agentProbeRoutes,
       onboardingRoutes,
     ])
     expect(registrations[0].opts).toEqual({ featuresDir, logsDir, dirtySpecStore })
-    expect(registrations[1].opts).toMatchObject({ featuresDir })
-    expect(registrations[2].opts).toMatchObject({ projectRoot: tmpDir, onPortChange })
-    // The live-update bus on both writing surfaces, by identity — see the
+    expect(registrations[1].opts).toMatchObject({ projectRoot: tmpDir, featuresDir, logsDir })
+    expect(registrations[2].opts).toMatchObject({ featuresDir })
+    expect(registrations[3].opts).toMatchObject({ projectRoot: tmpDir, onPortChange })
+    // The live-update bus on every writing surface, by identity — see the
     // fixture comment for what an omission silently costs.
     expect(registrations[1].opts.workspaceEvents).toBe(workspaceEvents)
     expect(registrations[2].opts.workspaceEvents).toBe(workspaceEvents)
-    expect(registrations[4].opts).toMatchObject({ projectRoot: tmpDir, featuresDir, sessionStore: gettingStarted })
+    expect(registrations[3].opts.workspaceEvents).toBe(workspaceEvents)
+    expect(registrations[5].opts).toMatchObject({ projectRoot: tmpDir, featuresDir, sessionStore: gettingStarted })
 
     const res = await app.inject({ method: 'GET', url: '/api/features' })
     expect(res.statusCode).toBe(200)
@@ -193,7 +201,7 @@ describe('config feature registrar', () => {
 
   it('counts every active run across suites for the port-change gate', async () => {
     const registrations = await registerFeature()
-    const countActiveRuns = registrations[2].opts.countActiveRuns as () => number
+    const countActiveRuns = registrations[3].opts.countActiveRuns as () => number
 
     expect(countActiveRuns()).toBe(0)
     seedRuns(

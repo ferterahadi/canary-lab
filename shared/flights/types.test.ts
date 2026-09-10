@@ -76,6 +76,12 @@ describe('STAGE_DEPENDS_ON — the real dependency graph', () => {
     expect(STAGE_DEPENDS_ON['portify']).not.toContain('specs-coverage')
     expect(STAGE_DEPENDS_ON['run']).not.toContain('prd-summary')
     expect(STAGE_DEPENDS_ON['evaluation-export']).toEqual(['run'])
+    // The Robustness Lab perturbs the GREEN run's own spec files — it reads the
+    // run record and nothing earlier, so a suite can re-enter it straight from
+    // a standalone passing run.
+    expect(STAGE_DEPENDS_ON['robustness']).toEqual(['run'])
+    expect(FLIGHT_EXECUTION_ORDER.indexOf('robustness')).toBe(FLIGHT_EXECUTION_ORDER.indexOf('heal') + 1)
+    expect(FLIGHT_EXECUTION_ORDER.indexOf('robustness')).toBe(FLIGHT_EXECUTION_ORDER.indexOf('evaluation-export') - 1)
     // Requirements collection boots nothing, so it needs no envset.
     expect(STAGE_DEPENDS_ON['docs']).toEqual(['scaffold'])
     expect(STAGE_DEPENDS_ON['prd-summary']).toEqual(['scaffold'])

@@ -160,6 +160,32 @@ describe('RunOrchestrator misc branches', () => {
     await orch.stop('failed')
   })
 
+  it('restoreSpecEdits puts the run-start copy back over a mid-run edit', async () => {
+    const f = makeFakeFactory()
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'a.spec.ts')
+    const original = "test('a', async () => { expect(1).toBe(1) })\n"
+    fs.writeFileSync(spec, original)
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ featureDir, repos: [] }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
+    })
+    await orch.start()
+    fs.writeFileSync(spec, "test('a', async () => { expect(1).toBe(2) })\n")
+
+    const result = orch.restoreSpecEdits()
+
+    expect(result).toMatchObject({ ok: true, restored: ['e2e/a.spec.ts'] })
+    expect(fs.readFileSync(spec, 'utf8')).toBe(original)
+    await orch.stop('failed')
+  })
+
   it('refreshSpecEdits re-measures the pending edits for its own feature without moving the boundary', async () => {
     const f = makeFakeFactory()
     const featureDir = path.join(tmpDir, 'features', 'demo')

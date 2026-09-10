@@ -33,8 +33,9 @@ with a concurrent double-boot and owns the verdict. These tools arrive via
 the Canary Lab MCP server. If this client is already connected (the plugin
 connects with `compact`), skip this step. To configure the same connection
 manually: `npx canary-lab mcp --profile compact`. Portify makes a feature's ports injectable so it can boot
-concurrently (benchmark arms / parallel runs). The double-boot verify is the
-success predicate — Canary Lab owns the verdict.
+concurrently (benchmark arms / parallel runs) and so the Robustness Lab can
+perturb it — its per-slot proxy needs a declared `ports` slot to sit on. The
+double-boot verify is the success predicate — Canary Lab owns the verdict.
 
 ## Arguments
 

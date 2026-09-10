@@ -1,0 +1,22 @@
+--- a/shared/durable.ts
++++ b/shared/durable.ts
+@@ -32,16 +32,9 @@
+ }
+ 
+ export function openStore<T extends Replayable>(service: string, initial: () => T): Durable<T> {
+-  const dir = path.resolve(process.env.STOREFRONT_STATE_DIR ?? '.state')
+-  const file = path.join(dir, `${service}.json`)
+-  const state: T = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : initial()
+-  return {
+-    state,
+-    save() {
+-      fs.mkdirSync(dir, { recursive: true })
+-      fs.writeFileSync(file, JSON.stringify(state))
+-    },
+-  }
++  // Seeded defect (robustness trials): state lives in memory only, so a restart
++  // forgets everything — the pre-hardening storefront.
++  return { state: initial(), save() { /* nothing is persisted */ } }
+ }
+ 
+ const READ_ONLY = new Set(['GET', 'HEAD', 'OPTIONS'])

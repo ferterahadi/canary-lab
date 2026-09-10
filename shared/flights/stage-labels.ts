@@ -18,6 +18,7 @@ export const FLIGHT_STAGE_LABEL: Record<FlightStageKey, string> = {
   'portify': 'Parallel setup',
   'run': 'Test run',
   'heal': 'Auto-repair',
+  'robustness': 'Robustness lab',
   'evaluation-export': 'Report',
 }
 

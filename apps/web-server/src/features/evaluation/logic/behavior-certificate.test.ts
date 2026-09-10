@@ -7,6 +7,7 @@ import type { RunDetail } from '../../runs/logic/run-store'
 import type { RunManifest, RunSummary } from '../../runs/logic/run-detail'
 import { suiteDigest } from '../../runs/logic/runtime/run-suite-snapshot'
 import type { CoverageLedger } from '../../../../../../shared/coverage/types'
+import type { RobustnessFinding, RobustnessJobManifest } from '../../../../../../shared/robustness/jobs'
 import { INTEGRITY_HINT_DISCLOSURE } from '../../../../../../shared/verification-strength/disclosure'
 import { BEHAVIOR_CERTIFICATE_CHECKER_FILENAME, BEHAVIOR_CERTIFICATE_FORMAT, type BehaviorCertificate } from '../../../../../../shared/verification-strength/certificate'
 import { buildBehaviorCertificate, requirementFingerprint } from './behavior-certificate'
@@ -413,5 +414,157 @@ describe('the bundled checker', () => {
     expect(source.match(/^import .* from '([^']+)'/gm)!.map((line) => line.replace(/.* from '([^']+)'/, '$1')))
       .toEqual(['node:crypto', 'node:fs', 'node:path'])
     expect(() => execFileSync(process.execPath, ['--check', CHECKER])).not.toThrow()
+  })
+})
+
+describe('buildBehaviorCertificate — the Robustness Lab block (@2)', () => {
+  const FORMAT = 'canary-lab/robustness-envelope@1' as const
+  const cell = (specFile: string, atom: 'latency' | 'duplicate' | 'restart') => ({ specFile, atom })
+  const confirmed: RobustnessFinding = {
+    cell: cell('e2e/cart.spec.ts', 'latency'),
+    failedTests: ['shows the cart total'],
+    runId: 'run-cell-1',
+    requirements: ['R1'],
+    status: 'confirmed',
+    envelope: { format: FORMAT, latency: { ms: 250 } },
+    shrink: {
+      status: 'confirmed',
+      envelope: { format: FORMAT, latency: { ms: 125 } },
+      probes: 2,
+      budgetExhausted: false,
+      confirmations: { asked: 3, reproduced: 3 },
+      steps: [{ probe: 0, envelope: { format: FORMAT, latency: { ms: 250 } }, reproduced: true, why: 'opening check' }],
+      repro: 'latency 125 ms',
+    },
+    repro: 'latency 125 ms',
+  }
+  const unconfirmed: RobustnessFinding = {
+    ...confirmed,
+    cell: cell('e2e/cart.spec.ts', 'duplicate'),
+    requirements: [],
+    status: 'unconfirmed',
+    envelope: { format: FORMAT, duplicate: { gapMs: 40, match: 'POST /api/**' } },
+    shrink: { ...confirmed.shrink!, status: 'unconfirmed', envelope: { format: FORMAT, duplicate: { gapMs: 40, match: 'POST /api/**' } }, confirmations: { asked: 3, reproduced: 1 }, repro: 'duplicate POST /api/** after 40 ms' },
+  }
+  function job(over: Partial<RobustnessJobManifest> = {}): RobustnessJobManifest {
+    return {
+      jobId: 'rj-1',
+      feature: 'checkout',
+      runId: 'run-1',
+      envelope: { format: FORMAT, latency: { ms: 250 }, duplicate: { gapMs: 40, match: 'POST /api/**' } },
+      status: 'done',
+      startedAt: '2026-09-10T00:00:00.000Z',
+      endedAt: '2026-09-10T00:10:00.000Z',
+      cells: { planned: 2, done: 2 },
+      findings: [],
+      skipped: [],
+      log: 'driver output the certificate must not carry\n',
+      ...over,
+    }
+  }
+
+  it('without a matrix the certificate says so, and the checker relays it', () => {
+    const cert = buildBehaviorCertificate(detail(snapshotted()), { coverage: LEDGER })
+    expect(cert.format).toBe('canary-lab/behavior-certificate@2')
+    expect(cert.robustness).toBeUndefined()
+    expect(cert.statement).not.toContain('Robustness Lab')
+    expect(cert.notProven.join('\n')).toContain('Behaviour under perturbation. No Robustness Lab matrix ran against this run')
+    expect(cert.notProven.join('\n')).not.toContain('robustness:')
+    const checked = runChecker(cert)
+    expect(checked.out).toContain('robustness: no matrix ran against this run')
+    expect(checked.status).toBe(0)
+  })
+
+  it('re-states a settled matrix: confirmed vs unconfirmed findings, skipped cells, the shrunk envelope — and never the log or the trace', () => {
+    const cert = buildBehaviorCertificate(detail(snapshotted()), {
+      coverage: LEDGER,
+      robustness: job({
+        cells: { planned: 3, done: 3 },
+        findings: [confirmed, unconfirmed],
+        skipped: [{ cell: cell('e2e/cart.spec.ts', 'restart'), reason: 'service failed to boot', runId: 'run-cell-3' }],
+      }),
+    })
+    expect(cert.robustness).toEqual({
+      jobId: 'rj-1',
+      status: 'done',
+      envelope: { format: FORMAT, latency: { ms: 250 }, duplicate: { gapMs: 40, match: 'POST /api/**' } },
+      cells: { planned: 3, judged: 2, notRun: 1 },
+      findings: [{
+        cell: cell('e2e/cart.spec.ts', 'latency'),
+        tests: ['shows the cart total'],
+        requirements: ['R1'],
+        envelope: { format: FORMAT, latency: { ms: 125 } },
+        repro: 'latency 125 ms',
+        confirmations: { asked: 3, reproduced: 3 },
+      }],
+      unconfirmed: [{
+        cell: cell('e2e/cart.spec.ts', 'duplicate'),
+        tests: ['shows the cart total'],
+        envelope: { format: FORMAT, duplicate: { gapMs: 40, match: 'POST /api/**' } },
+        repro: 'duplicate POST /api/** after 40 ms',
+        confirmations: { asked: 3, reproduced: 1 },
+      }],
+      skipped: [{ cell: cell('e2e/cart.spec.ts', 'restart'), reason: 'service failed to boot' }],
+    })
+    expect(JSON.stringify(cert)).not.toContain('driver output')
+    expect(JSON.stringify(cert)).not.toContain('opening check')
+    expect(cert.statement).toContain('2 of 3 cells judged, 1 finding confirmed by reproducing under the shrunk envelope, 1 unconfirmed')
+    const notProven = cert.notProven.join('\n')
+    expect(notProven).toContain('robustness: 1 cell not run — 1 skipped (see robustness.skipped for each reason). A cell the matrix never judged is not a pass.')
+    expect(notProven).toContain('That the 1 unconfirmed robustness finding is a defect.')
+    expect(notProven).toContain('Behaviour outside the certified envelope.')
+    expect(notProven).not.toContain('No Robustness Lab matrix ran')
+
+    const checked = runChecker(cert)
+    expect(checked.out).toContain('robustness: 2/3 cells judged (1 not run), 1 confirmed finding(s), 1 unconfirmed — reported from job rj-1 (done), not re-judged')
+    expect(checked.out).toContain('  confirmed e2e/cart.spec.ts × latency: shows the cart total — latency 125 ms')
+    expect(checked.out).toContain('  unconfirmed e2e/cart.spec.ts × duplicate: shows the cart total')
+    expect(checked.status).toBe(0)
+  })
+
+  it('a clean, complete matrix leaves only the envelope caveat; a stopped matrix names what it never judged, and a finding shrink never reached keeps the cell envelope', () => {
+    const clean = buildBehaviorCertificate(detail(snapshotted()), { robustness: job() })
+    expect(clean.robustness?.cells).toEqual({ planned: 2, judged: 2, notRun: 0 })
+    expect(clean.notProven.filter((line) => /robustness|Robustness|envelope/.test(line))).toEqual([
+      expect.stringMatching(/^Behaviour outside the certified envelope\./),
+    ])
+
+    const found: RobustnessFinding = { ...confirmed, status: 'found', shrink: undefined, repro: undefined }
+    const aborted = buildBehaviorCertificate(detail(snapshotted()), {
+      robustness: job({
+        status: 'aborted',
+        error: 'Interrupted by server restart',
+        cells: { planned: 5, done: 3 },
+        findings: [found, { ...found, cell: cell('e2e/cart.spec.ts', 'duplicate'), status: 'shrinking' }],
+        skipped: [{ cell: cell('e2e/cart.spec.ts', 'restart'), reason: 'aborted' }],
+      }),
+    })
+    expect(aborted.robustness?.status).toBe('aborted')
+    expect(aborted.robustness?.cells).toEqual({ planned: 5, judged: 2, notRun: 3 })
+    expect(aborted.robustness?.findings).toEqual([])
+    expect(aborted.robustness?.unconfirmed).toEqual([
+      { cell: cell('e2e/cart.spec.ts', 'latency'), tests: ['shows the cart total'], requirements: ['R1'], envelope: { format: FORMAT, latency: { ms: 250 } } },
+      { cell: cell('e2e/cart.spec.ts', 'duplicate'), tests: ['shows the cart total'], requirements: ['R1'], envelope: { format: FORMAT, latency: { ms: 250 } } },
+    ])
+    const notProven = aborted.notProven.join('\n')
+    expect(notProven).toContain('robustness: 3 cells not run — the matrix ended aborted after 2 judged, 1 more skipped. A cell the matrix never judged is not a pass.')
+    expect(notProven).toContain('That the 2 unconfirmed robustness findings are defects.')
+    const failed = buildBehaviorCertificate(detail(snapshotted()), { robustness: job({ status: 'failed', cells: { planned: 2, done: 1 } }) })
+    expect(failed.notProven.join('\n')).toContain('robustness: 1 cell not run — the matrix ended failed after 1 judged. A cell')
+    expect(runChecker(aborted).out).toContain('  unconfirmed e2e/cart.spec.ts × latency: shows the cart total\n')
+  })
+
+  it('refuses a running job — a matrix without a verdict is not evidence', () => {
+    expect(() => buildBehaviorCertificate(detail(snapshotted()), { robustness: job({ status: 'running' }) }))
+      .toThrow('robustness job rj-1 is still running and cannot be certified')
+  })
+
+  it('the checker still reads a @1 certificate, which has no robustness block to report', () => {
+    const cert = buildBehaviorCertificate(detail(snapshotted()), { coverage: LEDGER })
+    const legacy = { ...cert, format: 'canary-lab/behavior-certificate@1' } as unknown as BehaviorCertificate
+    const checked = runChecker(legacy)
+    expect(checked.out).not.toContain('robustness:')
+    expect(checked.out).toContain('RESULT: every check holds')
+    expect(checked.status).toBe(0)
   })
 })

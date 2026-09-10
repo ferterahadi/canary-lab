@@ -15,6 +15,9 @@ const paneTerminalState = vi.hoisted(() => ({
 
 vi.mock('../state/RunsContext', () => ({
   useRun: vi.fn(),
+  // RunsColumn reads the per-run detail map for the row it renders; these
+  // launch-control tests never load one, so an empty map is the truthful stub.
+  useRunDetails: vi.fn(() => ({})),
   useRuns: vi.fn(() => ({
     transients: {},
     errors: {},

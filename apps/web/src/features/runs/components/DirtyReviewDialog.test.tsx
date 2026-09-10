@@ -30,6 +30,20 @@ async function render(props: Partial<Parameters<typeof DirtyReviewDialog>[0]> = 
   await act(async () => root.render(<DirtyReviewDialog features={[feature()]} onClose={vi.fn()} {...props} />))
 }
 const click = async (label: string) => act(async () => button(label).click())
+it('lists a pending robustness envelope edit by name, not as zero tests', async () => {
+  // D15: the envelope rides in the run-start copy, so a mid-run edit to it is
+  // pending like a spec edit — but it declares exposure, not tests.
+  const pending = { manifest: { runId: 'run-1', feature: 'alpha', specEdits: { pending: [
+    { file: 'e2e/a.spec.ts', affectedTests: ['a'] },
+    { file: 'robustness/envelope.json', affectedTests: [] },
+  ] } } } as RunDetail
+  await render({ features: [], pendingRuns: [run], focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: pending })
+  const rows = [...document.querySelectorAll('.cl-review-file')].map((item) => item.textContent)
+  expect(rows.some((text) => text?.includes('a.spec.ts') && text.includes('1 test'))).toBe(true)
+  expect(rows.some((text) => text?.includes('robustness/envelope.json') && text.includes('perturbation envelope'))).toBe(true)
+  expect(document.body.textContent).not.toContain('0 tests')
+})
+
 it('shows a whole test with equal before/after columns, unchanged context and exact source edits', async () => {
   await render()
   await click('Code')

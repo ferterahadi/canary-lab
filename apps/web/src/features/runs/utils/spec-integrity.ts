@@ -1,6 +1,7 @@
 import type { DirtySpecSummary, Feature } from '@/shared/api/types'
 import type { StrengthVerdict } from '@shared/verification-strength/types'
 import { INTEGRITY_HINT_COPY, INTEGRITY_HINT_DISCLOSURE, INTEGRITY_HINT_FALSE_POSITIVE_RATE } from '@shared/verification-strength/disclosure'
+import { ROBUSTNESS_ENVELOPE_RELATIVE_PATH } from '@shared/robustness/types'
 
 // One reading of a feature's modified specs for the three review surfaces (the
 // status-bar pill, the features-column badge, the review dialog), so a suite
@@ -58,3 +59,13 @@ export const SPEC_TONE: Record<SpecEditTone, { glyph: string; color: string; lab
 
 /** The full hint sentence, for surfaces with room for it (the review dialog). */
 export const WEAKER_HINT_COPY = INTEGRITY_HINT_COPY
+
+/** What a pending file's edit reaches, for the file list: the tests whose
+ *  bodies changed, or — for the robustness envelope, which sits under the same
+ *  run-start boundary (D15) but asserts nothing — the environment it declares.
+ *  "0 tests" would read as harmless; the envelope decides what the suite is
+ *  exposed to. */
+export function pendingFileScope(file: Pick<DirtySpecSummary, 'file' | 'affectedTests'>): string {
+  if (file.file === ROBUSTNESS_ENVELOPE_RELATIVE_PATH) return 'perturbation envelope'
+  return `${file.affectedTests.length} ${file.affectedTests.length === 1 ? 'test' : 'tests'}`
+}

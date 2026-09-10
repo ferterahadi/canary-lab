@@ -81,16 +81,18 @@ describe('readLatestRunOutcomes', () => {
     expect(outcomes?.spansExecutions).toBe(false)
   })
 
-  it('skips boot and benchmark entries — the join wants suite evidence, and a verify run still counts', () => {
+  it('skips boot, benchmark and robustness-cell entries — the join wants suite evidence, and a verify run still counts', () => {
     // Newest entry is a benchmark arm, next a boot session: both have readable
     // summaries (the worst case — a benchmark writes a real one), yet neither
     // may feed the proven axis. The verify run behind them is genuine evidence
     // and must win.
     seedIndex([
+      { runId: 'r-cell', feature: 'demo', startedAt: '2026-01-05T00:00:00Z', executionType: 'robustness' },
       { runId: 'r-bench', feature: 'demo', startedAt: '2026-01-04T00:00:00Z', executionType: 'benchmark' },
       { runId: 'r-boot', feature: 'demo', startedAt: '2026-01-03T00:00:00Z', executionType: 'boot' },
       { runId: 'r-verify', feature: 'demo', startedAt: '2026-01-02T00:00:00Z', executionType: 'verify' },
     ])
+    seedSummary('r-cell', { passedNames: [], failed: [{ name: 'test-case-a' }] })
     seedSummary('r-bench', { passedNames: ['test-case-a'], failed: [] })
     seedSummary('r-boot', { passedNames: ['test-case-a'], failed: [] })
     seedSummary('r-verify', { passedNames: ['test-case-a'], failed: [] })

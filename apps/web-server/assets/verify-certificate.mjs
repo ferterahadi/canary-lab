@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Offline checker for a Canary Lab behavior certificate (canary-lab/behavior-certificate@1).
+// Offline checker for a Canary Lab behavior certificate (canary-lab/behavior-certificate@1
+// and @2 — @2 adds the optional `robustness` block, which is reported, never re-judged).
 //
 // Re-derives, from files on disk and nothing else, what the certificate claims
 // about the suite: every listed spec's sha256, the suite digest built from them,
@@ -17,7 +18,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
-const FORMAT = 'canary-lab/behavior-certificate@1'
+const FORMATS = ['canary-lab/behavior-certificate@1', 'canary-lab/behavior-certificate@2']
 
 const out = (line) => process.stdout.write(`${line}\n`)
 
@@ -37,8 +38,8 @@ function main(argv) {
     out(`cannot read certificate: ${err instanceof Error ? err.message : String(err)}`)
     return 2
   }
-  if (cert.format !== FORMAT) {
-    out(`unsupported certificate format: ${String(cert.format)} (this checker reads ${FORMAT})`)
+  if (!FORMATS.includes(cert.format)) {
+    out(`unsupported certificate format: ${String(cert.format)} (this checker reads ${FORMATS.join(', ')})`)
     return 2
   }
 
@@ -102,6 +103,17 @@ function main(argv) {
   out('')
   out(`pending spec edits the verdict never executed: ${cert.specEdits ? cert.specEdits.pending.length : 'unknown (no snapshot boundary)'}`)
   out(`advisory hints: ${cert.hints.length} — ${cert.disclosure}`)
+  // 5. Robustness (@2): what the matrix recorded, as recorded. Re-running a cell
+  // needs the services, so this checker only relays it — the run ids are there
+  // for anyone who wants to.
+  if (cert.robustness) {
+    const r = cert.robustness
+    out(`robustness: ${r.cells.judged}/${r.cells.planned} cells judged (${r.cells.notRun} not run), ${r.findings.length} confirmed finding(s), ${r.unconfirmed.length} unconfirmed — reported from job ${r.jobId} (${r.status}), not re-judged`)
+    for (const f of r.findings) out(`  confirmed ${f.cell.specFile} × ${f.cell.atom}: ${f.tests.join(', ')}${f.repro ? ` — ${f.repro}` : ''}`)
+    for (const f of r.unconfirmed) out(`  unconfirmed ${f.cell.specFile} × ${f.cell.atom}: ${f.tests.join(', ')}`)
+  } else if (cert.format === FORMATS[1]) {
+    out('robustness: no matrix ran against this run')
+  }
   out('')
   out('not proven by this certificate:')
   for (const line of cert.notProven) out(`  - ${line}`)

@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunDetail, RunIndexEntry } from '@/shared/api/types'
+import type { RobustnessJobIndexEntry } from '@shared/robustness/jobs'
 import type { PortifyIndexEntry } from '@/shared/api/client'
 import type { FeatureActivity } from './feature-activity'
 
@@ -23,6 +24,7 @@ const stores = {
   records: [] as DraftRecord[] | undefined,
   tasks: [] as EvaluationExportTask[],
   coverageJobs: null as CoverageJobIndexEntry[] | null,
+  robustnessJobs: null as RobustnessJobIndexEntry[] | null,
 }
 
 vi.mock('@/features/runs', async () => ({
@@ -40,24 +42,26 @@ vi.mock('@/features/wizard', async () => ({
   useWizardDrafts: () => ({ drafts: stores.drafts, records: stores.records }),
   isActiveWizardTask: (status: string) => status === 'generating',
 }))
-// The coverage-jobs read rides useLiveResource (WS-invalidated fetch) — the
-// same un-unit-testable edge as the stores, so it's stubbed the same way. The
-// stub RUNS the fetcher it is handed (against a mocked API client), so the
-// hook's wiring to the all-jobs endpoint is asserted, not assumed.
+// The coverage-jobs and robustness-jobs reads ride useLiveResource
+// (WS-invalidated fetch) — the same un-unit-testable edge as the stores, so
+// they're stubbed the same way, served by topic. The stub RUNS the fetcher it
+// is handed (against a mocked API client), so the hook's wiring to each
+// all-jobs endpoint is asserted, not assumed.
 const liveReads: Array<{ topic: string; key: string; cache?: string }> = []
 vi.mock('@/shared/state/use-live-resource', () => ({
   useLiveResource: (topic: string, key: string, fetcher: () => Promise<unknown>, opts?: { cache?: string }) => {
     liveReads.push({ topic, key, ...(opts?.cache ? { cache: opts.cache } : {}) })
     void fetcher()
-    return { value: stores.coverageJobs }
+    return { value: topic === 'robustness' ? stores.robustnessJobs : stores.coverageJobs }
   },
 }))
 vi.mock('@/shared/api/client', () => ({
   listAllCoverageJobs: vi.fn(async () => []),
+  listAllRobustnessJobs: vi.fn(async () => []),
 }))
 
 const { useFeatureActivity } = await import('./feature-activity')
-const { listAllCoverageJobs } = await import('@/shared/api/client')
+const { listAllCoverageJobs, listAllRobustnessJobs } = await import('@/shared/api/client')
 
 let container: HTMLDivElement
 let root: Root
@@ -76,6 +80,7 @@ beforeEach(() => {
   stores.records = []
   stores.tasks = []
   stores.coverageJobs = null
+  stores.robustnessJobs = null
 })
 
 afterEach(() => {
@@ -96,11 +101,15 @@ describe('useFeatureActivity', () => {
     expect(seen.size).toBe(0)
   })
 
-  it('wires the coverage-jobs read to the all-jobs endpoint on the coverage topic', () => {
+  it('wires the coverage-jobs and robustness-jobs reads to their all-jobs endpoints, each on its own topic', () => {
     liveReads.length = 0
     render()
-    expect(liveReads).toEqual([{ topic: 'coverage', key: 'all-jobs', cache: 'coverage-jobs' }])
+    expect(liveReads).toEqual([
+      { topic: 'coverage', key: 'all-jobs', cache: 'coverage-jobs' },
+      { topic: 'robustness', key: 'all-jobs', cache: 'robustness-jobs' },
+    ])
     expect(listAllCoverageJobs).toHaveBeenCalled()
+    expect(listAllRobustnessJobs).toHaveBeenCalled()
   })
 
   it('composes all the stores into one verb per feature', () => {
@@ -109,6 +118,7 @@ describe('useFeatureActivity', () => {
     stores.drafts = [{ draftId: 'd-c', featureName: 'c', status: 'generating' } as DraftRecord]
     stores.tasks = [{ taskId: 't-d', runId: 'r-d', feature: 'd', status: 'running' } as EvaluationExportTask]
     stores.coverageJobs = [{ jobId: 'j-e', feature: 'e', kind: 'coverage', status: 'running' } as CoverageJobIndexEntry]
+    stores.robustnessJobs = [{ jobId: 'rj-f', feature: 'f', runId: 'r-f', status: 'running' } as RobustnessJobIndexEntry]
 
     render()
     expect(seen.get('a')).toEqual({ kind: 'running', runId: 'r-a', external: false })
@@ -116,6 +126,7 @@ describe('useFeatureActivity', () => {
     expect(seen.get('c')).toEqual({ kind: 'authoring', draftId: 'd-c', external: false })
     expect(seen.get('d')).toEqual({ kind: 'exporting', taskId: 't-d', runId: 'r-d', external: false })
     expect(seen.get('e')).toEqual({ kind: 'mapping', jobId: 'j-e', external: false })
+    expect(seen.get('f')).toEqual({ kind: 'perturbing', jobId: 'rj-f', runId: 'r-f', external: false })
   })
 
   it('reads a run detail\'s external heal mode through the runDetails store', () => {

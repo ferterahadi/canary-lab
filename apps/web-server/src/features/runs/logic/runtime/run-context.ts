@@ -39,6 +39,7 @@ import type {
 import type { VerificationRunMetadata, ExecutionType as ExecutionType } from '../../../../../../../shared/verification'
 import type { PlaywrightSpawner } from './run-spawn'
 import type { RunModelPlan } from './run-model-plan'
+import type { PlaywrightRerunSelection } from './rerun-targets'
 import type { RunPerturbation } from './perturbation/client-ports'
 import type { ProxyShim } from './perturbation/proxy-shim'
 
@@ -104,6 +105,7 @@ export interface RunContext {
   readonly executionType: ExecutionType
   readonly verification?: VerificationRunMetadata
   readonly playwrightEnv: Record<string, string>
+  readonly initialSelection?: PlaywrightRerunSelection
 
   // ── run state ─────────────────────────────────────────────────────────────
   /** The directory Playwright runs from and every verdict reader lists specs
@@ -249,6 +251,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     executionType: opts.executionType ?? 'run',
     verification: opts.verification,
     playwrightEnv: opts.playwrightEnv ?? {},
+    initialSelection: opts.initialSelection,
 
     // A restart builds a fresh context over the SAME run dir without calling
     // start(); picking the existing copy up here is what keeps a restart from

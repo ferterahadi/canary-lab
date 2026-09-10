@@ -194,7 +194,7 @@ describe('start_external_evaluation_export', () => {
 
     expect(await text('start_external_evaluation_export', {
       runId: 'run-1', language: 'English', session_id: 's-1', client_kind: 'claude',
-    })).toBe('run run-1 is a boot session with no test results — run the suite first (start_run), then export that run')
+    })).toBe('run run-1 is a boot session, not a suite run — run the suite first (start_run), then export that run')
   })
 
   it('refuses a benchmark run for the same reason', async () => {
@@ -202,7 +202,7 @@ describe('start_external_evaluation_export', () => {
 
     expect(await text('start_external_evaluation_export', {
       runId: 'run-1', language: 'English', session_id: 's-1', client_kind: 'claude',
-    })).toBe('run run-1 is a benchmark session with no test results — run the suite first (start_run), then export that run')
+    })).toBe('run run-1 is a benchmark session, not a suite run — run the suite first (start_run), then export that run')
   })
 })
 
@@ -553,11 +553,12 @@ describe('the behavior certificate through the export tools', () => {
       certificateInsideArchive: 'certificate.json',
       checkerInsideArchive: 'verify-certificate.mjs',
       certificate: {
-        format: 'canary-lab/behavior-certificate@1',
+        format: 'canary-lab/behavior-certificate@2',
         counts: { declared: 1, passed: 1, failed: 0, skipped: 0, interrupted: 0, notRun: 0 },
         suite: { source: 'none', runStartCheck: 'unverifiable' },
         pendingSpecEdits: 'unknown',
         hints: 0,
+        robustness: 'none',
       },
     })
     const digest = submitted.certificate as { statement: string; notProven: string[]; verifyOffline: string; tests?: unknown }
@@ -568,7 +569,7 @@ describe('the behavior certificate through the export tools', () => {
     expect(String(submitted.nextSteps)).toContain('not the absence of weakening')
 
     const got = await call('get_evaluation_export', { taskId })
-    expect(got).toMatchObject({ certificatePath: paths.certificatePath, certificate: { format: 'canary-lab/behavior-certificate@1' } })
+    expect(got).toMatchObject({ certificatePath: paths.certificatePath, certificate: { format: 'canary-lab/behavior-certificate@2' } })
 
     const downloaded = await call('download_evaluation_export', { taskId })
     const full = downloaded.certificate as BehaviorCertificate
@@ -623,7 +624,7 @@ describe('the behavior certificate through the export tools', () => {
 
   it('digest: counts every claim outcome and points the offline check at the suite dir when there is one', () => {
     const certificate = {
-      format: 'canary-lab/behavior-certificate@1',
+      format: 'canary-lab/behavior-certificate@2',
       statement: 's',
       run: { counts: { declared: 2, passed: 1, failed: 1, skipped: 0, interrupted: 0, notRun: 0 } },
       suite: { source: 'run-start-snapshot', digest: 'abc', runStartCheck: 'matches', dir: '/logs/runs/r/suite' },
@@ -636,17 +637,24 @@ describe('the behavior certificate through the export tools', () => {
     const digest = certificateDigest(certificate, '/logs/evaluation-exports/eval-1/certificate.json')
 
     expect(digest).toEqual({
-      format: 'canary-lab/behavior-certificate@1',
+      format: 'canary-lab/behavior-certificate@2',
       statement: 's',
       suite: { source: 'run-start-snapshot', digest: 'abc', runStartCheck: 'matches' },
       counts: { declared: 2, passed: 1, failed: 1, skipped: 0, interrupted: 0, notRun: 0 },
       claims: { total: 5, allPassed: 2, someFailed: 1, notRun: 1, noTests: 1 },
       pendingSpecEdits: 2,
       hints: 1,
+      robustness: 'none',
       notProven: ['n1'],
       verifyOffline: expect.stringContaining('node verify-certificate.mjs certificate.json --suite "/logs/runs/r/suite"'),
     })
     expect(digest.verifyOffline).toContain('/logs/evaluation-exports/eval-1/certificate.json')
+
+    const perturbed = certificateDigest({
+      ...certificate,
+      robustness: { jobId: 'rj-1', status: 'done', envelope: {}, cells: { planned: 4, judged: 3, notRun: 1 }, findings: [{}, {}], unconfirmed: [{}], skipped: [{}] },
+    } as unknown as BehaviorCertificate, '/c.json')
+    expect(perturbed.robustness).toEqual({ jobId: 'rj-1', status: 'done', cells: { planned: 4, judged: 3, notRun: 1 }, findings: 2, unconfirmed: 1 })
   })
 })
 

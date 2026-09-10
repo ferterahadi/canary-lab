@@ -6,6 +6,7 @@ import { extractTestMetadataFromSource, extractTestPredicatesFromSource } from '
 import { getGitRoot, runGit } from '../../../../shared/git-repo'
 import { diffSpecPredicates } from '../../../../shared/verification-strength/differential'
 import type { SpecDiff } from '../../../../../../../shared/verification-strength/types'
+import { ROBUSTNESS_ENVELOPE_RELATIVE_PATH } from '../../../../../../../shared/robustness/types'
 
 // Test-file integrity detection. Canary Lab's promise is that a verdict stays
 // outside the agent's control; the threat is the heal agent silently editing a
@@ -309,7 +310,32 @@ export function computePendingEdits(liveDir: string, snapshotDir: string): Pendi
     }
     pending.push({ file: rel, change, affectedTests: changedTests.length > 0 ? changedTests : names, strength })
   }
+  const envelope = envelopePendingEdit(liveDir, snapshotDir)
+  if (envelope) pending.push(envelope)
   return pending
+}
+
+// The robustness envelope (D15) sits in the suite folder so the run-start copy
+// carries it. A mid-run edit changes what the suite was EXPOSED to, not what it
+// asserts, so it is reported pending with no test attribution and no strength
+// verdict — the differential reads assertions, and a JSON file has none. It
+// still counts as an edit the run never executed: adopt and restore treat it
+// like any other pending file.
+function envelopePendingEdit(liveDir: string, snapshotDir: string): PendingSpecEdit | undefined {
+  const rel = ROBUSTNESS_ENVELOPE_RELATIVE_PATH
+  const before = readOptional(path.join(snapshotDir, rel))
+  const after = readOptional(path.join(liveDir, rel))
+  if (before === after) return undefined
+  const change = before === undefined ? 'added' : after === undefined ? 'deleted' : 'modified'
+  return { file: rel, change, affectedTests: [] }
+}
+
+function readOptional(abs: string): string | undefined {
+  try {
+    return fs.readFileSync(abs, 'utf8')
+  } catch {
+    return undefined
+  }
 }
 
 function testNamesOf(rel: string, source: string): string[] {

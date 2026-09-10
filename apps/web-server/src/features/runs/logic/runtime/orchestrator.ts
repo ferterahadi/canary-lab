@@ -321,7 +321,9 @@ export class RunOrchestrator extends EventEmitter {
     // Declare the run failed and route it into heal (the agent fixes the
     // service) instead of running tests against a dead service.
     if (this.ctx.bootFailure) return await this.failRunForBootFailure()
-    let exitCode = await runPlaywright(this.ctx)
+    // A robustness cell names its one spec file here; every other run starts
+    // with the whole suite and only the heal reruns narrow the selection.
+    let exitCode = await runPlaywright(this.ctx, this.ctx.initialSelection)
     // If the user clicked Abort while Playwright was running, bail out
     // immediately — don't compute a finalStatus from the killed pty's
     // exit code, and don't fall through into the heal loop where a fresh

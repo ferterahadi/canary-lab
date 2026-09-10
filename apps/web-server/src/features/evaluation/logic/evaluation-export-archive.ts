@@ -7,6 +7,7 @@ import { computeFeatureCoverage } from '../../coverage/logic/coverage/service'
 import { createZip } from '../../../shared/simple-zip'
 import type { EvaluationArchiveContents } from './evaluation-export-types'
 import { buildBehaviorCertificate } from './behavior-certificate'
+import { robustnessJobStore } from '../../runs/logic/robustness/store'
 import { readBundledAsset } from '../../../shared/bundled-assets'
 import {
   BEHAVIOR_CERTIFICATE_CHECKER_FILENAME,
@@ -56,7 +57,7 @@ export async function buildEvaluationExportArchive(
   // The certificate rides in the same archive as the report (D7) with the
   // zero-dependency checker beside it, so the file a reader receives can be
   // re-verified without Canary Lab.
-  const certificate = buildBehaviorCertificate(detail, { coverage })
+  const certificate = buildBehaviorCertificate(detail, { coverage, robustness: robustnessJobFor(options.logsDir, detail) })
   const zip = createZip([
     { filename: 'evaluation.html', data: Buffer.from(exported.html, 'utf8') },
     { filename: BEHAVIOR_CERTIFICATE_FILENAME, data: Buffer.from(JSON.stringify(certificate, null, 2), 'utf8') },
@@ -70,6 +71,15 @@ export async function buildEvaluationExportArchive(
     contents: { bytes: zip.length, videos: videoEntries.length, assets: exported.assets.length },
     certificate,
   }
+}
+
+/** The newest SETTLED Robustness Lab job built from this run. A job built from
+ *  another run is another run's evidence, and a running job has no verdict yet
+ *  — both read as "no matrix", which the certificate then says. */
+function robustnessJobFor(logsDir: string, detail: RunDetail) {
+  const store = robustnessJobStore(logsDir)
+  const entry = store.forFeature(detail.manifest.feature).find((job) => job.runId === detail.runId && job.status !== 'running')
+  return entry ? store.get(entry.jobId) : undefined
 }
 
 function assertionVideos(

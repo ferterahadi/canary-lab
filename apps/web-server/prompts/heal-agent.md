@@ -1,5 +1,7 @@
 Playwright failed. {{healingDirective}}
 
+{{perturbationNote}}
+
 Run directory:
 - `{{runDir}}` (`{{runDirRel}}` from the project root)
 

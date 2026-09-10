@@ -1,4 +1,5 @@
 import http, { type IncomingMessage } from 'node:http'
+import { durableRequest, openStore, type Replayable } from '../shared/durable'
 
 // Final service in the storefront journey. It consumes catalog's price and the
 // successful inventory reservation to produce the customer-facing total.
@@ -14,10 +15,22 @@ interface Cart {
   items: CartItem[]
   discountPercent: number
   status: 'open' | 'placed'
+  touchedAt: number
 }
 
-const carts = new Map<string, Cart>()
-let nextId = 1
+interface CheckoutState extends Replayable {
+  carts: Record<string, Cart>
+  nextId: number
+}
+
+// The state file outlives the process — see shared/durable.ts.
+const store = openStore<CheckoutState>('checkout', () => ({ carts: {}, nextId: 1, replies: {} }))
+const carts = store.state.carts
+
+// A cart nobody has touched for this long is gone: the next request for it gets
+// 410. Generous on purpose — a slow network between two requests must never
+// cost a customer their cart.
+const CART_IDLE_MS = Number.parseInt(process.env.STOREFRONT_CART_IDLE_MS ?? '30000', 10)
 
 const DISCOUNT_CODES: Record<string, number> = { WELCOME10: 10, HALFOFF: 50 }
 
@@ -39,6 +52,7 @@ const server = http.createServer(async (req, res) => {
 
   console.log(`[checkout-service] ${method} ${url.pathname}`)
   res.setHeader('Content-Type', 'application/json')
+  if (durableRequest(store, req, res)) return
 
   try {
     if (method === 'GET' && url.pathname === '/') {
@@ -47,19 +61,26 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (method === 'POST' && url.pathname === '/carts') {
-      const cart: Cart = { id: String(nextId++), items: [], discountPercent: 0, status: 'open' }
-      carts.set(cart.id, cart)
+      const cart: Cart = { id: String(store.state.nextId++), items: [], discountPercent: 0, status: 'open', touchedAt: Date.now() }
+      carts[cart.id] = cart
       res.writeHead(201)
       res.end(JSON.stringify({ ...cart, total: 0 }))
       return
     }
 
-    const cart = segments[0] === 'carts' ? carts.get(segments[1] ?? '') : undefined
+    const cart = segments[0] === 'carts' ? carts[segments[1] ?? ''] : undefined
     if (segments[0] === 'carts' && !cart) {
       res.writeHead(404)
       res.end(JSON.stringify({ error: 'cart not found' }))
       return
     }
+    if (cart && Date.now() - cart.touchedAt > CART_IDLE_MS) {
+      delete carts[cart.id]
+      res.writeHead(410)
+      res.end(JSON.stringify({ error: 'cart expired' }))
+      return
+    }
+    if (cart) cart.touchedAt = Date.now()
 
     if (method === 'GET' && cart && segments.length === 2) {
       res.end(JSON.stringify({ ...cart, total: subtotal(cart) }))

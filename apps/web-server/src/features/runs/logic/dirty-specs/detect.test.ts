@@ -362,6 +362,32 @@ describe('computePendingEdits', () => {
     expect(pending[0].strength).toMatchObject({ baseline: 'run-start', verdict: 'weaker' })
     fs.rmSync(copyDir, { recursive: true, force: true })
   })
+
+  // The robustness envelope (D15) rides in the run-start copy, so editing it
+  // mid-run is an edit the run never executed — reported pending, attributed to
+  // no test and given no strength verdict (it changes exposure, not assertions).
+  it('reports a robustness envelope edited, added or deleted since run start, with no strength verdict', () => {
+    writeSpec('voucher.spec.ts', TWO_ASSERTIONS)
+    const copyDir = writeRunStartCopy('voucher.spec.ts', TWO_ASSERTIONS)
+    const envelope = (root: string, body: string) => {
+      fs.mkdirSync(path.join(root, 'robustness'), { recursive: true })
+      fs.writeFileSync(path.join(root, 'robustness', 'envelope.json'), body)
+    }
+    envelope(copyDir, '{"format":"canary-lab/robustness-envelope@1","latency":{"ms":300}}')
+    envelope(dir, '{"format":"canary-lab/robustness-envelope@1","latency":{"ms":300}}')
+    expect(computePendingEdits(dir, copyDir)).toEqual([])
+
+    envelope(dir, '{"format":"canary-lab/robustness-envelope@1","latency":{"ms":900}}')
+    expect(computePendingEdits(dir, copyDir)).toEqual([{ file: 'robustness/envelope.json', change: 'modified', affectedTests: [] }])
+
+    fs.rmSync(path.join(dir, 'robustness'), { recursive: true })
+    expect(computePendingEdits(dir, copyDir)).toEqual([{ file: 'robustness/envelope.json', change: 'deleted', affectedTests: [] }])
+
+    fs.rmSync(path.join(copyDir, 'robustness'), { recursive: true })
+    envelope(dir, '{"format":"canary-lab/robustness-envelope@1"}')
+    expect(computePendingEdits(dir, copyDir)).toEqual([{ file: 'robustness/envelope.json', change: 'added', affectedTests: [] }])
+    fs.rmSync(copyDir, { recursive: true, force: true })
+  })
 })
 
 describe('promoteGreen', () => {

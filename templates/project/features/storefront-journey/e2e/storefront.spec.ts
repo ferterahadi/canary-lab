@@ -20,8 +20,9 @@ import { StorefrontApi } from './helpers/api'
 // `fullyParallel: false` and this is the suite's only spec file. Keep the order,
 // and keep each journey's assertions ordered: a failed upstream contract must
 // never be rounded into proof of a downstream one. Keep contracts stateless too
-// — these services keep data in memory and are NOT restarted between heal
-// cycles, so a contract that leaves residue behind drifts on every rerun.
+// — these services keep their state (a per-run file) and are NOT restarted
+// between heal cycles, so a contract that leaves residue behind drifts on every
+// rerun.
 //
 // The `@req-*` tags map each contract to a requirement in
 // `docs/_prd-summary.json`, which is what makes the coverage ledger read 100%

@@ -72,6 +72,7 @@ export const ACTIVITY_CHIP: Record<FeatureActivityKind, { label: string; title: 
   'healing': { label: 'repairing', title: 'A repair agent is fixing the app so the failing tests pass', tone: 'var(--warning)' },
   'running': { label: 'running', title: 'Test run in progress', tone: FLIGHT_STATUS_TONE['running'] },
   'exporting': { label: 'exporting', title: 'Building the evaluation report', tone: FLIGHT_STATUS_TONE['running'] },
+  'perturbing': { label: 'perturbing', title: 'Booting the tests under perturbation', tone: FLIGHT_STATUS_TONE['running'] },
   'portifying': { label: 'port setup', title: 'Making the suite safe to run two at a time', tone: FLIGHT_STATUS_TONE['running'] },
   'authoring': { label: 'writing', title: 'Writing tests', tone: FLIGHT_STATUS_TONE['running'] },
   'verifying': { label: 'verifying', title: 'Verifying the suite against a deployed environment', tone: FLIGHT_STATUS_TONE['running'] },
@@ -108,6 +109,7 @@ export const RUNNING_STAGE_CHIP: Record<FlightStageKey, string> = {
   'portify': 'port setup',
   'run': 'running',
   'heal': 'repairing',
+  'robustness': 'perturbing',
   'evaluation-export': 'exporting',
 }
 

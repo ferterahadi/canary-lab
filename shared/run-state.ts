@@ -37,7 +37,9 @@ export interface RunLifecycleRestartPlan {
 export interface RunLifecycleTargetedRerun {
   selected: number
   total: number
-  mode: 'failed-and-pending' | 'failed-only' | 'full-suite' | 'none'
+  /** `robustness-cell`: the first pass of a Robustness Lab cell runs one spec
+   *  file on purpose — a selection, but not a rerun of anything. */
+  mode: 'failed-and-pending' | 'failed-only' | 'full-suite' | 'none' | 'robustness-cell'
   reason: string
 }
 

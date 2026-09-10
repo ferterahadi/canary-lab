@@ -6,7 +6,7 @@ import { shortRunRef } from '@/shared/lib/format'
 import { Modal } from '@/shared/ui/atoms'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
 import { useRun } from '../state/RunsContext'
-import { WEAKER_HINT_COPY, featureTone, specTone } from '../utils/spec-integrity'
+import { WEAKER_HINT_COPY, featureTone, pendingFileScope, specTone } from '../utils/spec-integrity'
 import { SpecToneChip } from './SpecToneChip'
 import { FullTestReview, type ReviewFocus } from './FullTestReview'
 
@@ -130,7 +130,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
                 <p className="mb-1 break-words px-2 text-xs font-medium">{card.name}</p>
                 {files.length ? files.map((file) => <button key={file.file} type="button" disabled={busy} aria-pressed={card.name === selected.name && file.file === spec?.file} className="cl-review-file" title={file.file} onClick={() => choose(card.name, file.file)}>
                   <span className="block truncate font-mono text-[11px]">{file.file.replace(/^e2e\//, '')}</span>
-                  <span className="mt-1 flex flex-wrap items-center gap-2"><SpecToneChip tone={specTone(file)} /><span className="text-[10px] text-secondary">{file.affectedTests.length} {file.affectedTests.length === 1 ? 'test' : 'tests'}</span></span>
+                  <span className="mt-1 flex flex-wrap items-center gap-2"><SpecToneChip tone={specTone(file)} /><span className="text-[10px] text-secondary">{pendingFileScope(file)}</span></span>
                 </button>) : <button className="cl-review-file text-xs" disabled={busy} aria-pressed={card.name === selected.name} onClick={() => choose(card.name)}>Pending test edits</button>}
               </div>
             })}

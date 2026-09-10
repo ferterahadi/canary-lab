@@ -3,6 +3,7 @@ import type { RunIndexEntry, RunStatus } from '@/shared/api/types'
 import { ChevronRightIcon, SlideOverPanel } from '@/shared/ui/atoms'
 import { useRunDetails, useRuns } from '../state/RunsContext'
 import { RunRow } from './RunRow'
+import { isAuxiliaryExecution } from '@shared/verification'
 
 interface Props {
   onClose: () => void
@@ -27,8 +28,9 @@ const FINISHED_STATUSES: RunStatus[] = ['passed', 'failed', 'aborted']
 export function RunsListDialog({ onClose, onNavigateToRun }: Props) {
   const { runs: allRuns } = useRuns()
   // Boot sessions live in the Services dialog; benchmark runs (arms + the
-  // validity-gate trial) live in the benchmark window — neither belongs here.
-  const runs = allRuns.filter((r) => r.executionType !== 'boot' && r.executionType !== 'benchmark')
+  // validity-gate trial) live in the benchmark window; robustness cells live in
+  // their job's pane — none belongs here.
+  const runs = allRuns.filter((r) => !isAuxiliaryExecution(r.executionType))
   const details = useRunDetails()
   // Finished runs are the long tail — collapsed by default so active work leads.
   const [finishedOpen, setFinishedOpen] = useState(false)

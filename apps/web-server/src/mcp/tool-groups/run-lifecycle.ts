@@ -29,8 +29,9 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       guidance: z.string().optional().describe('Optional user guidance when restarting a failed/aborted run by runId or run_ref.'),
       force_new: z.boolean().default(false).describe('Start a fresh concurrent run even if a matching run is healing (it continues independently). A same-repo collision still asks you to choose isolation.'),
       isolation: z.enum(['worktree', 'queue']).optional().describe('Only needed after start_run returns repo_collision_requires_choice: "worktree" isolates this run in a per-run git worktree and starts it now (concurrent); "queue" waits until the conflicting run finishes.'),
+      perturbation: z.record(z.string(), z.unknown()).optional().describe('Robustness envelope (the `envelope` object from a get_robustness finding, or the suite\'s robustness/envelope.json) to boot the services under: latency, duplicated writes and slot restarts through a per-slot proxy. Use it to repair a Robustness Lab finding — the failing test fails again under the same environment, and the heal context carries `perturbation` (with a one-line `repro`) so the fix targets the app\'s tolerance, not the test. Applies to fresh starts only; omitted = unperturbed.'),
     },
-  }, async ({ feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new, isolation }) => {
+  }, async ({ feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new, isolation, perturbation }) => {
     try {
       const requestedRef = runId ?? run_ref
       // Heal-claim policy (see heal-claim-policy.ts): claiming is open to every
@@ -153,6 +154,8 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
           claimable: claimAllowed,
         },
         isolation,
+        undefined,
+        perturbation,
       )
       if (outcome.kind === 'getting-started-busy') {
         return asJsonResult({

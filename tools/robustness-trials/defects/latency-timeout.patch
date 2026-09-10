@@ -1,0 +1,16 @@
+--- a/checkout-service/server.ts
++++ b/checkout-service/server.ts
+@@ -27,10 +27,9 @@
+ const store = openStore<CheckoutState>('checkout', () => ({ carts: {}, nextId: 1, replies: {} }))
+ const carts = store.state.carts
+ 
+-// A cart nobody has touched for this long is gone: the next request for it gets
+-// 410. Generous on purpose — a slow network between two requests must never
+-// cost a customer their cart.
+-const CART_IDLE_MS = Number.parseInt(process.env.STOREFRONT_CART_IDLE_MS ?? '30000', 10)
++// Seeded defect (robustness trials): a cart idle for 150 ms is gone, so one slow
++// round trip between two requests costs the customer their cart.
++const CART_IDLE_MS = Number.parseInt(process.env.STOREFRONT_CART_IDLE_MS ?? '150', 10)
+ 
+ const DISCOUNT_CODES: Record<string, number> = { WELCOME10: 10, HALFOFF: 50 }
+ 

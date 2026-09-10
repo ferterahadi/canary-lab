@@ -23,6 +23,7 @@ import {
   type BehaviorCertificate,
 } from '../../../../../shared/verification-strength/certificate'
 import { type ToolGroupContext, asJsonResult, asToonResult, errorResult, evaluationRewriteInput, evaluationTextSlotInput, externalEvaluationReportSchema, failureResult, gettingStartedBusyResult } from '../tool-support'
+import { isAuxiliaryExecution } from '../../../../../shared/verification'
 
 type EvaluationExportToolView = EvaluationExportTaskView & {
   archivePath?: string
@@ -44,6 +45,10 @@ interface CertificateDigest {
   claims: { total: number; allPassed: number; someFailed: number; notRun: number; noTests: number }
   pendingSpecEdits: number | 'unknown'
   hints: number
+  /** The Robustness Lab block in one row (@2): cells judged, confirmed and
+   *  unconfirmed findings — or 'none' when no settled matrix ran against this
+   *  run. Each confirmed finding's repro is in the full file. */
+  robustness: { jobId: string; status: string; cells: { planned: number; judged: number; notRun: number }; findings: number; unconfirmed: number } | 'none'
   notProven: string[]
   verifyOffline: string
 }
@@ -67,6 +72,9 @@ export function certificateDigest(certificate: BehaviorCertificate, certificateP
     claims,
     pendingSpecEdits: certificate.specEdits ? certificate.specEdits.pending.length : 'unknown',
     hints: certificate.hints.length,
+    robustness: certificate.robustness
+      ? { jobId: certificate.robustness.jobId, status: certificate.robustness.status, cells: certificate.robustness.cells, findings: certificate.robustness.findings.length, unconfirmed: certificate.robustness.unconfirmed.length }
+      : 'none',
     notProven: certificate.notProven,
     verifyOffline: `unzip the archive, then: node ${BEHAVIOR_CERTIFICATE_CHECKER_FILENAME} ${BEHAVIOR_CERTIFICATE_FILENAME}${'dir' in certificate.suite ? ` --suite ${JSON.stringify(certificate.suite.dir)}` : ''} — re-derives the spec hashes, the suite digest and every listed assertion from files on disk, with no Canary Lab code involved (certificate on this machine: ${certificatePath})`,
   }
@@ -126,8 +134,8 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
     // workspace even ships an aborted boot run), and exporting one produces a
     // plausible-looking but empty evaluation. Mirrors the GUI gate in App.tsx.
     const executionType = detail.manifest.executionType ?? 'run'
-    if (executionType === 'boot' || executionType === 'benchmark') {
-      return errorResult(`run ${runId} is a ${executionType} session with no test results — run the suite first (start_run), then export that run`)
+    if (isAuxiliaryExecution(executionType)) {
+      return errorResult(`run ${runId} is a ${executionType} session, not a suite run — run the suite first (start_run), then export that run`)
     }
     // Getting Started demo tracking: claimed after the gates above so a
     // rejected start never needs releasing; task creation below is synchronous.

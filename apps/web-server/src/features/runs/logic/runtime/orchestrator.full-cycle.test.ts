@@ -8,6 +8,7 @@ import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor } from './run-paths'
 import { readManifest, type RunLifecycleEvent } from './manifest'
+import type { PlaywrightRerunSelection } from './rerun-targets'
 
 interface FakeProcess {
   pid: number
@@ -99,10 +100,13 @@ describe('RunOrchestrator.runFullCycle', () => {
     autoHeal?: boolean
     manualHeal?: boolean
     externalHeal?: boolean
+    initialSelection?: PlaywrightRerunSelection
+    onSpawnPlaywright?: (selection: PlaywrightRerunSelection | undefined) => void
   }) {
     let pwIdx = 0
     let healIdx = 0
     const orch = new RunOrchestrator({
+      initialSelection: opts.initialSelection,
       feature: makeFeature(),
       runId: RUN_ID,
       runDir,
@@ -112,10 +116,13 @@ describe('RunOrchestrator.runFullCycle', () => {
       healthPollIntervalMs: 5,
       healSignalPollMs: 1,
       healAgentTimeoutMs: 1000,
-      playwrightSpawner: ({ rerunTargets }) => ({
-        command: `pw-${pwIdx++}${rerunTargets?.length ? ` ${rerunTargets.join(' ')}` : ''}`,
-        cwd: tmpDir,
-      }),
+      playwrightSpawner: ({ rerunTargets, rerunSelection }) => {
+        opts.onSpawnPlaywright?.(rerunSelection)
+        return {
+          command: `pw-${pwIdx++}${rerunTargets?.length ? ` ${rerunTargets.join(' ')}` : ''}`,
+          cwd: tmpDir,
+        }
+      },
       autoHeal: opts.autoHeal
         ? {
             agent: 'claude',
@@ -146,6 +153,20 @@ describe('RunOrchestrator.runFullCycle', () => {
     f.spawned[1].emitExit(0)
     const status = await promise
     expect(status).toBe('passed')
+    await orch.stop('passed')
+  })
+
+  it('narrows the FIRST Playwright pass to an initial selection — a Robustness Lab cell — and records it as a targeted run', async () => {
+    const f = makeFakeFactory()
+    const selection: PlaywrightRerunSelection = { kind: 'grep', grep: 'browse', selected: 1, total: 3, mode: 'robustness-cell', reason: 'Robustness Lab cell: e2e/storefront.spec.ts under latency.' }
+    const seen: (PlaywrightRerunSelection | undefined)[] = []
+    const orch = bootForFullCycle({ spawned: f, pwExitCodes: [0], initialSelection: selection, onSpawnPlaywright: (s) => seen.push(s) })
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 5))
+    f.spawned[1].emitExit(0)
+    expect(await promise).toBe('passed')
+    expect(seen).toEqual([selection])
+    expect(readLifecycleEvents(orch).find((e) => e.phase === 'rerunning-tests')).toMatchObject({ targetedRerun: { mode: 'robustness-cell', selected: 1, total: 3 } })
     await orch.stop('passed')
   })
 

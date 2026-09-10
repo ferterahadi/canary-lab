@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { robustnessJobStore } from '../../runs/logic/robustness/store'
+import type { RobustnessJobManifest } from '../../../../../../shared/robustness/jobs'
+import { ROBUSTNESS_ENVELOPE_FORMAT } from '../../../../../../shared/robustness/types'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -358,9 +361,10 @@ describe('workspaceStageEvidence probes', () => {
       JSON.stringify([
         { runId: '2026-06-01T0100-old0', feature: FEATURE, startedAt: '2026-06-01T01:00:00.000Z', status: 'failed' },
         { runId, feature: FEATURE, startedAt: '2026-07-01T02:45:00.000Z', status: 'passed' },
-        // None of these three are a feature test run, however recent they are.
+        // None of these four are a feature test run, however recent they are.
         { runId: 'boot-1', feature: FEATURE, startedAt: '2026-07-02T00:00:00.000Z', status: 'passed', executionType: 'boot' },
         { runId: 'bench-1', feature: FEATURE, startedAt: '2026-07-03T00:00:00.000Z', status: 'passed', executionType: 'benchmark' },
+        { runId: 'cell-1', feature: FEATURE, startedAt: '2026-07-03T12:00:00.000Z', status: 'failed', executionType: 'robustness' },
         { runId: 'verify-1', feature: FEATURE, startedAt: '2026-07-04T00:00:00.000Z', status: 'passed', executionType: 'verify' },
         { runId: 'other-feature', feature: 'somebody_else', startedAt: '2026-07-05T00:00:00.000Z', status: 'passed' },
       ]),
@@ -550,6 +554,35 @@ describe('workspaceStageEvidence — coverage, heal and export probes', () => {
     )
     expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['evaluation-export'])['evaluation-export'])
       .toEqual({ taskId: 'eval-newer', runId: 'r1', mode: 'raw' })
+  })
+})
+
+describe('workspaceStageEvidence — robustness probe', () => {
+  const job = (over: Partial<RobustnessJobManifest>): RobustnessJobManifest => ({
+    jobId: 'rj-1', feature: FEATURE, runId: 'r-1', envelope: { format: ROBUSTNESS_ENVELOPE_FORMAT, latency: { ms: 300 } }, status: 'done',
+    startedAt: '2026-07-01T00:00:00Z', endedAt: '2026-07-01T00:05:00Z', cells: { planned: 2, done: 2 }, findings: [], skipped: [], log: '',
+    ...over,
+  })
+
+  it('reports the newest COMPLETED matrix as the stage block — the same shape the conducted stage records', () => {
+    const store = robustnessJobStore(logsDir)
+    store.save(job({ jobId: 'rj-old', startedAt: '2026-07-01T00:00:00Z' }))
+    store.save(job({
+      jobId: 'rj-new', startedAt: '2026-07-02T00:00:00Z',
+      findings: [{ cell: { specFile: 'e2e/a.spec.ts', atom: 'latency' }, failedTests: ['x'], runId: 'c', requirements: [], status: 'confirmed', envelope: { format: ROBUSTNESS_ENVELOPE_FORMAT } }],
+      skipped: [{ cell: { specFile: 'e2e/b.spec.ts', atom: 'latency' }, reason: 'no summary' }],
+    }))
+    // A newer matrix that was stopped is not a verdict: the completed one wins.
+    store.save(job({ jobId: 'rj-stopped', startedAt: '2026-07-03T00:00:00Z', status: 'aborted' }))
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['robustness'])['robustness'])
+      .toEqual({ jobId: 'rj-new', runId: 'r-1', cells: { planned: 2, done: 2 }, findings: 1, confirmed: 1, unconfirmed: 0, skipped: 1 })
+  })
+
+  it('omits the block when no matrix completed — failed and aborted ones left cells unjudged', () => {
+    const store = robustnessJobStore(logsDir)
+    store.save(job({ jobId: 'rj-failed', status: 'failed' }))
+    store.save(job({ jobId: 'rj-other', feature: 'other-suite' }))
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['robustness'])['robustness']).toBeUndefined()
   })
 })
 

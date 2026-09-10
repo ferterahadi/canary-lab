@@ -29,6 +29,7 @@ import {
 } from './logic/runtime/env-switcher/switch'
 import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { ExecutionType } from '../../../../../shared/verification'
+import type { PlaywrightRerunSelection } from './logic/runtime/rerun-targets'
 import type { RobustnessEnvelope } from '../../../../../shared/robustness/types'
 import type { makeAttachRunStreams, makeRestartExternalRun } from './run-stream-wiring'
 import type { buildRunScheduling } from './run-scheduling'
@@ -86,8 +87,14 @@ export function buildRunsRouteDeps(
       executionType: ExecutionType = 'run',
       modelsOverride?: unknown,
       perturbationEnvelope?: RobustnessEnvelope,
+      cellSelection?: PlaywrightRerunSelection,
     ): Promise<StartRunOutcome> => {
       const isBoot = executionType === 'boot'
+      // A robustness cell never heals: a failure under perturbation is the
+      // finding the job that started it is looking for, not something to fix
+      // here. It also runs in place — nothing edits the repos, so there is no
+      // diff to capture — unless the feature is portified or a collision asks.
+      const isCell = executionType === 'robustness'
       const features = loadFeatures(featuresDir)
       const feature = features.find((f) => f.name === featureName)
       if (!feature) throw new Error(`feature not found: ${featureName}`)
@@ -181,11 +188,13 @@ export function buildRunsRouteDeps(
         }
       }
       let autoHeal: AutoHealConfig | undefined
-      const agentChoice = (externalOrigin || isBoot)
+      const agentChoice = (externalOrigin || isBoot || isCell)
         ? null
         : pickConfiguredHealAgent(projectConfig.healAgent)
       if (isBoot) {
         runnerLog.info('Boot-only session: booting services and holding them — no tests, no heal.')
+      } else if (isCell) {
+        runnerLog.info('Robustness cell: one spec file under one atom of the envelope — no heal; a failure here is a finding for the job that started it.')
       } else if (externalOrigin && canClaim) {
         runnerLog.info(
           `Auto-heal disabled: external agent session (${healAgentReq?.clientKind}, session ${healAgentReq?.sessionId.slice(0, 8)}) claimed and will drive the heal loop.`,
@@ -225,7 +234,7 @@ export function buildRunsRouteDeps(
         } catch (err) {
           runnerLog.warn(`Auto-heal disabled: ${(err as Error).message}`)
         }
-      } else if (!isBoot) {
+      } else if (!isBoot && !isCell) {
         runnerLog.warn('Auto-heal disabled: no `claude` or `codex` CLI on PATH (set CANARY_LAB_HEAL_AGENT=claude|codex to override).')
       }
 
@@ -282,15 +291,17 @@ export function buildRunsRouteDeps(
 	          ptyFactory,
           runnerLog,
           executionType,
-          // A boot-only session never runs tests, so it never heals — force all
-          // heal modes off regardless of project config.
-          autoHeal: isBoot ? undefined : autoHeal,
+          // A boot-only session never runs tests, so it never heals, and a
+          // robustness cell must not — force all heal modes off regardless of
+          // project config.
+          autoHeal: isBoot || isCell ? undefined : autoHeal,
           ...(models ? { models } : {}),
           manualHeal:
-            !isBoot && !externalOrigin && projectConfig.healAgent === 'manual',
+            !isBoot && !isCell && !externalOrigin && projectConfig.healAgent === 'manual',
           // External heal is an MCP-origin fact, not a workspace setting: the
           // retired `external` config value migrates to `claude` on load.
-          externalHeal: !isBoot && externalOrigin,
+          externalHeal: !isBoot && !isCell && externalOrigin,
+          ...(cellSelection ? { initialSelection: cellSelection } : {}),
           externalHealSession,
           repoBranchSnapshots,
           // Route every manifest/index write through RunStore so its event

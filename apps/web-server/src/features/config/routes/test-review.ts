@@ -9,7 +9,7 @@ import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { readManifest } from '../../runs/logic/runtime/manifest'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
 import { diffSourceText } from '../../runs/logic/dirty-specs/text-diff'
-import type { FeaturesRouteDeps } from './features'
+import type { FeaturesRouteDeps } from './features-route-deps'
 
 /** Resolve existing parents too: a deleted file behind a symlink must not
  * bypass the same boundary as a readable file. */

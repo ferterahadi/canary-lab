@@ -1,4 +1,5 @@
 import http, { type IncomingMessage } from 'node:http'
+import { durableRequest, openStore, type Replayable } from '../shared/durable'
 
 // Second service in the storefront journey. It consumes the SKU produced by
 // catalog and turns a reservation into the stock evidence checkout relies on.
@@ -9,10 +10,19 @@ interface StockItem {
   reserved: number
 }
 
-const stock = new Map<string, StockItem>([
-  ['espresso-beans', { sku: 'espresso-beans', onHand: 40, reserved: 0 }],
-  ['filter-papers', { sku: 'filter-papers', onHand: 120, reserved: 0 }],
-])
+interface InventoryState extends Replayable {
+  stock: Record<string, StockItem>
+}
+
+// The state file outlives the process — see shared/durable.ts.
+const store = openStore<InventoryState>('inventory', () => ({
+  stock: {
+    'espresso-beans': { sku: 'espresso-beans', onHand: 40, reserved: 0 },
+    'filter-papers': { sku: 'filter-papers', onHand: 120, reserved: 0 },
+  },
+  replies: {},
+}))
+const stock = store.state.stock
 
 const readBody = async (req: IncomingMessage): Promise<Record<string, unknown>> => {
   let body = ''
@@ -27,6 +37,7 @@ const server = http.createServer(async (req, res) => {
   const segments = url.pathname.split('/').filter(Boolean)
   res.setHeader('Content-Type', 'application/json')
   console.log(`[inventory-service] ${req.method} ${url.pathname}`)
+  if (durableRequest(store, req, res)) return
 
   // GET / — readiness probe.
   if (req.method === 'GET' && segments.length === 0) {
@@ -38,13 +49,13 @@ const server = http.createServer(async (req, res) => {
   // GET /stock — every sku with its available count.
   if (req.method === 'GET' && segments[0] === 'stock' && segments.length === 1) {
     res.writeHead(200)
-    res.end(JSON.stringify([...stock.values()].map((i) => ({ ...i, available: available(i) }))))
+    res.end(JSON.stringify(Object.values(stock).map((i) => ({ ...i, available: available(i) }))))
     return
   }
 
   // GET /stock/:sku — one sku, 404 when unknown.
   if (req.method === 'GET' && segments[0] === 'stock' && segments.length === 2) {
-    const item = stock.get(segments[1])
+    const item = stock[segments[1]]
     if (!item) {
       res.writeHead(404)
       res.end(JSON.stringify({ error: 'unknown sku' }))
@@ -57,7 +68,7 @@ const server = http.createServer(async (req, res) => {
 
   // POST /stock/:sku/reserve — reserve N units, refusing to oversell.
   if (req.method === 'POST' && segments[0] === 'stock' && segments[2] === 'reserve') {
-    const item = stock.get(segments[1])
+    const item = stock[segments[1]]
     if (!item) {
       res.writeHead(400)
       res.end(JSON.stringify({ error: 'unknown sku' }))

@@ -212,11 +212,19 @@ describe('GET /api/features/:name/tests', () => {
     }))
   })
 
-  it('returns [] when feature has no e2e dir', async () => {
+  it('reports the discovery failure, not an empty list, when the feature has no e2e dir', async () => {
+    // No spec files AND Playwright cannot enumerate: `[]` would read as "this
+    // suite has no tests" when the truth is "discovery is broken", so the
+    // route answers with one config-level row carrying the error.
     writeFeature('alpha')
     const app = await build()
     const res = await app.inject({ method: 'GET', url: '/api/features/alpha/tests' })
-    expect(res.json()).toEqual([])
+    expect(res.json()).toEqual([expect.objectContaining({
+      file: expect.stringMatching(/playwright\.config\.ts$/),
+      tests: [],
+      discoveryError: expect.stringContaining('could not enumerate'),
+      discoveryRepairPrompt: expect.stringContaining('alpha'),
+    })])
   })
 
   it('404s on unknown feature', async () => {
