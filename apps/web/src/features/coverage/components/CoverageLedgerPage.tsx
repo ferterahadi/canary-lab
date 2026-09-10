@@ -10,7 +10,7 @@ import { CoverageGeneratingPane } from './CoverageGeneratingPane'
 import { buildTestNumbering, testNumberKey } from '@/shared/test-numbering'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { Hovered, RequirementCard, TestCard, TestCardSkeleton, compareRequirements } from './CoverageCards'
-import { CoverageEmptyMain, CoverageHeader, HeadlinePill, readFollowPref, readRailPref, writeFollowPref, writeRailPref } from './CoverageHeader'
+import { CoverageEmptyMain, CoverageHeader, HeadlinePill, readRailPref, writeRailPref } from './CoverageHeader'
 import { COVERAGE_CSS } from './coverage-ledger-css'
 import { coverageTestSources, type CoverageTestSource } from './coverage-test-sources'
 
@@ -30,11 +30,6 @@ interface Props {
   onOpenFlight?: (flightId: string) => void
 }
 
-// How long the pointer must rest on a row before Follow scrolls the other pane.
-// Long enough that a sweep down the list doesn't fire on every row it crosses;
-// short enough that a deliberate pause reads as immediate.
-const FOLLOW_REST_MS = 150
-
 export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, onOpenFlight }: Props) {
   // Re-attach to a coverage job that started after the ledger opened (an
   // external agent mapping coverage) without a manual refresh — bumps on every
@@ -51,7 +46,6 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   // the PRD pane. Nonce so re-clicking the same id re-fires the scroll/flash.
   const [focusReq, setFocusReq] = useState<{ id: string; n: number } | null>(null)
   const prdPaneRef = useRef<HTMLDivElement>(null)
-  const testsPaneRef = useRef<HTMLDivElement>(null)
   const focusClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const focusNonce = useRef(0)
   // R22: one unified view (no tabs). Docs is a collapsible left rail; its
@@ -77,8 +71,6 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const toggleRail = useCallback(() => setRailOpen((v) => { writeRailPref(!v); return !v }), [])
-  const [follow, setFollow] = useState<boolean>(() => readFollowPref())
-  const toggleFollow = useCallback(() => setFollow((v) => { writeFollowPref(!v); return !v }), [])
 
   const refresh = useCallback(() => {
     setLoading(true)
@@ -350,29 +342,6 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
     el?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
   }, [focusReq, visibleReqs])
 
-  // Follow mode: once the pointer has RESTED on a row (a sweep across the list
-  // must not yank the other pane along), scroll the opposite ledger to the first
-  // related row in display order — and only if that row isn't already fully in
-  // view, so a hover never jitters a pane that already shows the answer. Filters
-  // are left alone: following shows what is there, jumping (a click) lifts them.
-  useEffect(() => {
-    if (!follow || !hovered || !ledger) return
-    const timer = setTimeout(() => {
-      const pane = hovered.kind === 'test' ? prdPaneRef.current : testsPaneRef.current
-      if (!pane) return
-      const wanted = new Set(hovered.kind === 'test'
-        ? (ledger.tests.find((t) => t.name === hovered.key)?.requirements ?? []).map((id) => `req-${id}`)
-        : ledger.tests.filter((t) => t.requirements.includes(hovered.key)).map((t) => `test-${t.name}`))
-      const target = [...pane.querySelectorAll<HTMLElement>('[data-testid]')].find((el) => wanted.has(el.getAttribute('data-testid') ?? ''))
-      if (!target) return
-      const r = target.getBoundingClientRect()
-      const p = pane.getBoundingClientRect()
-      if (r.top >= p.top && r.bottom <= p.bottom) return
-      target.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
-    }, FOLLOW_REST_MS)
-    return () => clearTimeout(timer)
-  }, [follow, hovered, ledger])
-
   const generating = Boolean(job)
 
   const state = ledger?.state
@@ -385,7 +354,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   // so it renders placeholder skeleton cards (one per known test) — same shell, so
   // they resolve into the real cards in place once the new ledger lands.
   const testsPaneEl = ledger ? (
-    <div ref={testsPaneRef} className="min-h-0 flex-1 overflow-auto p-4" style={{ scrollbarGutter: 'stable' }} data-testid="tests-pane">
+    <div className="min-h-0 flex-1 overflow-auto p-4" style={{ scrollbarGutter: 'stable' }} data-testid="tests-pane">
       {generating ? (
         <>
           <div data-testid="tests-remapping-note" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, fontSize: 11, color: 'var(--running)' }}>
@@ -535,8 +504,6 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
                   onToggleGap={(g) => setGapFilter((cur) => (cur === g ? null : g))}
                   strengthFilter={strengthFilter}
                   onToggleStrength={(s) => setStrengthFilter((cur) => (cur === s ? null : s))}
-                  follow={follow}
-                  onToggleFollow={toggleFollow}
                 />
                 <div className="flex min-h-0 flex-1">
                   {/* PRD / requirements pane */}

@@ -1,3 +1,4 @@
+import { type ReactNode, useState } from 'react'
 import type { CoverageLedger, GapType, TestCoverage, TestStrength } from '@/shared/api/types'
 import { GAP_META, STRENGTH_META, STRENGTH_ORDER, countFor } from './CoverageCards'
 
@@ -22,20 +23,14 @@ export function CoverageEmptyMain({ railOpen }: { railOpen: boolean }) {
   )
 }
 
-// Hero gauge: the requirement coverage %, as a donut to the left of the breakdown bar
-// (the donut is the headline number; the bar is the 3-way composition). Static SVG —
+// Hero gauge: a small donut whose arc is the requirement coverage %. It carries no
+// text of its own — the percentage and the sentence sit beside it, where a reader
+// can take them in at reading size instead of squinting into a dial. Static SVG —
 // headless preview forces reduced-motion. Hue tracks the number: green high, amber
 // mid, rose low — the colour reads the health at a glance.
-//
-// Geometry is a clearance problem, not a taste one. The label sits on a CHORD of the
-// inner circle, so the room it gets shrinks the further it is from the centre: at 82px
-// across with a 6px stroke, "COVERED" (~52px at 10px caps) was wider than the ~48px
-// chord it sat on and crowded the stroke. The dial is sized from that constraint —
-// inner radius 38.5px puts ~66px of chord under both lines, so the widest reading
-// ("100%") and the label each clear the ring by ~7px instead of touching it.
-const RING_SIZE = 104
-const RING_R = 42
-const RING_STROKE = 7
+const RING_SIZE = 44
+const RING_R = 18
+const RING_STROKE = 4
 
 export function CoverageRing({ pct }: { pct: number }) {
   const mid = RING_SIZE / 2
@@ -44,8 +39,8 @@ export function CoverageRing({ pct }: { pct: number }) {
   const offset = c * (1 - clamped / 100)
   const hue = clamped >= 80 ? 'var(--success)' : clamped >= 40 ? 'var(--warning)' : clamped > 0 ? 'var(--danger)' : 'var(--text-muted)'
   return (
-    <div style={{ position: 'relative', width: RING_SIZE, height: RING_SIZE, flexShrink: 0 }} data-testid="coverage-ring" aria-label={`${pct}% covered`}>
-      <svg width={RING_SIZE} height={RING_SIZE} viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`}>
+    <div style={{ width: RING_SIZE, height: RING_SIZE, flexShrink: 0 }} data-testid="coverage-ring" role="img" aria-label={`${pct}% covered`}>
+      <svg width={RING_SIZE} height={RING_SIZE} viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`} aria-hidden="true">
         <circle cx={mid} cy={mid} r={RING_R} fill="none" stroke="var(--border-default)" strokeWidth={RING_STROKE} />
         <circle
           cx={mid} cy={mid} r={RING_R} fill="none" stroke={hue} strokeWidth={RING_STROKE}
@@ -53,10 +48,6 @@ export function CoverageRing({ pct }: { pct: number }) {
           transform={`rotate(-90 ${mid} ${mid})`}
         />
       </svg>
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
-        <span style={{ fontSize: 24, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>{Math.round(pct)}<span style={{ fontSize: 12, fontWeight: 600 }}>%</span></span>
-        <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 6 }}>covered</span>
-      </div>
     </div>
   )
 }
@@ -108,162 +99,233 @@ export function writeRailPref(open: boolean): void {
   try { localStorage.setItem(RAIL_PREF_KEY, open ? 'open' : 'closed') } catch { /* ignore */ }
 }
 
-// Persisted Follow mode: while on, resting the pointer on a row in one ledger
-// scrolls the other ledger to the related row. Off by default — it moves a pane
-// the user didn't touch, so it has to be asked for — and remembered once chosen.
-export const FOLLOW_PREF_KEY = 'cl.coverage.follow'
-
-export function readFollowPref(): boolean {
-  try { return localStorage.getItem(FOLLOW_PREF_KEY) === 'on' } catch { return false }
-}
-
-export function writeFollowPref(on: boolean): void {
-  try { localStorage.setItem(FOLLOW_PREF_KEY, on ? 'on' : 'off') } catch { /* ignore */ }
-}
-
 // Bar/legend order reads good → gap: the green of `covered` leads, the work sinks
 // right. The legend doubles as the requirement filter.
 export const SEG_ORDER: GapType[] = ['covered', 'path-incomplete', 'variant-incomplete', 'untested']
 
-export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter, onToggleStrength, follow, onToggleFollow }: {
+// Legend items read number-first in plain words ("2 path gaps"), so the count and
+// its meaning are one phrase rather than a label with a badge hung on it.
+const GAP_WORDS: Record<GapType, [one: string, many: string]> = {
+  covered: ['covered', 'covered'],
+  'path-incomplete': ['path gap', 'path gaps'],
+  'variant-incomplete': ['variant gap', 'variant gaps'],
+  untested: ['untested', 'untested'],
+}
+
+export function gapWord(g: GapType, n: number): string {
+  return GAP_WORDS[g][n === 1 ? 0 : 1]
+}
+
+// The stat bar reads as a sentence, then two strips. Headline block: the small ring,
+// the percentage at reading size, and "n of N covered" — the breadth ratios and the
+// proof roll-up wait in its hover card, like the strips' figures do. Strips: Requirements and Test depth, each resting as ONE eyebrow line (name ·
+// total) over its stacked bar — that is all the resting bar shows, which is what keeps
+// it ~90px tall. The detail is one hover away: resting on (or focusing) a strip drops a
+// card with the number-first figures, and the figures are the filters (see Strip). The strips
+// sit beside the headline at every usable width — a narrow bar tightens the headline instead
+// of moving it — and only drop under it when the bar is genuinely cramped.
+export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter, onToggleStrength }: {
   ledger: CoverageLedger
   gapFilter: GapType | null
   onToggleGap: (g: GapType) => void
   strengthFilter: TestStrength | null
   onToggleStrength: (s: TestStrength) => void
-  follow: boolean
-  onToggleFollow: () => void
 }) {
   const { total, untested } = ledger.totals
   const covered = countFor(ledger, 'covered')
   const mapped = total - untested
   const orphans = ledger.orphanRequirementIds.length
+  // The wrapper is a size container so the bar's breakpoints follow the width the
+  // main column actually has (the Docs rail can take a third of the viewport).
   return (
-    <div className="clcov-statbar shrink-0">
-      {/* Donut headline % to the left of the bar — balances the row and replaces the
-          "Covered N%" pill (which is suppressed in the covered state, see HeadlinePill). */}
-      <CoverageRing pct={ledger.coveragePct} />
-      <div className="clcov-breakdown">
-        {/* One proportional bar makes the nesting self-evident: covered ⊂ mapped ⊂ total. */}
-        <div className="clcov-bar" data-testid="coverage-breakdown" role="img" aria-label={`${covered} covered, ${countFor(ledger, 'path-incomplete')} path-incomplete, ${countFor(ledger, 'variant-incomplete')} variant-incomplete, ${untested} untested of ${total}`}>
-          {total === 0
-            ? <span className="clcov-bar-seg" style={{ flexGrow: 1, background: 'var(--border-default)' }} />
-            : SEG_ORDER.map((g) => {
-                const count = countFor(ledger, g)
-                return count === 0 ? null : <span key={g} className="clcov-bar-seg" style={{ flexGrow: count, background: GAP_META[g].color }} />
-              })}
+    <div className="clcov-statwrap shrink-0">
+    <div className="clcov-statbar">
+      {/* Headline at rest: ring · % · "n of N covered". The breadth ratios and the proof
+          roll-up sit in the same hover card the strips use; a stale-tag warning keeps an
+          amber dot at rest so it is never fully hidden (status = dot + tooltip). */}
+      <div className="clcov-hero clcov-strip" tabIndex={0} data-testid="coverage-hero">
+        <CoverageRing pct={ledger.coveragePct} />
+        <div className="clcov-hero-text">
+          <div className="clcov-pct" data-testid="coverage-pct" aria-hidden="true">{Math.round(ledger.coveragePct)}%</div>
+          <div className="clcov-sentence" data-testid="coverage-sentence">
+            {covered} of {total} covered
+            {orphans > 0 && (
+              <span
+                className="clcov-alert clcov-hero-alert"
+                data-testid="orphan-dot"
+                role="img"
+                aria-label={`${orphans} stale tag${orphans > 1 ? 's' : ''}`}
+                title={`${orphans} stale tag${orphans > 1 ? 's' : ''} — test tags that point at requirements that no longer exist`}
+                style={{ background: 'var(--warning)' }}
+              />
+            )}
+          </div>
         </div>
-        {/* Legend = filter. Clicking a class isolates those requirements. */}
-        <div className="clcov-legend">
-          {SEG_ORDER.map((g) => {
-            const count = countFor(ledger, g)
-            const meta = GAP_META[g]
-            const on = gapFilter === g
-            return (
-              <button
-                key={g}
-                type="button"
-                className="clcov-legend-item"
-                data-testid={`gap-badge-${g}`}
-                aria-pressed={on}
-                data-on={on ? 'true' : 'false'}
-                data-empty={count === 0 ? 'true' : 'false'}
-                onClick={() => onToggleGap(g)}
-                style={{ ['--seg' as string]: meta.color }}
-              >
-                <span className="clcov-legend-dot" style={{ background: meta.color }} />
-                {meta.label}
-                <span className="clcov-legend-n">{count}</span>
-              </button>
-            )
-          })}
-          <CoverageGlossary />
-        </div>
-        {/* Plain-language ratios — the two headline numbers, side by side, so the
-            "32 mapped but 27 covered" gap reads itself. */}
-        <div className="clcov-cap">
-          {/* Two concrete ratios; the % lives once, in the state pill. The mapped %
-              just restated the 32/49 ratio, so it's dropped. */}
-          <span title="Requirements where every declared path has a mapped test"><strong>{covered}/{total}</strong> covered</span>
-          <span className="clcov-cap-sep" aria-hidden="true">·</span>
-          <span data-testid="mapped-stat" title="Requirements with at least one test mapped to them"><strong>{mapped}/{total}</strong> mapped</span>
+        <div className="clcov-card clcov-sub" data-testid="coverage-sub" role="group" aria-label="Coverage breadth and proof">
+          <span data-testid="mapped-stat" title="Requirements with at least one test mapped to them">{mapped}/{total} mapped</span>
           {ledger.enforcement && (
             <>
-              <span className="clcov-cap-sep" aria-hidden="true">·</span>
+              <span className="clcov-sub-sep" aria-hidden="true">·</span>
               <span data-testid="proven-stat" title="Requirements whose proof — a green run over every mapped test — is newer than both their tests' and their wording's last change">
-                <strong>{ledger.enforcement.provenUnchanged}/{ledger.enforcement.total}</strong>
-                {ledger.enforcement.runId ? <> proven in run <code className="clcov-cap-run">{ledger.enforcement.runId}</code></> : ' proven · no run yet'}
+                {ledger.enforcement.provenUnchanged}/{ledger.enforcement.total}
+                {ledger.enforcement.runId ? <> proven in run <code className="clcov-sub-run">{ledger.enforcement.runId}</code></> : ' proven · no run yet'}
               </span>
             </>
           )}
           {orphans > 0 && (
-            <span data-testid="orphan-note" className="clcov-stale" title={`These test tags point at requirements that no longer exist — re-map to clear:\n${ledger.orphanRequirementIds.join(', ')}`}>
-              ⚠ {orphans} stale tag{orphans > 1 ? 's' : ''}
-            </span>
+            <>
+              <span className="clcov-sub-sep" aria-hidden="true">·</span>
+              <span data-testid="orphan-note" className="clcov-stale" title={`These test tags point at requirements that no longer exist — re-map to clear:\n${ledger.orphanRequirementIds.join(', ')}`}>
+                {orphans} stale tag{orphans > 1 ? 's' : ''}
+              </span>
+            </>
           )}
         </div>
       </div>
-      {/* Test strength summary/filter — right-aligned so it sits above the tests
-          column, the way the gap legend sits above the requirements column. */}
-      <StrengthFilter tests={ledger.tests} value={strengthFilter} onToggle={onToggleStrength} follow={follow} onToggleFollow={onToggleFollow} />
+      <div className="clcov-groups">
+        <Strip
+          testId="requirements-group"
+          labelTestId="requirements-group-label"
+          barTestId="coverage-breakdown"
+          name="Requirements"
+          total={total}
+          barLabel={`${covered} covered, ${countFor(ledger, 'path-incomplete')} path-incomplete, ${countFor(ledger, 'variant-incomplete')} variant-incomplete, ${untested} untested of ${total}`}
+          cardLabel="Requirement classes — click one to filter the requirements"
+          items={SEG_ORDER.map((g) => {
+            const count = countFor(ledger, g)
+            return { key: g, count, word: gapWord(g, count), color: GAP_META[g].color, title: GAP_META[g].label, testId: `gap-badge-${g}` }
+          })}
+          active={gapFilter}
+          onToggle={(k) => onToggleGap(k as GapType)}
+          cardExtra={<CoverageGlossary />}
+        />
+        <StrengthFilter tests={ledger.tests} orphanTests={ledger.totals.orphanTests} value={strengthFilter} onToggle={onToggleStrength} />
+      </div>
+    </div>
     </div>
   )
 }
 
-// Per-test strength summary + filter (moved out of the Tests pane into the stat
-// header). Each chip toggles the tests-pane filter; the count is the tally per tier.
-// The Follow chip closes the row: it is the one control that acts on both ledgers,
-// so it sits where the two columns meet rather than in either pane.
-export function StrengthFilter({ tests, value, onToggle, follow, onToggleFollow }: {
+// One strip = eyebrow · bar · hover card. The resting state is the eyebrow line and the
+// bar; while a filter is on, the eyebrow also names it (dot · count · word) so the
+// resting state never hides an active filter. The card is an overlay — it never pushes
+// the ledgers down — and opens on hover or focus-within (the strip is focusable, so a
+// keyboard user opens it without filtering). Hovering a bar segment lights its figure
+// and dims the rest, hovering a figure does the same to the bar: the ledger's own
+// two-way affordance, so the shapes and the words are visibly one thing.
+export type StripItem = { key: string; count: number; word: string; color: string; title: string; testId: string }
+
+export function Strip({ testId, labelTestId, barTestId, name, total, barLabel, cardLabel, items, active, onToggle, cardExtra }: {
+  testId: string
+  labelTestId: string
+  barTestId: string
+  name: string
+  total: ReactNode
+  barLabel: string
+  cardLabel: string
+  items: StripItem[]
+  active: string | null
+  onToggle: (key: string) => void
+  cardExtra?: ReactNode
+}) {
+  const [lit, setLit] = useState<string | null>(null)
+  const sum = items.reduce((n, it) => n + it.count, 0)
+  const activeItem = active ? items.find((it) => it.key === active) : undefined
+  const dim = (key: string) => (lit !== null && lit !== key ? 'true' : 'false')
+  return (
+    <div className="clcov-strip" data-testid={testId} tabIndex={0} onMouseLeave={() => setLit(null)}>
+      <div className="clcov-grp-label" data-testid={labelTestId}>
+        <span className="clcov-grp-name">{name}</span>
+        {activeItem && (
+          <span className="clcov-strip-on" data-testid={`${testId}-active`} title="Filter on — open the strip to change it">
+            <span className="clcov-legend-dot" style={{ background: activeItem.color }} />
+            {activeItem.count} {activeItem.word}
+          </span>
+        )}
+        <i>{total}</i>
+      </div>
+      {/* One proportional bar; each segment is a click target for its class. */}
+      <div className="clcov-bar" data-testid={barTestId} role="group" aria-label={barLabel}>
+        {sum === 0
+          ? <span className="clcov-bar-seg" style={{ flexGrow: 1, background: 'var(--border-default)' }} />
+          : items.map((it) => it.count === 0 ? null : (
+              <button
+                key={it.key}
+                type="button"
+                className="clcov-bar-seg"
+                data-seg={it.key}
+                data-dim={dim(it.key)}
+                aria-label={`${it.count} ${it.word}`}
+                aria-pressed={active === it.key}
+                title={`${it.count} ${it.word}`}
+                style={{ flexGrow: it.count, background: it.color }}
+                onMouseEnter={() => setLit(it.key)}
+                onFocus={() => setLit(it.key)}
+                onClick={() => onToggle(it.key)}
+              />
+            ))}
+      </div>
+      <div className="clcov-card" role="group" aria-label={cardLabel}>
+        {items.map((it) => (
+          <button
+            key={it.key}
+            type="button"
+            className="clcov-fig"
+            data-testid={it.testId}
+            aria-pressed={active === it.key}
+            data-on={active === it.key ? 'true' : 'false'}
+            data-empty={it.count === 0 ? 'true' : 'false'}
+            data-dim={dim(it.key)}
+            title={it.title}
+            onMouseEnter={() => setLit(it.key)}
+            onFocus={() => setLit(it.key)}
+            onClick={() => onToggle(it.key)}
+          >
+            <span className="clcov-fig-n">{it.count}</span>{' '}
+            <span className="clcov-fig-w"><span className="clcov-legend-dot" style={{ background: it.color }} />{it.word}</span>
+          </button>
+        ))}
+        {cardExtra}
+      </div>
+    </div>
+  )
+}
+
+// Per-test depth strip: the same Strip as Requirements — eyebrow with its count, the
+// stacked bar in strength order, figures that filter the tests pane. Orphan tests (no
+// requirement tag) are named in the eyebrow because they are the one count here that is
+// not a depth.
+export function StrengthFilter({ tests, orphanTests, value, onToggle }: {
   tests: TestCoverage[]
+  orphanTests: number
   value: TestStrength | null
   onToggle: (s: TestStrength) => void
-  follow: boolean
-  onToggleFollow: () => void
 }) {
   if (tests.length === 0) return null
+  const counts = STRENGTH_ORDER.map((s) => [s, tests.filter((t) => (t.strength ?? 'shallow') === s).length] as const)
   return (
-    <div className="clcov-chips clcov-strength" data-testid="strength-filter">
-      {STRENGTH_ORDER.map((s) => {
-        const count = tests.filter((t) => (t.strength ?? 'shallow') === s).length
-        const meta = STRENGTH_META[s]
-        const on = value === s
-        return (
-          <button
-            key={s}
-            type="button"
-            className="clcov-chip"
-            data-testid={`strength-badge-${s}`}
-            aria-pressed={on}
-            data-on={on ? 'true' : 'false'}
-            data-empty={count === 0 ? 'true' : 'false'}
-            title={meta.title}
-            onClick={() => onToggle(s)}
-            style={{ ['--chip' as string]: meta.color }}
-          >
-            <span className="clcov-chip-dot" style={{ background: meta.color }} />
-            {meta.label}
-            <strong className="clcov-chip-n">{count}</strong>
-          </button>
-        )
-      })}
-      <span className="clcov-chip-gap" aria-hidden="true" />
-      <button
-        type="button"
-        className="clcov-chip"
-        data-testid="follow-toggle"
-        aria-pressed={follow}
-        data-on={follow ? 'true' : 'false'}
-        title={follow
-          ? 'Follow is on — resting on a row scrolls the other ledger to its related row. Click to stop.'
-          : 'Follow: resting on a test scrolls the requirements to the one it claims, and resting on a requirement scrolls the tests to its first test.'}
-        onClick={onToggleFollow}
-        style={{ ['--chip' as string]: 'var(--accent)' }}
-      >
-        <span className="clcov-chip-dot" style={{ background: follow ? 'var(--accent)' : 'var(--text-muted)' }} />
-        Follow
-      </button>
-    </div>
+    <Strip
+      testId="strength-filter"
+      labelTestId="strength-group-label"
+      barTestId="strength-breakdown"
+      name="Test depth"
+      total={(
+        <>
+          {tests.length} test{tests.length === 1 ? '' : 's'}
+          {orphanTests > 0 && (
+            <>
+              {' · '}
+              <span data-testid="orphan-tests-stat" className="clcov-orphan" title="Tests with no requirement tag — regenerate coverage to map them">{orphanTests} orphan</span>
+            </>
+          )}
+        </>
+      )}
+      barLabel={`${counts.map(([s, n]) => `${n} ${s}`).join(', ')} of ${tests.length}`}
+      cardLabel="Test depth tiers — click one to filter the tests"
+      items={counts.map(([s, count]) => ({ key: s, count, word: STRENGTH_META[s].label.toLowerCase(), color: STRENGTH_META[s].color, title: STRENGTH_META[s].title, testId: `strength-badge-${s}` }))}
+      active={value}
+      onToggle={(k) => onToggle(k as TestStrength)}
+    />
   )
 }
 

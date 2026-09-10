@@ -234,7 +234,7 @@ export function RequirementCard({ rc, active, focused, dimmed, onHover, onAccept
       >
         <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>
         <span className="clcov-rowid">{id}</span>
-        <span className="clcov-rowtitle">
+        <span className="clcov-rowtitle" title={title}>
           {title}
           {deprecated && <span className="clcov-rownote">(deprecated)</span>}
           {/* Functional is the default and says nothing; only the exception earns a word. */}
@@ -397,6 +397,11 @@ export function VariantCoverage({ rc }: { rc: RequirementCoverage }) {
   )
 }
 
+// Requirement tags shown on a test row at rest before the remainder folds into "+N".
+// Two keeps the facts cell inside its fixed column for every row; the fold unfolds in
+// place on click, and the tooltip names the folded ids.
+const MAX_REST_TAGS = 2
+
 // A test row at rest: caret · #N · name · the requirement and path it claims (mono,
 // muted; the requirement id is the jump link) · a dot in the strength hue. No
 // decorative accent, no run-coupled "verified" dot (coverage is semantic). Click
@@ -415,6 +420,9 @@ export function TestCard({ test, testNumber, active, dimmed, onHover, onExpand, 
 }) {
   const cardName = source?.test.name ?? test.name
   const [expanded, setExpanded] = useState(false)
+  const [allTags, setAllTags] = useState(false)
+  const shownReqs = allTags ? test.requirements : test.requirements.slice(0, MAX_REST_TAGS)
+  const hiddenReqs = allTags ? [] : test.requirements.slice(MAX_REST_TAGS)
   const toggle = () => {
     setExpanded((cur) => {
       if (!cur) onExpand() // trigger the lazy source fetch on first open
@@ -444,30 +452,53 @@ export function TestCard({ test, testNumber, active, dimmed, onHover, onExpand, 
         <span className="clcov-rowid"><TestIdBadge n={testNumber} /></span>
         {/* Name is the identity; the expanded shared presentation owns the
             file:line locator and Code mode's editor action. */}
-        <span className="clcov-rowtitle">{stripLeadingTestOrdinal(cardName)}</span>
-        <span className="clcov-rowfacts">
+        <span className="clcov-rowtitle" title={stripLeadingTestOrdinal(cardName)}>{stripLeadingTestOrdinal(cardName)}</span>
+        {/* The facts cell is a fixed-width column so every title wraps at the same
+            edge whatever a row claims. Two requirement tags show at rest; the rest
+            fold into a "+N" that unfolds in place. Several paths fold the same way. */}
+        <span className="clcov-rowfacts" data-expanded={allTags ? 'true' : 'false'}>
           {test.requirements.length === 0 ? (
             <span data-testid={`orphan-${cardName}`} className="clcov-orphan" title="No requirement tag — regenerate coverage to map this test">orphan</span>
           ) : (
-            test.requirements.map((id, i) => (
-              <span key={id} className="clcov-rowfact">
-                {i > 0 && <span className="clcov-rowsep" aria-hidden="true">·</span>}
-                <button
-                  type="button"
-                  className="clcov-reqtag"
-                  data-testid={`reqtag-${cardName}-${id}`}
-                  title={`Jump to requirement ${id}`}
-                  onClick={(e) => { e.stopPropagation(); onReqClick(id) }}
-                >{id}</button>
-              </span>
-            ))
+            <>
+              {shownReqs.map((id, i) => (
+                <span key={id} className="clcov-rowfact">
+                  {i > 0 && <span className="clcov-rowsep" aria-hidden="true">·</span>}
+                  <button
+                    type="button"
+                    className="clcov-reqtag"
+                    data-testid={`reqtag-${cardName}-${id}`}
+                    title={`Jump to requirement ${id}`}
+                    onClick={(e) => { e.stopPropagation(); onReqClick(id) }}
+                  >{id}</button>
+                </span>
+              ))}
+              {hiddenReqs.length > 0 && (
+                <span className="clcov-rowfact">
+                  <span className="clcov-rowsep" aria-hidden="true">·</span>
+                  <button
+                    type="button"
+                    className="clcov-reqtag clcov-more"
+                    data-testid={`reqtag-more-${cardName}`}
+                    title={`Also ${hiddenReqs.join(', ')} — click to show`}
+                    onClick={(e) => { e.stopPropagation(); setAllTags(true) }}
+                  >+{hiddenReqs.length}</button>
+                </span>
+              )}
+            </>
           )}
-          {test.pathTypes.map((p) => (
-            <span key={p} className="clcov-rowfact">
+          {test.pathTypes.length === 1 && (
+            <span className="clcov-rowfact">
               <span className="clcov-rowsep" aria-hidden="true">·</span>
-              <span title={`Exercises the ${PATH_DESC[p] ?? p} path`}>{p}</span>
+              <span title={`Exercises the ${PATH_DESC[test.pathTypes[0]] ?? test.pathTypes[0]} path`}>{test.pathTypes[0]}</span>
             </span>
-          ))}
+          )}
+          {test.pathTypes.length > 1 && (
+            <span className="clcov-rowfact">
+              <span className="clcov-rowsep" aria-hidden="true">·</span>
+              <span data-testid={`paths-${cardName}`} title={`Exercises the ${test.pathTypes.map((p) => PATH_DESC[p] ?? p).join(', ')} paths`}>{test.pathTypes.length} paths</span>
+            </span>
+          )}
         </span>
         {strength ? (
           <span className="clcov-alert" data-testid={`strength-${cardName}`} title={strength.title} style={{ background: strength.color }} />

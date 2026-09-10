@@ -147,6 +147,29 @@ describe('TestCard — the resting row', () => {
     expect(dot.title).toContain('Solid')
   })
 
+  it('folds requirement tags past the second into a "+N" that unfolds in place, and names the paths as a count', () => {
+    const onReqClick = renderTest({ ...TEST, requirements: ['R1', 'R2', 'R3', 'R4'], pathTypes: ['happy', 'sad'] })
+    const facts = container.querySelector('[data-testid="test-adds item"] .clcov-rowfacts') as HTMLElement
+    expect(facts.getAttribute('data-expanded')).toBe('false')
+    expect(container.querySelector('[data-testid="reqtag-adds item-R3"]')).toBeNull()
+    const more = container.querySelector<HTMLButtonElement>('[data-testid="reqtag-more-adds item"]')
+    expect(more?.textContent).toBe('+2')
+    expect(more?.title).toContain('R3, R4')
+    expect(container.querySelector('[data-testid="paths-adds item"]')?.textContent).toBe('2 paths')
+    act(() => { more?.click() })
+    // Unfolding is a row-local disclosure: no jump, no expand.
+    expect(onReqClick).not.toHaveBeenCalled()
+    expect(facts.getAttribute('data-expanded')).toBe('true')
+    expect(container.querySelector('[data-testid="reqtag-more-adds item"]')).toBeNull()
+    expect(container.querySelector('[data-testid="reqtag-adds item-R4"]')?.textContent).toBe('R4')
+  })
+
+  it('keeps the full name reachable as a tooltip once the two-line clamp cuts it', () => {
+    renderTest(TEST)
+    const title = container.querySelector('[data-testid="test-adds item"] .clcov-rowtitle') as HTMLElement
+    expect(title.title).toBe('adds item')
+  })
+
   it('an orphan says so in the warning hue instead of a requirement link', () => {
     renderTest({ ...TEST, requirements: [] })
     const orphan = container.querySelector('[data-testid="orphan-adds item"]') as HTMLElement

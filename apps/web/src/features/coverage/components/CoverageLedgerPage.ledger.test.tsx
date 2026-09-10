@@ -129,7 +129,8 @@ describe('CoverageLedgerPage', () => {
     await mount()
     const ring = container.querySelector('[data-testid="coverage-ring"]')
     expect(ring?.getAttribute('aria-label')).toBe('33.3% covered')
-    expect(container.querySelector('[data-testid="coverage-hero"]')).toBeNull() // hero number gone
+    // The headline block carries the big % beside the ring; the ring itself stays label-free.
+    expect(container.querySelector('[data-testid="coverage-hero"] [data-testid="coverage-pct"]')?.textContent).toBe('33%')
     expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
   })
 
