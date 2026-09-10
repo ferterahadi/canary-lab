@@ -217,9 +217,11 @@ export interface RunActionAvailabilitySet {
 
 export const TERMINAL_RUN_STATUSES = ['passed', 'failed', 'aborted'] as const
 export const ACTIVE_RUN_STATUSES = ['running', 'healing'] as const
+export const UNSETTLED_RUN_STATUSES = ['queued', ...ACTIVE_RUN_STATUSES] as const
 
 export type TerminalRunStatus = typeof TERMINAL_RUN_STATUSES[number]
 export type ActiveRunStatus = typeof ACTIVE_RUN_STATUSES[number]
+export type UnsettledRunStatus = typeof UNSETTLED_RUN_STATUSES[number]
 
 export const HEARTBEAT_STALE_MS = 10 * 60 * 1000
 
@@ -239,6 +241,22 @@ export function isRestartableRunStatus(status: string | null | undefined): statu
  *  ports. Distinct from active (running/healing) and terminal statuses. */
 export function isQueuedRunStatus(status: string | null | undefined): status is 'queued' {
   return status === 'queued'
+}
+
+/** A run that has not reached a verdict — queued for admission, or active with
+ *  processes. Every unsettled row is held in some server process's memory: a
+ *  registered orchestrator, or a slot in the admission queue. A fresh server
+ *  has neither, so an unsettled row on disk at boot belongs to a process that
+ *  died without finalizing it, and nothing here can drive it any further.
+ *
+ *  Distinct from `isActiveRunStatus`, which asks the narrower question "does
+ *  this run hold processes and ports right now" — the question admission and
+ *  the resource budget care about. Recovery paths want this wider one: a
+ *  `queued` orphan is just as un-drivable as a `running` one, and gating them
+ *  on `isActiveRunStatus` left queued orphans stuck active forever with a Stop
+ *  button that 404'd. */
+export function isUnsettledRunStatus(status: string | null | undefined): status is UnsettledRunStatus {
+  return isActiveRunStatus(status) || isQueuedRunStatus(status)
 }
 
 /** Why a run is parked in the queue. `resources` = the admission budget is

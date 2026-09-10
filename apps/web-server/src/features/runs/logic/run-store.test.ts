@@ -178,7 +178,7 @@ describe('RunStore', () => {
   // Helper: create a run dir + manifest + index entry so the store has
   // something to read/mutate.
   function seedRun(runId: string, overrides: Partial<{
-    status: 'running' | 'passed' | 'failed' | 'aborted' | 'healing'
+    status: 'queued' | 'running' | 'passed' | 'failed' | 'aborted' | 'healing'
     feature: string
     healCycles: number
     healMode: 'auto' | 'manual' | 'external'
@@ -388,6 +388,35 @@ describe('RunStore', () => {
 
     expect(await store.abortAllActiveOrStale()).toEqual({ aborted: ['really-dead'] })
     expect(readManifest(store.manifestPath('really-dead'))?.status).toBe('aborted')
+  })
+
+  it('abort finalizes an orphaned QUEUED row so Stop is not a 404 against a zombie', async () => {
+    // A queued run holds no orchestrator and no processes — its only owner is
+    // the in-memory admission queue of the process that parked it. Once that
+    // process is gone the row is undriveable, and `isActiveRunStatus` (running
+    // || healing) used to send Stop straight to `not-active`. Live case:
+    // 2026-09-08T1019-6deh sat `queued` across two days and every restart.
+    seedRun('zombie-q', { status: 'queued' })
+    const store = new RunStore(tmpDir, createRegistry())
+
+    expect(await store.abort('zombie-q')).toEqual({ ok: true })
+    expect(readManifest(store.manifestPath('zombie-q'))?.status).toBe('aborted')
+    expect(readRunsIndex(tmpDir)[0].status).toBe('aborted')
+  })
+
+  it('abortAllActiveOrStale finalizes a stale queued row but spares a freshly parked one', async () => {
+    // Same two-server guard as the healing case above: staleness is the only
+    // evidence available that no live process still holds the queue slot.
+    seedRun('stale-q', {
+      status: 'queued',
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1_000).toISOString(),
+    })
+    seedRun('fresh-q', { status: 'queued', heartbeatAt: new Date().toISOString() })
+    const store = new RunStore(tmpDir, createRegistry())
+
+    expect(await store.abortAllActiveOrStale()).toEqual({ aborted: ['stale-q'] })
+    expect(readManifest(store.manifestPath('stale-q'))?.status).toBe('aborted')
+    expect(readManifest(store.manifestPath('fresh-q'))?.status).toBe('queued')
   })
 
   it('abortAllActiveOrStale stops a registered run even when its heartbeat is fresh', async () => {

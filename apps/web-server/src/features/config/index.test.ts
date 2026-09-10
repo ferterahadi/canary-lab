@@ -16,6 +16,8 @@ import type { CoverageJobManifest } from '../coverage/logic/coverage/jobs/types'
 import type { PortifyManifest } from '../portify/logic/runtime/types'
 import type { BenchmarkManifest } from '../benchmark/logic/runtime/types'
 import { agentJobStore } from '../agent-sessions/logic/agent-jobs/store'
+import { discoveryRepairStore } from './logic/discovery-repair-store'
+import type { DiscoveryRepair } from '../../../../../shared/discovery-repair'
 import type { AgentJobManifest } from '../agent-sessions/logic/agent-jobs/types'
 import type { WorkspaceEventPublisher } from '../../shared/workspace-events'
 import { featuresRoutes } from './routes/features'
@@ -139,6 +141,24 @@ function seedFlight(flightId: string, feature: string, status: FlightStatus): vo
   } satisfies FlightManifest)
 }
 
+function seedDiscoveryRepair(id: string, feature: string, status: DiscoveryRepair['status']): void {
+  const now = '2026-08-21T00:00:00.000Z'
+  discoveryRepairStore(logsDir).save({
+    id,
+    feature,
+    featureDir: path.join(featuresDir, feature),
+    status,
+    owner: { kind: 'internal', agent: 'claude' },
+    createdAt: now,
+    updatedAt: now,
+    heartbeatAt: now,
+    message: 'Repairing discovery',
+    diagnostic: 'missing import',
+    log: [],
+    promptPath: path.join(logsDir, 'discovery-repairs', id, 'prompt.md'),
+  } satisfies DiscoveryRepair)
+}
+
 type Blocked = (featureName: string) => string | null
 
 async function renameDeps(): Promise<{
@@ -214,9 +234,16 @@ describe('config feature registrar', () => {
     expect(countActiveRuns()).toBe(2)
   })
 
-  it('refuses a rename while a run or a flight still holds the old name', async () => {
+  it('refuses a rename while a discovery repair, a run or a flight still holds the old name', async () => {
     const { blockedBy } = await renameDeps()
 
+    expect(blockedBy('checkout')).toBeNull()
+
+    // A repair is the FIRST blocker checked: its agent is editing that suite's
+    // files by name right now.
+    seedDiscoveryRepair('dr_1', 'checkout', 'repairing')
+    expect(blockedBy('checkout')).toBe('discovery repair dr_1 is active — finish it before renaming the suite')
+    seedDiscoveryRepair('dr_1', 'checkout', 'succeeded')
     expect(blockedBy('checkout')).toBeNull()
 
     seedRuns({ runId: 'r1', feature: 'checkout', status: 'healing' })

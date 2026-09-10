@@ -10,6 +10,7 @@ import {
   isRestartableRunStatus,
   isStaleHeartbeat,
   isTerminalRunStatus,
+  isUnsettledRunStatus,
   reduceRunLifecycleSnapshot,
   type RunLifecycleSnapshot,
 } from './run-state'
@@ -35,6 +36,18 @@ describe('run status predicates', () => {
     expect(isQueuedRunStatus('running')).toBe(false)
     expect(isQueuedRunStatus(null)).toBe(false)
     expect(isActiveRunStatus('queued')).toBe(false)
+
+    // Unsettled is the recovery-path question — "is some process supposed to be
+    // driving this" — and queued answers yes even though it holds no resources.
+    // The recovery paths gated on `isActiveRunStatus` instead, which is how a
+    // queued row from a dead server stayed active forever with a Stop that 404'd.
+    expect(isUnsettledRunStatus('queued')).toBe(true)
+    expect(isUnsettledRunStatus('running')).toBe(true)
+    expect(isUnsettledRunStatus('healing')).toBe(true)
+    expect(isUnsettledRunStatus('passed')).toBe(false)
+    expect(isUnsettledRunStatus('failed')).toBe(false)
+    expect(isUnsettledRunStatus('aborted')).toBe(false)
+    expect(isUnsettledRunStatus(null)).toBe(false)
   })
 
   it('detects stale heartbeats without treating missing or invalid timestamps as stale', () => {

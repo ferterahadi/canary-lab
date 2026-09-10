@@ -478,6 +478,14 @@ snapshot when the runs stream changes or the user requests it, and displays its
 check time. Queued chips and flight steps remain neutral; they never imply that
 services or tests are executing.
 
+The queue itself is in-memory, so a `queued` row that outlives its server process
+can be neither promoted nor cancelled. Recovery therefore treats `queued` like the
+active statuses: `isUnsettledRunStatus` (`shared/run-state.ts`) is what boot
+reconcile, `reapStaleRuns`, and `RunStore.abort` gate on, so an orphaned queued row
+is finalized at the next boot and its Stop button works in the meantime. The abort
+route asks the scheduler before the store — only the scheduler can free a queue slot
+this process still holds.
+
 ### Getting Started ownership
 
 The two core Getting Started workflows add a narrower workspace-level guard above

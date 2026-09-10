@@ -9,7 +9,7 @@ import type {
   TransientAction,
 } from '@/shared/api/types'
 import { deriveDisplayStatus } from '../utils/run-actions'
-import { isActiveRunStatus } from '@shared/run-state'
+import { isActiveRunStatus, isUnsettledRunStatus } from '@shared/run-state'
 import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
 import {
   errorMessage,
@@ -373,7 +373,7 @@ export function useGlobalActiveRun(): UseGlobalActiveRunResult {
 export function useActiveRuns(): { runs: RunIndexEntry[]; count: number } {
   const { state } = useRunsContext()
   return useMemo(() => {
-    const runs = state.runs.filter((r) => isActiveRunStatus(r.status) || r.status === 'queued')
+    const runs = state.runs.filter((r) => isUnsettledRunStatus(r.status))
     return { runs, count: runs.length }
   }, [state.runs])
 }
@@ -386,7 +386,7 @@ export function useActiveBootSessions(): { sessions: RunIndexEntry[]; count: num
   const { state } = useRunsContext()
   return useMemo(() => {
     const sessions = state.runs.filter(
-      (r) => r.executionType === 'boot' && (isActiveRunStatus(r.status) || r.status === 'queued'),
+      (r) => r.executionType === 'boot' && isUnsettledRunStatus(r.status),
     )
     return { sessions, count: sessions.length }
   }, [state.runs])
@@ -398,7 +398,7 @@ export function useActiveBootSessions(): { sessions: RunIndexEntry[]; count: num
 export function useActiveVerifyRuns(): { runs: RunIndexEntry[]; count: number } {
   const { state } = useRunsContext()
   const runs = state.runs.filter(
-    (r) => r.executionType === 'verify' && (isActiveRunStatus(r.status) || r.status === 'queued'),
+    (r) => r.executionType === 'verify' && isUnsettledRunStatus(r.status),
   )
   return { runs, count: runs.length }
 }

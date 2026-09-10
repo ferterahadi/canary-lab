@@ -89,8 +89,7 @@ export class DiscoveryRepairService {
       let diagnostic = ''
       const tests = await this.discover(feature, (text) => { diagnostic = text })
       if (tests !== null && tests.length > 0) {
-        try { this.checkRoster(repair, tests) }
-        catch (err) { diagnostic = err instanceof Error ? err.message : String(err) }
+        diagnostic = this.checkRoster(repair, tests)
         if (!diagnostic) { this.succeed(repair.id, tests); return }
       }
       if (tests?.length === 0) diagnostic = 'Discovery returned no test cases. Restore the complete suite.'
@@ -134,31 +133,39 @@ export class DiscoveryRepairService {
     let diagnostic = ''
     const tests = await this.discover(this.feature(repair.feature), (message) => { diagnostic = message })
     if (tests === null) throw new Error(diagnostic || 'Playwright could not enumerate the test cases')
-    if (tests.length === 0) throw new Error('Discovery returned no test cases. Review the suite before retrying.')
     this.succeed(id, tests)
   }
 
-  private checkRoster(repair: DiscoveryRepair, tests: PlaywrightListEntry[]): void {
+  /** The reason this roster is smaller than the last verified one, or `''` when
+   *  nothing is missing. A returned string rather than a throw: the start path
+   *  folds it into its own diagnostic, and a thrown value there would carry an
+   *  `unknown` type whose non-Error arm nothing in this method can produce. */
+  private checkRoster(repair: DiscoveryRepair, tests: PlaywrightListEntry[]): string {
     const previous = this.list(repair.feature).find((r) => r.id !== repair.id && r.status === 'succeeded')
-    if (previous) {
-      const roster = JSON.parse(fs.readFileSync(path.join(this.store.recordDir(previous.id), 'discovered-tests.json'), 'utf8')) as PlaywrightListEntry[]
-      // Line numbers move during import/setup repairs. Match case identity and
-      // multiplicity instead, so removing a duplicate case is also detected.
-      const key = (test: PlaywrightListEntry) => JSON.stringify([path.relative(repair.featureDir, test.file), test.title])
-      const remaining = new Map<string, number>()
-      for (const test of tests) remaining.set(key(test), (remaining.get(key(test)) ?? 0) + 1)
-      for (const test of roster) {
-        const count = remaining.get(key(test)) ?? 0
-        if (count === 0) throw new Error(`Discovery is missing a previously recorded case: ${test.title}. Restore the complete suite before retrying.`)
-        remaining.set(key(test), count - 1)
-      }
+    if (!previous) return ''
+    const roster = JSON.parse(fs.readFileSync(path.join(this.store.recordDir(previous.id), 'discovered-tests.json'), 'utf8')) as PlaywrightListEntry[]
+    // Line numbers move during import/setup repairs. Match case identity and
+    // multiplicity instead, so removing a duplicate case is also detected.
+    const key = (test: PlaywrightListEntry) => JSON.stringify([path.relative(repair.featureDir, test.file), test.title])
+    const remaining = new Map<string, number>()
+    for (const test of tests) remaining.set(key(test), (remaining.get(key(test)) ?? 0) + 1)
+    for (const test of roster) {
+      const count = remaining.get(key(test)) ?? 0
+      if (count === 0) return `Discovery is missing a previously recorded case: ${test.title}. Restore the complete suite before retrying.`
+      remaining.set(key(test), count - 1)
     }
+    return ''
   }
 
+  /** The one place a roster becomes a verdict, so it is also the one place both
+   *  emptiness and shrinkage are refused. `verify` used to pre-check emptiness,
+   *  which left this guard — the guard that also protects the start path —
+   *  unreachable. */
   private succeed(id: string, tests: PlaywrightListEntry[]): void {
     if (tests.length === 0) throw new Error('Discovery returned no test cases. Review the suite before retrying.')
     const repair = this.get(id)
-    this.checkRoster(repair, tests)
+    const missing = this.checkRoster(repair, tests)
+    if (missing) throw new Error(missing)
     fs.writeFileSync(path.join(this.store.recordDir(id), 'discovered-tests.json'), JSON.stringify(tests, null, 2))
     this.save({ ...repair, status: 'succeeded', endedAt: new Date().toISOString(), discoveredCount: tests.length, message: `${tests.length} tests discovered`, log: [...repair.log, `[Canary] ${tests.length} tests discovered. Test bodies were not executed.`] })
   }

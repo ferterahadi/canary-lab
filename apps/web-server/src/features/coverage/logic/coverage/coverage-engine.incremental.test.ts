@@ -86,7 +86,10 @@ describe('incremental mapping with real source inputs', () => {
     fs.writeFileSync(path.join(root, 'package-lock.json'), '{"lockfileVersion":3}')
     await runCoverageEngine(args(), { propose })
     expect(propose.mock.calls[3][0].tests).toHaveLength(2)
-  })
+    // Four engine passes, each re-parsing the spec and its helper through the
+    // TypeScript compiler. That fits the default 5s budget on an idle machine
+    // and does not under v8 coverage with every worker busy.
+  }, 30_000)
 
   it('examines unchanged tests against changed and newly scoped requirements', async () => {
     const propose = vi.fn<NonNullable<RunCoverageEngineDeps['propose']>>(async () => [])

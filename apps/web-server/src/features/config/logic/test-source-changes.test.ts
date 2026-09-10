@@ -50,3 +50,17 @@ it('clears markers after the exact edit is committed', async () => {
 it('retains a review count for removed lines without highlighting an unchanged neighbor', async () => {
   expect((await markers(original.replace('  expect(1).toBe(1)\n', '')))[0]).toEqual({ changedLines: [], count: 1 })
 })
+it('leaves an uncommitted spec unmarked — there is no HEAD side to compare it against', async () => {
+  const fresh = path.join(root, 'new.spec.ts')
+  const { tests } = extractTestsFromSource(fresh, original)
+  await attachSourceChanges(root, fresh, original, tests)
+  expect(tests.map((test) => test.sourceChanges)).toEqual([undefined, undefined])
+})
+it('still marks a test the extractor gave no end line, by treating its declaration line as the span', async () => {
+  const edited = original.replace('  expect(1).toBe(1)', '  expect(1).toBe(3)')
+  // `endLine` is optional on ExtractedTest, and a test arriving without one must
+  // stay addressable — dropping it would silently leave a real edit unmarked.
+  const tests = [{ name: 'first', line: 2, bodySource: '{}', steps: [], readable: { version: 1, title: 'first', completeness: 'complete' as const, nodes: [] } }]
+  await attachSourceChanges(root, file, edited, tests)
+  expect(tests[0].sourceChanges).toEqual({ changedLines: [3], count: 1 })
+})

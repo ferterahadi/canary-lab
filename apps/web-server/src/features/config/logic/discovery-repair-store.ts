@@ -11,7 +11,7 @@ export function discoveryRepairStore(logsDir: string): FileBackedTaskStore<Disco
   if (existing) return existing
   const store = new FileBackedTaskStore<DiscoveryRepair>({
     logsDir, dirName: 'discovery-repairs', recordFile: 'repair.json',
-    idOf: (r) => r.id, statusOf: (r) => r.status,
+    idOf: (r) => r.id,
     indexEntryOf: (r) => ({ id: r.id, createdAt: r.createdAt, feature: r.feature, status: r.status }),
     featureOf: (r) => r.feature, withFeature: (r, feature) => ({ ...r, feature }),
     sortNewestFirst: true,

@@ -4,7 +4,7 @@ import { EventEmitter } from 'events'
 import { readManifest, readRunsIndex, updateManifest, upsertRunsIndexEntry, writeRunsIndex, type RunLifecycleEvent, type RunIndexEntry, type RunManifest, type ServiceStatus } from './runtime/manifest'
 import { runDirFor } from './runtime/run-paths'
 import { FileRunStateSink, type RunStateSink } from './runtime/run-state-sink'
-import { isActiveRunStatus, isStaleHeartbeat } from '../../../../../../shared/run-state'
+import { isActiveRunStatus, isStaleHeartbeat, isUnsettledRunStatus } from '../../../../../../shared/run-state'
 import { trimRunArtifacts } from './run-artifacts'
 import { AbortAllResult, AbortResult, CleanupListing, DeleteResult, TrimResult, listCleanupEntries, reapStaleRuns, removeRunFromHistory } from './run-cleanup'
 import { RunDetail, getRunDetail } from './run-detail'
@@ -219,27 +219,34 @@ export class RunStore extends EventEmitter implements RunStateSink {
 
   // ─── operations ─────────────────────────────────────────────────────
 
-  /** Abort an active or orphaned-active run. Registered orchestrators get the
-   *  normal stop path; persisted running/healing rows without a registry entry
-   *  are finalized directly so the UI can recover from a dead server process. */
+  /** Abort an unsettled or orphaned run. Registered orchestrators get the
+   *  normal stop path; persisted queued/running/healing rows without a registry
+   *  entry are finalized directly so the UI can recover from a dead server
+   *  process.
+   *
+   *  A `queued` row this process still holds in its admission queue must be
+   *  cancelled through the scheduler instead — finalizing the manifest alone
+   *  would leave the slot in the queue, to be promoted later onto a run that
+   *  already reads as aborted. The abort route asks the scheduler first for
+   *  exactly that reason. */
   async abort(runId: string): Promise<AbortResult> {
     const orch = this.registry.get(runId)
     if (orch) {
       try { await orch.stop('aborted') } catch { /* best-effort */ }
       this.registry.delete(runId)
       // Test doubles and failed stop paths may not write terminal state. If
-      // the persisted row still claims active, finalize it here.
-      this.finalizePersistedActiveRun(runId)
+      // the persisted row still reads unsettled, finalize it here.
+      this.finalizePersistedUnsettledRun(runId)
       return { ok: true }
     }
-    return this.finalizePersistedActiveRun(runId)
+    return this.finalizePersistedUnsettledRun(runId)
       ? { ok: true }
       : { ok: false, reason: 'not-active' }
   }
 
   /** Abort every active orchestrator, then repair any remaining persisted
-   *  running/healing rows. Used by `canary-lab ui` SIGINT/SIGTERM cleanup and
-   *  by boot reconcile.
+   *  queued/running/healing rows. Used by `canary-lab ui` SIGINT/SIGTERM
+   *  cleanup and by boot reconcile.
    *
    *  The two loops answer different questions, and only the first one owns a
    *  process. Loop 1 stops the orchestrators THIS process is running — that is
@@ -261,7 +268,7 @@ export class RunStore extends EventEmitter implements RunStateSink {
     }
     const now = Date.now()
     for (const entry of this.list()) {
-      if (!isActiveRunStatus(entry.status)) continue
+      if (!isUnsettledRunStatus(entry.status)) continue
       if (this.isOwnedByLiveProcess(entry.runId, now)) continue
       const result = await this.abort(entry.runId)
       if (result.ok) aborted.add(entry.runId)
@@ -269,10 +276,18 @@ export class RunStore extends EventEmitter implements RunStateSink {
     return { aborted: [...aborted] }
   }
 
-  /** True when a persisted active row is beating fast enough that some other
+  /** True when a persisted unsettled row is beating fast enough that some other
    *  live process must own it. A manifest with no `heartbeatAt` at all predates
    *  the field and carries no such evidence, so it stays claimable — the same
-   *  distinction `reapStaleRuns` draws. */
+   *  distinction `reapStaleRuns` draws.
+   *
+   *  A queued row only beats once, at enqueue: the 5s heartbeat timer belongs
+   *  to the orchestrator, which a queued run does not have yet. So a queued row
+   *  reads as owned for `HEARTBEAT_STALE_MS` after it was parked and claimable
+   *  after that. Both answers are the safe ones here — this runs at boot (where
+   *  a just-parked row means a server that died seconds ago, and Stop is the
+   *  recovery lever) and at shutdown (where the queue is being torn down
+   *  anyway). */
   private isOwnedByLiveProcess(runId: string, nowMs: number): boolean {
     const heartbeatAt = this.get(runId)?.manifest.heartbeatAt
     if (!heartbeatAt) return false
@@ -352,19 +367,20 @@ export class RunStore extends EventEmitter implements RunStateSink {
     this.emit('event', event)
   }
 
-  private finalizePersistedActiveRun(runId: string): boolean {
+  private finalizePersistedUnsettledRun(runId: string): boolean {
     const detail = this.get(runId)
     if (detail) {
-      if (!isActiveRunStatus(detail.manifest.status)) return false
+      if (!isUnsettledRunStatus(detail.manifest.status)) return false
       this.finalize(runId, 'aborted', new Date().toISOString(), detail.manifest.healCycles)
       return true
     }
-    // No manifest, but the run may still be listed as active in the index (an
-    // interrupted boot run that never finalized). `finalize` writes the index
-    // even without a manifest, so we can recover it from the index entry alone
-    // — otherwise the UI Stop button would be a silent no-op against a zombie.
+    // No manifest, but the run may still be listed as unsettled in the index
+    // (an interrupted boot run that never finalized). `finalize` writes the
+    // index even without a manifest, so we can recover it from the index entry
+    // alone — otherwise the UI Stop button would be a silent no-op against a
+    // zombie.
     const entry = this.list().find((e) => e.runId === runId)
-    if (!entry || !isActiveRunStatus(entry.status)) return false
+    if (!entry || !isUnsettledRunStatus(entry.status)) return false
     this.finalize(runId, 'aborted', new Date().toISOString(), 0)
     return true
   }

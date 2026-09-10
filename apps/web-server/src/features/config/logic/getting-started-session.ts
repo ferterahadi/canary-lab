@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { isActiveRunStatus, isQueuedRunStatus } from '../../../../../../shared/run-state'
+import { isUnsettledRunStatus } from '../../../../../../shared/run-state'
 
 /** One key per Getting Started card — the two starters plus the five "More
  *  workflows". Each demo claims under its own key so every card can show its
@@ -60,13 +60,14 @@ export interface GettingStartedStatusResolver {
   isActive(target: GettingStartedTarget, status: string): boolean
 }
 
-/** The run-side liveness predicate for the resolver. `isActiveRunStatus` alone
- *  (running || healing) is NOT enough here: the resource budget can queue a
- *  start the caller never asked to park, and a queued demo run is still the
- *  demo — settling it would record a nonsense "completed: queued" and drop the
- *  one-demo-at-a-time lock while the run is still on its way. */
+/** The run-side liveness predicate for the resolver — the shared "unsettled"
+ *  one. `isActiveRunStatus` alone (running || healing) is NOT enough here: the
+ *  resource budget can queue a start the caller never asked to park, and a
+ *  queued demo run is still the demo — settling it would record a nonsense
+ *  "completed: queued" and drop the one-demo-at-a-time lock while the run is
+ *  still on its way. */
 export function isGettingStartedRunActive(status: string): boolean {
-  return isActiveRunStatus(status) || isQueuedRunStatus(status)
+  return isUnsettledRunStatus(status)
 }
 
 export class GettingStartedBusyError extends Error {

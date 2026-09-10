@@ -113,6 +113,50 @@ describe('reapStaleRuns', () => {
     expect(indexed[0].endedAt).toBeDefined()
   })
 
+  it('marks a stale QUEUED entry as aborted — the admission queue died with its process', async () => {
+    // The queue lives only in the owning server's memory. A `queued` row that
+    // outlives that process can never be promoted or cancelled, so before this
+    // was reaped it read as live work forever and its Stop button 404'd.
+    const dir = runDirFor(tmpDir, 'stale-q')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'stale-q',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'queued',
+      healCycles: 0,
+      services: [],
+      queueReason: 'resources',
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1).toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'stale-q', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'queued' },
+    ])
+    await reapStaleRuns(tmpDir)
+    expect(readManifest(path.join(dir, 'manifest.json'))?.status).toBe('aborted')
+    expect(listRuns(tmpDir)[0].status).toBe('aborted')
+  })
+
+  it('leaves a freshly queued entry alone — another live server may still own it', async () => {
+    const dir = runDirFor(tmpDir, 'fresh-q')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'fresh-q',
+      feature: 'foo',
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'queued',
+      healCycles: 0,
+      services: [],
+      queueReason: 'resources',
+      heartbeatAt: new Date().toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'fresh-q', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'queued' },
+    ])
+    await reapStaleRuns(tmpDir)
+    expect(listRuns(tmpDir)[0].status).toBe('queued')
+  })
+
   it('leaves running entry alone when heartbeat is fresh', async () => {
     const dir = runDirFor(tmpDir, 'fresh-1')
     fs.mkdirSync(dir, { recursive: true })

@@ -344,14 +344,19 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
   // marks the manifest 'aborted'. The run is preserved in history so the
   // user can audit the logs after. 404 when not active, 204 on success.
   app.post<{ Params: { runId: string } }>('/api/runs/:runId/abort', async (req, reply) => {
+    // A run still waiting in the admission queue has no orchestrator, and the
+    // queue slot lives only in this process's memory — cancelling it out of the
+    // scheduler is what actually stops it, and that path finalizes the row on
+    // the way out. Ask the scheduler FIRST: `store.abort` can also finalize a
+    // persisted `queued` row (the orphan a dead server left behind), and doing
+    // that to a run this process still holds would leave a terminal manifest in
+    // the queue for `promote()` to launch later.
+    if (deps.cancelQueuedRun?.(req.params.runId)) {
+      reply.code(204)
+      return ''
+    }
     const result = await deps.store.abort(req.params.runId)
     if (!result.ok) {
-      // A run still waiting in the admission queue has no orchestrator, so the
-      // store can't abort it — cancel it out of the queue instead.
-      if (deps.cancelQueuedRun?.(req.params.runId)) {
-        reply.code(204)
-        return ''
-      }
       reply.code(404)
       return { error: 'run not active' }
     }

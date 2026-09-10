@@ -8,18 +8,24 @@ import {
   HEARTBEAT_STALE_MS,
   isActiveRunStatus,
   isStaleHeartbeat,
+  isUnsettledRunStatus,
 } from '../../../../../../shared/run-state'
 import { dirSizeBytes, runArtifactBytes } from './run-artifacts'
 import type { OrchestratorRegistry } from './run-registry'
 import { RunStore } from './run-store'
 
 /**
- * One-shot cleanup for runs left in `running`/`healing` state by a previous
- * server process that crashed without writing a final status. Intended to run
- * once at server boot — never on a hot read path. A run is reaped only when
- * its manifest carries a `heartbeatAt` older than `HEARTBEAT_STALE_MS`; runs
- * with no `heartbeatAt` (legacy manifests written before the field existed)
- * are left untouched.
+ * One-shot cleanup for runs left unsettled — `queued`, `running` or `healing` —
+ * by a previous server process that crashed without writing a final status.
+ * Intended to run once at server boot, never on a hot read path. A run is
+ * reaped only when its manifest carries a `heartbeatAt` older than
+ * `HEARTBEAT_STALE_MS`; runs with no `heartbeatAt` (legacy manifests written
+ * before the field existed) are left untouched.
+ *
+ * `queued` belongs here for the same reason the active statuses do: the
+ * admission queue lives only in the owning process's memory, so a queued row
+ * outliving that process can never be promoted OR cancelled — it just reads as
+ * live work forever.
  */
 export async function reapStaleRuns(
   logsDir: string,
@@ -29,11 +35,11 @@ export async function reapStaleRuns(
   const now = Date.now()
 
   for (const entry of all) {
-    if (!isActiveRunStatus(entry.status)) continue
+    if (!isUnsettledRunStatus(entry.status)) continue
     const manifestPath = path.join(runDirFor(logsDir, entry.runId), 'manifest.json')
     const manifest = readManifest(manifestPath)
     if (!manifest) {
-      // Active index entry with no readable manifest. A live run always writes
+      // Unsettled index entry with no readable manifest. A live run always writes
       // its manifest before its index entry (FileRunStateSink.bootstrap), so
       // this is an orphan left by a process that died mid-teardown (e.g. a
       // boot/manual-services run) — UNLESS an orchestrator is still registered
