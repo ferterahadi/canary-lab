@@ -35,6 +35,8 @@ export const COVERAGE_CSS = `
 .clcov-chip[data-on='true']{background:color-mix(in srgb,var(--chip) 14%,var(--bg-surface));border-color:color-mix(in srgb,var(--chip) 60%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--chip) 30%,transparent) inset}
 .clcov-chip-dot{width:7px;height:7px;border-radius:50%;flex:none}
 .clcov-chip-n{font-variant-numeric:tabular-nums}
+/* Hairline between the strength tally and the Follow chip: same row, different job. */
+.clcov-chip-gap{width:1px;height:16px;background:var(--border-default);margin:0 3px}
 /* Coverage breakdown: a proportional bar + legend-filter + plain-language ratios.
    Makes covered ⊂ mapped ⊂ total legible at a glance — no question needed. */
 /* Breakdown grows to fill (pushing the strength cluster to the right edge); the BAR
@@ -61,57 +63,53 @@ export const COVERAGE_CSS = `
 .clcov-info-i{font-size:10px;font-weight:600;line-height:1}
 .clcov-info-pop{position:absolute;top:calc(100% + 8px);left:0;z-index:10;width:330px;display:flex;flex-direction:column;gap:6px;padding:12px 13px;border-radius:var(--radius-lg);background:var(--bg-overlay);border:1px solid var(--border-default);box-shadow:var(--shadow-popover);font-size:11.5px;line-height:1.5;color:var(--text-secondary);opacity:0;visibility:hidden;transform:translateY(-3px);transition:opacity .14s,transform .14s,visibility .14s}
 .clcov-info:hover .clcov-info-pop,.clcov-info:focus-within .clcov-info-pop,.clcov-info:focus-visible .clcov-info-pop{opacity:1;visibility:visible;transform:translateY(0)}
-/* The card is a query container so its header status chips can collapse to a single
-   letter when the card itself (not the whole viewport) is too narrow. */
-.clcov-card{container-type:inline-size}
-.clcov-card:hover{border-color:color-mix(in srgb,var(--text-muted) 38%,var(--border-default))}
-/* A @req tag jumped-to from a test card: a brief accent ring locates the card. */
-.clcov-card[data-focus='true']{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 70%,transparent)}
-/* Clickable @req tags on a test card — jump to the matching requirement. */
-.clcov-reqtag{appearance:none;cursor:pointer;transition:filter .12s}
-.clcov-reqtag:hover{filter:brightness(1.18)}
+/* Both ledgers are flat divider rows: transparent, one hairline between rows, the
+   hover/active hues from the token system. A row is caret · id · title · one short
+   mono fact · one dot at the right edge — the same silhouette in both panes. */
+.clcov-row{border-bottom:1px solid var(--border-default);transition:opacity .12s,background .12s}
+.clcov-row[data-active='true']{background:var(--bg-selected)}
+.clcov-row[data-dimmed='true']{opacity:.4}
+/* A requirement jumped-to from a test row: a brief accent ring locates the row. */
+.clcov-row[data-focus='true']{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--accent) 70%,transparent)}
+.clcov-rowhead{display:flex;align-items:center;gap:8px;min-height:32px;padding:5px 8px 5px 6px;cursor:pointer;outline:none;transition:background .12s}
+.clcov-rowhead:hover{background:var(--bg-hover)}
+.clcov-rowhead:focus-visible{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--accent) 60%,transparent)}
+.clcov-caret{flex:none;width:10px;font-size:10px;line-height:1;color:var(--text-muted)}
+.clcov-rowid{flex:none;min-width:26px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted);font-variant-numeric:tabular-nums}
+.clcov-rowtitle{flex:1 1 auto;min-width:0;font-size:12.5px;line-height:1.4;color:var(--text-primary);overflow-wrap:anywhere}
+.clcov-rownote{margin-left:6px;font-size:10.5px;color:var(--text-muted)}
+/* The mono fact strip on a test row: R1 · happy. The requirement id is the jump link. */
+.clcov-rowfacts{flex:none;display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted);white-space:nowrap}
+.clcov-rowfact{display:inline-flex;align-items:center;gap:5px}
+.clcov-rowsep{color:var(--border-strong)}
+.clcov-reqtag{appearance:none;background:none;border:0;padding:0;font:inherit;color:var(--text-secondary);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px;transition:color .12s}
+.clcov-reqtag:hover{color:var(--text-primary)}
 .clcov-reqtag:focus-visible{outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 55%,transparent)}
+.clcov-orphan{color:var(--warning)}
+/* Coverage segments: one square per path (or path×variant cell); filled = claimed. */
+.clcov-segs{flex:none;display:inline-flex;align-items:center;gap:2px;margin-left:8px}
+.clcov-seg{flex:none;width:8px;height:8px;border-radius:2px;background:var(--success)}
+.clcov-seg[data-seg='off']{background:transparent;box-shadow:inset 0 0 0 1px var(--border-strong)}
+.clcov-segn{margin-left:5px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted);font-variant-numeric:tabular-nums}
+/* The one dot at the right edge (proof health / test strength). Always laid out so
+   titles and facts align across rows; transparent when there is nothing to say. */
+.clcov-alert{flex:none;width:6px;height:6px;border-radius:50%;margin-left:4px}
+/* The disclosed detail sits slightly deeper than the pane, indented under the title. */
+.clcov-rowdetail{display:flex;flex-direction:column;gap:8px;padding:8px 12px 12px 32px;background:color-mix(in srgb,var(--bg-base) 55%,var(--bg-surface))}
+.clcov-req-text{font-size:11.5px;color:var(--text-secondary);line-height:1.5}
+/* A pane-level aside (the orphan count) in the same mono register as the row facts. */
+.clcov-note{display:flex;align-items:center;gap:7px;margin-bottom:8px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)}
 .clcov-skel{display:inline-block;border-radius:var(--radius-sm);background:color-mix(in srgb,var(--text-muted) 16%,var(--bg-base))}
 /* One loading language: the sweep is the shared .cl-skeleton animation
-   (styles.css) layered over this card's own fill — the ledger used to carry a
+   (styles.css) layered over this row's own fill — the ledger used to carry a
    second keyframe set at a different speed, so the app had two competing
    skeleton vocabularies. The shared class brings its own reduced-motion guard. */
-/* Click-to-expand cards: a quiet caret leads the header; the row is the hit target. */
-.clcov-disclose{cursor:pointer;outline:none;border-radius:var(--radius-md);margin:-2px -4px;padding:2px 4px;transition:background .12s}
-.clcov-disclose:hover{background:var(--bg-hover)}
-.clcov-disclose:focus-visible{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 60%,transparent)}
-.clcov-caret{flex:none;width:10px;font-size:10px;line-height:1;color:var(--text-muted)}
 /* Test source disclosure. */
-.clcov-source{margin-top:9px;border-top:1px solid var(--border-default);padding-top:9px}
+.clcov-source{padding-top:8px}
 /* The shared ShikiCode block frames itself (.shiki-block pre); just cap its height so a long body scrolls in place. */
 .clcov-source .shiki-block pre{max-height:360px;overflow:auto}
 .clcov-source-note{font-size:11.5px;color:var(--text-muted)}
-/* Requirement detail disclosure: kind chip + happy / unhappy paths. */
-.clcov-reqdetail{margin-top:9px;border-top:1px solid var(--border-default);padding-top:9px;display:flex;flex-direction:column;gap:8px}
-/* Requirement card header: a single inline-flow run. Caret, id badge, title, kind
-   and gap chips are all inline boxes, vertical-aligned to the text, so they flow and
-   wrap together — the tags read as part of the title and tuck after its last word,
-   never reserving a right column or block-stacking below it. */
-.clcov-reqhead{display:block;line-height:1.55}
-.clcov-reqhead .clcov-caret{display:inline;margin-right:5px}
-.clcov-reqid{display:inline-flex;align-items:center;vertical-align:middle;margin-right:7px;font-family:var(--font-mono);font-size:10.5px;font-weight:500;color:var(--text-muted);background:var(--bg-base);border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:1px 5px}
-/* Wraps the shared TestIdBadge so it flows inline in the test card's header. */
-.clcov-testid{display:inline-block;vertical-align:middle;margin-right:7px}
-.clcov-req-title{font-size:13px;color:var(--text-primary);overflow-wrap:anywhere}
-.clcov-kind-tag{display:inline-flex;align-items:center;vertical-align:middle;margin-left:6px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);background:var(--bg-base);border:1px solid var(--border-default);border-radius:999px;padding:1px 8px}
-/* Status chips collapse to their single-letter form when the card is too narrow for
-   the words; the full label stays available via the chip's hover title. */
-.clcov-cq-abbr{display:none}
-@container (max-width:340px){
-  .clcov-cq-full{display:none}
-  .clcov-cq-abbr{display:inline}
-}
-/* Gap status is a chip too (matches the kind chip): border + tint derived from its
-   own colour via currentColor, so only the hue is set inline. */
-.clcov-gap{display:inline-flex;align-items:center;vertical-align:middle;gap:5px;margin-left:6px;font-size:10px;font-weight:600;white-space:nowrap;border-radius:999px;padding:1px 8px;border:1px solid color-mix(in srgb,currentColor 38%,transparent);background:color-mix(in srgb,currentColor 12%,transparent)}
-.clcov-gap-dot{width:6px;height:6px;border-radius:50%;flex:none}
-.clcov-req-text{font-size:12px;color:var(--text-secondary);line-height:1.45;margin-top:5px}
-.clcov-enf{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:6px;font-size:10.5px;color:var(--text-muted);font-variant-numeric:tabular-nums}
+.clcov-enf{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:10.5px;color:var(--text-muted);font-variant-numeric:tabular-nums}
 .clcov-enf-item{display:inline-flex;align-items:center;gap:8px}
 .clcov-enf-sep{color:var(--border-default)}
 .clcov-enf code{font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)}
@@ -120,7 +118,7 @@ export const COVERAGE_CSS = `
 /* Variant coverage = accordion: a row of path pills (happy 1/4); clicking one
    reveals only that path's variant chips below, so a many-path/variant requirement
    stays compact and you inspect one path's gap at a time. */
-.clcov-vgrid{margin-top:9px;display:flex;flex-direction:column;gap:6px}
+.clcov-vgrid{display:flex;flex-direction:column;gap:6px}
 .clcov-vpaths{display:flex;flex-wrap:wrap;gap:6px}
 .clcov-vpath{display:inline-flex;align-items:center;gap:5px;appearance:none;cursor:pointer;font-family:var(--font-mono);font-size:10px;color:var(--text-secondary);background:var(--bg-base);border:1px solid var(--border-default);border-radius:999px;padding:2px 10px;transition:background .12s,border-color .12s}
 .clcov-vpath:hover{border-color:var(--border-strong);background:var(--bg-hover)}

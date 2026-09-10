@@ -78,6 +78,15 @@ describe('readFeatureRunHistory + historyForTests — provenAt', () => {
     expect(historyForTests(history, TESTS, ['totals add up']).provenAt).toEqual({ runId: 'r1', at: '2026-09-01T00:00:00Z' })
   })
 
+  it('proves nothing from a summary that carries no list of passing tests', () => {
+    // An interrupted or older summary can be missing `passedNames` entirely.
+    // Reading it as "no test passed" keeps the walk going to an earlier run,
+    // where reading it as "every test passed" would invent proof.
+    seedIndex([{ runId: 'r1', startedAt: '2026-09-01T00:00:00Z' }])
+    seedRun('r1', { summary: { failed: [] } })
+    expect(historyForTests(readFeatureRunHistory(logsDir, 'checkout'), TESTS, ['totals add up']).provenAt).toBeUndefined()
+  })
+
   it('reads at most `maxRuns` newest runs — the walk is bounded', () => {
     const entries = Array.from({ length: 5 }, (_, i) => ({ runId: `r${i}`, startedAt: `2026-09-0${i + 1}T00:00:00Z` }))
     seedIndex(entries)
@@ -179,6 +188,23 @@ describe('readFeatureRunHistory + historyForTests — test changes', () => {
     expect(changes[0]).toMatchObject({ at: '2026-09-06T12:00:00Z', tests: ['totals add up'] })
     expect(changes[0].runId).toBeUndefined()
     fs.rmSync(featureDir, { recursive: true, force: true })
+  })
+
+  it('a file-level adoption touches only the mapped tests it can place in a file', () => {
+    seedIndex([{ runId: 'r1', startedAt: '2026-09-01T00:00:00Z' }])
+    seedRun('r1', {
+      summary: { passedNames: [], failed: [] },
+      manifest: {
+        runId: 'r1', feature: 'checkout', startedAt: '2026-09-01T00:00:00Z', status: 'passed', healCycles: 0, services: [],
+        specEdits: { checkedAt: '2026-09-01T00:30:00Z', pending: [], adopted: [{ at: '2026-09-01T00:25:00Z', by: 'human', files: ['e2e/tax.spec.ts'] }] },
+      },
+    })
+    // A requirement can still name a test the suite no longer lists — a rename,
+    // or a tag left behind on a deleted case. With no file to place it in, a
+    // file-level adoption is not evidence that it changed.
+    expect(historyForTests(readFeatureRunHistory(logsDir, 'checkout'), TESTS, ['tax shown', 'retired case']).testChanges).toEqual([
+      { at: '2026-09-01T00:25:00Z', tests: ['tax shown'], verdict: 'changed', runId: 'r1' },
+    ])
   })
 
   it('a clean feature with no manifests yields an empty history', () => {

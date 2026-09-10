@@ -525,3 +525,36 @@ it('reads suite-list mapping evidence without invoking the English presentation 
   expect(readPersistedCoverageState(dir)).toBe('fresh')
   expect(extractTestsFromSource).not.toHaveBeenCalled()
 })
+
+it('reports mapping absent while the suite still has no distilled requirements to map against', () => {
+  expect(readPersistedCoverageState(writeFeature('nosummary'))).toBe('absent')
+})
+
+it('counts neither an untagged spec nor one that vanished mid-scan as mapping evidence', () => {
+  const dir = writeFeature('untagged')
+  fs.writeFileSync(path.join(dir, 'docs', '_prd-summary.json'), JSON.stringify({ requirementsHash: 'h1', requirements: [] }))
+  const gone = path.join(dir, 'e2e', 'b.spec.ts')
+  fs.writeFileSync(gone, "import { test } from '@playwright/test'\ntest('also untagged', async () => {})\n")
+  // A spec deleted between the directory scan and the read — an agent editing
+  // the suite while the list loads. One unreadable file must not decide the
+  // whole suite's mapping state, in either direction.
+  const realReadFileSync = fs.readFileSync
+  const spy = vi.spyOn(fs, 'readFileSync').mockImplementation(((file: fs.PathOrFileDescriptor, encoding?: unknown) => {
+    if (file === gone) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+    return realReadFileSync(file as fs.PathLike, encoding as BufferEncoding)
+  }) as typeof fs.readFileSync)
+  try {
+    expect(readPersistedCoverageState(dir)).toBe('absent')
+  } finally { spy.mockRestore() }
+})
+
+it('calls a recorded coverage run stale only once the requirements it ran against have moved', () => {
+  const dir = writeFeature('recorded')
+  fs.writeFileSync(path.join(dir, 'docs', '_prd-summary.json'), JSON.stringify({ requirementsHash: 'h1', requirements: [] }))
+  fs.writeFileSync(path.join(dir, 'docs', '_coverage-state.json'), JSON.stringify({ requirementsHash: 'h1', ranAt: '2026-09-10T00:00:00.000Z' }))
+  // A run on today's requirements is evidence on its own — the specs here carry
+  // no tags at all, and the state is still fresh.
+  expect(readPersistedCoverageState(dir)).toBe('fresh')
+  fs.writeFileSync(path.join(dir, 'docs', '_coverage-state.json'), JSON.stringify({ requirementsHash: 'h0', ranAt: '2026-09-10T00:00:00.000Z' }))
+  expect(readPersistedCoverageState(dir)).toBe('stale')
+})

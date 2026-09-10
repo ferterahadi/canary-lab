@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
+  getTestFileReview,
   listFeatures,
   approveDirtySpecs,
   commitDirtySpecs,
@@ -63,6 +64,21 @@ describe('features api', () => {
   it('getFeatureDirtyDiff throws ApiError on 404 when the spec is not dirty', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'not dirty' }))
     await expect(getFeatureDirtyDiff('feat/a', 'tests/x.ts', { fetchImpl })).rejects.toMatchObject({ status: 404 })
+  })
+
+  it('getTestFileReview pins the review to one run when the caller names it, and to HEAD when it does not', async () => {
+    // `runId` selects the run-start snapshot as the committed side. Dropping it
+    // from the query would silently review against HEAD instead — a different
+    // baseline, and the wrong evidence for a mid-run spec edit.
+    const review = { before: { source: '', tests: [] }, after: { source: '', tests: [] }, patch: '', baseline: 'run-start', assessment: { tests: [] } }
+    // A fresh Response per call: a body can only be read once.
+    const fetchImpl = vi.fn(async () => ok(review))
+    await expect(getTestFileReview('feat/a', 'e2e/a.spec.ts', 'run 1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(review)
+    await getTestFileReview('feat/a', 'e2e/a.spec.ts', undefined, { baseUrl: 'http://x', fetchImpl })
+    expect(fetchImpl.mock.calls.map((call) => call[0])).toEqual([
+      'http://x/api/features/feat%2Fa/test-review?file=e2e%2Fa.spec.ts&runId=run+1',
+      'http://x/api/features/feat%2Fa/test-review?file=e2e%2Fa.spec.ts',
+    ])
   })
 
   it('uses globalThis.fetch by default when no fetchImpl provided', async () => {

@@ -89,3 +89,50 @@ it('returns only a lightweight difference flag when full review context is not n
   git('add', '.'); git('commit', '-qm', 'accept edits')
   expect((await get('file=e2e/a.spec.ts&summary=true')).json()).toEqual({ changed: false })
 })
+it('answers 404 for a suite that does not exist rather than reviewing nothing', async () => {
+  expect((await app.inject('/api/features/ghost/test-review?file=e2e/a.spec.ts')).statusCode).toBe(404)
+})
+it('surfaces a read failure that is not a missing file instead of reporting an empty test file', async () => {
+  // A directory where a spec is expected reads as EISDIR. Swallowing it would
+  // render the review as "the whole file was deleted".
+  fs.mkdirSync(path.join(suite, 'e2e/folder.spec.ts'))
+  expect((await get('file=e2e/folder.spec.ts')).statusCode).toBe(500)
+})
+it('carries the parse failure into the review instead of showing a file with no tests', async () => {
+  // Nesting deep enough to overflow the extractor's recursive visitor is the
+  // one input that makes it report `parseError` from real source.
+  fs.writeFileSync(path.join(suite, 'e2e/deep.spec.ts'), `test('deep', async () => { const a = ${'('.repeat(2000)}x${')'.repeat(2000)} })\n`)
+  const review = (await get('file=e2e/deep.spec.ts')).json<TestFileReview>()
+  expect(review.after.parseError).toEqual(expect.any(String))
+  expect(review.before.parseError).toBeUndefined()
+})
+it.each([
+  { name: 'a suite that is not in a repository at all', init: false },
+  { name: 'a repository with nothing committed yet', init: true },
+])('refuses to invent a committed baseline for $name', async ({ init }) => {
+  const bare = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-review-nobase-')))
+  const dir = path.join(bare, 'features/alpha'); fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'feature.config.cjs'), `module.exports = { config: { name: 'alpha', featureDir: __dirname, envs: [], repos: [] } }`)
+  fs.writeFileSync(path.join(dir, 'e2e/a.spec.ts'), after)
+  if (init) execFileSync('git', ['init', '-q'], { cwd: bare, stdio: 'pipe' })
+  const bareApp = Fastify()
+  await testReviewRoutes(bareApp, { featuresDir: path.join(bare, 'features'), logsDir: path.join(bare, 'logs') })
+  try {
+    const response = await bareApp.inject('/api/features/alpha/test-review?file=e2e/a.spec.ts')
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toContain('No committed baseline')
+  } finally { await bareApp.close(); fs.rmSync(bare, { recursive: true, force: true }) }
+})
+it.each([
+  { name: 'the commit’s tree', object: () => git('rev-parse', 'HEAD^{tree}'), message: 'Could not read the committed test tree' },
+  { name: 'the file’s blob', object: () => git('rev-parse', 'HEAD:features/alpha/e2e/a.spec.ts'), message: 'Could not read the committed test file' },
+])('fails loudly when git cannot hand back $name, rather than showing the file as newly added', async ({ object, message }) => {
+  // A repository missing objects it still references — a partial clone, or a
+  // pruned one. Treating git's failure as "no committed version" would render
+  // every line as an addition and hide what actually changed.
+  const sha = object().trim()
+  fs.rmSync(path.join(root, '.git/objects', sha.slice(0, 2), sha.slice(2)))
+  const response = await get()
+  expect(response.statusCode).toBe(500)
+  expect(response.json().message).toBe(message)
+})

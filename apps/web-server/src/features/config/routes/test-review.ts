@@ -70,7 +70,11 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
     if (req.query.summary === 'true') return { changed: beforeSource !== afterSource }
     const extract = (source: string): ReviewSource => {
       const result = extractTestsFromSource(file, source, feature.semanticRules)
-      return { source, tests: result.tests.map((test) => ({ name: test.name, line: test.line, endLine: test.endLine ?? test.line, readable: test.readable })), ...(result.parseError ? { parseError: result.parseError } : {}) }
+      // `endLine` is optional on ExtractedTest only because the tests route
+      // emits helper-defined entries with no AST match; every test that comes
+      // out of `extractTestsFromSource` — the only producer here — carries one.
+      // A `?? test.line` fallback would be an arm nothing could reach.
+      return { source, tests: result.tests.map((test) => ({ name: test.name, line: test.line, endLine: test.endLine!, readable: test.readable })), ...(result.parseError ? { parseError: result.parseError } : {}) }
     }
     const result: TestFileReview = {
       file, currentPath, baseline,

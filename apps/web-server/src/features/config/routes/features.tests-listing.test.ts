@@ -347,6 +347,59 @@ test('configured client', async () => {
     const body = res.json() as Array<{ tests: Array<{ name: string }> }>
     expect(body[0].tests[0].name).toBe('plain')
   })
+
+  it('attaches the repair instructions once, to the first spec, when discovery fails across several files', async () => {
+    const dir = writeFeature('twospecs', { spec: "test('a', async () => {})" })
+    fs.writeFileSync(path.join(dir, 'e2e', 'b.spec.ts'), "test('b', async () => {})")
+    const app = await build({ spawner: failingSpawner })
+    const res = await app.inject({ method: 'GET', url: '/api/features/twospecs/tests' })
+    const body = res.json() as Array<{ discoveryRepairPrompt?: string; discoveryDiagnostics?: string }>
+    expect(body).toHaveLength(2)
+    // One prompt for the suite, not one per file — the UI renders the first it
+    // finds, and two copies would read as two separate repairs to run.
+    expect(body.filter((entry) => entry.discoveryRepairPrompt)).toHaveLength(1)
+    expect(body[0].discoveryRepairPrompt).toContain('suite twospecs')
+    // The reason, though, belongs on every row: each one is showing a
+    // source-only fallback and has to say why.
+    expect(body.map((entry) => entry.discoveryDiagnostics)).toEqual([expect.stringContaining('exit'), expect.stringContaining('exit')])
+    await app.close()
+  })
+
+  it('still lists the tests when git cannot produce the committed side, for the spec and for its helper', async () => {
+    // Markers are best-effort: `git show` is a subprocess, and a listing that
+    // 500s because git was unavailable would hide the whole suite behind an
+    // annotation nobody asked for.
+    const dir = writeFeature('nogit', { spec: "import { defineSpec } from './helpers/factory'\ndefineSpec()\n" })
+    const helpersDir = path.join(dir, 'e2e', 'helpers')
+    fs.mkdirSync(helpersDir, { recursive: true })
+    const helperFile = path.join(helpersDir, 'factory.ts')
+    fs.writeFileSync(helperFile, [
+      "import { test } from '@playwright/test'",
+      'export function defineSpec() {',
+      "  test('inner case', async () => {})",
+      '}',
+    ].join('\n'))
+    // A real repo, so the markers are genuinely attempted: `getGitRoot` runs
+    // for real and only the `git show` that reads the committed side fails.
+    git(dir, ['init', '-q']); git(dir, ['config', 'user.email', 'test@example.test']); git(dir, ['config', 'user.name', 'Test'])
+    git(dir, ['add', '.']); git(dir, ['commit', '-qm', 'baseline'])
+    const previous = vi.mocked(runGit).getMockImplementation()!
+    vi.mocked(runGit).mockRejectedValue(new Error('git: command not found'))
+    try {
+      const app = await build({ spawner: jsonSpawner(() => ({
+        config: { rootDir: dir },
+        suites: [{ file: path.join(dir, 'e2e', 'a.spec.ts'), suites: [{ file: helperFile, specs: [{ title: 'inner case', file: helperFile, line: 3 }] }] }],
+      })) })
+      const res = await app.inject({ method: 'GET', url: '/api/features/nogit/tests' })
+      expect(res.statusCode).toBe(200)
+      const body = res.json() as Array<{ tests: Array<{ name: string; sourceChanges?: unknown }> }>
+      expect(body[0].tests.map((test) => test.name)).toEqual(['inner case'])
+      expect(body[0].tests[0].sourceChanges).toBeUndefined()
+      await app.close()
+    } finally {
+      vi.mocked(runGit).mockImplementation(previous)
+    }
+  })
 })
 it('ships matching source and markers for each expanded Playwright test', async () => {
   const source = 'for (const channel of ["line", "whatsapp"]) {\n  test(`reads ${channel}`, () => {\n    expect(1).toBe(1)\n  })\n}'

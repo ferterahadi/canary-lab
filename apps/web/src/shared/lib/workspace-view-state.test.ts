@@ -469,6 +469,14 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
   })
 })
 
+it('opens a hand-shortened review link on the committed baseline, in English, with no line', () => {
+  // Only `reviewFile` survives a link someone trimmed or retyped. Every other
+  // review param has to fall back to the dialog's default rather than leave it
+  // pointing at a baseline, line or language the URL never named.
+  window.history.replaceState(null, '', '/?feature=shop&dialog=tests-review&reviewFile=e2e%2Fa.spec.ts')
+  expect(readPersistedView().reviewFocus).toEqual({ file: 'e2e/a.spec.ts', line: undefined, mode: 'english' })
+})
+
 it('round-trips a test review source, language and baseline without leaking them into other dialogs', () => {
   const reviewFocus = { file: 'e2e/conversations.spec.ts', line: 79, mode: 'code' as const, baseline: 'run' as const }
   persistView(view({ dialog: 'tests-review', feature: 'shop', run: 'run-1', reviewFocus }))

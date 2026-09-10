@@ -201,8 +201,26 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
     vi.mocked(api.listFeatureDocs).mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: true, sourceDocCount: 1, docsDrift: false })
   })
 
+  // The variant accordion lives in the expanded detail; the row itself only shows
+  // one segment per applicable path×variant cell.
+  function expandR6(): void {
+    act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R6"]')?.click() })
+  }
+
+  it('shows one segment per applicable path×variant cell at rest', async () => {
+    await mount()
+    const cov = container.querySelector('[data-testid="cov-R6"]')
+    const segs = [...cov!.querySelectorAll('[data-seg]')].map((el) => el.getAttribute('data-seg'))
+    // 2 paths × 4 channels, email covered on both.
+    expect(segs.length).toBe(8)
+    expect(segs.filter((v) => v === 'on').length).toBe(2)
+    expect(cov?.textContent).toContain('2/8')
+    expect(container.querySelector('[data-testid="variant-grid-R6"]')).toBeNull()
+  })
+
   it('shows a clickable path pill per path with a covered/total variant count, cells hidden until opened', async () => {
     await mount()
+    expandR6()
     expect(container.querySelector('[data-testid="variant-grid-R6"]')).toBeTruthy()
     const happy = container.querySelector('[data-testid="variant-path-R6-happy"]')
     expect(happy?.textContent).toContain('happy')
@@ -213,6 +231,7 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
 
   it('expands one path at a time to reveal its variant cells', async () => {
     await mount()
+    expandR6()
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="variant-path-R6-happy"]')?.click() })
     expect(container.querySelector('[data-testid="cell-R6-happy-email"]')?.getAttribute('data-covered')).toBe('true')
     expect(container.querySelector('[data-testid="cell-R6-happy-whatsapp"]')?.getAttribute('data-covered')).toBe('false')
@@ -225,11 +244,13 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
     expect(container.querySelector('[data-testid="cell-R6-sad-email"]')).toBeNull()
   })
 
-  it('labels the gap "Variant gap" and keeps the missing channels in the pill tooltip (not the pill text)', async () => {
+  it('names the gap "Variant gap" in the row tooltip and keeps the missing channels in the pill tooltip', async () => {
     await mount()
-    const gap = container.querySelector('[data-testid="gap-R6"]')
-    expect(gap?.textContent).toContain('Variant gap')
-    expect(gap?.textContent).not.toContain('whatsapp')
+    const cov = container.querySelector('[data-testid="cov-R6"]')
+    expect(cov?.getAttribute('title')).toContain('Variant gap')
+    expect(cov?.textContent).not.toContain('whatsapp')
+    expect(container.querySelector('[data-testid="gap-R6"]')).toBeNull()
+    expandR6()
     const happy = container.querySelector('[data-testid="variant-path-R6-happy"]')
     expect(happy?.getAttribute('title')).toContain('whatsapp')
     expect(happy?.getAttribute('title')).toContain('line')
@@ -253,6 +274,7 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
     ]
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(single)
     await mount()
+    expandR6()
     expect(container.querySelector('[data-testid="variant-path-R6-happy"]')?.textContent).toContain('1/4')
     expect(container.querySelector('[data-testid="cell-R6-happy-email"]')).toBeNull()
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="variant-path-R6-happy"]')?.click() })
@@ -282,6 +304,9 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
     na.coveragePct = 100
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(na)
     await mount()
+    // The row counts applicable cells only → 2/2 segments, both filled.
+    expect(container.querySelector('[data-testid="cov-R6"]')?.textContent).toContain('2/2')
+    expandR6()
     // Count is over applicable variants only → 1/1, not 1/4.
     const happy = container.querySelector('[data-testid="variant-path-R6-happy"]')
     expect(happy?.textContent).toContain('1/1')

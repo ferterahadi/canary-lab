@@ -7,18 +7,17 @@ import { stripLeadingTestOrdinal } from '@/shared/test-numbering'
 // Each gap class gets a stable label + colour. Coverage is semantic (run-free):
 // `untested` (no test maps to it) is the gap; `path-incomplete` (some declared
 // paths unclaimed) is partial; `covered` (every path claimed) is the good state.
-// `abbr` is the single-letter form the card status chips collapse to when the card
-// is too narrow for the full label (container query); the colour dot + a hover title
-// keep it decipherable.
-export const GAP_META: Record<GapType, { label: string; abbr: string; color: string }> = {
-  covered: { label: 'Covered', abbr: 'C', color: 'var(--success)' },
-  // Short labels keep the legend + card status from crushing the layout at narrow
-  // widths; the glossary `i` still spells out the full meaning.
-  'path-incomplete': { label: 'Path gap', abbr: 'P', color: 'var(--accent)' },
+// The label is the legend's word and the row tooltip's first word; the row itself
+// shows the gap as segments (one per path, or per path×variant cell) + a fraction.
+export const GAP_META: Record<GapType, { label: string; color: string }> = {
+  covered: { label: 'Covered', color: 'var(--success)' },
+  // Short labels keep the legend from crushing the layout at narrow widths; the
+  // glossary `i` still spells out the full meaning.
+  'path-incomplete': { label: 'Path gap', color: 'var(--accent)' },
   // A requirement that spans a variant dimension (channel/tenant/…) but is only
   // tested on some values. Amber = the breadth warning: it claims more than it proves.
-  'variant-incomplete': { label: 'Variant gap', abbr: 'V', color: 'var(--warning)' },
-  untested: { label: 'Untested', abbr: 'U', color: 'var(--text-muted)' },
+  'variant-incomplete': { label: 'Variant gap', color: 'var(--warning)' },
+  untested: { label: 'Untested', color: 'var(--text-muted)' },
 }
 
 // Per-test coverage strength — graded off the strongest stack layer a test's
@@ -45,22 +44,24 @@ export const STRENGTH_META: Record<TestStrength, { label: string; color: string;
 // Worst-first: the weakest tests sort to the front of the filter.
 export const STRENGTH_ORDER: TestStrength[] = ['shallow', 'basic', 'solid', 'strong']
 
-// Plain-language gloss for the `@path-*` tags on a test card (tooltip only — the
-// tag itself stays terse). These mirror a requirement's declared happy/sad/edge.
+// Plain-language gloss for the path a test row claims (tooltip only — the row
+// itself stays terse). These mirror a requirement's declared happy/sad/edge.
 export const PATH_DESC: Record<string, string> = { happy: 'happy', sad: 'failure', edge: 'edge-case' }
 
 // Requirements list is ordered worst-first (uncovered → partial → covered) so the
 // gaps that need work sit at the top — the whole point of the ledger.
 export const STATUS_RANK: Record<CoverageStatus, number> = { uncovered: 0, partial: 1, covered: 2 }
 
-// The time axis (D11): one chip per requirement, worst-first. The copy is the
-// 2026-09-03 mockup's; the hues follow the status vocabulary (rose = the proof
-// is undermined, amber = the proof is behind, green = proven and current).
-export const ENFORCEMENT_META: Record<EnforcementState, { label: string; abbr: string; color: string; rank: number; help: string }> = {
-  'tests-weakened': { label: 'Tests weakened since proof', abbr: 'W', color: 'var(--danger)', rank: 0, help: 'A mapped test was made weaker after the run that proved this requirement — that proof never saw the weaker test.' },
-  'proof-stale': { label: 'Proof stale', abbr: 'S', color: 'var(--warning)', rank: 1, help: 'A mapped test changed after the proof (or the requirement was never proven) and no green run has followed.' },
-  'wording-ahead': { label: 'Wording ahead of tests', abbr: 'A', color: 'var(--warning)', rank: 2, help: 'The requirement\'s wording changed after its tests and its proof — the tests may no longer test what it says.' },
-  'proven-unchanged': { label: 'Proven, unchanged', abbr: 'P', color: 'var(--success)', rank: 3, help: 'A green run over every mapped test is newer than both the tests\' and the wording\'s last change.' },
+// The time axis (D11): one dot per requirement row, shown only while the proof
+// is unhealthy — a healthy proof earns no mark. The copy is the 2026-09-03
+// mockup's; the hues follow the status vocabulary (rose = the proof is
+// undermined, amber = the proof is behind, green = proven and current — the
+// green is still used by the flight band, never by the row).
+export const ENFORCEMENT_META: Record<EnforcementState, { label: string; color: string; rank: number; help: string }> = {
+  'tests-weakened': { label: 'Tests weakened since proof', color: 'var(--danger)', rank: 0, help: 'A mapped test was made weaker after the run that proved this requirement — that proof never saw the weaker test.' },
+  'proof-stale': { label: 'Proof stale', color: 'var(--warning)', rank: 1, help: 'A mapped test changed after the proof (or the requirement was never proven) and no green run has followed.' },
+  'wording-ahead': { label: 'Wording ahead of tests', color: 'var(--warning)', rank: 2, help: 'The requirement\'s wording changed after its tests and its proof — the tests may no longer test what it says.' },
+  'proven-unchanged': { label: 'Proven, unchanged', color: 'var(--success)', rank: 3, help: 'A green run over every mapped test is newer than both the tests\' and the wording\'s last change.' },
 }
 
 /** Worst-first row order: a weakened test outranks any claim status (the proof
@@ -78,19 +79,15 @@ export function compareRequirements(a: RequirementCoverage, b: RequirementCovera
  *  reader compares by (three full timestamps on one line are noise). */
 const day = (iso: string): string => iso.slice(0, 10)
 
+// The dot has no words of its own, so the tooltip leads with the verdict.
 function enforcementTooltip(e: RequirementEnforcement): string {
   return [
+    ENFORCEMENT_META[e.state].label,
     ENFORCEMENT_META[e.state].help,
     e.provenAt ? `Proven in run ${e.provenAt.runId} · ${day(e.provenAt.at)}` : 'Never proven — no run has passed every mapped test',
     e.testsChangedAt ? `Tests changed ${day(e.testsChangedAt.at)} (${e.testsChangedAt.verdict})` : 'No recorded test change',
     `Wording changed ${day(e.wordingChangedAt)}`,
   ].join('\n')
-}
-
-// Golden-angle hue rotation gives each test a distinct, stable colour regardless
-// of how many there are. Mid lightness reads on both light and dark themes.
-export function testColor(index: number): string {
-  return `hsl(${Math.round((index * 137.508) % 360)}, 65%, 55%)`
 }
 
 export interface Hovered {
@@ -124,10 +121,22 @@ export function countFor(ledger: CoverageLedger, g: GapType): number {
   }
 }
 
-// The time axis under a requirement's text: the proof run, the last test change
-// with its verdict, the last wording change, where the wording came from, and
-// the Accept lever. Facts as a `·`-separated strip in the muted hue — the chip
-// above already carries the verdict colour, so the strip stays neutral.
+// The time axis inside a requirement's detail: the proof run, the last test
+// change with its verdict, the last wording change, where the wording came from,
+// and the Accept lever. Facts as a `·`-separated strip in the muted hue — the
+// row's dot already carries the verdict colour, so the strip stays neutral.
+
+/** One segment per unit of coverage the row promises: the declared paths, or —
+ *  for a variant requirement — every APPLICABLE path×variant cell (a variant the
+ *  ledger marked not-applicable anywhere is left out, matching VariantCoverage's
+ *  per-variant N/A rule, so the row and the accordion agree on the denominator).
+ *  Declared order, not worst-first: the segments are a map, not a queue. */
+export function coverageSegments(rc: RequirementCoverage): boolean[] {
+  const cells = rc.variantCoverage ?? []
+  if (cells.length === 0) return rc.pathCoverage.map((p) => p.covered)
+  const na = new Set(cells.filter((c) => c.applicable === false).map((c) => c.variant))
+  return cells.filter((c) => !na.has(c.variant)).map((c) => c.covered)
+}
 function EnforcementStrip({ rc, enforcement: e, onAccept }: { rc: RequirementCoverage; enforcement: RequirementEnforcement; onAccept?: () => void }) {
   const id = rc.requirement.id
   const source = rc.requirement.source
@@ -180,9 +189,8 @@ function EnforcementStrip({ rc, enforcement: e, onAccept }: { rc: RequirementCov
   )
 }
 
-export function RequirementCard({ rc, colors, active, focused, dimmed, onHover, onAccept }: {
+export function RequirementCard({ rc, active, focused, dimmed, onHover, onAccept }: {
   rc: RequirementCoverage
-  colors: string[]
   active: boolean
   focused: boolean
   dimmed: boolean
@@ -190,107 +198,86 @@ export function RequirementCard({ rc, colors, active, focused, dimmed, onHover, 
   /** The human-only Accept-wording lever (D11). Absent on read-only embeds. */
   onAccept?: () => void
 }) {
+  const { id, title, text, kind, happyPath, unhappyPath, deprecated } = rc.requirement
   const meta = GAP_META[rc.gapType]
   const enf = rc.enforcement
-  const enfMeta = enf ? ENFORCEMENT_META[enf.state] : null
-  // The which-paths / which-variants detail is no longer crammed into the gap pill —
-  // the path chips (1-axis) or the path×variant matrix below name the exact gaps,
-  // so the status reads as just a dot + short label and never crushes the title.
   const hasVariants = Boolean(rc.variantCoverage && rc.variantCoverage.length > 0)
-  const { kind, happyPath, unhappyPath } = rc.requirement
+  const segments = coverageSegments(rc)
+  const claimed = segments.filter(Boolean).length
   const happyText = meaningfulPath(happyPath)
   const unhappyText = meaningfulPath(unhappyPath)
-  // Only offer expansion when the summary carried meaningful path prose. `kind` is now
-  // shown in the always-visible header, so it no longer makes a card disclosable alone.
-  const hasDetail = Boolean(happyText || unhappyText)
+  // The row at rest is id · title · segments · a dot only when the proof is
+  // unhealthy. Everything else — the requirement text, the per-path detail, the
+  // history line, the happy/unhappy prose — waits behind the caret, so every
+  // requirement is disclosable (the text alone earns it).
   const [expanded, setExpanded] = useState(false)
-  const toggle = () => { if (hasDetail) setExpanded((c) => !c) }
+  const toggle = () => setExpanded((c) => !c)
+  const unhealthy = enf && enf.state !== 'proven-unchanged' ? enf : null
   return (
     <div
-      className="clcov-card"
-      data-testid={`req-${rc.requirement.id}`}
+      className="clcov-row"
+      data-testid={`req-${id}`}
       data-active={active ? 'true' : 'false'}
       data-focus={focused ? 'true' : 'false'}
+      data-dimmed={dimmed ? 'true' : 'false'}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
-      style={{
-        position: 'relative',
-        marginBottom: 8,
-        padding: '11px 13px 11px 15px',
-        borderRadius: 'var(--radius-md)',
-        background: active ? 'var(--bg-selected)' : 'var(--bg-surface)',
-        border: '1px solid var(--border-default)',
-        borderLeft: `3px solid ${colors[0] ?? 'var(--border-default)'}`,
-        opacity: dimmed ? 0.4 : 1,
-        transition: 'opacity 120ms, background 120ms, border-color 140ms, box-shadow 140ms',
-      }}
     >
-      {/* Header is ONE inline-flow line: caret · id · title · kind · gap status all
-          flow and wrap together as a single run, so the tags read as part of the
-          title and tuck after its last word instead of reserving a column or
-          block-stacking below it. */}
       <div
-        className={hasDetail ? 'clcov-disclose clcov-reqhead' : 'clcov-reqhead'}
-        style={{ marginBottom: 5 }}
-        {...(hasDetail
-          ? {
-              role: 'button' as const,
-              tabIndex: 0,
-              'aria-expanded': expanded,
-              'data-testid': `req-toggle-${rc.requirement.id}`,
-              onClick: toggle,
-              onKeyDown: (e: ReactKeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } },
-            }
-          : {})}
+        className="clcov-rowhead"
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        data-testid={`req-toggle-${id}`}
+        onClick={toggle}
+        onKeyDown={(e: ReactKeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
       >
-        {hasDetail && <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>}
-        <span className="clcov-reqid">{rc.requirement.id}</span>
-        <strong className="clcov-req-title">{rc.requirement.title}</strong>
-        {rc.requirement.deprecated && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}> (deprecated)</span>}
-        {kind && (
-          <span className="clcov-kind-tag" data-testid={`kind-${rc.requirement.id}`} title={kind === 'non-functional' ? 'Non-functional' : 'Functional'}>
-            <span className="clcov-cq-full">{kind === 'non-functional' ? 'Non-functional' : 'Functional'}</span>
-            <span className="clcov-cq-abbr" aria-hidden="true">{kind === 'non-functional' ? 'N' : 'F'}</span>
-          </span>
-        )}
-        <span className="clcov-gap" data-testid={`gap-${rc.requirement.id}`} title={meta.label} style={{ color: meta.color }}>
-          <span className="clcov-gap-dot" style={{ background: meta.color }} />
-          <span className="clcov-cq-full">{meta.label}</span>
-          <span className="clcov-cq-abbr" aria-hidden="true">{meta.abbr}</span>
+        <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>
+        <span className="clcov-rowid">{id}</span>
+        <span className="clcov-rowtitle">
+          {title}
+          {deprecated && <span className="clcov-rownote">(deprecated)</span>}
+          {/* Functional is the default and says nothing; only the exception earns a word. */}
+          {kind === 'non-functional' && <span className="clcov-rownote" data-testid={`kind-${id}`}>Non-functional</span>}
         </span>
-        {enf && enfMeta && (
-          <span className="clcov-gap" data-testid={`enf-${rc.requirement.id}`} title={enforcementTooltip(enf)} style={{ color: enfMeta.color }}>
-            <span className="clcov-gap-dot" style={{ background: enfMeta.color }} />
-            <span className="clcov-cq-full">{enfMeta.label}</span>
-            <span className="clcov-cq-abbr" aria-hidden="true">{enfMeta.abbr}</span>
-          </span>
+        <span
+          className="clcov-segs"
+          data-testid={`cov-${id}`}
+          title={`${meta.label} — ${claimed} of ${segments.length} ${hasVariants ? 'path × variant cells' : segments.length === 1 ? 'path' : 'paths'} ${claimed === 1 ? 'has' : 'have'} a mapped test`}
+        >
+          {segments.map((on, i) => <span key={i} className="clcov-seg" data-seg={on ? 'on' : 'off'} />)}
+          <span className="clcov-segn">{claimed}/{segments.length}</span>
+        </span>
+        {unhealthy ? (
+          <span className="clcov-alert" data-testid={`enf-${id}`} title={enforcementTooltip(unhealthy)} style={{ background: ENFORCEMENT_META[unhealthy.state].color }} />
+        ) : (
+          <span className="clcov-alert" aria-hidden="true" />
         )}
       </div>
-      <div className="clcov-req-text">{rc.requirement.text}</div>
-      {enf && <EnforcementStrip rc={rc} enforcement={enf} onAccept={onAccept} />}
-      {hasVariants ? (
-        // Variant requirement: the path×variant matrix (or a single inline row when
-        // there's one path) is the source of truth — the 1-axis path chips would
-        // only duplicate it, so they're dropped here.
-        <VariantCoverage rc={rc} />
-      ) : (
-        <div className="flex flex-wrap items-center gap-2" style={{ marginTop: 7 }}>
-          {rc.pathCoverage.map((p) => (
-            p.covered ? (
-              <span key={p.path} data-testid={`path-${rc.requirement.id}-${p.path}`} title={`${p.path} path has a mapped test`} className="clcov-vchip clcov-vchip-on">
-                {p.path} ✓
-              </span>
-            ) : (
-              // No test for this path — the dashed/muted treatment carries that.
-              <span key={p.path} data-testid={`path-${rc.requirement.id}-${p.path}`} title={`No test maps to the ${p.path} path`} className="clcov-vchip">
-                {p.path}
-              </span>
-            )
-          ))}
-        </div>
-      )}
-      {hasDetail && expanded && (
-        <div className="clcov-reqdetail" data-testid={`req-detail-${rc.requirement.id}`}>
+      {expanded && (
+        <div className="clcov-rowdetail" data-testid={`req-detail-${id}`}>
+          <div className="clcov-req-text">{text}</div>
+          {hasVariants ? (
+            // Variant requirement: the path×variant accordion is the source of truth —
+            // the 1-axis path chips would only duplicate it, so they're dropped here.
+            <VariantCoverage rc={rc} />
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              {rc.pathCoverage.map((p) => (
+                p.covered ? (
+                  <span key={p.path} data-testid={`path-${id}-${p.path}`} title={`${p.path} path has a mapped test`} className="clcov-vchip clcov-vchip-on">
+                    {p.path} ✓
+                  </span>
+                ) : (
+                  // No test for this path — the dashed/muted treatment carries that.
+                  <span key={p.path} data-testid={`path-${id}-${p.path}`} title={`No test maps to the ${p.path} path`} className="clcov-vchip">
+                    {p.path}
+                  </span>
+                )
+              ))}
+            </div>
+          )}
+          {enf && <EnforcementStrip rc={rc} enforcement={enf} onAccept={onAccept} />}
           {happyText && (
             <div className="clcov-path-block">
               <span className="clcov-path-label clcov-path-happy">Happy path</span>
@@ -410,13 +397,13 @@ export function VariantCoverage({ rc }: { rc: RequirementCoverage }) {
   )
 }
 
-// The test's strength chip + `@req-*` / `@path-*` tags carry the meaning — no
-// decorative accent border, and no run-coupled "verified" dot (coverage is semantic).
-// Click the header to disclose the actual test source (lazily fetched by the parent).
-export function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, source, sourceLoading, sourceError, onReqClick }: {
+// A test row at rest: caret · #N · name · the requirement and path it claims (mono,
+// muted; the requirement id is the jump link) · a dot in the strength hue. No
+// decorative accent, no run-coupled "verified" dot (coverage is semantic). Click
+// the row to disclose the actual test source (lazily fetched by the parent).
+export function TestCard({ test, testNumber, active, dimmed, onHover, onExpand, source, sourceLoading, sourceError, onReqClick }: {
   test: TestCoverage
   testNumber?: number
-  color: string
   active: boolean
   dimmed: boolean
   onHover: (on: boolean) => void
@@ -434,28 +421,18 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
       return !cur
     })
   }
+  const strength = test.strength ? STRENGTH_META[test.strength] : null
   return (
     <div
-      className="clcov-card"
+      className="clcov-row"
       data-testid={`test-${cardName}`}
       data-active={active ? 'true' : 'false'}
+      data-dimmed={dimmed ? 'true' : 'false'}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
-      style={{
-        marginBottom: 8,
-        padding: '11px 13px',
-        borderRadius: 'var(--radius-md)',
-        background: active ? 'var(--bg-selected)' : 'var(--bg-surface)',
-        border: '1px solid var(--border-default)',
-        boxShadow: active ? `inset 3px 0 0 ${color}` : 'none',
-        opacity: dimmed ? 0.4 : 1,
-        transition: 'opacity 120ms, background 120ms, box-shadow 120ms, border-color 140ms',
-      }}
     >
-      {/* One inline-flow header (same as the requirement card): caret · #N · name
-          flow and wrap together instead of the badge sitting in its own flex cell. */}
       <div
-        className="clcov-disclose clcov-reqhead"
+        className="clcov-rowhead"
         role="button"
         tabIndex={0}
         aria-expanded={expanded}
@@ -464,46 +441,42 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
       >
         <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>
-        <span className="clcov-testid"><TestIdBadge n={testNumber} /></span>
+        <span className="clcov-rowid"><TestIdBadge n={testNumber} /></span>
         {/* Name is the identity; the expanded shared presentation owns the
             file:line locator and Code mode's editor action. */}
-        <strong className="clcov-req-title">{stripLeadingTestOrdinal(cardName)}</strong>
-      </div>
-      {/* One compact meta row: strength (what the test IS) + the requirement links it
-          COVERS + the @path tags. Click a @req chip to jump to that requirement. */}
-      <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 7 }}>
-        {test.strength && (
-          <span
-            data-testid={`strength-${cardName}`}
-            title={STRENGTH_META[test.strength].title}
-            className="flex items-center gap-1"
-            style={{ fontSize: 10, fontWeight: 600, color: STRENGTH_META[test.strength].color, background: `color-mix(in srgb, ${STRENGTH_META[test.strength].color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${STRENGTH_META[test.strength].color} 45%, transparent)`, borderRadius: 999, padding: '1px 8px' }}
-          >
-            <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: STRENGTH_META[test.strength].color }} />
-            {STRENGTH_META[test.strength].label}
-          </span>
-        )}
-        {test.requirements.length === 0 ? (
-          <span data-testid={`orphan-${cardName}`} style={{ fontSize: 10, fontWeight: 600, color: 'var(--warning)', background: 'color-mix(in srgb, var(--warning) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
+        <span className="clcov-rowtitle">{stripLeadingTestOrdinal(cardName)}</span>
+        <span className="clcov-rowfacts">
+          {test.requirements.length === 0 ? (
+            <span data-testid={`orphan-${cardName}`} className="clcov-orphan" title="No requirement tag — regenerate coverage to map this test">orphan</span>
+          ) : (
+            test.requirements.map((id, i) => (
+              <span key={id} className="clcov-rowfact">
+                {i > 0 && <span className="clcov-rowsep" aria-hidden="true">·</span>}
+                <button
+                  type="button"
+                  className="clcov-reqtag"
+                  data-testid={`reqtag-${cardName}-${id}`}
+                  title={`Jump to requirement ${id}`}
+                  onClick={(e) => { e.stopPropagation(); onReqClick(id) }}
+                >{id}</button>
+              </span>
+            ))
+          )}
+          {test.pathTypes.map((p) => (
+            <span key={p} className="clcov-rowfact">
+              <span className="clcov-rowsep" aria-hidden="true">·</span>
+              <span title={`Exercises the ${PATH_DESC[p] ?? p} path`}>{p}</span>
+            </span>
+          ))}
+        </span>
+        {strength ? (
+          <span className="clcov-alert" data-testid={`strength-${cardName}`} title={strength.title} style={{ background: strength.color }} />
         ) : (
-          test.requirements.map((id) => (
-            <button
-              key={id}
-              type="button"
-              className="clcov-reqtag"
-              data-testid={`reqtag-${cardName}-${id}`}
-              title={`Jump to requirement ${id}`}
-              onClick={(e) => { e.stopPropagation(); onReqClick(id) }}
-              style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 11%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 30%, var(--border-default))`, color: 'var(--text-primary)' }}
-            >@req-{id}</button>
-          ))
+          <span className="clcov-alert" aria-hidden="true" />
         )}
-        {test.pathTypes.map((p) => (
-          <span key={p} title={`Exercises the ${PATH_DESC[p] ?? p} path`} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
-        ))}
       </div>
       {expanded && (
-        <div className="clcov-source" data-testid={`test-source-${cardName}`}>
+        <div className="clcov-rowdetail clcov-source" data-testid={`test-source-${cardName}`}>
           {source ? (
             <TestPresentation
               test={source.test}
@@ -522,37 +495,22 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
   )
 }
 
-// Placeholder card shown in the Tests pane while a coverage job runs. Same shell as
-// TestCard (so it resolves into the real card in place), but every meaningful bit —
-// dot, id badge, name, file, mapping chips — is a skeleton: the pane is honestly
-// loading, not half-revealing the test set against the middle pane's "Mapping…".
-// Widths vary per index so the column reads as a list of real cards, not a grid.
+// Placeholder row shown in the Tests pane while a coverage job runs. Same shell as
+// TestCard (so it resolves into the real row in place), but every meaningful bit —
+// caret, id, name, facts, dot — is a skeleton: the pane is honestly loading, not
+// half-revealing the test set against the middle pane's "Mapping…". Widths vary
+// per index so the column reads as a list of real rows, not a grid.
 export const SKEL_NAME_W = [172, 132, 198, 150, 116, 184, 142, 164]
 
 export function TestCardSkeleton({ index }: { index: number }) {
   return (
-    <div
-      className="clcov-card"
-      data-testid="test-skeleton"
-      aria-hidden="true"
-      style={{
-        marginBottom: 8,
-        padding: '11px 13px',
-        borderRadius: 'var(--radius-md)',
-        background: 'var(--bg-surface)',
-        border: '1px solid var(--border-default)',
-      }}
-    >
-      <div className="flex items-center gap-2">
-        <span className="clcov-skel cl-skeleton" style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0 }} />
-        <span className="clcov-skel cl-skeleton" style={{ width: 22, height: 16, borderRadius: 5 }} />
-        <span className="clcov-skel cl-skeleton" style={{ width: SKEL_NAME_W[index % SKEL_NAME_W.length], height: 13 }} />
-        <span className="clcov-skel cl-skeleton" style={{ marginLeft: 'auto', width: 84, height: 10 }} />
-      </div>
-      <div className="flex items-center gap-1.5" style={{ marginTop: 7 }}>
-        <span className="clcov-skel cl-skeleton" style={{ width: 56, height: 15 }} />
-        <span className="clcov-skel cl-skeleton" style={{ width: 42, height: 15 }} />
-        <span className="clcov-skel cl-skeleton" style={{ width: 68, height: 15 }} />
+    <div className="clcov-row" data-testid="test-skeleton" aria-hidden="true">
+      <div className="clcov-rowhead" style={{ cursor: 'default' }}>
+        <span className="clcov-skel cl-skeleton" style={{ width: 10, height: 10 }} />
+        <span className="clcov-skel cl-skeleton" style={{ width: 22, height: 12 }} />
+        <span className="clcov-skel cl-skeleton" style={{ width: SKEL_NAME_W[index % SKEL_NAME_W.length], height: 12 }} />
+        <span className="clcov-skel cl-skeleton" style={{ marginLeft: 'auto', width: 64, height: 10 }} />
+        <span className="clcov-skel cl-skeleton" style={{ width: 6, height: 6, borderRadius: '50%' }} />
       </div>
     </div>
   )

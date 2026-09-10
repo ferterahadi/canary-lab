@@ -26,7 +26,7 @@ afterEach(() => {
 
 function render(ledger: CoverageLedger): void {
   act(() => {
-    root.render(<CoverageHeader ledger={ledger} gapFilter={null} onToggleGap={() => {}} strengthFilter={null} onToggleStrength={() => {}} />)
+    root.render(<CoverageHeader ledger={ledger} gapFilter={null} onToggleGap={() => {}} strengthFilter={null} onToggleStrength={() => {}} follow={false} onToggleFollow={() => {}} />)
   })
 }
 

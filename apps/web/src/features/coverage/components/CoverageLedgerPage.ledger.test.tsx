@@ -149,15 +149,18 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="tests-pane"] [data-testid="strength-filter"]')).toBeNull()
   })
 
-  it('shows a terse gap status and names the missing path via the chips (not the pill)', async () => {
+  it('shows the gap as segments + a fraction at rest, and names the missing path via the chips once expanded', async () => {
     await mount()
-    // R1: happy claimed, sad declared but unclaimed. The status pill is now just the
-    // short label (no "· sad" note) — the path chips below name the exact gap.
-    const gap = container.querySelector('[data-testid="gap-R1"]')
-    expect(gap?.textContent).toContain('Path gap')
-    expect(gap?.textContent).not.toContain('· sad')
-    // The path chips are just the path name (the dashed/muted style carries "no test"):
-    // covered shows a ✓, uncovered shows neither "✓" nor the old "· no test".
+    // R1: happy claimed, sad declared but unclaimed. At rest that is two segments
+    // (one filled) and "1/2"; the gap class is the tooltip, not a chip.
+    const cov = container.querySelector('[data-testid="cov-R1"]')
+    expect([...cov!.querySelectorAll('[data-seg]')].map((el) => el.getAttribute('data-seg'))).toEqual(['on', 'off'])
+    expect(cov?.textContent).toContain('1/2')
+    expect(cov?.getAttribute('title')).toContain('Path gap')
+    expect(container.querySelector('[data-testid="gap-R1"]')).toBeNull()
+    // The path chips live in the detail: covered shows a ✓, uncovered just the name.
+    expect(container.querySelector('[data-testid="path-R1-happy"]')).toBeNull()
+    act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
     expect(container.querySelector('[data-testid="path-R1-happy"]')?.textContent?.trim()).toBe('happy ✓')
     expect(container.querySelector('[data-testid="path-R1-sad"]')?.textContent?.trim()).toBe('sad')
   })
@@ -221,10 +224,15 @@ describe('CoverageLedgerPage', () => {
     expect(cards[0]?.getAttribute('data-testid')).toBe('req-R3') // untested/uncovered first
   })
 
-  it('shows a per-test strength chip', async () => {
+  it('shows a per-test strength dot whose tooltip names the tier', async () => {
     await mount()
-    expect(container.querySelector('[data-testid="strength-adds item"]')?.textContent).toContain('Solid')
-    expect(container.querySelector('[data-testid="strength-sends receipt"]')?.textContent).toContain('Shallow')
+    const solid = container.querySelector<HTMLElement>('[data-testid="strength-adds item"]')
+    const shallow = container.querySelector<HTMLElement>('[data-testid="strength-sends receipt"]')
+    expect(solid?.title).toContain('Solid')
+    expect(shallow?.title).toContain('Shallow')
+    expect(solid?.textContent).toBe('')
+    expect(solid?.style.background).toBe('var(--accent)')
+    expect(shallow?.style.background).toBe('var(--danger)')
   })
 
   it('filters the tests pane by strength', async () => {
@@ -241,10 +249,13 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="test-adds item"]')).toBeTruthy()
   })
 
-  it('surfaces covers tags on the test card (R9)', async () => {
+  it('surfaces the requirement + path a test claims as one mono strip, without the @ annotation syntax (R9)', async () => {
     await mount()
-    expect(container.querySelector('[data-testid="test-adds item"]')?.textContent).toContain('@req-R1')
-    expect(container.querySelector('[data-testid="test-adds item"]')?.textContent).toContain('@path-happy')
+    const row = container.querySelector('[data-testid="test-adds item"]')
+    expect(row?.querySelector('[data-testid="reqtag-adds item-R1"]')?.textContent).toBe('R1')
+    expect(row?.textContent).toContain('happy')
+    expect(row?.textContent).not.toContain('@req-')
+    expect(row?.textContent).not.toContain('@path-')
   })
 
   it('hovering a test lights its requirement and dims the rest (two-way highlight)', async () => {
@@ -388,11 +399,13 @@ describe('CoverageLedgerPage', () => {
     }
   })
 
-  it('shows the requirement kind without expanding the card', async () => {
+  it('spends no word on a functional requirement — only Non-functional earns a tag', async () => {
+    const led = structuredClone(LEDGER)
+    led.requirements[1].requirement.kind = 'non-functional'
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
     await mount()
-    // Kind lives on the always-visible header, not behind the disclosure.
-    expect(container.querySelector('[data-testid="req-detail-R1"]')).toBeNull()
-    expect(container.querySelector('[data-testid="kind-R1"]')?.textContent).toContain('Functional')
+    expect(container.querySelector('[data-testid="kind-R1"]')).toBeNull()
+    expect(container.querySelector('[data-testid="kind-R2"]')?.textContent).toBe('Non-functional')
   })
 
   it('expands a requirement to reveal its happy/unhappy paths', async () => {
@@ -403,7 +416,8 @@ describe('CoverageLedgerPage', () => {
     const detail = container.querySelector('[data-testid="req-detail-R1"]')
     expect(detail?.textContent).toContain('item appears in the cart')
     expect(detail?.textContent).toContain('out-of-stock item is rejected')
-    // Kind is no longer duplicated inside the detail (it's on the header now).
+    // The detail also carries the requirement text the row keeps behind the caret.
+    expect(detail?.textContent).toContain(LEDGER.requirements[0].requirement.text)
     expect(detail?.textContent).not.toContain('Functional')
     // Toggling again collapses it.
     act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
@@ -423,13 +437,18 @@ describe('CoverageLedgerPage', () => {
     expect(detail?.textContent).not.toContain('Unhappy path')
   })
 
-  it('does not make a card expandable when every path prose is N/A', async () => {
+  it('renders neither prose block when every path prose is N/A — the detail is just text + paths', async () => {
     const led = structuredClone(LEDGER)
     led.requirements[0].requirement.happyPath = 'N/A'
     led.requirements[0].requirement.unhappyPath = 'n/a — nothing to assert'
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
     await mount()
-    expect(container.querySelector('[data-testid="req-toggle-R1"]')).toBeNull()
+    act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
+    const detail = container.querySelector('[data-testid="req-detail-R1"]')
+    expect(detail?.textContent).toContain(led.requirements[0].requirement.text)
+    expect(detail?.textContent).not.toContain('N/A')
+    expect(detail?.textContent).not.toContain('Happy path')
+    expect(detail?.textContent).not.toContain('Unhappy path')
   })
 
   it('shows every discovered channel title at one declaration and keeps its requirement link', async () => {
@@ -454,7 +473,7 @@ describe('CoverageLedgerPage', () => {
     for (const channel of ['whatsapp', 'line']) {
       const card = pane.querySelector(`[data-testid="test-${title(channel)}"]`)!
       expect(card).toBeTruthy()
-      expect(card.textContent).toContain('@req-R1')
+      expect(card.querySelector('.clcov-reqtag')?.textContent).toBe('R1')
       await act(async () => { card.querySelector<HTMLElement>('[role="button"]')!.click() })
       expect(card.querySelector('[data-testid="test-presentation"]')).toBeTruthy()
       act(() => { card.querySelector<HTMLButtonElement>('.clcov-reqtag')!.click() })
@@ -462,10 +481,13 @@ describe('CoverageLedgerPage', () => {
     }
   })
 
-  it('offers no expand toggle for a requirement with no extra detail', async () => {
+  it('every requirement expands — its text and path chips always wait behind the caret', async () => {
     await mount()
-    // R3 has no kind/happyPath/unhappyPath → not disclosable.
-    expect(container.querySelector('[data-testid="req-toggle-R3"]')).toBeNull()
+    // R3 has no kind/happyPath/unhappyPath, but its text and paths still live in the detail.
+    act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R3"]')?.click() })
+    const detail = container.querySelector('[data-testid="req-detail-R3"]')
+    expect(detail?.textContent).toContain(LEDGER.requirements[2].requirement.text)
+    expect(detail?.querySelector('[data-testid^="path-R3-"]')).toBeTruthy()
   })
 
   it('expands a test to fetch its shared English presentation lazily, with Code one action away', async () => {
@@ -560,6 +582,8 @@ describe('CoverageLedgerPage', () => {
     vi.mocked(api.acceptRequirementWording).mockResolvedValue({ feature: 'checkout', requirementId: 'R2', acceptedAt: '2026-09-07T00:00:00.000Z', acceptedFingerprint: 'fp' })
     await mount()
     const pulls = vi.mocked(api.getFeatureCoverage).mock.calls.length
+    // The lever lives in the expanded detail.
+    act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R2"]')?.click() })
     const button = container.querySelector('[data-testid="accept-R2"]') as HTMLButtonElement
     expect(button).toBeTruthy()
     await act(async () => { button.click() })

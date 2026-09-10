@@ -218,7 +218,14 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
 
     // 2. Ask Playwright to enumerate the resolved test list (loops expanded,
     //    `${var}` substituted). On failure, fall back to AST-only output.
-    let discoveryDiagnostics: string | undefined
+    // Seeded, not left undefined: every path on which `listPlaywrightTests`
+    // resolves to null runs `onDiagnostics` first — a non-zero exit, a spawn
+    // failure, a timeout and unparseable JSON each carry their own text, and a
+    // null result is never cached — so the failure branch below always has a
+    // reason to show. Holding that as the variable's type keeps the fallback
+    // in one place instead of a `??` and a conditional spread whose empty arms
+    // nothing can reach.
+    let discoveryDiagnostics = 'Playwright could not enumerate the test cases.'
     const pwList = await listPlaywrightTests(feature.featureDir, {
       spawner: deps.playwrightListSpawner,
       onDiagnostics: (diagnostic) => {
@@ -231,7 +238,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     })
 
     if (pwList === null) {
-      const discoveryRepairPrompt = buildDiscoveryRepairPrompt(feature, discoveryDiagnostics ?? 'Playwright could not enumerate the test cases.')
+      const discoveryRepairPrompt = buildDiscoveryRepairPrompt(feature, discoveryDiagnostics)
       if (specFiles.length === 0) return [{
         file: path.join(feature.featureDir, 'playwright.config.ts'), tests: [],
         discoveryError: 'Playwright could not enumerate the test cases.',
@@ -244,7 +251,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
           file,
           tests: result.tests.map(withCodeDisplay),
           discoveryError: 'Playwright could not enumerate the test cases. The source definitions may omit generated cases.',
-          ...(discoveryDiagnostics ? { discoveryDiagnostics } : {}),
+          discoveryDiagnostics,
           ...(index === 0 ? { discoveryRepairPrompt } : {}),
           ...(result.parseError ? { parseError: result.parseError } : {}),
         }

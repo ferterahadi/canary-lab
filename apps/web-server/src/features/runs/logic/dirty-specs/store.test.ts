@@ -287,4 +287,21 @@ describe('DirtySpecStore', () => {
     store.remove('checkout')
     expect(store.get('checkout')).toBeNull()
   })
+
+  it('skips a feature whose record file is gone instead of listing a row it cannot read', async () => {
+    // A half-deleted record: the index row survives after the record file goes
+    // (a manual `rm` inside the logs dir, or a crash between the two writes).
+    // `list()` feeds the dirty flag on every suite card, so a row with no
+    // record behind it must drop out rather than surface a state-less suite.
+    const store = new DirtySpecStore(logsDir)
+    writeSpec(PASS)
+    await store.captureRunStart('checkout', featureDir)
+    expect(store.list()).toHaveLength(1)
+
+    fs.rmSync(path.join(logsDir, 'dirty-specs', 'checkout', 'dirty.json'))
+
+    expect(store.list()).toEqual([])
+    // Still indexed — `list()` filters on read; it does not repair the index.
+    expect(JSON.parse(fs.readFileSync(path.join(logsDir, 'dirty-specs', 'index.json'), 'utf8'))).toHaveLength(1)
+  })
 })

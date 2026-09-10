@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   listRuns,
   getRunDetail,
+  getRunQueue,
   getRunAudit,
   pinFeatureBranchesToCurrent,
   startRun,
@@ -43,6 +44,18 @@ describe('runs api', () => {
     const out = await getRunDetail('r1', { fetchImpl })
     expect(out).toEqual(detail)
     expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r1', { method: 'GET' })
+  })
+
+  it('getRunQueue reports why a run is parked, and reports no queue at all as null', async () => {
+    const diagnostics = { position: 2, waitingOn: 'run-1', repoPaths: ['/repos/shop'] }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(ok({ diagnostics }))
+      .mockResolvedValueOnce(ok({ diagnostics: null }))
+    await expect(getRunQueue('run 9', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ diagnostics })
+    // A run that is not queued answers with an explicit null — the panel needs
+    // to tell "not waiting" apart from "we could not find out".
+    await expect(getRunQueue('run-1', { fetchImpl })).resolves.toEqual({ diagnostics: null })
+    expect(fetchImpl.mock.calls.map((call) => call[0])).toEqual(['http://x/api/runs/run%209/queue', '/api/runs/run-1/queue'])
   })
 
   it('getRunAudit fetches the run audit trail by id', async () => {

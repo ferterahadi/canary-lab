@@ -615,15 +615,19 @@ export function translateReadableTest(input: ReadableTestInput): ReadableTest {
 }
 
 /** One extraction owns one helper compilation. Each test still receives fresh
- * recursion state; nothing is cached across edits or semantic-rule changes. */
-export function createReadableTestAstTranslator(input: Omit<ReadableTestAstInput, 'title' | 'body'>): (title: string, body: ts.Block) => ReadableTest {
-  const semanticContext = input.semanticContext ?? compileSemanticSource(input.file, input.sourceFile.getFullText(), {
-    semanticRules: input.semanticRules,
-    compilerOptions: input.compilerOptions,
-    absoluteSourceRanges: true,
-  })
-  const helpers = parseHelpers(input.helpers ?? [], semanticContext.config, input.compilerOptions)
-  return (title, body) => translateReadableTestFromAst({ ...input, semanticContext, title, body }, helpers)
+ * recursion state; nothing is cached across edits or semantic-rule changes.
+ *
+ * `semanticContext` and `helpers` are optional on `ReadableTestAstInput` for
+ * the single-test entry point below, and required here: batching only pays off
+ * when the caller has already compiled the file and collected its helpers once
+ * for the whole extraction. Falling back to a per-factory compile would be the
+ * work this function exists to avoid, so the type rules it out rather than
+ * leaving an arm no caller can reach. */
+export function createReadableTestAstTranslator(
+  input: Omit<ReadableTestAstInput, 'title' | 'body'> & Required<Pick<ReadableTestAstInput, 'helpers' | 'semanticContext'>>,
+): (title: string, body: ts.Block) => ReadableTest {
+  const helpers = parseHelpers(input.helpers, input.semanticContext.config, input.compilerOptions)
+  return (title, body) => translateReadableTestFromAst({ ...input, title, body }, helpers)
 }
 
 /** Uses an already-parsed test callback so AST extraction and readable

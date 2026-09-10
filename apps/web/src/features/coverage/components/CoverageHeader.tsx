@@ -108,16 +108,31 @@ export function writeRailPref(open: boolean): void {
   try { localStorage.setItem(RAIL_PREF_KEY, open ? 'open' : 'closed') } catch { /* ignore */ }
 }
 
+// Persisted Follow mode: while on, resting the pointer on a row in one ledger
+// scrolls the other ledger to the related row. Off by default — it moves a pane
+// the user didn't touch, so it has to be asked for — and remembered once chosen.
+export const FOLLOW_PREF_KEY = 'cl.coverage.follow'
+
+export function readFollowPref(): boolean {
+  try { return localStorage.getItem(FOLLOW_PREF_KEY) === 'on' } catch { return false }
+}
+
+export function writeFollowPref(on: boolean): void {
+  try { localStorage.setItem(FOLLOW_PREF_KEY, on ? 'on' : 'off') } catch { /* ignore */ }
+}
+
 // Bar/legend order reads good → gap: the green of `covered` leads, the work sinks
 // right. The legend doubles as the requirement filter.
 export const SEG_ORDER: GapType[] = ['covered', 'path-incomplete', 'variant-incomplete', 'untested']
 
-export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter, onToggleStrength }: {
+export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter, onToggleStrength, follow, onToggleFollow }: {
   ledger: CoverageLedger
   gapFilter: GapType | null
   onToggleGap: (g: GapType) => void
   strengthFilter: TestStrength | null
   onToggleStrength: (s: TestStrength) => void
+  follow: boolean
+  onToggleFollow: () => void
 }) {
   const { total, untested } = ledger.totals
   const covered = countFor(ledger, 'covered')
@@ -190,14 +205,22 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
       </div>
       {/* Test strength summary/filter — right-aligned so it sits above the tests
           column, the way the gap legend sits above the requirements column. */}
-      <StrengthFilter tests={ledger.tests} value={strengthFilter} onToggle={onToggleStrength} />
+      <StrengthFilter tests={ledger.tests} value={strengthFilter} onToggle={onToggleStrength} follow={follow} onToggleFollow={onToggleFollow} />
     </div>
   )
 }
 
 // Per-test strength summary + filter (moved out of the Tests pane into the stat
 // header). Each chip toggles the tests-pane filter; the count is the tally per tier.
-export function StrengthFilter({ tests, value, onToggle }: { tests: TestCoverage[]; value: TestStrength | null; onToggle: (s: TestStrength) => void }) {
+// The Follow chip closes the row: it is the one control that acts on both ledgers,
+// so it sits where the two columns meet rather than in either pane.
+export function StrengthFilter({ tests, value, onToggle, follow, onToggleFollow }: {
+  tests: TestCoverage[]
+  value: TestStrength | null
+  onToggle: (s: TestStrength) => void
+  follow: boolean
+  onToggleFollow: () => void
+}) {
   if (tests.length === 0) return null
   return (
     <div className="clcov-chips clcov-strength" data-testid="strength-filter">
@@ -224,6 +247,22 @@ export function StrengthFilter({ tests, value, onToggle }: { tests: TestCoverage
           </button>
         )
       })}
+      <span className="clcov-chip-gap" aria-hidden="true" />
+      <button
+        type="button"
+        className="clcov-chip"
+        data-testid="follow-toggle"
+        aria-pressed={follow}
+        data-on={follow ? 'true' : 'false'}
+        title={follow
+          ? 'Follow is on — resting on a row scrolls the other ledger to its related row. Click to stop.'
+          : 'Follow: resting on a test scrolls the requirements to the one it claims, and resting on a requirement scrolls the tests to its first test.'}
+        onClick={onToggleFollow}
+        style={{ ['--chip' as string]: 'var(--accent)' }}
+      >
+        <span className="clcov-chip-dot" style={{ background: follow ? 'var(--accent)' : 'var(--text-muted)' }} />
+        Follow
+      </button>
     </div>
   )
 }
