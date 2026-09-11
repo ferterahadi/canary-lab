@@ -121,7 +121,7 @@ describe('RequirementCard — the resting row', () => {
     act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
     const detail = container.querySelector('[data-testid="req-detail-R1"]') as HTMLElement
     expect(detail.textContent).toContain('The total adds up.')
-    expect(container.querySelector('[data-testid="behaviour-unhappy-R1"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="path-R1-sad"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="byline-R1"]')).toBeNull()
     expect(container.querySelector('[data-testid="proof-verdict-R1"]')).toBeTruthy()
   })
@@ -134,34 +134,41 @@ describe('RequirementCard — the resting row', () => {
   })
 })
 
-// The disclosed detail is a stack of NAMED bands: one band per PROMISE (its
-// sentence and its coverage together), then the proof. Behaviour and coverage used
-// to be two bands split on the same axis, so the reader carried "Unhappy path"
-// across a section break to match it against a pill called `sad`.
+// The disclosed detail is what the requirement promises, then what is tested,
+// then the proof: a stack of NAMED bands carrying the sentences, and under them a
+// table with one row per declared path. The marks used to hang off the band heads
+// instead, which drew the identical fact two different ways depending on whether
+// the requirement happened to have a channel dimension.
 describe('RequirementCard — the disclosed detail', () => {
   const withPaths = { id: 'R1', title: 'Totals', text: 'The total adds up.', pathTypes: ['happy', 'sad'], happyPath: 'The total matches the cart.', unhappyPath: 'A missing price is refused.' }
   const expand = () => act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
   const detail = () => (container.querySelector('[data-testid="req-detail-R1"]') as HTMLElement).textContent ?? ''
 
-  it('pairs each promise with the marks for its own cases and the word they add up to', () => {
+  it('states each promise as a sentence, then names every declared path in one table', () => {
     renderReq(req({ enforcement: PROVEN, requirement: withPaths }))
     expand()
     const happy = container.querySelector('[data-testid="behaviour-happy-R1"]') as HTMLElement
     expect(happy.textContent).toContain('Happy path')
     expect(happy.textContent).toContain('The total matches the cart.')
+    // The sentence and the squares are two different facts at two different
+    // grains: the band promises, the grid below reports per path.
+    expect(happy.querySelector('[data-seg]')).toBeNull()
+    expect(container.querySelector('[data-testid="behaviour-unhappy-R1"]')?.textContent).toContain('A missing price is refused.')
+    const grid = container.querySelector('[data-testid="path-grid-R1"]') as HTMLElement
+    expect(grid.textContent).toContain('Per path')
+    const row = (path: string) => container.querySelector(`[data-testid="path-R1-${path}"]`) as HTMLElement
     // A fraction of one is not a reading — "1/1 tested" made the reader divide to
     // learn a fact the single square already showed. The word is the reading.
-    expect(happy.textContent).toContain('has a test · not yet passed')
-    expect([...happy.querySelectorAll('[data-seg]')].map((el) => el.getAttribute('data-seg'))).toEqual(['claimed'])
-    const unhappy = container.querySelector('[data-testid="behaviour-unhappy-R1"]') as HTMLElement
-    expect(unhappy.textContent).toContain('A missing price is refused.')
-    expect(unhappy.textContent).toContain('no test')
-    expect([...unhappy.querySelectorAll('[data-seg]')].map((el) => el.getAttribute('data-seg'))).toEqual(['off'])
+    expect(row('happy').textContent).toContain('has a test · not yet passed')
+    expect(row('happy').querySelector('[data-seg]')?.getAttribute('data-seg')).toBe('claimed')
+    expect(row('sad').textContent).toContain('no test')
+    expect(row('sad').querySelector('[data-seg]')?.getAttribute('data-seg')).toBe('off')
   })
 
-  // One bad cell makes the whole promise unproven, so the summary word is the
-  // WORST of the row — never the majority, and never the first square.
-  it('summarises a promise by its worst case, not its best', () => {
+  // Declared order, not worst-first: these rows are the resting strip's squares
+  // re-drawn with their names on, so re-sorting them would break the one mapping
+  // a reader can make between the closed row and the open one.
+  it('keeps the path rows in declared order, matching the resting strip', () => {
     renderReq(req({
       enforcement: PROVEN,
       requirement: { ...withPaths, pathTypes: ['sad', 'edge'] },
@@ -170,9 +177,10 @@ describe('RequirementCard — the disclosed detail', () => {
       coverageStatus: 'covered',
     }))
     expand()
-    const unhappy = container.querySelector('[data-testid="behaviour-unhappy-R1"]') as HTMLElement
-    expect(unhappy.textContent).toContain('has a test · not yet passed')
-    expect(unhappy.textContent).not.toContain('passed\u00a0')
+    const rows = [...container.querySelectorAll('[data-testid^="path-R1-"]')]
+    expect(rows.map((r) => r.getAttribute('data-testid'))).toEqual(['path-R1-sad', 'path-R1-edge'])
+    expect(rows[0]?.textContent).toContain('passed')
+    expect(rows[1]?.textContent).toContain('has a test · not yet passed')
   })
 
   it('closes with the verdict the marks add up to, under the marks themselves', () => {
@@ -186,16 +194,18 @@ describe('RequirementCard — the disclosed detail', () => {
     expect(detailEl.lastElementChild).toBe(verdict)
   })
 
-  // A promise with no stated prose still earns its band: the fraction underneath it
-  // is anonymous without a name, and dropping the band would hide the coverage.
-  it('keeps a band with coverage but no prose, and drops the stack when there is neither', () => {
+  // A band with no stated prose has nothing left to say but its own name — its
+  // coverage is in the table below, under the path it belongs to.
+  it('drops a band with no prose, and the table when there are no declared paths', () => {
     renderReq(req({ enforcement: PROVEN }))
     expand()
-    expect(container.querySelector('[data-testid="behaviour-happy-R1"]')?.textContent).toContain('Happy path')
+    expect(container.querySelector('[data-testid="behaviour-R1"]')).toBeNull()
     expect(detail()).not.toContain('The total matches the cart.')
+    expect(container.querySelector('[data-testid="path-R1-happy"]')?.textContent).toContain('has a test')
     renderReq(req({ enforcement: PROVEN, requirement: { id: 'R1', title: 'Totals', text: 'The total adds up.', pathTypes: [] }, pathCoverage: [] }))
     expand()
     expect(container.querySelector('[data-testid="behaviour-R1"]')).toBeNull()
+    expect(container.querySelector('[data-testid="path-grid-R1"]')).toBeNull()
   })
 
   it('omits the provenance byline and confirmation control', () => {

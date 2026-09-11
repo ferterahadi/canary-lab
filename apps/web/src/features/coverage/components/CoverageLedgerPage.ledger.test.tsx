@@ -159,12 +159,14 @@ describe('CoverageLedgerPage', () => {
     act(() => { cov?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
     expect(document.body.querySelector('[role="tooltip"]')?.textContent).toContain('Path gap')
     expect(container.querySelector('[data-testid="gap-R1"]')).toBeNull()
-    // The detail names the missing path on its own band, marked and worded — the
+    // The detail names the missing path on its own row, marked and worded — the
     // same square the strip uses, so nothing has to be translated across the caret.
-    expect(container.querySelector('[data-testid="behaviour-happy-R1"]')).toBeNull()
+    expect(container.querySelector('[data-testid="path-grid-R1"]')).toBeNull()
     act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
-    expect(container.querySelector('[data-testid="behaviour-happy-R1"]')?.textContent).toContain('has a test · not yet passed')
-    expect(container.querySelector('[data-testid="behaviour-unhappy-R1"]')?.textContent).toContain('no test')
+    expect(container.querySelector('[data-testid="path-R1-happy"]')?.textContent).toContain('has a test · not yet passed')
+    expect(container.querySelector('[data-testid="path-R1-sad"]')?.textContent).toContain('no test')
+    // One table per requirement, never both: a channel-less requirement gets the
+    // per-path reading of exactly the squares its resting strip drew.
     expect(container.querySelector('[data-testid="channel-grid-R1"]')).toBeNull()
   })
 
@@ -427,9 +429,10 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="req-detail-R1"]')).toBeNull()
   })
 
-  // A hollow "N/A" is never rendered as prose — but the band itself stays, because
-  // the coverage fraction under it still has to be attributable to a promise.
-  it('drops an N/A prose line and keeps the band its coverage belongs to', async () => {
+  // A hollow "N/A" is never rendered as prose, and a band is now nothing BUT its
+  // prose — so the band goes with it, and the coverage it used to carry is read
+  // off the per-path table, which never depended on the prose in the first place.
+  it('drops an N/A band entirely and still reports that path in the table', async () => {
     const led = structuredClone(LEDGER)
     led.requirements[0].requirement.happyPath = 'token matches the pattern'
     led.requirements[0].requirement.unhappyPath = 'N/A — internal bug, format tests catch it'
@@ -439,11 +442,11 @@ describe('CoverageLedgerPage', () => {
     const detail = container.querySelector('[data-testid="req-detail-R1"]')
     expect(detail?.textContent).toContain('token matches the pattern')
     expect(detail?.textContent).not.toContain('N/A')
-    expect(container.querySelector('[data-testid="behaviour-unhappy-R1"] .clcov-path-text')).toBeNull()
-    expect(container.querySelector('[data-testid="behaviour-unhappy-R1"]')?.textContent).toContain('no test')
+    expect(container.querySelector('[data-testid="behaviour-unhappy-R1"]')).toBeNull()
+    expect(container.querySelector('[data-testid="path-R1-sad"]')?.textContent).toContain('no test')
   })
 
-  it('renders no prose at all when every path prose is N/A — the bands are just names + marks', async () => {
+  it('drops the band stack entirely when every path prose is N/A, keeping the table', async () => {
     const led = structuredClone(LEDGER)
     led.requirements[0].requirement.happyPath = 'N/A'
     led.requirements[0].requirement.unhappyPath = 'n/a — nothing to assert'
@@ -454,6 +457,8 @@ describe('CoverageLedgerPage', () => {
     expect(detail?.textContent).toContain(led.requirements[0].requirement.text)
     expect(detail?.textContent).not.toContain('N/A')
     expect(detail?.querySelectorAll('.clcov-path-text').length).toBe(0)
+    expect(container.querySelector('[data-testid="behaviour-R1"]')).toBeNull()
+    expect(container.querySelector('[data-testid="path-grid-R1"]')).toBeTruthy()
   })
 
   it('shows every discovered channel title at one declaration and keeps its requirement link', async () => {
@@ -492,7 +497,7 @@ describe('CoverageLedgerPage', () => {
     act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R3"]')?.click() })
     const detail = container.querySelector('[data-testid="req-detail-R3"]')
     expect(detail?.textContent).toContain(LEDGER.requirements[2].requirement.text)
-    expect(detail?.querySelector('[data-testid^="behaviour-marks-"]')).toBeTruthy()
+    expect(detail?.querySelector('[data-testid^="path-R3-"]')).toBeTruthy()
   })
 
   it('expands a test to fetch its shared English presentation lazily, with Code one action away', async () => {

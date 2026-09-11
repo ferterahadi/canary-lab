@@ -229,19 +229,18 @@ export const COVERAGE_CSS = `
 .clcov-source-note{font-size:11.5px;color:var(--text-muted)}
 
 /* One promise per band: its name and its sentence. Hairline-separated so the
-   bands read as a stack of NAMED facts rather than one run-on block. */
+   bands read as a stack of NAMED facts rather than one run-on block. No marks
+   here — every square a requirement owns is drawn in the grid below, whichever
+   grid that is. */
 .clcov-bands{display:flex;flex-direction:column;gap:0;margin-top:10px;padding-top:10px;border-top:1px solid var(--border-default)}
 .clcov-band{display:flex;flex-direction:column;gap:3px;padding:7px 0}
 .clcov-band+.clcov-band{border-top:1px solid var(--border-default)}
 .clcov-band:first-child{padding-top:0}
 .clcov-band:last-child{padding-bottom:0}
-.clcov-band-head{display:flex;align-items:center;gap:8px}
 .clcov-band-name{font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--text-secondary)}
-.clcov-band-marks{margin-left:auto;display:inline-flex;align-items:center;gap:5px}
-.clcov-band-word{font-family:var(--font-mono);font-size:10px;color:var(--text-muted)}
 
-/* Channel coverage as a matrix: channels down (unbounded, room below), paths
-   across (at most three declared, so the columns cannot overflow the pane).
+/* The coverage table, shared by both readings: channels down with paths across,
+   or the declared paths down with one lane of marks.
 
    ONE grid, not one per line. The head and the rows used to be separate grid
    containers sharing a template whose first track is auto-sized, so each

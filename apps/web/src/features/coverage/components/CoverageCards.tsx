@@ -318,54 +318,37 @@ function VerdictLine({ rc, enforcement: e }: { rc: RequirementCoverage; enforcem
 }
 
 
-/** `sad` and `edge` share ONE prose field on the requirement (`unhappyPath`), so
- *  they read as one promise with two test surfaces — never as two promises whose
- *  sentence happens to be identical. */
-const PATH_BUCKET: Record<PathType, 'happy' | 'unhappy'> = { happy: 'happy', sad: 'unhappy', edge: 'unhappy' }
-
-/** One promise the requirement makes: the sentence that states it, and every
- *  coverage segment that stands for it. */
+/** One promise the requirement makes, and the sentence that states it. `sad` and
+ *  `edge` share ONE prose field (`unhappyPath`), so they read as one promise with
+ *  two test surfaces — never as two promises whose sentence happens to be
+ *  identical. Which is also why a bucket carries no marks: the cases it stands for
+ *  are two different paths, and the grid below names them one row each. */
 export interface BehaviourBucket {
   key: 'happy' | 'unhappy'
   label: string
-  text: string | null
-  segments: CoverageSegment[]
+  text: string
 }
 
-/** Behaviour and coverage used to be two bands split on the SAME axis — the prose
- *  under "Expected behaviour", the chips under "Test coverage" — so a reader had
- *  to carry "Unhappy path" across a section break and match it to a pill called
- *  `sad`, in a second vocabulary, to learn whether the thing they had just read
- *  was tested. One block per promise puts the claim and its evidence in one
- *  eye-line, and the pill's name stops being a word the reader has to translate.
- *  A bucket with neither prose nor segments never renders. */
-export function behaviourBuckets(rc: RequirementCoverage, happyText: string | null, unhappyText: string | null): BehaviourBucket[] {
-  const segments = coverageSegments(rc)
-  const bucket = (key: 'happy' | 'unhappy', label: string, text: string | null): BehaviourBucket =>
-    ({ key, label, text, segments: segments.filter((seg) => PATH_BUCKET[seg.path] === key) })
-  return [bucket('happy', 'Happy path', happyText), bucket('unhappy', 'Unhappy path', unhappyText)]
-    .filter((b) => b.text !== null || b.segments.length > 0)
+/** The requirement's declared behaviour, in the reader's order: what it promises
+ *  on the happy path, then what it promises when things go wrong. A promise with
+ *  no stated prose contributes nothing — its coverage is named in the grid below,
+ *  under the path it belongs to. */
+export function behaviourBuckets(happyText: string | null, unhappyText: string | null): BehaviourBucket[] {
+  return [
+    { key: 'happy' as const, label: 'Happy path', text: happyText },
+    { key: 'unhappy' as const, label: 'Unhappy path', text: unhappyText },
+  ].filter((b): b is BehaviourBucket => b.text !== null)
 }
 
-/** One promise: its name, its sentence, and — when the requirement has no channel
- *  dimension — the mark for the cases it covers. The per-channel grid below owns
- *  the marks whenever there IS a dimension, so nothing is said twice. */
-function BehaviourBand({ rc, bucket, showMarks }: { rc: RequirementCoverage; bucket: BehaviourBucket; showMarks: boolean }) {
-  const id = rc.requirement.id
+/** One promise: its name and its sentence. The marks live in the grid below —
+ *  never here as well. They used to hang off the band head as a right-floated
+ *  cluster, so a requirement WITHOUT channels drew its coverage one way and a
+ *  requirement WITH channels drew the identical fact another way, in a table. */
+function BehaviourBand({ rc, bucket }: { rc: RequirementCoverage; bucket: BehaviourBucket }) {
   return (
-    <div className="clcov-band" data-testid={`behaviour-${bucket.key}-${id}`}>
-      <div className="clcov-band-head">
-        <span className="clcov-band-name">{bucket.label}</span>
-        {showMarks && bucket.segments.length > 0 && (
-          <span className="clcov-band-marks" data-testid={`behaviour-marks-${bucket.key}-${id}`}>
-            {bucket.segments.map((seg) => (
-              <span key={seg.label} className="clcov-cellmark" data-seg={segmentState(seg)} title={`${seg.label} — ${SEGMENT_WORD[segmentState(seg)]}`} />
-            ))}
-            <span className="clcov-band-word">{SEGMENT_WORD[worstState(bucket.segments)]}</span>
-          </span>
-        )}
-      </div>
-      {bucket.text && <p className="clcov-path-text">{bucket.text}</p>}
+    <div className="clcov-band" data-testid={`behaviour-${bucket.key}-${rc.requirement.id}`}>
+      <span className="clcov-band-name">{bucket.label}</span>
+      <p className="clcov-path-text">{bucket.text}</p>
     </div>
   )
 }
@@ -375,6 +358,91 @@ function BehaviourBand({ rc, bucket, showMarks }: { rc: RequirementCoverage; buc
 export function worstState(segments: CoverageSegment[]): SegmentState {
   if (segments.some((seg) => !seg.covered)) return 'off'
   return segments.every((seg) => seg.proven) ? 'proven' : 'claimed'
+}
+
+/** One line of a coverage table: a named thing, the marks that stand for it, and
+ *  the word they add up to. */
+interface GridRow {
+  key: string
+  testId: string
+  /** The row's own axis value — a channel (`whatsapp`) or a path (`sad`). */
+  name: string
+  na: boolean
+  marks: { key: string; state: SegmentState | 'na'; title: string }[]
+  word: string
+  wordTitle?: string
+}
+
+/** THE coverage table. Both readings of a requirement's marks render through it,
+ *  so a reader who has learned one block has learned the other: the channel grid
+ *  (channels down, paths across) and the path grid (paths down, one mark lane).
+ *
+ *  ONE grid, not one per line. The head and the rows used to be separate grid
+ *  containers sharing a template whose first track is auto-sized, so each resolved
+ *  that track from its OWN first cell — the kicker in the head, a name in a row —
+ *  and the column labels sat a dozen pixels right of the marks they name. The head
+ *  and rows are subgrids of this container, so every line resolves the name column
+ *  once.
+ *
+ *  The mark tracks are sized from their own content, never a fixed width: at a
+ *  22px track a label as ordinary as `happy` (29px of mono) overflowed its column
+ *  and ran into the next one — the head read `happyedge`, and no label sat over
+ *  the marks it names. `minmax(22px,auto)` keeps a bare mark column from
+ *  collapsing while letting the widest declared label set the column. A table with
+ *  no column names still gets one track, for its single lane of marks. */
+function CoverageGrid({ testId, kicker, columns, rows }: { testId: string; kicker: string; columns: string[]; rows: GridRow[] }) {
+  return (
+    <div
+      className="clcov-grid"
+      data-testid={testId}
+      style={{ gridTemplateColumns: `minmax(64px,auto) repeat(${Math.max(columns.length, 1)},minmax(22px,auto)) minmax(0,1fr)` }}
+    >
+      <div className="clcov-grid-head">
+        <span className="clcov-grid-kicker">{kicker}</span>
+        {columns.map((col) => <span key={col} className="clcov-grid-col">{col}</span>)}
+        {columns.length === 0 && <span />}
+        <span />
+      </div>
+      {rows.map((row) => (
+        <div key={row.key} className="clcov-grid-row" data-testid={row.testId} data-na={row.na ? 'true' : 'false'}>
+          <span className="clcov-grid-name">{row.name}</span>
+          {row.marks.map((mark) => <span key={mark.key} className="clcov-cellmark" data-seg={mark.state} title={mark.title} />)}
+          {/* The trailing word is what makes a two-row grid readable as a list: at
+              that size an axis lookup costs more than the sentence. */}
+          <span className="clcov-grid-word" title={row.wordTitle}>{row.word}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** The declared paths as rows, one mark each. This is what a requirement without a
+ *  channel dimension gets, and it is deliberately the SAME table the channelled
+ *  one gets: sentences first, then the marks in a named table below them.
+ *
+ *  Paths down rather than across, even though the channel grid reads them across:
+ *  there is no second axis here, so a row per path is dense where a column per
+ *  path would be one row of marks under three headings — or, if the bands became
+ *  the rows, a staircase of blanks, since Happy path can only ever own `happy` and
+ *  Unhappy path can only ever own `sad` and `edge`.
+ *
+ *  Declared order, not the channel grid's worst-first: these rows are the same
+ *  squares the closed row's strip already draws, in the same order, so sorting
+ *  them would break the one mapping a reader can make between the two. */
+function PathGrid({ rc }: { rc: RequirementCoverage }) {
+  const id = rc.requirement.id
+  const rows = rc.pathCoverage.map((p) => {
+    const state = segmentState({ covered: p.covered, proven: p.proven === true })
+    return {
+      key: p.path,
+      testId: `path-${id}-${p.path}`,
+      name: p.path,
+      na: false,
+      marks: [{ key: p.path, state, title: `${p.path} — ${SEGMENT_WORD[state]}` }],
+      word: SEGMENT_WORD[state],
+    }
+  })
+  return <CoverageGrid testId={`path-grid-${id}`} kicker="Per path" columns={[]} rows={rows} />
 }
 
 /** Channel coverage as the matrix it actually is: channels down, paths across.
@@ -388,13 +456,7 @@ export function worstState(segments: CoverageSegment[]): SegmentState {
  *  channels are unbounded and grow downward, where there is room.
  *
  *  Rendered open, with no caret: the reader already opened the row, and "which
- *  channel" is the question that brought them here.
- *
- *  The path tracks are sized from their own content, never a fixed width: at a
- *  22px track a label as ordinary as `happy` (29px of mono) overflowed its column
- *  and ran into the next one — the head read `happyedge`, and no label sat over
- *  the marks it names. `minmax(22px,auto)` keeps a bare mark column from
- *  collapsing while letting the widest declared path name set the column. */
+ *  channel" is the question that brought them here. */
 function ChannelGrid({ rc }: { rc: RequirementCoverage }) {
   const id = rc.requirement.id
   const cells = rc.variantCoverage ?? []
@@ -413,39 +475,18 @@ function ChannelGrid({ rc }: { rc: RequirementCoverage }) {
   const rank = (r: typeof rows[number]) =>
     r.reason ? [2, 0, 0] : [0, -r.segments.filter((seg) => !seg.covered).length, -r.segments.filter((seg) => !seg.proven).length]
   rows.sort((x, y) => { const a = rank(x); const b = rank(y); return a[0] - b[0] || a[1] - b[1] || a[2] - b[2] })
-  return (
-    <div
-      className="clcov-grid"
-      data-testid={`channel-grid-${id}`}
-      style={{ gridTemplateColumns: `minmax(64px,auto) repeat(${paths.length},minmax(22px,auto)) minmax(0,1fr)` }}
-    >
-      <div className="clcov-grid-head">
-        <span className="clcov-grid-kicker">Per channel</span>
-        {paths.map((path) => <span key={path} className="clcov-grid-col">{path}</span>)}
-        <span />
-      </div>
-      {rows.map((row) => (
-        <div
-          key={row.variant}
-          className="clcov-grid-row"
-          data-testid={`channel-${id}-${row.variant}`}
-          data-na={row.reason ? 'true' : 'false'}
-        >
-          <span className="clcov-grid-name">{row.variant}</span>
-          {row.reason
-            ? paths.map((path) => <span key={path} className="clcov-cellmark" data-seg="na" title={`${row.variant}: N/A — ${row.reason}`} />)
-            : row.segments.map((seg) => (
-              <span key={seg.path} className="clcov-cellmark" data-seg={segmentState(seg)} title={`${seg.label} — ${SEGMENT_WORD[segmentState(seg)]}`} />
-            ))}
-          {/* The trailing word is what makes a two-channel grid readable as a
-              list: at that size an axis lookup costs more than the sentence. */}
-          <span className="clcov-grid-word" title={row.reason}>
-            {row.reason ? `n/a — ${row.reason}` : SEGMENT_WORD[worstState(row.segments)]}
-          </span>
-        </div>
-      ))}
-    </div>
-  )
+  const gridRows: GridRow[] = rows.map((row) => ({
+    key: row.variant,
+    testId: `channel-${id}-${row.variant}`,
+    name: row.variant,
+    na: row.reason !== undefined,
+    marks: row.reason !== undefined
+      ? paths.map((path) => ({ key: path, state: 'na' as const, title: `${row.variant}: N/A — ${row.reason}` }))
+      : row.segments.map((seg) => ({ key: seg.path, state: segmentState(seg), title: `${seg.label} — ${SEGMENT_WORD[segmentState(seg)]}` })),
+    word: row.reason !== undefined ? `n/a — ${row.reason}` : SEGMENT_WORD[worstState(row.segments)],
+    wordTitle: row.reason,
+  }))
+  return <CoverageGrid testId={`channel-grid-${id}`} kicker="Per channel" columns={paths} rows={gridRows} />
 }
 
 /** True while the two-line clamp is actually cutting this title. Read at hover time
@@ -483,13 +524,10 @@ export function RequirementCard({ rc, active, focused, dimmed, onHover }: {
   const enf = rc.enforcement
   const segments = coverageSegments(rc)
   const claimed = segments.filter((s) => s.covered).length
-  const buckets = behaviourBuckets(rc, meaningfulPath(happyPath), meaningfulPath(unhappyPath))
-  // With a channel dimension the grid owns every mark; the bands would only
-  // restate it at a coarser grain, which is how the chip rows got duplicated.
+  // The bands say what the requirement promises; a grid below says what is tested.
+  // Which grid is the only thing a channel dimension changes.
+  const bands = behaviourBuckets(meaningfulPath(happyPath), meaningfulPath(unhappyPath))
   const hasChannels = (rc.variantCoverage ?? []).length > 0
-  // ...which also leaves a prose-less band with nothing to say but its own name,
-  // so it stops earning the space.
-  const bands = hasChannels ? buckets.filter((b) => b.text !== null) : buckets
   // The row at rest is id · title · segments · a dot only when the proof is
   // unhealthy. Everything else — the requirement text, the per-path detail, the
   // history line, the happy/unhappy prose — waits behind the caret, so every
@@ -552,10 +590,11 @@ export function RequirementCard({ rc, active, focused, dimmed, onHover }: {
           <p className="clcov-req-text">{text}</p>
           {bands.length > 0 && (
             <div className="clcov-bands" data-testid={`behaviour-${id}`}>
-              {bands.map((b) => <BehaviourBand key={b.key} rc={rc} bucket={b} showMarks={!hasChannels} />)}
+              {bands.map((b) => <BehaviourBand key={b.key} rc={rc} bucket={b} />)}
             </div>
           )}
           {hasChannels && <ChannelGrid rc={rc} />}
+          {!hasChannels && rc.pathCoverage.length > 0 && <PathGrid rc={rc} />}
           {enf && <VerdictLine rc={rc} enforcement={enf} />}
         </div>
       )}

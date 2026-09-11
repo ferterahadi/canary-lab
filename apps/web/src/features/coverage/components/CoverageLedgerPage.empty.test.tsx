@@ -316,8 +316,11 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
     expandR6()
     const happy = container.querySelector('[data-testid="behaviour-happy-R6"]') as HTMLElement
     expect(happy.textContent).toContain('Every channel honours the scope.')
-    expect(container.querySelector('[data-testid="behaviour-marks-happy-R6"]')).toBeNull()
+    expect(happy.querySelector('[data-seg]')).toBeNull()
     expect(container.querySelector('[data-testid="behaviour-unhappy-R6"]')).toBeNull()
+    // A channelled requirement reads its marks off the channel grid, never the
+    // per-path table — one table per requirement, always.
+    expect(container.querySelector('[data-testid="path-grid-R6"]')).toBeNull()
   })
 
   it('names the gap "Variant gap" in the row tooltip and the missing channels in the verdict', async () => {

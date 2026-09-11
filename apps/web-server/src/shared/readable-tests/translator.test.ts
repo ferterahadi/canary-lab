@@ -291,7 +291,7 @@ describe('translateReadableTest structure', () => {
           children: [expect.objectContaining({ text: expect.stringContaining('string "Continue"') })],
         }),
         expect.objectContaining({
-          text: 'otherwise',
+          text: 'else',
           children: [expect.objectContaining({ text: expect.stringContaining('string "Start"') })],
         }),
       ],
