@@ -858,7 +858,12 @@ client the prompt/context (`buildSummaryAuthoringContext` / `buildCoverageMappin
 reusing the internal prompts), and canary writes the result through the canonical writers
 (`applyExternalSummary` via the shared `assembleSummary`; `applyExternalCoverageMappings`
 via the tag-writer) and recomputes. Such jobs carry `producer: 'external'`, have no
-`sessionRef`, and render monitor-only (`ExternalAgentCard`) in the Generating pane. Both
+`sessionRef`, and render as external-session rows in Flight Activity. GUI Generate
+opens the recorded or evidence-derived Flight in follow-mode. The shared coverage-job
+index drives Requirements and Tests & coverage; each Activity segment tails its own
+`kind: 'coverage'` job source, including completed sessions. Active jobs also reconcile
+through REST so a missed broadcast cannot strand the stage transition. The ledger
+remains the input and results surface. Both
 models feed the *same* deterministic ledger recompute, which is producer-agnostic (it
 only reads on-disk tags). The single
 highest-risk invariant is **requirement-id stability across PRD regeneration** —

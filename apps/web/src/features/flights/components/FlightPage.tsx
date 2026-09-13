@@ -1,4 +1,5 @@
 import type { FlightIndexEntry, FlightManifest, FlightStageKey } from '@/shared/api/client'
+import type { CoverageJobIndexEntry } from '@/shared/api/types'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import type { FeatureActivity, FeatureExternalHistory } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
@@ -27,6 +28,7 @@ export function FlightPage({
   onClose,
   activity,
   externalHistory,
+  coverageJobs,
   derivedStages,
   onStartFlight,
   onOpenConfig,
@@ -53,6 +55,7 @@ export function FlightPage({
   /** Persistent external-work provenance by feature + stage. Unlike activity,
    *  this remains after the task settles so Activity can explain who did it. */
   externalHistory?: FeatureExternalHistory
+  coverageJobs?: CoverageJobIndexEntry[]
   /** R81: evidence-derived rails per feature — App owns the one instance (same
    *  ownership rule as `activity`). Supplies the stages for a derived token. */
   derivedStages?: Map<string, DerivedStage[]>
@@ -79,7 +82,7 @@ export function FlightPage({
   const docsRefreshKey = useInvalidationKey('coverage')
   return (
     <div className="flex h-full w-full flex-col bg-canvas text-primary">
-      <FlightDetail flightId={flightId} refreshKey={refreshKey} liveFlight={liveFlight} indexEntry={indexEntry} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} onOpenSpecReview={onOpenSpecReview} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} externalHistory={externalHistory} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage }} stage={stage} onSelectStage={onSelectStage} />
+      <FlightDetail flightId={flightId} refreshKey={refreshKey} liveFlight={liveFlight} indexEntry={indexEntry} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} onOpenSpecReview={onOpenSpecReview} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} externalHistory={externalHistory} coverageJobs={coverageJobs} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage }} stage={stage} onSelectStage={onSelectStage} />
     </div>
   )
 }

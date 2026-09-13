@@ -74,6 +74,7 @@ export type FeatureExternalHistory = Map<string, Partial<Record<FlightStageKey, 
 export interface FeatureWorkState {
   activity: Map<string, FeatureActivity>
   externalHistory: FeatureExternalHistory
+  coverageJobs: CoverageJobIndexEntry[]
 }
 
 /** Which flight stage a standalone activity kind maps onto — so an
@@ -395,7 +396,7 @@ export function useFeatureWorkState(): FeatureWorkState {
     'coverage',
     'all-jobs',
     () => api.listAllCoverageJobs(),
-    { cache: 'coverage-jobs' },
+    { cache: 'coverage-jobs', pollWhile: (jobs) => jobs === null || jobs.some((job) => job.status === 'running') },
   )
   // Same arrangement for the matrix jobs: their store publishes
   // `robustness-changed` on every write and the socket bumps `robustness`.
@@ -406,6 +407,7 @@ export function useFeatureWorkState(): FeatureWorkState {
     { cache: 'robustness-jobs' },
   )
   return useMemo(() => ({
+    coverageJobs: coverageJobs ?? [],
     activity: deriveFeatureActivity({
       activeRuns: runs,
       portifyWorkflows: workflows,

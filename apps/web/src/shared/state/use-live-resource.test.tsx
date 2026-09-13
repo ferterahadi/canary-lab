@@ -20,6 +20,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount())
   container.remove()
+  vi.useRealTimers()
 })
 
 /** Renders the hook and exposes the bus so a test can bump a topic the way the
@@ -46,6 +47,43 @@ const read = (testId: string): string | undefined =>
   container.querySelector(`[data-testid="${testId}"]`)?.textContent ?? undefined
 
 describe('useLiveResource', () => {
+  it('reconciles a missed completion event, retains state through failures, and stops terminal polling', async () => {
+    vi.useFakeTimers()
+    const fetcher = vi.fn<() => Promise<string>>()
+      .mockResolvedValueOnce('running')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue('done')
+    function Task() {
+      const { value } = useLiveResource('coverage', 'poll-recovery', fetcher, { pollWhile: (v) => v !== 'done' })
+      return <span data-testid="value">{value}</span>
+    }
+    await act(async () => root.render(<Task />))
+    expect(read('value')).toBe('running')
+    await act(async () => vi.advanceTimersByTimeAsync(2500))
+    expect(read('value')).toBe('running')
+    await act(async () => vi.advanceTimersByTimeAsync(2500))
+    expect(read('value')).toBe('done')
+    await act(async () => vi.advanceTimersByTimeAsync(10000))
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  it('recovers a hung request and ignores its stale response after completion', async () => {
+    vi.useFakeTimers()
+    let resolveOld!: (value: string) => void
+    const fetcher = vi.fn<() => Promise<string>>()
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+      .mockResolvedValue('done')
+    function Task() {
+      const { value } = useLiveResource('coverage', 'poll-hung', fetcher, { pollWhile: (v) => v !== 'done' })
+      return <span data-testid="value">{value}</span>
+    }
+    await act(async () => root.render(<Task />))
+    await act(async () => vi.advanceTimersByTimeAsync(2500))
+    expect(read('value')).toBe('done')
+    await act(async () => resolveOld('running'))
+    expect(read('value')).toBe('done')
+  })
+
   it('resolves the value for its key', async () => {
     await render({ id: 'checkout', fetcher: async (key) => `value:${key}` })
     expect(read('value')).toBe('value:checkout')

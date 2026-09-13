@@ -1,13 +1,12 @@
 @import "tailwindcss";
 @import "@xterm/xterm/css/xterm.css";
-@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
  * Canary Lab — crisp modern surface
  *
- * One sans family (Geist), one mono family (JetBrains Mono). Cool neutrals
+ * One type family (Geist) for every piece of UI text. Cool neutrals
  * for both themes; a single saturated blue accent; subtle shadows, soft
  * rounded corners, hairline borders. No decorative flourishes.
  */
@@ -23,9 +22,9 @@
   --bg-hover: #f5f5f5;
   --bg-selected: #ededed;
 
-  --border-default: #e5e5e5;
-  --border-strong: #d4d4d4;
-  --border-subtle: #f0f0f0;
+  --border-default: #c9c9d0;
+  --border-strong: #94949e;
+  --border-subtle: #e2e2e6;
   --border-focus: #2563eb;
 
   --accent: #2563eb;
@@ -57,8 +56,8 @@
   --assistant: #7c3aed;
 
   --text-primary: #0a0a0a;
-  --text-secondary: #525252;
-  --text-muted: #a3a3a3;
+  --text-secondary: #3f3f46;
+  --text-muted: #6b6b73;
 
   --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-popover:
@@ -94,8 +93,16 @@
   --semantic-error-control-flow: var(--code-keyword);
   --semantic-attention: #dc2626;
 
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-  --font-sans: 'Inter Tight', 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /* Two families, split by MEANING, not by screen region: proportional = written
+     by a human (titles, labels, prose, buttons); fixed-width = produced by a
+     machine (run ids, test ids, tags, file paths, ports, branch names, counts,
+     code, the xterm pane). A reader can tell which kind of thing they are
+     looking at before reading a word, and the rule keeps holding as surfaces
+     are added — unlike a per-screen font choice, which drifts.
+     Inter is drawn for dense screen UI and stays legible at this app's 10-13px
+     sizes; JetBrains Mono is the editor face the run terminal already uses. */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* Neutrals — dark
@@ -109,9 +116,9 @@
   --bg-hover: #1f1f1f;
   --bg-selected: #262626;
 
-  --border-default: #262626;
-  --border-strong: #3a3a3a;
-  --border-subtle: #1c1c1c;
+  --border-default: #454545;
+  --border-strong: #6b6b6b;
+  --border-subtle: #2e2e2e;
   --border-focus: #3b82f6;
 
   --accent: #3b82f6;
@@ -126,9 +133,9 @@
   --boot-soft: color-mix(in srgb, var(--boot) 18%, transparent);
   --assistant: #a78bfa;
 
-  --text-primary: #fafafa;
-  --text-secondary: #a3a3a3;
-  --text-muted: #737373;
+  --text-primary: #ffffff;
+  --text-secondary: #c9c9cf;
+  --text-muted: #9b9ba3;
 
   --code-string: #98c379;
   --code-variable: var(--code-string);
@@ -212,6 +219,11 @@ html, body, #root {
 
 body {
   font-family: var(--font-sans);
+  /* Tabular figures app-wide. With one proportional family for every surface,
+     digits would otherwise vary in width — columns of counts would ragged-edge
+     and live-updating numbers (elapsed timers, pass counts) would twitch as
+     they tick. Geist's tabular set is drawn for this; prose is unharmed. */
+  font-variant-numeric: tabular-nums;
   background: var(--bg-base);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
@@ -729,6 +741,20 @@ body {
   color: var(--text-muted);
 }
 
+/* The same register one tone up: the NAME of a band or a section the reader is
+   meant to land on, rather than a caption they read after it. Colour is baked in
+   for the same reason `.cl-rubric` bakes muted — the register IS the tone pair,
+   and a `text-*` utility beside an unlayered `.cl-*` rule that declares colour
+   is dead anyway. */
+.cl-rubric-strong {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
 /* ── Named type steps ──────────────────────────────────────────────────────
    The dense operator-console scale, named by ROLE so a surface picks a step
    instead of a number. Five steps in all — title (12.5) → body (12) → data
@@ -773,6 +799,141 @@ body {
 .cl-type-meta {
   font-size: 11px;
   line-height: 1.35;
+}
+
+/* ── Ledger style — the coverage pane's vocabulary, as shared primitives ────
+   The coverage ledger is this app's reference surface: stacked detail reads as
+   hairline-separated NAMED bands, a sequence reads as a numbered ladder with a
+   mono bead, a list reads as flat divider rows with no box around them, and the
+   small print about a mechanism sits in the mono machine register. Those four
+   shapes were local to `coverage-ledger-css.ts`; every one of them is the house
+   style rather than a coverage detail, so they live here and the coverage pane
+   keeps only its own positioning on top.
+
+   Neutral surfaces, one accent: none of these spend a hue. Meaning arrives via a
+   status dot, a bead tone or a mark — never a tinted slab. */
+
+/* A stack of named facts. Hairlines between them, nothing around them: the
+   alternative (a card per fact) turns four related facts into four objects. */
+.cl-bands {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.cl-band {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 0;
+}
+.cl-band + .cl-band {
+  border-top: 1px solid var(--border-default);
+}
+.cl-band:first-child {
+  padding-top: 0;
+}
+.cl-band:last-child {
+  padding-bottom: 0;
+}
+
+/* The ladder: an ordered sequence of named steps. Same hairline rhythm as the
+   bands, plus a bead column. Use the bands when order doesn't matter. */
+.cl-ladder {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cl-ladder-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 10px 0;
+}
+.cl-ladder-step + .cl-ladder-step {
+  border-top: 1px solid var(--border-default);
+}
+.cl-ladder-step:first-child {
+  padding-top: 0;
+}
+.cl-ladder-step:last-child {
+  padding-bottom: 0;
+}
+.cl-ladder-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+/* The bead rides 1px low so its circle centres on the step's name rather than on
+   the name's line box. */
+.cl-ladder-step > .cl-bead {
+  margin-top: 1px;
+}
+
+/* The bead: the mark leading a step or a row — a position, a count, or a
+   settled verdict. Hollow and mono, so a column of them reads as a sequence
+   instead of a row of filled dots competing with the status vocabulary.
+
+   Tone is a variable, not a variant: a bead carrying a verdict sets
+   `--cl-bead-tone` to that status hue, and `data-toned` tints its edge to
+   match. The default is the quiet numeral. Metrics are baked in (an unlayered
+   `.cl-*` rule beats a `text-[Npx]` utility beside it), so callers pass the
+   tone and nothing else. */
+.cl-bead {
+  --cl-bead-tone: var(--text-muted);
+  --cl-bead-edge: var(--border-default);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  border: 1px solid var(--cl-bead-edge);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--cl-bead-tone);
+  font-variant-numeric: tabular-nums;
+}
+.cl-bead[data-toned='true'] {
+  --cl-bead-edge: color-mix(in srgb, var(--cl-bead-tone) 55%, var(--border-default));
+}
+
+/* The aside: small print about the mechanism — what a number is derived from,
+   what a step will cost, where a value came from. Mono because it describes the
+   machine; muted because it is never the thing you came to read. */
+.cl-aside {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A list as a ledger: transparent rows, one hairline between them, one above
+   and below the group. The box it replaces (a rounded border around a list of
+   rows that already divide themselves) drew a second frame inside a dialog that
+   is already a frame. Rows bring their own padding and their own selected /
+   hover surface — see `OptionRow`. */
+.cl-ledger {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--border-default);
+}
+.cl-ledger > * + * {
+  border-top: 1px solid var(--border-default);
+}
+
+/* Disclosed or quoted detail belonging to the thing above it: a 2px neutral
+   rail and a half-step-deeper ground. Neutral on purpose — the rail says "this
+   belongs to that", which is structure, not status, so it never takes a hue. */
+.cl-quote-rail {
+  border-left: 2px solid var(--border-default);
+  background: color-mix(in srgb, var(--bg-base) 55%, var(--bg-surface));
 }
 
 .cl-divider {
@@ -1515,7 +1676,7 @@ body {
   padding: 10px 12px;
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .cl-comparison thead th, .cl-comparison-section td {

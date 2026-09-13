@@ -1,3 +1,5 @@
+import type { CoverageJobIndexEntry } from '@/shared/api/types'
+import { coverageJobStage, stageCoverageJobs } from '../lib/coverage-activity'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { ExternalWorkCheckpointData, FlightEntryOptions, FlightIndexEntry, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
@@ -62,6 +64,7 @@ export function FlightDetail({
   docsRefreshKey,
   activity,
   externalHistory,
+  coverageJobs = [],
   derivedStages,
   drill,
   stage: routedStage,
@@ -88,6 +91,7 @@ export function FlightDetail({
   /** Persistent external provenance — keeps the Activity rail honest after a
    *  standalone task settles and drops out of the live activity map. */
   externalHistory?: FeatureExternalHistory
+  coverageJobs?: CoverageJobIndexEntry[]
   derivedStages?: Map<string, DerivedStage[]>
   drill: FlightDrillThroughs
   /** The selected stage, when App owns it (routed as `?stage=…`) — null is
@@ -278,6 +282,17 @@ export function FlightDetail({
   // read the same live activity as the chip, not just the saved flight verdict.
   const featureActivity = flight ? activity?.get(flight.feature) : undefined
   const activityRowKey = featureActivity ? stageRowKey(ACTIVITY_STAGE[featureActivity.kind]) : undefined
+  const featureCoverageJobs = coverageJobs.filter((job) => job.feature === flight?.feature)
+  const activeCoverageJob = featureCoverageJobs.filter((job) => job.status === 'running')
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || (a.kind === 'coverage' ? -1 : 1))[0]
+  const coveragePhase = activeCoverageJob ? coverageJobStage(activeCoverageJob) : null
+  const [followedCoverage, setFollowedCoverage] = useState<{ flightId: string; stage: FlightStageKey } | null>(null)
+  useEffect(() => {
+    if (coveragePhase) setFollowedCoverage({ flightId, stage: coveragePhase })
+  }, [flightId, coveragePhase])
+  // Keep the last generation stage in view when it settles. An explicit rail
+  // selection still wins, and another live stage can take over follow-mode.
+  const coverageLanding = followedCoverage?.flightId === flightId ? followedCoverage.stage : null
   const featureExternalHistory = flight ? externalHistory?.get(flight.feature) : undefined
   // A run is intentionally the louder feature-level activity, so that map may
   // hide a simultaneous Portify job. Read Portify's own index as well: the
@@ -307,8 +322,17 @@ export function FlightDetail({
         : 'running' as const
       rows = rows.map((candidate) => candidate.key === 'portify' ? { ...candidate, status } : candidate)
     }
-    return rows
-  }, [flight, activityRowKey, featurePortify])
+    return rows.map((candidate) => {
+      const latest = stageCoverageJobs(coverageJobs, flight?.feature ?? '', candidate.key).at(-1)
+      const recorded = flight?.stages.find((stage) => stage.key === (candidate.key === 'docs' ? 'prd-summary' : candidate.key))
+      if (!latest || (recorded?.startedAt && latest.startedAt < recorded.startedAt)) return candidate
+      if (latest.status === 'running') return { ...candidate, status: 'running' as const }
+      if (latest.status === 'failed' || latest.status === 'aborted') return { ...candidate, status: 'failed' as const }
+      const derivedStatus = derivedStages?.get(latest.feature)?.find((stage) => stage.key === candidate.key)?.status
+      if (derivedStatus) return { ...candidate, status: derivedStatus }
+      return candidate
+    })
+  }, [flight, activityRowKey, featurePortify, coverageJobs, derivedStages])
 
   // Default the selected stage to the one that needs eyes: waiting → running →
   // first failed → the row that resumes next → last done. The user's explicit
@@ -329,14 +353,16 @@ export function FlightDetail({
       : undefined
     const pick =
       railRows.find((s) => s.status === 'waiting-for-approval')
+      ?? railRows.find((s) => s.key === coveragePhase)
       ?? railRows.find((s) => s.status === 'running' && !(reportForeground && s.key === 'portify'))
       ?? railRows.find((s) => s.status === 'failed')
+      ?? railRows.find((s) => s.key === coverageLanding)
       ?? reportForeground
       ?? railRows.find((s) => s.status === 'running')
       ?? railRows.find((s) => s.status === 'pending')
       ?? [...railRows].reverse().find((s) => s.status === 'done')
     return pick?.key ?? null
-  }, [railRows])
+  }, [railRows, coveragePhase, coverageLanding])
   const stageKey = selectedStage ?? autoStage
   const row = railRows.find((s) => s.key === stageKey) ?? null
   const stage = flight?.stages.find((s) => s.key === stageKey) ?? null
@@ -344,6 +370,11 @@ export function FlightDetail({
   // carry their folded companion so its facts/checkpoint/log surface too.
   const companionKey = stageKey ? STAGE_COMPANION[stageKey] : undefined
   const companionStage = (companionKey ? flight?.stages.find((s) => s.key === companionKey) : null) ?? null
+  useEffect(() => {
+    // Once generation settles, pin its result stage in the URL so refresh
+    // restores the same result instead of jumping to an unrelated pending step.
+    if (!coveragePhase && coverageLanding && selectedStage === null) setSelectedStage(coverageLanding)
+  }, [coveragePhase, coverageLanding, selectedStage, setSelectedStage])
 
   // A read failure only blanks the view when there is nothing else to show.
   // With a pushed manifest in hand the record is NOT missing, and a transient
@@ -402,7 +433,9 @@ export function FlightDetail({
   const takeoverRequested = externalWorkCheckpoint != null
     && typeof (externalWorkCheckpoint.data as ExternalWorkCheckpointData | undefined)?.takeoverRequestedAt === 'string'
   const waitingChip = featureActivity?.waiting ? featureChipState(flight, featureActivity) : null
-  const suiteActivityChip = externalSuiteWork && featureActivity ? ACTIVITY_CHIP[featureActivity.kind] : null
+  const suiteActivityChip = activeCoverageJob
+    ? ACTIVITY_CHIP[activeCoverageJob.kind === 'summary' ? 'condensing' : 'mapping']
+    : externalSuiteWork && featureActivity ? ACTIVITY_CHIP[featureActivity.kind] : null
   const tone = waitingChip?.tone ?? (agentHolding
     ? FLIGHT_STATUS_TONE['running']
     : suiteActivityChip?.tone ?? FLIGHT_STATUS_TONE[flight.status])
@@ -554,7 +587,7 @@ export function FlightDetail({
           </>
         ) : derivedFeature ? (
           <>
-            {derivedEntry ? (
+            {derivedEntry ? (!activeCoverageJob && (
               <ContinueMenu
                 flight={flight}
                 onAction={act}
@@ -562,7 +595,7 @@ export function FlightDetail({
                 externalMutationOwner={externalMutationOwner}
                 recordlessEntry={derivedEntry}
               />
-            ) : (
+            )) : (
               <DisabledControlTooltip>
                 <button
                   type="button"
@@ -585,7 +618,7 @@ export function FlightDetail({
             {flight.status === 'done' && evalStage && (
               <DownloadEvaluationAction flight={flight} stage={evalStage} testId="flight-primary-download" primary />
             )}
-            {(flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
+            {!activeCoverageJob && (flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
               <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} externalMutationOwner={externalMutationOwner} />
             )}
             <FlightMenu flight={flight} onAction={act} onDeleted={onBackToList} externalMutationOwner={externalMutationOwner} />
@@ -764,6 +797,7 @@ export function FlightDetail({
               activePortifyWorkflowId={featurePortify?.workflowId}
               activity={featureActivity}
               externalHistory={featureExternalHistory}
+              coverageJobs={featureCoverageJobs}
               activityOpen={activityOpenByFlight[flightId]?.[stage.key]}
               onActivityOpenChange={(open) => setStageActivityOpen(stage.key, open)}
               externalMutationOwner={externalMutationOwner}

@@ -60,12 +60,13 @@ function rowLabel(key: FlightStageKey): string {
  *  lifecycle state): the intent+repos form, the live planning agent, and the
  *  multi-feature proposal awaiting confirmation. */
 
-/** R69 (concept C): one numbered step in the launch form — a badge + connector
+/** R69 (concept C): one numbered step in the launch form — a bead + connector
  *  rail on the left, the section's title + content on the right, so the setup
- *  reads as an ordered sequence (intent → repos → launch). Every badge shares
- *  one solid, high-contrast treatment so the whole sequence reads as equally
- *  present — the accent is spent only on the primary action and the selected
- *  stage row, never on the step numbers. The last step drops its connector. */
+ *  reads as an ordered sequence (intent → repos → launch). The mark is the
+ *  shared `.cl-bead` (hollow, mono, quiet) and the title is the shared title
+ *  step, so the form reads in the coverage ledger's voice: the accent is spent
+ *  only on the primary action, and nothing in the sequence competes with the
+ *  status hues on the stage rows below. The last step drops its connector. */
 function Step({
   n,
   title,
@@ -80,22 +81,14 @@ function Step({
   return (
     <div className="flex gap-3">
       <div className="flex flex-col items-center pt-0.5">
-        <span
-          aria-hidden="true"
-          className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[11px] font-semibold"
-          style={{
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--border-strong)',
-            color: 'var(--text-primary)',
-          }}
-        >
+        <span aria-hidden="true" className="cl-bead">
           {n}
         </span>
-        {!last && <span className="mt-1 w-px flex-1" style={{ background: 'var(--border-strong)', minHeight: 14 }} />}
+        {!last && <span className="mt-1 w-px flex-1" style={{ background: 'var(--border-default)', minHeight: 14 }} />}
       </div>
       <div className={`min-w-0 flex-1 ${last ? '' : 'pb-4'}`}>
         {title && (
-          <div className="mb-1.5 text-[11px] font-medium" style={{ color: 'var(--text-secondary)' }}>
+          <div className="cl-type-title mb-1.5 text-primary">
             {title}
           </div>
         )}
@@ -197,7 +190,7 @@ export function FlightStartDialog({
           the collapsible journey list. Fresh mode has no resume: changing the
           inputs is the restart. */}
       {!newFlight && !freshMode && entry?.canContinue && (
-        <div className="overflow-hidden rounded-md border" style={{ borderColor: 'var(--border-default)' }}>
+        <div className="cl-ledger">
           <StageRow
             testId="flight-start-continue"
             selected={picked === 'continue'}
@@ -213,14 +206,13 @@ export function FlightStartDialog({
       {/* R69: the whole flight as a collapsible preview. Greyed + locked for a
           first flight (the journey, for the record); the live re-entry control
           once flown. */}
-      <div className="overflow-hidden rounded border" style={{ borderColor: 'var(--border-default)' }}>
+      <div className="cl-ledger">
         <button
           type="button"
           data-testid="flight-steps-toggle"
           aria-expanded={showSteps}
           onClick={() => setShowSteps((v) => !v)}
           className="cl-hover-row flex w-full items-center gap-2 px-3 py-2 text-left"
-          style={{ background: 'var(--bg-selected)' }}
         >
           <span
             aria-hidden="true"
@@ -229,10 +221,10 @@ export function FlightStartDialog({
           >
             <ChevronRightIcon />
           </span>
-          <span className="text-[12px] font-medium" style={{ color: 'var(--text-primary)' }}>The full flight</span>
-          <span className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{stepCount} steps, fully automated</span>
+          <span className="cl-type-title text-primary">The full flight</span>
+          <span className="cl-aside">{stepCount} steps, fully automated</span>
           {(newFlight || freshMode) && (
-            <span className="ml-auto text-[10.5px]" style={{ color: 'var(--text-secondary)' }}>
+            <span className="cl-aside ml-auto">
               {freshMode ? 'every step re-runs' : 'start from any step after the first flight'}
             </span>
           )}
@@ -448,8 +440,7 @@ export function FlightStartDialog({
                   // mid-pipeline — the surviving artifacts were built from it.
                   <blockquote
                     data-testid="flight-start-frozen-intent"
-                    className="rounded border-l-2 py-1 pl-2.5 text-[12px]"
-                    style={{ borderColor: 'var(--accent)', color: 'var(--text-secondary)' }}
+                    className="cl-quote-rail cl-type-body py-1.5 pl-2.5 text-secondary"
                   >
                     {entry?.prefill.description || '—'}
                   </blockquote>
@@ -462,14 +453,14 @@ export function FlightStartDialog({
                   />
                 )}
                 {hasRecord && !freshMode && (
-                  <div className="mt-1.5 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                  <div className="cl-aside mt-1.5">
                     {editableInputs
                       ? 'Prefilled from the last flight — editable because you’re starting from the beginning.'
                       : 'Locked, because earlier steps already used these. Pick "Start fresh — from the beginning" below to change them.'}
                   </div>
                 )}
                 {freshMode && (
-                  <div className="mt-1.5 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                  <div className="cl-aside mt-1.5">
                     Prefilled from the last flight.
                   </div>
                 )}
@@ -515,7 +506,7 @@ export function FlightStartDialog({
             </div>
 
             {hasRecord && (
-              <div data-testid="flight-start-reset-note" className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+              <div data-testid="flight-start-reset-note" className="cl-aside">
                 {freshMode
                   ? 'The last attempt is wiped first — docs, tests, saved settings, run and report.'
                   : picked === 'continue'

@@ -32,7 +32,8 @@ import type { InvalidationTopic } from './invalidation-bus'
 export interface LiveResource<T> {
   /** The last resolved value; `null` before the first resolve, when `key` is
    *  null, or when the fetch failed. A failure reads the same as absent, which
-   *  is what every current caller renders — a missing card, not an error. */
+   *  is what ordinary reads render. Polling tasks retain their last snapshot
+   *  through failed reads so a network error cannot erase a running task. */
   value: T | null
   /** True while a fetch is in flight, including refetches. Lets a caller hold a
    *  skeleton in place instead of flashing an empty state mid-refresh. */
@@ -72,6 +73,9 @@ export function useLiveResource<T>(
      *  inferred key would hand one resource the other's value. Omit for a
      *  resource that must never paint stale. */
     cache?: string
+    /** Reconcile an active task when a workspace event is missed. Failed reads
+     *  retain the last snapshot and retry; terminal values stop the reads. */
+    pollWhile?: (value: T | null) => boolean
   } = {},
 ): LiveResource<T> {
   const cacheKey = opts.cache !== undefined && key !== null ? `${opts.cache}:${key}` : null
@@ -83,6 +87,9 @@ export function useLiveResource<T>(
   const fetcherRef = useRef(fetcher)
   fetcherRef.current = fetcher
   const cacheTag = opts.cache
+  const pollWhileRef = useRef(opts.pollWhile)
+  pollWhileRef.current = opts.pollWhile
+  const polling = opts.pollWhile !== undefined
 
   useEffect(() => {
     if (key === null) {
@@ -94,19 +101,35 @@ export function useLiveResource<T>(
     // A key CHANGE (not a remount) paints the new key's cached value — or
     // nothing — immediately, so the pane never shows one stage's figures under
     // another stage's labels while the fetch is in flight.
-    setValue(cacheTag !== undefined ? (lastResolved.get(`${cacheTag}:${key}`) as T | undefined) ?? null : null)
+    let current = cacheTag !== undefined ? (lastResolved.get(`${cacheTag}:${key}`) as T | undefined) ?? null : null
+    setValue(current)
     setLoading(true)
-    fetcherRef.current(key)
-      .then((next) => {
-        if (cacheTag !== undefined) lastResolved.set(`${cacheTag}:${key}`, next ?? null)
-        if (alive) setValue(next ?? null)
-      })
-      .catch(() => { if (alive) setValue(null) })
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
+    let requested = 0
+    let applied = 0
+    const fetch = () => {
+      const request = ++requested
+      fetcherRef.current(key)
+        .then((next) => {
+          if (!alive || request < applied) return
+          applied = request
+          current = next ?? null
+          if (cacheTag !== undefined) lastResolved.set(`${cacheTag}:${key}`, next ?? null)
+          setValue(current)
+        })
+        .catch(() => {
+          // A failed task read is not evidence that the task disappeared.
+          if (alive && request >= applied && !polling) setValue(null)
+        })
+        .finally(() => { if (alive) setLoading(false) })
+    }
+    fetch()
+    const timer = polling ? setInterval(() => {
+      if (pollWhileRef.current?.(current)) fetch()
+    }, 2500) : undefined
+    return () => { alive = false; clearInterval(timer) }
     // `cacheTag` is constant per call site (a literal), so it needs no dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, version])
+  }, [key, version, polling])
 
   return { value, loading }
 }

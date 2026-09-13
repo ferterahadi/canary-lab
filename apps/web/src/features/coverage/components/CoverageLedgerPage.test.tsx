@@ -99,6 +99,7 @@ const LEDGER: CoverageLedger = {
   docsDrift: true,
 }
 
+const openGeneration = vi.fn()
 let container: HTMLDivElement
 
 let root: Root
@@ -125,7 +126,7 @@ afterEach(() => {
 })
 
 async function mount(): Promise<void> {
-  await act(async () => { root.render(<CoverageLedgerPage feature="checkout" onClose={() => {}} />) })
+  await act(async () => { root.render(<CoverageLedgerPage onOpenGeneration={openGeneration} feature="checkout" onClose={() => {}} />) })
   await act(async () => { await Promise.resolve() })
 }
 
@@ -135,6 +136,7 @@ describe('CoverageLedgerPage — flight generating banner (R14)', () => {
     await act(async () => {
       root.render(
         <CoverageLedgerPage
+          onOpenGeneration={openGeneration}
           feature="checkout"
           onClose={() => {}}
           generatingFlight={{ flightId: 'fl_1', stage: 'specs-coverage', stageStatus: 'running' }}

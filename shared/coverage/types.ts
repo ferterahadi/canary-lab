@@ -204,6 +204,12 @@ export interface PathCoverage {
   /** Some claiming test also PASSED in the feature's latest run. Absent when no
    *  run has been recorded for the feature (claim-only view). */
   proven?: boolean
+  /** No claiming test passed, and at least one FAILED in that run. The companion
+   *  to `proven`: without it a failing test and a test nobody has run collapse
+   *  into the same "claimed, unproven" reading, which is the difference between
+   *  a broken promise and an unkept one. Never true alongside `proven` — a pass
+   *  proves the path whatever else failed. Absent when no run was joined. */
+  failed?: boolean
 }
 
 /**
@@ -225,6 +231,9 @@ export interface VariantCellCoverage {
   reason?: string
   /** Some test claiming this cell also PASSED in the feature's latest run. */
   proven?: boolean
+  /** No test claiming this cell passed, and at least one FAILED. Same rule as
+   *  `PathCoverage.failed`; never true alongside `proven`. */
+  failed?: boolean
 }
 
 /**

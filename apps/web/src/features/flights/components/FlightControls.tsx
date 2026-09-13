@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import * as api from '@/shared/api/client'
 import type { FlightManifest, FlightStageKey, FlightStageStatus } from '@/shared/api/client'
 import { Modal, useEscapeToClose } from '@/shared/ui/atoms'
@@ -311,14 +311,11 @@ export function RedoFlightDialog({
             onClick={onStartFresh}
             className="cl-hover-row -mb-2 flex items-start gap-3 rounded-md px-3.5 py-2 text-left transition-colors"
           >
-            <span
-              aria-hidden="true"
-              className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[10px] border-line text-muted"
-            >
+            <span aria-hidden="true" className="cl-bead mt-px">
               ✎
             </span>
             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="text-[12.5px] font-medium text-secondary">
+              <span className="cl-type-title text-secondary">
                 {START_FRESH_LABEL}
               </span>
               <span className="text-[10.5px] leading-snug text-muted">
@@ -337,7 +334,7 @@ export function RedoFlightDialog({
         <div
           role="radiogroup"
           aria-label="Step to re-run from"
-          className="flex flex-col overflow-hidden rounded-md border border-line"
+          className="cl-ledger"
         >
           {REDO_STAGES.map((s, index) => {
             const { allowed, reason } = entryFor(s.key)
@@ -375,18 +372,14 @@ export function RedoFlightDialog({
                 className={[
                   OPTION_ROW_CLASS,
                   allowed ? 'cl-hover-row' : '',
-                  index > 0 ? 'border-t' : '',
                 ].filter(Boolean).join(' ')}
                 style={optionRowStyle({ selected, disabled: !allowed, interactive: true })}
               >
                 <span
                   aria-hidden="true"
-                  className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[9.5px] font-semibold"
-                  style={{
-                    borderColor: `color-mix(in srgb, ${badgeTone} 55%, var(--border-default))`,
-                    color: badgeTone,
-                    background: 'transparent',
-                  }}
+                  className="cl-bead mt-px"
+                  data-toned={settled ? 'true' : undefined}
+                  style={{ '--cl-bead-tone': badgeTone } as CSSProperties}
                 >
                   {settled ? STAGE_ICON[lastStatus] : index + 1}
                 </span>
@@ -403,8 +396,8 @@ export function RedoFlightDialog({
           })}
         </div>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-medium text-secondary">
-            What went wrong last time? <span className="font-normal text-muted">(optional — added to the agent's prompt)</span>
+          <span className="cl-type-data font-medium text-secondary">
+            What went wrong last time? <span className="cl-aside">(optional — added to the agent's prompt)</span>
           </span>
           <textarea
             data-testid="flight-redo-feedback"

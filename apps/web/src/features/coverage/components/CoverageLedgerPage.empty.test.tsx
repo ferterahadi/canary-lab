@@ -95,6 +95,7 @@ const LEDGER: CoverageLedger = {
   docsDrift: true,
 }
 
+const openGeneration = vi.fn()
 let container: HTMLDivElement
 
 let root: Root
@@ -122,7 +123,7 @@ afterEach(() => {
 })
 
 async function mount(): Promise<void> {
-  await act(async () => { root.render(<CoverageLedgerPage feature="checkout" onClose={() => {}} />) })
+  await act(async () => { root.render(<CoverageLedgerPage onOpenGeneration={openGeneration} feature="checkout" onClose={() => {}} />) })
   await act(async () => { await Promise.resolve() })
 }
 
@@ -296,7 +297,7 @@ describe('CoverageLedgerPage — variant axis (D1)', () => {
   it('ends each channel row with the word its marks add up to', async () => {
     await mount()
     expandR6()
-    expect(container.querySelector('[data-testid="channel-R6-email"] .clcov-grid-word')?.textContent).toBe('has a test · not yet passed')
+    expect(container.querySelector('[data-testid="channel-R6-email"] .clcov-grid-word')?.textContent).toBe('has a test · no result yet')
     expect(container.querySelector('[data-testid="channel-R6-line"] .clcov-grid-word')?.textContent).toBe('no test')
   })
 

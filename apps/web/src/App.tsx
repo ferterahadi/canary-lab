@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FeaturesColumn } from './shared/shell/FeaturesColumn'
 import { TestCasesColumn } from './shared/shell/TestCasesColumn'
 import { RunsColumn } from './features/runs/components/RunsColumn'
@@ -98,7 +98,17 @@ export function App() {
   // R26: per-feature live activity (runs / portify / authoring) — the one
   // instance behind the Flights pill and the flights landing list. Clicking an
   // activity-only row opens the activity's REAL surface.
-  const { activity: featureActivity, externalHistory: featureExternalHistory } = useFeatureWorkState()
+  const { activity: featureActivity, externalHistory: featureExternalHistory, coverageJobs } = useFeatureWorkState()
+  const coverageJobVersion = coverageJobs.map((job) => `${job.jobId}:${job.status}`).join('|')
+  const seenCoverageJobVersion = useRef(coverageJobVersion)
+  useEffect(() => {
+    if (seenCoverageJobVersion.current === coverageJobVersion) return
+    seenCoverageJobVersion.current = coverageJobVersion
+    // A reconciled completion must update stage evidence and the ledger too,
+    // even when the workspace broadcast carrying that completion was lost.
+    refreshFeatures()
+    invalidate('coverage')
+  }, [coverageJobVersion, refreshFeatures, invalidate])
   // Evidence-derived stage rails for flightless picker rows — one instance,
   // same ownership rule as featureActivity (the pill stays presentational).
   const derivedStages = useDerivedFeatureStages(features, featureExternalHistory)
@@ -554,6 +564,13 @@ export function App() {
               onClose={() => returnFlight ? openFlight(returnFlight) : setView('workspace')}
               generatingFlight={coverageGeneratingFlight}
               onOpenFlight={openFlight}
+              coverageJobs={coverageJobs}
+              onOpenGeneration={(job) => {
+                invalidate('coverage')
+                openActivity(job.feature, { kind: job.kind === 'summary' ? 'condensing' : 'mapping', jobId: job.jobId })
+                // Follow the summary → mapping handoff in the Flight rail.
+                setFlightStage(null)
+              }}
             />
           : view === 'flights' && selectedFlightId
           ? <FlightPage
@@ -567,6 +584,7 @@ export function App() {
               indexEntry={flights.find((f) => f.flightId === selectedFlightId) ?? null}
               activity={featureActivity}
               externalHistory={featureExternalHistory}
+              coverageJobs={coverageJobs}
               derivedStages={derivedStages}
               // Select the feature too: the config dialog is qualified by the
               // durable `feature` param, so opening it for a flight's feature

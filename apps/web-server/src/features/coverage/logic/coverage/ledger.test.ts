@@ -324,6 +324,7 @@ describe('computeCoverageLedger — proven axis (latest-run join)', () => {
     expect(ledger.totals.proven).toBeUndefined()
     expect(ledger.requirements[0].proven).toBeUndefined()
     expect(ledger.requirements[0].pathCoverage[0].proven).toBeUndefined()
+    expect(ledger.requirements[0].pathCoverage[0].failed).toBeUndefined()
   })
 
   it('carries the merged-execution flag onto the ledger, and only when set', () => {
@@ -365,6 +366,50 @@ describe('computeCoverageLedger — proven axis (latest-run join)', () => {
     expect(ledger.coveragePct).toBe(100)   // headline untouched
     expect(r.proven).toBe(false)
     expect(ledger.provenPct).toBe(0)
+  })
+
+  it('separates a broken promise from an unkept one: a failing test flags `failed`, a never-run test does not', () => {
+    const requirements = [req('R1', ['happy']), req('R2', ['happy'])]
+    const tests: CoverageTestInput[] = [
+      { name: 'red', requirements: ['R1'], pathTypes: ['happy'], lastRun: { runId: 'r9', passed: false } },
+      { name: 'never ran', requirements: ['R2'], pathTypes: ['happy'] },
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests, provenRunId: 'r9' })
+    const [broken, unkept] = ledger.requirements
+    expect(broken.pathCoverage[0].failed).toBe(true)
+    expect(unkept.pathCoverage[0].failed).toBe(false)
+    // Neither is proven — `failed` is the only thing telling them apart.
+    expect(broken.pathCoverage[0].proven).toBe(false)
+    expect(unkept.pathCoverage[0].proven).toBe(false)
+  })
+
+  it('a pass wins: a path with one green and one red test is proven, not failed', () => {
+    const requirements = [req('R1', ['happy'])]
+    const tests: CoverageTestInput[] = [
+      { name: 'green', requirements: ['R1'], pathTypes: ['happy'], lastRun: { runId: 'r9', passed: true } },
+      { name: 'red', requirements: ['R1'], pathTypes: ['happy'], lastRun: { runId: 'r9', passed: false } },
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests, provenRunId: 'r9' })
+    const p = ledger.requirements[0].pathCoverage[0]
+    expect(p.proven).toBe(true)
+    expect(p.failed).toBe(false)
+  })
+
+  it('variant cells carry `failed` on the same pass-wins rule, and N/A cells carry neither', () => {
+    const requirements = [req('R1', ['happy'], {
+      variants: ['email', 'sms', 'post'],
+      variantsNA: [{ variant: 'post', reason: 'not a channel here' }],
+    })]
+    const tests: CoverageTestInput[] = [
+      { name: 'email-ok', requirements: ['R1'], pathTypes: ['happy'], variants: ['email'], lastRun: { runId: 'r9', passed: true } },
+      { name: 'email-red', requirements: ['R1'], pathTypes: ['happy'], variants: ['email'], lastRun: { runId: 'r9', passed: false } },
+      { name: 'sms-red', requirements: ['R1'], pathTypes: ['happy'], variants: ['sms'], lastRun: { runId: 'r9', passed: false } },
+    ]
+    const cells = computeCoverageLedger({ feature: 'f', requirements, tests, provenRunId: 'r9' }).requirements[0].variantCoverage ?? []
+    const cell = (v: string) => cells.find((c) => c.variant === v)
+    expect(cell('email')?.failed).toBe(false) // a green test covers the red one
+    expect(cell('sms')?.failed).toBe(true)
+    expect(cell('post')?.failed).toBe(false)  // N/A: nothing to prove, nothing to break
   })
 
   it('a test that never ran (no lastRun) claims but never proves', () => {

@@ -138,6 +138,11 @@ is incomplete,
 underlying dates sit on the verdict's dot. The header states how many requirements are proven unchanged in
 the latest run.
 
+**Generate** opens the suite's Flight page and follows Requirements → Tests &
+coverage. Activity shows the live summary and mapping sessions, with their
+history available after completion. Return to Coverage to inspect the resulting
+requirements, test mappings, and gaps.
+
 Regenerating the PRD summary preserves surviving requirement IDs. Changes to
 source docs mark the summary and dependent coverage state stale instead of
 silently reusing old mappings. See [FEATURES](FEATURES.md#requirement-coverage)

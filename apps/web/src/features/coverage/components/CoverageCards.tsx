@@ -73,15 +73,18 @@ export const PATH_DESC: Record<string, string> = { happy: 'happy', sad: 'failure
  *  square stands for. The mark mirrors the square's own fill, so the reader maps
  *  line to square by position and by shape; nothing has to explain the symbols,
  *  because the only thing missing from an anonymous square was its name. */
-const SEGMENT_MARK: Record<SegmentState, string> = { off: '□', claimed: '■', proven: '▣' }
+const SEGMENT_MARK: Record<SegmentState, string> = { off: '□', claimed: '■', failed: '▨', proven: '▣' }
 function segmentTooltip(verdict: string, segments: CoverageSegment[]): string {
   const claimed = segments.filter((s) => s.covered).length
   const proven = segments.filter((s) => s.proven).length
+  const failing = segments.filter((s) => segmentState(s) === 'failed').length
   const key = segments.map((s) => `${SEGMENT_MARK[segmentState(s)]} ${s.label} — ${SEGMENT_WORD[segmentState(s)]}`)
   // Both numbers, because they are the two different questions the strip answers.
   // "mapped" rather than "covered": the good state's verdict word IS "Covered", and
   // "Covered — 3 of 3 covered" reads as a stutter. Mapped is the ledger's own verb.
-  return [`${verdict} — ${claimed} of ${segments.length} mapped, ${proven} proven`, ...key].join('\n')
+  // A failing count only appears when there is one: it is news, not a standing field.
+  const counts = `${claimed} of ${segments.length} mapped, ${proven} proven${failing > 0 ? `, ${failing} failing` : ''}`
+  return [`${verdict} — ${counts}`, ...key].join('\n')
 }
 
 // Requirements list is ordered worst-first (uncovered → partial → covered) so the
@@ -157,14 +160,30 @@ export function verdictView(rc: RequirementCoverage, e: RequirementEnforcement):
       color: 'var(--danger)',
     }
   }
+  // A red square in the strip outranks every time-axis reading below it. The axis
+  // measures the newest run that passed EVERYTHING, which can be an older run than
+  // the latest — so a requirement proved in run 5 and broken in run 7 still derives
+  // `proven-unchanged`, and without this branch the panel would say "Proven" over a
+  // row of rose squares. Latest-run truth wins.
+  const failing = coverageSegments(rc).filter((seg) => segmentState(seg) === 'failed')
+  if (failing.length > 0) {
+    const cases = [...new Set(failing.map((seg) => seg.variant ?? seg.path))]
+    return {
+      label: failing.length === 1 ? 'A test is failing' : 'Tests are failing',
+      detail: `${joinNatural(cases)} ${cases.length === 1 ? 'has a test that' : 'have tests that'} failed in the latest run. Fix the app — never the test.`,
+      color: 'var(--danger)',
+    }
+  }
   // Every remaining state needs a proof to be measured against. Without one the
-  // honest reading is simply that nothing has proved it yet.
+  // honest reading is simply that nothing has proved it yet — and that is what the
+  // sky squares above already say, so the dot takes their hue rather than amber.
+  // Amber is reserved here for the two verdicts the squares CANNOT show: a proof
+  // that has gone out of date, and wording that moved after it.
   if (!proof) {
     return {
       label: 'Not proven yet',
       detail: 'No run has passed every test mapped to this requirement.',
-      color: 'var(--warning)',
-      hollow: true,
+      color: 'var(--running)',
     }
   }
   if (e.state === 'proven-unchanged') {
@@ -240,19 +259,27 @@ export function countFor(ledger: CoverageLedger, g: GapType): number {
 // and the Accept lever. Facts as a `·`-separated strip in the muted hue — the
 // row's dot already carries the verdict colour, so the strip stays neutral.
 
-/** The three things a square can say, in the order they improve. One vocabulary
+/** The four things a square can say, in the order they improve. One vocabulary
  *  for the resting strip, the per-channel grid and the band marks, so the reader
- *  learns ONE mark: hollow = nothing claims this, sky = a test claims it, green =
- *  a run passed it. The two filled states are the product's whole thesis, so they
- *  get two hues from the documented status vocabulary — sky is "in progress",
- *  which is precisely a claim awaiting its proof, and green stays the only hue
- *  that means evidence. */
-export type SegmentState = 'off' | 'claimed' | 'proven'
-export const segmentState = (seg: { covered: boolean; proven: boolean }): SegmentState =>
-  seg.proven ? 'proven' : seg.covered ? 'claimed' : 'off'
+ *  learns ONE mark: hollow = nothing claims this, sky = a test claims it, rose =
+ *  a test claims it and FAILED, green = a run passed it. The filled states are
+ *  the product's whole thesis, so they take hues from the documented status
+ *  vocabulary — sky is "in progress", which is precisely a claim awaiting its
+ *  proof; rose is the failure hue everywhere else; and green stays the only hue
+ *  that means evidence.
+ *
+ *  `failed` exists because sky was carrying three different realities at once —
+ *  a test that ran and failed, a test skipped or absent from the last run, and a
+ *  suite that has never run — so a broken promise and an unkept one drew the
+ *  identical square. A pass still wins the cell: `proven` is checked first, and
+ *  the ledger only sets `failed` where nothing passed. */
+export type SegmentState = 'off' | 'claimed' | 'failed' | 'proven'
+export const segmentState = (seg: { covered: boolean; proven: boolean; failed?: boolean }): SegmentState =>
+  seg.proven ? 'proven' : seg.failed ? 'failed' : seg.covered ? 'claimed' : 'off'
 export const SEGMENT_WORD: Record<SegmentState, string> = {
   off: 'no test',
-  claimed: 'has a test · not yet passed',
+  claimed: 'has a test · no result yet',
+  failed: 'has a test · it failed',
   proven: 'passed',
 }
 
@@ -276,6 +303,8 @@ export interface CoverageSegment {
    *  strip painted a claim in `--success` — the hue that means "passed"
    *  everywhere else — under a panel that said "Last proved: never". */
   proven: boolean
+  /** Nothing claiming this unit passed, and something claiming it FAILED. */
+  failed: boolean
 }
 
 /** One segment per unit of coverage the row promises: the declared paths, or —
@@ -287,12 +316,12 @@ export interface CoverageSegment {
 export function coverageSegments(rc: RequirementCoverage): CoverageSegment[] {
   const cells = rc.variantCoverage ?? []
   if (cells.length === 0) {
-    return rc.pathCoverage.map((p) => ({ label: p.path, path: p.path, covered: p.covered, proven: p.proven === true }))
+    return rc.pathCoverage.map((p) => ({ label: p.path, path: p.path, covered: p.covered, proven: p.proven === true, failed: p.failed === true }))
   }
   const na = new Set(cells.filter((c) => c.applicable === false).map((c) => c.variant))
   return cells
     .filter((c) => !na.has(c.variant))
-    .map((c) => ({ label: `${c.path} · ${c.variant}`, path: c.path, variant: c.variant, covered: c.covered, proven: c.proven === true }))
+    .map((c) => ({ label: `${c.path} · ${c.variant}`, path: c.path, variant: c.variant, covered: c.covered, proven: c.proven === true, failed: c.failed === true }))
 }
 /** The panel's conclusion, drawn under the marks it is drawn FROM. One line: a
  *  mark and the situation. The coverage bands above already name the missing
@@ -304,14 +333,19 @@ function VerdictLine({ rc, enforcement: e }: { rc: RequirementCoverage; enforcem
     e.testsChangedAt ? `Tests changed ${day(e.testsChangedAt.at)} (${e.testsChangedAt.verdict})` : 'No recorded test change',
     `Wording last written ${day(e.wordingChangedAt)}`,
   ].join('\n')
+  // The dot repeats the sentence's own hue, so what it explains on hover is the
+  // EVIDENCE behind that sentence — the three dates the state is derived from —
+  // under the verdict itself, so a reader who hovers the mark never has to hold
+  // the label in their head to make sense of the dates.
   return (
     <p className="clcov-verdict" data-testid={`proof-verdict-${rc.requirement.id}`}>
-      <span
-        className="clcov-verdict-dot"
-        data-hollow={v.hollow ? 'true' : 'false'}
-        title={dates}
-        style={v.hollow ? { boxShadow: `inset 0 0 0 1px ${v.color}` } : { background: v.color }}
-      />
+      <Tooltip label={[v.label, v.detail, '', dates].join('\n')} placement="top">
+        <span
+          className="clcov-verdict-dot"
+          data-hollow={v.hollow ? 'true' : 'false'}
+          style={v.hollow ? { boxShadow: `inset 0 0 0 1px ${v.color}` } : { background: v.color }}
+        />
+      </Tooltip>
       <span className="clcov-verdict-label">{v.label}</span>
     </p>
   )
@@ -346,17 +380,19 @@ export function behaviourBuckets(happyText: string | null, unhappyText: string |
  *  requirement WITH channels drew the identical fact another way, in a table. */
 function BehaviourBand({ rc, bucket }: { rc: RequirementCoverage; bucket: BehaviourBucket }) {
   return (
-    <div className="clcov-band" data-testid={`behaviour-${bucket.key}-${rc.requirement.id}`}>
-      <span className="clcov-band-name">{bucket.label}</span>
+    <div className="cl-band" data-testid={`behaviour-${bucket.key}-${rc.requirement.id}`}>
+      <span className="cl-rubric-strong">{bucket.label}</span>
       <p className="clcov-path-text">{bucket.text}</p>
     </div>
   )
 }
 
 /** The reading a row of marks adds up to: one bad cell makes the whole promise
- *  unproven, so the WORST state is the honest summary word. */
+ *  unproven, so the WORST state is the honest summary word. A missing test beats
+ *  a failing one beats an unproven claim — the same order the squares improve in. */
 export function worstState(segments: CoverageSegment[]): SegmentState {
   if (segments.some((seg) => !seg.covered)) return 'off'
+  if (segments.some((seg) => segmentState(seg) === 'failed')) return 'failed'
   return segments.every((seg) => seg.proven) ? 'proven' : 'claimed'
 }
 
@@ -432,7 +468,7 @@ function CoverageGrid({ testId, kicker, columns, rows }: { testId: string; kicke
 function PathGrid({ rc }: { rc: RequirementCoverage }) {
   const id = rc.requirement.id
   const rows = rc.pathCoverage.map((p) => {
-    const state = segmentState({ covered: p.covered, proven: p.proven === true })
+    const state = segmentState({ covered: p.covered, proven: p.proven === true, failed: p.failed === true })
     return {
       key: p.path,
       testId: `path-${id}-${p.path}`,
@@ -466,7 +502,7 @@ function ChannelGrid({ rc }: { rc: RequirementCoverage }) {
     const reason = naReason(variant)
     const segments = paths.map((path) => {
       const cell = cells.find((c) => c.path === path && c.variant === variant)
-      return { label: `${path} · ${variant}`, path, variant, covered: cell?.covered ?? false, proven: cell?.proven === true }
+      return { label: `${path} · ${variant}`, path, variant, covered: cell?.covered ?? false, proven: cell?.proven === true, failed: cell?.failed === true }
     })
     return { variant, reason, segments }
   })
@@ -534,12 +570,20 @@ export function RequirementCard({ rc, active, focused, dimmed, onHover }: {
   // requirement is disclosable (the text alone earns it).
   const [expanded, setExpanded] = useState(false)
   const toggle = () => setExpanded((c) => !c)
-  // Red always for a weakened test. Amber only where there is a claim to be
-  // unproven — an untested requirement's hollow squares ARE the gap, and a dot
-  // beside them marks one fact twice (it put 41 amber dots on a suite whose only
-  // real news was "nothing has run yet").
-  const unhealthy = enf && enf.state !== 'proven-unchanged'
-    && (enf.state === 'tests-weakened' || rc.coverageStatus === 'covered') ? enf : null
+  // The dot says ONE thing: the goalpost moved after this requirement was proved.
+  // Nothing else — the squares already report the state, and a mark that repeats
+  // them is noise. That rule was half-applied before: it spared untested rows
+  // ("an untested requirement's hollow squares ARE the gap") but still fired amber
+  // for every never-proven row, which its sky squares already say. Across five
+  // live suites all 17 dots were that case, so the dot carried no information at
+  // all. It now needs an actual proof to have moved away from:
+  //   • a mapped test was weakened — news whether or not a proof exists, and the
+  //     one thing no square can show (a weaker test still passes)
+  //   • a proof exists and something has changed since it (`provenAt` is only ever
+  //     set on a covered requirement, so that guard is implied)
+  // A failing test gets no dot: its square is already rose.
+  const moved = enf && enf.state !== 'proven-unchanged'
+    && (enf.state === 'tests-weakened' || enf.provenAt !== undefined) ? enf : null
   return (
     <div
       className="clcov-row"
@@ -575,8 +619,13 @@ export function RequirementCard({ rc, active, focused, dimmed, onHover }: {
             <span className="clcov-segn">{claimed}/{segments.length}</span>
           </span>
         </Tooltip>
-        {unhealthy ? (
-          <span className="clcov-alert" data-testid={`enf-${id}`} title={enforcementTooltip(rc, unhealthy)} style={{ background: verdictView(rc, unhealthy).color }} />
+        {/* Through the shared Tooltip, like the strip beside it: a 6px dot is the
+            most cryptic mark on the row, so its explanation has to arrive on hover
+            rather than after the ~1s a native `title` waits. */}
+        {moved ? (
+          <Tooltip label={enforcementTooltip(rc, moved)} placement="top">
+            <span className="clcov-alert" data-testid={`enf-${id}`} style={{ background: verdictView(rc, moved).color }} />
+          </Tooltip>
         ) : (
           <span className="clcov-alert" aria-hidden="true" />
         )}
@@ -589,7 +638,7 @@ export function RequirementCard({ rc, active, focused, dimmed, onHover }: {
         <div className="clcov-rowdetail" data-testid={`req-detail-${id}`}>
           <p className="clcov-req-text">{text}</p>
           {bands.length > 0 && (
-            <div className="clcov-bands" data-testid={`behaviour-${id}`}>
+            <div className="cl-bands clcov-bands" data-testid={`behaviour-${id}`}>
               {bands.map((b) => <BehaviourBand key={b.key} rc={rc} bucket={b} />)}
             </div>
           )}

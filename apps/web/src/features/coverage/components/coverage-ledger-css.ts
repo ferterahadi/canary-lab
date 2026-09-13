@@ -11,34 +11,29 @@ export const COVERAGE_CSS = `
 @keyframes clcov-sheen{0%{background-position:200% 0}100%{background-position:-200% 0}}
 @media (prefers-reduced-motion:reduce){.clcov-head[data-generating='true']::after{animation:none;background:var(--running)}}
 .clcov-title{display:flex;flex-direction:column;line-height:1.18;min-width:0}
-.clcov-eyebrow{font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)}
 .clcov-feature{font-size:13.5px;font-weight:600;color:var(--text-primary);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40ch}
 .clcov-close{appearance:none;cursor:pointer;white-space:nowrap;font-size:12px;font-weight:500;color:var(--text-secondary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:6px 12px;transition:background .12s,color .12s,border-color .12s}
 .clcov-close:hover{color:var(--text-primary);background:var(--bg-hover);border-color:var(--border-strong)}
 /* ── Empty main (no summary yet) ───────────────────────────────────────────────
    A left-aligned block centred in the column: prose reads badly centred, and three
-   numbered steps are a list, not a headline. The steps are hairline-separated NAMED
-   bands (the .clcov-band shape), so they read as a sequence of facts rather than one
-   paragraph, and every colour is a token so both themes come free. */
+   numbered steps are a list, not a headline. The steps are the shared .cl-ladder
+   (hairline-separated named steps, each led by a .cl-bead), so they read as a
+   sequence of facts rather than one paragraph, and every colour is a token so both
+   themes come free. */
 .clcov-empty{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:10px;min-height:100%;width:min(560px,100%);margin:0 auto;padding:48px 28px}
 .clcov-empty-mark{display:flex;align-items:center;justify-content:center;width:36px;height:36px;margin-bottom:2px;border-radius:var(--radius-lg);border:1px solid var(--border-default);background:var(--bg-surface);color:var(--border-strong)}
 .clcov-empty-h{margin:0;font-size:15px;font-weight:600;line-height:1.35;letter-spacing:-.01em;color:var(--text-primary)}
 .clcov-empty-p{margin:0;font-size:12.5px;line-height:1.6;color:var(--text-secondary)}
-/* The ladder. The visible number is authored and aria-hidden, so a reader gets the
-   <ol> semantics and the chip stays decoration. */
-.clcov-empty-steps{list-style:none;margin:8px 0 0;padding:12px 0 0;width:100%;display:flex;flex-direction:column;border-top:1px solid var(--border-default)}
-.clcov-empty-step{display:flex;align-items:flex-start;gap:11px;padding:10px 0}
-.clcov-empty-step+.clcov-empty-step{border-top:1px solid var(--border-default)}
-.clcov-empty-step:first-child{padding-top:0}
-.clcov-empty-step:last-child{padding-bottom:0}
-.clcov-empty-n{flex:none;display:flex;align-items:center;justify-content:center;width:19px;height:19px;margin-top:1px;border-radius:50%;border:1px solid var(--border-default);font-family:var(--font-mono);font-size:10.5px;line-height:1;color:var(--text-muted);font-variant-numeric:tabular-nums}
-.clcov-empty-body{min-width:0;display:flex;flex-direction:column;gap:3px}
+/* Where this pane puts the shared ladder. The shape is .cl-ladder in styles.css;
+   only its placement under the prose is local. The visible number is authored and
+   aria-hidden, so a reader gets the <ol> semantics and the bead stays decoration. */
+.clcov-empty-steps{margin:8px 0 0;padding:12px 0 0;width:100%;border-top:1px solid var(--border-default)}
 .clcov-empty-name{font-size:12.5px;font-weight:600;line-height:1.35;color:var(--text-primary)}
 .clcov-empty-say{margin:0;font-size:12px;line-height:1.55;color:var(--text-secondary)}
 .clcov-empty-act{align-self:flex-start;margin-top:6px;padding:4px 10px;font-size:11.5px}
-/* The closing fact sits in the page's mono aside register (.clcov-sub), so it reads
+/* The closing fact sits in the shared mono aside register (.cl-aside), so it reads
    as small print about the mechanism rather than a fourth step. */
-.clcov-empty-foot{margin:14px 0 0;padding-top:12px;width:100%;border-top:1px solid var(--border-default);font-family:var(--font-mono);font-size:10.5px;line-height:1.6;color:var(--text-muted)}
+.clcov-empty-foot{margin:14px 0 0;padding-top:12px;width:100%;border-top:1px solid var(--border-default)}
 
 /* Stat bar: a headline block, then two strips. The strips sit beside the headline at
    every usable width — narrowing tightens the headline rather than moving it, so the
@@ -57,10 +52,13 @@ export const COVERAGE_CSS = `
 .clcov-hero-alert{display:inline-block;vertical-align:middle;margin-left:7px;cursor:help}
 .clcov-pct{font-size:26px;font-weight:500;line-height:1;letter-spacing:-.02em;color:var(--text-primary);font-variant-numeric:tabular-nums}
 .clcov-sentence{margin-top:3px;font-size:12.5px;line-height:1.35;color:var(--text-primary)}
+/* The proof readout: the ring's two coloured slices in words. Mono and muted so it
+   reads as a measurement under the sentence, not a second sentence competing with it. */
+.clcov-proof{margin-top:3px;font-family:var(--font-mono);font-size:10.5px;line-height:1.4;color:var(--text-muted);font-variant-numeric:tabular-nums;cursor:help}
 /* The headline's card: one mono line of ratios; it wraps at spaces so a long run id
    moves whole to a second line. Wider than the headline so that seldom happens. */
 .clcov-sub{font-family:var(--font-mono);font-size:10.5px;line-height:1.5;color:var(--text-muted);font-variant-numeric:tabular-nums;display:block;right:auto;min-width:100%;width:max-content;max-width:min(420px,90cqw)}
-.clcov-sub-sep{color:var(--border-strong);margin:0 4px}
+.clcov-sub-sep{color:var(--border-strong);margin:0 6px}
 .clcov-sub-run{font-family:inherit;font-size:inherit;color:var(--text-secondary);white-space:nowrap}
 .clcov-stale{color:var(--warning);cursor:help;border-bottom:1px dotted color-mix(in srgb,var(--warning) 55%,transparent)}
 /* The two strips stack, one ruler over the other at the same width so they compare;
@@ -86,6 +84,12 @@ export const COVERAGE_CSS = `
    leaves the strip. Same surface as the glossary popover so the two read as one family. */
 .clcov-card{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:10;display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px 18px;padding:10px 12px;border-radius:var(--radius-lg);background:var(--bg-overlay);border:1px solid var(--border-default);box-shadow:var(--shadow-popover);opacity:0;visibility:hidden;transform:translateY(-3px);transition:opacity .14s,transform .14s,visibility .14s}
 .clcov-strip:hover .clcov-card,.clcov-strip:focus-within .clcov-card{opacity:1;visibility:visible;transform:translateY(0)}
+/* The sub card is one sentence of stats, not the legend's grid of figures, so it
+   drops the shared column gap: the separator's own margin is then the only space
+   between items. 18px each side of a middot reads as a layout gap rather than as
+   punctuation. Compound selector because .clcov-card is declared after .clcov-sub
+   and would otherwise win on source order. Row gap stays for the wrapped case. */
+.clcov-card.clcov-sub{gap:4px 0;padding:7px 10px}
 /* Figures: the number at reading size over its word and dot. The selected state is the
    neutral selected surface — the dot already carries the hue. A lit segment dims the
    other figures (and a lit figure dims the other segments) so bar and words read as one. */
@@ -156,7 +160,7 @@ export const COVERAGE_CSS = `
 .clcov-rowhead:focus-visible{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--accent) 60%,transparent)}
 .clcov-caret{flex:none;width:10px;font-size:10px;line-height:1;color:var(--text-muted)}
 .clcov-rowid{flex:none;width:var(--clcov-id-w);font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted);font-variant-numeric:tabular-nums}
-.clcov-rowtitle{flex:1 1 auto;min-width:0;font-size:12.5px;line-height:1.4;color:var(--text-primary);overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.clcov-rowtitle{flex:1 1 auto;min-width:0;font-size:12.5px;line-height:1.4;color:var(--text-primary);overflow-wrap:break-word;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .clcov-rownote{margin-left:6px;font-size:10.5px;color:var(--text-muted)}
 /* The mono fact strip on a test row: R1 · happy. The requirement id is the jump link.
    Two fixed sub-columns, each right-aligned, so the tags and the paths each keep a
@@ -189,6 +193,7 @@ export const COVERAGE_CSS = `
    (green — evidence). Green is spent only on the second. */
 .clcov-seg{flex:none;width:8px;height:8px;border-radius:2px;background:var(--running)}
 .clcov-seg[data-seg='off']{background:transparent;box-shadow:inset 0 0 0 1px var(--border-strong)}
+.clcov-seg[data-seg='failed']{background:var(--danger)}
 .clcov-seg[data-seg='proven']{background:var(--success)}
 .clcov-segn{margin-left:5px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted);font-variant-numeric:tabular-nums}
 /* The one dot at the right edge (proof health / test strength). Always laid out so
@@ -213,7 +218,7 @@ export const COVERAGE_CSS = `
    already owns just puts a line of noise between them and the content. */
 /* The path chips of a 1-axis requirement. */
 /* A pane-level aside (the orphan count) in the same mono register as the row facts. */
-.clcov-note{display:flex;align-items:center;gap:7px;margin-bottom:8px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)}
+.clcov-note{display:flex;align-items:center;gap:7px;margin-bottom:8px}
 .clcov-skel{display:inline-block;border-radius:var(--radius-sm);background:color-mix(in srgb,var(--text-muted) 16%,var(--bg-base))}
 /* One loading language: the sweep is the shared .cl-skeleton animation
    (styles.css) layered over this row's own fill — the ledger used to carry a
@@ -228,16 +233,12 @@ export const COVERAGE_CSS = `
 .clcov-source .shiki-block pre{max-height:360px;overflow:auto}
 .clcov-source-note{font-size:11.5px;color:var(--text-muted)}
 
-/* One promise per band: its name and its sentence. Hairline-separated so the
-   bands read as a stack of NAMED facts rather than one run-on block. No marks
-   here — every square a requirement owns is drawn in the grid below, whichever
-   grid that is. */
-.clcov-bands{display:flex;flex-direction:column;gap:0;margin-top:10px;padding-top:10px;border-top:1px solid var(--border-default)}
-.clcov-band{display:flex;flex-direction:column;gap:3px;padding:7px 0}
-.clcov-band+.clcov-band{border-top:1px solid var(--border-default)}
-.clcov-band:first-child{padding-top:0}
-.clcov-band:last-child{padding-bottom:0}
-.clcov-band-name{font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--text-secondary)}
+/* One promise per band: its name and its sentence. The stack is the shared
+   .cl-bands / .cl-band shape (hairline-separated NAMED facts rather than one
+   run-on block), named with .cl-rubric-strong; only its placement under the
+   requirement's wording is local. No marks here — every square a requirement owns
+   is drawn in the grid below, whichever grid that is. */
+.clcov-bands{margin-top:10px;padding-top:10px;border-top:1px solid var(--border-default)}
 
 /* The coverage table, shared by both readings: channels down with paths across,
    or the declared paths down with one lane of marks.
@@ -263,6 +264,7 @@ export const COVERAGE_CSS = `
 .clcov-grid-row[data-na='true'] .clcov-grid-name{color:var(--text-muted)}
 .clcov-cellmark{justify-self:center;width:8px;height:8px;border-radius:2px;background:var(--running)}
 .clcov-cellmark[data-seg='off']{background:transparent;box-shadow:inset 0 0 0 1px var(--border-strong)}
+.clcov-cellmark[data-seg='failed']{background:var(--danger)}
 .clcov-cellmark[data-seg='proven']{background:var(--success)}
 .clcov-cellmark[data-seg='na']{background:transparent;box-shadow:inset 0 0 0 1px var(--border-default);opacity:.6}
 

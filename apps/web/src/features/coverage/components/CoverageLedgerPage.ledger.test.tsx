@@ -52,6 +52,7 @@ vi.mock('@/shared/api/client', async () => {
   }
 })
 
+const openGeneration = vi.fn()
 let container: HTMLDivElement
 
 export let root: Root
@@ -98,8 +99,8 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-async function mount(): Promise<void> {
-  await act(async () => { root.render(<CoverageLedgerPage feature="checkout" onClose={() => {}} />) })
+async function mount(coverageJobs: import('@/shared/api/types').CoverageJobIndexEntry[] = []): Promise<void> {
+  await act(async () => { root.render(<CoverageLedgerPage onOpenGeneration={openGeneration} coverageJobs={coverageJobs} feature="checkout" onClose={() => {}} />) })
   await act(async () => { await Promise.resolve() })
 }
 
@@ -163,7 +164,7 @@ describe('CoverageLedgerPage', () => {
     // same square the strip uses, so nothing has to be translated across the caret.
     expect(container.querySelector('[data-testid="path-grid-R1"]')).toBeNull()
     act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
-    expect(container.querySelector('[data-testid="path-R1-happy"]')?.textContent).toContain('has a test · not yet passed')
+    expect(container.querySelector('[data-testid="path-R1-happy"]')?.textContent).toContain('has a test · no result yet')
     expect(container.querySelector('[data-testid="path-R1-sad"]')?.textContent).toContain('no test')
     // One table per requirement, never both: a channel-less requirement gets the
     // per-path reading of exactly the squares its resting strip drew.
@@ -300,108 +301,87 @@ describe('CoverageLedgerPage', () => {
     expect(api.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary', undefined)
   })
 
-  it('shows the dedicated Generating screen while a job runs, not the ledger (R13)', async () => {
-    let resolveJob: (m: import('@/shared/api/types').CoverageJobManifest) => void = () => {}
+  it('Generate starts one summary job and hands its durable identity to Flight', async () => {
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
-    vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: 'summarizing…' })
-    vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
+    const job = { jobId: 'j1', feature: 'checkout', kind: 'summary' as const, status: 'running' as const, startedAt: 'now', log: '' }
+    vi.mocked(api.startCoverageJob).mockResolvedValue(job)
     await mount()
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.click()
-      await Promise.resolve()
-    })
-    // The generating pane owns the screen; the ledger panes are gone.
-    expect(container.querySelector('[data-testid="coverage-generating"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
-    expect(container.querySelector('[data-testid="generating-phases"]')).toBeTruthy()
-    // Avoid leaking the pending getCoverageJob promise.
-    resolveJob({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')!.click() })
+    expect(api.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary', undefined)
+    expect(openGeneration).toHaveBeenCalledWith(job)
+    expect(container.querySelector('[data-testid="coverage-generating"]')).toBeNull()
+    expect(api.getCoverageJob).not.toHaveBeenCalled()
   })
 
-  it('puts the Tests pane (3rd column) in a loading state while generating — skeleton cards, no real test cases', async () => {
-    let resolveJob: (m: import('@/shared/api/types').CoverageJobManifest) => void = () => {}
+  it('preserves the model confirmation before handing the launched job to Flight', async () => {
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
-    vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: 'summarizing…' })
-    vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
+    vi.mocked(api.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null, askModelsOnLaunch: true })
+    const job = { jobId: 'gated', feature: 'checkout', kind: 'summary' as const, status: 'running' as const, startedAt: 'now', log: '' }
+    vi.mocked(api.startCoverageJob).mockResolvedValue(job)
     await mount()
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.click()
-      await Promise.resolve()
-    })
-    // Tests pane stays mounted, but the whole mapping is being recomputed, so the
-    // test cards are held back entirely: a mapping note + placeholder skeleton
-    // cards, NOT the real test names/chips that would read as "already done".
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')!.click() })
+    expect(api.startCoverageJob).not.toHaveBeenCalled()
+    expect(openGeneration).not.toHaveBeenCalled()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="gate-confirm"]')!.click() })
+    expect(api.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary', undefined)
+    expect(openGeneration).toHaveBeenCalledWith(job)
+  })
+
+  it('shows the Flight link when reopening results during generation, without a second progress viewer', async () => {
+    const job = { jobId: 'j1', feature: 'checkout', kind: 'summary' as const, status: 'running' as const, startedAt: 'now' }
+    await mount([job])
+    expect(container.querySelector('[data-testid="coverage-generating"]')).toBeNull()
+    expect(container.querySelector('[data-testid="prd-pane"]')).toBeTruthy()
+    const banner = container.querySelector('[data-testid="coverage-job-running"]')!
+    await act(async () => { banner.querySelector('button')!.click() })
+    expect(openGeneration).toHaveBeenCalledWith(job)
+  })
+
+  it('keeps test mappings in a loading state while the shared Flight job is running', async () => {
+    await mount([{ jobId: 'j1', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: 'now' }])
     expect(container.querySelector('[data-testid="tests-pane"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="tests-remapping-note"]')).toBeTruthy()
     expect(container.querySelectorAll('[data-testid="test-skeleton"]').length).toBeGreaterThan(0)
     expect(container.querySelector('[data-testid="test-adds item"]')).toBeNull()
-    expect(container.querySelector('[data-testid="orphan-tests-note"]')).toBeNull()
-    // Avoid leaking the pending getCoverageJob promise.
-    resolveJob({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
   })
 
-  it('re-lists the rail docs when generation completes so the generated PRD doc appears (items 1+2)', async () => {
-    // A summary job that completes and chains a coverage job, which also completes.
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
-    vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: '' })
-    vi.mocked(api.getCoverageJob).mockImplementation(async (id: string) => (
-      id === 'j1'
-        ? { jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', chainedJobId: 'j2', startedAt: 'now', log: 'summary done' }
-        : { jobId: 'j2', feature: 'checkout', kind: 'coverage', status: 'done', startedAt: 'now', log: 'coverage done' }
-    ))
-    await mount()
-    await act(async () => { await Promise.resolve() })
+  it('refreshes source docs and results when the shared job completes without a workspace event', async () => {
+    const job = { jobId: 'j1', feature: 'checkout', kind: 'coverage' as const, status: 'running' as const, startedAt: 'now' }
+    await mount([job])
     const before = vi.mocked(api.listFeatureDocs).mock.calls.length
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.click()
-      await Promise.resolve()
-    })
-    // Flush the pollJob chain + the rail's reload effect.
-    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve() })
-    // The rail re-fetched its doc list on completion — no manual refresh needed,
-    // so the generated _prd-summary.md pill shows up live.
+    await mount([{ ...job, status: 'done' }])
     expect(vi.mocked(api.listFeatureDocs).mock.calls.length).toBeGreaterThan(before)
+    expect(container.querySelector('[data-testid="test-adds item"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="coverage-job-running"]')).toBeNull()
   })
 
-  it('rehydrates a running job on mount so a refresh restores the Generating screen (R18)', async () => {
-    // Server says a coverage job is still running for this feature.
-    vi.mocked(api.listCoverageJobs).mockResolvedValue([
-      { jobId: 'jX', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: '2026-01-01T00:00:01Z' },
-    ])
-    let resolveJob: (m: import('@/shared/api/types').CoverageJobManifest) => void = () => {}
-    vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
+  it('restores a running job from the shared index after a cold mount', async () => {
+    await mount([{ jobId: 'jX', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: 'now' }])
+    expect(container.querySelector('[data-testid="coverage-job-running"]')).toBeTruthy()
+    expect(api.startCoverageJob).not.toHaveBeenCalled()
+    expect(api.listCoverageJobs).not.toHaveBeenCalled()
+  })
+
+  it('attaches to an existing job on conflict instead of creating another lifecycle', async () => {
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
+    const job = { jobId: 'existing', feature: 'checkout', kind: 'summary' as const, status: 'running' as const, startedAt: 'now', log: '' }
+    vi.mocked(api.startCoverageJob).mockRejectedValue(new api.ApiError(409, { existingJobId: job.jobId }, 'already running'))
+    vi.mocked(api.getCoverageJob).mockResolvedValue(job)
     await mount()
-    await act(async () => { await Promise.resolve(); await Promise.resolve() })
-    // Without any click, the Generating screen is restored from the running job.
-    expect(api.listCoverageJobs).toHaveBeenCalledWith('checkout')
-    expect(container.querySelector('[data-testid="coverage-generating"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
-    resolveJob({ jobId: 'jX', feature: 'checkout', kind: 'coverage', status: 'done', startedAt: '2026-01-01T00:00:01Z', log: 'done' })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')!.click() })
+    expect(openGeneration).toHaveBeenCalledWith(job)
+    expect(api.getCoverageJob).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('[data-testid="coverage-action-error"]')).toBeNull()
   })
 
-  it('self-heals a wedged poll: a hung getCoverageJob never leaves the Generating screen stuck', async () => {
-    vi.useFakeTimers()
-    try {
-      // Rehydrate finds a running job; the per-job poll then HANGS forever (the real
-      // bug: a getCoverageJob fetch that never resolves wedges the setTimeout chain).
-      // Meanwhile the authoritative job index shows the job actually finished.
-      vi.mocked(api.listCoverageJobs)
-        .mockResolvedValueOnce([{ jobId: 'jW', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: '2026-01-01T00:00:01Z' }])
-        .mockResolvedValue([{ jobId: 'jW', feature: 'checkout', kind: 'coverage', status: 'done', startedAt: '2026-01-01T00:00:01Z', endedAt: '2026-01-01T00:01:00Z' }])
-      vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise(() => {})) // never resolves → wedge
-      await act(async () => { root.render(<CoverageLedgerPage feature="checkout" onClose={() => {}} />) })
-      await act(async () => { await Promise.resolve(); await Promise.resolve() })
-      // Generating screen is up and the poll is wedged.
-      expect(container.querySelector('[data-testid="coverage-generating"]')).toBeTruthy()
-      expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
-      // The reconcile backstop (3s interval) sees "no running job" on two consecutive
-      // checks and clears the screen — without the wedged poll ever resolving.
-      await act(async () => { await vi.advanceTimersByTimeAsync(7000) })
-      expect(container.querySelector('[data-testid="coverage-generating"]')).toBeNull()
-      expect(container.querySelector('[data-testid="prd-pane"]')).toBeTruthy()
-    } finally {
-      vi.useRealTimers()
-    }
+  it('keeps the documents and reports a failed start without navigating', async () => {
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
+    vi.mocked(api.startCoverageJob).mockRejectedValue(new Error('agent unavailable'))
+    await mount()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')!.click() })
+    expect(container.querySelector('[data-testid="coverage-action-error"]')?.textContent).toContain('agent unavailable')
+    expect(openGeneration).not.toHaveBeenCalled()
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')!.disabled).toBe(false)
   })
 
   it('spends no word on a functional requirement — only Non-functional earns a tag', async () => {

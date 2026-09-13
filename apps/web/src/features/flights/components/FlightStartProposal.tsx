@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useState, type CSSProperties, type ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import type { PlanFeaturesTask, PlannedFeature } from '@/shared/api/client'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
@@ -328,12 +328,12 @@ export function StageRow({
     <>
       <span
         aria-hidden="true"
-        className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[9.5px] font-semibold"
-        style={{
-          borderColor: `color-mix(in srgb, ${badgeTone} 70%, var(--border-default))`,
-          color: badgeTone,
-          background: 'transparent',
-        }}
+        className="cl-bead mt-px"
+        /* Hollow mono bead from the ledger layer; the tone is the only thing a
+           caller sets, and only a MEANINGFUL mark (a status glyph, ▸) tints its
+           edge — a bare pipeline number keeps the neutral hairline. */
+        data-toned={icon !== '·' ? 'true' : undefined}
+        style={{ '--cl-bead-tone': badgeTone } as CSSProperties}
       >
         {badge}
       </span>

@@ -24,10 +24,10 @@ export function CoverageEmptyMain({ railOpen, onOpenRail }: { railOpen: boolean;
           Canary has nothing to check your tests against yet. Give it the docs that say how
           this suite is meant to behave, and it works out the rest.
         </p>
-        <ol className="clcov-empty-steps">
-          <li className="clcov-empty-step">
-            <span className="clcov-empty-n" aria-hidden="true">1</span>
-            <div className="clcov-empty-body">
+        <ol className="cl-ladder clcov-empty-steps">
+          <li className="cl-ladder-step">
+            <span className="cl-bead" aria-hidden="true">1</span>
+            <div className="cl-ladder-body">
               <span className="clcov-empty-name">Add your docs</span>
               <p className="clcov-empty-say">
                 Drop a spec, a ticket, or a page of notes into Source docs
@@ -45,9 +45,9 @@ export function CoverageEmptyMain({ railOpen, onOpenRail }: { railOpen: boolean;
               )}
             </div>
           </li>
-          <li className="clcov-empty-step">
-            <span className="clcov-empty-n" aria-hidden="true">2</span>
-            <div className="clcov-empty-body">
+          <li className="cl-ladder-step">
+            <span className="cl-bead" aria-hidden="true">2</span>
+            <div className="cl-ladder-body">
               <span className="clcov-empty-name">Press Generate</span>
               <p className="clcov-empty-say">
                 Canary reads them and writes down what this suite promises, one numbered
@@ -55,9 +55,9 @@ export function CoverageEmptyMain({ railOpen, onOpenRail }: { railOpen: boolean;
               </p>
             </div>
           </li>
-          <li className="clcov-empty-step">
-            <span className="clcov-empty-n" aria-hidden="true">3</span>
-            <div className="clcov-empty-body">
+          <li className="cl-ladder-step">
+            <span className="cl-bead" aria-hidden="true">3</span>
+            <div className="cl-ladder-body">
               <span className="clcov-empty-name">Read the results</span>
               <p className="clcov-empty-say">
                 Every requirement gets a line here: which of your tests cover it, which
@@ -66,7 +66,7 @@ export function CoverageEmptyMain({ railOpen, onOpenRail }: { railOpen: boolean;
             </div>
           </li>
         </ol>
-        <p className="clcov-empty-foot">
+        <p className="cl-aside clcov-empty-foot">
           Nothing is run — this is read from the words in your docs and the tests already on disk.
         </p>
       </div>
@@ -79,6 +79,15 @@ export function CoverageEmptyMain({ railOpen, onOpenRail }: { railOpen: boolean;
 // can take them in at reading size instead of squinting into a dial. Static SVG —
 // headless preview forces reduced-motion. Hue tracks the number: green high, amber
 // mid, rose low — the colour reads the health at a glance.
+//
+// The ring is a PARTITION of every requirement, never two measurements stacked:
+// the grey track is what no test covers, the dimmed arc what a test claims but no
+// run has proved, and the solid arc the proof. Hue carries coverage health, opacity
+// carries proof — two encodings on one shape, so a badly-covered suite still goes
+// rose and a fully-written-but-never-run one reads as a full pale ring, which a
+// single solid arc could not say at all. Concentric arcs were the alternative and
+// lose: at 40px two 3px strokes read as decoration, and their denominators (covered
+// vs total) are invisible. A second radius would also need its own health hue.
 const RING_R = 18
 const RING_STROKE = 4
 // The box hugs the stroke, so the ring carries no invisible padding: 40px of ink used to
@@ -86,23 +95,46 @@ const RING_STROKE = 4
 // right, where the strips end flush. Both edges are one 16px inset now.
 const RING_SIZE = RING_R * 2 + RING_STROKE
 
-export function CoverageRing({ pct }: { pct: number }) {
+// The claimed-but-unproven arc: the same hue at a third of its weight. Not amber —
+// a suite that simply has not run yet is not in trouble, and saying so in a warning
+// colour is the same false alarm `verdictView` exists to avoid. Amber stays on the
+// per-requirement dot, where it can tell a stale proof from a weakened test.
+const CLAIMED_OPACITY = 0.3
+
+export function CoverageRing({ pct, provenPct }: { pct: number; provenPct?: number }) {
   const mid = RING_SIZE / 2
   const c = 2 * Math.PI * RING_R
-  const clamped = Math.max(0, Math.min(100, pct))
-  const offset = c * (1 - clamped / 100)
-  const hue = clamped >= 80 ? 'var(--success)' : clamped >= 40 ? 'var(--warning)' : clamped > 0 ? 'var(--danger)' : 'var(--text-muted)'
+  const clamp = (n: number) => Math.max(0, Math.min(100, n))
+  const covered = clamp(pct)
+  // A proof slice can never outrun the covered sweep it sits inside. Omitted ⇒ one
+  // solid arc, exactly the pre-proof-axis rendering (a ledger with no enforcement).
+  const proven = provenPct === undefined ? undefined : Math.min(clamp(provenPct), covered)
+  const hue = covered >= 80 ? 'var(--success)' : covered >= 40 ? 'var(--warning)' : covered > 0 ? 'var(--danger)' : 'var(--text-muted)'
+  // One slice, `from`→`to` as shares of the whole circle. No gap is cut between
+  // slices: the arcs stay exactly proportional, and the opacity step reads as the
+  // boundary on its own. The round caps do overlap there, so the caller draws the
+  // dimmed slice first and the solid one covers its cap.
+  const slice = (from: number, to: number, opacity: number) => (
+    <circle
+      cx={mid} cy={mid} r={RING_R} fill="none" stroke={hue} strokeOpacity={opacity}
+      strokeWidth={RING_STROKE} strokeLinecap="round"
+      strokeDasharray={c} strokeDashoffset={c * (1 - (to - from) / 100)}
+      transform={`rotate(${Math.round((-90 + (from * 360) / 100) * 1000) / 1000} ${mid} ${mid})`}
+    />
+  )
+  const label = proven === undefined ? `${pct}% covered` : `${pct}% covered, ${Math.round(proven * 10) / 10}% proven`
   return (
-    <div style={{ width: RING_SIZE, height: RING_SIZE, flexShrink: 0 }} data-testid="coverage-ring" role="img" aria-label={`${pct}% covered`}>
+    <div style={{ width: RING_SIZE, height: RING_SIZE, flexShrink: 0 }} data-testid="coverage-ring" role="img" aria-label={label}>
       {/* `overflow:visible` because the stroke now ends exactly on the viewBox edge — the
           default clip would shave its outermost antialiased row on all four sides. */}
       <svg width={RING_SIZE} height={RING_SIZE} viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`} style={{ overflow: 'visible' }} aria-hidden="true">
         <circle cx={mid} cy={mid} r={RING_R} fill="none" stroke="var(--border-default)" strokeWidth={RING_STROKE} />
-        <circle
-          cx={mid} cy={mid} r={RING_R} fill="none" stroke={hue} strokeWidth={RING_STROKE}
-          strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
-          transform={`rotate(-90 ${mid} ${mid})`}
-        />
+        {proven === undefined ? slice(0, covered, 1) : (
+          <>
+            {covered - proven > 0 && slice(proven, covered, CLAIMED_OPACITY)}
+            {proven > 0 && slice(0, proven, 1)}
+          </>
+        )}
       </svg>
     </div>
   )
@@ -192,6 +224,13 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
   const covered = countFor(ledger, 'covered')
   const mapped = total - untested
   const orphans = ledger.orphanRequirementIds.length
+  // The ring's third slice. `provenUnchanged` can only land on a `covered`
+  // requirement — enforcement.ts withholds the proof from a partial one — so
+  // proven + claimed-only + not-covered partitions the requirement set exactly,
+  // which is the whole reason one ring can carry both axes.
+  const enf = total > 0 ? ledger.enforcement : undefined
+  const proven = enf?.provenUnchanged
+  const claimedOnly = proven === undefined ? 0 : covered - proven
   // The wrapper is a size container so the bar's breakpoints follow the width the
   // main column actually has (the Docs rail can take a third of the viewport).
   return (
@@ -201,7 +240,7 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
           roll-up sit in the same hover card the strips use; a stale-tag warning keeps an
           amber dot at rest so it is never fully hidden (status = dot + tooltip). */}
       <div className="clcov-hero clcov-strip" tabIndex={0} data-testid="coverage-hero">
-        <CoverageRing pct={ledger.coveragePct} />
+        <CoverageRing pct={ledger.coveragePct} provenPct={proven === undefined ? undefined : (proven / total) * 100} />
         <div className="clcov-hero-text">
           <div className="clcov-pct" data-testid="coverage-pct" aria-hidden="true">{Math.round(ledger.coveragePct)}%</div>
           <div className="clcov-sentence" data-testid="coverage-sentence">
@@ -217,6 +256,25 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
               />
             )}
           </div>
+          {/* The proof readout at rest. It names the ring's two coloured slices in
+              words, so the reader never has to decode an arc — and "claimed only" is
+              opaque enough to earn a gloss. The run id and the day stay in the hover
+              card below: takeaway at rest, provenance one hover away. */}
+          {proven !== undefined && (
+            <div
+              className="clcov-proof"
+              data-testid="coverage-proof"
+              title={enf?.runId
+                ? 'Proven — a run passed every test mapped to the requirement, and neither the tests nor the wording have changed since. Unproven — a test covers it, but nothing has proved it yet.'
+                : 'No run has been recorded for this suite, so nothing is proven yet — every covered requirement is a claim.'}
+            >
+              {!enf?.runId
+                ? 'no run yet — nothing proven'
+                : claimedOnly > 0
+                  ? `${proven} proven · ${claimedOnly} unproven`
+                  : `${proven} proven`}
+            </div>
+          )}
         </div>
         <div className="clcov-card clcov-sub" data-testid="coverage-sub" role="group" aria-label="Coverage breadth and proof">
           <span data-testid="mapped-stat" title="Requirements with at least one test mapped to them">{mapped}/{total} mapped</span>

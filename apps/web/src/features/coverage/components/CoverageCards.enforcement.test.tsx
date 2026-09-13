@@ -48,6 +48,13 @@ function expand(): void {
   act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
 }
 
+// Both dots explain themselves through the shared Tooltip (instant) rather than a
+// native `title` (~1s): hover the mark, read the portal.
+function tipOf(selector: string): string {
+  act(() => { container.querySelector(selector)?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+  return document.body.querySelector('[role="tooltip"]')?.textContent ?? ''
+}
+
 const PROVEN: RequirementEnforcement = {
   state: 'proven-unchanged',
   provenAt: { runId: 'run-9', at: '2026-09-03T10:00:00.000Z' },
@@ -65,7 +72,7 @@ describe('RequirementCard — proof-health dot', () => {
     const dot = container.querySelector('[data-testid="enf-R1"]') as HTMLElement
     expect(dot.textContent).toBe('')
     expect(dot.style.background).toBe(color)
-    expect(dot.title.split('\n')[0]).toBe(label)
+    expect(tipOf('[data-testid="enf-R1"]').split('\n')[0]).toBe(label)
   })
 
   it('a healthy proof renders no dot at all — absence is the good state', () => {
@@ -82,6 +89,15 @@ describe('RequirementCard — proof-health dot', () => {
     expect(container.querySelector('[data-testid="enf-R1"]')).toBeNull()
   })
 
+  // The dot needs a proof to have moved AWAY from. A covered requirement nothing
+  // has run is fully described by its sky squares, and an amber dot beside them
+  // marked the same fact twice — every one of the 17 dots across five live suites
+  // was this case, so the mark carried nothing at all.
+  it('a covered-but-never-proven requirement gets no dot — its sky squares already say it', () => {
+    render(rc({ state: 'wording-ahead', wordingChangedAt: '2026-09-01T00:00:00.000Z' }))
+    expect(container.querySelector('[data-testid="enf-R1"]')).toBeNull()
+  })
+
   // A weakened test is the one state that outranks the claim status: the assertion
   // that used to hold is gone, and no amount of "it was never covered" excuses it.
   it('a weakened test still shows its dot on an unclaimed requirement', () => {
@@ -91,7 +107,7 @@ describe('RequirementCard — proof-health dot', () => {
 
   it('the tooltip carries the three dates behind the verdict, so the dot is the whole story on hover', () => {
     render(rc({ ...PROVEN, state: 'proof-stale' }))
-    const title = (container.querySelector('[data-testid="enf-R1"]') as HTMLElement).title
+    const title = tipOf('[data-testid="enf-R1"]')
     expect(title).toContain('Proven in run run-9 · 2026-09-03')
     expect(title).toContain('Tests changed 2026-09-02 (changed)')
     expect(title).toContain('Wording changed 2026-09-01')
@@ -118,10 +134,12 @@ describe('RequirementCard — the verdict line', () => {
   it('keeps all three dates on the mark, where they are one hover away', () => {
     render(rc(PROVEN))
     expand()
-    const dot = container.querySelector('[data-testid="proof-verdict-R1"] .clcov-verdict-dot') as HTMLElement
-    expect(dot.title).toContain('Last proved 2026-09-03 · run run-9')
-    expect(dot.title).toContain('Tests changed 2026-09-02 (changed)')
-    expect(dot.title).toContain('Wording last written 2026-09-01')
+    const dot = tipOf('[data-testid="proof-verdict-R1"] .clcov-verdict-dot')
+    // The verdict and its reason lead, so the three dates below them have a subject.
+    expect(dot).toContain('Proven')
+    expect(dot).toContain('Last proved 2026-09-03 · run run-9')
+    expect(dot).toContain('Tests changed 2026-09-02 (changed)')
+    expect(dot).toContain('Wording last written 2026-09-01')
   })
 
   // Never proven is not "the wording ran ahead" — there is nothing for it to be
@@ -149,7 +167,7 @@ describe('RequirementCard — the verdict line', () => {
     render(rc({ ...PROVEN, state: 'tests-weakened' }))
     expand()
     expect(verdict()).toBe('A test was weakened after the proof')
-    const tooltip = (container.querySelector('[data-testid="enf-R1"]') as HTMLElement).title
+    const tooltip = tipOf('[data-testid="enf-R1"]')
     expect(tooltip).toContain('totals add up changed 2026-09-02')
     expect(tooltip).toContain("Restore the assertion — rerunning won't fix this.")
   })
@@ -158,7 +176,7 @@ describe('RequirementCard — the verdict line', () => {
     render(rc({ ...PROVEN, state: 'proof-stale' }))
     expand()
     expect(verdict()).toBe('Proof out of date')
-    expect((container.querySelector('[data-testid="enf-R1"]') as HTMLElement).title).toContain('totals add up changed 2026-09-02, after run run-9 (2026-09-03) proved this. Rerun to re-prove.')
+    expect(tipOf('[data-testid="enf-R1"]')).toContain('totals add up changed 2026-09-02, after run run-9 (2026-09-03) proved this. Rerun to re-prove.')
   })
 
   it('falls back to a testless sentence when the ledger records no test change', () => {

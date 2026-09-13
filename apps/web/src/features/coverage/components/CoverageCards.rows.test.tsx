@@ -84,7 +84,7 @@ describe('RequirementCard — the resting row', () => {
     // Declared order, and the mark mirrors that square's own fill — so the reader
     // maps line to square by position. Each line ends in the WORD for that state,
     // because the mark alone cannot say the difference between claimed and passed.
-    expect(segTip()).toBe('Path gap — 1 of 2 mapped, 0 proven\n■ happy — has a test · not yet passed\n□ sad — no test')
+    expect(segTip()).toBe('Path gap — 1 of 2 mapped, 0 proven\n■ happy — has a test · no result yet\n□ sad — no test')
   })
 
   it('names the path AND the variant once a variant dimension is in play', () => {
@@ -96,7 +96,7 @@ describe('RequirementCard — the resting row', () => {
       ],
       gapType: 'variant-incomplete',
     }))
-    expect(segTip()).toBe('Variant gap — 1 of 2 mapped, 0 proven\n■ happy · email — has a test · not yet passed\n□ happy · whatsapp — no test')
+    expect(segTip()).toBe('Variant gap — 1 of 2 mapped, 0 proven\n■ happy · email — has a test · no result yet\n□ happy · whatsapp — no test')
   })
 
   it('a variant requirement counts applicable path×variant cells, never the N/A ones', () => {
@@ -159,7 +159,7 @@ describe('RequirementCard — the disclosed detail', () => {
     const row = (path: string) => container.querySelector(`[data-testid="path-R1-${path}"]`) as HTMLElement
     // A fraction of one is not a reading — "1/1 tested" made the reader divide to
     // learn a fact the single square already showed. The word is the reading.
-    expect(row('happy').textContent).toContain('has a test · not yet passed')
+    expect(row('happy').textContent).toContain('has a test · no result yet')
     expect(row('happy').querySelector('[data-seg]')?.getAttribute('data-seg')).toBe('claimed')
     expect(row('sad').textContent).toContain('no test')
     expect(row('sad').querySelector('[data-seg]')?.getAttribute('data-seg')).toBe('off')
@@ -180,7 +180,7 @@ describe('RequirementCard — the disclosed detail', () => {
     const rows = [...container.querySelectorAll('[data-testid^="path-R1-"]')]
     expect(rows.map((r) => r.getAttribute('data-testid'))).toEqual(['path-R1-sad', 'path-R1-edge'])
     expect(rows[0]?.textContent).toContain('passed')
-    expect(rows[1]?.textContent).toContain('has a test · not yet passed')
+    expect(rows[1]?.textContent).toContain('has a test · no result yet')
   })
 
   it('closes with the verdict the marks add up to, under the marks themselves', () => {
@@ -231,8 +231,12 @@ describe('RequirementCard — the proof-health dot', () => {
     renderReq(req({ enforcement, gapType: 'covered', coverageStatus: 'covered', pathCoverage: [{ path: 'happy', covered: true, proven: true }] }))
     const dot = container.querySelector('[data-testid="enf-R1"]') as HTMLElement
     expect(dot.style.background).toBe(color)
-    expect(dot.title).toContain(label)
-    expect(dot.title).toContain('Wording changed 2026-09-01')
+    // Instant tooltip, not a native `title`: a 6px dot is the row's most cryptic
+    // mark, so its explanation cannot wait the ~1s `title` takes to appear.
+    act(() => { dot.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    const tip = document.body.querySelector('[role="tooltip"]')?.textContent ?? ''
+    expect(tip).toContain(label)
+    expect(tip).toContain('Wording changed 2026-09-01')
     expect(dot.textContent).toBe('')
   })
 

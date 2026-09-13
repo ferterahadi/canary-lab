@@ -39,6 +39,10 @@ feature has a recorded run the ledger also carries an additive **proven**
 axis (`provenPct`, `totals.proven`, per-requirement/path `proven`,
 `provenRunId`): covered = a tag claims it; proven = the covering test
 actually passed in the latest run (omitted when no run is recorded).
+A path or variant cell also carries `failed` — no claiming test passed and
+at least one FAILED in that run. That is a broken promise, distinct from an
+unkept one (nothing has run it yet); fix the app, never the test. A pass
+wins, so `failed` is never true alongside `proven`.
 The ledger also carries the **time axis**: per requirement an `enforcement`
 block — `state`, `provenAt` (the newest run in which every mapped test
 passed), `testsChangedAt` (the last classified spec edit on a mapped test, with

@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import type { ExternalWorkCheckpointData, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
+import type { CoverageJobIndexEntry } from '@/shared/api/types'
+import { useLiveResource } from '@/shared/state/use-live-resource'
+import { coverageSessionSources, stageCoverageJobs } from '../lib/coverage-activity'
 import * as api from '@/shared/api/client'
 import type { RobustnessFinding } from '@shared/robustness/jobs'
 import type { AgentSessionSegmentSource, AgentSessionSource, ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
@@ -216,13 +219,14 @@ export function StageDetail({
   flightId,
   flight,
   row,
-  stage,
-  companion,
+  stage: recordedStage,
+  companion: recordedCompanion,
   runLive,
   activeRunId,
   activePortifyWorkflowId,
   activity,
   externalHistory,
+  coverageJobs = [],
   activityOpen,
   onActivityOpenChange,
   externalMutationOwner,
@@ -254,6 +258,7 @@ export function StageDetail({
   activity?: FeatureActivity
   /** Durable external producer records for this feature, keyed by stage. */
   externalHistory?: Partial<Record<FlightStageKey, StageExternalHistory>>
+  coverageJobs?: CoverageJobIndexEntry[]
   /** The stage's remembered Activity disclosure choice. Undefined preserves
    *  the normal default: open while live, collapsed otherwise. */
   activityOpen?: boolean
@@ -272,10 +277,27 @@ export function StageDetail({
   docsRefreshKey?: number
   drill: FlightDrillThroughs
 }) {
-  // R27: the specs↔coverage loop runs TWO agents per pass — the authoring
-  // agent (sidecar `specs-coverage`) and the mapping agent (`coverage-map`).
-  // The live view follows whichever half of the loop is working now.
-  const loopProgress = specsCoverageProgress(stage)
+  const coverageHistory = stageCoverageJobs(coverageJobs, flight.feature, recordedStage.key)
+  const latestCoverageJob = coverageHistory.at(-1)
+  const coverageStageStart = (recordedStage.key === 'docs' ? recordedCompanion?.startedAt : recordedStage.startedAt)
+  // A newer conducted stage supersedes an earlier standalone generation; its
+  // old sessions remain readable without replacing the current Flight agent.
+  const coverageOwnsCurrent = latestCoverageJob !== undefined
+    && (!coverageStageStart || latestCoverageJob.startedAt >= coverageStageStart)
+  const { value: coverageJob } = useLiveResource(
+    'coverage',
+    coverageOwnsCurrent ? `${latestCoverageJob.jobId}:${latestCoverageJob.status}` : null,
+    () => api.getCoverageJob(latestCoverageJob!.jobId),
+    { cache: 'flight-coverage-job', pollWhile: (job) => job === null || job.status === 'running' },
+  )
+  const stage = coverageOwnsCurrent
+    ? { ...recordedStage, status: row.status, error: coverageJob?.error, errorDetail: undefined }
+    : recordedStage
+  const companion = coverageOwnsCurrent && recordedCompanion
+    ? { ...recordedCompanion, status: row.status, error: undefined, errorDetail: undefined }
+    : recordedCompanion
+  // Standalone mapping does not author tests or start another author↔map pass.
+  const loopProgress = coverageOwnsCurrent ? undefined : specsCoverageProgress(stage)
   const agentDir =
     loopProgress && stage.status === 'running' && loopProgress.phase === 'mapping'
       ? 'coverage-map'
@@ -338,12 +360,17 @@ export function StageDetail({
   const facts = stageFacts(dataStage, flight, companion ?? undefined, band)
   // Read off the ROW key, so the merged pairs report their companion's spawns
   // too (Test run carries heal, Requirements carries the summary distiller).
-  const modelChips = flightRowModelChips(row.key, flight.opts.models)
+  const coverageAgent = coverageJob?.sessionRef?.agent
+  const coverageModels = coverageAgent ? {
+    prd: coverageJob?.models?.prd?.[coverageAgent],
+    mapping: coverageJob?.models?.mapping?.[coverageAgent],
+  } : undefined
+  const modelChips = flightRowModelChips(row.key, coverageOwnsCurrent ? coverageModels : flight.opts.models)
   const drillThrough = stageDrillThrough(dataStage, flight, drill, companion, onOpenConfig)
   const runId = runMerged
     ? (activeRunId ?? ((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
     : undefined
-  const pausedKind = pausedResumeKind(stage, flight, companion)
+  const pausedKind = coverageOwnsCurrent ? null : pausedResumeKind(stage, flight, companion)
   const pausedNotice = pausedKind ? <StagePausedPanel kind={pausedKind} /> : null
   // Send to repair (D16): a finding becomes a run booted under its smallest
   // failing envelope, so the repair agent works on a failure that reproduces
@@ -390,7 +417,16 @@ export function StageDetail({
   const error = stage.error ?? companion?.error
   // Detail travels with whichever half's error is showing.
   const errorDetail = stage.error != null ? stage.errorDetail : companion?.errorDetail
-  const combinedLog = [stage.log, companion?.log].filter(Boolean).join('')
+  const coverageLog = coverageHistory.flatMap((job) => {
+    const label = job.kind === 'summary' ? 'Summarizing docs' : 'Mapping coverage'
+    const rows = [`[coverage@${job.startedAt}] ${label} started.`]
+    if (job.status !== 'running') {
+      const detail = coverageJob?.jobId === job.jobId && coverageJob.error ? ` ${coverageJob.error}` : ''
+      rows.push(`[coverage@${job.endedAt ?? job.startedAt}] ${label} ${job.status}.${detail}`)
+    }
+    return rows
+  }).join('\n')
+  const combinedLog = [stage.log, companion?.log, coverageLog].filter(Boolean).join('\n')
   const activityOnThisRow = activity?.external === true
     && stageRowKey(ACTIVITY_STAGE[activity.kind]) === stage.key
   const flightHandOff = isExternallyDriven(flight)
@@ -477,6 +513,7 @@ export function StageDetail({
       stage: session.sidecar,
       live: live
         && !externalOwnsCurrent
+        && !coverageOwnsCurrent
         && index === sessions.length - 1
         && loopProgress?.phase === session.phase
         && loopProgress?.pass === session.pass,
@@ -486,20 +523,26 @@ export function StageDetail({
     flightId,
     docs: stage,
     summary: companion,
-    externalOwnsCurrent,
+    externalOwnsCurrent: externalOwnsCurrent || coverageOwnsCurrent,
     // The legacy fallback guesses from stage evidence because old manifests
     // did not persist session refs. Only internal Flights can safely make that
     // inference; a settled external Flight no longer satisfies
     // isExternallyDriven(), but still has no Canary-owned transcript.
-    allowLegacy: flight.opts.stageProducer !== 'external',
+    allowLegacy: flight.opts.stageProducer !== 'external' && !coverageOwnsCurrent,
   })
-  const sessionSources = foldedRequirementSessions.length > 0
+  const flightSessionSources = foldedRequirementSessions.length > 0
     ? foldedRequirementSessions
     : recordedSessionSources
+  const currentFlightSession = coverageHistory.length > 0 && flightSessionSources.length === 0
+    && !coverageOwnsCurrent && !externalOwnsCurrent && localActivitySource
+    ? [{ label: flightStageLabel(stage.key), startedAt: coverageStageStart, source: localActivitySource }]
+    : []
+  const sessionSources = [...flightSessionSources, ...currentFlightSession, ...coverageSessionSources(coverageHistory)]
+    .sort((a, b) => (a.startedAt ?? '').localeCompare(b.startedAt ?? ''))
   // Suppress the legacy local source entirely so its generic live tail cannot
   // add a second spinner under the external-session row or replay an older
   // internal session as current.
-  const activitySource = sessionSources.length > 0 || externalOwnsCurrent ? undefined : localActivitySource
+  const activitySource = sessionSources.length > 0 || externalOwnsCurrent || coverageOwnsCurrent ? undefined : localActivitySource
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -788,7 +831,7 @@ export function StageDetail({
           timeline — coverage % after each mapping feeds the next authoring. */}
       {loopProgress
         ? <SpecsPassTimeline progress={loopProgress} live={live} failed={stage.status === 'failed'} />
-        : stage.key === 'specs-coverage' && awaiting
+        : stage.key === 'specs-coverage' && awaiting && !coverageOwnsCurrent
           ? (
             // The loop's own shape before it starts: the same card, kicker and
             // row list the timeline becomes, so the card doesn't appear from

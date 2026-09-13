@@ -108,12 +108,43 @@ variant is needed for colour**. Opacity modifiers (`bg-danger/10`) compile to
 ## 2. Typography
 
 ```
---font-sans: 'Inter Tight', 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif
---font-mono: 'JetBrains Mono', ui-monospace, monospace
+--font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif
+--font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace
 ```
 
-**Mono is semantic, not decorative** — it marks machine identity: run ids, test
-ids, tags, file paths, ports, branch names, counts.
+**Two families, split by meaning — not by screen region.** Proportional means
+*written by a human*: titles, labels, prose, buttons. Fixed-width means
+*produced by a machine*: run ids, test ids, tags, file paths, ports, branch
+names, counts, code, and the xterm run pane.
+
+That is the whole rule, and it is the differentiator the UI leans on. A reader
+can tell which kind of thing they are looking at before reading a word, and the
+rule keeps holding as surfaces are added. Assigning fonts per screen region
+instead — one for the sidebar, another for the main pane — drifts the moment
+someone adds a panel.
+
+**Do not collapse the two.** It has been tried: one family for everything reads
+flat and removes the only signal that separates a requirement's prose title from
+its id. If a new surface needs a third face, it almost certainly needs a weight
+or a size instead.
+
+`index.html` loads exactly these two, each as a `400..700` variable range. A
+family named in a stack but not loaded there is a ghost that renders only on
+machines that happen to have it installed — which is how this file once
+documented Geist while the app actually rendered Inter Tight.
+
+**Why Inter.** The app runs at 10–13px. Inter was drawn for dense screen UI and
+keeps its x-height and aperture at that size; most faces muddy. **Why JetBrains
+Mono.** It is the editor face the run terminal already carried, so the terminal
+is consistent by construction rather than by exception.
+
+Numeric columns stay aligned through `font-variant-numeric: tabular-nums`, set
+once on `body`. It covers the ~30 mono rules that never declared it themselves,
+and stops live-updating numbers (elapsed timers, pass counts) twitching as they
+tick.
+
+Prose titles wrap at spaces (`overflow-wrap: break-word`), not mid-word.
+Reserve `anywhere` for source lines and unbreakable identifiers.
 
 ### Size scale (as built)
 
@@ -165,6 +196,8 @@ its box (a 3×3 help mark, a `▾` caret, an icon button's arrow) is not type.
 | `.cl-kicker` | sans 13px/600, `-0.005em` | Section heading |
 | `.cl-frame-heading` | sans 12.5px/600 | Older twin of `.cl-type-title` that also bakes in `--text-primary` — fine where the title is never toned; a status-hued title needs the step instead |
 | `.cl-rubric` | **mono 10px/500 caps, `.08em`** | Sub-caption under a title, `PanelCard` kicker. Mono caps because it reads as data, not literature. |
+| `.cl-rubric-strong` | same register, `--text-secondary` | The same caps register one tone up: the NAME of a band or section (the coverage detail's `Happy path` / `Unhappy path`), as opposed to a caption read after it |
+| `.cl-aside` | **mono 10.5px/1.6 muted, tabular** | Small print about the mechanism — what a number derives from, what a step costs, where a value came from. The ledger's footnote voice |
 | `.cl-badge-accent` / `.cl-badge-neutral` | 10px/600 caps, 1px 6px | The two tones of a small badge beside a card title. Same metrics, so two badges on one line are one object in two tones |
 | `.cl-wordmark` | sans 13.5px/600 | App wordmark |
 | `.cl-italic-affix` | sans 10.5px caps muted | Legacy — renders as a quiet label, no italics |
@@ -269,6 +302,25 @@ Pills / dots / halos use `9999px` (`rounded-full`).
 | `.cl-count-chip` | Mono numeral on `--bg-elevated`, pill |
 | `.cl-badge-accent` | 10px uppercase accent badge ("Recommended") |
 | `.cl-status-dot` (+ `--running`) | 0.55rem circle; dark mode adds a soft halo per hue |
+
+### Ledger style — the coverage pane's vocabulary, shared
+
+The coverage ledger is the reference surface for this app's look, so its four
+shapes live in `styles.css` rather than in `coverage-ledger-css.ts`, and any
+surface can reach for them. None of them spends a hue: meaning arrives via a
+status dot, a bead tone or a mark, never a tinted slab.
+
+| Class | What it is |
+| --- | --- |
+| `.cl-bands` / `.cl-band` | A stack of NAMED facts: hairlines between them, no box around them. Name each band with `.cl-rubric-strong`. Use when a card per fact would turn four related facts into four objects |
+| `.cl-ladder` / `.cl-ladder-step` / `.cl-ladder-body` | The same hairline rhythm, ordered, with a bead column — a sequence rather than a set |
+| `.cl-bead` | The hollow mono mark leading a step or row: a position, a count, or a settled verdict. Tone is a variable, not a variant — set `--cl-bead-tone` to a status hue and `data-toned="true"` to tint its edge; the default is a quiet numeral. Metrics are baked in, so a `text-[Npx]` beside it is dead |
+| `.cl-ledger` | A list as a ledger: transparent rows, one hairline between them and one above/below the group. Replaces a rounded border drawn around rows that already divide themselves — a second frame inside a dialog that is already a frame |
+| `.cl-quote-rail` | Disclosed or quoted detail belonging to the thing above it: a 2px NEUTRAL rail + a half-step-deeper ground. Structure, not status, so it never takes a hue |
+
+Adopted by the coverage pane (`features/coverage/**`, which keeps only its own
+placement on top) and the two flight launchers (`FlightStartDialog`,
+`FlightControls`' re-run picker).
 
 ### Row-state stack — precedence matters
 
