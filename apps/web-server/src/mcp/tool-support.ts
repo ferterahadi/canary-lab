@@ -59,7 +59,7 @@ export function coverageBlockedNext(feature: string, summary: SummaryState, sour
   }
   // summary 'absent'
   if (sourceDocCount === 0) {
-    return `No source doc on file for "${feature}", so there is nothing to ground coverage on. ASK THE USER to attach or paste the PRD/spec in the chat (do NOT invent one or pull an external file). Once they provide it, write_feature_doc("${feature}", "<name>.md", <content>), then call start_external_summary with feature "${feature}" and a stable session_id — read the docs yourself and submit_external_summary.`
+    return `No source doc on file for "${feature}", so there is nothing to ground coverage on. First call start_external_summary with a stable session_id to request MCP 2.0 elicitation. Only when elicitation is unavailable, ASK THE USER to attach or paste the PRD/spec in the chat (do NOT invent one or pull an external file). Once they provide it, write_feature_doc("${feature}", "<name>.md", <content>), then call start_external_summary with feature "${feature}" and a stable session_id — read the docs yourself and submit_external_summary.`
   }
   return `Source docs exist for "${feature}" but no PRD summary yet. YOU author it: call start_external_summary with feature "${feature}" and a stable session_id, read the source docs in the returned prompt, submit_external_summary, then call start_external_coverage with the same session_id and submit_external_coverage to map tests → requirements.`
 }

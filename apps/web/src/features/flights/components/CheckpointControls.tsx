@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { isElicitationReview, checkpointInputToken } from '@/shared/lib/workspace-view-state'
 import * as api from '@/shared/api/client'
 import type { FlightCheckpoint, FlightManifest, FlightStage } from '@/shared/api/client'
 import { evaluationArchiveFilename } from '@/shared/lib/format'
@@ -103,7 +104,8 @@ export function CheckpointControls({
       .finally(() => setBusy(false))
   }
   const respond = (response: { choice?: string; values?: Record<string, string>; data?: unknown; feedback?: string; token?: string }): void => {
-    mutate(() => api.respondFlightCheckpoint(flightId, response))
+    const elicitationToken = checkpointInputToken(flightId, checkpoint.kind)
+    mutate(() => api.respondFlightCheckpoint(flightId, { ...response, ...(elicitationToken ? { elicitationToken } : {}) }))
   }
 
   const data = (checkpoint.data ?? {}) as Record<string, unknown>
@@ -114,7 +116,7 @@ export function CheckpointControls({
   // A genuine question on an externally driven flight still belongs to the MCP
   // client that started it. The external-work hand-off itself never reaches
   // this component: running work lives in the stage Activity rail, not in a decision card.
-  const readOnly = isExternallyDriven(flight)
+  const readOnly = isExternallyDriven(flight) && !isElicitationReview(flightId, checkpoint.kind)
   const lockedTitle = readOnly
     ? externalMutationTooltip('flight', 'answer this checkpoint')
     : undefined

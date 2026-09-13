@@ -24,6 +24,7 @@ import type { ClientKind } from '../../../../shared/run-mode'
 export type McpClientSurface = 'claude-code' | 'claude-desktop-chat' | 'codex' | 'other'
 
 export interface McpClientFacts {
+  elicitation?: { form: boolean; url: boolean }
   name?: string
   version?: string
   surface: McpClientSurface
@@ -47,6 +48,7 @@ export interface RawClientInfo {
 
 export interface RawClientCapabilities {
   sampling?: unknown
+  elicitation?: { form?: unknown; url?: unknown }
 }
 
 export function classifyMcpClient(
@@ -76,6 +78,10 @@ export function classifyMcpClient(
     surface,
     canFanOut: surface === 'claude-code',
     sampling: caps?.sampling !== undefined && caps.sampling !== null,
+    ...(caps?.elicitation ? { elicitation: {
+      form: caps.elicitation.form !== undefined || caps.elicitation.url === undefined,
+      url: caps.elicitation.url !== undefined,
+    } } : {}),
   }
 }
 

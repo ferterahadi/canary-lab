@@ -1,6 +1,7 @@
 // MCP tools — the conducted flight pipeline (start / inspect / answer checkpoints).
-// Split out of authoring.ts; bodies are unchanged.
 import { z } from 'zod'
+import { requestFlightCheckpoint } from '../flight-input'
+import type { CallToolResult } from '@modelcontextprotocol/server'
 import path from 'path'
 import { flightStageRemedy } from '../../features/flights/logic/stage-remedy'
 import {
@@ -12,7 +13,7 @@ import {
   hasPolled,
   noteHandOffContact,
 } from '../handoff-idle'
-import type { ExternalWorkCheckpointData, FlightManifest } from '../../../../../shared/flights/types'
+import type { ExternalWorkCheckpointData, FlightManifest, FlightCheckpointResponse } from '../../../../../shared/flights/types'
 import { deriveFeatureSlug } from '../../../../../shared/flights/types'
 import { fanOutAdviceFor } from '../client-surface'
 import { type ToolGroupContext, asJsonResult, errorResult } from '../tool-support'
@@ -89,9 +90,9 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
         options?: string[]
         data?: ExternalWorkCheckpointData & { lastAttempt?: { mode?: string; outcome?: string; reason?: string } }
       } | undefined
-      const base = `Flight is parked on the ${cp?.kind ?? 'checkpoint'} checkpoint — call respond_flight_checkpoint(flightId, choice: one of ${JSON.stringify(cp?.options ?? [])}).`
+      const base = `Flight is parked on the ${cp?.kind ?? 'checkpoint'} checkpoint. If the user has not answered, call respond_flight_checkpoint(flightId) without a choice to request MCP elicitation. Otherwise pass their choice: one of ${JSON.stringify(cp?.options ?? [])}.`
       if (cp?.kind === 'prd-source') {
-        const fork = `${base} The Requirements stage ALWAYS pauses here — a two-path fork; ask your user which path. (a) Supply docs yourself: distill THIS conversation with write_feature_doc("${String(view.feature)}", "conversation-prd.md", <markdown>) or link a local file with write_feature_doc(link_path: "~/path/to/prd.md"), then respond "continue". (b) Have Canary's agent gather them guided by the flight's frozen intent: respond "collect-repo-docs" (the agent copies in repo docs relevant to the intent) or "infer-from-diff" (the agent derives requirements from the branch diff vs base). If a previous gather went wrong, pass feedback:"<what was wrong>" with the choice — it is added to the agent's prompt.`
+        const fork = `${base} The Requirements stage ALWAYS pauses here — a two-path fork; call respond_flight_checkpoint with no choice to elicit the user response. (a) Supply docs yourself: distill THIS conversation with write_feature_doc("${String(view.feature)}", "conversation-prd.md", <markdown>) or link a local file with write_feature_doc(link_path: "~/path/to/prd.md"), then respond "continue". (b) Have Canary's agent gather them guided by the flight's frozen intent: respond "collect-repo-docs" (the agent copies in repo docs relevant to the intent) or "infer-from-diff" (the agent derives requirements from the branch diff vs base). If a previous gather went wrong, pass feedback:"<what was wrong>" with the choice — it is added to the agent's prompt.`
         // A re-park after an empty gather must NOT read as a neutral first
         // visit: repeating the same collector over the same repos is the one
         // choice already known to fail. Mirrors the web UI, which flips its
@@ -142,11 +143,14 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
         // the user a status table, and ended its turn at stage 5 of 11. A parked
         // hand-off has no deadline, so the flight simply stopped, reporting
         // "waiting-for-approval" with six stages that would never start.
-        const stayRule = 'DO NOT END YOUR TURN while this step is open. The flight advances ONLY when you submit — nothing polls it, no timeout rescues it, and a status update to the user is not progress. Keep working through submit, then follow the flight to its next stage. If you truly must stop, say so to the user in the same breath and tell them the flight is parked until they re-invoke the flight skill to pick this hand-off up. '
+        const stayRule = 'DO NOT END YOUR TURN while this step is open unless user elicitation returned needs-input. The flight advances ONLY when you submit — nothing polls it, no timeout rescues it, and a status update to the user is not progress. Keep working through submit, then follow the flight to its next stage. If you truly must stop, say so to the user in the same breath and tell them the flight is parked until they re-invoke the flight skill to pick this hand-off up. '
+        const docsInputRule = data?.stage === 'docs'
+          ? 'Before gathering requirements, call respond_flight_checkpoint(flightId) without a choice to elicit supplied documents versus gathering, unless the user already chose. If elicitation returns needs-input, leave this hand-off pending. Do not start a separate coverage job. '
+          : ''
         // Advice matched to what THIS client can do, rather than one line that
         // tells a subagent-less chat client to fan out and then reads its
         // serial behaviour as disobedience.
-        return `${rejected}This flight hands its ${String(data?.stage ?? 'stage')} step to YOU (stage_producer:"external"). ${where}, rendered exactly as Canary's own agent would receive it. ${stayRule}${tokenRule} ${fanOutAdviceFor(ctx.clientFacts())} Do the work with your tools now (write the files the prompt names, on the real paths it gives), then release with respond_flight_checkpoint(flightId, choice:"submit", data:<the result shape the prompt asks for>). Canary re-validates independently — the config must parse, the doc must exist on disk, submitted requirements are reconciled and re-read from the written summary, the specs must compile, a mapping must account for every roster test, a legacy Portify submit is judged on the workflow record + overlay mark, a run submit on the run\'s own terminal manifest — so a claim of success that did not land on disk re-parks or fails the stage rather than passing. If you cannot do this step (no file tools, permission refused, wrong machine), answer choice:"run-internally" and Canary's local agent takes just that step; the flight continues either way.`
+        return `${rejected}This flight hands its ${String(data?.stage ?? 'stage')} step to YOU (stage_producer:"external"). ${docsInputRule}${where}, rendered exactly as Canary's own agent would receive it. ${stayRule}${tokenRule} ${fanOutAdviceFor(ctx.clientFacts())} Do the work with your tools now (write the files the prompt names, on the real paths it gives), then release with respond_flight_checkpoint(flightId, choice:"submit", data:<the result shape the prompt asks for>). Canary re-validates independently — the config must parse, the doc must exist on disk, submitted requirements are reconciled and re-read from the written summary, the specs must compile, a mapping must account for every roster test, a legacy Portify submit is judged on the workflow record + overlay mark, a run submit on the run\'s own terminal manifest — so a claim of success that did not land on disk re-parks or fails the stage rather than passing. If you cannot do this step (no file tools, permission refused, wrong machine), answer choice:"run-internally" and Canary's local agent takes just that step; the flight continues either way.`
       }
       if (cp?.kind === 'config-approval') {
         return `${base} The feature is scaffolded — the config being approved is the REAL on-disk feature.config.cjs (checkpoint data carries a snapshot + configPath). Approve as-is, pass an edited configSource via data, or answer "redraft" to re-run the repo scan.`
@@ -509,54 +513,61 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('respond_flight_checkpoint', {
-    description: 'Release a flight parked waiting-for-approval: pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval (the config is the scaffolded feature\'s REAL on-disk file — data.configSource writes through to it). Under autopilot (the default) only similarity-choice, missing-env, and re-parked checkpoints reach you; a flight started with autopilot:false parks at every checkpoint. A prd-source park is a two-path fork: supply the docs yourself (write_feature_doc with content or link_path, then respond "continue"), or have Canary\'s agent gather them guided by the flight\'s frozen intent — respond "collect-repo-docs" (copies in repo docs relevant to the intent) or "infer-from-diff" (derives requirements from the branch diff vs base); optional feedback rides a retry into the agent\'s prompt. A portify-gate park is the final Parallel setup ask after Report and BEFORE any Portify agent/double-boot cost: "run" starts the server-owned background Portify workflow (declared native port injection or a sibling feature\'s saved overlay is verified first — the agent only runs if edits are needed), "skip" keeps the feature serial and the flight continues. A portify-apply park is a verified-diff review: "apply" saves the overlay (nothing lands in the product repos), "revise" REQUIRES feedback:"<what to change>" and re-runs the agent + double-boot re-verify (the checkpoint re-parks with the new diff), "cancel" discards the edits and SKIPS the stage — the flight continues without Parallel setup (the feature stays serial; a later flight can retry). export-mode picks the evaluation flavor: raw (fast) or localized (rewritten reasoning — on a stage_producer:"external" flight the localized rewrite is handed to YOU as an external-work checkpoint, and is the default there). On external-work, checkpoint.data.takeoverRequestedAt means the user asked Canary to take this step: stop your work and respond choice:"run-internally" to release it; any submit is rejected.',
+    description: 'Release a flight parked waiting-for-approval. Omit choice/values/data to request MCP 2.0 elicitation (docs selection or a human checkpoint). Otherwise pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval (the config is the scaffolded feature\'s REAL on-disk file — data.configSource writes through to it). Under autopilot (the default) only similarity-choice, missing-env, and re-parked checkpoints reach you; a flight started with autopilot:false parks at every checkpoint. A prd-source park is a two-path fork: supply the docs yourself (write_feature_doc with content or link_path, then respond "continue"), or have Canary\'s agent gather them guided by the flight\'s frozen intent — respond "collect-repo-docs" (copies in repo docs relevant to the intent) or "infer-from-diff" (derives requirements from the branch diff vs base); optional feedback rides a retry into the agent\'s prompt. A portify-gate park is the final Parallel setup ask after Report and BEFORE any Portify agent/double-boot cost: "run" starts the server-owned background Portify workflow (declared native port injection or a sibling feature\'s saved overlay is verified first — the agent only runs if edits are needed), "skip" keeps the feature serial and the flight continues. A portify-apply park is a verified-diff review: "apply" saves the overlay (nothing lands in the product repos), "revise" REQUIRES feedback:"<what to change>" and re-runs the agent + double-boot re-verify (the checkpoint re-parks with the new diff), "cancel" discards the edits and SKIPS the stage — the flight continues without Parallel setup (the feature stays serial; a later flight can retry). export-mode picks the evaluation flavor: raw (fast) or localized (rewritten reasoning — on a stage_producer:"external" flight the localized rewrite is handed to YOU as an external-work checkpoint, and is the default there). On external-work, checkpoint.data.takeoverRequestedAt means the user asked Canary to take this step: stop your work and respond choice:"run-internally" to release it; any submit is rejected.',
     inputSchema: {
       flightId: z.string(),
+      document_source: z.enum(['upload']).optional().describe('Open requirements import using URL-mode elicitation.'),
       choice: z.string().optional().describe('One of the checkpoint\'s options.'),
       values: z.record(z.string(), z.string()).optional().describe('missing-env only: KEY→value map, written to the missing env file then captured.'),
       data: z.unknown().optional().describe('config-approval only: { configSource } with the hand-edited config — written through to the feature\'s on-disk feature.config.cjs before validation.'),
       feedback: z.string().optional().describe('prd-source agent choices and portify-apply "revise" only: for prd-source, what went wrong last time (added to the collector agent\'s prompt); for portify-apply revise (where it is REQUIRED), what the agent should change before the double-boot re-verify.'),
       token: z.string().optional().describe('external-work submit only: the `handOffId` from the checkpoint data you are answering. Identifies WHICH hand-off your result belongs to — without it, a result you started before the user paused and resumed the flight could settle a step against an ask that has since changed. Pass it back verbatim; a submit carrying a superseded id is discarded and the step re-parks.'),
     },
-  }, async ({ flightId, choice, values, data, feedback, token }) => {
+  }, async (args, request) => {
+    const { flightId, choice, values, data, document_source } = args
     if (!deps.flightsRequest) return flightsUnavailable()
-    const resp = await deps.flightsRequest({
-      method: 'POST',
-      url: `/api/flights/${encodeURIComponent(flightId)}/respond`,
-      payload: { response: { ...(choice ? { choice } : {}), ...(values ? { values } : {}), ...(data !== undefined ? { data } : {}), ...(feedback ? { feedback } : {}), ...(token ? { token } : {}) } },
-    })
-    if (resp.statusCode !== 200) {
-      const body = resp.body as { error?: string; type?: string; status?: string; pauseReason?: string }
-      // The one rejection whose recipient may have just spent minutes on work
-      // nobody wants any more. A bare error string reads as "retry" — which is the
-      // opposite of what has to happen, and there is no other channel to say so:
-      // an external client cannot be interrupted mid-turn, so this reply IS the
-      // stop signal.
-      if (body.type === 'flight_not_parked') {
-        return asJsonResult({
-          type: 'flight_stopped',
-          flightId,
-          status: body.status,
-          ...(body.pauseReason ? { pauseReason: body.pauseReason } : {}),
-          next: body.status === 'aborted'
-            ? 'This flight was ABORTED — it will not continue. Discard the work you were doing for it and do not resubmit. Tell the user it was stopped; only start_flight with redo:true begins a new attempt, and only if they ask.'
-            : 'The flight is no longer waiting on you — the user stopped it, or it moved on. DISCARD the result you were about to submit and stop working on this step. Do not resubmit and do not resume the flight yourself; tell the user it was stopped. Files you already wrote stay on disk, and if they resume, a fresh hand-off re-parks with a new handOffId.',
-        })
+    const send = async ({ choice, values, data, feedback, token, expectedUpdatedAt }: FlightCheckpointResponse): Promise<CallToolResult> => {
+      const resp = await deps.flightsRequest!({
+        method: 'POST',
+        url: `/api/flights/${encodeURIComponent(flightId)}/respond`,
+        payload: { response: { ...(choice ? { choice } : {}), ...(values ? { values } : {}), ...(data !== undefined ? { data } : {}), ...(feedback ? { feedback } : {}), ...(token ? { token } : {}), ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}) } },
+      })
+      if (resp.statusCode !== 200) {
+        const body = resp.body as { error?: string; type?: string; status?: string; pauseReason?: string }
+        // The one rejection whose recipient may have just spent minutes on work
+        // nobody wants any more. A bare error string reads as "retry" — which is the
+        // opposite of what has to happen, and there is no other channel to say so:
+        // an external client cannot be interrupted mid-turn, so this reply IS the
+        // stop signal.
+        if (body.type === 'flight_not_parked') {
+          return asJsonResult({
+            type: 'flight_stopped',
+            flightId,
+            status: body.status,
+            ...(body.pauseReason ? { pauseReason: body.pauseReason } : {}),
+            next: body.status === 'aborted'
+              ? 'This flight was ABORTED — it will not continue. Discard the work you were doing for it and do not resubmit. Tell the user it was stopped; only start_flight with redo:true begins a new attempt, and only if they ask.'
+              : 'The flight is no longer waiting on you — the user stopped it, or it moved on. DISCARD the result you were about to submit and stop working on this step. Do not resubmit and do not resume the flight yourself; tell the user it was stopped. Files you already wrote stay on disk, and if they resume, a fresh hand-off re-parks with a new handOffId.',
+          })
+        }
+        if (body.type === 'flight_takeover_requested') {
+          return asJsonResult({
+            type: 'takeover_requested',
+            flightId,
+            requestedAt: (body as { requestedAt?: string }).requestedAt,
+            next: 'The user asked Canary to take this step. STOP your work now, including subagents/processes; do not submit this result or attempt another submit. Release it with respond_flight_checkpoint(flightId, choice:"run-internally"). Canary starts its local agent only after that acknowledgement. Files you already wrote stay on disk, so tell the user what changed if they need to review it.',
+          })
+        }
+        return errorResult(`respond failed (${resp.statusCode}): ${String(body.error ?? '')}`)
       }
-      if (body.type === 'flight_takeover_requested') {
-        return asJsonResult({
-          type: 'takeover_requested',
-          flightId,
-          requestedAt: (body as { requestedAt?: string }).requestedAt,
-          next: 'The user asked Canary to take this step. STOP your work now, including subagents/processes; do not submit this result or attempt another submit. Release it with respond_flight_checkpoint(flightId, choice:"run-internally"). Canary starts its local agent only after that acknowledgement. Files you already wrote stay on disk, so tell the user what changed if they need to review it.',
-        })
-      }
-      return errorResult(`respond failed (${resp.statusCode}): ${String(body.error ?? '')}`)
+      // The hand-off is settled or the flight is stopping: drop its contact
+      // record so the ledger cannot grow across a long-lived server.
+      forgetHandOffContact(handOffContact, flightId)
+      const view = flightView(resp.body)
+      return asJsonResult({ ...view, next: flightNext(view) })
     }
-    // The hand-off is settled or the flight is stopping: drop its contact
-    // record so the ledger cannot grow across a long-lived server.
-    forgetHandOffContact(handOffContact, flightId)
-    const view = flightView(resp.body)
-    return asJsonResult({ ...view, next: flightNext(view) })
+    return !choice && !values && data === undefined
+      ? requestFlightCheckpoint(ctx, request, flightId, document_source === 'upload', send)
+      : send(args)
   })
 }

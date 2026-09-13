@@ -6,6 +6,18 @@ type: skill
 
 # Canary Lab — Run + Heal Loop
 
+## User input through MCP 2.0
+
+Let the owning MCP command request missing input with SDK 2.0 elicitation
+(`input_required`). The client collects the response and retries the command.
+Do not answer a user form yourself or ask the same question in chat first.
+Existing user instructions and autopilot choices still apply without another ask.
+On `needs-input`, leave work pending after decline/cancel, stale input, or an
+unfinished UI action; never retry or repeat the question automatically. Chat is
+only the fallback when elicitation is unavailable. Never collect passwords, API
+keys, or access tokens in chat or form elicitation: use the returned Canary UI URL.
+Setup and reconnection questions still use chat while MCP is unavailable.
+
 ## MCP Invocation
 
 Setup and the plugin expose one public Canary Lab MCP tool: `exec` (usually
@@ -52,7 +64,7 @@ If `start_run` returns `type: "getting_started_busy"`, a Getting Started demo al
 
 1. Call `list_features` and choose the requested feature.
 2. Call `start_run` with `claim_heal: true`, a stable `session_id`, and a useful `conversation_name`. Do **not** pass `client_kind` — the MCP bridge auto-detects it from the connection; guessing it yourself can mis-set it and suppress heal claim. Heal claiming is open to interactive Claude/Codex clients (Desktop or CLI alike) — only runner-spawned PTY agents are blocked — so an ordinary CLI session like this one can own the heal loop. For requests like "rerun 7cvh", pass `run_ref: "7cvh"`.
-3. If `start_run` returns `type: "repo_collision_requires_choice"`, another run is using the same app/repo. Ask the user whether to run this one isolated in a per-run git worktree (runs now, concurrently) or queue it until the other run finishes, then re-call `start_run` with `isolation: "worktree"` or `isolation: "queue"`. Do not guess. If `start_run` returns `queued: true`, tell the user the run is parked (`queueReason`) and will start automatically when capacity frees; `wait_for_heal_task` still blocks until it starts and needs fixes.
+3. If `start_run` returns `type: "repo_collision_requires_choice"`, another run is using the same app/repo. The tool requests this choice through elicitation when supported. Only if this fallback result reaches you, ask the user whether to run this one isolated in a per-run git worktree (runs now, concurrently) or queue it until the other run finishes, then re-call `start_run` with `isolation: "worktree"` or `isolation: "queue"`. Do not guess. If `start_run` returns `queued: true`, tell the user the run is parked (`queueReason`) and will start automatically when capacity frees; `wait_for_heal_task` still blocks until it starts and needs fixes.
 4. If `start_run` returns an active run, continue that run. But if it returns `type: "boot_session"` (or `executionType: "boot"`), the run is a held boot-only session — services are up, no tests run, and there is no heal task. Do not claim heal or call `wait_for_heal_task`; report that services are ready and that the user can stop them with `abort_run` (confirm:true) when done. A service that fails its readiness probe is marked failed (its status shows `timeout`) but the session stays held — boot never self-aborts on a health-check failure, so report which services came up and which failed; only `abort_run` tears it down.
 5. If `start_run` reports `already-claimed`, stop and tell the user which session owns the run. If it returns `claimSuppressed: true`, this session is a runner-spawned PTY agent (the benchmark/portify sessions Canary Lab launches itself) and cannot own the heal loop — interactive clients are *not* suppressed, so you normally won't hit this. The run still runs in External-client heal mode (it does **not** fall back to the project's configured heal agent — it waits for a drive); do not call `wait_for_heal_task`. Report the run id and tell the user to drive heal from an interactive Claude/Codex client or the web UI.
 6. Handle user interrupts explicitly: "pause", "intercept", or "pause and heal" means call `pause_run`; "stop heal" or "cancel repair" means call `cancel_heal`; "abort", "kill the run", or "stop everything" means call `abort_run` only with the required confirmation.

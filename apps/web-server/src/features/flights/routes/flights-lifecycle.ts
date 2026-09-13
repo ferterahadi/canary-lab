@@ -8,6 +8,7 @@ import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
 import { FlightNotParkedError, FlightStageEntryError, FlightTakeoverRequestedError, forceFlightTakeover, requestFlightTakeover, resumeFlight, setFlightAutopilot, respondToFlightCheckpoint, pauseFlight, redoFlight, deleteFlight } from '../logic/conductor'
 import { rejectForeignFlightDecision } from './flight-decision-origin'
+import { allowsCheckpointInput } from '../logic/checkpoint-input'
 import { parseFlightExternalAgentSession, reclaimGettingStartedFlight, resolveFlightModels } from './flight-route-support'
 import { GettingStartedBusyError } from '../../config/logic/getting-started-session'
 import { type FlightCheckpointResponse, type FlightStageKey } from '../logic/types'
@@ -18,7 +19,8 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
   app.post<{ Params: { id: string }; Body: { response?: FlightCheckpointResponse } | undefined }>(
     '/api/flights/:id/respond',
     async (req, reply) => {
-      const foreign = rejectForeignFlightDecision(req, reply, () => store.get(req.params.id))
+      const foreign = req.body?.response?.elicitationToken && allowsCheckpointInput(req.body.response.elicitationToken, store.get(req.params.id))
+        ? null : rejectForeignFlightDecision(req, reply, () => store.get(req.params.id))
       if (foreign) return foreign
       const response = req.body?.response
       if (!response || typeof response !== 'object') {

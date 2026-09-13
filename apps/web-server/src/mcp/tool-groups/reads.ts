@@ -4,6 +4,7 @@
 // enclosing function is new. Add a tool here, then wire its name into the
 // profile arrays in ../tool-support.ts (see the cl_add-mcp-tool skill).
 import { z } from 'zod'
+import { requestVerificationUrls } from '../verification-input'
 import { buildExternalRunSnapshotSlim, buildSpecEditsWarning } from '../../features/runs/logic/heal/external-heal-surface'
 import { loadFeatures } from '../../shared/feature-loader'
 import { createVerificationConfig, getVerificationConfig, listVerificationConfigs, updateVerificationConfig } from '../../features/coverage/logic/verification'
@@ -136,18 +137,23 @@ export function registerReadTools(ctx: ToolGroupContext): void {
     inputSchema: {
       featureId: z.string().describe('Feature name.'),
       name: z.string().describe('Configuration name, e.g. Beta or Staging.'),
-      targetUrls: z.record(z.string(), z.string()).describe('Target URLs keyed by verification target id.'),
+      targetUrls: z.record(z.string(), z.string()).optional().describe('Target URLs keyed by verification target id. Omit to request them from the user through MCP 2.0 elicitation.'),
       playwrightEnvsetId: z.string().describe('Playwright envset to apply for verification.'),
     },
-  }, async ({ featureId, name, targetUrls, playwrightEnvsetId }) => {
+  }, async (args, request) => {
+    const { featureId, name, targetUrls, playwrightEnvsetId } = args
     const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
     if (!feature) return errorResult(`feature not found: ${featureId}`)
-    try {
-      const created = createVerificationConfig(feature, { name, targetUrls, playwrightEnvsetId }, deps.workspaceEvents)
-      return asJsonResult(created)
-    } catch (err) {
-      return failureResult(err)
+    const save = async (urls: Record<string, string>) => {
+      try {
+        const config = createVerificationConfig(feature, { name, targetUrls: urls, playwrightEnvsetId }, deps.workspaceEvents)
+        return config ? asJsonResult(config) : errorResult('verification config not found')
+      } catch (err) {
+        return failureResult(err)
+      }
     }
+    if (targetUrls !== undefined) return save(targetUrls)
+    return requestVerificationUrls(ctx, request, feature, ['create_verification_config', deps.projectRoot, args], undefined, playwrightEnvsetId, save)
   })
 
   registerTool('update_verification_config', {
@@ -156,19 +162,23 @@ export function registerReadTools(ctx: ToolGroupContext): void {
       featureId: z.string().describe('Feature name.'),
       configId: z.string().describe('Verification config id.'),
       name: z.string().describe('Configuration name, e.g. Beta or Staging.'),
-      targetUrls: z.record(z.string(), z.string()).describe('Target URLs keyed by verification target id.'),
+      targetUrls: z.record(z.string(), z.string()).optional().describe('Target URLs keyed by verification target id. Omit to request them from the user through MCP 2.0 elicitation.'),
       playwrightEnvsetId: z.string().describe('Playwright envset to apply for verification.'),
     },
-  }, async ({ featureId, configId, name, targetUrls, playwrightEnvsetId }) => {
+  }, async (args, request) => {
+    const { featureId, configId, name, targetUrls, playwrightEnvsetId } = args
     const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
     if (!feature) return errorResult(`feature not found: ${featureId}`)
-    try {
-      const config = updateVerificationConfig(feature, configId, { name, targetUrls, playwrightEnvsetId }, deps.workspaceEvents)
-      if (!config) return errorResult(`verification config not found: ${configId}`)
-      return asJsonResult(config)
-    } catch (err) {
-      return failureResult(err)
+    const save = async (urls: Record<string, string>) => {
+      try {
+        const config = updateVerificationConfig(feature, configId, { name, targetUrls: urls, playwrightEnvsetId }, deps.workspaceEvents)
+        return config ? asJsonResult(config) : errorResult(`verification config not found: ${configId}`)
+      } catch (err) {
+        return failureResult(err)
+      }
     }
+    if (targetUrls !== undefined) return save(targetUrls)
+    return requestVerificationUrls(ctx, request, feature, ['update_verification_config', deps.projectRoot, args], getVerificationConfig(feature, configId), playwrightEnvsetId, save)
   })
 
   registerTool('execute_verification', {

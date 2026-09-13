@@ -17,6 +17,7 @@ import type { StageAdapters } from '../logic/conductor'
 import type { FlightAgentSpawner } from '../logic/stages/context'
 
 import { FLIGHT_STAGE_KEYS } from '../logic/types'
+import { issueCheckpointInput } from '../logic/checkpoint-input'
 
 import type { FlightIndexEntry, FlightManifest } from '../logic/types'
 
@@ -113,6 +114,29 @@ async function waitForStatus(flightId: string, statuses: string[], timeoutMs = 3
 }
 
 describe('flights routes', () => {
+  it('allows a URL-invited human response only for the reviewed external checkpoint', async () => {
+    const adapters = allDone()
+    adapters.scout = {
+      teardown: () => null,
+      run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'missing-env', message: 'Provide environment', options: ['retry'] } }),
+      onCheckpointResponse: async () => ({ kind: 'done' }),
+    }
+    const store = new FlightRunStore(tmpDir)
+    app = await buildApp(adapters, store)
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ stageProducer: 'external' }) })
+    const flightId = started.json().flightId as string
+    await waitForStatus(flightId, ['waiting-for-approval'])
+    const manifest = store.get(flightId)!
+    const token = issueCheckpointInput(manifest)
+    const url = `/api/flights/${flightId}/respond`
+    expect((await app.inject({ method: 'POST', url, body: { response: { choice: 'retry' } } })).statusCode).toBe(409)
+    expect((await app.inject({ method: 'POST', url, headers: { 'x-canary-origin': 'mcp' }, body: { response: { choice: 'retry', expectedUpdatedAt: 'old-version' } } })).statusCode).toBe(409)
+    expect(store.get(flightId)?.status).toBe('waiting-for-approval')
+    const applied = await app.inject({ method: 'POST', url, body: { response: { choice: 'retry', elicitationToken: token } } })
+    expect(applied.statusCode).toBe(200)
+    expect((await app.inject({ method: 'POST', url, body: { response: { choice: 'retry', elicitationToken: token } } })).statusCode).toBe(409)
+  })
+
   it('releases a checkpoint via respond and refuses one when nothing waits', async () => {
     const adapters = allDone()
     adapters.scout = {

@@ -80,6 +80,7 @@ export type CanaryLabMcpToolName =
   | 'submit_external_portify'
   | 'revise_external_portify'
   | 'get_portify'
+  | 'review_portify'
   | 'save_portify'
   | 'cancel_portify'
   | 'remove_portification'
@@ -272,6 +273,7 @@ export const PORTIFY_TOOLS = [
   'submit_external_portify',
   'revise_external_portify',
   'get_portify',
+  'review_portify',
   'save_portify',
   'cancel_portify',
   'remove_portification',

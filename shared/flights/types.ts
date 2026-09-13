@@ -217,6 +217,10 @@ export interface PrdSourceCheckpointData {
 /** The client's answer to a checkpoint. `choice` addresses `options`; `values`
  *  carries user-supplied env values for `missing-env`. */
 export interface FlightCheckpointResponse {
+  /** Scoped URL-mode invitation, verified by the HTTP respond route. */
+  elicitationToken?: string
+  /** Elicitation answers apply only to the flight revision that was reviewed. */
+  expectedUpdatedAt?: string
   choice?: string
   values?: Record<string, string>
   data?: unknown

@@ -453,6 +453,9 @@ export function respondToFlightCheckpoint(
   const now = deps.now ?? (() => new Date().toISOString())
   const current = store.get(flightId)
   if (!current) throw new Error(`flight not found: ${flightId}`)
+  if (response.expectedUpdatedAt !== undefined && response.expectedUpdatedAt !== current.updatedAt) {
+    throw Object.assign(new Error('The flight changed while its checkpoint was being reviewed. Read the current checkpoint before responding.'), { statusCode: 409 })
+  }
   if (current.status !== 'waiting-for-approval') {
     throw new FlightNotParkedError(flightId, current.status, current.pauseReason)
   }

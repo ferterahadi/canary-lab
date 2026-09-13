@@ -146,6 +146,7 @@ const PORTIFY_TOOLS = uniqueSorted([
   'submit_external_portify',
   'revise_external_portify',
   'get_portify',
+  'review_portify',
   'save_portify',
   'cancel_portify',
   'remove_portification',

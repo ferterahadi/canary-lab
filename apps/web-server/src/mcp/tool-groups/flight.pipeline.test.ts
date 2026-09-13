@@ -972,9 +972,14 @@ describe('respond_flight_checkpoint — what rides the response', () => {
   it('sends only the fields the caller actually supplied', async () => {
     const { call, requests } = flightHarness({ reply: { statusCode: 200, body: parkedFlight() } })
 
-    await call('respond_flight_checkpoint', { flightId: 'fl-1' })
+    await call('respond_flight_checkpoint', { flightId: 'fl-1', choice: 'approve' })
 
-    expect(requests[0].payload).toEqual({ response: {} })
+    expect(requests[0].payload).toEqual({ response: { choice: 'approve' } })
+    requests.length = 0
+    const unanswered = await call('respond_flight_checkpoint', { flightId: 'fl-1' })
+    expect(requests.every((request) => request.method === 'GET')).toBe(true)
+    expect(unanswered.next).toContain('agent work')
+    expect(unanswered.checkpoint).toMatchObject({ kind: 'external-work' })
   })
 
   it('carries every field when the caller supplies them all', async () => {

@@ -20,3 +20,18 @@ on `editing`, read verification.failureDetail and perform the edits below.
 - Borrowed start: if ANOTHER feature already saved an overlay for the same app, Canary pre-applies that patch into your scratch worktree at setup, and the returned `instructions` list the exact `ports` slots that feature declared. START from that list rather than re-deriving it from the diff — then check it against the start command(s) THIS feature boots and add a slot for any listener they expose that the list misses (a differently-booted stack can bind a port the other feature never did). If this feature ALREADY declares every listed slot there is nothing to edit at all: Canary starts the double-boot itself, the instructions say so, and you POLL `get_portify` instead of submitting (submit 409s while that boot is in flight). Otherwise review the edits, declare the slots, then submit. The borrowed lines are captured into THIS feature's own overlay, so it stays self-contained.
 - Saving captures the verified edits as an EPHEMERAL OVERLAY under features/<feature>/portify/ — nothing committed or merged, so the product repo stays pristine; each run applies the overlay into a fresh per-run worktree (disjoint ports) before boot and reverse-applies at teardown. If the overlay later stops applying (the repo moved under it), the run fails loudly asking you to re-portify (start_external_portify, or the GUI).
 - Undo it: remove_portification(feature, confirm:true) reverts the feature config (the declared `ports` slots + `${port.x}` health-check rewrites, restored from the snapshot saved with the overlay) and deletes the overlay, so the feature is no longer portified. Re-run start_external_portify (or the GUI) to redo.
+
+
+## User input through MCP 2.0
+
+Let the owning MCP command request missing input with SDK 2.0 elicitation
+(`input_required`). The client collects the response and retries the command.
+Do not answer a user form yourself or ask the same question in chat first.
+Existing user instructions and autopilot choices still apply without another ask.
+On `needs-input`, leave work pending after decline/cancel, stale input, or an
+unfinished UI action; never retry or repeat the question automatically. Chat is
+only the fallback when elicitation is unavailable. Never collect passwords, API
+keys, or access tokens in chat or form elicitation: use the returned Canary UI URL.
+Setup and reconnection questions still use chat while MCP is unavailable.
+
+After showing a standalone verified diff, use review_portify(workflowId) only if a user decision is still needed; follow its save/revise/discard next command.

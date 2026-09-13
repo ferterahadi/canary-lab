@@ -6,6 +6,18 @@ type: skill
 
 # Canary Lab — Semantic Coverage Ledger
 
+## User input through MCP 2.0
+
+Let the owning MCP command request missing input with SDK 2.0 elicitation
+(`input_required`). The client collects the response and retries the command.
+Do not answer a user form yourself or ask the same question in chat first.
+Existing user instructions and autopilot choices still apply without another ask.
+On `needs-input`, leave work pending after decline/cancel, stale input, or an
+unfinished UI action; never retry or repeat the question automatically. Chat is
+only the fallback when elicitation is unavailable. Never collect passwords, API
+keys, or access tokens in chat or form elicitation: use the returned Canary UI URL.
+Setup and reconnection questions still use chat while MCP is unavailable.
+
 ## MCP Invocation
 
 Setup and the plugin expose one public Canary Lab MCP tool: `exec` (usually
@@ -97,10 +109,13 @@ a job.
 - `state.summary` `stale`/`absent` → run Step 1 (echo the previous ids!).
 - `state.coverage: "blocked"` → read the ledger's `next:` field and follow
   it — don't present a menu. When `next` reports no source doc ("Setup
-  needed", `sourceDocCount: 0`), **ask the user to attach or paste the
-  PRD/spec in the chat** — never invent one or pull an external file. Drop
-  source docs (specs, tickets, notes) into the feature with
-  `write_feature_doc` first.
+  needed", `sourceDocCount: 0`), call `start_external_summary` with the
+  feature and your stable `session_id`. It requests the PRD/spec through
+  elicitation and resumes after saving user-supplied text or a linked local file.
+  For attachments, call it with `document_source: "upload"` to open Canary's
+  import UI. Follow its result. Only the unsupported-client `needs-docs` fallback
+  asks the user to attach or paste in chat, then uses `write_feature_doc`.
+  Never invent requirements or pull a document the user did not provide.
 
 **Step 1 — PRD summary** (only when stale/absent; author it YOURSELF; no local agent):
 

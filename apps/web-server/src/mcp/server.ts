@@ -80,7 +80,10 @@ export async function registerMcpRoutes(
     defaultClientKind: ClientKind | undefined,
   ): McpServer => {
     const mcp = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS_BY_PROFILE[profile] })
-    registerCanaryLabTools(mcp, deps, {
+    registerCanaryLabTools(mcp, { ...deps, getUiUrl: () => {
+      const address = app.server.address()
+      return address && typeof address !== 'string' ? `http://127.0.0.1:${address.port}` : undefined
+    } }, {
       profile,
       defaultClientKind,
       onExecCall: (event) => {

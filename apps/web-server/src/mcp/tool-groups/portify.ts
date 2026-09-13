@@ -1,6 +1,8 @@
 // MCP tools — port-ification (make a feature's apps take injectable ports) plus
 // the two external heal-context reads. Split out of authoring.ts; bodies unchanged.
 import { z } from 'zod'
+import { registerPortifyReviewTool } from './portify-review'
+import { inputFingerprint, inputPending } from '../elicitation'
 import { buildExternalFailureDetail, buildExternalHealContext } from '../../features/runs/logic/heal/external-heal-surface'
 import { loadFeatures } from '../../shared/feature-loader'
 import { computePortPreflight } from '../../features/runs/logic/runtime/port-preflight'
@@ -10,7 +12,10 @@ import { portInjectability } from '../../../../../shared/launcher/port-injectabi
 import { type ToolGroupContext, asJsonResult, ensureExternalClaimForMcpCall, errorResult, failureResult, gettingStartedBusyResult, summarizeUnifiedDiff } from '../tool-support'
 
 export function registerPortifyTools(ctx: ToolGroupContext): void {
+  registerPortifyReviewTool(ctx)
   const { registerTool, deps, clientKindInput } = ctx
+  const reviewChanged = (workflowId: string, revision?: string): boolean =>
+    revision !== undefined && inputFingerprint(deps.getPortify?.(workflowId)) !== revision
 
   // ── Port-ification (make a feature's apps use injectable ports) ──────────
   registerTool('start_external_portify', {
@@ -78,8 +83,10 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
     inputSchema: {
       workflowId: z.string(),
       feedback: z.string().describe("What the human wants changed, in their words. Required — a reopen with nothing to act on just loses the verified state."),
+      review_revision: z.string().optional().describe('Pass through from review_portify; rejects a changed review.'),
     },
-  }, async ({ workflowId, feedback }) => {
+  }, async ({ workflowId, feedback, review_revision }) => {
+    if (reviewChanged(workflowId, review_revision)) return inputPending('The portification review changed. Nothing was applied.')
     if (!deps.reviseExternalPortify) return errorResult('reviseExternalPortify dependency is not configured')
     try {
       const { manifest, instructions } = deps.reviseExternalPortify(workflowId, feedback)
@@ -157,9 +164,11 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
     inputSchema: {
       workflowId: z.string(),
       confirm: z.literal(true).describe('Must be true. Guards against saving an unreviewed rewrite.'),
+      review_revision: z.string().optional().describe('Pass through from review_portify; rejects a changed review.'),
     },
     annotations: { destructiveHint: false, idempotentHint: false },
-  }, async ({ workflowId }) => {
+  }, async ({ workflowId, review_revision }) => {
+    if (reviewChanged(workflowId, review_revision)) return inputPending('The portification review changed. Nothing was applied.')
     if (!deps.savePortify) return errorResult('savePortify dependency is not configured')
     try {
       const manifest = await deps.savePortify(workflowId)
@@ -178,9 +187,11 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
     inputSchema: {
       workflowId: z.string(),
       confirm: z.literal(true).describe('Must be true. Guards against discarding in-flight work.'),
+      review_revision: z.string().optional().describe('Pass through from review_portify; rejects a changed review.'),
     },
     annotations: { destructiveHint: true, idempotentHint: false },
-  }, async ({ workflowId }) => {
+  }, async ({ workflowId, review_revision }) => {
+    if (reviewChanged(workflowId, review_revision)) return inputPending('The portification review changed. Nothing was applied.')
     if (!deps.cancelPortify) return errorResult('cancelPortify dependency is not configured')
     try {
       return asJsonResult(await deps.cancelPortify(workflowId))

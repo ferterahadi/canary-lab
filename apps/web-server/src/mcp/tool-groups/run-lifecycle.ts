@@ -1,9 +1,10 @@
 // MCP tools — run lifecycle.
 //
-// Registration bodies are unchanged from the pre-split tools.ts; only the
-// enclosing function is new. Add a tool here, then wire its name into the
+// Add a tool here, then wire its name into the
 // profile arrays in ../tool-support.ts (see the cl_add-mcp-tool skill).
 import { z } from 'zod'
+import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/server'
+import { requestUserInput } from '../elicitation'
 import { normalizeRunCounts } from '../../features/runs/logic/heal/external-heal-surface'
 import { isHealClaimAllowed } from '../../features/runs/logic/heal/heal-claim-policy'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
@@ -31,87 +32,127 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       isolation: z.enum(['worktree', 'queue']).optional().describe('Only needed after start_run returns repo_collision_requires_choice: "worktree" isolates this run in a per-run git worktree and starts it now (concurrent); "queue" waits until the conflicting run finishes.'),
       perturbation: z.record(z.string(), z.unknown()).optional().describe('Robustness envelope (the `envelope` object from a get_robustness finding, or the suite\'s robustness/envelope.json) to boot the services under: latency, duplicated writes and slot restarts through a per-slot proxy. Use it to repair a Robustness Lab finding — the failing test fails again under the same environment, and the heal context carries `perturbation` (with a one-line `repro`) so the fix targets the app\'s tolerance, not the test. Applies to fresh starts only; omitted = unperturbed.'),
     },
-  }, async ({ feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new, isolation, perturbation }) => {
-    try {
-      const requestedRef = runId ?? run_ref
-      // Heal-claim policy (see heal-claim-policy.ts): claiming is open to every
-      // human-driven interactive client — claude/codex (Desktop or CLI) and even
-      // undetected 'other'. The ONLY kinds blocked are runner-spawned PTY agents
-      // (claude-pty/codex-pty), which would otherwise claim their own run. A
-      // blocked client may still start/verify the run, but must not own its heal
-      // loop — so we down-shift claim_heal to false and tell the caller, instead
-      // of grabbing heal duty behind their back.
-      const claimAllowed = claim_heal && isHealClaimAllowed(client_kind)
-      const claimSuppressed = claim_heal && !claimAllowed
-      const suppressionFields = claimSuppressed
-        ? { claimSuppressed: true, message: CLAIM_SUPPRESSED_MESSAGE }
-        : {}
-      // Default (no explicit ref, no force_new): continue the run that's
-      // already healing for this feature — the external-heal continuation
-      // pattern. With concurrency, `force_new` (or targeting a different run)
-      // no longer blocks: it falls through to a fresh concurrent start, where
-      // same-repo collisions surface a worktree/queue choice.
-      const healing = findHealingRunForFeature(deps, feature, env)
-      if (healing && !force_new && !requestedRef) {
-        const claim = claimAllowed ? claimRun(deps, healing.manifest.runId, session_id, client_kind, conversation_name) : null
-        return asJsonResult({
-          runId: healing.manifest.runId,
-          reused: true,
-          status: healing.manifest.status,
-          claimed: claimAllowed ? claim?.accepted === true : false,
-          claim,
-          ...suppressionFields,
-          ...(claimAllowed ? healWaitNext() : {}),
-        })
-      }
-      if (requestedRef) {
-        const resolved = resolveRunRef(deps, feature, env, requestedRef)
-        if (resolved.kind === 'missing') return errorResult(`run-not-found: ${requestedRef}`)
-        if (resolved.kind === 'ambiguous') {
+  }, async (args, request) => {
+    const { feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new, perturbation } = args
+    const ask = (fallback: () => CallToolResult, message = 'Another run uses these repositories. Run now in an isolated worktree, or queue until they are free?') => requestUserInput(request, ctx.clientFacts(), {
+      scope: ['run-isolation', deps.projectRoot, args], mode: 'form',
+      schema: z.object({ isolation: z.enum(['worktree', 'queue']) }), message, fallback,
+    }, async (answer) => begin(answer.isolation))
+    const begin = async (isolation = args.isolation): Promise<CallToolResult | InputRequiredResult> => {
+      try {
+        const requestedRef = runId ?? run_ref
+        // Heal-claim policy (see heal-claim-policy.ts): claiming is open to every
+        // human-driven interactive client — claude/codex (Desktop or CLI) and even
+        // undetected 'other'. The ONLY kinds blocked are runner-spawned PTY agents
+        // (claude-pty/codex-pty), which would otherwise claim their own run. A
+        // blocked client may still start/verify the run, but must not own its heal
+        // loop — so we down-shift claim_heal to false and tell the caller, instead
+        // of grabbing heal duty behind their back.
+        const claimAllowed = claim_heal && isHealClaimAllowed(client_kind)
+        const claimSuppressed = claim_heal && !claimAllowed
+        const suppressionFields = claimSuppressed
+          ? { claimSuppressed: true, message: CLAIM_SUPPRESSED_MESSAGE }
+          : {}
+        // Default (no explicit ref, no force_new): continue the run that's
+        // already healing for this feature — the external-heal continuation
+        // pattern. With concurrency, `force_new` (or targeting a different run)
+        // no longer blocks: it falls through to a fresh concurrent start, where
+        // same-repo collisions surface a worktree/queue choice.
+        const healing = findHealingRunForFeature(deps, feature, env)
+        if (healing && !force_new && !requestedRef) {
+          const claim = claimAllowed ? claimRun(deps, healing.manifest.runId, session_id, client_kind, conversation_name) : null
           return asJsonResult({
-            type: 'ambiguous_run_ref',
-            run_ref: requestedRef,
-            candidates: resolved.candidates.map(runCandidate),
-          })
-        }
-        const target = resolved.detail
-        const status = target.manifest.status
-        if (isActiveBootRun(target)) {
-          // Boot-only sessions hold services up with no tests and no heal loop.
-          // Don't claim heal or tell the caller to wait_for_heal_task.
-          return asJsonResult({ ...bootSessionValue(target), reused: true })
-        }
-        if (isActiveRunStatus(status)) {
-          const claim = claimAllowed ? claimRun(deps, target.manifest.runId, session_id, client_kind, conversation_name) : null
-          return asJsonResult({
-            runId: target.manifest.runId,
+            runId: healing.manifest.runId,
             reused: true,
-            status,
+            status: healing.manifest.status,
             claimed: claimAllowed ? claim?.accepted === true : false,
             claim,
             ...suppressionFields,
             ...(claimAllowed ? healWaitNext() : {}),
           })
         }
-        if (status === 'passed') {
+        if (requestedRef) {
+          const resolved = resolveRunRef(deps, feature, env, requestedRef)
+          if (resolved.kind === 'missing') return errorResult(`run-not-found: ${requestedRef}`)
+          if (resolved.kind === 'ambiguous') {
+            return asJsonResult({
+              type: 'ambiguous_run_ref',
+              run_ref: requestedRef,
+              candidates: resolved.candidates.map(runCandidate),
+            })
+          }
+          const target = resolved.detail
+          const status = target.manifest.status
+          if (isActiveBootRun(target)) {
+            // Boot-only sessions hold services up with no tests and no heal loop.
+            // Don't claim heal or tell the caller to wait_for_heal_task.
+            return asJsonResult({ ...bootSessionValue(target), reused: true })
+          }
+          if (isActiveRunStatus(status)) {
+            const claim = claimAllowed ? claimRun(deps, target.manifest.runId, session_id, client_kind, conversation_name) : null
+            return asJsonResult({
+              runId: target.manifest.runId,
+              reused: true,
+              status,
+              claimed: claimAllowed ? claim?.accepted === true : false,
+              claim,
+              ...suppressionFields,
+              ...(claimAllowed ? healWaitNext() : {}),
+            })
+          }
+          if (status === 'passed') {
+            return asJsonResult({
+              type: 'not_restartable',
+              runId: target.manifest.runId,
+              status,
+              message: 'Passed runs are not restarted by start_run. Start a fresh run without runId/run_ref if you want to test again.',
+            })
+          }
+          if (status !== 'failed' && status !== 'aborted') {
+            return errorResult(`run-not-restartable: ${target.manifest.runId} status=${status}`)
+          }
+          if (!deps.restartExternalRun) return errorResult('restartExternalRun dependency is not configured')
+          // Restarting a failed run re-enters external heal. A disallowed (CLI /
+          // 'other') client may still trigger the restart — it just can't own the
+          // loop: `claimable: false` restarts into external mode with no session
+          // and no broker claim, so the run waits for a Desktop/UI drive rather
+          // than silently restarting into a session the client owns.
+          const restarted = await deps.restartExternalRun(
+            target.manifest.runId,
+            {
+              kind: 'external',
+              sessionId: session_id,
+              clientKind: client_kind,
+              ...(conversation_name ? { conversationName: conversation_name } : {}),
+              claimable: claimAllowed,
+            },
+            guidance,
+          )
+          const claim = claimAllowed ? claimRun(deps, restarted.runId, session_id, client_kind, conversation_name) : null
+          const counts = normalizeRunCounts(target.summary ?? null)
           return asJsonResult({
-            type: 'not_restartable',
-            runId: target.manifest.runId,
-            status,
-            message: 'Passed runs are not restarted by start_run. Start a fresh run without runId/run_ref if you want to test again.',
+            runId: restarted.runId,
+            reused: true,
+            restarted: true,
+            mode: restarted.mode ?? 'remaining',
+            statusLine: counts.statusLine,
+            counts,
+            status: 'running',
+            claimed: claimAllowed ? claim?.accepted === true : false,
+            claim,
+            ...suppressionFields,
+            ...(claimAllowed ? healWaitNext() : {}),
           })
         }
-        if (status !== 'failed' && status !== 'aborted') {
-          return errorResult(`run-not-restartable: ${target.manifest.runId} status=${status}`)
-        }
-        if (!deps.restartExternalRun) return errorResult('restartExternalRun dependency is not configured')
-        // Restarting a failed run re-enters external heal. A disallowed (CLI /
-        // 'other') client may still trigger the restart — it just can't own the
-        // loop: `claimable: false` restarts into external mode with no session
-        // and no broker claim, so the run waits for a Desktop/UI drive rather
-        // than silently restarting into a session the client owns.
-        const restarted = await deps.restartExternalRun(
-          target.manifest.runId,
+        // Any MCP-triggered run is external-origin: it must use External-client
+        // heal regardless of the project's Heal Agent setting (which only governs
+        // UI-triggered runs). `claimable` is what splits a Desktop client that
+        // owns the loop from a CLI/'other' client that can't — the latter still
+        // runs in external mode and waits for a Desktop/UI drive instead of
+        // falling back to a locally-spawned auto-heal agent.
+        const outcome = await deps.startRun(
+          feature,
+          env,
           {
             kind: 'external',
             sessionId: session_id,
@@ -119,86 +160,54 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
             ...(conversation_name ? { conversationName: conversation_name } : {}),
             claimable: claimAllowed,
           },
-          guidance,
+          isolation,
+          undefined,
+          perturbation,
         )
-        const claim = claimAllowed ? claimRun(deps, restarted.runId, session_id, client_kind, conversation_name) : null
-        const counts = normalizeRunCounts(target.summary ?? null)
-        return asJsonResult({
-          runId: restarted.runId,
-          reused: true,
-          restarted: true,
-          mode: restarted.mode ?? 'remaining',
-          statusLine: counts.statusLine,
-          counts,
-          status: 'running',
-          claimed: claimAllowed ? claim?.accepted === true : false,
-          claim,
-          ...suppressionFields,
-          ...(claimAllowed ? healWaitNext() : {}),
-        })
-      }
-      // Any MCP-triggered run is external-origin: it must use External-client
-      // heal regardless of the project's Heal Agent setting (which only governs
-      // UI-triggered runs). `claimable` is what splits a Desktop client that
-      // owns the loop from a CLI/'other' client that can't — the latter still
-      // runs in external mode and waits for a Desktop/UI drive instead of
-      // falling back to a locally-spawned auto-heal agent.
-      const outcome = await deps.startRun(
-        feature,
-        env,
-        {
-          kind: 'external',
-          sessionId: session_id,
-          clientKind: client_kind,
-          ...(conversation_name ? { conversationName: conversation_name } : {}),
-          claimable: claimAllowed,
-        },
-        isolation,
-        undefined,
-        perturbation,
-      )
-      if (outcome.kind === 'getting-started-busy') {
-        return asJsonResult({
-          type: 'getting_started_busy',
-          active: outcome.active,
-          message: outcome.message,
-          nextSteps: ['follow the active demo in its current owner; do not start another run or flight'],
-        })
-      }
-      if (outcome.kind === 'collision') {
-        // Same-repo collision and the client didn't choose. Nothing started —
-        // ask the user, then re-call start_run with isolation:"worktree"|"queue".
-        return asJsonResult({
-          type: 'repo_collision_requires_choice',
-          conflictingRunId: outcome.conflictingRunId,
-          conflictingFeature: outcome.conflictingFeature,
-          repoPaths: outcome.repoPaths,
-          options: outcome.options,
-          message: outcome.message,
-          nextSteps: ['ask_user_worktree_or_queue'],
-        })
-      }
-      if (outcome.kind === 'queued') {
+        if (outcome.kind === 'getting-started-busy') {
+          return asJsonResult({
+            type: 'getting_started_busy',
+            active: outcome.active,
+            message: outcome.message,
+            nextSteps: ['follow the active demo in its current owner; do not start another run or flight'],
+          })
+        }
+        if (outcome.kind === 'collision') {
+          // Same-repo collision and the client didn't choose. Nothing started —
+          // ask the user, then re-call start_run with isolation:"worktree"|"queue".
+          return ask(() => asJsonResult({
+            type: 'repo_collision_requires_choice',
+            conflictingRunId: outcome.conflictingRunId,
+            conflictingFeature: outcome.conflictingFeature,
+            repoPaths: outcome.repoPaths,
+            options: outcome.options,
+            message: outcome.message,
+            nextSteps: ['ask_user_worktree_or_queue'],
+          }), outcome.message)
+        }
+        if (outcome.kind === 'queued') {
+          return asJsonResult({
+            runId: outcome.runId,
+            reused: false,
+            queued: true,
+            queueReason: outcome.reason,
+            claimed: claimAllowed,
+            ...suppressionFields,
+            ...(claimAllowed ? healWaitNext() : {}),
+          })
+        }
         return asJsonResult({
           runId: outcome.runId,
           reused: false,
-          queued: true,
-          queueReason: outcome.reason,
           claimed: claimAllowed,
           ...suppressionFields,
           ...(claimAllowed ? healWaitNext() : {}),
         })
+      } catch (err) {
+        return failureResult(err)
       }
-      return asJsonResult({
-        runId: outcome.runId,
-        reused: false,
-        claimed: claimAllowed,
-        ...suppressionFields,
-        ...(claimAllowed ? healWaitNext() : {}),
-      })
-    } catch (err) {
-      return failureResult(err)
     }
+    return request?.mcpReq.requestState?.() !== undefined ? ask(() => errorResult('Elicitation unavailable')) : begin()
   })
 
   registerTool('boot_services', {
@@ -209,44 +218,52 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       env: z.string().optional().describe("Envset name. Defaults to the feature's first declared env."),
       isolation: z.enum(['worktree', 'queue']).optional().describe('Only needed after this returns repo_collision_requires_choice: "worktree" boots in a per-run git worktree (concurrent); "queue" waits until the conflicting run finishes.'),
     },
-  }, async ({ feature, env, isolation }) => {
-    try {
-      const outcome = await deps.startRun(feature, env, undefined, isolation, 'boot')
-      if (outcome.kind === 'getting-started-busy') {
-        return asJsonResult({
-          type: 'getting_started_busy',
-          active: outcome.active,
-          message: outcome.message,
-          nextSteps: ['follow the active demo in its current owner; do not start another run or flight'],
-        })
-      }
-      if (outcome.kind === 'collision') {
-        return asJsonResult({
-          type: 'repo_collision_requires_choice',
-          conflictingRunId: outcome.conflictingRunId,
-          conflictingFeature: outcome.conflictingFeature,
-          repoPaths: outcome.repoPaths,
-          options: outcome.options,
-          message: outcome.message,
-          nextSteps: ['ask_user_worktree_or_queue'],
-        })
-      }
-      if (outcome.kind === 'queued') {
+  }, async (args, request) => {
+    const { feature, env } = args
+    const ask = (fallback: () => CallToolResult, message = 'Boot in an isolated worktree now, or queue until the repositories are free?') => requestUserInput(request, ctx.clientFacts(), {
+      scope: ['boot-isolation', deps.projectRoot, args], mode: 'form',
+      schema: z.object({ isolation: z.enum(['worktree', 'queue']) }), message, fallback,
+    }, async (answer) => begin(answer.isolation))
+    const begin = async (isolation = args.isolation): Promise<CallToolResult | InputRequiredResult> => {
+      try {
+        const outcome = await deps.startRun(feature, env, undefined, isolation, 'boot')
+        if (outcome.kind === 'getting-started-busy') {
+          return asJsonResult({
+            type: 'getting_started_busy',
+            active: outcome.active,
+            message: outcome.message,
+            nextSteps: ['follow the active demo in its current owner; do not start another run or flight'],
+          })
+        }
+        if (outcome.kind === 'collision') {
+          return ask(() => asJsonResult({
+            type: 'repo_collision_requires_choice',
+            conflictingRunId: outcome.conflictingRunId,
+            conflictingFeature: outcome.conflictingFeature,
+            repoPaths: outcome.repoPaths,
+            options: outcome.options,
+            message: outcome.message,
+            nextSteps: ['ask_user_worktree_or_queue'],
+          }), outcome.message)
+        }
+        if (outcome.kind === 'queued') {
+          return asJsonResult({
+            runId: outcome.runId,
+            queued: true,
+            queueReason: outcome.reason,
+            nextSteps: ['boot starts automatically when capacity frees; stop it with abort_run when done'],
+          })
+        }
         return asJsonResult({
           runId: outcome.runId,
-          queued: true,
-          queueReason: outcome.reason,
-          nextSteps: ['boot starts automatically when capacity frees; stop it with abort_run when done'],
+          booted: true,
+          nextSteps: ['services are booting and will be held — exercise them, then call abort_run (confirm:true) to stop services + revert the envset. A service that fails its readiness probe is marked failed (status "timeout") but the session stays held; boot does not self-abort on a health-check failure'],
         })
+      } catch (err) {
+        return failureResult(err)
       }
-      return asJsonResult({
-        runId: outcome.runId,
-        booted: true,
-        nextSteps: ['services are booting and will be held — exercise them, then call abort_run (confirm:true) to stop services + revert the envset. A service that fails its readiness probe is marked failed (status "timeout") but the session stays held; boot does not self-abort on a health-check failure'],
-      })
-    } catch (err) {
-      return failureResult(err)
     }
+    return request?.mcpReq.requestState?.() !== undefined ? ask(() => errorResult('Elicitation unavailable')) : begin()
   })
 
   registerTool('pause_run', {

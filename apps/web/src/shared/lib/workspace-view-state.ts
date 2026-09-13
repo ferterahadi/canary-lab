@@ -88,6 +88,22 @@ export interface RunOpenTarget {
 
 export interface ReviewFocus { file?: string; line?: number; mode?: 'english' | 'code'; baseline?: 'run' }
 
+/** URL-mode MCP elicitation explicitly invites the human to answer this
+ * checkpoint in the existing UI. This is a UI ownership hint, not authority
+ * for an API call, and cannot unlock agent-work checkpoints or another flight. */
+export function isElicitationReview(flightId: string, checkpointKind: string): boolean {
+  const params = new URLSearchParams(window.location.search)
+  return checkpointKind !== 'external-work' && params.get('view') === 'flights'
+    && params.get('flight') === flightId
+    && !!params.get('inputToken')
+    && params.get('elicitation') === `${flightId}:${checkpointKind}`
+}
+
+export function checkpointInputToken(flightId: string, checkpointKind: string): string | undefined {
+  return isElicitationReview(flightId, checkpointKind)
+    ? new URLSearchParams(window.location.search).get('inputToken') ?? undefined : undefined
+}
+
 export interface PersistedView {
   /** Inspect current suite source independently of the selected run (URL only). */
   currentTests?: boolean
@@ -247,6 +263,10 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'draft', null)
     // `flight` only qualifies the flights view — drop it otherwise.
     setOrDelete(params, 'flight', state.view === 'flights' ? state.flight : null)
+    if (state.view !== 'flights' || !state.flight || !params.get('elicitation')?.startsWith(`${state.flight}:`)) {
+      params.delete('elicitation')
+      params.delete('inputToken')
+    }
     // `stage` only qualifies an OPEN flight — drop it on the flights landing
     // list and off the view entirely, so a stage pick can't outlive its flight.
     setOrDelete(params, 'stage', state.view === 'flights' && state.flight ? state.flightStage : null)

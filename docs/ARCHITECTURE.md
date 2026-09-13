@@ -672,12 +672,24 @@ link, or the per-repo reason there is none.
   keeps the sessionful 2025 handler behind the same endpoint so older clients can
   initialize and reconnect without a flag. The SDK classifies each request from
   its protocol envelope; both paths build tools from the same profile factory.
+- **User input** uses the MCP TypeScript SDK 2.0 `inputRequired(...)` flow in
+  `apps/web-server/src/mcp/elicitation.ts`. The SDK adapts the same handler for
+  legacy peers. Missing requirements, run/boot isolation, verification URLs,
+  standalone portify review and unanswered flight checkpoints can elicit input.
+  Existing explicit inputs and autopilot decisions bypass the ask. Unsupported
+  clients receive chat or UI-link recovery instructions; decline/cancel leaves
+  work pending. Form responses are validated and bound to their operation and
+  reviewed revision; in-process receipts prevent duplicate application on retry.
+  Open requests expire after 30 minutes and across server restarts. URL-mode
+  document input uses the coverage document rail. Secret entry uses a scoped,
+  expiring invitation to the existing flight checkpoint UI; secrets do not
+  traverse MCP. Status reads never open a question.
 - **Profiles** pick the tool surface via `?profile=`. There are seven workflow profiles, two composed direct-tool profiles, and one compact dispatcher profile: `repair` (heal loop), `verify` (verification configs), `author`
   (suite/envset/draft authoring), `coverage` (docs → PRD summary → ledger), `export`
   (evaluation archives), `flight` (the conducted pipeline), `portify` (port-injection
   workflow), then `lifecycle` (repair + verify + author + coverage + export + flight,
   no portify), `full` (lifecycle + portify), and `compact` (**the bare-server and
-  setup-installed default**: one always-loaded `exec` tool dispatching all 64 atomic
+  setup-installed default**: one always-loaded `exec` tool dispatching all 70 atomic
   handlers). `lifecycle` and `full` remain direct-tool rollback/debug surfaces. `coverage`, `export`
   and `flight` were carved out of what used to be one oversized `author` array; the
   composed unions absorbed the split, so nothing had to move twice. Optional

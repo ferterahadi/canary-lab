@@ -74,3 +74,16 @@ Read the result: succeeded restores the existing Tests list; failed returns the
 latest diagnostic. Stop editing and report action: blocked when unable to proceed.
 Never weaken tests, run test bodies, or claim success from your own exit message.
 Use the shipped canary-lab-repair-discovery skill for the complete workflow.
+
+
+## User input through MCP 2.0
+
+Let the owning MCP command request missing input with SDK 2.0 elicitation
+(`input_required`). The client collects the response and retries the command.
+Do not answer a user form yourself or ask the same question in chat first.
+Existing user instructions and autopilot choices still apply without another ask.
+On `needs-input`, leave work pending after decline/cancel, stale input, or an
+unfinished UI action; never retry or repeat the question automatically. Chat is
+only the fallback when elicitation is unavailable. Never collect passwords, API
+keys, or access tokens in chat or form elicitation: use the returned Canary UI URL.
+Setup and reconnection questions still use chat while MCP is unavailable.
