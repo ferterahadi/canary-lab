@@ -1,6 +1,7 @@
 // MCP tools — the conducted flight pipeline (start / inspect / answer checkpoints).
 import { z } from 'zod'
 import { requestFlightCheckpoint } from '../flight-input'
+import { documentResolutionInput } from '../document-resolution'
 import type { CallToolResult } from '@modelcontextprotocol/server'
 import path from 'path'
 import { flightStageRemedy } from '../../features/flights/logic/stage-remedy'
@@ -90,7 +91,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
         options?: string[]
         data?: ExternalWorkCheckpointData & { lastAttempt?: { mode?: string; outcome?: string; reason?: string } }
       } | undefined
-      const base = `Flight is parked on the ${cp?.kind ?? 'checkpoint'} checkpoint. If the user has not answered, call respond_flight_checkpoint(flightId) without a choice to request MCP elicitation. Otherwise pass their choice: one of ${JSON.stringify(cp?.options ?? [])}.`
+      const base = `Flight is parked on the ${cp?.kind ?? 'checkpoint'} checkpoint. If the user has not answered, call respond_flight_checkpoint(flightId) without a choice. Document checkpoints discover authorized sources first and elicit only unresolved material; other human checkpoints request MCP elicitation. Otherwise pass their choice: one of ${JSON.stringify(cp?.options ?? [])}.`
       if (cp?.kind === 'prd-source') {
         const fork = `${base} The Requirements stage ALWAYS pauses here — a two-path fork; call respond_flight_checkpoint with no choice to elicit the user response. (a) Supply docs yourself: distill THIS conversation with write_feature_doc("${String(view.feature)}", "conversation-prd.md", <markdown>) or link a local file with write_feature_doc(link_path: "~/path/to/prd.md"), then respond "continue". (b) Have Canary's agent gather them guided by the flight's frozen intent: respond "collect-repo-docs" (the agent copies in repo docs relevant to the intent) or "infer-from-diff" (the agent derives requirements from the branch diff vs base). If a previous gather went wrong, pass feedback:"<what was wrong>" with the choice — it is added to the agent's prompt.`
         // A re-park after an empty gather must NOT read as a neutral first
@@ -145,7 +146,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
         // "waiting-for-approval" with six stages that would never start.
         const stayRule = 'DO NOT END YOUR TURN while this step is open unless user elicitation returned needs-input. The flight advances ONLY when you submit — nothing polls it, no timeout rescues it, and a status update to the user is not progress. Keep working through submit, then follow the flight to its next stage. If you truly must stop, say so to the user in the same breath and tell them the flight is parked until they re-invoke the flight skill to pick this hand-off up. '
         const docsInputRule = data?.stage === 'docs'
-          ? 'Before gathering requirements, call respond_flight_checkpoint(flightId) without a choice to elicit supplied documents versus gathering, unless the user already chose. If elicitation returns needs-input, leave this hand-off pending. Do not start a separate coverage job. '
+          ? 'Discover clearly relevant, authorized documents first. Call respond_flight_checkpoint(flightId, document_resolution) without a choice only for missing, ambiguous, or conflicting sources. Honor existing user choices. If input is pending, leave this hand-off pending. Do not start a separate coverage job. '
           : ''
         // Advice matched to what THIS client can do, rather than one line that
         // tells a subagent-less chat client to fan out and then reads its
@@ -513,10 +514,11 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('respond_flight_checkpoint', {
-    description: 'Release a flight parked waiting-for-approval. Omit choice/values/data to request MCP 2.0 elicitation (docs selection or a human checkpoint). Otherwise pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval (the config is the scaffolded feature\'s REAL on-disk file — data.configSource writes through to it). Under autopilot (the default) only similarity-choice, missing-env, and re-parked checkpoints reach you; a flight started with autopilot:false parks at every checkpoint. A prd-source park is a two-path fork: supply the docs yourself (write_feature_doc with content or link_path, then respond "continue"), or have Canary\'s agent gather them guided by the flight\'s frozen intent — respond "collect-repo-docs" (copies in repo docs relevant to the intent) or "infer-from-diff" (derives requirements from the branch diff vs base); optional feedback rides a retry into the agent\'s prompt. A portify-gate park is the final Parallel setup ask after Report and BEFORE any Portify agent/double-boot cost: "run" starts the server-owned background Portify workflow (declared native port injection or a sibling feature\'s saved overlay is verified first — the agent only runs if edits are needed), "skip" keeps the feature serial and the flight continues. A portify-apply park is a verified-diff review: "apply" saves the overlay (nothing lands in the product repos), "revise" REQUIRES feedback:"<what to change>" and re-runs the agent + double-boot re-verify (the checkpoint re-parks with the new diff), "cancel" discards the edits and SKIPS the stage — the flight continues without Parallel setup (the feature stays serial; a later flight can retry). export-mode picks the evaluation flavor: raw (fast) or localized (rewritten reasoning — on a stage_producer:"external" flight the localized rewrite is handed to YOU as an external-work checkpoint, and is the default there). On external-work, checkpoint.data.takeoverRequestedAt means the user asked Canary to take this step: stop your work and respond choice:"run-internally" to release it; any submit is rejected.',
+    description: 'Release a flight parked waiting-for-approval. Omit choice/values/data for a human checkpoint. Documents first return discovery instructions; pass document_resolution with source evidence to proceed automatically or elicit unresolved material using MCP 2.0. Otherwise pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval (the config is the scaffolded feature\'s REAL on-disk file — data.configSource writes through to it). Under autopilot (the default) only similarity-choice, missing-env, and re-parked checkpoints reach you; a flight started with autopilot:false parks at every checkpoint. A prd-source park is a two-path fork: supply the docs yourself (write_feature_doc with content or link_path, then respond "continue"), or have Canary\'s agent gather them guided by the flight\'s frozen intent — respond "collect-repo-docs" (copies in repo docs relevant to the intent) or "infer-from-diff" (derives requirements from the branch diff vs base); optional feedback rides a retry into the agent\'s prompt. A portify-gate park is the final Parallel setup ask after Report and BEFORE any Portify agent/double-boot cost: "run" starts the server-owned background Portify workflow (declared native port injection or a sibling feature\'s saved overlay is verified first — the agent only runs if edits are needed), "skip" keeps the feature serial and the flight continues. A portify-apply park is a verified-diff review: "apply" saves the overlay (nothing lands in the product repos), "revise" REQUIRES feedback:"<what to change>" and re-runs the agent + double-boot re-verify (the checkpoint re-parks with the new diff), "cancel" discards the edits and SKIPS the stage — the flight continues without Parallel setup (the feature stays serial; a later flight can retry). export-mode picks the evaluation flavor: raw (fast) or localized (rewritten reasoning — on a stage_producer:"external" flight the localized rewrite is handed to YOU as an external-work checkpoint, and is the default there). On external-work, checkpoint.data.takeoverRequestedAt means the user asked Canary to take this step: stop your work and respond choice:"run-internally" to release it; any submit is rejected.',
     inputSchema: {
       flightId: z.string(),
-      document_source: z.enum(['upload']).optional().describe('Open requirements import using URL-mode elicitation.'),
+      document_source: z.enum(['form', 'upload']).optional().describe('The user chose to supply requirements: use form input or URL document import.'),
+      document_resolution: documentResolutionInput.optional().describe('Completed source discovery or an unresolved document question. Omit choice when supplying this.'),
       choice: z.string().optional().describe('One of the checkpoint\'s options.'),
       values: z.record(z.string(), z.string()).optional().describe('missing-env only: KEY→value map, written to the missing env file then captured.'),
       data: z.unknown().optional().describe('config-approval only: { configSource } with the hand-edited config — written through to the feature\'s on-disk feature.config.cjs before validation.'),
@@ -524,8 +526,9 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       token: z.string().optional().describe('external-work submit only: the `handOffId` from the checkpoint data you are answering. Identifies WHICH hand-off your result belongs to — without it, a result you started before the user paused and resumed the flight could settle a step against an ask that has since changed. Pass it back verbatim; a submit carrying a superseded id is discarded and the step re-parks.'),
     },
   }, async (args, request) => {
-    const { flightId, choice, values, data, document_source } = args
+    const { flightId, choice, values, data, document_source, document_resolution } = args
     if (!deps.flightsRequest) return flightsUnavailable()
+    if (document_resolution !== undefined && (choice || values || data !== undefined)) return errorResult('Pass document_resolution without choice, values, or data so source evidence is validated before the flight continues.')
     const send = async ({ choice, values, data, feedback, token, expectedUpdatedAt }: FlightCheckpointResponse): Promise<CallToolResult> => {
       const resp = await deps.flightsRequest!({
         method: 'POST',
@@ -567,7 +570,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       return asJsonResult({ ...view, next: flightNext(view) })
     }
     return !choice && !values && data === undefined
-      ? requestFlightCheckpoint(ctx, request, flightId, document_source === 'upload', send)
+      ? requestFlightCheckpoint(ctx, request, flightId, document_source, document_resolution, send)
       : send(args)
   })
 }

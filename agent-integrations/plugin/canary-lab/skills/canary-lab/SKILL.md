@@ -129,20 +129,24 @@ preserved).
   exists. Do not perform that legacy hand-off. Release it immediately with
   `choice: "run-internally"`, tell the user where `links.evaluationZip` is,
   and end your turn while Canary continues it in the background.
-- **The `docs` hand-off: request user input BEFORE gathering.** The prompt asks you to
-  search the repos (or read the diff), but the user may already hold the
-  requirements. First call `respond_flight_checkpoint(flightId)` without a
-  choice: it elicits supplied requirements versus gathering. For attachments,
-  follow its `document_source: "upload"` next step. Never start a separate
-  summary job alongside the flight. Only the unsupported-client fallback asks
-  this question in chat; never invent a document. If they supply
-  material, do not gather: write their content (or a faithful distillation of
-  their file) to `checkpoint.data.context.outPath` and submit — or, when they
-  want their original file kept live, `write_feature_doc` with `link_path` and
-  then submit; the step re-parks as `prd-source` with the linked doc counted,
-  so answer `continue` there. Skip the ask only when the user already chose a
-  gather path at a `prd-source` park in this conversation, or told you to
-  proceed without them.
+- **The `docs` hand-off: discover authorized documents before asking.** Search the
+  flight's repositories and explicit user references, using the frozen intent as
+  the relevance filter. Read contents; use clearly relevant, compatible sources
+  automatically and preserve prior source choices. Never choose by a confidence
+  percentage or infer requirements from code/tests without authorization.
+  `respond_flight_checkpoint(flightId)` returns discovery instructions when no
+  documents exist. Return `document_resolution: {status: "resolved", searched,
+  sources: [{path, sha256, reason}]}` to validate/import selected sources.
+  Missing material uses `{status: "missing", searched, reason}`; ambiguity/conflicts
+  use that status plus `searched`, `question`, and `candidates: [{label, sources}]`
+  (1–5 for ambiguity, 2–5 for conflicts).
+  Pass this without `choice` to elicit only the unresolved issue through MCP 2.0.
+  A collector's recorded empty search already establishes that discovery ran.
+  Follow `document_source: "form"` or `"upload"` when the user chooses to supply
+  material. Only unsupported clients ask the focused question in chat.
+  Use only the selected documents, write the current handoff's required output,
+  and submit with its `handOffId`. Never start a separate coverage job. If the
+  user already chose `infer-from-diff`, follow that authorized handoff directly.
 - Do the work with your own tools, writing to the real paths the prompt names.
   Then release it: `respond_flight_checkpoint(flightId, choice: "submit", data: <the shape the prompt asks for>, token: checkpoint.data.handOffId)`.
 - **Pass `token`, and re-check before you submit.** `checkpoint.data.handOffId`

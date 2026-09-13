@@ -684,6 +684,17 @@ link, or the per-repo reason there is none.
   document input uses the coverage document rail. Secret entry uses a scoped,
   expiring invitation to the existing flight checkpoint UI; secrets do not
   traverse MCP. Status reads never open a question.
+- **Document discovery** precedes missing-document elicitation in coverage and
+  flight MCP tools. The calling agent searches authorized sources and returns
+  `document_resolution`; the shared `mcp/document-resolution.ts` gate validates
+  source paths and SHA-256 evidence. Clear sources are imported automatically;
+  missing, ambiguous, or conflicting material uses the existing SDK 2.0 helper.
+  Source choices persist in `features/<feature>/docs/_document-selection.json`,
+  with provenance and content-bound exclusions. Rejected originals stay visible
+  in the Docs rail while the shared docs collection excludes them from summaries.
+  Changed documents invalidate the review; prior unchanged choices are reused.
+  A flight collector can return an unresolved document question on its existing
+  checkpoint, preserving the flight and avoiding a second summary job.
 - **Profiles** pick the tool surface via `?profile=`. There are seven workflow profiles, two composed direct-tool profiles, and one compact dispatcher profile: `repair` (heal loop), `verify` (verification configs), `author`
   (suite/envset/draft authoring), `coverage` (docs → PRD summary → ledger), `export`
   (evaluation archives), `flight` (the conducted pipeline), `portify` (port-injection

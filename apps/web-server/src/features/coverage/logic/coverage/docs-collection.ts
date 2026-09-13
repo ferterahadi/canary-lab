@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
+import { documentHash, readDocumentSelection } from './document-resolution'
 
 // Reads the source-docs collection under features/<feature>/docs/ and computes a
 // stable hash over it. The hash is what drift detection compares against the
@@ -40,7 +41,7 @@ export function isGeneratedDoc(relPath: string): boolean {
  * user's original is the live source); a dangling symlink is skipped — it
  * must not crash the PRD summary, the docs rail lists it as broken instead.
  */
-export function readDocsCollection(featureDir: string): DocsCollection {
+export function readDocsCollection(featureDir: string, options?: { includeExcluded: boolean }): DocsCollection {
   const docsDir = docsDirFor(featureDir)
   const entries: DocEntry[] = []
   if (fs.existsSync(docsDir)) {
@@ -56,7 +57,12 @@ export function readDocsCollection(featureDir: string): DocsCollection {
       }
     }
   }
-  return { docsDir, entries, docsHash: computeDocsHash(entries) }
+  // Keep rejected originals available in the Docs rail, but do not feed them
+  // back into the summary after a source choice. An edited original is new
+  // evidence: its old exclusion expires and ordinary drift detection sees it.
+  const excluded = options?.includeExcluded ? [] : readDocumentSelection(featureDir)?.excluded ?? []
+  const selected = entries.filter((entry) => !excluded.some((item) => item.relPath === entry.relPath && item.sha256 === documentHash(entry.content)))
+  return { docsDir, entries: selected, docsHash: computeDocsHash(selected) }
 }
 
 /**

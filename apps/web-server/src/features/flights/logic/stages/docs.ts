@@ -15,6 +15,8 @@ import { agentProgressSink } from './agent-progress'
 import { recordStageAgentSession } from './stage-agent-sessions'
 import { CHECKPOINT_OPTIONS } from '../types'
 import { prepareRequirementsDraft, saveRequirementsDraft, type RequirementsDraftInput } from './requirements-draft'
+import { documentResolutionInput, type DocumentResolution } from '../../../coverage/logic/coverage/document-resolution'
+import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 
 // Populate features/<f>/docs/ — the prd-source checkpoint is a two-path FORK:
 //   manual — the user supplies docs (UI drop zone / MCP write_feature_doc),
@@ -243,7 +245,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
    *  recommendation away from the path that just failed — if it can tell an
    *  empty-handed retry from a first visit. `message` still carries the prose
    *  form for the CLI/MCP surfaces and older clients. */
-  const park = (ctx: StageContext, linked: string[], attempt?: PrdSourceAttempt): StageOutcome => {
+  const park = (ctx: StageContext, linked: string[], attempt?: PrdSourceAttempt, documentResolution?: DocumentResolution): StageOutcome => {
     const m = ctx.manifest()
     const docs = userDocs(featureDirFor(deps, m.feature))
     const hasDocs = docs.length > 0
@@ -260,7 +262,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
         // with no docs present there is nothing for `continue` to continue
         // with, so the option is withheld rather than shown and then rejected.
         options: [...CHECKPOINT_OPTIONS['prd-source']].filter((o) => hasDocs || o !== 'continue'),
-        data: { docs, linked, intent: m.description, lastAttempt: attempt },
+        data: { docs, linked, intent: m.description, lastAttempt: attempt, ...(documentResolution ? { documentResolution } : {}) },
       },
     }
   }
@@ -279,6 +281,16 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     reply: string,
   ): StageOutcome => {
     const m = ctx.manifest()
+    const unresolved = extractJsonCandidates(reply)
+      .map((candidate) => documentResolutionInput.safeParse((candidate as { document_resolution?: unknown } | null)?.document_resolution))
+      .find((parsed) => parsed.success && parsed.data.status !== 'resolved')
+    if (unresolved?.success) {
+      const resolution = unresolved.data
+      const reason = resolution.status === 'missing' ? resolution.reason : 'question' in resolution ? resolution.question : ''
+      const attempt: PrdSourceAttempt = { mode, outcome: 'empty', reason }
+      ctx.appendLog(attemptLogLine(attempt))
+      return park(ctx, [], attempt, resolution)
+    }
     const wrote = fs.existsSync(plan.outPath) && fs.statSync(plan.outPath).size > 0
     if (!wrote) {
       const reason = /NOTHING_FOUND:?\s*(.*)/.exec(reply)?.[1]?.trim()
@@ -372,7 +384,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     if (forceInternal !== true && handsOffToClient(ctx)) {
       ctx.appendLog(`[docs] handed the ${MODE_LABEL[mode]} step to the external agent session…\n`)
       return externalWorkCheckpoint(ctx, 'docs', prompt, {
-        message: `Ask your user first: if they have a PRD/spec to supply, write THAT to ${outPath} instead of gathering — never invent one. Otherwise gather requirement docs (${MODE_LABEL[mode]}) in your own client and write the doc to the same path. Follow the prompt to draft its summary in this session and return { requirements[], variantDimension? } on \`data\`. Reply NOTHING_FOUND if there is nothing relevant.`,
+        message: `Discover and use clearly relevant, authorized requirement documents (${MODE_LABEL[mode]}) in your own client. If material is missing, ambiguous, or conflicting, call respond_flight_checkpoint with document_resolution and no choice for MCP 2.0 elicitation; otherwise write ${outPath} and draft its summary in this session. Return { requirements[], variantDimension? } on \`data\`. Never invent requirements or ask again for an existing user choice.`,
         context: { mode, ...plan, intent: m.description },
       })
     }

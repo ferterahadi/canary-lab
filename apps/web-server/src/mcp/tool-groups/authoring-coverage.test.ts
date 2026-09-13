@@ -4,6 +4,8 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { slugify } from '../../features/runs/logic/runtime/summary-types'
 import { registerCoverageAuthoringTools } from './authoring-coverage'
+import { readDocsCollection } from '../../features/coverage/logic/coverage/docs-collection'
+import { documentHash, writeDocumentSelection } from '../../features/coverage/logic/coverage/document-resolution'
 import { BUSY_ACTIVE, captureTools, fakeGettingStartedDemo } from './__fixtures__/tool-group-harness'
 
 // The offloaded coverage surface: the calling client does the reading and the
@@ -39,7 +41,7 @@ function harness(over: Record<string, unknown> = {}) {
   return { ...tools, published }
 }
 
-/** A feature with one source doc (so a summary pass has something to read) and
+/** A feature with one reviewed source doc (so a summary pass has something to read) and
  *  one untagged spec (so a mapping pass has something to map). */
 function writeFeature(name = 'checkout', specBody = CREATE_TEST): string {
   const dir = path.join(featuresDir, name)
@@ -51,6 +53,11 @@ function writeFeature(name = 'checkout', specBody = CREATE_TEST): string {
   fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), SPEC_HEADER + specBody)
   fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
   fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# Todos\na user can create a todo\n')
+  // These tests exercise summary authoring after discovery. The discovery suite
+  // separately proves that an unreviewed document cannot start a summary job.
+  const docs = readDocsCollection(dir)
+  writeDocumentSelection(dir, { reviewedDocsHash: docs.docsHash, decisionKey: 'fixture-review', searched: [docs.docsDir], excluded: [],
+    sources: docs.entries.map((entry) => ({ path: path.join(docs.docsDir, entry.relPath), relPath: entry.relPath, sha256: documentHash(entry.content), reason: 'The provided todo specification applies.' })) })
   return dir
 }
 
@@ -104,18 +111,18 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 
 describe('start_external_summary', () => {
-  it('asks the user for a PRD instead of minting a job it cannot ground', async () => {
+  it('requests discovery before elicitation instead of minting an ungrounded job', async () => {
     const dir = writeFeature()
     fs.rmSync(path.join(dir, 'docs'), { recursive: true, force: true })
     const { call } = harness()
 
     const out = await call('start_external_summary', { feature: 'checkout', session_id: 's1' })
 
-    expect(out.status).toBe('needs-docs')
-    // The steering has to name the user, not a retry: an invented PRD would
-    // ground every later coverage number in fiction.
-    expect(out.next).toContain('ASK THE USER')
-    expect(out.next).toContain('write_feature_doc("checkout"')
+    expect(out.status).toBe('needs-document-discovery')
+    // Discovery must preserve the requirement for source evidence.
+    expect(out.next).toContain('Never invent requirements')
+    expect(out.next).toContain('document_resolution')
+    expect(out.next).toContain('authorized')
     expect(out).not.toHaveProperty('jobId')
     expect(fs.existsSync(path.join(logsDir, 'coverage-jobs'))).toBe(false)
   })
@@ -490,8 +497,9 @@ describe('Getting Started demo tracking (start_external_summary / start_external
     const gsSummary = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-sum' })
     const { call } = harness({ gettingStartedDemo: gsSummary.demo })
     const summary = await call('start_external_summary', { feature: 'checkout', session_id: 's1' })
-    expect(summary.status).toBe('needs-docs')
-    expect(gsSummary.abandoned).toEqual(['gs-sum'])
+    expect(summary.status).toBe('needs-document-discovery')
+    expect(gsSummary.claims).toEqual([])
+    expect(gsSummary.abandoned).toEqual([])
     expect(gsSummary.attached).toEqual([])
 
     const gsCoverage = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-cov' })

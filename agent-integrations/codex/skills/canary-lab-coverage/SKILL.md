@@ -110,20 +110,29 @@ a job.
 - `state.coverage: "blocked"` → read the ledger's `next:` field and follow
   it — don't present a menu. When `next` reports no source doc ("Setup
   needed", `sourceDocCount: 0`), call `start_external_summary` with the
-  feature and your stable `session_id`. It requests the PRD/spec through
-  elicitation and resumes after saving user-supplied text or a linked local file.
-  For attachments, call it with `document_source: "upload"` to open Canary's
-  import UI. Follow its result. Only the unsupported-client `needs-docs` fallback
-  asks the user to attach or paste in chat, then uses `write_feature_doc`.
-  Never invent requirements or pull a document the user did not provide.
+  feature and your stable `session_id`. `needs-document-discovery` means search
+  the task's repositories, existing docs, and user-provided references first.
+  Read contents, honor source precedence, and use clearly relevant, authorized
+  documents automatically. Return `document_resolution` with `status: "resolved"`,
+  `searched`, and `sources: [{path, sha256, reason}]`; hashes identify the bytes read.
+  For missing material return `status: "missing"`, `searched`, `reason`; for
+  ambiguous/conflicting material return that status, `searched`, `question`, and
+  `candidates: [{label, sources}]` (1–5 for ambiguity, 2–5 for conflicts). Only these unresolved cases elicit input.
+  Use the selected documents from the result; rejected originals remain on disk.
+  When the user chooses to supply material, follow `document_source: "form"` or
+  `"upload"`. Only an unsupported client asks the focused question in chat.
+  Preserve previous user choices. Never invent requirements or infer them from
+  code/tests without authorization. A confidence percentage is not source evidence.
 
 **Step 1 — PRD summary** (only when stale/absent; author it YOURSELF; no local agent):
 
 Choose one stable `session_id` before the first start call and reuse it for
 both externally driven jobs in this conversation.
 
-1. `start_external_summary(feature, session_id)` → returns a `jobId`, the source-doc
-   paths, the previous requirement ids to PRESERVE, and a `prompt`.
+1. `start_external_summary(feature, session_id)` → first follow any
+   `needs-document-discovery` result, including for linked or changed documents.
+   Once sources are resolved, it returns a `jobId`, selected source-doc paths,
+   the previous requirement ids to PRESERVE, and a `prompt`.
 2. Read each doc in the returned paths; extract the testable requirements.
 3. `submit_external_summary(jobId, requirements[, variantDimension])`.
 

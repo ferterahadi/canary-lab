@@ -2,7 +2,9 @@ import { randomUUID } from 'crypto'
 import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 import { linkFeatureDoc, writeFeatureDoc } from '../features/config/logic/feature-authoring'
-import { listFeatureDocs } from '../features/coverage/logic/coverage/feature-docs'
+import { readDocsCollection } from '../features/coverage/logic/coverage/docs-collection'
+import { resolveFeatureDir } from '../features/coverage/logic/coverage/service'
+import path from 'path'
 import { requestUserInput, inputPending } from './elicitation'
 import { asJsonResult, authoringCtx, errorResult, type ToolGroupContext } from './tool-support'
 
@@ -22,17 +24,25 @@ export async function requestDocuments(
   scope: unknown,
   upload: boolean,
   fallback: () => CallToolResult,
-  ready: () => Promise<CallToolResult | InputRequiredResult>,
+  ready: (paths: string[]) => Promise<CallToolResult | InputRequiredResult>,
+  options: { revision?: unknown; message?: string; command: string; beforeWrite?: () => CallToolResult | undefined | Promise<CallToolResult | undefined> },
 ): Promise<CallToolResult | InputRequiredResult> {
   const url = featureInputUrl(ctx, feature)
   if (upload) {
     if (!url) return fallback()
+    const featureDir = resolveFeatureDir(ctx.deps.featuresDir, feature)
+    const before = readDocsCollection(featureDir, { includeExcluded: true })
     return requestUserInput(request, ctx.clientFacts(), {
       scope, mode: 'url', url,
       message: `Import the requirements documents for ${feature} in Canary Lab, then return here.`,
-      fallback: () => asJsonResult({ status: 'needs-docs', feature, url, next: 'Open the document import URL, add the requirements, then retry start_external_summary. Do not invent a document.' }),
+      fallback: () => asJsonResult({ status: 'needs-docs', feature, url, next: `Open the document import URL, add the requirements, then retry ${options.command}. Do not invent a document.` }),
     }, async () => {
-      return listFeatureDocs(ctx.deps.featuresDir, feature).sourceDocCount > 0 ? ready() : inputPending('The document import is not complete. Add the documents in Canary Lab before resuming.')
+      const check = options.beforeWrite?.()
+      const blocked = check instanceof Promise ? await check : check
+      if (blocked) return blocked
+      const after = readDocsCollection(featureDir, { includeExcluded: true })
+      const changed = after.entries.filter((entry) => !before.entries.some((old) => old.relPath === entry.relPath && old.content === entry.content))
+      return changed.length > 0 ? ready(changed.map((entry) => path.join(after.docsDir, entry.relPath))) : inputPending('The document import is not complete. Add the documents in Canary Lab before resuming.')
     })
   }
   const schema = z.object({
@@ -41,18 +51,21 @@ export async function requestDocuments(
     local_path: z.string().max(4096).optional().describe('Markdown file path on the machine running Canary Lab, only for local-file.'),
   }).refine((v) => v.source === 'upload' || (v.source === 'paste' ? !!v.content?.trim() : !!v.local_path?.trim()))
   return requestUserInput(request, ctx.clientFacts(), {
-    scope, mode: 'form', schema,
-    message: `Coverage for ${feature} needs your requirements. Provide the document or choose upload for attachments.`,
+    scope, revision: options.revision, mode: 'form', schema,
+    message: options.message ?? `Requirements for ${feature} need your input. Provide the document or choose upload for attachments.`,
     fallback,
   }, async (value) => {
     if (value.source === 'upload') return asJsonResult({
       status: 'needs-docs', feature, ...(url ? { url } : {}),
-      next: 'The user chose attachments. Call start_external_summary again with document_source:"upload" and the same feature/session_id to open document import. Do not ask the same question in chat.',
+      next: `The user chose attachments. Call ${options.command} again with document_source:"upload" and the same arguments to open document import. Do not ask the same question in chat.`,
     })
+    const check = options.beforeWrite?.()
+    const blocked = check instanceof Promise ? await check : check
+    if (blocked) return blocked
     const relPath = `user-${randomUUID()}.md`
     const result = value.source === 'paste'
       ? writeFeatureDoc(authoringCtx(ctx.deps), { feature, relPath, content: value.content! })
       : linkFeatureDoc(authoringCtx(ctx.deps), { feature, relPath, targetPath: value.local_path! })
-    return result.ok ? ready() : errorResult(result.error)
+    return result.ok ? ready([result.writtenPath]) : errorResult(result.error)
   })
 }

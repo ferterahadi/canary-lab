@@ -71,15 +71,16 @@ describe('coverageBlockedNext', () => {
     expect(next).not.toMatch(/ASK THE USER/)
   })
 
-  it('asks the USER for the PRD when nothing grounds the coverage, and forbids substituting one', () => {
-    // The one case that needs a human. Grounded coverage has to come from a real
-    // PRD/spec; an agent that invents one produces a ledger that measures nothing,
-    // which is the exact failure the coverage axis exists to prevent.
+  it('discovers source evidence before eliciting unresolved requirements', () => {
+    // Grounded coverage still requires real source material; discovery is not
+    // permission to invent requirements from the implementation.
     const next = coverageBlockedNext('checkout', 'absent', 0)
 
     expect(next).toMatch(/ASK THE USER/)
-    expect(next).toContain('do NOT invent one or pull an external file')
-    expect(next).toContain('write_feature_doc("checkout"')
+    expect(next).toContain('Never invent requirements')
+    expect(next).toContain('Search authorized repositories')
+    expect(next).toContain('Only unresolved material triggers MCP 2.0 elicitation')
+    expect(next).toContain('write_feature_doc')
     expect(next).toContain('a stable session_id')
   })
 

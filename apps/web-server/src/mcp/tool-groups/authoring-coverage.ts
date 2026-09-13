@@ -1,7 +1,7 @@
 // MCP tools — the externally-driven PRD-summary and coverage-mapping passes.
 import { z } from 'zod'
 import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/server'
-import { requestDocuments } from '../document-input'
+import { resolveDocuments, documentResolutionInput } from '../document-resolution'
 import { FeatureNotFoundError } from '../../features/coverage/logic/coverage/service'
 import { coverageJobStore } from '../../features/coverage/logic/coverage/jobs/store'
 import { CoverageJobConflictError } from '../../features/coverage/logic/coverage/jobs/runner'
@@ -20,7 +20,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
 
   registerTool('start_external_summary', {
     description:
-      'Start a PRD-summary pass YOU drive — no local agent. Returns the source docs (paths to read), the previous requirement ids to PRESERVE, and a `prompt`: read each source doc, extract testable requirements, then call submit_external_summary with the requirements[]. Canary reconciles ids against the prior summary (the stable spine) and writes docs/_prd-summary.{json,md} — never re-derives the requirements. Single-flight (rejected if a summary/coverage job is running). No source doc yet → MCP 2.0 elicitation for user requirements; unsupported clients receive status:"needs-docs" (ASK THE USER for the PRD; do not invent one). This is the FIRST step of coverage — follow it with start_external_coverage. Offload to a background task, or fan out one subagent per doc in a single parallel round (up to 5 at once) and merge their requirements, when the PRD is large.',
+      'Start a PRD-summary pass YOU drive — no local agent. Returns the source docs (paths to read), the previous requirement ids to PRESERVE, and a `prompt`: read each source doc, extract testable requirements, then call submit_external_summary with the requirements[]. Canary reconciles ids against the prior summary (the stable spine) and writes docs/_prd-summary.{json,md} — never re-derives the requirements. Single-flight (rejected if a summary/coverage job is running). Unreviewed or changed source documents → status:"needs-document-discovery": search authorized repositories and user references, then return document_resolution. Clearly relevant sources proceed automatically; only missing, ambiguous, or conflicting sources trigger MCP 2.0 elicitation. Never invent requirements. This is the FIRST step of coverage — follow it with start_external_coverage. Offload to a background task, or fan out one subagent per doc in a single parallel round (up to 5 at once) and merge their requirements, when the PRD is large.',
     inputSchema: {
       feature: z.string().describe('Existing feature name (from list_features).'),
       session_id: z.string().describe('Stable id for your conversation — reuse it across calls.'),
@@ -28,13 +28,20 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
       conversation_name: z.string().optional(),
       external_session_url: z.string().optional(),
       document_source: z.enum(['form', 'upload']).optional().describe('When documents are missing, use form elicitation by default; upload opens Canary document import.'),
+      document_resolution: documentResolutionInput.optional().describe('Completed document discovery: sources with evidence, or missing/ambiguous/conflicting material that needs user input.'),
     },
   }, async (args, request) => {
-    const { feature, session_id, client_kind, conversation_name, external_session_url, document_source } = args
-    const ask = () => requestDocuments(ctx, request, feature, ['summary-docs', deps.projectRoot, args], document_source === 'upload', () => asJsonResult({
-      status: 'needs-docs', feature,
-      next: `No source doc on file for "${feature}". ASK THE USER to attach or paste the PRD/spec (do NOT invent one or pull an external file), then write_feature_doc("${feature}", "<name>.md", <content>) and call start_external_summary again with the same session_id.`,
-    }), begin)
+    const { feature, session_id, client_kind, conversation_name, external_session_url, document_source, document_resolution } = args
+    const resolve = () => resolveDocuments({
+      ctx, request, feature, scope: ['summary-docs', deps.projectRoot, args],
+      documentSource: document_source, resolution: document_resolution,
+      command: `start_external_summary(feature:"${feature}", session_id:"${session_id}")`,
+      beforeWrite: () => {
+        const active = coverageJobStore(deps.store.logsDir).activeFor(feature, 'summary')
+        return active ? errorResult(`A summary job is already running for ${feature} (existing job ${active.jobId}). No documents were changed.`) : undefined
+      },
+      ready: begin,
+    })
     const begin = async (): Promise<CallToolResult | InputRequiredResult> => {
       // Getting Started demo tracking. The coverage demo is a two-job sequence:
       // the summary claim settles when its job completes and start_external_coverage
@@ -59,7 +66,8 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
         )
         if (res.kind === 'needs-docs') {
           abandonClaim()
-          return ask()
+          return asJsonResult({ status: 'needs-document-discovery', feature,
+            next: 'The selected documents are no longer available. Rediscover the source material and retry start_external_summary with document_resolution. Never invent requirements.' })
         }
         if (claim?.kind === 'claimed') deps.gettingStartedDemo?.attach(claim.sessionId, { kind: 'coverage-job', id: res.manifest.jobId, feature })
         return asJsonResult({
@@ -78,7 +86,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
         throw err
       }
     }
-    return request?.mcpReq.requestState?.() !== undefined ? ask() : begin()
+    return resolve()
   })
 
   registerTool('submit_external_summary', {

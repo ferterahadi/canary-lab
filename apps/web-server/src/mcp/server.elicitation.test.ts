@@ -7,6 +7,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { registerMcpRoutes } from './server'
 import { createRegistry, RunStore } from '../features/runs/logic/run-store'
 import { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
+import { documentHash } from '../features/coverage/logic/coverage/document-resolution'
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
@@ -42,19 +43,59 @@ async function harness(reply: (params: Record<string, unknown>) => Promise<unkno
 }
 
 describe('SDK 2.0 elicitation over the real compact HTTP dispatcher', () => {
+  it('accepts discovered source evidence over HTTP without requesting user input', async () => {
+    const reply = vi.fn(async () => ({ action: 'cancel' }))
+    const { call, featureDir } = await harness(reply)
+    const file = path.join(featureDir, 'docs', 'spec.md')
+    const content = '# Checkout\nUsers can submit an order.'
+    fs.mkdirSync(path.dirname(file))
+    fs.writeFileSync(file, content)
+    const discovery = await call('start_external_summary', { feature: 'checkout', session_id: 'automatic' })
+    expect(discovery.status).toBe('needs-document-discovery')
+    const result = await call('start_external_summary', { feature: 'checkout', session_id: 'automatic', document_resolution: {
+      status: 'resolved', searched: [path.dirname(file)], sources: [{ path: file, sha256: documentHash(content), reason: 'The supplied checkout spec defines order submission.' }],
+    } })
+    expect(result.status).toBe('running')
+    expect(reply).not.toHaveBeenCalled()
+  })
+
+  it('resolves a source conflict through a real SDK 2.0 form and excludes the rejected source', async () => {
+    const reply = vi.fn(async () => ({ action: 'accept', content: { choice: '1: Current' } }))
+    const { call, featureDir } = await harness(reply)
+    const docsDir = path.join(featureDir, 'docs')
+    fs.mkdirSync(docsDir)
+    const sources = ['Current', 'Draft'].map((label, i) => {
+      const file = path.join(docsDir, `${label}.md`)
+      const content = `# Refunds\nRefunds last ${i ? 7 : 30} days.`
+      fs.writeFileSync(file, content)
+      return { label, sources: [{ path: file, sha256: documentHash(content), reason: 'Defines refund duration.' }] }
+    })
+    const result = await call('start_external_summary', { feature: 'checkout', session_id: 'conflict', document_resolution: {
+      status: 'conflicting', searched: [docsDir], question: 'Which refund duration applies?', candidates: sources,
+    } })
+    expect(result.status).toBe('running')
+    expect(reply).toHaveBeenCalledTimes(1)
+    expect(reply).toHaveBeenCalledWith(expect.objectContaining({ mode: 'form', message: expect.stringContaining('Which refund duration applies?') }))
+    expect(result.context).toMatchObject({ docs: [{ relPath: 'Current.md' }] })
+    expect(fs.existsSync(path.join(docsDir, 'Draft.md'))).toBe(true)
+  })
+
   it('imports user requirements and resumes the summary without a second agent call', async () => {
     const reply = vi.fn(async () => ({ action: 'accept', content: { source: 'paste', content: '# Checkout\nUsers can submit an order.' } }))
     const { call, featureDir } = await harness(reply)
-    const result = await call('start_external_summary', { feature: 'checkout', session_id: 'docs-session' })
+    const discovery = await call('start_external_summary', { feature: 'checkout', session_id: 'docs-session' })
+    expect(discovery.status).toBe('needs-document-discovery')
+    expect(reply).not.toHaveBeenCalled()
+    const result = await call('start_external_summary', { feature: 'checkout', session_id: 'docs-session', document_resolution: { status: 'missing', searched: ['feature docs and user references'], reason: 'No applicable specification is available.' } })
     expect(result.status).toBe('running')
     expect(result.jobId).toEqual(expect.any(String))
-    expect(fs.readdirSync(path.join(featureDir, 'docs'))).toHaveLength(1)
+    expect(fs.readdirSync(path.join(featureDir, 'docs')).filter((file) => file.endsWith('.md'))).toHaveLength(1)
     expect(reply).toHaveBeenCalledTimes(1)
   })
 
   it('does not create a summary or document after cancel', async () => {
     const { call, featureDir, logsDir } = await harness(async () => ({ action: 'cancel' }))
-    const result = await call('start_external_summary', { feature: 'checkout', session_id: 'cancel-session' })
+    const result = await call('start_external_summary', { feature: 'checkout', session_id: 'cancel-session', document_resolution: { status: 'missing', searched: ['feature docs'], reason: 'No requirements found.' } })
     expect(result.status).toBe('needs-input')
     expect(fs.existsSync(path.join(featureDir, 'docs'))).toBe(false)
     expect(fs.existsSync(path.join(logsDir, 'coverage-jobs'))).toBe(false)
