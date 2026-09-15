@@ -27,6 +27,7 @@ interface Props {
   specReviewRunDetail?: RunDetail | null
   /** Every feature — feeds the dirty-tests review panel. */
   features?: Feature[]
+  onFeaturesChanged?: () => void
   onOpenCleanup?: () => void
   /** Flight index (App owns it, WS-driven) — feeds the Flights pill. */
   flights?: FlightIndexEntry[]
@@ -99,7 +100,7 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocus, onReviewFeature, specReviewRunId, specReviewFeature, specReviewRunDetail, activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onOpenPortify, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight, specReviewOpen, onSpecReviewOpenChange }: Props) {
+export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocus, onReviewFeature, specReviewRunId, specReviewFeature, specReviewRunDetail, activeRunDetail, features = [], onFeaturesChanged, onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onOpenPortify, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight, specReviewOpen, onSpecReviewOpenChange }: Props) {
   const { connection, runs } = useRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Deployed-env verification runs (record-only) get their own pill (R27) —
@@ -343,7 +344,7 @@ export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocu
       </div>
       </div>
       {servicesOpen && <ServicesDialog onClose={() => setServicesOpen(false)} />}
-      {reviewOpen && <DirtyReviewDialog onChooseFeature={onReviewFeature} focus={reviewFocus} onFocus={onReviewFocus} focusFeature={specReviewFeature} focusRunId={specReviewRunId} focusRunDetail={specReviewRunDetail} features={features} pendingRuns={pendingRuns} onClose={() => setReviewOpen(false)} />}
+      {reviewOpen && <DirtyReviewDialog onFeaturesChanged={onFeaturesChanged} onChooseFeature={onReviewFeature} focus={reviewFocus} onFocus={onReviewFocus} focusFeature={specReviewFeature} focusRunId={specReviewRunId} focusRunDetail={specReviewRunDetail} features={features} pendingRuns={pendingRuns} onClose={() => setReviewOpen(false)} />}
       {benchmarkOpen && (
         <BenchmarkWindow
           onClose={() => setBenchmarkOpen(false)}

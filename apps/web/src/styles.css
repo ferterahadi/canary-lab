@@ -714,6 +714,29 @@ body {
   border-bottom: 1px solid var(--border-default);
 }
 
+/* The three ledger columns (Suites · Tests · Runs) share one header band so
+   their rules line up whatever controls each column happens to be showing.
+   The band owns the height; controls inside size to the band instead of
+   pushing it taller. `.cl-*` is unlayered, so these rules beat a Tailwind
+   `py-*`/`h-*` utility at the call site — the call sites carry none. */
+.cl-column-header {
+  height: 40px;
+  padding-block: 0;
+}
+
+.cl-column-header .cl-button,
+.cl-column-header .cl-button-primary,
+.cl-column-header .cl-run-menu-button {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding-block: 0;
+}
+
+.cl-column-header .cl-run-menu-button-compact {
+  width: 24px;
+}
+
 .cl-panel-footer {
   background: var(--bg-surface);
   border-top: 1px solid var(--border-default);

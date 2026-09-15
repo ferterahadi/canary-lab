@@ -105,7 +105,9 @@ describe('buildSpecEditsWarning', () => {
     const steps = warning?.nextSteps.join('\n') ?? ''
     expect(steps).toContain('Restore')
     expect(steps).toContain('ask the human to adopt')
-    expect(steps).toContain('No MCP tool can adopt or approve')
+    expect(steps).toContain('No MCP tool can self-approve')
+    expect(steps).toContain('get_test_review')
+    expect(steps).toContain('review_test_changes')
   })
 
   it('names a weaker hint and orders the restore, never an edit of the test', () => {

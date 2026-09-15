@@ -23,6 +23,8 @@ export type CanaryLabMcpToolName =
   | 'list_runs'
   | 'get_run'
   | 'get_run_snapshot'
+  | 'get_test_review'
+  | 'review_test_changes'
   | 'get_run_actions'
   | 'list_verification_configs'
   | 'get_verification_config'
@@ -104,6 +106,8 @@ export interface CanaryLabMcpExecCallEvent {
 }
 
 export const REPAIR_TOOLS = [
+  'get_test_review',
+  'review_test_changes',
   'start_discovery_repair',
   'get_discovery_repair',
   'update_discovery_repair',
@@ -210,6 +214,8 @@ export const EXPORT_TOOLS = [
 // Flight = the conducted end-to-end pipeline. write_feature_doc rides along so
 // the client can distill conversation docs at the prd-source checkpoint.
 export const FLIGHT_TOOLS = [
+  'get_test_review',
+  'review_test_changes',
   'get_workflow_guide',
   // Every shipped skill's bootstrap uses list_features as its liveness probe
   // ("only an unknown-tool error means the server is disconnected") — flight

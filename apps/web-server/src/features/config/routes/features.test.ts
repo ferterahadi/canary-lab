@@ -436,7 +436,7 @@ describe('POST /api/features/:name/commit-dirty', () => {
     expect((res.json() as { error: string }).error).toBeTruthy()
   })
 
-  it('500s with the git stderr when `git commit` fails (nothing staged to commit)', async () => {
+  it.each(['reverted', 'committed'])('quietly clears stale edits that were already %s, preserving unrelated staged work', async (action) => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
     initGitFeature(dir)
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
@@ -445,15 +445,26 @@ describe('POST /api/features/:name/commit-dirty', () => {
     await store.recompute('alpha', dir)
     expect(store.get('alpha')?.status).toBe('dirty')
 
-    // Revert the working tree back to the committed content before the route
-    // runs. `git add` on unmodified content stages nothing, so the follow-up
-    // `git commit` for those pathspecs fails ("nothing to commit").
-    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(1) })\n")
+    if (action === 'reverted') {
+      fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(1) })\n")
+    } else {
+      git(dir, ['add', '.'])
+      git(dir, ['commit', '-qm', 'external commit'])
+    }
+    fs.writeFileSync(path.join(dir, 'unrelated.txt'), 'keep staged')
+    git(dir, ['add', 'unrelated.txt'])
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir }).toString()
+    const changed = vi.fn()
+    store.onEvent(changed)
 
     const app = await build({ dirtySpecStore: store })
     const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
-    expect(res.statusCode).toBe(500)
-    expect((res.json() as { error: string }).error).toBeTruthy()
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ committed: false, reason: 'no modified specs', status: 'clean' })
+    expect(store.get('alpha')?.dirtySpecs).toEqual([])
+    expect(changed).toHaveBeenCalledWith({ kind: 'changed', featureId: 'alpha' })
+    expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir }).toString()).toBe(head)
+    expect(execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: dir }).toString().trim()).toBe('unrelated.txt')
   })
 
   it('commits the dirty specs and clears the dirty status on success', async () => {
@@ -520,5 +531,43 @@ describe('POST /api/features/:name/commit-dirty', () => {
     } finally {
       vi.mocked(runGit).mockImplementation(realRunGit)
     }
+  })
+
+  it('surfaces a failed Git comparison instead of treating it as a clean suite', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+    const realRunGit = vi.mocked(runGit).getMockImplementation()!
+    vi.mocked(runGit).mockImplementation(async (cwd, args) =>
+      args[0] === 'diff' ? { code: 128, stdout: '', stderr: 'cannot read index' } : realRunGit(cwd, args),
+    )
+    try {
+      const app = await build({ dirtySpecStore: store })
+      const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
+      expect(res.statusCode).toBe(500)
+      expect(res.json()).toEqual({ error: 'cannot read index' })
+      expect(store.get('alpha')?.status).toBe('dirty')
+    } finally {
+      vi.mocked(runGit).mockImplementation(realRunGit)
+    }
+  })
+
+  it('commits an untracked spec with a run baseline rather than mistaking it for a no-op', async () => {
+    const dir = writeFeature('alpha')
+    initGitFeature(dir)
+    fs.mkdirSync(path.join(dir, 'e2e'))
+    const file = path.join(dir, 'e2e', 'new.spec.ts')
+    fs.writeFileSync(file, "test('one', async () => { expect(1).toBe(1) })\n")
+    const store = makeDirtySpecStore()
+    await store.captureRunStart('alpha', dir)
+    fs.writeFileSync(file, "test('one', async () => { expect(1).toBe(2) })\n")
+    await store.recompute('alpha', dir)
+    const app = await build({ dirtySpecStore: store })
+    const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ committed: true, status: 'clean' })
+    expect(execFileSync('git', ['show', 'HEAD:e2e/new.spec.ts'], { cwd: dir }).toString()).toBe(fs.readFileSync(file, 'utf8'))
   })
 })

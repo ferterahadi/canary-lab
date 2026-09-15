@@ -102,6 +102,17 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       reply.code(500)
       return { error: (add.stderr || add.stdout).trim() || 'git add failed' }
     }
+    // The review can outlive an external commit. Check the selected paths after
+    // staging so new files count too, without including unrelated staged work.
+    const diff = await runGit(root, ['diff', '--cached', '--quiet', '--', ...repoRelPaths])
+    if (diff.code === 0) {
+      const rec = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
+      return { committed: false, reason: 'no modified specs', status: rec.status }
+    }
+    if (diff.code !== 1) {
+      reply.code(500)
+      return { error: (diff.stderr || diff.stdout).trim() || 'git diff failed' }
+    }
     const message = `test: accept modified specs for "${feature.name}" via Canary Lab`
     const commit = await runGit(root, ['commit', '-m', message, '--', ...repoRelPaths])
     if (commit.code !== 0) {

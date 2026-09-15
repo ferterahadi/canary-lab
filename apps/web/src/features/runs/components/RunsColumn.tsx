@@ -78,7 +78,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
 
   return (
     <div ref={containerRef} className="cl-panel flex h-full flex-col">
-      <div className="cl-panel-header flex items-center gap-3 px-4 py-3">
+      <div className="cl-panel-header cl-column-header flex items-center gap-3 px-4">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span className="cl-kicker shrink-0">Runs</span>
           {feature && runs.length > 0 && <span className="cl-count-chip">{runs.length}</span>}

@@ -99,6 +99,7 @@ export function App() {
   // instance behind the Flights pill and the flights landing list. Clicking an
   // activity-only row opens the activity's REAL surface.
   const { activity: featureActivity, externalHistory: featureExternalHistory, coverageJobs } = useFeatureWorkState()
+  const selectedFeatureActivity = selectedFeature ? featureActivity.get(selectedFeature) : undefined
   const coverageJobVersion = coverageJobs.map((job) => `${job.jobId}:${job.status}`).join('|')
   const seenCoverageJobVersion = useRef(coverageJobVersion)
   useEffect(() => {
@@ -442,6 +443,7 @@ export function App() {
       content: (
         <TestCasesColumn
           feature={selectedFeature}
+          isAuthoringTests={selectedFeatureActivity?.kind === 'authoring'}
           activeRunSummary={nav.currentTests ? undefined : summaryForSelectedFeature}
           activeRunManifest={nav.currentTests ? undefined : statusRunDetail.detail?.manifest}
           activeRunStatus={nav.currentTests ? undefined : statusForSelectedFeature}
@@ -507,6 +509,7 @@ export function App() {
       <GlobalStatusBar
         activeRunDetail={activeRunDetail}
         features={features}
+        onFeaturesChanged={refreshFeatures}
         onOpenCleanup={() => setView('cleanup')}
         flights={flights}
         preFlights={preFlights}

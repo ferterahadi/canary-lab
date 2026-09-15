@@ -20,6 +20,7 @@ interface Props {
   focus?: ReviewFocus
   onFocus?: (focus: ReviewFocus) => void
   onChooseFeature?: (name: string) => void
+  onFeaturesChanged?: () => void
   onClose: () => void
 }
 
@@ -42,7 +43,7 @@ function specsFor(card: ReviewSuite, detail: RunDetail | null | undefined): Dirt
 
 /** The selected file and its actions share one owner. Live run snapshots take
  * precedence over feature summaries; reading a hint never adopts an edit. */
-export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, focusRunId, focusRunDetail, focus, onFocus, onChooseFeature, onClose }: Props) {
+export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, focusRunId, focusRunDetail, focus, onFocus, onChooseFeature, onFeaturesChanged, onClose }: Props) {
   const pendingByFeature = new Map<string, RunIndexEntry>()
   for (const run of pendingRuns) {
     if (!pendingByFeature.has(run.feature) || run.runId === focusRunId) pendingByFeature.set(run.feature, run)
@@ -111,12 +112,16 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
           <div className="cl-review-commit-buttons">
             {run && ['queued', 'running', 'healing'].includes(run.status) && <>
               <button className="cl-button px-3 py-1.5 text-xs" disabled={busy} onClick={() => { void act(() => api.restoreSpecEdits(run.runId)) }}>Restore original tests</button>
-              <button className="cl-button-primary px-3 py-1.5 text-xs" disabled={busy} onClick={() => { void act(() => api.adoptSpecEdits(run.runId)) }}>Adopt &amp; rerun</button>
+              <button className="cl-button-primary px-3 py-1.5 text-xs" disabled={busy} onClick={() => { void act(async () => {
+                await api.adoptSpecEdits(run.runId)
+                onClose()
+              }) }}>Adopt &amp; rerun</button>
             </>}
             {selected?.feature && <button className="cl-button-primary px-3 py-1.5 text-xs" disabled={busy || commitFileCount === 0} title={`Commit all ${commitFileCount} changed spec files in ${selected.name}, including files not opened here`} onClick={() => { void act(async () => {
               const result = await api.commitDirtySpecs(selected.name)
-              if (!result.committed) setError(result.reason ?? 'No spec changes were committed.')
-              else setSaved({ name: selected.name, files: commitFileCount })
+              onFeaturesChanged?.()
+              if (result.committed) setSaved({ name: selected.name, files: commitFileCount })
+              else if (result.status !== 'clean') setError(result.reason ?? 'No spec changes were committed.')
             }) }}>Commit suite · {commitFileCount} {commitFileCount === 1 ? 'file' : 'files'}</button>}
           </div>
           {error && <p role="alert" className="cl-review-action-message text-danger">{error}</p>}

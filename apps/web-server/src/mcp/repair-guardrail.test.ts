@@ -93,7 +93,7 @@ describe('repair guardrail — MCP instructions', () => {
     expect(lead).toMatch(/not tested/i)
     expect(lead).toMatch(/restore/i)
     expect(lead).toMatch(/ask the human to adopt/i)
-    expect(lead).toMatch(/no (MCP )?tool can adopt/i)
+    expect(lead).toMatch(/no (MCP )?tool can self-approve/i)
   })
 
   it('the repair guide orders a restore on a weaker hint, never an edit to the test', () => {
@@ -207,7 +207,7 @@ describe('repair guardrail — shipped agent skills', () => {
       expect(text).toMatch(/not tested/i)
       expect(text).toMatch(/restore/i)
       expect(text).toMatch(/ask the human to adopt/i)
-      expect(text).toMatch(/no (MCP )?tool can adopt/i)
+      expect(text).toMatch(/no (MCP )?tool can self-approve/i)
       expect(text).toMatch(/weaker/i)
     },
   )
@@ -227,7 +227,7 @@ describe('repair guardrail — shipped agent skills', () => {
 // run-start copy of its suite, so a live spec edit is inert until a HUMAN adopts
 // it in Canary Lab; the differential's reading of that edit is a hint, never a
 // gate. Two things would quietly undo this without failing any other test: an
-// MCP tool that adopts/approves (the agent that weakened the spec then blesses
+// MCP tool that self-approves (the agent that weakened the spec then blesses
 // its own edit), or a verdict path that consults the hint (a `withheld` status,
 // a blocked export). Both are pinned here. Procedure: `cl_sync-agent-surfaces`.
 describe('spec-edit boundary — humans adopt, hints advise', () => {
@@ -251,7 +251,7 @@ describe('spec-edit boundary — humans adopt, hints advise', () => {
     }
   })
 
-  it('no MCP source reaches human-only spec-edit actions or retired requirement confirmation', () => {
+  it('only the elicited review handler reaches adoption; other human-only actions remain unreachable', () => {
     const sources = findSources(MCP_SRC)
     expect(sources.length).toBeGreaterThan(20)
     for (const file of sources) {
@@ -260,7 +260,11 @@ describe('spec-edit boundary — humans adopt, hints advise', () => {
       // reached through app.inject() would be reachable from every client.
       // Keep the retired requirement-confirmation action forbidden too; removing
       // its UI must never transfer that action to an agent.
-      expect(text, path.relative(REPO_ROOT, file)).not.toMatch(/adopt-spec-edits|restore-spec-edits|approve-dirty|commit-dirty|adoptSpecEdits\(|restoreSpecEdits\(|requirements\/[^'"`]*\/accept|acceptRequirementWording\(/)
+      expect(text, path.relative(REPO_ROOT, file)).not.toMatch(/restore-spec-edits|approve-dirty|commit-dirty|adoptSpecEdits\(|restoreSpecEdits\(|requirements\/[^'"`]*\/accept|acceptRequirementWording\(/)
+      if (file === path.join(MCP_SRC, 'tool-groups', 'test-review.ts')) {
+        expect(text).toContain('requestUserInput(')
+        expect(text).toContain('expectedRevision: review_revision')
+      } else expect(text, path.relative(REPO_ROOT, file)).not.toContain('adopt-spec-edits')
     }
   })
 
@@ -284,10 +288,11 @@ describe('spec-edit boundary — humans adopt, hints advise', () => {
     }
   }
 
-  it('the warning itself tells the agent no tool can adopt or approve, and orders a restore', () => {
+  it('the warning forbids self-approval, offers human review, and orders a restore', () => {
     const warning = buildSpecEditsWarning(passedWithWeakerHint())
     const steps = warning?.nextSteps.join('\n') ?? ''
-    expect(steps).toMatch(/No MCP tool can adopt or approve/)
+    expect(steps).toMatch(/No MCP tool can self-approve/)
+    expect(steps).toContain('review_test_changes')
     expect(steps).toMatch(/ask the human to adopt/)
     expect(steps).toMatch(/Restore/)
     // Nothing in the warning is a lever.

@@ -26,7 +26,7 @@ interface Props {
   onReviewFeature?: (name: string) => void
   onSelectFeature: (name: string) => void
   onFeaturesChanged?: (preferredFeature?: string | null) => void
-  /** Opens the Requirement Coverage ledger for a feature (R8 column entry point). */
+  /** Opens the Requirement Coverage ledger when generation is not active in Flight. */
   onOpenCoverage?: (feature: string) => void
   /** Opens the new-flight dialog (intent + repo picker) — the "+ New" action.
    *  Flight is the only GUI path to a new feature (R40/R50). */
@@ -58,11 +58,11 @@ interface Props {
 
 // Colour the Coverage icon by the derived headline (R8). Neutral (inherit) for
 // setup-needed / no-coverage / unknown so the column stays calm until there's
-// real signal; green when covered, sky while generating, amber when stale.
+// real signal; green when covered, amber when stale. Generating belongs to the
+// Flight shortcut, so the Coverage action is absent in that state.
 function coverageHeadlineColor(headline: string | null | undefined): string | undefined {
   if (!headline) return undefined
   if (headline.startsWith('Covered')) return 'var(--success)'
-  if (headline === 'Generating') return 'var(--running)'
   if (headline === 'Stale') return 'var(--warning)'
   return undefined
 }
@@ -188,7 +188,7 @@ export function FeaturesColumn({
 
   return (
     <div className="cl-panel flex h-full flex-col">
-      <div className="cl-panel-header flex items-center justify-between gap-2 px-4 py-3">
+      <div className="cl-panel-header cl-column-header flex items-center justify-between gap-2 px-4">
         <div className="flex min-w-0 items-center gap-2">
           <span className="cl-kicker">Suites</span>
           {features.length > 0 && <span className="cl-count-chip">{features.length}</span>}
@@ -196,7 +196,7 @@ export function FeaturesColumn({
         <button
           type="button"
           onClick={() => gatePromo('create-feature', () => onStartNewFlight?.())}
-          className="cl-button shrink-0 whitespace-nowrap px-2.5 py-1"
+          className="cl-button shrink-0 whitespace-nowrap px-2.5"
           title="Start a flight on new repos"
         >
           + New
@@ -353,13 +353,17 @@ function FeatureRow({
   // permanent tint would make the column noise again.
   const inFlight = Boolean(flight?.live || flight?.attention)
   const showFlightChip = inFlight || flight?.queued === true
+  // The Coverage shortcut is for the resting ledger. While its job runs, Flight
+  // owns the live work and is already the adjacent shortcut. Hiding this action
+  // avoids two icons that describe the same work but open different surfaces.
+  const coverageAction = coverageHeadline === 'Generating' ? undefined : onOpenCoverage
   // The action cluster FLOATS over the row's right edge instead of sitting in
   // flow, so three icons cost the suite name zero width at rest — in a column
   // of long `cns_*` names that width is the column's actual content. The name
   // only makes room (padding-right) while the row is hovered/focused, so
   // nothing ever moves: the ellipsis just lands earlier. Width is computed from
   // the visible count so a 1-action row doesn't reserve space for three.
-  const actionCount = 1 + (onOpenCoverage ? 1 : 0) + (flight ? 1 : 0)
+  const actionCount = 1 + (coverageAction ? 1 : 0) + (flight ? 1 : 0)
   // The at-rest flight chip already sits in flow at that same right edge, so it
   // has ALREADY cost the name its width — reserving the full cluster on top of it
   // left an in-flight row with ~18px of readable name on hover (204px row − 72px
@@ -457,11 +461,11 @@ function FeatureRow({
             </button>
           </Tooltip>
         )}
-        {onOpenCoverage && (
+        {coverageAction && (
           <Tooltip label="Coverage">
             <button
               type="button"
-              onClick={() => { onSelectFeature(f.name); onOpenCoverage(f.name) }}
+              onClick={() => { onSelectFeature(f.name); coverageAction(f.name) }}
               aria-label={`Open coverage for ${f.name}`}
               data-testid={`coverage-action-${f.name}`}
               data-headline={coverageHeadline ?? ''}

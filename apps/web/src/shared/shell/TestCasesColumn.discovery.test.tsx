@@ -36,10 +36,48 @@ beforeEach(() => {
   root = createRoot(container)
 })
 afterEach(() => { act(() => root.unmount()); container.remove() })
-async function render() {
-  await act(async () => root.render(<InvalidationProvider><TestCasesColumn feature="suite" activeRunSummary={undefined} activeRunStatus={undefined} /></InvalidationProvider>))
+async function render(isAuthoringTests = false) {
+  await act(async () => root.render(<InvalidationProvider><TestCasesColumn feature="suite" isAuthoringTests={isAuthoringTests} activeRunSummary={undefined} activeRunStatus={undefined} /></InvalidationProvider>))
 }
 describe('Tests column discovery repair', () => {
+  it('keeps repair and retry visible with one disclosure for the agent handoff and diagnostics', async () => {
+    await render()
+    const details = container.querySelector('details')!
+    expect(container.querySelectorAll('details')).toHaveLength(1)
+    expect(details.open).toBe(false)
+    expect(details.querySelector('summary')?.textContent).toBe('Details & other options')
+    const mainActions = [...container.querySelectorAll('button')].filter((button) => !button.closest('details'))
+    expect(mainActions.map((button) => button.textContent)).toEqual(['Repair in Canary Lab', 'Retry discovery'])
+    expect(mainActions[0].classList.contains('cl-button-primary')).toBe(true)
+    await act(async () => details.querySelector('summary')!.click())
+    expect(details.open).toBe(true)
+    expect(details.textContent).toContain('/canary-lab-repair-discovery suite')
+    expect(details.textContent).toContain('missing import')
+  })
+
+  it('shows live placeholders instead of a discovery failure while authoring, then discovers again when writing ends', async () => {
+    await render(true)
+    expect(container.textContent).toContain('Writing tests…')
+    expect(container.textContent).not.toContain('Test discovery failed')
+    expect(container.textContent).not.toContain('Two ways to repair it')
+    // The placeholder is the card it becomes, not a generic bar stack: same
+    // `cl-card` chrome and the same 40px row, so the list does not re-lay itself
+    // out when the first authored spec lands.
+    const cards = container.querySelectorAll<HTMLElement>('[data-testid="test-card-skeleton"]')
+    expect(cards).toHaveLength(3)
+    expect(cards[0].className).toContain('cl-card')
+    expect(cards[0].querySelector<HTMLElement>('.h-10')).not.toBeNull()
+    // Each card sweeps as one unit, one step behind the card above it.
+    const offsets = [...cards].map((card) => card.querySelector<HTMLElement>('[data-testid="skeleton-bar"]')!.style.animationDelay)
+    expect(offsets).toEqual(['', '-110ms', '-220ms'])
+
+    vi.mocked(getFeatureTests).mockResolvedValue([{ file: '/features/suite/e2e/a.spec.ts', tests: [{ name: 'Newly authored case', line: 1, bodySource: '', steps: [], readable: readableTest('Newly authored case') }] }])
+    await render(false)
+    expect(container.textContent).toContain('Newly authored case')
+    expect(container.textContent).not.toContain('Writing tests…')
+    expect(getFeatureTests).toHaveBeenCalledTimes(2)
+  })
+
   it('shows external work started elsewhere and returns to the existing test list after verification without a refresh', async () => {
     await render()
     expect(container.textContent).toContain('In your agent')

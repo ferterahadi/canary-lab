@@ -16,6 +16,40 @@ function rows(source: string, file = 'review.spec.ts'): ReadableStoryItem[] {
 const english = (source: string, file?: string): string => rows(source, file).map((item) => item.text).join('\n')
 
 describe('whole-file English', () => {
+  it('renders the response property checks from the test review as compact English with exact source links', () => {
+    const source = `for (const response of [created, replay, read]) {
+  expect(response).not.toHaveProperty('token');
+  expect(response.metadata).not.toHaveProperty('webhook_secret');
+  expect(response.metadata).not.toHaveProperty('two_step_pin');
+}`
+    const checks = rows(source).filter((item) => item.role === 'check')
+    expect(checks.map((item) => item.text)).toEqual([
+      'Check that response does not have property "token"',
+      'Check that response.metadata does not have property "webhook_secret"',
+      'Check that response.metadata does not have property "two_step_pin"',
+    ])
+    for (const [index, check] of checks.entries()) {
+      expect(check.source).toMatchObject({ startLine: index + 2, endLine: index + 2, snippet: source.split('\n')[index + 1].trim() })
+      expect(check.spans.map((span) => span.text).join('')).toBe(check.text)
+    }
+  })
+
+  it.each([
+    ['expect(response).toHaveProperty("token")', 'Check that response has property "token"'],
+    ['expect(response).toHaveProperty("token", undefined)', 'Check that response has property "token" equal to undefined'],
+    ['expect(response).not.toHaveProperty(["metadata", "token"], secret)', 'Check that response does not have property (a list containing "metadata", "token") equal to secret'],
+    ['await expect.soft(result, message()).resolves.not.toHaveProperty(path, value)', 'Wait for the check that the resolved value of result does not have property path equal to value; continue collecting failures if this check fails; with failure message the result of message()'],
+  ])('preserves property values, paths and modifiers: %s', (source, expected) => {
+    expect(english(source)).toBe(expected)
+  })
+
+  it.each(['expect(response).toHaveProperty()', 'expect(response).toHaveProperty("token", value, extra)'])(
+    'retains the full grammar for unsupported property argument counts: %s', (source) => {
+      expect(english(source)).toContain('call:')
+      expect(rows(source)[0].source.snippet).toBe(source)
+    },
+  )
+
   it.each(['id', 'newId'])('renders the reported nested polling callback as prose while preserving %s and the second argument', (id) => {
     const source = `await poll(async () => (await allMessages(request)).messages.find((message: any) => message.messageId === ${id}), 60_000)`
     const item = rows(source)[0]

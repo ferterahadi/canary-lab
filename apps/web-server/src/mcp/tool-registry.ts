@@ -12,6 +12,7 @@ import { registerHealFlowTools } from './tool-groups/heal-flow'
 import { registerDiscoveryRepairTools } from './tool-groups/discovery-repair'
 import { registerRobustnessTools } from './tool-groups/robustness'
 import { registerReadTools } from './tool-groups/reads'
+import { registerTestReviewTools } from './tool-groups/test-review'
 import { registerRunLifecycleTools } from './tool-groups/run-lifecycle'
 import {
   FULL_TOOLS,
@@ -69,6 +70,7 @@ export function createCanaryLabToolRegistry(
   registerWorkflowGuideTools(ctx)
   registerAuthoringTools(ctx)
   registerRunLifecycleTools(ctx)
+  registerTestReviewTools(ctx)
   registerHealFlowTools(ctx)
   registerDiscoveryRepairTools(ctx)
   registerRobustnessTools(ctx)

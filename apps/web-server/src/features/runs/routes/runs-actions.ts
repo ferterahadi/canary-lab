@@ -304,15 +304,19 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
   // POST /api/runs/:runId/adopt-spec-edits — a human lets the live spec edits
   // into an active run: the run-start copy is re-taken and a rerun signalled
   // (D9). Sits beside /approve-dirty as the second human-only integrity lever;
-  // no MCP tool wraps it (pinned by mcp/repair-guardrail.test.ts). A terminal
+  // MCP reaches it only after human elicitation with an exact revision. A terminal
   // run has nothing to adopt into — a new run snapshots the live suite itself.
-  app.post<{ Params: { runId: string } }>('/api/runs/:runId/adopt-spec-edits', async (req, reply) => {
+  app.post<{ Params: { runId: string }; Body?: { expectedRevision?: string } }>('/api/runs/:runId/adopt-spec-edits', async (req, reply) => {
     const orch = deps.store.registry.get(req.params.runId)
     if (!orch?.adoptSpecEdits) {
       reply.code(404)
       return { error: 'run not active; start a new run to test the edited suite' }
     }
-    const result = await orch.adoptSpecEdits()
+    const revision = req.body?.expectedRevision
+    if (revision !== undefined && (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision))) {
+      return reply.code(400).send({ error: 'Invalid review revision' })
+    }
+    const result = await orch.adoptSpecEdits(revision)
     if (!result.ok) {
       reply.code(409)
       return { reason: result.reason }

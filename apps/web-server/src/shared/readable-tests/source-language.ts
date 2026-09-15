@@ -189,14 +189,21 @@ export function sourceAssertionText(node: ts.Statement): string | undefined {
   if (!ts.isCallExpression(expression) || expression.typeArguments?.length || expression.questionDotToken) return undefined
   const expectation = parseExpectation(expression)
   if (!expectation) return undefined
-  const rule = ASSERTION_RULES.find((rule) => rule.matcher === expectation.matcher)
+  const propertyCheck = expectation.matcher === 'toHaveProperty'
+  if (propertyCheck && (expression.arguments.length < 1 || expression.arguments.length > 2)) return undefined
+  const rule = propertyCheck
+    ? { expectedArguments: 1, relation: 'has property', negatedRelation: 'does not have property' }
+    : ASSERTION_RULES.find((rule) => rule.matcher === expectation.matcher)
   if (!rule || expression.arguments.length < rule.expectedArguments) return undefined
   const subject = sourceExpressionText(expectation.actual)
   const settled = expectation.settlement === 'resolves' ? `the resolved value of ${subject}`
     : expectation.settlement === 'rejects' ? `the rejection from ${subject}` : subject
   const expected = rule.expectedArguments ? ` ${sourceArgumentText(expression.arguments[0])}` : ''
-  const extra = expression.arguments.slice(rule.expectedArguments)
+  // The second property argument is an expected value, not matcher options.
+  const propertyValue = propertyCheck && expression.arguments[1]
+  const extra = expression.arguments.slice(propertyCheck ? 2 : rule.expectedArguments)
   return `${awaited ? 'Wait for the check' : 'Check'} that ${settled} ${expectation.negated ? rule.negatedRelation : rule.relation}${expected}`
+    + (propertyValue ? ` equal to ${sourceArgumentText(propertyValue)}` : '')
     + (expectation.soft ? '; continue collecting failures if this check fails' : '')
     + (expectation.message ? `; with failure message ${sourceExpressionText(expectation.message)}` : '')
     + (extra.length ? `; with additional arguments ${extra.map(sourceArgumentText).join(', ')}` : '')

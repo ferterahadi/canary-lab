@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FeaturesColumn } from './FeaturesColumn'
 import type { FeatureFlightAction } from '@/features/flights'
+import { InvalidationProvider, useInvalidation } from '../state/invalidation'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -13,6 +14,13 @@ const gatePromo = vi.fn((_action: string, continueAction: () => void) => continu
 // Hoisted so the factory below can close over it without re-importing the mocked
 // module (that shape deadlocks vitest collection).
 const { listCoverageStates } = vi.hoisted(() => ({ listCoverageStates: vi.fn() }))
+
+let invalidateCoverage: () => void
+function InvalidationTap() {
+  const { invalidate } = useInvalidation()
+  invalidateCoverage = () => invalidate('coverage')
+  return null
+}
 
 vi.mock('../api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/client')>()),
@@ -178,6 +186,81 @@ describe('FeaturesColumn coverage action (R8)', () => {
       )
     })
     expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBeNull()
+  })
+
+  it('hides Coverage while generation runs and keeps Flight as the progress destination', async () => {
+    listCoverageStates.mockResolvedValueOnce([{
+      feature: 'alpha',
+      headline: 'Generating',
+      summary: 'fresh',
+      coverage: 'generating',
+      coveragePct: null,
+    }])
+    const onOpenCoverage = vi.fn()
+    const onOpenFlight = vi.fn()
+    await act(async () => {
+      root.render(
+        <FeaturesColumn
+          features={[feature('alpha')]}
+          selectedFeature={null}
+          onSelectFeature={() => {}}
+          onOpenCoverage={onOpenCoverage}
+          onOpenFlight={onOpenFlight}
+          flightAction={() => ({
+            flightId: 'fl_alpha',
+            tone: 'var(--running)',
+            label: 'authoring',
+            title: 'Specs + coverage is running',
+            live: true,
+            attention: false,
+          })}
+        />,
+      )
+    })
+
+    expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBeNull()
+    const flight = container.querySelector<HTMLButtonElement>('[data-testid="flight-shortcut-alpha"]')
+    expect(flight).toBeTruthy()
+    act(() => { flight?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(onOpenFlight).toHaveBeenCalledWith('fl_alpha')
+    expect(onOpenCoverage).not.toHaveBeenCalled()
+  })
+
+  it('restores the Coverage destination when the live job refresh reports completion', async () => {
+    listCoverageStates
+      .mockResolvedValueOnce([{
+        feature: 'alpha',
+        headline: 'Generating',
+        summary: 'fresh',
+        coverage: 'generating',
+        coveragePct: null,
+      }])
+      .mockResolvedValueOnce([{
+        feature: 'alpha',
+        headline: 'Covered 80%',
+        summary: 'fresh',
+        coverage: 'fresh',
+        coveragePct: 80,
+      }])
+    await act(async () => {
+      root.render(
+        <InvalidationProvider>
+          <InvalidationTap />
+          <FeaturesColumn
+            features={[feature('alpha')]}
+            selectedFeature={null}
+            onSelectFeature={() => {}}
+            onOpenCoverage={() => {}}
+          />
+        </InvalidationProvider>,
+      )
+    })
+    expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBeNull()
+
+    await act(async () => invalidateCoverage())
+
+    expect(listCoverageStates).toHaveBeenCalledTimes(2)
+    expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBeTruthy()
   })
 })
 

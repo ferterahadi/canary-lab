@@ -16,20 +16,15 @@ import { readManifest, type SpecEditsAdoptedBy } from './manifest'
 import { captureDirtySpecBaseline } from './run-manifest-writer'
 import { INTEGRITY_HINT_DISCLOSURE, deriveIntegrityHints } from './run-integrity-hints'
 import { detectHealMode } from './auto-heal'
+import { SUITE_SNAPSHOT_SKIP, suiteReviewRevision } from './suite-review'
 
 export type AdoptSpecEditsResult =
   | { ok: true; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
-  | { ok: false; reason: 'tests-running' | 'nothing-to-adopt' | 'snapshot-failed' }
+  | { ok: false; reason: 'tests-running' | 'nothing-to-adopt' | 'snapshot-failed' | 'review-changed' }
 
 export type RestoreSpecEditsResult =
   | { ok: true; restored: string[] }
   | { ok: false; reason: 'tests-running' | 'nothing-to-restore' | 'restore-failed' }
-
-// Top-level entries of a feature dir that are not suite content. Envsets are
-// read from the LIVE dir by the env switcher and carry secrets; node_modules
-// resolves by walking up from the copy exactly as it does from the live dir;
-// .git is never suite content.
-const SUITE_SNAPSHOT_SKIP = new Set(['envsets', 'node_modules', '.git'])
 
 /** One digest over every spec's content, independent of listing order. Lets a
  *  reader check that the copy still holds what it held at run start. */
@@ -85,13 +80,13 @@ function readLive(featureDir: string, rel: string): string | undefined {
 /** A human lets the live edits into this run: the snapshot is taken again from
  *  the live suite, the dirty baseline re-read from it, the adoption recorded on
  *  the manifest, and a rerun signalled so the adopted suite actually runs. The
- *  only path that moves the boundary — no verdict, hint or MCP tool does
- *  (D13); the HTTP route beside /approve-dirty is its sole caller. Refused
+ *  human path that moves the boundary. MCP reaches the same HTTP route only
+ *  after elicitation accepts the exact reviewed revision. Refused
  *  while Playwright is executing the current copy: replacing files under a
  *  running process would corrupt the very run it is meant to inform. */
-export async function adoptSpecEdits(ctx: RunContext): Promise<AdoptSpecEditsResult> {
+export async function adoptSpecEdits(ctx: RunContext, expectedRevision?: string): Promise<AdoptSpecEditsResult> {
   if (ctx.playwrightPty) return { ok: false, reason: 'tests-running' }
-  const adopted = await adoptPendingSpecEdits(ctx, 'human')
+  const adopted = await adoptPendingSpecEdits(ctx, 'human', expectedRevision)
   if (!adopted.ok) return adopted
   const signal = ctx.signalGate.observe('rerun', {
     hypothesis: 'A human adopted the edited spec(s) into this run.',
@@ -155,11 +150,11 @@ export async function adoptTestHealSpecEdits(ctx: RunContext): Promise<string[]>
 
 type AdoptCoreResult =
   | { ok: true; adopted: string[] }
-  | { ok: false; reason: 'nothing-to-adopt' | 'snapshot-failed' }
+  | { ok: false; reason: 'nothing-to-adopt' | 'snapshot-failed' | 'review-changed' }
 
 /** Re-take the snapshot over the live suite, re-baseline the dirty record and
  *  record the adoption. No signal: who reruns, and how, is the caller's. */
-async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy): Promise<AdoptCoreResult> {
+async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, expectedRevision?: string): Promise<AdoptCoreResult> {
   const live = ctx.feature.featureDir
   const hadSnapshot = ctx.suiteDir !== live
   const pending = hadSnapshot ? computePendingEdits(live, ctx.suiteDir) : []
@@ -168,15 +163,19 @@ async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy): P
   // taking the first one: every spec the live suite holds is what gets adopted.
   const adopted = hadSnapshot ? pending.map((edit) => edit.file) : Object.keys(hashFeatureSpecs(live)).sort()
 
-  snapshotSuite(ctx)
+  if (expectedRevision !== undefined) {
+    const result = snapshotReviewedSuite(ctx, expectedRevision)
+    if (!result.ok) return result
+  } else snapshotSuite(ctx)
   if (ctx.suiteDir === live) return { ok: false, reason: 'snapshot-failed' }
   await captureDirtySpecBaseline(ctx)
 
   const previous = readManifest(ctx.paths.manifestPath)?.specEdits?.adopted ?? []
   const at = new Date().toISOString()
+  const remaining = computePendingEdits(live, ctx.suiteDir)
   ctx.stateSink.patchManifest(ctx.runId, {
-    specEdits: { checkedAt: at, pending: [], adopted: [...previous, { at, by, files: adopted }] },
-    integrity: { hints: [], disclosure: INTEGRITY_HINT_DISCLOSURE },
+    specEdits: { checkedAt: at, pending: remaining, adopted: [...previous, { at, by, files: adopted, ...(expectedRevision ? { reviewRevision: expectedRevision } : {}) }] },
+    integrity: { hints: deriveIntegrityHints(remaining, (rel) => readLive(live, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
   })
   return { ok: true, adopted }
 }
@@ -204,5 +203,48 @@ export function snapshotSuite(ctx: RunContext): void {
     ctx.stateSink.patchManifest(ctx.runId, {
       suiteSnapshot: { kind: 'unavailable', at: new Date().toISOString(), reason },
     })
+  }
+}
+
+/** Stage and validate the copied bytes before replacing evidence. A late file
+ * edit or failed copy must leave the old snapshot and verdict intact. */
+function snapshotReviewedSuite(ctx: RunContext, expectedRevision: string): { ok: true } | { ok: false; reason: 'review-changed' | 'snapshot-failed' } {
+  const target = ctx.paths.suiteSnapshotDir
+  let scratch: string | undefined
+  let originalMoved = false
+  let installed = false
+  try {
+    if (ctx.suiteDir === ctx.feature.featureDir || suiteReviewRevision(target, ctx.feature.featureDir) !== expectedRevision) {
+      return { ok: false, reason: 'review-changed' }
+    }
+    scratch = fs.mkdtempSync(`${target}.review-`)
+    const staging = path.join(scratch, 'candidate')
+    const backup = path.join(scratch, 'original')
+    copyDirRecursive(ctx.feature.featureDir, staging, undefined, (rel) => SUITE_SNAPSHOT_SKIP.has(rel))
+    if (suiteReviewRevision(target, staging) !== expectedRevision) return { ok: false, reason: 'review-changed' }
+    fs.renameSync(target, backup)
+    originalMoved = true
+    fs.renameSync(staging, target)
+    installed = true
+    ctx.stateSink.patchManifest(ctx.runId, {
+      suiteSnapshot: { kind: 'taken', dir: target, takenAt: new Date().toISOString(), digest: suiteDigest(target) },
+    })
+    originalMoved = false
+    return { ok: true }
+  } catch (error) {
+    if (originalMoved) {
+      try {
+        if (installed) fs.rmSync(target, { recursive: true, force: true })
+        fs.renameSync(path.join(scratch!, 'original'), target)
+        originalMoved = false
+      } catch (rollbackError) {
+        // Keep the original bytes on disk even if the filesystem refuses rollback.
+        ctx.runnerLog?.warn(`suite rollback failed; original retained at ${scratch}: ${String(rollbackError)}`)
+      }
+    }
+    ctx.runnerLog?.warn(`reviewed suite snapshot failed: ${error instanceof Error ? error.message : String(error)}`)
+    return { ok: false, reason: 'snapshot-failed' }
+  } finally {
+    if (scratch && !originalMoved) fs.rmSync(scratch, { recursive: true, force: true })
   }
 }

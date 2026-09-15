@@ -123,7 +123,7 @@ export type SpecEditsAdoptedBy = 'human' | 'test-heal'
 export interface RunSpecEdits {
   checkedAt: string
   pending: PendingSpecEdit[]
-  adopted: Array<{ at: string; by: SpecEditsAdoptedBy; files: string[] }>
+  adopted: Array<{ at: string; by: SpecEditsAdoptedBy; files: string[]; reviewRevision?: string }>
 }
 
 /** What the strength differential says about `specEdits.pending` (D13).

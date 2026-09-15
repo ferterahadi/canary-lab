@@ -101,8 +101,8 @@ export class RunOrchestrator extends EventEmitter {
     return cancelHeal(this.ctx, this)
   }
 
-  async adoptSpecEdits(): ReturnType<typeof adoptSpecEdits> {
-    return adoptSpecEdits(this.ctx)
+  async adoptSpecEdits(expectedRevision?: string): ReturnType<typeof adoptSpecEdits> {
+    return adoptSpecEdits(this.ctx, expectedRevision)
   }
 
   restoreSpecEdits(): ReturnType<typeof restoreSpecEdits> {

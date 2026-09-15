@@ -233,7 +233,15 @@ Commit names the selected suite and counts all its tracked dirty spec files.
 A successful commit leaves a saved receipt; the uncommitted review cue clears on
 live refresh. Differences from a selected run remain independently inspectable:
 saving in Git never validates new tests or changes an existing run verdict.
-Restore and adopt remain explicit live-run actions. Editing opens the existing
+Restore and adopt remain explicit live-run actions. MCP clients can call
+`get_test_review` to display the exact snapshot comparison, then
+`review_test_changes` to request human adoption through elicitation. The review
+includes every copied suite file; envsets, dependencies and Git metadata are
+excluded exactly as in the snapshot. Approval is bound to both trees by SHA-256.
+A staged copy is checked before replacing the snapshot, so stale answers and
+copy failures cannot silently adopt a different revision. Cancellation leaves
+work pending; unsupported clients use the existing review page. Adoption signals
+a rerun and never changes the verdict into a pass. Editing opens the existing
 editor; validation uses the existing Run flow. Closing Services leaves sessions
 running; stopping is a separate action.
 

@@ -1,6 +1,6 @@
 // POST /api/runs/:runId/adopt-spec-edits — the human-only lever that lets a
-// mid-run spec edit into a run (D9/D13). HTTP only, beside /approve-dirty: no
-// MCP tool wraps it, which `mcp/repair-guardrail.test.ts` pins.
+// mid-run spec edit into a run (D9/D13). Beside /approve-dirty: no
+// unrestricted MCP tool wraps it; elicited review passes an exact revision.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -59,7 +59,18 @@ describe('POST /api/runs/:runId/adopt-spec-edits', () => {
     expect(res.json()).toEqual({ status: 'adopted', adopted: ['e2e/a.spec.ts'], rerun: 'signalled' })
   })
 
-  it.each(['tests-running', 'nothing-to-adopt', 'snapshot-failed'] as const)('409s with reason=%s', async (reason) => {
+  it('passes the exact review revision to the orchestrator and rejects malformed revisions', async () => {
+    const { app, registry } = await build()
+    const adopt = vi.fn(async () => ({ ok: true as const, adopted: ['e2e/a.spec.ts'], rerun: 'signalled' as const }))
+    registry.set('r1', stub(adopt))
+    const expectedRevision = 'a'.repeat(64)
+    expect((await app.inject({ method: 'POST', url: '/api/runs/r1/adopt-spec-edits', payload: { expectedRevision } })).statusCode).toBe(202)
+    expect(adopt).toHaveBeenCalledWith(expectedRevision)
+    expect((await app.inject({ method: 'POST', url: '/api/runs/r1/adopt-spec-edits', payload: { expectedRevision: 'not-a-revision' } })).statusCode).toBe(400)
+    expect(adopt).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['tests-running', 'nothing-to-adopt', 'snapshot-failed', 'review-changed'] as const)('409s with reason=%s', async (reason) => {
     const { app, registry } = await build()
     registry.set('r1', stub(async () => ({ ok: false, reason })))
     const res = await app.inject({ method: 'POST', url: '/api/runs/r1/adopt-spec-edits' })

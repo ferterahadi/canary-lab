@@ -30,7 +30,7 @@ export type OrchestratorCancelHealResult =
  *  same reason the pause/cancel results are duplicated here. */
 export type OrchestratorAdoptSpecEditsResult =
   | { ok: true; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
-  | { ok: false; reason: 'tests-running' | 'nothing-to-adopt' | 'snapshot-failed' }
+  | { ok: false; reason: 'tests-running' | 'nothing-to-adopt' | 'snapshot-failed' | 'review-changed' }
 
 export type OrchestratorRestoreSpecEditsResult =
   | { ok: true; restored: string[] }
@@ -55,7 +55,7 @@ export interface OrchestratorLike {
   cancelHeal(): Promise<OrchestratorCancelHealResult>
   /** A human adopts the live spec edits into the run: re-snapshot, re-baseline,
    *  rerun. Human-only by construction — reached from the HTTP route alone. */
-  adoptSpecEdits?(): Promise<OrchestratorAdoptSpecEditsResult>
+  adoptSpecEdits?(expectedRevision?: string): Promise<OrchestratorAdoptSpecEditsResult>
   /** A human puts the live specs back to what the run executed. Human-only by
    *  construction, the same way as adopt. */
   restoreSpecEdits?(): OrchestratorRestoreSpecEditsResult

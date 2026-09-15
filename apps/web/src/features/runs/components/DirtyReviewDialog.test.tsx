@@ -156,7 +156,18 @@ it('commits every changed file in the selected suite and retains a saved receipt
   expect(document.body.textContent).toContain('No uncommitted test edits remain')
   expect(onClose).not.toHaveBeenCalled()
 })
-it('does not claim a no-op commit succeeded', async () => {
+it('quietly refreshes an already-clean suite without claiming a new commit', async () => {
+  vi.mocked(api.commitDirtySpecs).mockResolvedValue({ committed: false, status: 'clean', reason: 'no modified specs' })
+  const onFeaturesChanged = vi.fn()
+  await render({ onFeaturesChanged }); await click('Commit suite · 1 file')
+  expect(onFeaturesChanged).toHaveBeenCalledExactlyOnceWith()
+  expect(document.querySelector('[role="alert"]')).toBeNull()
+  expect(document.body.textContent).not.toContain('Saved in Git')
+  await render({ features: [], onFeaturesChanged })
+  expect(document.body.textContent).toContain('No uncommitted test edits remain')
+  expect(button('Commit suite · 1 file')).toBeUndefined()
+})
+it('does not hide a no-op without confirmation that the suite is clean', async () => {
   vi.mocked(api.commitDirtySpecs).mockResolvedValue({ committed: false, reason: 'no modified specs' })
   await render(); await click('Commit suite · 1 file')
   expect(document.querySelector('[role="alert"]')?.textContent).toBe('no modified specs')

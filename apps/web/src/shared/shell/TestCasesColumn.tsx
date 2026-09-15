@@ -1,7 +1,7 @@
 import { discoveryRepairActive } from '@shared/discovery-repair'
 import { useDiscoveryRepair } from './use-discovery-repair'
 import { DiscoveryRepairActivity } from './DiscoveryRepairActivity'
-import { Section, CopyField } from '../ui/atoms'
+import { CopyField } from '../ui/atoms'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api/client'
 import { useInvalidationKey } from '../state/invalidation'
@@ -25,6 +25,7 @@ import { TestIdBadge } from '../ui/TestIdBadge'
 import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
 import { sourceFileInRun } from '@/features/runs'
 import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
+import { SkeletonBar } from '@/shared/ui/Skeleton'
 
 type TestCardExecutionHighlight = TestExecutionLineHighlight & { sourceLine: number }
 
@@ -38,6 +39,9 @@ interface Props {
   currentTests?: boolean
   onCurrentTestsChange?: (current: boolean) => void
   feature: string | null
+  /** Workspace discovery is expected to be incomplete while the authoring
+   *  agent is still changing spec files. */
+  isAuthoringTests?: boolean
   activeRunSummary: RunSummary | undefined
   activeRunManifest?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'specEdits' | 'runId'>
   activeRunStatus: RunStatus | undefined
@@ -48,11 +52,12 @@ interface Props {
   dirtySpecs?: DirtySpecSummary[]
 }
 
-export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, activeRunStatus, onTotalTestsChange, onReviewTest, currentTests = false, onCurrentTestsChange, dirtySpecs = [] }: Props) {
+export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSummary, activeRunManifest, activeRunStatus, onTotalTestsChange, onReviewTest, currentTests = false, onCurrentTestsChange, dirtySpecs = [] }: Props) {
   // The spec list refetches when a `tests-changed` event fires for the selected
   // feature (App gates the invalidation to the visible feature).
   const refreshKey = useInvalidationKey('tests')
   const runId = activeRunManifest?.runId
+  const workspaceAuthoring = isAuthoringTests && !runId
   const sourceKey = `${feature ?? ''}:${runId ?? 'workspace'}`
   const recordedRosterKey = runId ? JSON.stringify(activeRunSummary?.knownTests ?? []) : ''
   const repairState = useDiscoveryRepair(feature)
@@ -129,7 +134,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
     }
     load()
     return () => { cancelled = true; clearTimeout(retryTimer) }
-  }, [feature, sourceKey, runId, recordedRosterKey, refreshKey, retryKey])
+  }, [feature, sourceKey, runId, recordedRosterKey, refreshKey, retryKey, workspaceAuthoring])
 
   const dirtyRevision = JSON.stringify(dirtySpecs)
 
@@ -199,7 +204,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
 
   return (
     <div className="cl-panel flex h-full flex-col">
-      <div className="cl-panel-header flex items-center justify-between gap-2 px-4 py-3">
+      <div className="cl-panel-header cl-column-header flex items-center justify-between gap-2 px-4">
         <div className="flex min-w-0 items-center gap-2">
           <span className="cl-kicker">Tests</span>
           {currentTests && <span className="text-[10px] text-secondary">Current source</span>}
@@ -209,18 +214,29 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
             </span>
           )}
         </div>
-        {(runId || currentTests) && onCurrentTestsChange && <button type="button" className="cl-button px-2 py-1 text-[11px]" onClick={() => onCurrentTestsChange(!currentTests)}>{currentTests ? 'View recorded results' : 'View current tests'}</button>}
-        {dirtySpecs.length > 0 && onReviewTest && <button className="cl-button px-2 py-1 text-[11px]" onClick={() => onReviewTest(dirtySpecs[0].file)}>Review {dirtySpecs.length} {dirtySpecs.length === 1 ? 'file' : 'files'}</button>}
-        {runDifferences.length > 0 && onReviewTest && <button className="cl-button px-2 py-1 text-[11px]" title="Current tests differ from the selected run’s snapshot. Saving in Git does not validate them." onClick={() => onReviewTest(runDifferences[0], undefined, 'run')}>Different from this run</button>}
+        {(runId || currentTests) && onCurrentTestsChange && <button type="button" className="cl-button px-2 text-[11px]" onClick={() => onCurrentTestsChange(!currentTests)}>{currentTests ? 'View recorded results' : 'View current tests'}</button>}
+        {dirtySpecs.length > 0 && onReviewTest && <button className="cl-button px-2 text-[11px]" onClick={() => onReviewTest(dirtySpecs[0].file)}>Review {dirtySpecs.length} {dirtySpecs.length === 1 ? 'file' : 'files'}</button>}
+        {runDifferences.length > 0 && onReviewTest && <button className="cl-button px-2 text-[11px]" title="Current tests differ from the selected run’s snapshot. Saving in Git does not validate them." onClick={() => onReviewTest(runDifferences[0], undefined, 'run')}>Different from this run</button>}
         <TestsHeaderIndicator
           summary={activeRunSummary}
           totalTests={totalTests}
           passedCount={passedCount}
-          specsLoaded={Boolean(specs)}
+          specsLoaded={Boolean(specs) && !workspaceAuthoring}
           isRunActivelyTesting={isRunActivelyTesting}
         />
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3" style={{ scrollbarGutter: 'stable' }}>
+        {workspaceAuthoring ? (
+          <div data-testid="tests-authoring-placeholder">
+            <div role="status" className="mb-3 flex items-center gap-2 text-xs text-running">
+              <span className="cl-pulse h-1.5 w-1.5 rounded-full bg-[var(--running)]" aria-hidden="true" />
+              Writing tests…
+            </div>
+            <div className="space-y-1.5">
+              {AUTHORING_NAME_WIDTHS.map((width, i) => <AuthoringTestCard key={width} width={width} row={i} />)}
+            </div>
+          </div>
+        ) : <>
         {specs?.some((spec) => spec.recordedSourceUnavailable) && <p role="status" className="mb-3 text-xs text-secondary">Showing recorded tests and results. Historical source is unavailable for some tests in this run.</p>}
         {repairState.error && <p role="status" className="mb-2 text-xs text-warning">{repairState.error}</p>}
         {activeRepair ? <DiscoveryRepairActivity repair={activeRepair} /> : <>
@@ -229,37 +245,47 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
           {showRepairHistory && <DiscoveryRepairActivity repair={latestRepair} />}
         </details>}
         {discoveryError && (
-          <div role="status" className="mb-2 rounded-md border px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
+          <div className="mb-2 rounded-md border p-3 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
+            <div role="status">
             <div className="font-medium text-primary">{runId ? 'Recorded tests unavailable' : 'Test discovery failed'}</div>
-            <p className="mt-1">{discoveryError}</p>
-            <p className="mt-1">{runId ? 'Open Playwright to inspect the recorded results. Current workspace tests cannot replace this run’s evidence.' : displaySpecs ? 'Showing the previous test list until discovery succeeds.' : 'A complete test list is unavailable. This is a discovery error, not a test result.'}</p>
-            {!runId && <div className="mt-3"><Section title="Two ways to repair it" bodyClassName="divide-y divide-[var(--border-default)]">
-              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-3"><div>In Canary Lab<p className="text-[11px] text-muted">Runs in this workspace.</p></div><button type="button" className="cl-button px-2 py-1" disabled={repairState.starting} onClick={() => { void repairState.start() }}>{repairState.starting ? 'Starting…' : latestRepair?.status === 'failed' ? 'Resume repair' : 'Repair in Canary Lab'}</button></div>
-              <div className="flex flex-col gap-1 px-3 py-3"><div>In your agent <span className="text-[11px] text-muted">· Paste in Claude or Codex.</span></div><CopyField value={`/canary-lab-repair-discovery ${feature}`} label="discovery repair command" /></div>
-            </Section></div>}
-            <details className="mt-2"><summary className="cursor-pointer text-accent">Manual recovery</summary><div className="mt-2 flex flex-wrap gap-2">
-              {repairPrompt && <button type="button" className="cl-button px-2 py-1" onClick={copyRepairPrompt}>{promptCopied ? 'Copied repair prompt' : 'Copy repair prompt'}</button>}
+            <p className="mt-1 leading-relaxed">{runId ? 'Open Playwright to inspect the recorded results. Current workspace tests cannot replace this run’s evidence.' : 'Playwright couldn’t load the test list. Repair discovery to see your tests.'}</p>
+            {!runId && displaySpecs && <p className="mt-1">Showing the previous test list until discovery succeeds.</p>}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {!runId && <button type="button" className="cl-button-primary px-3 py-1.5" disabled={repairState.starting} onClick={() => { void repairState.start() }}>{repairState.starting ? 'Starting…' : latestRepair?.status === 'failed' ? 'Resume repair' : 'Repair in Canary Lab'}</button>}
               <button type="button" className="cl-button px-2 py-1" onClick={() => { setManualRetryAfter(repairCompletion); setRetryKey((key) => key + 1) }}>{runId ? 'Reload recorded tests' : 'Retry discovery'}</button>
             </div>
-            </details>
-            {copyError && <p role="alert" className="mt-2 text-danger">{copyError}</p>}
-            {repairPrompt && <details className="mt-2">
-              <summary className="cursor-pointer text-accent">View repair prompt</summary>
+            <details className="mt-3 border-t border-[var(--border-default)] pt-3">
+              <summary className="cursor-pointer text-muted hover:text-primary">{runId ? 'Technical details' : 'Details & other options'}</summary>
+              <div className="mt-3 space-y-4">
+            {!runId && <div className="space-y-2">
+              <div className="font-medium text-primary">In your agent</div>
+              <p>Paste this command in Claude or Codex.</p>
+              <CopyField value={`/canary-lab-repair-discovery ${feature}`} label="discovery repair command" />
+            </div>}
+            <div>
+              <div className="font-medium text-primary">View discovery error</div>
+              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px]">{diagnostics || discoveryError}</pre>
+            </div>
+            {repairPrompt && <div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium text-primary">View repair prompt</span>
+                <button type="button" className="cl-button px-2 py-1" onClick={copyRepairPrompt}>{promptCopied ? 'Copied repair prompt' : 'Copy repair prompt'}</button>
+              </div>
+              {copyError && <p role="alert" className="mt-2 text-danger">{copyError}</p>}
               <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px]">{repairPrompt}</pre>
-            </details>}
-            {diagnostics && <details className="mt-2">
-              <summary className="cursor-pointer text-accent">View discovery error</summary>
-              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px]">{diagnostics}</pre>
-            </details>}
-            {!displaySpecs && incompleteSpecs.length > 0 && <details className="mt-2">
-              <summary className="cursor-pointer text-accent">Source definitions · incomplete</summary>
+            </div>}
+            {!displaySpecs && incompleteSpecs.length > 0 && <div>
+              <div className="font-medium text-primary">Source definitions · incomplete</div>
               <p className="mt-1">Generated cases may be missing. These definitions are not the discovered test count.</p>
               {incompleteSpecs.map((spec) => <div key={spec.file} className="mt-2">
                 <div className="break-all text-muted">{spec.file}</div>
                 <ul className="mt-1 space-y-1">{spec.tests.map((test, i) => <li key={`${test.line}:${i}`}>{test.name}</li>)}</ul>
                 {spec.parseError && <p className="text-danger">{spec.parseError}</p>}
               </div>)}
-            </details>}
+            </div>}
+              </div>
+            </details>
           </div>
         )}
         {!displaySpecs ? (
@@ -340,6 +366,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunManifest, 
           </div>
         )}
         </>}
+        </>}
       </div>
     </div>
   )
@@ -395,6 +422,41 @@ function formatLoadError(err: unknown): string {
   }
   return 'Unable to load tests for this suite.'
 }
+
+/** The authoring placeholder is the card it becomes — R83's rule from the flight
+ *  stage panes applied to this column. A pane there keeps its settled card stack
+ *  in every state, with only the figures replaced by bars, so a value lands in
+ *  the slot its placeholder held. This column's settled stack is TestCards, so
+ *  the placeholder is a TestCard: the same `cl-card` chrome, the same `space-y`
+ *  rhythm, and the same 40px header row (`py-2.5` twice over a 20px line box),
+ *  with the caret, `#N`, name, `:line` and status pill each standing in at their
+ *  real footprint. A generic bar stack was a different shape to the list it
+ *  became, so the pane re-laid itself out the moment the first spec landed.
+ *
+ *  Every bar carries the CARD's sweep offset rather than its own: one card is
+ *  one test arriving, so it sweeps as a unit while the stack reads top-down. */
+function AuthoringTestCard({ width, row }: { width: string; row: number }) {
+  return (
+    <div className="cl-card" data-testid="test-card-skeleton" aria-hidden="true">
+      <div className="flex h-10 items-center gap-3 px-3">
+        {/* Caret, then the `#N` badge at its `min-width`/height. */}
+        <SkeletonBar awaiting="live" row={row} className="shrink-0" width="0.625rem" height={10} />
+        <SkeletonBar awaiting="live" row={row} className="shrink-0" width="1.375rem" height={12} />
+        <div className="min-w-0 flex-1">
+          <SkeletonBar awaiting="live" row={row} width={width} height={11} />
+        </div>
+        {/* `:line`, then the status pill at its own `min-width: 3.5rem`. */}
+        <SkeletonBar awaiting="live" row={row} className="shrink-0" width="1.75rem" height={9} />
+        <SkeletonBar awaiting="live" row={row} className="shrink-0" width="3.5rem" height={14} />
+      </div>
+    </div>
+  )
+}
+
+/** Per-card name widths. Fixed rather than randomized: `Math.random` would
+ *  reshuffle the stack on every render, which reads as activity that is not
+ *  happening. The count of entries IS the number of placeholder cards. */
+const AUTHORING_NAME_WIDTHS = ['58%', '41%', '69%'] as const
 
 function TestCard({
   sourceFile,

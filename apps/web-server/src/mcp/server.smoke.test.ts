@@ -28,6 +28,8 @@ const inertPtyFactory: PtyFactory = () => ({
 const uniqueSorted = (values: string[]): string[] => Array.from(new Set(values)).sort()
 
 const REPAIR_TOOLS = uniqueSorted([
+  'get_test_review',
+  'review_test_changes',
   'start_discovery_repair',
   'get_discovery_repair',
   'update_discovery_repair',
@@ -114,6 +116,8 @@ const EXPORT_TOOLS = uniqueSorted([
 ])
 
 const FLIGHT_TOOLS = uniqueSorted([
+  'get_test_review',
+  'review_test_changes',
   'get_workflow_guide',
   'abort_flight',
   'get_flight',
@@ -186,6 +190,8 @@ const FULL_ONLY_TOOLS = [
 // appears in another array; the first repair-only tool would have broken the count
 // with no hint as to why.
 const LIFECYCLE_TOOLS = uniqueSorted([
+  'get_test_review',
+  'review_test_changes',
   ...REPAIR_TOOLS,
   ...VERIFY_TOOLS,
   ...AUTHOR_TOOLS,

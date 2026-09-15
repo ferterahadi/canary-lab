@@ -102,6 +102,7 @@ export type McpStartRunOutcome =
     }
 
 export interface CanaryLabMcpDeps {
+  testReviewRequest?: (opts: { method: 'GET' | 'POST'; url: string; payload?: unknown }) => Promise<{ statusCode: number; body: unknown }>
   getUiUrl?: () => string | undefined
   discoveryRepairRequest?: (opts: { method: 'GET' | 'POST'; url: string; payload?: unknown }) => Promise<{ statusCode: number; body: unknown }>
   /** Robustness Lab (D16) over MCP: `start_robustness` / `get_robustness`

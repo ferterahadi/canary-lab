@@ -100,8 +100,8 @@ export interface ExternalHealContext {
 // The agent-facing reading of the D9 boundary. A run executes the run-start
 // copy of its suite, so a spec edited after that point was never tested — this
 // says so, names the edits and the hints, and offers the two honest exits:
-// restore the spec, or ask the human to adopt in Canary Lab. Advisory by
-// construction: no verdict reads it, and no MCP tool can adopt or approve.
+// restore the spec, or request human adoption of the reviewed revision.
+// Advisory by construction: no verdict reads it, and agents cannot self-approve.
 export interface SpecEditsWarning {
   pending: Array<{
     file: string
@@ -135,7 +135,7 @@ export function buildSpecEditsWarning(manifest: RunManifest): SpecEditsWarning |
     disclosure: INTEGRITY_HINT_DISCLOSURE,
     message: `⚠️ ${files} changed after this run started. The run executed the run-start copy of the suite, so none of these edits was tested.`,
     nextSteps: [
-      'Restore the edited spec(s) to what the run started with, or ask the human to adopt the edits in Canary Lab (adopting re-runs the suite against them). No MCP tool can adopt or approve a spec edit — do not try, and do not report the edited tests as passed.',
+      'Restore the edited spec(s) to what the run started with, or ask the human to adopt: call get_test_review, show its exact patch, then review_test_changes with review_revision for human elicitation. Unsupported clients use the Canary review page. No MCP tool can self-approve a spec edit; do not report the edited tests as passed.',
       ...(weaker.length > 0
         ? [`A hint reads ${weaker.map((h) => `${h.file} › ${h.test}`).join(', ')} as weaker than what ran. Restore it — a weaker assertion is never a repair.`]
         : []),
