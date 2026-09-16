@@ -56,7 +56,7 @@ describe('test-readability command', () => {
   it('preserves other layout when only syntax rules are requested', async () => {
     const file = write('layout.test.ts', 'const first=1, second=2;\n')
     await checkTestFiles([file], { fix: true, rulesOnly: true })
-    expect(fs.readFileSync(file, 'utf8')).toBe('const first=1\nconst second=2;\n')
+    expect(fs.readFileSync(file, 'utf8')).toBe('const first=1;\nconst second=2;\n')
   })
 
   it('leaves invalid source intact and returns unresolved findings', async () => {

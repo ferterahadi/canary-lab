@@ -81,8 +81,8 @@ third = ['left', 'right']
     const result = await inspectTestReadability(source, 'switch.test.ts', { rulesOnly: true })
     expect(result.issues.filter((issue) => issue.rule === 'one-var')).toHaveLength(2)
     expect(result.remaining).toEqual([])
-    expect(result.code).toContain('let a = 1\nlet b = 2')
-    expect(result.code).toContain('var c = 3\nvar d = 4')
+    expect(result.code).toContain('let a = 1;\nlet b = 2')
+    expect(result.code).toContain('var c = 3;\nvar d = 4')
   })
 
   it('reports comma operators without rewriting a call or its this binding', async () => {
@@ -103,6 +103,12 @@ third = ['left', 'right']
     const result = await inspectTestReadability('// eslint-disable one-var\nconst a = 1, b = 2', 'directives.test.ts', { rulesOnly: true })
     expect(result.changed).toBe(true)
     expect(result.issues).toEqual([expect.objectContaining({ rule: 'one-var' })])
+    expect(result.remaining).toEqual([])
+  })
+
+  it('preserves semicolons and CRLF in declaration-only cleanup', async () => {
+    const result = await inspectTestReadability('const a = 1, b = 2;\r\n', 'windows.spec.ts', { rulesOnly: true })
+    expect(result.code).toBe('const a = 1;\r\nconst b = 2;\r\n')
     expect(result.remaining).toEqual([])
   })
 

@@ -101,11 +101,13 @@ function analyze(source: string, filename: string): { issues: TestReadabilityIss
       report(node, 'one-var', 'Declare each variable in a separate statement.', fixable)
       if (fixable) {
         const indentation = source.slice(source.lastIndexOf('\n', node.getStart(ast) - 1) + 1).match(/^\s*/)![0]
+        const semicolon = node.getLastToken(ast)!.kind === ts.SyntaxKind.SemicolonToken ? ';' : ''
+        const newline = source.includes('\r\n') ? '\r\n' : '\n'
         const list = node.declarationList.getChildren(ast).find((child) => child.kind === ts.SyntaxKind.SyntaxList)!
         for (const token of list.getChildren(ast)) {
           if (token.kind === ts.SyntaxKind.CommaToken) {
             const whitespace = source.slice(token.end).match(/^\s*/)![0]
-            edits.push({ start: token.getStart(ast), end: token.end + whitespace.length, text: `\n${indentation}${keyword.getText(ast)} ` })
+            edits.push({ start: token.getStart(ast), end: token.end + whitespace.length, text: `${semicolon}${newline}${indentation}${keyword.getText(ast)} ` })
           }
         }
       }

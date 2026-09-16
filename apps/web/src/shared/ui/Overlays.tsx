@@ -88,8 +88,8 @@ export function useDismissOnOutsideMousedown(
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- callers pass a
-    // fresh array literal every render; the refs inside it are stable.
+    // Callers pass a fresh array literal every render; the refs inside it are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- depend on the stable refs, not their wrapper array
   }, [enabled, ...refs])
 }
 
