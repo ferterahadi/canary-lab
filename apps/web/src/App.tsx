@@ -454,7 +454,7 @@ export function App() {
           baselineRunStatus={statusForSelectedFeature}
           currentTests={nav.currentTests}
           onCurrentTestsChange={selectedRunForFeature ? nav.setCurrentTests : undefined}
-          onReviewTest={(file, line, baseline) => { setReviewFocus({ file, line, baseline, mode: 'english' }); setSpecReviewOpen(true) }}
+          onReviewTest={(file, line, baseline, change, test) => { setReviewFocus({ file, line, baseline, change, test, mode: 'english' }); setSpecReviewOpen(true) }}
           onTotalTestsChange={setSpecTotalTests}
           dirtySpecs={features.find((f) => f.name === selectedFeature)?.dirty?.specs ?? []}
         />

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { RunManifest, CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunIndexEntry } from '@/shared/api/types'
 import type { PortifyIndexEntry } from '@/shared/api/client'
 import type { RobustnessJobIndexEntry } from '@shared/robustness/jobs'
-import fixture from '../../runs/utils/__fixtures__/cns-wa-snapshot.json'
+import fixture from '../../runs/utils/__fixtures__/run-snapshot-review.json'
 import { deriveFeatureActivity, deriveFeatureExternalHistory } from './feature-activity'
 
 const run = (over: Partial<RunIndexEntry>): RunIndexEntry => ({
@@ -537,7 +537,7 @@ it('carries the recorded review wait from run detail into the feature activity',
     runDetails: { [manifest.runId]: { runId: manifest.runId, manifest } },
     portifyWorkflows: [], drafts: [],
   })
-  expect(result.get('cns-wa')?.waiting?.label).toBe('Awaiting test review')
+  expect(result.get('sample-suite')?.waiting?.label).toBe('Awaiting test review')
 })
 
 describe('deriveFeatureActivity — Robustness lab (D16)', () => {

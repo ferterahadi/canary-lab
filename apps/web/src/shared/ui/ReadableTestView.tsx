@@ -23,7 +23,7 @@ interface ReadableExecutionHighlight {
 }
 
 // English mode is one source-ordered test story. The role label remains on
-// every line, so setup/action/check meaning stays visible without moving steps
+// every line, so test/setup/action/check meaning stays visible without moving steps
 // away from their authored execution position.
 export function ReadableTestView({
   test,
@@ -133,6 +133,7 @@ function StoryRow({
   const sequenceLabel = storySequenceLabel(sequence)
   const localSequenceLabel = storyLocalSequenceLabel(sequence)
   const keyword = storyKeyword(step)
+  const displayText = storyDisplayText(step)
   const selected = selectedNodeId === step.id
   const executionKind = executionHighlight?.nodeId === step.id
     ? executionHighlight.kind
@@ -156,7 +157,7 @@ function StoryRow({
         data-execution-highlight={executionKind}
         data-changed-source={changed ? 'true' : undefined}
         aria-pressed={selected}
-        aria-label={`${sequenceLabel}. ${keyword}: ${step.text}. ${changed ? 'Modified since the committed test. ' : ''}${executionKind ? `${executionDescription}. ` : ''}Show ${sourceLabel(step.source)}`}
+        aria-label={`${sequenceLabel}. ${keyword}: ${displayText}. ${changed ? 'Modified since the committed test. ' : ''}${executionKind ? `${executionDescription}. ` : ''}Show ${sourceLabel(step.source)}`}
         title={`Step ${sequenceLabel} — ${sourceLabel(step.source)} — ${fidelityTitle(step.fidelity)}${changed ? ' — Modified since the committed test' : ''}${executionKind ? ` — ${executionDescription}` : ''}`}
         onClick={() => onSourceSelect?.({ id: step.id, source: step.source })}
         className="grid w-full grid-cols-[2ch_8ch_minmax(0,1fr)] items-start gap-x-2 px-2 py-0 text-left leading-[1.65] transition-colors hover:bg-running/10"
@@ -250,7 +251,7 @@ function storySpanColor(kind: ReadableStorySpan['kind']): string | undefined {
 
 function roleColor(role: ReadableStoryRole): string {
   if (role === 'setup') return 'var(--code-cyan)'
-  if (role === 'action') return 'var(--code-keyword)'
+  if (role === 'action' || role === 'test') return 'var(--code-keyword)'
   return 'var(--semantic-attention)'
 }
 
@@ -278,10 +279,37 @@ function storyKeyword(step: ReadableStoryItem): string {
   return keywords[step.flowKind]
 }
 
-function roleLabel(role: ReadableStoryRole): 'SETUP' | 'ACTION' | 'CHECK' {
+function roleLabel(role: ReadableStoryRole): 'TEST' | 'SETUP' | 'ACTION' | 'CHECK' {
+  if (role === 'test') return 'TEST'
   if (role === 'setup') return 'SETUP'
   if (role === 'action') return 'ACTION'
   return 'CHECK'
+}
+
+function redundantStoryPrefix(step: ReadableStoryItem): string {
+  const keyword = storyKeyword(step)
+  if (keyword === 'TEST' && step.text.startsWith('Test: ')) return 'Test: '
+  if (keyword === 'CHECK' && step.text.startsWith('Check that ')) return 'Check that '
+  return ''
+}
+
+function storyDisplayText(step: ReadableStoryItem): string {
+  return step.text.slice(redundantStoryPrefix(step).length)
+}
+
+function storyDisplaySpans(step: ReadableStoryItem): ReadableStorySpan[] {
+  let remaining = redundantStoryPrefix(step).length
+  if (remaining === 0) return step.spans
+  const spans: ReadableStorySpan[] = []
+  for (const span of step.spans) {
+    if (remaining >= span.text.length) {
+      remaining -= span.text.length
+      continue
+    }
+    spans.push(remaining > 0 ? { ...span, text: span.text.slice(remaining) } : span)
+    remaining = 0
+  }
+  return spans
 }
 
 /** The Shiki theme's canvas colours, shared with Code mode. Until Shiki is
@@ -326,7 +354,7 @@ export function ReadableStoryText({ step, children }: { step: ReadableStoryItem;
       {storyKeyword(step)}
     </span>
     <span className="min-w-0 whitespace-pre-wrap break-words">
-      {step.spans.map((span, index) => <StorySpan key={index} span={span} />)}
+      {storyDisplaySpans(step).map((span, index) => <StorySpan key={index} span={span} />)}
       {children}
     </span>
   </>

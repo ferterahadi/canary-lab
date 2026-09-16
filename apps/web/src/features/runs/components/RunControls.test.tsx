@@ -339,10 +339,10 @@ describe('run overview', () => {
     })
 
     await act(async () => {
-      clickButton('Review Evaluation')
+      clickButton('Evaluation')
     })
     await act(async () => {
-      clickButton('Raw output')
+      clickButton('Evidence report')
     })
 
     expect(gatePromo).toHaveBeenCalledWith('export-evaluation', expect.any(Function))
@@ -357,10 +357,10 @@ describe('run overview', () => {
     expect(onOpenEvaluationReport).toHaveBeenCalledExactlyOnceWith('alpha')
 
     await act(async () => {
-      clickButton('Review Evaluation')
+      clickButton('Evaluation')
     })
     await act(async () => {
-      clickButton('Localized output')
+      clickButton('Plain-English report')
     })
     await act(async () => {
       const continueAction = gatePromo.mock.calls.at(-1)?.[1] as () => void

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { diffChangedLines } from './text-diff'
+import { diffChangedLines, diffSourceText } from './text-diff'
+import { sourceRows } from '../../../../../../../shared/test-source-diff'
 import * as gitRepo from '../../../../shared/git-repo'
 
 describe('diffChangedLines', () => {
@@ -22,6 +23,16 @@ describe('diffChangedLines', () => {
 
   it('flags every line when there is no baseline to compare against', async () => {
     expect(await diffChangedLines('', 'a\nb')).toEqual(new Set([1, 2]))
+  })
+
+  it.each(['added', 'removed'])('keeps an empty %s-file baseline empty instead of matching an artificial blank line', async (kind) => {
+    const source = 'import setup\n\ntest body\n'
+    const before = { source: kind === 'added' ? '' : source, tests: [] }
+    const after = { source: kind === 'added' ? source : '', tests: [] }
+    const rows = sourceRows({ before, after, patch: await diffSourceText(before.source, after.source, 10) })
+    expect(rows).toHaveLength(3)
+    expect(rows.every((row) => row.change === 1)).toBe(true)
+    expect(rows.every((row) => kind === 'added' ? row.before === null : row.after === null)).toBe(true)
   })
 
   it('flags nothing when a line is only removed', async () => {

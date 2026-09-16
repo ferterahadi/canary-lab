@@ -2,9 +2,15 @@
 // Split out of client.ts; see that barrel for the shared surface.
 
 import type { Feature } from './types'
-import type { TestFileReview } from '@shared/test-review'
+import type { TestFileReview, TestSourceComparison } from '@shared/test-review'
 import type { StrengthVerdict } from '@shared/verification-strength/types'
 import { defaultOpts, request, type ClientOptions } from './internal'
+
+export function getTestSourceComparison(feature: string, runId: string, opts?: ClientOptions): Promise<TestSourceComparison> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const query = new URLSearchParams({ runId })
+  return request(`${baseUrl}/api/features/${encodeURIComponent(feature)}/test-source-comparison?${query}`, { method: 'GET' }, fetchImpl)
+}
 
 export function getTestFileReview(feature: string, file: string, runId?: string, opts?: ClientOptions): Promise<TestFileReview> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)

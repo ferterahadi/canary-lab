@@ -105,6 +105,6 @@ Major capabilities share stores, so work started on one surface appears on the o
 | Suite authoring | `/canary-lab-author` | `author` — `create_feature` / draft flow / envsets | `/api/features*` | Flight → Test authoring & coverage stage / config editor |
 | Coverage ledger | `/canary-lab-coverage` | `coverage` — summary/coverage jobs + ledger | `/api/coverage*` | Coverage ledger page (Suites column) |
 | Portify | `/canary-lab-portify` | `portify` — external portify workflow | `/api/portify*` | Flight → Parallel readiness stage (also run-collision recovery); Ports tab reports injectability |
-| Evaluation export | `/canary-lab-export` | `export` — evaluation export tools | `/api/evaluation*` | run detail → Export Evaluation |
+| Evaluation export | `/canary-lab-export` | `export` — evaluation export tools | `/api/evaluation*` | run detail → Create evaluation report |
 
 If a new capability lands with a missing cell, that's a gap — the parity bar is part of the product, not a coincidence.

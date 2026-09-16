@@ -7,7 +7,7 @@ Point a Flight at this folder and it will conduct every stage:
 
 ```text
 Repo scan → Suite setup → Requirements → Test authoring & coverage
-          → Parallel readiness → Test Run & heal → Evaluation Report
+          → Parallel readiness → Test Run & heal → Evaluation report
 ```
 
 Every stage has real work:
@@ -17,7 +17,7 @@ Every stage has real work:
 - **Test authoring** writes the specs; nothing is pre-written.
 - **Parallel readiness** fixes `lending-service` binding port 4500 directly.
 - **Test Run & heal** finds an unlabeled defect from its failing assertion.
-- **Evaluation Report** exports the archive.
+- **Evaluation report** exports the archive.
 
 For an existing failing suite, use `demo-app/` and `storefront-journey`.
 

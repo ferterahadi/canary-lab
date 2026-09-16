@@ -73,7 +73,7 @@ export interface ReadableSource {
   snippet: string
 }
 
-export type ReadableStoryRole = 'setup' | 'action' | 'check'
+export type ReadableStoryRole = 'test' | 'setup' | 'action' | 'check'
 
 export type ReadableStoryFlowKind =
   | 'scope'
@@ -122,7 +122,7 @@ export interface ReadableStoryFlow extends ReadableStoryItemBase {
 export type ReadableStoryItem = ReadableStoryStep | ReadableStoryFlow
 
 /** The reader-first altitude in authored execution order. Each row carries its
- * setup/action/check role instead of being moved into a role-based bucket. */
+ * test/setup/action/check role instead of being moved into a role-based bucket. */
 export interface ReadableTestStory {
   steps: ReadableStoryItem[]
 }

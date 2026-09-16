@@ -6,6 +6,7 @@ import { hasStructuralCallback, sourceAssertionText, sourceConditionText, source
 import type {
   ReadableStoryFlowKind,
   ReadableStoryItem,
+  ReadableStoryRole,
   ReadableStorySpan,
 } from '../../../../../shared/readable-tests/types'
 import {
@@ -26,7 +27,7 @@ import {
   setupLikeStatement,
 } from './language'
 
-export type StoryRole = 'setup' | 'action' | 'check'
+export type StoryRole = ReadableStoryRole
 
 interface StoryCandidateBase {
   node: ts.Node
@@ -44,6 +45,7 @@ export interface StoryStepCandidate extends StoryCandidateBase {
 export interface StoryFlowCandidate extends StoryCandidateBase {
   kind: 'flow'
   flowKind: ReadableStoryFlowKind
+  headerEndPosition?: number
   children: StoryCandidate[]
 }
 
@@ -58,24 +60,60 @@ interface WalkOptions {
 
 const SETUP_CALL_VERBS = new Set(['build', 'configure', 'create', 'generate', 'make', 'mock', 'prepare', 'seed', 'setup'])
 const SEMANTIC_RECEIVER_METHODS = new Set([
+  'at',
   'concat',
+  'copyWithin',
+  'entries',
+  'every',
+  'fill',
   'filter',
   'find',
   'findIndex',
+  'findLast',
+  'findLastIndex',
+  'flat',
   'flatMap',
+  'from',
+  'fromAsync',
+  'includes',
+  'indexOf',
+  'isArray',
   'join',
+  'keys',
+  'lastIndexOf',
   'map',
+  'of',
   'pop',
   'push',
   'reduce',
+  'reduceRight',
   'replace',
   'replaceAll',
   'reverse',
   'shift',
+  'slice',
+  'some',
   'sort',
   'splice',
   'split',
+  'toLocaleString',
+  'toReversed',
   'toSorted',
+  'toSpliced',
+  'toString',
+  'unshift',
+  'values',
+  'with',
+])
+const MUTATING_COLLECTION_METHODS = new Set([
+  'copyWithin',
+  'fill',
+  'pop',
+  'push',
+  'reverse',
+  'shift',
+  'sort',
+  'splice',
   'unshift',
 ])
 const EXACT_IDENTIFIER_OPEN = '\uE000'
@@ -469,8 +507,24 @@ function genericCallDescription(
     // These standard operations have receiver/callback semantics that a bare
     // verb would hide. Their dedicated renderers either preserve that meaning
     // or omit the step when an argument cannot be described safely.
-    if (method === 'find' || (SEMANTIC_RECEIVER_METHODS.has(method) && renderExpression(call, sourceFile).fidelity === 'unresolved')) {
-      return undefined
+    if (SEMANTIC_RECEIVER_METHODS.has(method)) {
+      const rendered = renderExpression(call, sourceFile)
+      if (rendered.fidelity === 'unresolved') return undefined
+      // A pure collection result discarded as a statement changes no state.
+      // Callback expression bodies are different: their result is the value
+      // returned to the surrounding helper and must remain visible.
+      if (!assigned && ts.isExpressionStatement(call.parent) && !MUTATING_COLLECTION_METHODS.has(method)) return undefined
+      return assigned
+        ? {
+            role: 'setup',
+            text: `Set ${exactIdentifierText(assigned)} to ${rendered.text}`,
+            fidelity: 'derived',
+          }
+        : {
+            role: 'action',
+            text: sentenceCase(rendered.text),
+            fidelity: 'derived',
+          }
     }
   }
 
@@ -1370,7 +1424,8 @@ export function storyCandidates(
       const registration = testRegistration(statement, completeContext)
       if (registration) {
         const children = callbackCandidates(registration.callback, [...path, 0], options)
-        return [{ kind: 'flow', flowKind: 'scope', node: statement, path, role: 'setup',
+        return [{ kind: 'flow', flowKind: 'scope', node: statement, path, role: registration.role,
+          ...(registration.role === 'test' ? { headerEndPosition: registration.callback.body.getStart(sourceFile) } : {}),
           text: registration.text, spans: storySpans(registration.text, variablePhrases(statement, registration.text, aliases), true), fidelity: 'derived', children }]
       }
       const call = callFromStatement(statement)

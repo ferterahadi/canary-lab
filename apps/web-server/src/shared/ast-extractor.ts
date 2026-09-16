@@ -80,6 +80,7 @@ export interface ExtractedTestMetadata {
   endLine: number
   bodySource: string
   bodyLine: number
+  declarationSource: string
 }
 
 export interface ExtractMetadataResult {
@@ -723,6 +724,7 @@ export function extractTestMetadataFromSource(file: string, source: string, opti
           endLine: sourceFile.getLineAndCharacterOfPosition(call.getEnd()).line + 1,
           bodySource,
           bodyLine,
+          declarationSource: call.getText(sourceFile),
           ...(options.expandParametrised && !ts.isStringLiteralLike(call.arguments[0])
             && (name.includes('${') || name === call.arguments[0].getText(sourceFile)) ? { unresolvedTitle: true } : {}),
           ...(requirements ? { requirements } : {}),

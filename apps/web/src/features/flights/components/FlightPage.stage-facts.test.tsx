@@ -925,7 +925,7 @@ describe('trailer model (R14–R18)', () => {
     expect(deliverable).toContain('2026-07-23T1603-z6kc')
     expect(deliverable).toContain('canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc.zip')
     expect(deliverable).not.toContain('export.zip')
-    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Report ready.')
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Evaluation report ready.')
   })
 
   it('a read-time-probed export (a derived flight has no zip path) still offers the download', async () => {
@@ -1270,8 +1270,8 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     expect(facts?.textContent).toContain('Test depth')
     expect(facts?.textContent).toContain('Tests that passed')
     expect(facts?.textContent).toContain('Requirements proven')
-    expect(container.querySelector('[data-testid="evaluation-deliverable-skeleton"]')?.textContent).toContain("This flight's report")
-    expect(container.querySelector('[data-testid="all-reports-skeleton"]')?.textContent).toContain('All reports for this suite')
+    expect(container.querySelector('[data-testid="evaluation-deliverable-skeleton"]')?.textContent).toContain("This flight's evaluation report")
+    expect(container.querySelector('[data-testid="all-reports-skeleton"]')?.textContent).toContain('All evaluation reports for this suite')
   })
 
   // R83's promise is that a value lands in the SLOT its placeholder held. These

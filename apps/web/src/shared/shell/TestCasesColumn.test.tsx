@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, getTestFileReview, getTestFileDifference, getFeatureTests } from '../api/client'
+import { ApiError, getTestFileReview, getTestSourceComparison, getFeatureTests } from '../api/client'
 import { readableTest } from '../api/__fixtures__/readable-test'
 
 import type { FeatureTests } from '../api/types'
@@ -19,7 +19,7 @@ vi.mock('../api/client', async () => {
     ...actual,
     getFeatureTests: vi.fn(),
     getTestFileReview: vi.fn(),
-    getTestFileDifference: vi.fn(),
+    getTestSourceComparison: vi.fn(),
   }
 })
 
@@ -52,7 +52,7 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   vi.mocked(getFeatureTests).mockReset()
-  vi.mocked(getTestFileDifference).mockReset().mockResolvedValue({ changed: false })
+  vi.mocked(getTestSourceComparison).mockReset().mockResolvedValue({ state: 'ready', files: [], differences: [], changes: { added: [], changed: [], removed: [] } })
   vi.mocked(getTestFileReview).mockReset().mockRejectedValue(new Error('No baseline'))
 })
 
@@ -80,12 +80,36 @@ function statusBadges(): string[] {
 }
 
 describe('TestCasesColumn', () => {
+  it('states only that no suite is picked, with no body to restate it', async () => {
+    await act(async () => {
+      root.render(<TestCasesColumn feature={null} activeRunSummary={undefined} activeRunStatus={undefined} />)
+    })
+
+    const empty = container.querySelector('[data-testid="tests-no-suite"]')
+    expect(empty?.textContent).toBe('No suite selected')
+    expect(empty?.getAttribute('data-compact')).toBe('')
+    expect(getFeatureTests).not.toHaveBeenCalled()
+  })
+
+  it('holds the list\u2019s own shape while the fetch is in flight', () => {
+    vi.mocked(getFeatureTests).mockReturnValue(new Promise<FeatureTests>(() => {}))
+
+    act(() => {
+      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+    })
+
+    const placeholder = container.querySelector('[data-testid="tests-loading-placeholder"]')
+    expect(placeholder?.querySelectorAll('[data-testid="test-card-skeleton"]')).toHaveLength(3)
+    expect(placeholder?.querySelector('.sr-only')?.textContent).toContain('Loading test cases')
+    expect(container.textContent).not.toContain('Loading...')
+  })
+
   it('does not flash the old filtered count while the full saved suite is loading', async () => {
     vi.mocked(getFeatureTests).mockReturnValue(new Promise<FeatureTests>(() => {}))
     await act(async () => {
       root.render(<TestCasesColumn feature="alpha" activeRunStatus="aborted" activeRunManifest={{ runId: 'meta' }} activeRunSummary={{ complete: true, total: 4, passed: 2, failed: [] }} />)
     })
-    expect(container.textContent).toContain('Loading...')
+    expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).not.toBeNull()
     expect(container.querySelector('.cl-panel-header')?.textContent).not.toContain('2/4')
   })
   it('shows the full recorded suite with missing execution evidence labelled not run', async () => {
@@ -114,7 +138,7 @@ describe('TestCasesColumn', () => {
       root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
     })
 
-    expect(container.textContent).toContain('Loading...')
+    expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).not.toBeNull()
   })
 
   it('renders tests after loading succeeds', async () => {
@@ -150,7 +174,8 @@ describe('TestCasesColumn', () => {
     })
 
     expect(container.textContent).toContain('loads checkout')
-    expect(container.textContent).not.toContain('Loading...')
+    expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).toBeNull()
+    expect(container.querySelectorAll('.cl-card > button > span.uppercase')).toHaveLength(0)
     expect(container.querySelector('[data-testid="test-presentation-english"]')).not.toBeNull()
     expect(container.textContent).toContain('Open “/checkout”')
     expect(container.querySelector('[data-testid="test-presentation-code"]')).toBeNull()
@@ -271,13 +296,13 @@ describe('TestCasesColumn', () => {
       root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
     })
 
-    // Kicker and figure share the left group; the right slot stays empty until a
-    // run is on screen AND that run's tests have drifted from the workspace.
+    // The compact header keeps the count beside its kicker without implying a
+    // recorded result or offering version controls when no run is selected.
     const header = container.querySelector('.cl-panel-header')
-    expect(header?.children).toHaveLength(1)
-    const left = header?.children[0]
-    expect(left?.children[0]?.textContent).toBe('Tests')
-    expect(left?.children[1]?.textContent).toBe('2')
+    expect(header?.querySelector('.cl-kicker')?.textContent).toBe('Tests')
+    expect(header?.querySelector('.cl-count-chip')?.textContent).toBe('2')
+    expect(header?.querySelector('[aria-label="Test source"]')).toBeNull()
+    expect(header?.querySelector('[data-testid="test-version-compare"]')).toBeNull()
     expect(header?.textContent).not.toContain('0/2')
   })
 
@@ -700,7 +725,7 @@ describe('TestCasesColumn', () => {
     })
 
     const cardFor = (name: string) => {
-      const button = Array.from(container.querySelectorAll('button')).find((el) => el.textContent?.includes(name))
+      const button = Array.from(container.querySelectorAll('.cl-card > button')).find((el) => el.textContent?.includes(name))
       return button?.closest('.cl-card') as HTMLElement | null
     }
     expect(cardFor('b')?.style.boxShadow ?? '').not.toContain('var(--danger)')
@@ -719,7 +744,7 @@ describe('TestCasesColumn', () => {
     expect(review).not.toHaveBeenCalled()
   })
 
-  it.each(['weaker', 'stronger', 'equivalent', 'unclassifiable'] as const)('opens the run comparison directly and marks affected tests for %s edits', async (verdict) => {
+  it.each(['weaker', 'stronger', 'equivalent', 'unclassifiable'] as const)('opens the run comparison directly and marks affected tests for %s edits', async (_verdict) => {
     const review = vi.fn()
     const setCurrentTests = vi.fn()
     vi.mocked(getFeatureTests).mockResolvedValue([
@@ -731,7 +756,7 @@ describe('TestCasesColumn', () => {
         ],
       },
     ])
-    vi.mocked(getTestFileDifference).mockResolvedValue({ changed: true, affectedTests: ['b'], verdict })
+    vi.mocked(getTestSourceComparison).mockResolvedValue({ state: 'ready', files: ['e2e/a.spec.ts'], differences: [{ file: 'e2e/a.spec.ts', affectedTests: ['b'] }], changes: { added: [], changed: [{ file: 'e2e/a.spec.ts', name: 'b', line: 12, endLine: 15 }], removed: [] } })
 
     await act(async () => {
       root.render(
@@ -745,44 +770,45 @@ describe('TestCasesColumn', () => {
         />,
       )
     })
-    await waitFor(() => container.querySelector('[data-testid="test-version-compare"]')?.getAttribute('aria-disabled') === 'false')
+    await waitFor(() => container.querySelector('[aria-label="Compare 1 changed tests"]') !== null)
 
     // The snapshot is the baseline, so only the test the run executed in a
     // different form is marked. Every classification still needs attention.
     const cardFor = (name: string) => {
-      const button = Array.from(container.querySelectorAll('button')).find((el) => el.textContent?.includes(name))
+      const button = Array.from(container.querySelectorAll('.cl-card > button')).find((el) => el.textContent?.includes(name))
       return button?.closest('.cl-card') as HTMLElement | null
     }
     expect(cardFor('b')?.querySelector('[data-testid="test-modified-dot"]')).not.toBeNull()
     expect(cardFor('a')?.querySelector('[data-testid="test-modified-dot"]')).toBeNull()
-    const compare = container.querySelector<HTMLButtonElement>('[data-testid="test-version-compare"]')!
+    // The drift mark IS the entrance to the comparison, and it sits in the column
+    // header beside the tabs it qualifies. A ready comparison states its drift and
+    // nothing else, so the unknown-comparison mark must be absent here.
+    const compare = container.querySelector<HTMLButtonElement>('[aria-label="Compare 1 changed tests"]')!
     expect(compare.closest('.cl-panel-header')).not.toBeNull()
-    expect(container.querySelector('[aria-label="Compare 1 changed tests"]')).not.toBeNull()
-    expect(compare.getAttribute('aria-label')).toBe('Compare recorded tests with current source')
+    expect(container.querySelector('[data-testid="test-version-compare"]')).toBeNull()
     await act(async () => compare.click())
-    // Suite-relative, with the run baseline named — not the git-HEAD one.
-    expect(review).toHaveBeenCalledWith('e2e/a.spec.ts', undefined, 'run')
+    // Suite-relative, with the run baseline named — not the git-HEAD one, opened
+    // at the test that drifted rather than at the top of the file.
+    expect(review).toHaveBeenCalledWith('e2e/a.spec.ts', 12, 'run', 'changed', 'b')
     expect(document.querySelector('[role="menu"]')).toBeNull()
 
     await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Test source"] button')!.click() })
     expect(setCurrentTests).toHaveBeenCalledWith(true)
   })
 
-  it('labels current source without borrowing a run verdict or another file’s changes', async () => {
+  it('leaves current source unlabelled without borrowing a run verdict or another file’s changes', async () => {
     vi.mocked(getFeatureTests).mockResolvedValue(['a', 'b'].map((file) => ({
       file: `/tmp/features/alpha/e2e/${file}.spec.ts`,
       tests: [{ name: 'same title', line: 3, bodySource: '', steps: [], readable: readableTest('same title') }],
     })))
-    vi.mocked(getTestFileDifference).mockImplementation(async (_feature, file) => file === 'e2e/b.spec.ts'
-      ? { changed: true, affectedTests: ['same title'] } : { changed: false })
+    vi.mocked(getTestSourceComparison).mockResolvedValue({ state: 'ready', files: ['e2e/a.spec.ts', 'e2e/b.spec.ts'], differences: [{ file: 'e2e/b.spec.ts', affectedTests: ['same title'] }], changes: { added: [], changed: [], removed: [] } })
     await act(async () => root.render(<TestCasesColumn feature="alpha" currentTests
       activeRunSummary={undefined} activeRunStatus={undefined}
       baselineRun={{ runId: 'r1', featureDir: '/tmp/features/alpha', suiteSnapshot: { kind: 'taken', dir: '/tmp/runs/r1/suite', takenAt: 'now', digest: 'digest' } }} />))
     const cards = container.querySelectorAll('.cl-card')
-    expect(cards[0].textContent).toContain('Not verified')
-    expect(cards[0].textContent).not.toContain('Changed since run')
-    expect(cards[1].textContent).toContain('Changed since run')
-    expect(container.textContent).not.toContain('passed')
+    expect(container.querySelectorAll('.cl-card > button > span.uppercase')).toHaveLength(0)
+    expect(cards[0].querySelector('[data-testid="test-modified-dot"]')).toBeNull()
+    expect(cards[1].querySelector('[data-testid="test-modified-dot"]')).not.toBeNull()
   })
 
   it('highlights only the line(s) the server reports as changed for a dirty test', async () => {
@@ -826,7 +852,7 @@ describe('TestCasesColumn', () => {
     })
 
     expect(container.textContent).toContain('Unable to load tests for this suite. Server returned HTTP 500.')
-    expect(container.textContent).not.toContain('Loading...')
+    expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).toBeNull()
   })
 
   it('does not render the evaluation export in the tests pane', async () => {
@@ -836,7 +862,7 @@ describe('TestCasesColumn', () => {
       root.render(<TestCasesColumn feature="alpha beta" activeRunSummary={undefined} activeRunStatus="passed" />)
     })
 
-    expect(container.textContent).not.toContain('Review Evaluation')
+    expect(container.textContent).not.toContain('Evaluation')
   })
 
   it('hydrates selected run summary tests with parsed spec code when location still matches', async () => {

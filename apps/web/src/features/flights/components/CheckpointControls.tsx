@@ -69,8 +69,8 @@ export function DownloadEvaluationAction({
       style={primary ? undefined : { color: failed ? 'var(--danger)' : 'var(--success)' }}
     >
       {/* One label for one file: the header, this card and the reports list all
-          say "report". */}
-      {failed ? 'Download failed — retry' : '⬇ Download report'}
+          say "evaluation report". */}
+      {failed ? 'Download failed — retry' : '⬇ Download evaluation report'}
     </button>
   )
 }

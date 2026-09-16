@@ -72,7 +72,7 @@ export function RunOverviewTab({
   onOpenEvaluationReport,
 }: RunOverviewTabProps) {
   const duration = durationBetween(manifest.startedAt, manifest.endedAt)
-  // The "Review Evaluation" trigger moved to the run's tab row
+  // The "Create evaluation report" trigger moved to the run's tab row
   // (`ReviewEvaluationMenu`) — it is a run-level action, not an Overview one.
   return (
     <RunPane padded>

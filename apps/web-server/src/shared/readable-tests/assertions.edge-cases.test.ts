@@ -261,19 +261,19 @@ describe('Playwright assertion edge cases', () => {
     const cases: Array<[string, string]> = [
       [
         "expect(msgs.every((m) => m.pattern === 'TRIGGER_EMAIL_BATCH')).toBe(true)",
-        'Check that for every item in msgs, item pattern equals “TRIGGER_EMAIL_BATCH”',
+        "Check that every item in msgs meets this condition: that item's pattern equals “TRIGGER_EMAIL_BATCH”",
       ],
       [
         'expect(msgs.every((m) => (m as TriggerBatchMessage).data.emailInfo.transactionId === txId)).toBe(true)',
-        'Check that for every item in msgs, item data email info transaction identifier equals txId',
+        "Check that every item in msgs meets this condition: that item's data email info transaction identifier equals txId",
       ],
       [
         "expect(rows.some((row) => row.status === 'FAILED')).toBeFalsy()",
-        'Check that it is false that for at least one item in rows, item status equals “FAILED”',
+        "Check that it is false that at least one item in rows meets this condition: that item's status equals “FAILED”",
       ],
       [
         'expect((rows.every((row) => row.ready)) as boolean).not.toEqual(false)',
-        'Check that for every item in rows, item ready',
+        "Check that every item in rows meets this condition: that item's ready",
       ],
       [
         'expect(Array.isArray(payload.redirect_uris)).toBe(true)',

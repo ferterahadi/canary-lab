@@ -305,7 +305,7 @@ describe('readable test story flow edge cases', () => {
       'Modify rows starting at index 1',
       'Modify rows starting at index 1, removing 0 items, inserting replacement',
       'Sort rows using default ordering, saving the result as sorted',
-      'Sort rows by comparing left item rank minus right item rank',
+      "Sort rows by comparing left item's rank minus right item's rank",
       'Send a GET request to “/orders”, extracting properties data',
     ]))
     expect(texts.join('\n')).not.toMatch(/compute key|nested|push|compare/)

@@ -741,16 +741,88 @@ body {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  gap: 4px 20px;
   height: auto;
   min-height: 40px;
   padding: 0 12px;
 }
 
-.cl-tests-tabs { display: flex; align-items: center; gap: 10px; }
-.cl-tests-tabs .cl-tab { display: inline-flex; align-items: center; gap: 4px; min-height: 39px; padding-bottom: 0; white-space: nowrap; }
-.cl-test-version-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
-.cl-test-change { gap: 3px; padding-inline: 4px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.cl-tests-tabs { display: flex; align-items: center; gap: 20px; }
+.cl-tests-tabs .cl-tab { display: inline-flex; align-items: center; gap: 5px; min-height: 39px; padding-bottom: 0; white-space: nowrap; }
+
+/* One numeral system across both tabs. The source total used the standalone
+   count chip and the run ratio used a bare mono span, so the two halves of a
+   pair sat at different sizes on different backgrounds — the pair only reads as
+   a pair when each side is the same shape: one glyph, one figure. */
+.cl-tab-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* No underline on these tabs. The shared accent bar spans the whole tab, and each
+   tab here is an icon plus a figure of a different length ("59" against "13/19"),
+   so the bar changed length as you switched — a selection mark that resizes reads
+   as a second, meaningless variable. The hairline rules already divide the pair,
+   and selection is carried by the figure's own weight: the chosen tab's numerals
+   are `--text-primary`, the other's `--text-muted`. `aria-pressed` carries it to
+   assistive tech, and the difference is lightness, not hue, so it survives a
+   colour-vision difference. */
+.cl-tests-tabs .cl-tab-active::after {
+  content: none;
+}
+
+/* A short centred rule, not a full-height border: at 39px the tabs are taller
+   than their own content, and a rule that spans them cuts the header in half.
+   Every tab takes one, including the first, so the title reads as the first cell
+   of the same row rather than as a label sitting outside it. */
+.cl-tests-tabs .cl-tab::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  width: 1px;
+  height: 13px;
+  transform: translateY(-50%);
+  background: var(--border-subtle);
+}
+.cl-test-version-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.cl-test-changes { display: flex; align-items: center; gap: 9px; }
+
+/* A drift mark is a tinted glyph and a numeral, with no border of its own. The
+   bordered version read as three more buttons competing with the tabs, when the
+   trio is one reading of one thing: how far current source has moved from the
+   recorded run. Hover is the only chrome, so the mark still looks clickable. */
+.cl-test-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding-inline: 3px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  transition: background 120ms ease;
+}
+
+.cl-test-change:hover,
+.cl-test-change:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+
+/* The comparison footer renders this same trio as a FILTER, so the kind on show
+   has to stay lit with no pointer on it. The tests header passes no pressed
+   state, so its marks never match this and keep hover as their only chrome. */
+.cl-test-change[aria-pressed="true"] {
+  background: var(--bg-selected);
+}
+
+.cl-test-change:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
 
 .cl-panel-footer {
   background: var(--bg-surface);
@@ -2024,28 +2096,41 @@ body {
    identical to the test cards. Other comparison-table consumers keep their layout. */
 .cl-review-panes { grid-template-columns: 184px minmax(0, 1fr); }
 .cl-review-panes .cl-review-content { padding: 0; }
-.cl-review-panes .cl-review-file { padding: 8px; }
+.cl-review-panes .cl-review-file { padding: 8px 32px 8px 8px; }
+.cl-review-file-row { position: relative; }
+.cl-review-file-editor { position: absolute; right: 4px; top: 4px; width: 24px; height: 24px; opacity: 0; pointer-events: none; }
+.cl-review-file-row:hover .cl-review-file-editor, .cl-review-file-row:focus-within .cl-review-file-editor { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .cl-review-file-editor { opacity: 1; pointer-events: auto; } }
 .cl-review-suite-name { padding: 4px 8px; font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
-.cl-review-hint-link { font-size: 11px; color: var(--warning); text-decoration: underline; text-underline-offset: 3px; }
 .cl-context-toolbar { flex-shrink: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 8px 12px; border-bottom: 1px solid var(--border-default); }
-.cl-review-baseline { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-right: auto; font-size: 11px; color: var(--text-secondary); }
+.cl-review-baseline { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; font-size: 11px; color: var(--text-secondary); }
 .cl-review-baseline select { max-width: 260px; }
-.cl-review-change-nav { display: flex; align-items: center; gap: 4px; font-size: 11px; }
-.cl-review-change-nav span { min-width: 88px; text-align: center; font-variant-numeric: tabular-nums; }
-.cl-review-change-nav button { width: 28px; height: 28px; }
+.cl-review-change-nav { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+/* Only the stepper's figure changes width as you walk the list, so it alone
+   keeps a floor — arrows that shift as the ordinal grows read as a layout bug.
+   Scoped to the status span: the drift marks beside it hold spans of their own,
+   and the bare `span` selector this replaces stretched each glyph to the floor. */
+.cl-review-change-nav .cl-review-change-status { min-width: 44px; text-align: center; font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.cl-review-change-nav .cl-icon-button { width: 24px; height: 24px; }
+.cl-review-change-nav .cl-icon-button:disabled { opacity: 0.4; cursor: not-allowed; }
+/* The short centred rule the tests tabs use, for the same reason: the marks say
+   WHICH tests are in play, the stepper says where you are inside them — two
+   readings, one strip. */
+.cl-review-change-nav .cl-test-change + .cl-icon-button { position: relative; margin-left: 4px; }
+.cl-review-change-nav .cl-test-change + .cl-icon-button::before { content: ""; position: absolute; left: -6px; top: 50%; width: 1px; height: 13px; transform: translateY(-50%); background: var(--border-subtle); }
 .cl-context-table { display: flex; overflow: hidden; }
 .cl-review-source-canvas { display: flex; flex: 1; min-width: 0; overflow: hidden; }
 .cl-context-table .cl-comparison-wrap { flex: 1; min-width: 0; background: transparent; overflow: auto; border: 0; border-radius: 0; scrollbar-gutter: stable; overflow-anchor: none; }
 .cl-context-table .cl-comparison { min-width: 720px; table-layout: fixed; background: transparent; }
 .cl-context-table .cl-comparison th { position: sticky; top: 0; z-index: 1; background: var(--bg-elevated); width: 50%; padding-block: 8px; }
-.cl-context-table .cl-comparison td { position: relative; padding: 2px 10px 2px 46px; vertical-align: top; }
+.cl-context-table .cl-comparison td { position: relative; padding: 2px 10px 2px calc(var(--review-gutter-width, 2ch) + 16px); vertical-align: top; }
 .cl-context-table .cl-comparison tbody tr { border-top: 0; }
-.cl-context-line { position: absolute; left: 8px; top: 5px; color: var(--text-muted); font: 10px var(--font-mono); }
+.cl-context-line { position: absolute; left: 8px; top: 5px; width: var(--review-gutter-width, 2ch); color: var(--text-muted); font: 10px var(--font-mono); text-align: right; }
 .cl-context-table tr[data-selected] td { box-shadow: inset 2px 0 var(--accent); }
 .cl-context-table tr[data-source-changed] .cl-context-line { color: var(--warning); font-weight: 600; }
 .cl-review-source-line { min-height: 1.65em; font: 12px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .cl-review-source-line > del, .cl-review-source-line > ins { display: block; margin-inline: -6px; padding-inline: 6px; text-decoration: none; border-radius: 0; color: inherit; }
-.cl-review-source-line > del::before, .cl-review-source-line > ins::before { position: absolute; left: 34px; }
+.cl-review-source-line > del::before, .cl-review-source-line > ins::before { position: absolute; left: calc(var(--review-gutter-width, 2ch) + 8px); }
 .cl-review-story-line { display: grid; grid-template-columns: 9ch minmax(0, 1fr); gap: 8px; }
 .cl-review-story-link { width: 100%; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .cl-review-story-link:hover, .cl-review-story-link:focus-visible { background: var(--bg-selected); outline: 1px solid var(--accent); }
@@ -2053,10 +2138,13 @@ body {
 .cl-context-assessment { flex: 0 0 auto; max-height: 72px; overflow: auto; padding: 8px 12px; border-top: 1px solid var(--border-default); font-size: 11px; line-height: 1.6; }
 .cl-review-footer { grid-template-rows: auto; min-height: 36px; row-gap: 4px; }
 .cl-review-action-message { height: auto; }
+.cl-review-footer-navigation { grid-column: 2; justify-self: end; }
+.cl-review-commit-context:empty, .cl-review-commit-buttons:empty { display: none; }
 @media (max-width: 760px) {
   .cl-review-panes { grid-template-columns: minmax(0, 1fr); grid-template-rows: 96px minmax(0, 1fr); }
   .cl-review-panes > .cl-dialog-rail { height: 96px; max-height: 96px; }
   .cl-review-baseline { width: 100%; }
   .cl-review-footer { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; }
   .cl-review-commit-buttons { justify-content: flex-start; }
+  .cl-review-footer-navigation { grid-column: 1; }
 }

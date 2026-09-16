@@ -17,7 +17,8 @@
  *     the body reserves exactly `BODY_LINES` lines; the detail slot is
  *     reserved whether or not it is filled. The copy in `empty-state-copy.ts`
  *     is banded to a character count that always fills those lines and never
- *     overflows them, so the reserved box is both floor and ceiling.
+ *     overflows them, so the reserved box is both floor and ceiling. The one
+ *     opt-out is `compact` — see its note below for what it costs.
  *
  * Colour is otherwise deliberately absent: an empty state is not a status, and
  * an accent here would read as one. `nothing-to-report` is the single exception
@@ -114,31 +115,44 @@ const BODY_MIN_HEIGHT_PX = BODY_FONT_PX * BODY_LINE_HEIGHT * BODY_LINES
  *  One clipped line keeps the card's height an invariant instead of a hope. */
 const DETAIL_HEIGHT_PX = 22
 
-export function EmptyState({
-  reason,
-  icon,
-  title,
-  body,
-  detail,
-  testId,
-}: {
+interface EmptyShared {
   reason: EmptyReason
   /** Overrides the reason's default glyph where a surface has a truer mark of
    *  its own (the lifecycle rail, the journal). Never overrides its colour. */
   icon?: ReactNode
   title: string
-  body: string
-  /** The one optional slot — small print, a path, a link onward. Its height is
-   *  reserved whether or not it is used. */
-  detail?: ReactNode
   testId?: string
-}) {
+}
+
+/** `compact` drops the body and the detail slot, leaving the glyph and the
+ *  title. It is the right rendering for exactly one shape of empty: the title
+ *  IS the whole message, and the pane has no next action of its own to spell
+ *  out — the control that fills it lives somewhere else on screen. A prose
+ *  body there is three lines restating a heading.
+ *
+ *  It opts out of the equal-height promise, so a compact pane must not sit
+ *  beside a full one. The union is what enforces the rest: a compact caller
+ *  cannot pass copy that would never render, and a full caller cannot forget
+ *  the body that its reserved box exists to hold. */
+type EmptyStateProps = EmptyShared & (
+  | { compact: true; body?: never; detail?: never }
+  | {
+      compact?: false
+      body: string
+      /** The one optional slot — small print, a path, a link onward. Its height
+       *  is reserved whether or not it is used. */
+      detail?: ReactNode
+    }
+)
+
+export function EmptyState({ reason, icon, title, body, detail, testId, compact = false }: EmptyStateProps) {
   const meta = EMPTY_REASON[reason]
   return (
     <div
       data-testid={testId}
       data-empty-reason={reason}
-      className="flex h-full min-h-[160px] w-full flex-col items-center justify-center gap-2.5 px-6 py-8 text-center"
+      data-compact={compact ? '' : undefined}
+      className={`flex h-full w-full flex-col items-center justify-center gap-2.5 px-6 text-center ${compact ? 'min-h-[110px] py-6' : 'min-h-[160px] py-8'}`}
     >
       <span
         aria-hidden="true"
@@ -154,18 +168,20 @@ export function EmptyState({
       <div className="text-[13px] font-medium" style={{ color: 'var(--text-secondary)' }}>
         {title}
       </div>
-      <p
-        className="text-xs leading-relaxed"
-        style={{ color: 'var(--text-muted)', width: BODY_WIDTH, minHeight: BODY_MIN_HEIGHT_PX }}
-      >
-        {body}
-      </p>
-      <div
-        className="flex items-center justify-center gap-2 overflow-hidden text-[11px] leading-relaxed [&>*]:truncate"
-        style={{ color: 'var(--text-muted)', height: DETAIL_HEIGHT_PX, width: BODY_WIDTH }}
-      >
-        {detail}
-      </div>
+      {!compact && <>
+        <p
+          className="text-xs leading-relaxed"
+          style={{ color: 'var(--text-muted)', width: BODY_WIDTH, minHeight: BODY_MIN_HEIGHT_PX }}
+        >
+          {body}
+        </p>
+        <div
+          className="flex items-center justify-center gap-2 overflow-hidden text-[11px] leading-relaxed [&>*]:truncate"
+          style={{ color: 'var(--text-muted)', height: DETAIL_HEIGHT_PX, width: BODY_WIDTH }}
+        >
+          {detail}
+        </div>
+      </>}
     </div>
   )
 }

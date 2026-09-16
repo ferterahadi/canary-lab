@@ -99,6 +99,20 @@ async function flushHighlighter(): Promise<void> {
 }
 
 describe('ReadableTestView', () => {
+  it('labels a test block as TEST while preserving its nested setup, actions and checks', () => {
+    const test: ReadableTest = { ...STORY, story: { steps: [{
+      id: 'test-declaration', kind: 'flow', flowKind: 'scope', role: 'test',
+      text: 'Test: "completes checkout"', spans: [{ text: 'Test: "completes checkout"' }],
+      fidelity: 'derived', source: source(9, 'test("completes checkout", () => {})'),
+      children: STORY.story!.steps,
+    }] } }
+    act(() => root.render(<ReadableTestView test={test} />))
+    expect(Array.from(container.querySelectorAll('[data-testid^="readable-story-role-"]')).map((row) => row.textContent))
+      .toEqual(['TEST', 'SETUP', 'ACTION', 'CHECK'])
+    expect(container.querySelector('[data-testid="readable-story-item-test-declaration"]')?.textContent?.trim())
+      .toBe('01TEST"completes checkout"')
+  })
+
   it('keeps authored execution order with highlighted role keywords and variables', async () => {
     act(() => root.render(<ReadableTestView test={STORY} sourceFile="/repo/e2e/checkout.spec.ts" />))
 
@@ -113,7 +127,7 @@ describe('ReadableTestView', () => {
     expect(rows.map((row) => row.textContent?.trim())).toEqual([
       '01SETUPPrepare unique identifiers',
       '02ACTIONSubmit the checkout form',
-      '03CHECKCheck that order status equals “confirmed” // order.ts',
+      '03CHECKorder status equals “confirmed” // order.ts',
     ])
     expect((container.querySelector('[data-testid="readable-story-role-setup-identifiers"]') as HTMLElement).style.color)
       .toBe('var(--code-cyan)')
@@ -156,10 +170,12 @@ describe('ReadableTestView', () => {
         steps: [{
           id: 'highlighted-check',
           role: 'check',
-          text: 'Check that response status is at least 200 using request, then equals “PAID”',
+          text: 'Check that refresh result for response status is at least 200 using request, then equals “PAID”',
           spans: [
             { text: 'Check', kind: 'verb' },
             { text: ' that ' },
+            { text: 'refresh', kind: 'verb' },
+            { text: ' result for ' },
             { text: 'response', kind: 'variable' },
             { text: ' status ' },
             { text: 'is at least', kind: 'operator' },
@@ -195,6 +211,8 @@ describe('ReadableTestView', () => {
     for (const [kind, color] of Object.entries(colors)) {
       expect((container.querySelector(`[data-story-span="${kind}"]`) as HTMLElement).style.color).toBe(color)
     }
+    expect(container.querySelector('[data-testid="readable-story-item-highlighted-check"]')?.textContent?.trim())
+      .toBe('01CHECKrefresh result for response status is at least 200 using request, then equals “PAID”')
   })
 
   it('renders nested callbacks, loops, retries, and error paths with hierarchical numbering', () => {

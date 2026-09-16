@@ -1,0 +1,1362 @@
+{
+  "manifest": {
+    "runId": "2000-01-01T1051-demo",
+    "featureDir": "/workspace/features/sample-suite",
+    "suiteSnapshot": {
+      "kind": "taken",
+      "dir": "/workspace/logs/runs/2000-01-01T1051-demo/suite",
+      "takenAt": "2000-01-01T10:51:22.998Z",
+      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "summary": {
+    "complete": true,
+    "total": 98,
+    "passed": 85,
+    "passedIds": [
+      "test-id-case-002",
+      "test-id-case-003",
+      "test-id-case-004",
+      "test-id-case-005",
+      "test-id-case-006",
+      "test-id-case-007",
+      "test-id-case-008",
+      "test-id-case-009",
+      "test-id-case-010",
+      "test-id-case-011",
+      "test-id-case-012",
+      "test-id-case-013",
+      "test-id-case-014",
+      "test-id-case-015",
+      "test-id-case-016",
+      "test-id-case-017",
+      "test-id-case-018",
+      "test-id-case-019",
+      "test-id-case-020",
+      "test-id-case-021",
+      "test-id-case-022",
+      "test-id-case-023",
+      "test-id-case-024",
+      "test-id-case-030",
+      "test-id-case-031",
+      "test-id-case-032",
+      "test-id-case-033",
+      "test-id-case-034",
+      "test-id-case-035",
+      "test-id-case-036",
+      "test-id-case-037",
+      "test-id-case-038",
+      "test-id-case-039",
+      "test-id-case-040",
+      "test-id-case-041",
+      "test-id-case-042",
+      "test-id-case-043",
+      "test-id-case-044",
+      "test-id-case-045",
+      "test-id-case-046",
+      "test-id-case-047",
+      "test-id-case-048",
+      "test-id-case-049",
+      "test-id-case-050",
+      "test-id-case-051",
+      "test-id-case-052",
+      "test-id-case-053",
+      "test-id-case-058",
+      "test-id-case-059",
+      "test-id-case-060",
+      "test-id-case-061",
+      "test-id-case-062",
+      "test-id-case-063",
+      "test-id-case-064",
+      "test-id-case-065",
+      "test-id-case-066",
+      "test-id-case-067",
+      "test-id-case-068",
+      "test-id-case-069",
+      "test-id-case-070",
+      "test-id-case-071",
+      "test-id-case-072",
+      "test-id-case-073",
+      "test-id-case-074",
+      "test-id-case-075",
+      "test-id-case-076",
+      "test-id-case-077",
+      "test-id-case-078",
+      "test-id-case-079",
+      "test-id-case-080",
+      "test-id-case-081",
+      "test-id-case-082",
+      "test-id-case-083",
+      "test-id-case-084",
+      "test-id-case-085",
+      "test-id-case-086",
+      "test-id-case-087",
+      "test-id-case-088",
+      "test-id-case-089",
+      "test-id-case-090",
+      "test-id-case-091",
+      "test-id-case-092",
+      "test-id-case-093",
+      "test-id-case-094",
+      "test-id-case-095"
+    ],
+    "passedNames": [
+      "test-case-req-r1-path-sad-variant-demo-recorded-case-002",
+      "test-case-req-r1-path-sad-variant-demo-recorded-case-003",
+      "test-case-req-r4-path-happy-variant-demo-recorded-case-004",
+      "test-case-req-r4-path-happy-variant-demo-recorded-case-005",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-006",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-007",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-008",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-009",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-010",
+      "test-case-req-r20-path-sad-variant-demo-recorded-case-011",
+      "test-case-req-r20-path-sad-variant-demo-recorded-case-012",
+      "test-case-req-r21-path-sad-variant-demo-recorded-case-013",
+      "test-case-req-r16-path-happy-variant-demo-recorded-case-014",
+      "test-case-req-r16-path-sad-variant-demo-recorded-case-015",
+      "test-case-req-r17-path-happy-recorded-case-016",
+      "test-case-req-r17-path-sad-recorded-case-017",
+      "test-case-req-r17-path-sad-recorded-case-018",
+      "test-case-req-r17-path-sad-recorded-case-019",
+      "test-case-req-r20-path-happy-variant-demo-recorded-case-020",
+      "test-case-req-r3-path-happy-path-sad-variant-demo-recorded-case-021",
+      "test-case-req-r3-req-r25-path-sad-variant-demo-recorded-case-022",
+      "test-case-req-r21-path-happy-variant-demo-recorded-case-023",
+      "test-case-req-r27-path-happy-variant-demo-recorded-case-024",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-030",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-031",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-032",
+      "test-case-req-r22-path-sad-variant-demo-recorded-case-033",
+      "test-case-req-r26-path-sad-variant-demo-recorded-case-034",
+      "test-case-req-r26-path-sad-variant-demo-recorded-case-035",
+      "test-case-req-r26-path-sad-variant-demo-recorded-case-036",
+      "test-case-req-r13-req-r15-path-happy-variant-demo-recorded-case-037",
+      "test-case-req-r14-path-happy-variant-demo-recorded-case-038",
+      "test-case-req-r14-path-happy-variant-demo-recorded-case-039",
+      "test-case-req-r33-path-happy-variant-demo-recorded-case-040",
+      "test-case-req-r33-path-happy-variant-demo-recorded-case-041",
+      "test-case-req-r33-path-happy-variant-demo-recorded-case-042",
+      "test-case-req-r33-path-happy-variant-demo-recorded-case-043",
+      "test-case-req-r33-path-happy-variant-demo-recorded-case-044",
+      "test-case-req-r3-req-r33-path-sad-variant-demo-recorded-case-045",
+      "test-case-req-r34-path-happy-variant-demo-recorded-case-046",
+      "test-case-req-r34-path-sad-variant-demo-recorded-case-047",
+      "test-case-req-r13-path-sad-variant-demo-recorded-case-048",
+      "test-case-req-r13-path-sad-variant-demo-recorded-case-049",
+      "test-case-req-r13-path-sad-variant-demo-recorded-case-050",
+      "test-case-req-r3-req-r13-path-sad-variant-demo-recorded-case-051",
+      "test-case-req-r15-path-sad-recorded-case-052",
+      "test-case-req-r23-path-happy-variant-demo-recorded-case-053",
+      "test-case-req-r2-req-r1-path-happy-variant-demo-recorded-case-058",
+      "test-case-req-r2-path-sad-recorded-case-059",
+      "test-case-req-r2-path-sad-recorded-case-060",
+      "test-case-req-r1-path-sad-variant-demo-recorded-case-061",
+      "test-case-req-r1-path-sad-variant-demo-recorded-case-062",
+      "test-case-req-r5-req-r6-req-r8-path-happy-recorded-case-063",
+      "test-case-req-r5-req-r7-req-r8-path-happy-recorded-case-064",
+      "test-case-req-r7-path-happy-recorded-case-065",
+      "test-case-req-r5-req-r8-path-sad-recorded-case-066",
+      "test-case-req-r5-req-r8-path-sad-recorded-case-067",
+      "test-case-req-r5-req-r8-path-sad-recorded-case-068",
+      "test-case-req-r6-path-sad-recorded-case-069",
+      "test-case-req-r6-path-sad-recorded-case-070",
+      "test-case-req-r3-path-happy-variant-demo-recorded-case-071",
+      "test-case-req-r3-path-happy-variant-demo-recorded-case-072",
+      "test-case-req-r3-path-sad-variant-demo-recorded-case-073",
+      "test-case-req-r4-path-happy-variant-demo-recorded-case-074",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-075",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-076",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-077",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-078",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-079",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-080",
+      "test-case-req-r9-path-happy-recorded-case-081",
+      "test-case-req-r9-path-sad-recorded-case-082",
+      "test-case-req-r9-path-sad-recorded-case-083",
+      "test-case-req-r3-req-r9-path-sad-variant-demo-recorded-case-084",
+      "test-case-req-r10-path-happy-recorded-case-085",
+      "test-case-req-r10-path-happy-recorded-case-086",
+      "test-case-req-r12-path-happy-recorded-case-087",
+      "test-case-req-r12-path-happy-recorded-case-088",
+      "test-case-req-r12-path-sad-recorded-case-089",
+      "test-case-req-r12-path-sad-recorded-case-090",
+      "test-case-req-r35-req-r3-path-happy-variant-demo-recorded-case-091",
+      "test-case-req-r35-req-r3-path-sad-variant-demo-recorded-case-092",
+      "test-case-req-r27-req-r30-path-sad-variant-demo-recorded-case-093",
+      "test-case-req-r27-req-r30-path-sad-variant-demo-recorded-case-094",
+      "test-case-req-r25-path-sad-variant-demo-recorded-case-095"
+    ],
+    "skippedIds": [
+      "test-id-case-025",
+      "test-id-case-026",
+      "test-id-case-027",
+      "test-id-case-028",
+      "test-id-case-029",
+      "test-id-case-054",
+      "test-id-case-055",
+      "test-id-case-056",
+      "test-id-case-057"
+    ],
+    "skippedNames": [
+      "test-case-req-r16-req-r18-req-r20-req-r21-path-happy-variant-demo-recorded-case-025",
+      "test-case-req-r18-path-sad-variant-demo-recorded-case-026",
+      "test-case-req-r19-path-happy-path-sad-variant-demo-recorded-case-027",
+      "test-case-req-r22-path-happy-variant-demo-recorded-case-028",
+      "test-case-req-r3-path-sad-variant-demo-recorded-case-029",
+      "test-case-req-r24-path-happy-recorded-case-054",
+      "test-case-req-r26-req-r27-req-r28-req-r29-path-happy-variant-demo-recorded-case-055",
+      "test-case-req-r41-path-happy-variant-demo-recorded-case-056",
+      "test-case-req-r30-path-happy-variant-demo-recorded-case-057"
+    ],
+    "knownTests": [
+      {
+        "id": "test-id-case-001",
+        "name": "test-case-req-r1-path-happy-variant-demo-recorded-case-001",
+        "title": "@req-R1 @path-happy @variant-demo recorded case 001",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R1 @path-happy @variant-demo recorded case 001"
+        ],
+        "listLine": "records.spec.ts › @req-R1 @path-happy @variant-demo recorded case 001",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:71"
+      },
+      {
+        "id": "test-id-case-002",
+        "name": "test-case-req-r1-path-sad-variant-demo-recorded-case-002",
+        "title": "@req-R1 @path-sad @variant-demo recorded case 002",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R1 @path-sad @variant-demo recorded case 002"
+        ],
+        "listLine": "records.spec.ts › @req-R1 @path-sad @variant-demo recorded case 002",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:84"
+      },
+      {
+        "id": "test-id-case-003",
+        "name": "test-case-req-r1-path-sad-variant-demo-recorded-case-003",
+        "title": "@req-R1 @path-sad @variant-demo recorded case 003",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R1 @path-sad @variant-demo recorded case 003"
+        ],
+        "listLine": "records.spec.ts › @req-R1 @path-sad @variant-demo recorded case 003",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:84"
+      },
+      {
+        "id": "test-id-case-004",
+        "name": "test-case-req-r4-path-happy-variant-demo-recorded-case-004",
+        "title": "@req-R4 @path-happy @variant-demo recorded case 004",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R4 @path-happy @variant-demo recorded case 004"
+        ],
+        "listLine": "records.spec.ts › @req-R4 @path-happy @variant-demo recorded case 004",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:93"
+      },
+      {
+        "id": "test-id-case-005",
+        "name": "test-case-req-r4-path-happy-variant-demo-recorded-case-005",
+        "title": "@req-R4 @path-happy @variant-demo recorded case 005",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R4 @path-happy @variant-demo recorded case 005"
+        ],
+        "listLine": "records.spec.ts › @req-R4 @path-happy @variant-demo recorded case 005",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:93"
+      },
+      {
+        "id": "test-id-case-006",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-006",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 006",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R4 @path-sad @variant-demo recorded case 006"
+        ],
+        "listLine": "records.spec.ts › @req-R4 @path-sad @variant-demo recorded case 006",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:118"
+      },
+      {
+        "id": "test-id-case-007",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-007",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 007",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R4 @path-sad @variant-demo recorded case 007"
+        ],
+        "listLine": "records.spec.ts › @req-R4 @path-sad @variant-demo recorded case 007",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:118"
+      },
+      {
+        "id": "test-id-case-008",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-008",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 008",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R4 @path-sad @variant-demo recorded case 008"
+        ],
+        "listLine": "records.spec.ts › @req-R4 @path-sad @variant-demo recorded case 008",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:118"
+      },
+      {
+        "id": "test-id-case-009",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-009",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 009",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R4 @path-sad @variant-demo recorded case 009"
+        ],
+        "listLine": "records.spec.ts › @req-R4 @path-sad @variant-demo recorded case 009",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:118"
+      },
+      {
+        "id": "test-id-case-010",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-010",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 010",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R4 @path-sad @variant-demo recorded case 010"
+        ],
+        "listLine": "records.spec.ts › @req-R4 @path-sad @variant-demo recorded case 010",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:118"
+      },
+      {
+        "id": "test-id-case-011",
+        "name": "test-case-req-r20-path-sad-variant-demo-recorded-case-011",
+        "title": "@req-R20 @path-sad @variant-demo recorded case 011",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R20 @path-sad @variant-demo recorded case 011"
+        ],
+        "listLine": "records.spec.ts › @req-R20 @path-sad @variant-demo recorded case 011",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:126"
+      },
+      {
+        "id": "test-id-case-012",
+        "name": "test-case-req-r20-path-sad-variant-demo-recorded-case-012",
+        "title": "@req-R20 @path-sad @variant-demo recorded case 012",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R20 @path-sad @variant-demo recorded case 012"
+        ],
+        "listLine": "records.spec.ts › @req-R20 @path-sad @variant-demo recorded case 012",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:126"
+      },
+      {
+        "id": "test-id-case-013",
+        "name": "test-case-req-r21-path-sad-variant-demo-recorded-case-013",
+        "title": "@req-R21 @path-sad @variant-demo recorded case 013",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R21 @path-sad @variant-demo recorded case 013"
+        ],
+        "listLine": "records.spec.ts › @req-R21 @path-sad @variant-demo recorded case 013",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:135"
+      },
+      {
+        "id": "test-id-case-014",
+        "name": "test-case-req-r16-path-happy-variant-demo-recorded-case-014",
+        "title": "@req-R16 @path-happy @variant-demo recorded case 014",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R16 @path-happy @variant-demo recorded case 014"
+        ],
+        "listLine": "records.spec.ts › @req-R16 @path-happy @variant-demo recorded case 014",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:146"
+      },
+      {
+        "id": "test-id-case-015",
+        "name": "test-case-req-r16-path-sad-variant-demo-recorded-case-015",
+        "title": "@req-R16 @path-sad @variant-demo recorded case 015",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R16 @path-sad @variant-demo recorded case 015"
+        ],
+        "listLine": "records.spec.ts › @req-R16 @path-sad @variant-demo recorded case 015",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:154"
+      },
+      {
+        "id": "test-id-case-016",
+        "name": "test-case-req-r17-path-happy-recorded-case-016",
+        "title": "@req-R17 @path-happy recorded case 016",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R17 @path-happy recorded case 016"
+        ],
+        "listLine": "records.spec.ts › @req-R17 @path-happy recorded case 016",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:160"
+      },
+      {
+        "id": "test-id-case-017",
+        "name": "test-case-req-r17-path-sad-recorded-case-017",
+        "title": "@req-R17 @path-sad recorded case 017",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R17 @path-sad recorded case 017"
+        ],
+        "listLine": "records.spec.ts › @req-R17 @path-sad recorded case 017",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:175"
+      },
+      {
+        "id": "test-id-case-018",
+        "name": "test-case-req-r17-path-sad-recorded-case-018",
+        "title": "@req-R17 @path-sad recorded case 018",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R17 @path-sad recorded case 018"
+        ],
+        "listLine": "records.spec.ts › @req-R17 @path-sad recorded case 018",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:175"
+      },
+      {
+        "id": "test-id-case-019",
+        "name": "test-case-req-r17-path-sad-recorded-case-019",
+        "title": "@req-R17 @path-sad recorded case 019",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R17 @path-sad recorded case 019"
+        ],
+        "listLine": "records.spec.ts › @req-R17 @path-sad recorded case 019",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:175"
+      },
+      {
+        "id": "test-id-case-020",
+        "name": "test-case-req-r20-path-happy-variant-demo-recorded-case-020",
+        "title": "@req-R20 @path-happy @variant-demo recorded case 020",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R20 @path-happy @variant-demo recorded case 020"
+        ],
+        "listLine": "records.spec.ts › @req-R20 @path-happy @variant-demo recorded case 020",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:182"
+      },
+      {
+        "id": "test-id-case-021",
+        "name": "test-case-req-r3-path-happy-path-sad-variant-demo-recorded-case-021",
+        "title": "@req-R3 @path-happy @path-sad @variant-demo recorded case 021",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R3 @path-happy @path-sad @variant-demo recorded case 021"
+        ],
+        "listLine": "records.spec.ts › @req-R3 @path-happy @path-sad @variant-demo recorded case 021",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:192"
+      },
+      {
+        "id": "test-id-case-022",
+        "name": "test-case-req-r3-req-r25-path-sad-variant-demo-recorded-case-022",
+        "title": "@req-R3 @req-R25 @path-sad @variant-demo recorded case 022",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R3 @req-R25 @path-sad @variant-demo recorded case 022"
+        ],
+        "listLine": "records.spec.ts › @req-R3 @req-R25 @path-sad @variant-demo recorded case 022",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:204"
+      },
+      {
+        "id": "test-id-case-023",
+        "name": "test-case-req-r21-path-happy-variant-demo-recorded-case-023",
+        "title": "@req-R21 @path-happy @variant-demo recorded case 023",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R21 @path-happy @variant-demo recorded case 023"
+        ],
+        "listLine": "records.spec.ts › @req-R21 @path-happy @variant-demo recorded case 023",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:214"
+      },
+      {
+        "id": "test-id-case-024",
+        "name": "test-case-req-r27-path-happy-variant-demo-recorded-case-024",
+        "title": "@req-R27 @path-happy @variant-demo recorded case 024",
+        "titlePath": [
+          "records.spec.ts",
+          "@req-R27 @path-happy @variant-demo recorded case 024"
+        ],
+        "listLine": "records.spec.ts › @req-R27 @path-happy @variant-demo recorded case 024",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:228"
+      },
+      {
+        "id": "test-id-case-025",
+        "name": "test-case-req-r16-req-r18-req-r20-req-r21-path-happy-variant-demo-recorded-case-025",
+        "title": "@req-R16 @req-R18 @req-R20 @req-R21 @path-happy @variant-demo recorded case 025",
+        "titlePath": [
+          "records.spec.ts",
+          "recorded group 01",
+          "@req-R16 @req-R18 @req-R20 @req-R21 @path-happy @variant-demo recorded case 025"
+        ],
+        "listLine": "records.spec.ts › recorded group 01 › @req-R16 @req-R18 @req-R20 @req-R21 @path-happy @variant-demo recorded case 025",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:352"
+      },
+      {
+        "id": "test-id-case-026",
+        "name": "test-case-req-r18-path-sad-variant-demo-recorded-case-026",
+        "title": "@req-R18 @path-sad @variant-demo recorded case 026",
+        "titlePath": [
+          "records.spec.ts",
+          "recorded group 01",
+          "@req-R18 @path-sad @variant-demo recorded case 026"
+        ],
+        "listLine": "records.spec.ts › recorded group 01 › @req-R18 @path-sad @variant-demo recorded case 026",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:367"
+      },
+      {
+        "id": "test-id-case-027",
+        "name": "test-case-req-r19-path-happy-path-sad-variant-demo-recorded-case-027",
+        "title": "@req-R19 @path-happy @path-sad @variant-demo recorded case 027",
+        "titlePath": [
+          "records.spec.ts",
+          "recorded group 01",
+          "@req-R19 @path-happy @path-sad @variant-demo recorded case 027"
+        ],
+        "listLine": "records.spec.ts › recorded group 01 › @req-R19 @path-happy @path-sad @variant-demo recorded case 027",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:385"
+      },
+      {
+        "id": "test-id-case-028",
+        "name": "test-case-req-r22-path-happy-variant-demo-recorded-case-028",
+        "title": "@req-R22 @path-happy @variant-demo recorded case 028",
+        "titlePath": [
+          "records.spec.ts",
+          "recorded group 01",
+          "@req-R22 @path-happy @variant-demo recorded case 028"
+        ],
+        "listLine": "records.spec.ts › recorded group 01 › @req-R22 @path-happy @variant-demo recorded case 028",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:399"
+      },
+      {
+        "id": "test-id-case-029",
+        "name": "test-case-req-r3-path-sad-variant-demo-recorded-case-029",
+        "title": "@req-R3 @path-sad @variant-demo recorded case 029",
+        "titlePath": [
+          "records.spec.ts",
+          "recorded group 01",
+          "@req-R3 @path-sad @variant-demo recorded case 029"
+        ],
+        "listLine": "records.spec.ts › recorded group 01 › @req-R3 @path-sad @variant-demo recorded case 029",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:432"
+      },
+      {
+        "id": "test-id-case-030",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-030",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 030",
+        "titlePath": [
+          "records.spec.ts",
+          "recorded group 02",
+          "@req-R4 @path-sad @variant-demo recorded case 030"
+        ],
+        "listLine": "records.spec.ts › recorded group 02 › @req-R4 @path-sad @variant-demo recorded case 030",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:451"
+      },
+      {
+        "id": "test-id-case-031",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-031",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 031",
+        "titlePath": [
+          "records.spec.ts",
+          "recorded group 02",
+          "@req-R4 @path-sad @variant-demo recorded case 031"
+        ],
+        "listLine": "records.spec.ts › recorded group 02 › @req-R4 @path-sad @variant-demo recorded case 031",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:451"
+      },
+      {
+        "id": "test-id-case-032",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-032",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 032",
+        "titlePath": [
+          "records.spec.ts",
+          "recorded group 02",
+          "@req-R4 @path-sad @variant-demo recorded case 032"
+        ],
+        "listLine": "records.spec.ts › recorded group 02 › @req-R4 @path-sad @variant-demo recorded case 032",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:451"
+      },
+      {
+        "id": "test-id-case-033",
+        "name": "test-case-req-r22-path-sad-variant-demo-recorded-case-033",
+        "title": "@req-R22 @path-sad @variant-demo recorded case 033",
+        "titlePath": [
+          "records.spec.ts",
+          "recorded group 02",
+          "@req-R22 @path-sad @variant-demo recorded case 033"
+        ],
+        "listLine": "records.spec.ts › recorded group 02 › @req-R22 @path-sad @variant-demo recorded case 033",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:457"
+      },
+      {
+        "id": "test-id-case-034",
+        "name": "test-case-req-r26-path-sad-variant-demo-recorded-case-034",
+        "title": "@req-R26 @path-sad @variant-demo recorded case 034",
+        "titlePath": [
+          "records.spec.ts",
+          "recorded group 02",
+          "@req-R26 @path-sad @variant-demo recorded case 034"
+        ],
+        "listLine": "records.spec.ts › recorded group 02 › @req-R26 @path-sad @variant-demo recorded case 034",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:468"
+      },
+      {
+        "id": "test-id-case-035",
+        "name": "test-case-req-r26-path-sad-variant-demo-recorded-case-035",
+        "title": "@req-R26 @path-sad @variant-demo recorded case 035",
+        "titlePath": [
+          "records.spec.ts",
+          "recorded group 02",
+          "@req-R26 @path-sad @variant-demo recorded case 035"
+        ],
+        "listLine": "records.spec.ts › recorded group 02 › @req-R26 @path-sad @variant-demo recorded case 035",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:468"
+      },
+      {
+        "id": "test-id-case-036",
+        "name": "test-case-req-r26-path-sad-variant-demo-recorded-case-036",
+        "title": "@req-R26 @path-sad @variant-demo recorded case 036",
+        "titlePath": [
+          "records.spec.ts",
+          "recorded group 02",
+          "@req-R26 @path-sad @variant-demo recorded case 036"
+        ],
+        "listLine": "records.spec.ts › recorded group 02 › @req-R26 @path-sad @variant-demo recorded case 036",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:468"
+      },
+      {
+        "id": "test-id-case-037",
+        "name": "test-case-req-r13-req-r15-path-happy-variant-demo-recorded-case-037",
+        "title": "@req-R13 @req-R15 @path-happy @variant-demo recorded case 037",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R13 @req-R15 @path-happy @variant-demo recorded case 037"
+        ],
+        "listLine": "delivery.spec.ts › @req-R13 @req-R15 @path-happy @variant-demo recorded case 037",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:14"
+      },
+      {
+        "id": "test-id-case-038",
+        "name": "test-case-req-r14-path-happy-variant-demo-recorded-case-038",
+        "title": "@req-R14 @path-happy @variant-demo recorded case 038",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R14 @path-happy @variant-demo recorded case 038"
+        ],
+        "listLine": "delivery.spec.ts › @req-R14 @path-happy @variant-demo recorded case 038",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:32"
+      },
+      {
+        "id": "test-id-case-039",
+        "name": "test-case-req-r14-path-happy-variant-demo-recorded-case-039",
+        "title": "@req-R14 @path-happy @variant-demo recorded case 039",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R14 @path-happy @variant-demo recorded case 039"
+        ],
+        "listLine": "delivery.spec.ts › @req-R14 @path-happy @variant-demo recorded case 039",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:48"
+      },
+      {
+        "id": "test-id-case-040",
+        "name": "test-case-req-r33-path-happy-variant-demo-recorded-case-040",
+        "title": "@req-R33 @path-happy @variant-demo recorded case 040",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R33 @path-happy @variant-demo recorded case 040"
+        ],
+        "listLine": "delivery.spec.ts › @req-R33 @path-happy @variant-demo recorded case 040",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:58"
+      },
+      {
+        "id": "test-id-case-041",
+        "name": "test-case-req-r33-path-happy-variant-demo-recorded-case-041",
+        "title": "@req-R33 @path-happy @variant-demo recorded case 041",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R33 @path-happy @variant-demo recorded case 041"
+        ],
+        "listLine": "delivery.spec.ts › @req-R33 @path-happy @variant-demo recorded case 041",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:63"
+      },
+      {
+        "id": "test-id-case-042",
+        "name": "test-case-req-r33-path-happy-variant-demo-recorded-case-042",
+        "title": "@req-R33 @path-happy @variant-demo recorded case 042",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R33 @path-happy @variant-demo recorded case 042"
+        ],
+        "listLine": "delivery.spec.ts › @req-R33 @path-happy @variant-demo recorded case 042",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:58"
+      },
+      {
+        "id": "test-id-case-043",
+        "name": "test-case-req-r33-path-happy-variant-demo-recorded-case-043",
+        "title": "@req-R33 @path-happy @variant-demo recorded case 043",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R33 @path-happy @variant-demo recorded case 043"
+        ],
+        "listLine": "delivery.spec.ts › @req-R33 @path-happy @variant-demo recorded case 043",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:63"
+      },
+      {
+        "id": "test-id-case-044",
+        "name": "test-case-req-r33-path-happy-variant-demo-recorded-case-044",
+        "title": "@req-R33 @path-happy @variant-demo recorded case 044",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R33 @path-happy @variant-demo recorded case 044"
+        ],
+        "listLine": "delivery.spec.ts › @req-R33 @path-happy @variant-demo recorded case 044",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:71"
+      },
+      {
+        "id": "test-id-case-045",
+        "name": "test-case-req-r3-req-r33-path-sad-variant-demo-recorded-case-045",
+        "title": "@req-R3 @req-R33 @path-sad @variant-demo recorded case 045",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R3 @req-R33 @path-sad @variant-demo recorded case 045"
+        ],
+        "listLine": "delivery.spec.ts › @req-R3 @req-R33 @path-sad @variant-demo recorded case 045",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:79"
+      },
+      {
+        "id": "test-id-case-046",
+        "name": "test-case-req-r34-path-happy-variant-demo-recorded-case-046",
+        "title": "@req-R34 @path-happy @variant-demo recorded case 046",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R34 @path-happy @variant-demo recorded case 046"
+        ],
+        "listLine": "delivery.spec.ts › @req-R34 @path-happy @variant-demo recorded case 046",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:84"
+      },
+      {
+        "id": "test-id-case-047",
+        "name": "test-case-req-r34-path-sad-variant-demo-recorded-case-047",
+        "title": "@req-R34 @path-sad @variant-demo recorded case 047",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R34 @path-sad @variant-demo recorded case 047"
+        ],
+        "listLine": "delivery.spec.ts › @req-R34 @path-sad @variant-demo recorded case 047",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:94"
+      },
+      {
+        "id": "test-id-case-048",
+        "name": "test-case-req-r13-path-sad-variant-demo-recorded-case-048",
+        "title": "@req-R13 @path-sad @variant-demo recorded case 048",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R13 @path-sad @variant-demo recorded case 048"
+        ],
+        "listLine": "delivery.spec.ts › @req-R13 @path-sad @variant-demo recorded case 048",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:101"
+      },
+      {
+        "id": "test-id-case-049",
+        "name": "test-case-req-r13-path-sad-variant-demo-recorded-case-049",
+        "title": "@req-R13 @path-sad @variant-demo recorded case 049",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R13 @path-sad @variant-demo recorded case 049"
+        ],
+        "listLine": "delivery.spec.ts › @req-R13 @path-sad @variant-demo recorded case 049",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:101"
+      },
+      {
+        "id": "test-id-case-050",
+        "name": "test-case-req-r13-path-sad-variant-demo-recorded-case-050",
+        "title": "@req-R13 @path-sad @variant-demo recorded case 050",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R13 @path-sad @variant-demo recorded case 050"
+        ],
+        "listLine": "delivery.spec.ts › @req-R13 @path-sad @variant-demo recorded case 050",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:101"
+      },
+      {
+        "id": "test-id-case-051",
+        "name": "test-case-req-r3-req-r13-path-sad-variant-demo-recorded-case-051",
+        "title": "@req-R3 @req-R13 @path-sad @variant-demo recorded case 051",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R3 @req-R13 @path-sad @variant-demo recorded case 051"
+        ],
+        "listLine": "delivery.spec.ts › @req-R3 @req-R13 @path-sad @variant-demo recorded case 051",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:108"
+      },
+      {
+        "id": "test-id-case-052",
+        "name": "test-case-req-r15-path-sad-recorded-case-052",
+        "title": "@req-R15 @path-sad recorded case 052",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R15 @path-sad recorded case 052"
+        ],
+        "listLine": "delivery.spec.ts › @req-R15 @path-sad recorded case 052",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:113"
+      },
+      {
+        "id": "test-id-case-053",
+        "name": "test-case-req-r23-path-happy-variant-demo-recorded-case-053",
+        "title": "@req-R23 @path-happy @variant-demo recorded case 053",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R23 @path-happy @variant-demo recorded case 053"
+        ],
+        "listLine": "delivery.spec.ts › @req-R23 @path-happy @variant-demo recorded case 053",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:126"
+      },
+      {
+        "id": "test-id-case-054",
+        "name": "test-case-req-r24-path-happy-recorded-case-054",
+        "title": "@req-R24 @path-happy recorded case 054",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R24 @path-happy recorded case 054"
+        ],
+        "listLine": "delivery.spec.ts › @req-R24 @path-happy recorded case 054",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:135"
+      },
+      {
+        "id": "test-id-case-055",
+        "name": "test-case-req-r26-req-r27-req-r28-req-r29-path-happy-variant-demo-recorded-case-055",
+        "title": "@req-R26 @req-R27 @req-R28 @req-R29 @path-happy @variant-demo recorded case 055",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R26 @req-R27 @req-R28 @req-R29 @path-happy @variant-demo recorded case 055"
+        ],
+        "listLine": "delivery.spec.ts › @req-R26 @req-R27 @req-R28 @req-R29 @path-happy @variant-demo recorded case 055",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:140"
+      },
+      {
+        "id": "test-id-case-056",
+        "name": "test-case-req-r41-path-happy-variant-demo-recorded-case-056",
+        "title": "@req-R41 @path-happy @variant-demo recorded case 056",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R41 @path-happy @variant-demo recorded case 056"
+        ],
+        "listLine": "delivery.spec.ts › @req-R41 @path-happy @variant-demo recorded case 056",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:166"
+      },
+      {
+        "id": "test-id-case-057",
+        "name": "test-case-req-r30-path-happy-variant-demo-recorded-case-057",
+        "title": "@req-R30 @path-happy @variant-demo recorded case 057",
+        "titlePath": [
+          "delivery.spec.ts",
+          "@req-R30 @path-happy @variant-demo recorded case 057"
+        ],
+        "listLine": "delivery.spec.ts › @req-R30 @path-happy @variant-demo recorded case 057",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/delivery.spec.ts:172"
+      },
+      {
+        "id": "test-id-case-058",
+        "name": "test-case-req-r2-req-r1-path-happy-variant-demo-recorded-case-058",
+        "title": "@req-R2 @req-R1 @path-happy @variant-demo recorded case 058",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R2 @req-R1 @path-happy @variant-demo recorded case 058"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R2 @req-R1 @path-happy @variant-demo recorded case 058",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:119"
+      },
+      {
+        "id": "test-id-case-059",
+        "name": "test-case-req-r2-path-sad-recorded-case-059",
+        "title": "@req-R2 @path-sad recorded case 059",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R2 @path-sad recorded case 059"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R2 @path-sad recorded case 059",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:134"
+      },
+      {
+        "id": "test-id-case-060",
+        "name": "test-case-req-r2-path-sad-recorded-case-060",
+        "title": "@req-R2 @path-sad recorded case 060",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R2 @path-sad recorded case 060"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R2 @path-sad recorded case 060",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:144"
+      },
+      {
+        "id": "test-id-case-061",
+        "name": "test-case-req-r1-path-sad-variant-demo-recorded-case-061",
+        "title": "@req-R1 @path-sad @variant-demo recorded case 061",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R1 @path-sad @variant-demo recorded case 061"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R1 @path-sad @variant-demo recorded case 061",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:152"
+      },
+      {
+        "id": "test-id-case-062",
+        "name": "test-case-req-r1-path-sad-variant-demo-recorded-case-062",
+        "title": "@req-R1 @path-sad @variant-demo recorded case 062",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R1 @path-sad @variant-demo recorded case 062"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R1 @path-sad @variant-demo recorded case 062",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:152"
+      },
+      {
+        "id": "test-id-case-063",
+        "name": "test-case-req-r5-req-r6-req-r8-path-happy-recorded-case-063",
+        "title": "@req-R5 @req-R6 @req-R8 @path-happy recorded case 063",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R5 @req-R6 @req-R8 @path-happy recorded case 063"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R5 @req-R6 @req-R8 @path-happy recorded case 063",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:159"
+      },
+      {
+        "id": "test-id-case-064",
+        "name": "test-case-req-r5-req-r7-req-r8-path-happy-recorded-case-064",
+        "title": "@req-R5 @req-R7 @req-R8 @path-happy recorded case 064",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R5 @req-R7 @req-R8 @path-happy recorded case 064"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R5 @req-R7 @req-R8 @path-happy recorded case 064",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:168"
+      },
+      {
+        "id": "test-id-case-065",
+        "name": "test-case-req-r7-path-happy-recorded-case-065",
+        "title": "@req-R7 @path-happy recorded case 065",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R7 @path-happy recorded case 065"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R7 @path-happy recorded case 065",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:186"
+      },
+      {
+        "id": "test-id-case-066",
+        "name": "test-case-req-r5-req-r8-path-sad-recorded-case-066",
+        "title": "@req-R5 @req-R8 @path-sad recorded case 066",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R5 @req-R8 @path-sad recorded case 066"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R5 @req-R8 @path-sad recorded case 066",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:203"
+      },
+      {
+        "id": "test-id-case-067",
+        "name": "test-case-req-r5-req-r8-path-sad-recorded-case-067",
+        "title": "@req-R5 @req-R8 @path-sad recorded case 067",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R5 @req-R8 @path-sad recorded case 067"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R5 @req-R8 @path-sad recorded case 067",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:203"
+      },
+      {
+        "id": "test-id-case-068",
+        "name": "test-case-req-r5-req-r8-path-sad-recorded-case-068",
+        "title": "@req-R5 @req-R8 @path-sad recorded case 068",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R5 @req-R8 @path-sad recorded case 068"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R5 @req-R8 @path-sad recorded case 068",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:203"
+      },
+      {
+        "id": "test-id-case-069",
+        "name": "test-case-req-r6-path-sad-recorded-case-069",
+        "title": "@req-R6 @path-sad recorded case 069",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R6 @path-sad recorded case 069"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R6 @path-sad recorded case 069",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:211"
+      },
+      {
+        "id": "test-id-case-070",
+        "name": "test-case-req-r6-path-sad-recorded-case-070",
+        "title": "@req-R6 @path-sad recorded case 070",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R6 @path-sad recorded case 070"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R6 @path-sad recorded case 070",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:218"
+      },
+      {
+        "id": "test-id-case-071",
+        "name": "test-case-req-r3-path-happy-variant-demo-recorded-case-071",
+        "title": "@req-R3 @path-happy @variant-demo recorded case 071",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R3 @path-happy @variant-demo recorded case 071"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R3 @path-happy @variant-demo recorded case 071",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:227"
+      },
+      {
+        "id": "test-id-case-072",
+        "name": "test-case-req-r3-path-happy-variant-demo-recorded-case-072",
+        "title": "@req-R3 @path-happy @variant-demo recorded case 072",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R3 @path-happy @variant-demo recorded case 072"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R3 @path-happy @variant-demo recorded case 072",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:239"
+      },
+      {
+        "id": "test-id-case-073",
+        "name": "test-case-req-r3-path-sad-variant-demo-recorded-case-073",
+        "title": "@req-R3 @path-sad @variant-demo recorded case 073",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R3 @path-sad @variant-demo recorded case 073"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R3 @path-sad @variant-demo recorded case 073",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:245"
+      },
+      {
+        "id": "test-id-case-074",
+        "name": "test-case-req-r4-path-happy-variant-demo-recorded-case-074",
+        "title": "@req-R4 @path-happy @variant-demo recorded case 074",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R4 @path-happy @variant-demo recorded case 074"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R4 @path-happy @variant-demo recorded case 074",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:255"
+      },
+      {
+        "id": "test-id-case-075",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-075",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 075",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R4 @path-sad @variant-demo recorded case 075"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R4 @path-sad @variant-demo recorded case 075",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:269"
+      },
+      {
+        "id": "test-id-case-076",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-076",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 076",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R4 @path-sad @variant-demo recorded case 076"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R4 @path-sad @variant-demo recorded case 076",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:269"
+      },
+      {
+        "id": "test-id-case-077",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-077",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 077",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R4 @path-sad @variant-demo recorded case 077"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R4 @path-sad @variant-demo recorded case 077",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:269"
+      },
+      {
+        "id": "test-id-case-078",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-078",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 078",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R4 @path-sad @variant-demo recorded case 078"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R4 @path-sad @variant-demo recorded case 078",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:269"
+      },
+      {
+        "id": "test-id-case-079",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-079",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 079",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R4 @path-sad @variant-demo recorded case 079"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R4 @path-sad @variant-demo recorded case 079",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:269"
+      },
+      {
+        "id": "test-id-case-080",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-080",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 080",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R4 @path-sad @variant-demo recorded case 080"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R4 @path-sad @variant-demo recorded case 080",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:269"
+      },
+      {
+        "id": "test-id-case-081",
+        "name": "test-case-req-r9-path-happy-recorded-case-081",
+        "title": "@req-R9 @path-happy recorded case 081",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R9 @path-happy recorded case 081"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R9 @path-happy recorded case 081",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:277"
+      },
+      {
+        "id": "test-id-case-082",
+        "name": "test-case-req-r9-path-sad-recorded-case-082",
+        "title": "@req-R9 @path-sad recorded case 082",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R9 @path-sad recorded case 082"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R9 @path-sad recorded case 082",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:287"
+      },
+      {
+        "id": "test-id-case-083",
+        "name": "test-case-req-r9-path-sad-recorded-case-083",
+        "title": "@req-R9 @path-sad recorded case 083",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R9 @path-sad recorded case 083"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R9 @path-sad recorded case 083",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:295"
+      },
+      {
+        "id": "test-id-case-084",
+        "name": "test-case-req-r3-req-r9-path-sad-variant-demo-recorded-case-084",
+        "title": "@req-R3 @req-R9 @path-sad @variant-demo recorded case 084",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R3 @req-R9 @path-sad @variant-demo recorded case 084"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R3 @req-R9 @path-sad @variant-demo recorded case 084",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:302"
+      },
+      {
+        "id": "test-id-case-085",
+        "name": "test-case-req-r10-path-happy-recorded-case-085",
+        "title": "@req-R10 @path-happy recorded case 085",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R10 @path-happy recorded case 085"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R10 @path-happy recorded case 085",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:310"
+      },
+      {
+        "id": "test-id-case-086",
+        "name": "test-case-req-r10-path-happy-recorded-case-086",
+        "title": "@req-R10 @path-happy recorded case 086",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R10 @path-happy recorded case 086"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R10 @path-happy recorded case 086",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:318"
+      },
+      {
+        "id": "test-id-case-087",
+        "name": "test-case-req-r12-path-happy-recorded-case-087",
+        "title": "@req-R12 @path-happy recorded case 087",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R12 @path-happy recorded case 087"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R12 @path-happy recorded case 087",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:337"
+      },
+      {
+        "id": "test-id-case-088",
+        "name": "test-case-req-r12-path-happy-recorded-case-088",
+        "title": "@req-R12 @path-happy recorded case 088",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R12 @path-happy recorded case 088"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R12 @path-happy recorded case 088",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:337"
+      },
+      {
+        "id": "test-id-case-089",
+        "name": "test-case-req-r12-path-sad-recorded-case-089",
+        "title": "@req-R12 @path-sad recorded case 089",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R12 @path-sad recorded case 089"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R12 @path-sad recorded case 089",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:351"
+      },
+      {
+        "id": "test-id-case-090",
+        "name": "test-case-req-r12-path-sad-recorded-case-090",
+        "title": "@req-R12 @path-sad recorded case 090",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R12 @path-sad recorded case 090"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R12 @path-sad recorded case 090",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:362"
+      },
+      {
+        "id": "test-id-case-091",
+        "name": "test-case-req-r35-req-r3-path-happy-variant-demo-recorded-case-091",
+        "title": "@req-R35 @req-R3 @path-happy @variant-demo recorded case 091",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R35 @req-R3 @path-happy @variant-demo recorded case 091"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R35 @req-R3 @path-happy @variant-demo recorded case 091",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:369"
+      },
+      {
+        "id": "test-id-case-092",
+        "name": "test-case-req-r35-req-r3-path-sad-variant-demo-recorded-case-092",
+        "title": "@req-R35 @req-R3 @path-sad @variant-demo recorded case 092",
+        "titlePath": [
+          "setup.spec.ts",
+          "recorded group 03",
+          "@req-R35 @req-R3 @path-sad @variant-demo recorded case 092"
+        ],
+        "listLine": "setup.spec.ts › recorded group 03 › @req-R35 @req-R3 @path-sad @variant-demo recorded case 092",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/setup.spec.ts:395"
+      },
+      {
+        "id": "test-id-case-093",
+        "name": "test-case-req-r27-req-r30-path-sad-variant-demo-recorded-case-093",
+        "title": "@req-R27 @req-R30 @path-sad @variant-demo recorded case 093",
+        "titlePath": [
+          "validation.spec.ts",
+          "@req-R27 @req-R30 @path-sad @variant-demo recorded case 093"
+        ],
+        "listLine": "validation.spec.ts › @req-R27 @req-R30 @path-sad @variant-demo recorded case 093",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/validation.spec.ts:26"
+      },
+      {
+        "id": "test-id-case-094",
+        "name": "test-case-req-r27-req-r30-path-sad-variant-demo-recorded-case-094",
+        "title": "@req-R27 @req-R30 @path-sad @variant-demo recorded case 094",
+        "titlePath": [
+          "validation.spec.ts",
+          "@req-R27 @req-R30 @path-sad @variant-demo recorded case 094"
+        ],
+        "listLine": "validation.spec.ts › @req-R27 @req-R30 @path-sad @variant-demo recorded case 094",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/validation.spec.ts:26"
+      },
+      {
+        "id": "test-id-case-095",
+        "name": "test-case-req-r25-path-sad-variant-demo-recorded-case-095",
+        "title": "@req-R25 @path-sad @variant-demo recorded case 095",
+        "titlePath": [
+          "validation.spec.ts",
+          "@req-R25 @path-sad @variant-demo recorded case 095"
+        ],
+        "listLine": "validation.spec.ts › @req-R25 @path-sad @variant-demo recorded case 095",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/validation.spec.ts:46"
+      },
+      {
+        "id": "test-id-case-096",
+        "name": "test-case-req-r31-req-r32-path-happy-variant-demo-recorded-case-096",
+        "title": "@req-R31 @req-R32 @path-happy @variant-demo recorded case 096",
+        "titlePath": [
+          "validation.spec.ts",
+          "@req-R31 @req-R32 @path-happy @variant-demo recorded case 096"
+        ],
+        "listLine": "validation.spec.ts › @req-R31 @req-R32 @path-happy @variant-demo recorded case 096",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/validation.spec.ts:58"
+      },
+      {
+        "id": "test-id-case-097",
+        "name": "test-case-req-r9-path-happy-variant-demo-recorded-case-097",
+        "title": "@req-R9 @path-happy @variant-demo recorded case 097",
+        "titlePath": [
+          "validation.spec.ts",
+          "@req-R9 @path-happy @variant-demo recorded case 097"
+        ],
+        "listLine": "validation.spec.ts › @req-R9 @path-happy @variant-demo recorded case 097",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/validation.spec.ts:80"
+      },
+      {
+        "id": "test-id-case-098",
+        "name": "test-case-req-r11-req-r7-path-happy-variant-demo-recorded-case-098",
+        "title": "@req-R11 @req-R7 @path-happy @variant-demo recorded case 098",
+        "titlePath": [
+          "validation.spec.ts",
+          "@req-R11 @req-R7 @path-happy @variant-demo recorded case 098"
+        ],
+        "listLine": "validation.spec.ts › @req-R11 @req-R7 @path-happy @variant-demo recorded case 098",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/validation.spec.ts:101"
+      }
+    ],
+    "failed": [
+      {
+        "id": "test-id-case-001",
+        "name": "test-case-req-r1-path-happy-variant-demo-recorded-case-001",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/records.spec.ts:71"
+      },
+      {
+        "id": "test-id-case-096",
+        "name": "test-case-req-r31-req-r32-path-happy-variant-demo-recorded-case-096",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/validation.spec.ts:58"
+      },
+      {
+        "id": "test-id-case-097",
+        "name": "test-case-req-r9-path-happy-variant-demo-recorded-case-097",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/validation.spec.ts:80"
+      },
+      {
+        "id": "test-id-case-098",
+        "name": "test-case-req-r11-req-r7-path-happy-variant-demo-recorded-case-098",
+        "location": "/workspace/logs/runs/2000-01-01T1051-demo/suite/e2e/validation.spec.ts:101"
+      }
+    ]
+  }
+}

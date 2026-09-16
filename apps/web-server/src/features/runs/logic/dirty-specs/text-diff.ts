@@ -41,7 +41,7 @@ export async function diffSourceText(oldText: string, newText: string, context =
     // A missing trailing newline makes git treat the last line as "changed"
     // purely because of the EOF marker, even when its content is identical —
     // normalize so that artifact never shows up as a phantom changed line.
-    const withTrailingNewline = (s: string) => (s.endsWith('\n') ? s : `${s}\n`)
+    const withTrailingNewline = (s: string) => (!s || s.endsWith('\n') ? s : `${s}\n`)
     fs.writeFileSync(oldPath, normalizeNewline ? withTrailingNewline(oldText) : oldText)
     fs.writeFileSync(newPath, normalizeNewline ? withTrailingNewline(newText) : newText)
     // Exit code is 1 when the files differ (not an error) and 0 when they

@@ -45,7 +45,7 @@ it('returns full source and source-linked English from the same committed/curren
   expect(result.after.story?.steps.slice(0, 3).map((item) => item.text)).toEqual([
     'Import test, expect from "@playwright/test"',
     'Set constant sharedSetup to "keep this context"',
-    'Test: "reads own scope"; with an asynchronous callback; receiving an object with properties request',
+    'Test: "reads own scope"',
   ])
   expect(result.before.story?.steps[0].source).toMatchObject({ file: 'e2e/a.spec.ts', startLine: 1, endLine: 1 })
   expect(result.patch).toContain(" const sharedSetup = 'keep this context'")
@@ -153,4 +153,52 @@ it.each([
   const response = await get()
   expect(response.statusCode).toBe(500)
   expect(response.json().message).toBe(message)
+})
+
+function saveSnapshot() {
+  const dir = path.join(root, 'logs/runs/run-1')
+  fs.mkdirSync(path.join(dir, 'suite/e2e'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'suite/e2e/a.spec.ts'), before)
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ feature: 'alpha', suiteSnapshot: { kind: 'taken', dir: path.join(dir, 'suite') } }))
+  return dir
+}
+it('compares retained checks across a rename and reports only the real assertion addition', async () => {
+  saveSnapshot()
+  fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), before.replace('reads own scope', 'reads local scope').replace('  const body = await response.json()', '  const body = await response.json()\n  expect(body.ready).toBe(true)'))
+  const comparison = (await app.inject('/api/features/alpha/test-source-comparison?runId=run-1')).json()
+  expect(comparison.changes).toMatchObject({ added: [], removed: [], changed: [{ name: 'reads local scope', previous: { name: 'reads own scope' } }] })
+  const review = (await get('file=e2e/a.spec.ts&runId=run-1')).json<TestFileReview>()
+  expect(review.assessment.tests.flatMap((test) => test.changes).map((change) => change.kind)).toEqual(['added'])
+})
+it('compares declarations in both source trees without relying on a runtime roster', async () => {
+  const dir = saveSnapshot()
+  fs.writeFileSync(path.join(dir, 'suite/e2e/deleted.spec.ts'), "test('gone', () => {})")
+  fs.writeFileSync(path.join(suite, 'e2e/new.spec.ts'), "for (const id of [1,2,3]) { test(`case ${id}`, () => {}) }")
+  const result = await app.inject('/api/features/alpha/test-source-comparison?runId=run-1')
+  expect(result.statusCode).toBe(200)
+  expect(result.json()).toMatchObject({ state: 'ready', files: ['e2e/a.spec.ts', 'e2e/deleted.spec.ts', 'e2e/new.spec.ts'], changes: {
+    added: [{ file: 'e2e/new.spec.ts', name: 'case ${id}', line: 1, endLine: 1 }],
+    changed: [{ file: 'e2e/a.spec.ts', name: 'reads own scope', line: 3, endLine: 11 }],
+    removed: [{ file: 'e2e/deleted.spec.ts', name: 'gone', line: 1, endLine: 1 }],
+  } })
+  expect(fs.readFileSync(path.join(dir, 'suite/e2e/a.spec.ts'), 'utf8')).toBe(before)
+})
+it('rejects missing, mismatched and unavailable source comparison baselines', async () => {
+  const getComparison = (suiteName: string, query: string) => app.inject(`/api/features/${suiteName}/test-source-comparison?${query}`)
+  expect((await getComparison('alpha', '')).statusCode).toBe(400)
+  expect((await getComparison('alpha', 'runId=..')).statusCode).toBe(400)
+  expect((await getComparison('ghost', 'runId=run-1')).statusCode).toBe(404)
+  expect((await getComparison('alpha', 'runId=missing')).statusCode).toBe(404)
+  const dir = saveSnapshot()
+  fs.rmSync(path.join(dir, 'suite'), { recursive: true })
+  expect((await getComparison('alpha', 'runId=run-1')).statusCode).toBe(409)
+})
+it('does not read outside a source tree through a linked e2e directory', async () => {
+  saveSnapshot()
+  const outside = path.join(root, 'outside'); fs.mkdirSync(outside)
+  fs.writeFileSync(path.join(outside, 'secret.spec.ts'), "test('private', () => {})")
+  fs.rmSync(path.join(suite, 'e2e'), { recursive: true }); fs.symlinkSync(outside, path.join(suite, 'e2e'))
+  const result = await app.inject('/api/features/alpha/test-source-comparison?runId=run-1')
+  expect(result.statusCode).toBe(400)
+  expect(result.body).not.toContain('private')
 })

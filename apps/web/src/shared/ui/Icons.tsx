@@ -135,6 +135,55 @@ export function MinusIcon() {
   )
 }
 
+/** "Something here is unknown or wrong" — the comparison that could not be run.
+ *  Replaces a bare "?" character: a text mark inside a row of drawn icons sits
+ *  on the font's baseline instead of the icons' optical centre, and carries the
+ *  body face's weight rather than the icon family's. */
+export function AlertCircleIcon({ size = 13 }: { size?: number } = {}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7.5v5.5" />
+      <path d="M12 16.5h.01" />
+    </svg>
+  )
+}
+
+/** A test file in the working tree — the "current source" half of the tests
+ *  header. Paired with `PlayIcon`, the two glyphs carry a distinction the
+ *  words "Source" and "Run" used to spend a third of the bar spelling out. */
+export function FileIcon({ size = 12 }: { size?: number } = {}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+      <path d="M14 3v5h5" />
+    </svg>
+  )
+}
+
+/** Solid triangle for "a recorded run". Filled rather than stroked, because an
+ *  outline triangle loses its shape beside an 11px numeral — but drawn inset,
+ *  with a round join and a stroke of its own fill, so its mass matches the
+ *  outlined `FileIcon` it sits beside. A full-bleed triangle reads heavier than
+ *  every other glyph in the header and pulls the eye to the wrong tab. */
+export function PlayIcon({ size = 12 }: { size?: number } = {}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8.5 6 18 12 8.5 18z" />
+    </svg>
+  )
+}
+
+/** Pencil — an edited test body, the middle mark of the new/changed/removed
+ *  trio in the tests header. */
+export function PencilIcon({ size = 12 }: { size?: number } = {}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  )
+}
+
 export function TrashIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -158,6 +207,17 @@ export function ChevronRightIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="9 18 15 12 9 6" />
+    </svg>
+  )
+}
+
+/** The mirror of `ChevronRightIcon`, for a pair that steps both ways — a
+ *  previous/next stepper reads as one control only when both arrows are the
+ *  same weight and size. */
+export function ChevronLeftIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="15 18 9 12 15 6" />
     </svg>
   )
 }

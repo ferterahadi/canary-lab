@@ -574,6 +574,9 @@ function translateStory(
 
   function translateCandidate(candidate: Candidate): ReadableStoryItem {
     const source = sourceFor(candidate.node, context.sourceFile, context.file, context.lineOffset)
+    const headerEndPosition = candidate.kind === 'flow' ? candidate.headerEndPosition
+      ?? ((ts.isForOfStatement(candidate.node) || ts.isForInStatement(candidate.node) || ts.isForStatement(candidate.node))
+        && ts.isBlock(candidate.node.statement) ? candidate.node.statement.getStart(context.sourceFile) : undefined) : undefined
     const base = {
       id: stableNodeId(source, [-1, ...candidate.path]),
       role: candidate.role,
@@ -587,9 +590,8 @@ function translateStory(
           ...base,
           kind: 'flow',
           flowKind: candidate.flowKind,
-          ...((ts.isForOfStatement(candidate.node) || ts.isForInStatement(candidate.node) || ts.isForStatement(candidate.node))
-            && ts.isBlock(candidate.node.statement) ? {
-              headerEndLine: context.lineOffset + context.sourceFile.getLineAndCharacterOfPosition(candidate.node.statement.getStart(context.sourceFile)).line,
+          ...(headerEndPosition !== undefined ? {
+              headerEndLine: context.lineOffset + context.sourceFile.getLineAndCharacterOfPosition(headerEndPosition).line,
             } : {}),
           children: translateCandidates(candidate.kind === 'flow' && candidate.flowKind === 'condition'
             ? candidate.children.flatMap((child) => child.kind === 'flow' && child.flowKind === 'then'

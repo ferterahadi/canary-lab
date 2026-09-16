@@ -20,6 +20,6 @@ describe('flightStageLabel', () => {
     expect(flightRailLabel('docs')).toBe('Requirements')
     expect(flightRailLabel('specs-coverage')).toBe('Tests & coverage')
     expect(flightRailLabel('portify')).toBe('Parallel setup')
-    expect(flightRailLabel('evaluation-export')).toBe('Report')
+    expect(flightRailLabel('evaluation-export')).toBe('Evaluation report')
   })
 })

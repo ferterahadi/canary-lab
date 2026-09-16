@@ -19,7 +19,7 @@ export const FLIGHT_STAGE_LABEL: Record<FlightStageKey, string> = {
   'run': 'Test run',
   'heal': 'Auto-repair',
   'robustness': 'Robustness lab',
-  'evaluation-export': 'Report',
+  'evaluation-export': 'Evaluation report',
 }
 
 /** The rail folds implementation stages into user-visible steps. Keep the

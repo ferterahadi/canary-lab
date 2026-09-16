@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { testFileReview } from '../api/__fixtures__/test-review'
+import { multilineImportReview, testFileReview } from '../api/__fixtures__/test-review'
 import { sourceRows } from '../lib/test-review-model'
 import { SourceComparisonTable } from './SourceComparisonTable'
 import { ShikiCode } from './TestCodeBlock'
@@ -19,6 +19,111 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(() => { act(() => root.unmount()); container.remove() })
+it('does not paint an unchanged statement because the opposite side has a meaningful edit', async () => {
+  const review = testFileReview()
+  const rows = sourceRows(review).map((row) => ({ ...row, beforeChanged: false, afterChanged: row.afterLine === 5 }))
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={rows} mode="code" />))
+  expect(container.querySelector('del')).toBeNull()
+  expect([...container.querySelectorAll('ins')].map((item) => item.textContent)).toEqual(['  expect(x).toBe(2)'])
+})
+it.each(['added test', 'changed tags'])('collapses registration syntax for %s and opens the complete header in Code mode', async (variant) => {
+  const review = testFileReview()
+  const source = ["test('concurrent binding remains durable', {", "  tag: ['@req-R18', '@req-R19'],", '}, async () => {',
+    '  const value = 1;', '  expect(value).toBe(1);', '});']
+  for (const side of ['before', 'after'] as const) {
+    const lines = [...source]
+    if (side === 'before') lines[1] = "  tag: ['@req-R18'],"
+    review[side] = { source: lines.join('\n'), tests: [], story: { steps: [{
+      id: 'test', kind: 'flow', flowKind: 'scope', role: 'test', text: 'Test: "concurrent binding remains durable"',
+      spans: [{ text: 'Test: "concurrent binding remains durable"' }], fidelity: 'derived', headerEndLine: 3,
+      source: { file: review.file, startLine: 1, endLine: 6, snippet: lines.join('\n') }, children: [
+        { id: 'setup', role: 'setup', text: 'Set constant value to 1', spans: [{ text: 'Set constant value to 1' }], fidelity: 'derived',
+          source: { file: review.file, startLine: 4, endLine: 4, snippet: lines[3] } },
+        { id: 'check', role: 'check', text: 'Check that value equals 1', spans: [{ text: 'Check that value equals 1' }], fidelity: 'derived',
+          source: { file: review.file, startLine: 5, endLine: 5, snippet: lines[4] } },
+      ],
+    }] } }
+  }
+  if (variant === 'added test') {
+    review.before = { source: '', tests: [], story: { steps: [] } }
+    review.patch = '@@ -0,0 +1,6 @@\n' + source.map((line) => '+' + line).join('\n')
+  } else review.patch = '@@ -1,6 +1,6 @@\n' + source.flatMap((line, i) => i === 1
+    ? ["-  tag: ['@req-R18'],", '+' + line] : [' ' + line]).join('\n')
+  const select = vi.fn()
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="english" change={1} onSelectSource={select} />))
+  expect(container.textContent).toContain('TEST"concurrent binding remains durable"')
+  expect(container.textContent).not.toMatch(/tag:|async|=>/)
+  expect(container.textContent).toContain('SETUPSet constant value to 1')
+  expect(container.textContent).toContain('CHECKvalue equals 1')
+  expect(container.querySelector('[data-side="after"][data-source-line="1"] ins')).not.toBeNull()
+  expect(container.querySelector('[data-side="after"][data-source-line="2"]')).toBeNull()
+  expect(container.querySelector('[data-side="after"][data-source-line="3"]')).toBeNull()
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-side="after"][data-source-line="1"] button')!.click())
+  expect(select).toHaveBeenLastCalledWith({ side: 'after', line: 1, endLine: 3 })
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="code" selection={select.mock.lastCall![0]} />))
+  expect(container.querySelector('[data-side="after"][data-source-line="2"]')?.textContent).toContain(source[1])
+  expect(container.querySelector('[data-side="after"][data-source-line="3"]')?.textContent).toContain(source[2])
+  expect(container.querySelectorAll('[data-source-selected]')).toHaveLength(3)
+})
+it('compacts a multiline import into its source range and preserves all code lines', async () => {
+  const review = multilineImportReview()
+  const select = vi.fn()
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="english" onSelectSource={select} />))
+  expect(container.querySelectorAll('tbody tr')).toHaveLength(3)
+  expect([...container.querySelectorAll('td:first-child .cl-context-line')].map((element) => element.textContent)).toEqual(['1', '2–18', '19'])
+  expect(container.textContent).toContain('cassandraFixture')
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-side="after"][data-source-line="2"] button')!.click())
+  expect(select).toHaveBeenLastCalledWith({ side: 'after', line: 2, endLine: 18 })
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="code" selection={select.mock.lastCall![0]} />))
+  expect(container.querySelectorAll('tbody tr')).toHaveLength(19)
+  expect(container.querySelectorAll('[data-source-selected]')).toHaveLength(17)
+  expect(container.querySelector('[data-side="after"][data-source-line="3"]')?.textContent).toContain('api,')
+})
+it('marks and navigates each edit inside a compacted range even when its English wording is identical', async () => {
+  const review = multilineImportReview()
+  const rows = sourceRows(review)
+  for (const [index, change] of [[2, 1], [8, 2]]) {
+    rows[index].change = change
+    rows[index].after = `  changed${change},`
+  }
+  for (const change of [1, 2]) {
+    await act(async () => root.render(<SourceComparisonTable review={review} rows={rows} mode="english" change={change} />))
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(3)
+    expect(container.querySelectorAll('[data-selected]')).toHaveLength(1)
+    expect(container.querySelector('[data-selected] .cl-context-line')?.textContent).toBe('2–18')
+    expect(container.querySelector('[data-source-line="2"][data-side="before"] del')).not.toBeNull()
+    expect(container.querySelector('[data-source-line="2"][data-side="after"] ins')).not.toBeNull()
+  }
+})
+it.each(['before', 'after'] as const)('retains independent %s content opposite a continuation without repeating its line number', async (side) => {
+  const review = multilineImportReview()
+  delete review[side].story
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="english" />))
+  expect(container.querySelectorAll('tbody tr')).toHaveLength(19)
+  const opposite = side === 'before' ? 'after' : 'before'
+  expect(container.querySelector(`[data-side="${side}"][data-source-line="3"]`)?.textContent).toContain('api,')
+  expect(container.querySelector(`[data-side="${opposite}"][data-source-line="3"]`)?.closest('td')?.querySelector('.cl-context-line')).toBeNull()
+})
+it.each(['insert', 'remove'] as const)('keeps unequal ranges aligned when an import member is %s', async (operation) => {
+  const review = multilineImportReview()
+  const before = review.before.source.split('\n')
+  const after = [...before.slice(0, 9), '  newMember,', ...before.slice(9)]
+  review.after.source = after.join('\n')
+  review.after.story!.steps[0].source.endLine = 19
+  review.patch = '@@ -1,19 +1,20 @@\n' + [...before.slice(0, 9).map((line) => ` ${line}`), '+  newMember,', ...before.slice(9).map((line) => ` ${line}`)].join('\n')
+  if (operation === 'remove') {
+    [review.before, review.after] = [review.after, review.before]
+    review.patch = review.patch.replace('@@ -1,19 +1,20 @@', '@@ -1,20 +1,19 @@').replace('+  newMember,', '-  newMember,')
+  }
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="english" change={1} />))
+  expect(container.querySelectorAll('tbody tr')).toHaveLength(3)
+  const ranges = [...container.querySelectorAll('[data-selected] .cl-context-line')].map((element) => element.textContent)
+  expect(ranges).toEqual(operation === 'insert' ? ['2–18', '2–19'] : ['2–19', '2–18'])
+  const last = [...container.querySelectorAll('tbody tr:last-child .cl-context-line')].map((element) => element.textContent)
+  expect(last).toEqual(operation === 'insert' ? ['19', '20'] : ['20', '19'])
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="code" change={1} />))
+  expect(container.querySelector(operation === 'insert' ? 'ins' : 'del')?.textContent).toBe('  newMember,')
+})
 it('uses full-file Shiki output in aligned rows, including inserted and removed sides', async () => {
   const review = testFileReview()
   const rows = sourceRows(review)
@@ -31,12 +136,18 @@ it('uses full-file Shiki output in aligned rows, including inserted and removed 
   expect(container.querySelector('#added td:last-child')?.textContent).toContain('new line')
   expect(container.querySelectorAll('[data-selected="true"]')).toHaveLength(1)
 })
+it('uses the same compact two-character gutter as the standalone code viewer', async () => {
+  const review = testFileReview()
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="code" />))
+  expect(container.querySelector<HTMLElement>('.cl-review-source-canvas')?.style.getPropertyValue('--review-gutter-width')).toBe('2ch')
+})
 it('shares the existing English semantic labels and token colors, retaining untranslated source', async () => {
   const review = testFileReview()
   review.after.tests[0].readable.story = { steps: [{ id: 'check', role: 'check', text: 'Check that x equals 2', spans: [{ text: 'Check', kind: 'verb' }, { text: ' that x equals ' }, { text: '2', kind: 'number' }], fidelity: 'exact', source: { file: review.file, startLine: 5, endLine: 5, snippet: 'expect(x).toBe(2)' } }] }
   await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="english" />))
   expect(container.querySelector('[data-testid="readable-story-role-check"]')?.textContent).toBe('CHECK')
   expect(container.querySelector('[data-story-span="number"]')?.textContent).toBe('2')
+  expect(container.textContent).toContain('CHECKx equals 2')
   expect(container.textContent).toContain('import { test, expect }')
 })
 it('links function headings to their declaration and keeps untranslated lines clickable', async () => {

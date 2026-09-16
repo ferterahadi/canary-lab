@@ -5,12 +5,12 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, getFeatureDirtyDiff, getFeatureTests } from '../api/client'
 import { readableTest } from '../api/__fixtures__/readable-test'
-import fixture from '@/features/runs/utils/__fixtures__/cns-wa-snapshot.json'
+import fixture from '@/features/runs/utils/__fixtures__/run-snapshot-review.json'
 import type { RunManifest, RunSummary } from '../api/types'
 import { TestCasesColumn } from './TestCasesColumn'
 import { InvalidationProvider, useInvalidation } from '../state/invalidation'
 
-vi.mock('./use-discovery-repair', () => ({ useDiscoveryRepair: () => ({ repairs: [], start: async () => {}, starting: false, error: null }) }))
+vi.mock('./use-discovery-repair', () => ({ useDiscoveryRepair: () => ({ repairs: [], start: async () => {}, starting: false, startError: null }) }))
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
@@ -18,7 +18,7 @@ vi.mock('../api/client', async () => {
     ...actual,
     getFeatureTests: vi.fn(),
     getFeatureDirtyDiff: vi.fn(),
-    getTestFileDifference: vi.fn().mockResolvedValue({ changed: false }),
+    getTestSourceComparison: vi.fn().mockResolvedValue({ state: 'ready', files: [], differences: [], changes: { added: [], changed: [], removed: [] } }),
   }
 })
 
@@ -80,7 +80,7 @@ describe('TestCasesColumn', () => {
     }
     await act(async () => { root.render(<InvalidationProvider><View /></InvalidationProvider>) })
     await act(async () => { container.querySelector<HTMLButtonElement>('button')?.click() })
-    expect(container.textContent).toContain('Showing the previous test list')
+    expect(container.textContent).toContain('Showing the last list that loaded.')
     expect(container.textContent).toContain('cannot use GET /a')
     expect(container.textContent).toContain('cannot use GET /b')
     expect(container.textContent).not.toContain('${operation}')
@@ -236,8 +236,8 @@ describe('TestCasesColumn', () => {
   })
 })
 
-// Recorded from 2026-09-07T0406-r8vx: all 98 tests had results, but the
-// workspace/snapshot root difference made every card PENDING after refresh.
+// The anonymized recording keeps all 98 results. Different workspace/snapshot
+// roots made every card PENDING after refresh, so both roots are load-bearing.
 it('hydrates the recorded snapshot results without confusing them with live source', async () => {
   vi.mocked(getFeatureTests).mockResolvedValue(fixture.specs.map((spec) => ({
     ...spec,
@@ -245,7 +245,7 @@ it('hydrates the recorded snapshot results without confusing them with live sour
   })))
   await act(async () => {
     root.render(<TestCasesColumn
-      feature="cns-wa"
+      feature="sample-suite"
       activeRunStatus="healing"
       activeRunManifest={fixture.manifest as RunManifest}
       activeRunSummary={fixture.summary as RunSummary}
@@ -265,7 +265,7 @@ it('hydrates the recorded snapshot results without confusing them with live sour
   expect(container.querySelector('[data-testid="suite-version-menu"]')).toBeNull()
 })
 
-it('shows discovery diagnostics and incomplete definitions without presenting them as test results', async () => {
+it('shows the discovery error on the card and never parsed definitions as a test list', async () => {
   vi.mocked(getFeatureTests).mockResolvedValue([{
     file: '/tmp/features/alpha/e2e/current.spec.ts',
     tests: [{ name: 'cannot use ${operation}', line: 42, bodySource: '', steps: [], readable: readableTest('cannot use ${operation}') }],
@@ -274,10 +274,12 @@ it('shows discovery diagnostics and incomplete definitions without presenting th
   }])
   const total = vi.fn()
   await act(async () => root.render(<TestCasesColumn feature="alpha" activeRunStatus="queued" activeRunSummary={undefined} onTotalTestsChange={total} />))
-  expect(container.textContent).toContain('View discovery error')
-  expect(container.textContent).toContain('Cannot find module ./fixtures/login')
-  expect(container.textContent).toContain('Source definitions · incomplete')
-  expect(container.textContent).toContain('cannot use ${operation}')
+  // The error reads on the card itself, with no disclosure to open first.
+  expect(container.querySelector('[data-testid="test-list-error-summary"]')?.textContent).toBe('Cannot find module ./fixtures/login')
+  expect(container.querySelectorAll('details')).toHaveLength(0)
+  // Definitions recovered by parsing were never the discovered test count, and
+  // the card no longer lists them at all — so they cannot be read as one.
+  expect(container.textContent).not.toContain('${operation}')
   expect(total).toHaveBeenLastCalledWith(0)
   expect(container.querySelector('[data-testid="test-presentation"]')).toBeNull()
 })
@@ -289,35 +291,16 @@ it('retains a suite’s last discovered list when returning from another suite a
     .mockResolvedValue([{ file: '/alpha/a.spec.ts', tests: [test('${alpha}')], discoveryError: 'Discovery failed' }])
   const render = (feature: string) => act(async () => root.render(<TestCasesColumn feature={feature} activeRunStatus={undefined} activeRunSummary={undefined} />))
   await render('alpha'); await render('beta'); await render('alpha')
-  expect(container.textContent).toContain('Showing the previous test list')
+  expect(container.textContent).toContain('Showing the last list that loaded.')
   expect(container.textContent).toContain('resolved alpha')
   expect(container.textContent).not.toContain('resolved beta')
   expect(container.textContent).not.toContain('${alpha}')
 })
 
-it('copies the server repair prompt and offers manual copy when clipboard access fails', async () => {
-  const prompt = 'Repair alpha discovery. Diagnostic: missing fixture. Preserve every assertion.'
-  const writeText = vi.fn().mockRejectedValueOnce(new Error('clipboard unavailable')).mockResolvedValue(undefined)
-  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
-  vi.mocked(getFeatureTests).mockResolvedValue([{
-    file: '/alpha/a.spec.ts', tests: [], discoveryError: 'Discovery failed', discoveryRepairPrompt: prompt,
-  }])
-  await act(async () => root.render(<TestCasesColumn feature="alpha" activeRunStatus={undefined} activeRunSummary={undefined} />))
-  const copy = () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Copy repair prompt')!
-  await act(async () => copy().click())
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain('copy it manually')
-  expect(container.textContent).toContain('View repair prompt')
-  expect(container.textContent).toContain(prompt)
-  await act(async () => copy().click())
-  expect(writeText).toHaveBeenLastCalledWith(prompt)
-  expect(container.textContent).toContain('Copied repair prompt')
-  expect(container.querySelector('[role="alert"]')).toBeNull()
-})
-
-// Names were changed from @req/@variant tags to a whatsapp: prefix after
+// Names were changed from @req/@variant tags to a sample: prefix after
 // this recorded run. Loading workspace source made all 98 results pending.
 it('keeps all recorded verdicts when current test names changed', async () => {
-  const { default: recorded } = await import('@/features/runs/utils/__fixtures__/cns-wa-renamed.json')
+  const { default: recorded } = await import('@/features/runs/utils/__fixtures__/run-snapshot-renamed.json')
   const summary = recorded.summary as RunSummary
   const files = new Map<string, { name: string; line: number; bodySource: string; steps: []; readable: ReturnType<typeof readableTest> }[]>()
   for (const test of summary.knownTests!) {
@@ -328,10 +311,10 @@ it('keeps all recorded verdicts when current test names changed', async () => {
   }
   const saved = [...files].map(([file, tests]) => ({ file, tests }))
   vi.mocked(getFeatureTests).mockImplementation(async (_feature, _opts, runId) => runId ? saved : [{
-    file: 'current.spec.ts', tests: [{ name: 'whatsapp: renamed current test', line: 1, bodySource: '{}', steps: [], readable: readableTest('current') }],
+    file: 'current.spec.ts', tests: [{ name: 'sample: renamed current test', line: 1, bodySource: '{}', steps: [], readable: readableTest('current') }],
   }])
-  await act(async () => root.render(<TestCasesColumn feature="cns-wa-merchant" activeRunStatus="failed" activeRunManifest={recorded.manifest as RunManifest} activeRunSummary={summary} />))
-  expect(getFeatureTests).toHaveBeenCalledWith('cns-wa-merchant', undefined, recorded.manifest.runId)
+  await act(async () => root.render(<TestCasesColumn feature="renamed-suite" activeRunStatus="failed" activeRunManifest={recorded.manifest as RunManifest} activeRunSummary={summary} />))
+  expect(getFeatureTests).toHaveBeenCalledWith('renamed-suite', undefined, recorded.manifest.runId)
   const labels = [...container.querySelectorAll('button')].map((button) => button.textContent ?? '')
   expect(labels.filter((text) => text.endsWith('passed'))).toHaveLength(85)
   expect(labels.filter((text) => text.endsWith('failed'))).toHaveLength(4)
@@ -341,9 +324,9 @@ it('keeps all recorded verdicts when current test names changed', async () => {
   expect(container.textContent).toContain('85/98')
 
   vi.mocked(getFeatureTests).mockRejectedValue(new ApiError(409, { error: 'Snapshot unavailable' }))
-  await act(async () => root.render(<TestCasesColumn feature="cns-wa-merchant" activeRunStatus="failed" activeRunManifest={{ ...recorded.manifest, runId: 'missing' } as RunManifest} activeRunSummary={summary} />))
+  await act(async () => root.render(<TestCasesColumn feature="renamed-suite" activeRunStatus="failed" activeRunManifest={{ ...recorded.manifest, runId: 'missing' } as RunManifest} activeRunSummary={summary} />))
   expect(container.textContent).toContain('Recorded tests unavailable')
-  expect(container.textContent).not.toContain('a new app can read')
+  expect(container.textContent).not.toContain(summary.knownTests![0].title!)
   expect(container.textContent).not.toContain('Repair in Canary Lab')
   expect(container.textContent).toContain('Snapshot unavailable')
   expect(container.textContent).toContain('Reload recorded tests')
@@ -354,7 +337,7 @@ it('loads the recorded roster when it arrives after the run booted', async () =>
   const manifest = { runId: 'booting-run', featureDir: '/workspace/features/suite', suiteSnapshot: { kind: 'taken', dir: '/workspace/logs/runs/booting-run/suite', takenAt: '', digest: '' } } as RunManifest
   vi.mocked(getFeatureTests).mockResolvedValueOnce([])
   await act(async () => root.render(<TestCasesColumn feature="suite" activeRunStatus="running" activeRunManifest={manifest} activeRunSummary={undefined} />))
-  expect(container.textContent).toContain('Waiting for this run to record its test list.')
+  expect(container.querySelector('[data-testid="tests-run-listing"]')?.textContent).toBe('Listing tests…')
   const name = 'recorded test'
   const file = `${manifest.suiteSnapshot!.kind === 'taken' ? manifest.suiteSnapshot!.dir : ''}/e2e/a.spec.ts`
   vi.mocked(getFeatureTests).mockResolvedValue([{ file, tests: [{ name, line: 1, bodySource: '{}', steps: [], readable: readableTest(name) }] }])
@@ -365,8 +348,8 @@ it('loads the recorded roster when it arrives after the run booted', async () =>
   expect(getFeatureTests).toHaveBeenCalledTimes(2)
 })
 
-it('shows the 23 recorded legacy auth passes without offering current source as evidence', async () => {
-  const { default: legacy } = await import('@/features/runs/utils/__fixtures__/cns-legacy-auth.json')
+it('shows the 23 recorded legacy passes without offering current source as evidence', async () => {
+  const { default: legacy } = await import('@/features/runs/utils/__fixtures__/run-legacy-roster.json')
   const summary = legacy.summary as RunSummary
   const specs = summary.knownTests!.map((known) => {
     const [, file, line] = /^(.*?):(\d+)$/.exec(known.location!)!
@@ -376,7 +359,9 @@ it('shows the 23 recorded legacy auth passes without offering current source as 
   await act(async () => root.render(<TestCasesColumn feature={legacy.manifest.feature} activeRunManifest={legacy.manifest as RunManifest} activeRunStatus="passed" activeRunSummary={summary} />))
   expect(container.textContent).toContain('23/23')
   expect([...container.querySelectorAll('button')].filter((button) => button.textContent?.endsWith('passed'))).toHaveLength(23)
-  expect(container.textContent).toContain('Source wasn’t saved for some tests in this run')
+  // One statement of the fact, on the card it is about. The banner that used
+  // to repeat it above the list is gone.
+  expect(container.textContent).not.toContain('Source wasn’t saved for some tests in this run')
   expect(container.textContent).toContain('Source was not retained for this test')
   expect(container.textContent).not.toContain('Recorded tests unavailable')
   expect(container.textContent).not.toContain('Retry discovery')
@@ -387,9 +372,9 @@ it('explains an aborted run with no roster without inviting discovery retries', 
   vi.mocked(getFeatureTests).mockResolvedValue([])
   const manifest = { runId: 'aborted-before-start', featureDir: '/workspace/features/suite' } as RunManifest
   await act(async () => root.render(<TestCasesColumn feature="suite" activeRunManifest={manifest} activeRunStatus="aborted" activeRunSummary={undefined} />))
-  expect(container.textContent).toContain('This run has no recorded test list')
+  expect(container.querySelector('[data-testid="tests-run-none"]')?.textContent).toBe('This run recorded no tests')
   expect(container.textContent).not.toContain('Retry discovery')
-  expect(container.textContent).not.toContain('No test files found')
+  expect(container.textContent).not.toContain('No tests in this suite yet')
   expect(container.textContent).not.toContain('HTTP 409')
 })
 
@@ -404,10 +389,10 @@ it('lets an empty historical run open current tests without inheriting its verdi
     return <TestCasesColumn feature="suite" currentTests={current} onCurrentTestsChange={setCurrent} activeRunManifest={current ? undefined : manifest} activeRunStatus={current ? undefined : 'aborted'} activeRunSummary={undefined} />
   }
   await act(async () => root.render(<View />))
-  expect(container.textContent).toContain('This run has no recorded test list')
+  expect(container.querySelector('[data-testid="tests-run-none"]')).not.toBeNull()
   const click = async (label: string) => act(async () => {
     const button = [...container.querySelectorAll('button'), ...document.querySelectorAll('[role="menu"] button')]
-      .find((button) => button.getAttribute('aria-label') === label)
+      .find((button) => button.getAttribute('aria-label')?.startsWith(label))
     expect(button).toBeTruthy()
     ;(button as HTMLButtonElement).click()
   })
@@ -416,14 +401,12 @@ it('lets an empty historical run open current tests without inheriting its verdi
   await click('Current source')
   expect(getFeatureTests).toHaveBeenLastCalledWith('suite', undefined, undefined)
   expect(container.textContent).toContain('current test')
-  expect(container.querySelector('[aria-label="Current source"]')?.getAttribute('aria-pressed')).toBe('true')
-  expect(container.textContent).not.toContain('pending')
-  expect(container.textContent).not.toContain('passed')
-  expect(container.textContent).toContain('Not verified')
+  expect(container.querySelector('[aria-label^="Current source"]')?.getAttribute('aria-pressed')).toBe('true')
+  expect(container.querySelectorAll('.cl-card > button > span.uppercase')).toHaveLength(0)
   expect(container.querySelector('[data-testid="suite-version-menu"]')).toBeNull()
   await click('Recorded run')
   expect(getFeatureTests).toHaveBeenLastCalledWith('suite', undefined, 'old-run')
-  expect(container.textContent).toContain('This run has no recorded test list')
+  expect(container.querySelector('[data-testid="tests-run-none"]')).not.toBeNull()
   expect(container.textContent).not.toContain('expect(200)')
   expect(container.querySelector('[aria-label="Test source"]')).not.toBeNull()
 })
@@ -444,17 +427,19 @@ it('keeps switching reversible when the saved suite and current source are ident
   await act(async () => root.render(<View />))
   for (const label of ['Current source', 'Recorded run', 'Current source']) {
     const buttons = [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Test source"] button')]
-    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual(['Current source', 'Recorded run'])
-    const button = buttons.find((button) => button.getAttribute('aria-label') === label)!
+    // Each tab's accessible name carries its counts after the colon; the name
+    // before it is what identifies the tab.
+    expect(buttons.map((button) => button.getAttribute('aria-label')?.split(':')[0])).toEqual(['Current source', 'Recorded run'])
+    const button = buttons.find((button) => button.getAttribute('aria-label')?.startsWith(label))!
     await act(async () => button.click())
     expect(button.getAttribute('aria-pressed')).toBe('true')
     expect(container.querySelector('[data-testid="suite-version-menu"]')).toBeNull()
-    expect(container.querySelector('.cl-card')?.textContent).toContain(label === 'Current source' ? 'Not verified' : 'passed')
+    expect(container.querySelectorAll('.cl-card > button > span.uppercase')).toHaveLength(label === 'Recorded run' ? 1 : 0)
   }
 })
 
 it('offers current source from a legacy run while keeping its results in recorded mode', async () => {
-  const { default: legacy } = await import('@/features/runs/utils/__fixtures__/cns-legacy-auth.json')
+  const { default: legacy } = await import('@/features/runs/utils/__fixtures__/run-legacy-roster.json')
   const known = legacy.summary.knownTests[0]
   const [, file, line] = /^(.*?):(\d+)$/.exec(known.location!)!
   vi.mocked(getFeatureTests).mockImplementation(async (_feature, _signal, runId) => [{
@@ -469,9 +454,10 @@ it('offers current source from a legacy run while keeping its results in recorde
   }
   await act(async () => root.render(<View />))
   expect(container.querySelector('.cl-card')?.textContent).toContain('passed')
-  const action = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'View current source')!
+  // The way across is the header's own source tab — the card never grew a
+  // second control that did the same thing.
+  const action = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.getAttribute('aria-label')?.startsWith('Current source'))!
   await act(async () => action.click())
-  expect(container.textContent).not.toContain('Source wasn’t saved')
-  expect(container.querySelector('.cl-card')?.textContent).toContain('Not verified')
-  expect(container.querySelector('.cl-card')?.textContent).not.toContain('passed')
+  expect(container.textContent).not.toContain('Source was not retained')
+  expect(container.querySelectorAll('.cl-card > button > span.uppercase')).toHaveLength(0)
 })

@@ -242,7 +242,7 @@ export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocu
               flight detail's per-stage drill-throughs (coverage ledger, portify
               workflow, run detail). R15/R19: the Exports and Wizards pills are
               gone too — exports live on the flight's Export results stage and
-              the run detail's Review Evaluation action; wizard drafts resume
+              the run detail's Create evaluation report action; wizard drafts resume
               through the routed add-test dialog (openTask re-attaches to the
               latest draft). R26: the Runs pill is absorbed as well — a live
               run (or portify / authoring job) lights the Flights pill and its

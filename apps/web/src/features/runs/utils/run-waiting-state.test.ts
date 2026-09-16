@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RunDetail, RunManifest } from '@/shared/api/types'
-import fixture from './__fixtures__/cns-wa-snapshot.json'
+import fixture from './__fixtures__/run-snapshot-review.json'
 import { runWaitingState } from './run-waiting-state'
 import { deriveRunViewModel } from './run-view-model'
 

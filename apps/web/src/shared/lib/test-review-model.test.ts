@@ -1,6 +1,48 @@
 import { expect, it } from 'vitest'
-import { testFileReview } from '../api/__fixtures__/test-review'
-import { assessmentsForRows, englishLines, rowsForTest, sourceRows, testSelections } from './test-review-model'
+import { multilineImportReview, testFileReview } from '../api/__fixtures__/test-review'
+import { assessmentsForRows, comparedTestRows, englishLines, englishSourceRange, rowsForTest, sourceRows, testSelections } from './test-review-model'
+it('isolates a real removal from the surviving or added test occupying its old lines', () => {
+  const review = testFileReview()
+  const old = review.before.tests[0]
+  const rows = comparedTestRows(review, { file: review.file, ...old }, 'removed')
+  expect(rows).toHaveLength(6)
+  expect(rows.map((row) => row.beforeLine)).toEqual([3, 4, 5, 6, 7, 8])
+  expect(rows.every((row) => row.after === null && row.afterLine === undefined && row.change === 1)).toBe(true)
+})
+it('uses semantic source ranges instead of colouring formatting-only line edits', () => {
+  const review = testFileReview()
+  review.meaningfulChanges = { before: [7], after: [7] }
+  const rows = comparedTestRows(review, { file: review.file, ...review.after.tests[0] }, 'changed')
+  expect(rows.filter((row) => row.change != null)).toEqual([expect.objectContaining({ beforeLine: 7, afterLine: 7, beforeChanged: true, afterChanged: true })])
+  expect(rows.find((row) => row.afterLine === 5)).toMatchObject({ beforeChanged: false, afterChanged: false, change: undefined })
+})
+it('aligns only a renamed test despite inserted shared setup and a neighbouring test', () => {
+  const review = testFileReview()
+  const original = review.before.tests[0]
+  review.after.source = "test.beforeEach(() => { setup() })\n\n" + review.after.source.replace("test('a'", "test('renamed'") + "\ntest('unrelated', () => { other() })"
+  const test = { file: review.file, name: 'renamed', line: 5, endLine: 10, previous: original }
+  const rows = comparedTestRows(review, test, 'changed')
+  expect(rows).toHaveLength(6)
+  expect(rows[0]).toMatchObject({ beforeLine: 3, afterLine: 5, change: 1 })
+  expect(rows[1]).toMatchObject({ before: '  const x = 1', after: '  const x = 1' })
+  expect(rows[1].change).toBeUndefined()
+  expect(rows.map((row) => row.after).join('\n')).not.toMatch(/beforeEach|unrelated|import/)
+  expect(rows.filter((row) => row.change != null)).toHaveLength(3)
+})
+it('aligns unequal insertion and deletion blocks within the selected test', () => {
+  const review = testFileReview()
+  review.after.source = review.before.source.replace('  const x = 1', '  const x = 1\n  prepare()\n  prepareAgain()').replace('  const context = x\n', '')
+  const test = { file: review.file, name: 'a', line: 3, endLine: 9, previous: review.before.tests[0] }
+  const rows = comparedTestRows(review, test, 'changed')
+  expect(rows.filter((row) => row.before === null).map((row) => row.after)).toEqual(['  prepare()', '  prepareAgain()'])
+  expect(rows.filter((row) => row.after === null).map((row) => row.before)).toEqual(['  const context = x'])
+  expect(rows.at(-1)).toMatchObject({ before: '})', after: '})', beforeLine: 8, afterLine: 9 })
+})
+it('maps every import continuation back to its full English range and leaves following code alone', () => {
+  const lines = englishLines(multilineImportReview().after)
+  for (let line = 2; line <= 18; line++) expect(englishSourceRange(lines, line)).toEqual({ line: 2, endLine: 18 })
+  expect(englishSourceRange(lines, 19)).toEqual({ line: 19, endLine: 19 })
+})
 it('keeps unchanged context, source line numbers and contiguous change groups', () => {
   const review = testFileReview(); const rows = sourceRows(review)
   expect(rows).toHaveLength(8)

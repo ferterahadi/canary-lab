@@ -5,7 +5,7 @@ import path from 'path'
 import Fastify from 'fastify'
 import { featuresRoutes } from './features'
 import { writeManifest } from '../../runs/logic/runtime/manifest'
-import legacy from '../../../../../web/src/features/runs/utils/__fixtures__/cns-legacy-auth.json'
+import legacy from '../../../../../web/src/features/runs/utils/__fixtures__/run-legacy-roster.json'
 import { saveSuiteTestRoster } from '../../runs/logic/suite-test-roster'
 
 const roots: string[] = []

@@ -1,15 +1,13 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { FeatureSpecFile, RunManifest } from '../api/types'
-import { compareTestVersions, suiteRelativeFile, type RunDifference } from '../lib/test-versions'
+import type { TestSourceComparison } from '@shared/test-review'
 
 type Baseline = Pick<RunManifest, 'runId' | 'featureDir' | 'suiteSnapshot'>
-type Comparison =
-  | { state: 'loading' | 'unavailable' | 'error'; differences: RunDifference[] }
-  | { state: 'ready'; differences: RunDifference[]; files: string[]; changes: ReturnType<typeof compareTestVersions> }
+type Comparison = TestSourceComparison | { state: 'loading' | 'error'; differences: [] }
 
-/** The card loader owns the visible version; fetch only its counterpart here.
- * Both lists must belong to this selection/revision before comparing them. */
+/** The card loader owns the visible roster; fetch its counterpart for totals.
+ * Declaration changes come from source snapshots independently of either roster. */
 export function useTestVersions({ feature, baseline, displayed, recordedView, revision, ready, displayFailed }: {
   feature: string | null
   baseline: Baseline | undefined
@@ -47,29 +45,16 @@ export function useTestVersions({ feature, baseline, displayed, recordedView, re
   const current = recordedView ? counterpart : visible
   const recorded = recordedView ? visible : counterpart
   const snapshotDir = baseline?.suiteSnapshot?.kind === 'taken' ? baseline.suiteSnapshot.dir : undefined
-  const featureDir = baseline?.featureDir
-  const rosterKey = JSON.stringify([current?.map((spec) => [spec.file, spec.tests.map((test) => [test.name, test.line])]), recorded?.map((spec) => [spec.file, spec.tests.map((test) => [test.name, test.line])])])
-  const comparisonKey = JSON.stringify([contextKey, snapshotDir, featureDir, rosterKey])
   const [comparison, setComparison] = useState<{ key: string; value: Comparison } | null>(null)
   useEffect(() => {
-    if (!feature || !baseline || !snapshotDir || !current || !recorded) return
+    if (!feature || !baseline?.runId || !snapshotDir) return
     let cancelled = false
-    const roots = [featureDir, snapshotDir]
-    const files = [...new Set([...current, ...recorded].map((spec) => suiteRelativeFile(spec.file, ...roots)))].sort()
-    Promise.all(files.map(async (file) => ({ file, ...await api.getTestFileDifference(feature, file, baseline.runId) }))).then((reviews) => {
-      if (cancelled) return
-      const differences = reviews.filter((review) => review.changed).map((review) => ({ file: review.file, affectedTests: review.affectedTests ?? [] }))
-      const incomplete = [...current, ...recorded].some((spec) => spec.parseError || spec.discoveryError || spec.recordedSourceUnavailable)
-      setComparison({ key: comparisonKey, value: incomplete ? { state: 'unavailable', differences } : {
-        state: 'ready', differences, files, changes: compareTestVersions(current, recorded, roots, differences),
-      } })
-    }).catch(() => { if (!cancelled) setComparison({ key: comparisonKey, value: { state: 'error', differences: [] } }) })
+    api.getTestSourceComparison(feature, baseline.runId).then((value) => {
+      if (!cancelled) setComparison({ key: contextKey, value })
+    }).catch(() => { if (!cancelled) setComparison({ key: contextKey, value: { state: 'error', differences: [] } }) })
     return () => { cancelled = true }
-    // The key carries both complete rosters; stable array identities are not
-    // required when the visible loader refreshes the same source.
-  }, [feature, baseline?.runId, snapshotDir, featureDir, comparisonKey])
-  const value: Comparison = !snapshotDir ? { state: 'unavailable', differences: [] }
-    : displayFailed || other?.failed ? { state: 'error', differences: [] }
-      : comparison?.key === comparisonKey ? comparison.value : { state: 'loading', differences: [] }
+  }, [feature, baseline?.runId, snapshotDir, contextKey])
+  const value: Comparison = !snapshotDir ? { state: 'unavailable', differences: [], files: [], reasons: ['Snapshot unavailable'] }
+    : comparison?.key === contextKey ? comparison.value : { state: 'loading', differences: [] }
   return { current, recorded, comparison: value }
 }

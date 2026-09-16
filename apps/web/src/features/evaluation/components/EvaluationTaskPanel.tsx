@@ -50,10 +50,10 @@ export function EvaluationTaskPanel({
             className="cl-button shrink-0 px-2.5 py-1 text-xs"
             style={{ color: downloadFailed ? 'var(--danger)' : 'var(--success)' }}
           >
-            {/* "report" — the same word the flight header and the reports list
-                use for this same file; three labels for one download read as
+            {/* "evaluation report" — the same words the flight header and the
+                reports list use for this same file; three labels for one download read as
                 three different files. */}
-            {downloadFailed ? 'Download failed — retry' : '⬇ Download report'}
+            {downloadFailed ? 'Download failed — retry' : '⬇ Download evaluation report'}
           </button>
         )}
       </div>

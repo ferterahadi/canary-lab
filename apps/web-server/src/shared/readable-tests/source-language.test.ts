@@ -16,6 +16,43 @@ function rows(source: string, file = 'review.spec.ts'): ReadableStoryItem[] {
 const english = (source: string, file?: string): string => rows(source, file).map((item) => item.text).join('\n')
 
 describe('whole-file English', () => {
+  it.each([
+    `test('case', { tag: ['@req-R11'] }, async () => { const id = 1; expect(id).toBe(1) })`,
+    `test.only('case', () => { const id = 1; expect(id).toBe(1) })`,
+    `it.skip('case', () => { const id = 1; expect(id).toBe(1) })`,
+    `import { test as check } from '@playwright/test'; check('case', () => { const id = 1; expect(id).toBe(1) })`,
+    `import * as spec from 'vitest'; spec.test.each([1])('case', () => { const id = 1; expect(id).toBe(1) })`,
+  ])('distinguishes test declarations from their setup and checks: %s', (source) => {
+    const test = rows(source).find((item) => item.text.startsWith('Test:'))
+    expect(test).toMatchObject({ kind: 'flow', role: 'test', text: 'Test: "case"', children: [
+      { role: 'setup' }, { role: 'check' },
+    ] })
+  })
+
+  it('keeps hooks and helper declarations as setup around a test', () => {
+    const items = rows(`test.beforeEach(() => {}); function helper() {}; test('case', () => {})`)
+    expect(items.find((item) => item.text.startsWith('Before each test'))?.role).toBe('setup')
+    expect(items.find((item) => item.source.snippet.startsWith('function helper'))?.role).toBe('setup')
+    expect(items.filter((item) => item.role === 'test')).toHaveLength(1)
+  })
+
+  it.each(['async () =>', 'async function ()'])('covers the complete multiline test header for %s without consuming its body', (callback) => {
+    const source = `test('concurrent binding remains durable', {
+  tag: ['@req-R18', '@req-R19', '@path-happy'],
+}, ${callback} {
+  const value = 1;
+  expect(value).toBe(1);
+});`
+    const item = translateReadableSource('review.spec.ts', source).steps[0]
+    expect(item).toMatchObject({ kind: 'flow', role: 'test', text: 'Test: "concurrent binding remains durable"',
+      headerEndLine: 3, source: { startLine: 1, endLine: 6, snippet: source },
+      children: [
+        { role: 'setup', source: { startLine: 4, endLine: 4 } },
+        { role: 'check', source: { startLine: 5, endLine: 5 } },
+      ],
+    })
+  })
+
   it('renders the response property checks from the test review as compact English with exact source links', () => {
     const source = `for (const response of [created, replay, read]) {
   expect(response).not.toHaveProperty('token');
@@ -228,9 +265,9 @@ for (const variant of ['missing template', 'empty template']) {
 
   it('handles import aliases, namespace imports, parameterized modifiers and tagged tables', () => {
     expect(english(`import { test as check } from '@jest/globals'; check.concurrent.each([[1, 2]])('adds', (a, b) => { expect(a).toBe(b) })`))
-      .toContain('Test: "adds"; (concurrent); for each case in')
+      .toContain('Test: "adds"')
     expect(english(`import * as spec from 'vitest'; spec.describe.only('group', () => { spec.test('case', () => {}) })`)).toContain('Test group: "group"; (only)')
-    expect(english('test.each`a | b\n${1} | ${2}`("adds", ({a, b}) => { expect(a).toBe(b) })')).toContain('for each case in text formed by joining "a | b\\n", 1, " | ", 2')
+    expect(english('test.each`a | b\n${1} | ${2}`("adds", ({a, b}) => { expect(a).toBe(b) })')).toContain('Test: "adds"')
     expect(english(`import { test as check } from './fixture'; check.beforeEach(() => {})`)).toContain('Before each test')
   })
 
@@ -350,8 +387,8 @@ test.beforeAll(() => { throw new Error('setup failed') });`)
     expect(english(source)).not.toBe('')
   })
 
-  it('keeps typed callback returns and optional call syntax', () => {
-    expect(english(`test('case', (done): void => { done() })`)).toContain('returning type void')
+  it('keeps test headings focused on the title and retains optional call syntax', () => {
+    expect(rows(`test('case', (done): void => { done() })`).find((item) => item.role === 'test')?.text).toBe('Test: "case"')
     const context = compileSemanticSource('example.ts', `handler?.();`)
     expect(sourceStatementText(context.sourceFile.statements[0])).toContain('optional')
     const defaults = parseSource('defaults.js', '({ value = 1 } = data)').sourceFile.statements[0] as ts.ExpressionStatement

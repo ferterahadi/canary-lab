@@ -522,11 +522,18 @@ it('opens a hand-shortened review link on the committed baseline, in English, wi
 })
 
 it('round-trips a test review source, language and baseline without leaking them into other dialogs', () => {
-  const reviewFocus = { file: 'e2e/conversations.spec.ts', line: 79, mode: 'code' as const, baseline: 'run' as const }
+  const reviewFocus = { file: 'e2e/conversations.spec.ts', line: 79, mode: 'code' as const, baseline: 'run' as const, change: 'removed' as const, test: 'Deleted test' }
   persistView(view({ dialog: 'tests-review', feature: 'shop', run: 'run-1', reviewFocus }))
   expect(readPersistedView().reviewFocus).toEqual(reviewFocus)
   expect(JSON.parse(localStorage.getItem(KEY)!)).not.toHaveProperty('reviewFocus')
   persistView(view({ dialog: null, feature: 'shop' }))
   expect(readPersistedView().reviewFocus).toBeUndefined()
   expect(window.location.search).not.toContain('review')
+})
+
+it('ignores unknown review categories and clears the category when switching to Git HEAD', () => {
+  window.history.replaceState(null, '', '/?dialog=tests-review&reviewFile=a.spec.ts&reviewBase=run&reviewChange=bogus')
+  expect(readPersistedView().reviewFocus?.change).toBeUndefined()
+  persistView(view({ dialog: 'tests-review', reviewFocus: { file: 'a.spec.ts', change: 'added' } }))
+  expect(window.location.search).not.toContain('reviewChange')
 })

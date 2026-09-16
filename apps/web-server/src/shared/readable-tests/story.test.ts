@@ -252,8 +252,8 @@ describe('readable test story', () => {
 
     expect(textsFor(translated, 'check')).toEqual([
       'Check that msgs has length 2',
-      'Check that for every item in msgs, item pattern equals “TRIGGER_EMAIL_BATCH”',
-      'Check that for every item in msgs, item data email info transaction identifier equals txId',
+      "Check that every item in msgs meets this condition: that item's pattern equals “TRIGGER_EMAIL_BATCH”",
+      "Check that every item in msgs meets this condition: that item's data email info transaction identifier equals txId",
       'Check that payload.redirect_uris is a list',
     ])
   })
@@ -418,8 +418,8 @@ describe('readable test story', () => {
     })
 
     expect(storyItems(translated).map((step) => step.text)).toEqual([
-      'Find the first item in msgs where item pattern equals “SEND_MULTIPLE_EMAIL”, saving the result as sendMultiple',
-      'Find the first item in msgs where item pattern equals “TRIGGER_EMAIL_BATCH”, saving the result as triggerBatch',
+      "Find the first item in msgs where that item's pattern equals “SEND_MULTIPLE_EMAIL”, saving the result as sendMultiple",
+      "Find the first item in msgs where that item's pattern equals “TRIGGER_EMAIL_BATCH”, saving the result as triggerBatch",
       'Find the first item in msgs matching predicate, saving the result as unsafe',
       'Check that send multiple is defined',
       'Check that trigger batch is defined',
@@ -501,7 +501,7 @@ describe('readable test story', () => {
 
     expect(translated.story?.steps[0]).toEqual(expect.objectContaining({
       role: 'setup',
-      text: 'Create attempts as a list containing “a”, “b” transformed so each item becomes an object with message identifier set to item, transaction identifier set to sharedTxn',
+      text: 'Create attempts as a list containing “a”, “b” transformed so each item becomes an object with message identifier set to that item, transaction identifier set to sharedTxn',
     }))
     const scope = translated.story?.steps[1]
     expect(scope).toEqual(expect.objectContaining({
@@ -636,23 +636,61 @@ describe('readable test story', () => {
   const label = names.join(', ')
   const pieces = label.split(':', 2)
   const normalized = label.replaceAll('-', '_')
+  const localized = names.toLocaleString()
   const length = rows.push(nextRow)
   const removed = rows.splice(1, 2, replacement)
+  rows.copyWithin(0, 2, 4)
+  rows.fill(replacement, 1, 3)
   rows.reverse()
 }`,
     })
 
     expect(storyItems(translated).map((step) => step.text)).toEqual([
-      'Set ready to rows filtered to keep each item where item enabled',
+      "Set ready to rows filtered to keep each item where that item's enabled",
       "Set total count to the sum of each item's count in records",
-      'Set ordered to rows sorted by comparing left item rank minus right item rank',
+      "Set ordered to rows sorted by comparing left item's rank minus right item's rank",
       'Set label to names joined with “, ”',
       'Set pieces to label split using “:”, limited to 2 items',
       'Set normalized to label with every match for “-” replaced by “_”',
+      'Set localized to names as localized text',
       'Append nextRow to rows, saving the new length as length',
       'Modify rows starting at index 1, removing 2 items, inserting replacement, saving the removed items as removed',
+      'Rows after copying items from index 2 up to index 4 into index 0',
+      'Rows after filling items from index 1 up to index 3 with replacement',
       'Reverse rows',
     ])
+  })
+
+  it('uses collection semantics instead of generic method-on-receiver wording', () => {
+    const translated = translateReadableTest({
+      ...INPUT,
+      bodySource: `{
+  await settleThread(
+    c.conversationId,
+    (t) => t.messages.some((m: any) => m.messageId === first),
+    'initial inbound stored before read cutoff',
+  )
+  const allReady = rows.every((row) => row.ready)
+  const failed = rows.filter((row) => row.status === 'FAILED')
+  const identifiers = rows.map((row) => row.id)
+  const total = rows.reduce((sum, row) => sum + row.count, 0)
+  const selected = enabled
+    ? rows.filter((row) => row.ready)
+    : rows.filter((row) => !row.ready)
+}`,
+    })
+
+    const texts = storyItems(translated).map((step) => step.text)
+    expect(texts).toEqual(expect.arrayContaining([
+      "At least one item in t.messages meets this condition: that item's message identifier equals first",
+      "Set all ready based on whether every item in rows meets this condition: that item's ready",
+      "Set failed to rows filtered to keep each item where that item's status equals “FAILED”",
+      "Create identifiers as rows transformed so each item becomes that item's identifier",
+      "Set total to the sum of each item's count in rows",
+      "Set selected to rows filtered to keep each item where that item's ready",
+      "Set selected to rows filtered to keep each item where not that item's ready",
+    ]))
+    expect(texts.join('\n')).not.toMatch(/\b(?:Some|Every|Map|Filter|Reduce) on\b/)
   })
 
   it('preserves object and array destructuring details', () => {

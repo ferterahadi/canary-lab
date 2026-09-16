@@ -10,6 +10,8 @@ export interface ContextRow {
   beforeLine?: number
   afterLine?: number
   change?: number
+  beforeChanged?: boolean
+  afterChanged?: boolean
 }
 
 export function sourceRows(review: SourceComparison): ContextRow[] {
@@ -50,4 +52,3 @@ export function rowsForTest(rows: ContextRow[], selected: TestSelection | undefi
   const opposite = review[selected.side === 'after' ? 'before' : 'after'].tests.filter((test) => rows.some((row) => contains(selected.test, row[own]) && contains(test, row[other])))
   return rows.filter((row) => contains(selected.test, row[own]) || opposite.some((test) => contains(test, row[other])))
 }
-

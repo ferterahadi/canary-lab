@@ -617,7 +617,7 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="stage-rail-portify"]')?.textContent).toContain('Parallel setup')
     expect(container.querySelector('[data-testid="stage-rail-scaffold"]')?.textContent).toContain('Suite setup')
     expect(container.querySelector('[data-testid="stage-rail-docs"]')?.textContent).toContain('Requirements')
-    expect(container.querySelector('[data-testid="stage-rail-evaluation-export"]')?.textContent).toContain('Report')
+    expect(container.querySelector('[data-testid="stage-rail-evaluation-export"]')?.textContent).toContain('Evaluation report')
     // Run + heal are one user step; similarity never shows unless it needs a
     // human; the pair companions (env-capture, prd-summary) fold into their rows.
     const runRow = container.querySelector('[data-testid="stage-rail-run"]')!

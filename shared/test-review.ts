@@ -1,6 +1,22 @@
 import type { ReadableTest, ReadableTestStory } from './readable-tests/types'
 import type { SpecDiff } from './verification-strength/types'
 
+export interface VersionTest {
+  file: string
+  name: string
+  line: number
+  endLine: number
+  /** Exact recorded counterpart, including the old title of a renamed test. */
+  previous?: { name: string; line: number; endLine: number }
+}
+export type TestChangeKind = 'added' | 'changed' | 'removed'
+export type TestVersionChanges = Record<TestChangeKind, VersionTest[]>
+export interface RunDifference { file: string; affectedTests: string[] }
+export type TestSourceComparison = {
+  files: string[]
+  differences: RunDifference[]
+} & ({ state: 'ready'; changes: TestVersionChanges } | { state: 'unavailable'; reasons: string[] })
+
 /** A human decision about one exact run-snapshot versus live-suite revision. */
 export interface TestReviewDecision {
   at: string
@@ -32,4 +48,6 @@ export interface TestFileReview {
   after: ReviewSource
   patch: string
   assessment: SpecDiff
+  /** Semantic source edits for test navigation; the raw patch remains complete. */
+  meaningfulChanges?: { before: number[]; after: number[] }
 }

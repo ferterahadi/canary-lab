@@ -40,19 +40,34 @@ async function render(isAuthoringTests = false) {
   await act(async () => root.render(<InvalidationProvider><TestCasesColumn feature="suite" isAuthoringTests={isAuthoringTests} activeRunSummary={undefined} activeRunStatus={undefined} /></InvalidationProvider>))
 }
 describe('Tests column discovery repair', () => {
-  it('keeps repair and retry visible with one disclosure for the agent handoff and diagnostics', async () => {
+  it('puts all three ways out on the card, with nothing to open for a one-line error', async () => {
     await render()
-    const details = container.querySelector('details')!
-    expect(container.querySelectorAll('details')).toHaveLength(1)
-    expect(details.open).toBe(false)
-    expect(details.querySelector('summary')?.textContent).toBe('Details & other options')
-    const mainActions = [...container.querySelectorAll('button')].filter((button) => !button.closest('details'))
+    const command = container.querySelector('[data-testid="discovery-repair-command"]')!
+    const mainActions = [...container.querySelectorAll('button')].filter((button) => !command.contains(button))
     expect(mainActions.map((button) => button.textContent)).toEqual(['Repair in Canary Lab', 'Retry discovery'])
     expect(mainActions[0].classList.contains('cl-button-primary')).toBe(true)
-    await act(async () => details.querySelector('summary')!.click())
-    expect(details.open).toBe(true)
-    expect(details.textContent).toContain('/canary-lab-repair-discovery suite')
-    expect(details.textContent).toContain('missing import')
+    // The third way out — hand it to your own agent — is a peer of the buttons.
+    // It used to sit behind a disclosure labelled "Details & other options",
+    // where nobody looking at a failure would think to find it.
+    expect(command.textContent).toContain('/canary-lab-repair-discovery suite')
+    // And the error itself reads on the card rather than costing a click.
+    expect(container.querySelector('[data-testid="test-list-error-summary"]')?.textContent).toBe('missing import')
+    expect(container.querySelectorAll('details')).toHaveLength(0)
+  })
+
+  it('opens the rest of a multi-line error behind one named disclosure', async () => {
+    vi.mocked(getFeatureTests).mockResolvedValue([{
+      ...failedSpecs[0],
+      discoveryDiagnostics: "Error: Cannot find module './fixtures/auth'\n  at e2e/a.spec.ts:3:1\n  at playwright.config.ts:12:20",
+    }])
+    await render()
+    // The first line is the diagnosis and stays on the card; only the stack
+    // behind it is worth hiding.
+    expect(container.querySelector('[data-testid="test-list-error-summary"]')?.textContent).toBe("Error: Cannot find module './fixtures/auth'")
+    const details = container.querySelectorAll('details')
+    expect(details).toHaveLength(1)
+    expect(details[0].querySelector('summary')?.textContent).toBe('Full error output')
+    expect(details[0].querySelector('pre')?.textContent).toContain('at playwright.config.ts:12:20')
   })
 
   it('shows live placeholders instead of a discovery failure while authoring, then discovers again when writing ends', async () => {
@@ -80,7 +95,7 @@ describe('Tests column discovery repair', () => {
 
   it('shows external work started elsewhere and returns to the existing test list after verification without a refresh', async () => {
     await render()
-    expect(container.textContent).toContain('In your agent')
+    expect(container.querySelector('[data-testid="discovery-repair-command"]')).not.toBeNull()
     await send([repair('repairing')])
     expect(container.textContent).toContain('Inspecting imports')
     expect(container.textContent).not.toContain('Two ways to repair it')
@@ -118,7 +133,32 @@ describe('Tests column discovery repair', () => {
     await act(async () => retry.click())
     expect(container.textContent).toContain('Manually repaired case')
     expect(container.textContent).not.toContain('Test discovery failed')
-    expect(container.textContent).toContain('Repair history')
+    // The restored list IS the evidence the repair worked. A permanent
+    // "Repair history" disclosure above it was chrome for a one-time event.
+    expect(container.textContent).not.toContain('Repair history')
+    expect(container.querySelector('[data-testid="tests-unavailable-card"]')).toBeNull()
+  })
+
+  it('acknowledges the start and, when no agent is free, points at the command below it', async () => {
+    await render()
+    const button = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Repair in Canary Lab') || b.textContent === 'Starting…') as HTMLButtonElement
+    let release!: (value: DiscoveryRepairView) => void
+    vi.mocked(startDiscoveryRepair).mockReturnValue(new Promise((r) => { release = r }))
+    await act(async () => button().click())
+    expect(button().textContent).toBe('Starting…')
+    expect(button().disabled).toBe(true)
+    await act(async () => release(repair('repairing')))
+
+    // A 409 here is not a transport problem the user can wait out: it means no
+    // agent is free, and the fix is the command on this same card.
+    await send([repair('failed')])
+    vi.mocked(startDiscoveryRepair).mockRejectedValue(new Error('No repair agent is available. Use the In your agent command.'))
+    const resume = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Resume repair')!
+    await act(async () => resume.click())
+    const alert = container.querySelector('[role="alert"]')!
+    expect(alert.textContent).toContain('No repair agent is available')
+    expect(alert.compareDocumentPosition(container.querySelector('[data-testid="discovery-repair-command"]')!))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
   })
 
   it('rehydrates the live record from a reconnect snapshot and ignores an older REST response', async () => {

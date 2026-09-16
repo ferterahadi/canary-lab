@@ -384,11 +384,7 @@ describe('flights routes', () => {
 
     expect(resp.statusCode).toBe(400)
     expect(resp.json()).toMatchObject({ type: 'stage_entry_rejected' })
-    // Label re-pinned: 98b28976 deliberately renamed the evaluation-export
-    // stage's display label from "Evaluation report" to "Report" (part of a
-    // broader FLIGHT_STAGE_LABEL unification — see shared/flights/stage-labels.ts)
-    // without updating this assertion, which predates that rename.
-    expect(resp.json().error).toMatch(/Can't start at Report:/)
+    expect(resp.json().error).toMatch(/Can't start at Evaluation report:/)
   })
 
   describe('agent-session', () => {

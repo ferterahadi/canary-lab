@@ -5,14 +5,18 @@ import { connectReconnectingSocket, defaultWsBase } from '../api/reconnecting-so
 export function useDiscoveryRepair(feature: string | null) {
   const [snapshot, setSnapshot] = useState<{ feature: string; repairs: DiscoveryRepairView[] } | null>(null)
   const [starting, setStarting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // Only a failed `start` reaches here. A dropped socket used to set this too,
+  // which put an amber line in the tests column for a transport blip on a
+  // stream that is open for every suite, repair or no repair — and, because the
+  // line was not gated on a run, over a run's recorded roster as well.
+  const [startError, setStartError] = useState<string | null>(null)
   const featureRef = useRef(feature)
   featureRef.current = feature
   useEffect(() => {
     if (!feature) return
     let cancelled = false
     let receivedStream = false
-    setError(null)
+    setStartError(null)
     void listDiscoveryRepairs(feature).then((repairs) => {
       if (!cancelled && !receivedStream && Array.isArray(repairs)) setSnapshot({ feature, repairs })
     }).catch(() => { /* The task stream supplies the same snapshot when REST races a reconnect. */ })
@@ -22,17 +26,16 @@ export function useDiscoveryRepair(feature: string | null) {
       onMessage: (data) => {
         try {
           const value = JSON.parse(data) as { repairs?: DiscoveryRepairView[] }
-          if (!cancelled && Array.isArray(value.repairs)) { receivedStream = true; setSnapshot({ feature, repairs: value.repairs }); setError(null) }
+          if (!cancelled && Array.isArray(value.repairs)) { receivedStream = true; setSnapshot({ feature, repairs: value.repairs }) }
         } catch { /* Ignore malformed frames; reconnect snapshots remain authoritative. */ }
       },
-      onReconnect: () => { if (!cancelled) setError('Reconnecting to repair progress…') },
     })
     return () => { cancelled = true; connection.close() }
   }, [feature])
   const start = useCallback(async () => {
     if (!feature) return
     setStarting(true)
-    setError(null)
+    setStartError(null)
     try {
       const repair = await startDiscoveryRepair(feature)
       if (featureRef.current === feature) setSnapshot((previous) => {
@@ -41,8 +44,8 @@ export function useDiscoveryRepair(feature: string | null) {
         if (repairs.some((r) => r.id === repair.id && r.updatedAt >= repair.updatedAt)) return previous
         return { feature, repairs: [repair, ...repairs.filter((r) => r.id !== repair.id)] }
       })
-    } catch (err) { if (featureRef.current === feature) setError(err instanceof Error ? err.message : String(err)) }
+    } catch (err) { if (featureRef.current === feature) setStartError(err instanceof Error ? err.message : String(err)) }
     finally { setStarting(false) }
   }, [feature])
-  return { repairs: snapshot?.feature === feature ? snapshot.repairs : [], start, starting, error }
+  return { repairs: snapshot?.feature === feature ? snapshot.repairs : [], start, starting, startError }
 }

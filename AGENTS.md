@@ -19,6 +19,16 @@ copied to `dist/templates/` during build.
 
 ## Hard rules
 
+- **Keep workspace data in the workspace.** Feature suites, their fixtures, and
+  original run artifacts belong in the selected Canary workspace, never this
+  package's source tree. Repository unit/regression fixtures stay beside their
+  tests so a fresh checkout works: use synthetic data or anonymized recordings,
+  preserve the behavior and result relationships, and replace personal paths,
+  project names, and identifying content with neutral placeholders. Never load
+  or symlink a contributor's live workspace from a repository test.
+  `npm run check:conventions` rejects personal home paths and symlinks in fixture
+  directories under `apps/`, `shared/`, and `tools/`; `npm run smoke:pack` runs
+  that gate too. This is a repository check, not a filesystem sandbox.
 - **Never run the canary-apply rebuild/restart cycle** — the user runs it themselves
   (see the `cl_verify-changes` skill for the hand-off). Sole exception: a checkout
   that carries a gitignored `cl_apply-local` skill has opted in locally — follow that

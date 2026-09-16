@@ -116,10 +116,10 @@ cross-cutting.
 
 - Run tests against a **deployed** environment with `execute_verification`, target URLs, and a Playwright envset. Verification never boots local services or heals; configs are reusable and scoped to the `verify` MCP profile.
 
-### [Export evaluation]
+### [Evaluation report]
 
-- Export any terminal run as `evaluation.html`. Failed or aborted runs preserve their status.
-- **Raw** uses run evidence; **localized** asks a local agent to improve per-test wording. External MCP clients supply their own wording. Tests and verdicts stay the same.
+- Create an evaluation report for any terminal run as `evaluation.html`. Failed or aborted runs preserve their status.
+- **Evidence report** uses run evidence; **Plain-English report** asks a local agent to clarify the wording. External MCP clients supply their own wording. Tests and verdicts stay the same.
 
 ### [General]
 

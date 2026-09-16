@@ -4,7 +4,7 @@ import { compareText, type TextPart } from '@/shared/lib/comparison-diff'
 export type ComparisonRow =
   | { id: string; kind: 'section'; label: ReactNode }
   | { id: string; kind: 'message'; label: ReactNode; assessment?: ReactNode; message: ReactNode }
-  | { id: string; kind?: 'values'; label?: ReactNode; assessment?: ReactNode; before: string | null; after: string | null; description?: ReactNode; code?: boolean; testId?: string; beforeLine?: number; afterLine?: number; selected?: boolean; sourceChanged?: boolean; fullSource?: boolean; beforeContent?: ReactNode; afterContent?: ReactNode }
+  | { id: string; kind?: 'values'; label?: ReactNode; assessment?: ReactNode; before: string | null; after: string | null; description?: ReactNode; code?: boolean; testId?: string; beforeLine?: number | string; afterLine?: number | string; selected?: boolean; sourceChanged?: boolean; fullSource?: boolean; beforeContent?: ReactNode; afterContent?: ReactNode }
 
 export function ComparisonTable({ rows, beforeLabel = 'Before', afterLabel = 'After', labelHeading = 'Change', code = false, ariaLabel = 'Before and after comparison', review = false, scrollRef, onScroll }: {
   rows: ComparisonRow[]

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   getTestFileReview,
   getTestFileDifference,
+  getTestSourceComparison,
   listFeatures,
   approveDirtySpecs,
   commitDirtySpecs,
@@ -73,7 +74,7 @@ describe('features api', () => {
     // baseline, and the wrong evidence for a mid-run spec edit.
     const review = { before: { source: '', tests: [] }, after: { source: '', tests: [] }, patch: '', baseline: 'run-start', assessment: { tests: [] } }
     // A fresh Response per call: a body can only be read once.
-    const fetchImpl = vi.fn(async () => ok(review))
+    const fetchImpl = vi.fn<typeof fetch>(async () => ok(review))
     await expect(getTestFileReview('feat/a', 'e2e/a.spec.ts', 'run 1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(review)
     await getTestFileReview('feat/a', 'e2e/a.spec.ts', undefined, { baseUrl: 'http://x', fetchImpl })
     expect(fetchImpl.mock.calls.map((call) => call[0])).toEqual([
@@ -93,6 +94,13 @@ describe('features api', () => {
       'http://x/api/features/feat%2Fa/test-review?file=e2e%2Fa.spec.ts&runId=run+1&summary=true',
       { method: 'GET' },
     )
+  })
+
+  it('gets source declaration changes for exactly the selected suite and run', async () => {
+    const comparison = { state: 'ready', files: [], differences: [], changes: { added: [], changed: [], removed: [] } }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(comparison))
+    await expect(getTestSourceComparison('feat/a', 'run 1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(comparison)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/features/feat%2Fa/test-source-comparison?runId=run+1', { method: 'GET' })
   })
 
   it('uses globalThis.fetch by default when no fetchImpl provided', async () => {

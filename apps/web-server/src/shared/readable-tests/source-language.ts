@@ -310,6 +310,7 @@ export function sourceDeclarationText(node: ts.Statement): string | undefined {
 }
 
 export function testRegistration(node: ts.Statement, context: SemanticContext): {
+  role: 'test' | 'setup'
   text: string
   callback: ts.ArrowFunction | ts.FunctionExpression
 } | undefined {
@@ -352,9 +353,10 @@ export function testRegistration(node: ts.Statement, context: SemanticContext): 
   // Curried calls are registration tables only when .each is explicit.
   if (tables.length && !path.includes('each')) return undefined
   const prefix = HOOKS[scope] ?? (scope === 'describe' ? 'Test group' : 'Test')
+  const isTest = scope === 'test' || scope === 'it'
   const args = call.arguments.filter((arg) => arg !== callback).map(sourceExpressionText)
   const modifiers = path.filter((part) => part !== 'each').map((part) => MODIFIERS[part])
-  const details = [
+  const details = isTest ? [sourceExpressionText(call.arguments[0])] : [
     args.length ? args.join('; ') : '',
     modifiers.length ? `(${modifiers.join(', ')})` : '',
     path.includes('each') ? `for each case in ${tables.map(sourceExpressionText).join(', ')}` : '',
@@ -364,5 +366,5 @@ export function testRegistration(node: ts.Statement, context: SemanticContext): 
   ].filter(Boolean)
   // Generic or generator callbacks need the full grammar to preserve their contract.
   if (callback.typeParameters?.length || (ts.isFunctionExpression(callback) && (callback.asteriskToken || callback.name))) return undefined
-  return { text: `${prefix}${details.length ? `: ${details.join('; ')}` : ''}`, callback }
+  return { role: isTest ? 'test' : 'setup', text: `${prefix}${details.length ? `: ${details.join('; ')}` : ''}`, callback }
 }

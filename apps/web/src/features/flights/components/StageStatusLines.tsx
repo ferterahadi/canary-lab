@@ -459,11 +459,11 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
       return `${plural(findings, 'finding')} — ${confirmed} confirmed 3/3${unconfirmed ? `, ${unconfirmed} unconfirmed` : ''}.${notProven}`
     }
     case 'evaluation-export': {
-      if (running) return 'Building the report…'
+      if (running) return 'Building the evaluation report…'
       // Deliberately unnamed here: the sentence used to end in `export.zip`, the
       // archive's internal filename inside the logs dir and NOT the name the
       // download hands over. The card's Archive tile carries the real one.
-      return 'Report ready.'
+      return 'Evaluation report ready.'
     }
     default:
       return running ? 'Working…' : 'Done.'

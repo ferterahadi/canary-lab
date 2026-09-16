@@ -432,7 +432,7 @@ function CompositionGroup({ heading, count, rows, testId, awaiting }: {
   )
 }
 
-/** This flight's report: the deliverable, named as the user will receive it, with
+/** This flight's evaluation report: the deliverable, named as the user will receive it, with
  *  the one download for it. The band above measures what the report SAYS; this
  *  says what it IS and hands it over.
  *
@@ -440,7 +440,7 @@ function CompositionGroup({ heading, count, rows, testId, awaiting }: {
  *  completed export for the feature, whatever produced it), so the kicker says
  *  "latest" rather than claiming the flight built it. */
 export function EvaluationDeliverablePanel({ task, awaiting, probed }: { task: EvaluationExportTask | null; awaiting?: AwaitingState; probed?: boolean }) {
-  const kicker = probed ? 'Latest report for this suite' : "This flight's report"
+  const kicker = probed ? 'Latest evaluation report for this suite' : "This flight's evaluation report"
   if (!task) {
     return awaiting ? <StageColumn><SkeletonPanel kicker={kicker} awaiting={awaiting} testId="evaluation-deliverable-skeleton" rows={2} /></StageColumn> : null
   }
@@ -503,11 +503,11 @@ export function AllReportsPanel({
   if (mine.length === 0) {
     // Safe to promise: this stage's own export becomes the first row, so the
     // card is never a placeholder for something that will not arrive.
-    return awaiting ? <StageColumn><SkeletonPanel kicker="All reports for this suite" awaiting={awaiting} testId="all-reports-skeleton" variant="rows" rows={2} /></StageColumn> : null
+    return awaiting ? <StageColumn><SkeletonPanel kicker="All evaluation reports for this suite" awaiting={awaiting} testId="all-reports-skeleton" variant="rows" rows={2} /></StageColumn> : null
   }
   return (
     <StageColumn>
-      <PanelCard kicker="All reports for this suite" aside={<span className="cl-count-chip">{mine.length}</span>} testId="all-reports-panel">
+      <PanelCard kicker="All evaluation reports for this suite" aside={<span className="cl-count-chip">{mine.length}</span>} testId="all-reports-panel">
         <ul className="m-0 flex list-none flex-col divide-y divide-line-subtle p-0">
           {mine.map((task) => (
             <li key={task.taskId} data-testid={`report-row-${task.taskId}`} className="flex min-w-0 items-center gap-2 py-1.5">

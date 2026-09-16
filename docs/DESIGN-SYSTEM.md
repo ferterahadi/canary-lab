@@ -369,14 +369,34 @@ describe edits, not pass/fail results or the strength of an assertion. Keep any
 weakening hint separate. Label both comparison baselines explicitly when known.
 
 Test review uses two equal Before/After columns for complete source, with source
-line gutters and a sticky header. English and Code share the selected source change;
-Previous/Next scrolls through the whole file, including imports and shared setup.
-A fixed assessment area explains the selected change only after source loads;
+line gutters and a sticky header. English and Code share the selected test or source change;
+English labels multiline statements with source ranges (for example, `2–18`) and
+compacts continuation rows when neither side has independent content. Edits inside
+a range mark its English row even when the wording is unchanged. Code retains every
+source line, and format switching follows the source range rather than a pixel offset.
+Against a recorded run, the footer navigates new, changed, or removed `test(...)`
+declarations across the suite using the same source comparison and totals as the
+Tests header. Each step selects one declaration; a loop counts once regardless of
+how many cases it generates. The comparison reads both source trees, not the run
+result roster. Changed means the title or executable declaration changed; tags,
+annotations, comments, formatting, imports and setup outside it do not increase
+that count. Unambiguous renames retain their recorded counterpart and count once
+as changed. Next keeps the loaded file mounted and
+jumps immediately to the start of the next declaration.
+Each selection compares only that test's paired declarations, without highlighting
+unchanged rows as a selection. Statement fingerprints suppress tag, comment and
+formatting-only highlights even when meaningful edits occur in the same test.
+Added and removed tests show their complete declaration
+on the relevant side and an explicit absence message on the other. The category,
+file, test name, and line survive refresh in the review URL. Against Git HEAD,
+imports and setup remain visible and Previous/Next still navigates
+consecutive blocks of source edits within the selected file.
+A fixed assessment area explains the selected test or source change only after source loads;
 loading or unavailable source never implies no changes. The dialog is up to
 2560px wide (94vw maximum) and 96vh high, with a compact 184px suite/file rail,
 one toolbar, and a suite-scoped footer. The toolbar contains the explicit baseline
-selector, shared English/Code tabs, change navigation, and one editor action.
-Advisory disclosure opens from the header. On narrow screens the rail moves above
+selector, shared English/Code tabs, and selected test name. Navigation lives in the
+footer; each file's editor action lives in the rail. On narrow screens the rail moves above
 the review and the source table scrolls horizontally. Edited test cards stay neutral;
 amber denotes an advisory weakening hint.
 Red and green inside code describe removed and added content only.

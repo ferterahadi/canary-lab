@@ -1,5 +1,5 @@
 /**
- * "Review Evaluation" — the run's deliverable, not the Overview tab's.
+ * "Create evaluation report" — the run's deliverable, not the Overview tab's.
  *
  * It used to sit inside the Overview pane, which made it look like a property
  * of that one tab and left it stranded in an otherwise empty strip. It belongs
@@ -58,12 +58,12 @@ export function ReviewEvaluationMenu({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="Produce the evaluation report and review it — per-test reasoning + verdicts, with video playback where the tests drive a browser. This is the run's deliverable."
+        title="Create the evaluation report — per-test reasoning and verdicts, with video playback where the tests drive a browser. This is the run's deliverable."
         className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors duration-150"
         style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
       >
         <ReportIcon />
-        Review Evaluation
+        Evaluation
         <span aria-hidden="true" style={{ color: 'var(--text-muted)' }}>▾</span>
       </button>
       {open && (
@@ -78,8 +78,8 @@ export function ReviewEvaluationMenu({
             onClick={() => handleExport('raw')}
             className="cl-hover-row block w-full px-3 py-2 text-left"
           >
-            <span className="block font-medium">Raw output</span>
-            <span className="block text-[11px]" style={{ color: 'var(--text-muted)' }}>Fast report, no LLM rewrite</span>
+            <span className="block font-medium">Evidence report</span>
+            <span className="block text-[11px]" style={{ color: 'var(--text-muted)' }}>Generated directly from run evidence</span>
           </button>
           <button
             type="button"
@@ -87,8 +87,8 @@ export function ReviewEvaluationMenu({
             onClick={() => handleExport('localized')}
             className="cl-hover-row block w-full px-3 py-2 text-left"
           >
-            <span className="block font-medium">Localized output</span>
-            <span className="block text-[11px]" style={{ color: 'var(--text-muted)' }}>Uses the LLM rewrite</span>
+            <span className="block font-medium">Plain-English report</span>
+            <span className="block text-[11px]" style={{ color: 'var(--text-muted)' }}>AI clarifies the same run evidence</span>
           </button>
         </div>
       )}

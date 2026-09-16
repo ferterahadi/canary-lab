@@ -164,7 +164,7 @@ const CHECKPOINT_TITLE: Record<string, string> = {
   'portify-gate': 'Make this suite safe to run twice at once?',
   'portify-apply': 'Save these port changes?',
   'run-failed': 'The test run did not pass',
-  'export-mode': 'How should the report be built?',
+  'export-mode': 'How should the evaluation report be built?',
   // StageDetail presents this protocol checkpoint as running Activity, not a
   // decision card. Keep the wire vocabulary labelled for any consumer that
   // still asks for a generic checkpoint title.

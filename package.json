@@ -1,7 +1,7 @@
 {
   "name": "canary-lab",
   "version": "2.3.0",
-  "description": "The independent local harness for AI-repaired Playwright tests \u2014 it runs the tests itself, so a green run can't be faked.",
+  "description": "The independent local harness for AI-repaired Playwright tests — it runs the tests itself, so a green run can't be faked.",
   "keywords": [
     "playwright",
     "playwright-testing",
@@ -140,13 +140,16 @@
     "@modelcontextprotocol/server": "^2.0.0",
     "@playwright/test": "^1.62.0",
     "@toon-format/toon": "^4.1.0",
+    "@typescript-eslint/parser": "8.65.0",
     "ast-types": "^0.16.1",
     "dotenv": "^16.6.1",
+    "eslint-linter": "npm:eslint@9.39.5",
     "fastify": "^5.10.0",
     "hono": "^4.12.34",
     "mammoth": "^1.12.0",
     "node-pty": "^1.1.0",
     "pdf-parse": "^2.4.5",
+    "prettier": "3.9.7",
     "recast": "^0.23.12",
     "shiki": "^4.3.1",
     "typescript": "5.9.3",
@@ -154,7 +157,7 @@
     "zod": "^4.4.3"
   },
   "//overrides": [
-    "Transitive pin for GHSA-frvp-7c67-39w9 \u2014 path traversal in @hono/node-server's",
+    "Transitive pin for GHSA-frvp-7c67-39w9 — path traversal in @hono/node-server's",
     "serveStatic on Windows, patched in 2.0.5. There is no patched 1.x.",
     "",
     "Why a pin is needed: @modelcontextprotocol/node@2.0.0 hard-declares ^1.19.9,",
@@ -165,9 +168,9 @@
     "tree imports. Typecheck and the MCP integration suite verify the resolved 2.x.",
     "",
     "Note: npm overrides are honored only in the root project, so this does NOT",
-    "protect anyone installing canary-lab as a dependency \u2014 only an upstream bump does.",
+    "protect anyone installing canary-lab as a dependency — only an upstream bump does.",
     "",
-    "REMOVE this override once the adapter widens its range to ^1.19.9 || ^2 \u2014 tracked at",
+    "REMOVE this override once the adapter widens its range to ^1.19.9 || ^2 — tracked at",
     "https://github.com/modelcontextprotocol/typescript-sdk/issues/2531"
   ],
   "overrides": {

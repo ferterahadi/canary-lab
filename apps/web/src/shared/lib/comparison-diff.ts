@@ -2,8 +2,8 @@ export interface TextPart { text: string; changed: boolean }
 
 /** Preserve every character, including whitespace. Bound the quadratic alignment
  * work so a captured minified line cannot freeze the review screen. */
-export function compareText(before: string, after: string): { before: TextPart[]; after: TextPart[] } {
-  const tokenize = (text: string): string[] => text.match(/@[\p{L}\p{N}_-]+|[\p{L}\p{N}_]+|\s+|[^\p{L}\p{N}_\s]/gu) ?? []
+export function compareText(before: string, after: string, unit: 'words' | 'lines' = 'words'): { before: TextPart[]; after: TextPart[] } {
+  const tokenize = (text: string): string[] => text.match(unit === 'lines' ? /[^\n]*\n|[^\n]+$/g : /@[\p{L}\p{N}_-]+|[\p{L}\p{N}_]+|\s+|[^\p{L}\p{N}_\s]/gu) ?? []
   const a = tokenize(before)
   const b = tokenize(after)
   let start = 0

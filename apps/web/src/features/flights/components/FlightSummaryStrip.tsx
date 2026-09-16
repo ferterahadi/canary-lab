@@ -151,7 +151,7 @@ export function FlightSummaryStrip({
   // "no report" up here.
   const exportEv = asRecord(flight.stages.find((s) => s.key === 'evaluation-export')?.evidence)
   if (flight.links?.evaluationZip || typeof exportEv?.taskId === 'string') {
-    items.push({ label: 'Report', value: 'ready', tone: 'var(--success)', stage: 'evaluation-export' })
+    items.push({ label: 'Evaluation report', value: 'ready', tone: 'var(--success)', stage: 'evaluation-export' })
   }
 
   const autopilotOn = flight.opts.autopilot !== false

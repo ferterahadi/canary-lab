@@ -373,6 +373,7 @@ describe('extractTestMetadataFromSource', () => {
           endLine: 1,
           bodyLine: 1,
           bodySource: '{ expect(1).toBe(1) }',
+          declarationSource: source.split('\n')[0],
         },
         {
           name: 'second',
@@ -380,6 +381,7 @@ describe('extractTestMetadataFromSource', () => {
           endLine: 2,
           bodyLine: 2,
           bodySource: '{ expect(2).toBe(2) }',
+          declarationSource: source.split('\n')[1],
         },
       ],
     })

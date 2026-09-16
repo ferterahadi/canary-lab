@@ -1,7 +1,6 @@
 import { discoveryRepairActive } from '@shared/discovery-repair'
 import { useDiscoveryRepair } from './use-discovery-repair'
 import { DiscoveryRepairActivity } from './DiscoveryRepairActivity'
-import { CopyField } from '../ui/atoms'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../api/client'
 import { useInvalidationKey } from '../state/invalidation'
@@ -26,8 +25,11 @@ import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../t
 import { sourceFileInRun } from '@/features/runs'
 import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
 import { useTestVersions } from './use-test-versions'
+import type { TestChangeKind } from '../lib/test-versions'
 import { TestsVersionHeader } from './TestsVersionHeader'
 import { SkeletonBar } from '@/shared/ui/Skeleton'
+import { EmptyState } from '@/shared/ui/EmptyState'
+import { TestListUnavailableCard } from './TestListUnavailableCard'
 
 type TestCardExecutionHighlight = TestExecutionLineHighlight & { sourceLine: number }
 
@@ -56,7 +58,7 @@ interface Props {
   baselineRun?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'runId'>
   baselineRunSummary?: RunSummary
   baselineRunStatus?: RunStatus
-  onReviewTest?: (file: string, line?: number, baseline?: 'run') => void
+  onReviewTest?: (file: string, line?: number, baseline?: 'run', change?: TestChangeKind, test?: string) => void
   onTotalTestsChange?: (n: number) => void
   /** Spec files flagged as modified, each with the test title(s) actually
    *  affected — only those test cards get a direct review action. */
@@ -74,7 +76,6 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
   const repairState = useDiscoveryRepair(feature)
   const latestRepair = repairState.repairs[0]
   const activeRepair = runId ? undefined : repairState.repairs.find(discoveryRepairActive)
-  const [showRepairHistory, setShowRepairHistory] = useState(false)
   const repairCompletion = latestRepair && !discoveryRepairActive(latestRepair) ? latestRepair.id + latestRepair.updatedAt : ''
   const [loaded, setLoaded] = useState<{ sourceKey: string; specs: FeatureSpecFile[]; revision?: string } | null>(null)
   const specs = loaded?.sourceKey === sourceKey ? loaded.specs : null
@@ -85,8 +86,6 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
   const [manualRetryAfter, setManualRetryAfter] = useState('')
   const loadRevision = `${refreshKey}:${retryKey}`
   useEffect(() => { if (repairCompletion) setRetryKey((key) => key + 1) }, [repairCompletion])
-  const [promptCopied, setPromptCopied] = useState(false)
-  const [copyError, setCopyError] = useState<string | null>(null)
   const [expandedTest, setExpandedTest] = useState<ExpandedTestSelection | null>(null)
 
   useEffect(() => {
@@ -103,8 +102,6 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
       ? current
       : { sourceKey, key: null, autoExpandPending: true })
     setLoadError(null)
-    setPromptCopied(false)
-    setCopyError(null)
     setDiscovery(null)
     setLoaded(previousLists.current.has(sourceKey) ? { sourceKey, specs: previousLists.current.get(sourceKey)! } : null)
     const failed = (message: string): void => {
@@ -175,29 +172,21 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
   )
 
   if (!feature) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
-        Select a suite
-      </div>
-    )
+    // Compact: the title is the whole message, and the control that resolves
+    // it is the Suites column beside this one — a body here would be three
+    // lines telling the user to look left.
+    return <EmptyState compact reason="not-yet" title="No suite selected" testId="tests-no-suite" />
   }
 
   const displaySpecs = specs
   const incompleteSpecs = discovery?.feature === feature ? discovery.specs : []
   const repairFailure = !runId && latestRepair?.status === 'failed' && manualRetryAfter !== repairCompletion ? latestRepair.diagnostic : null
   const discoveryError = loadError || repairFailure
-  const diagnostics = repairFailure || incompleteSpecs.find((spec) => spec.discoveryDiagnostics)?.discoveryDiagnostics
-  const repairPrompt = incompleteSpecs.find((spec) => spec.discoveryRepairPrompt)?.discoveryRepairPrompt
-  const copyRepairPrompt = async (): Promise<void> => {
-    if (!repairPrompt) return
-    try {
-      await navigator.clipboard.writeText(repairPrompt)
-      setPromptCopied(true)
-      setCopyError(null)
-    } catch {
-      setCopyError('Could not copy. Open the repair prompt below and copy it manually.')
-    }
-  }
+  // What the card shows as the failure itself: Playwright's own diagnostics
+  // when it produced any, the failed request otherwise. Its first line is the
+  // diagnosis on the card; the rest opens behind `Full error output`.
+  const errorOutput = repairFailure || incompleteSpecs.find((spec) => spec.discoveryDiagnostics)?.discoveryDiagnostics || discoveryError || ''
+  const retryDiscovery = (): void => { setManualRetryAfter(repairCompletion); setRetryKey((key) => key + 1) }
   const isRunActivelyTesting = activeRunStatus === 'running'
   // Header and cards share the same identity/status rules, including skipped
   // and never-run tests that must not become passes.
@@ -239,77 +228,61 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
               Writing tests…
             </div>
             <div className="space-y-1.5">
-              {AUTHORING_NAME_WIDTHS.map((width, i) => <AuthoringTestCard key={width} width={width} row={i} />)}
+              {SKELETON_NAME_WIDTHS.map((width, i) => <TestCardSkeleton key={width} width={width} row={i} />)}
             </div>
           </div>
         ) : <>
-        {specs?.some((spec) => spec.recordedSourceUnavailable) && <div role="status" className="mb-3 text-xs text-secondary">
-          <p>Source wasn’t saved for some tests in this run. Recorded results are still available.</p>
-          {onCurrentTestsChange && <button type="button" className="mt-1 text-accent hover:underline" onClick={() => onCurrentTestsChange(true)}>View current source</button>}
-        </div>}
-        {repairState.error && <p role="status" className="mb-2 text-xs text-warning">{repairState.error}</p>}
         {activeRepair ? <DiscoveryRepairActivity repair={activeRepair} /> : <>
-        {latestRepair && <details className="mb-2 text-xs" open={showRepairHistory} onToggle={(event) => setShowRepairHistory(event.currentTarget.open)}>
-          <summary className="cursor-pointer text-accent">Repair history</summary>
-          {showRepairHistory && <DiscoveryRepairActivity repair={latestRepair} />}
-        </details>}
-        {discoveryError && (
-          <div className="mb-2 rounded-md border p-3 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
-            <div role="status">
-            <div className="font-medium text-primary">{runId ? 'Recorded tests unavailable' : 'Test discovery failed'}</div>
-            <p className="mt-1 leading-relaxed">{runId ? 'Open Playwright to inspect the recorded results. Current workspace tests cannot replace this run’s evidence.' : 'Playwright couldn’t load the test list. Repair discovery to see your tests.'}</p>
-            {!runId && displaySpecs && <p className="mt-1">Showing the previous test list until discovery succeeds.</p>}
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              {!runId && <button type="button" className="cl-button-primary px-3 py-1.5" disabled={repairState.starting} onClick={() => { void repairState.start() }}>{repairState.starting ? 'Starting…' : latestRepair?.status === 'failed' ? 'Resume repair' : 'Repair in Canary Lab'}</button>}
-              <button type="button" className="cl-button px-2 py-1" onClick={() => { setManualRetryAfter(repairCompletion); setRetryKey((key) => key + 1) }}>{runId ? 'Reload recorded tests' : 'Retry discovery'}</button>
-            </div>
-            <details className="mt-3 border-t border-[var(--border-default)] pt-3">
-              <summary className="cursor-pointer text-muted hover:text-primary">{runId ? 'Technical details' : 'Details & other options'}</summary>
-              <div className="mt-3 space-y-4">
-            {!runId && <div className="space-y-2">
-              <div className="font-medium text-primary">In your agent</div>
-              <p>Paste this command in Claude or Codex.</p>
-              <CopyField value={`/canary-lab-repair-discovery ${feature}`} label="discovery repair command" />
-            </div>}
-            <div>
-              <div className="font-medium text-primary">View discovery error</div>
-              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px]">{diagnostics || discoveryError}</pre>
-            </div>
-            {repairPrompt && <div>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-medium text-primary">View repair prompt</span>
-                <button type="button" className="cl-button px-2 py-1" onClick={copyRepairPrompt}>{promptCopied ? 'Copied repair prompt' : 'Copy repair prompt'}</button>
-              </div>
-              {copyError && <p role="alert" className="mt-2 text-danger">{copyError}</p>}
-              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px]">{repairPrompt}</pre>
-            </div>}
-            {!displaySpecs && incompleteSpecs.length > 0 && <div>
-              <div className="font-medium text-primary">Source definitions · incomplete</div>
-              <p className="mt-1">Generated cases may be missing. These definitions are not the discovered test count.</p>
-              {incompleteSpecs.map((spec) => <div key={spec.file} className="mt-2">
-                <div className="break-all text-muted">{spec.file}</div>
-                <ul className="mt-1 space-y-1">{spec.tests.map((test, i) => <li key={`${test.line}:${i}`}>{test.name}</li>)}</ul>
-                {spec.parseError && <p className="text-danger">{spec.parseError}</p>}
-              </div>)}
-            </div>}
-              </div>
-            </details>
-          </div>
-        )}
+        {discoveryError && <>
+          {runId
+            ? <TestListUnavailableCard
+                testId="tests-unavailable-card"
+                title="Recorded tests unavailable"
+                lead="This run’s test list couldn’t be read."
+                error={errorOutput}
+                retryLabel="Reload recorded tests"
+                onRetry={retryDiscovery}
+              />
+            : <TestListUnavailableCard
+                testId="tests-unavailable-card"
+                title="Test discovery failed"
+                lead="Playwright couldn’t list this suite’s tests."
+                error={errorOutput}
+                retryLabel="Retry discovery"
+                onRetry={retryDiscovery}
+                repair={{
+                  starting: repairState.starting,
+                  resume: latestRepair?.status === 'failed',
+                  onStart: () => { void repairState.start() },
+                  command: `/canary-lab-repair-discovery ${feature}`,
+                  startError: repairState.startError,
+                }}
+              />}
+          {/* Sits under the card, beside what it describes: the stale list this
+              note is about, or the tab that still holds the run's results. */}
+          {runId
+            ? <p className="mb-3 text-[11px] text-muted">Recorded results are still in the Playwright tab. Current tests can’t stand in for this run’s evidence.</p>
+            : displaySpecs && <p className="mb-3 text-[11px] text-muted">Showing the last list that loaded.</p>}
+        </>}
         {!displaySpecs ? (
-          !loadError && <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading...</div>
+          // The list is arriving, so the placeholder is the list: the same cards
+          // the fetch resolves into, rather than a one-line "Loading..." that
+          // the first spec then shoves off the pane. See `TestCardSkeleton`.
+          !loadError && <div data-testid="tests-loading-placeholder">
+            <span role="status" className="sr-only">Loading test cases…</span>
+            <div className="space-y-1.5">
+              {SKELETON_NAME_WIDTHS.map((width, i) => <TestCardSkeleton key={width} width={width} row={i} />)}
+            </div>
+          </div>
         ) : displaySpecs.length === 0 ? (
-          <div role="status" className="text-xs text-secondary">{runId
+          // Compact, because each title is the whole message and the control
+          // that resolves it — the run picker, the header's version tabs, an
+          // editor — is never in this pane.
+          runId
             ? isRunActivelyTesting || activeRunStatus === 'queued' || activeRunStatus === 'healing'
-              ? 'Waiting for this run to record its test list.'
-              : 'This run has no recorded test list. Select another run or start a new run to record its tests. Any available execution evidence is in Playwright.'
-            : 'No test files found.'}
-            {runId && !isRunActivelyTesting && activeRunStatus !== 'queued' && activeRunStatus !== 'healing' && onCurrentTestsChange && (
-              <button type="button" className="ml-1 text-accent underline-offset-2 transition-colors hover:underline" onClick={() => onCurrentTestsChange(true)}>
-                Show current source
-              </button>
-            )}</div>
+              ? <EmptyState compact reason="not-yet" title="Listing tests…" testId="tests-run-listing" />
+              : <EmptyState compact reason="not-captured" title="This run recorded no tests" testId="tests-run-none" />
+            : <EmptyState compact reason="not-yet" title="No tests in this suite yet" testId="tests-none" />
         ) : (
           <div className="space-y-1.5">
             {displaySpecs.flatMap((spec) => {
@@ -370,7 +343,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
                     test={t}
                     sourceUnavailable={spec.recordedSourceUnavailable}
                     status={statusForTest(testIdentity, activeRunSummary, isRunActivelyTesting)}
-                    sourceStatus={currentTests ? modified && baselineRunId ? 'Changed since run' : 'Not verified' : undefined}
+                    showStatus={!currentTests && Boolean(runId || activeRunSummary)}
                     showNotRun={Boolean(runId) && !isRunActivelyTesting}
                     isRunningTest={isRunningTest}
                     runningStep={runningTest?.step}
@@ -459,10 +432,11 @@ function formatLoadError(err: unknown): string {
   return 'Unable to load tests for this suite.'
 }
 
-/** The authoring placeholder is the card it becomes — R83's rule from the flight
- *  stage panes applied to this column. A pane there keeps its settled card stack
- *  in every state, with only the figures replaced by bars, so a value lands in
- *  the slot its placeholder held. This column's settled stack is TestCards, so
+/** The placeholder is the card it becomes — R83's rule from the flight stage
+ *  panes applied to this column, for both of the column's waiting states: an
+ *  authoring agent writing specs, and the plain fetch of a list that exists.
+ *  A pane there keeps its settled card stack in every state, with only the
+ *  figures replaced by bars, so a value lands in the slot its placeholder held. This column's settled stack is TestCards, so
  *  the placeholder is a TestCard: the same `cl-card` chrome, the same `space-y`
  *  rhythm, and the same 40px header row (`py-2.5` twice over a 20px line box),
  *  with the caret, `#N`, name, `:line` and status pill each standing in at their
@@ -471,7 +445,7 @@ function formatLoadError(err: unknown): string {
  *
  *  Every bar carries the CARD's sweep offset rather than its own: one card is
  *  one test arriving, so it sweeps as a unit while the stack reads top-down. */
-function AuthoringTestCard({ width, row }: { width: string; row: number }) {
+function TestCardSkeleton({ width, row }: { width: string; row: number }) {
   return (
     <div className="cl-card" data-testid="test-card-skeleton" aria-hidden="true">
       <div className="flex h-10 items-center gap-3 px-3">
@@ -492,7 +466,7 @@ function AuthoringTestCard({ width, row }: { width: string; row: number }) {
 /** Per-card name widths. Fixed rather than randomized: `Math.random` would
  *  reshuffle the stack on every render, which reads as activity that is not
  *  happening. The count of entries IS the number of placeholder cards. */
-const AUTHORING_NAME_WIDTHS = ['58%', '41%', '69%'] as const
+const SKELETON_NAME_WIDTHS = ['58%', '41%', '69%'] as const
 
 function TestCard({
   sourceFile,
@@ -500,7 +474,7 @@ function TestCard({
   test,
   sourceUnavailable,
   status,
-  sourceStatus,
+  showStatus,
   showNotRun,
   isRunningTest,
   runningStep,
@@ -516,7 +490,7 @@ function TestCard({
   test: ExtractedTest
   sourceUnavailable?: boolean
   status: StepStatus
-  sourceStatus?: 'Changed since run' | 'Not verified'
+  showStatus: boolean
   showNotRun: boolean
   isRunningTest: boolean
   runningStep?: RunSummaryRunningStep
@@ -580,9 +554,7 @@ function TestCard({
         >
           :{test.line}
         </span>
-        {sourceStatus
-          ? <StepStatusBadge status="unmatched" label={sourceStatus} />
-          : <StepStatusBadge status={status} label={showNotRun && (status === 'unmatched' || status === 'pending') ? 'not run' : undefined} />}
+        {showStatus && <StepStatusBadge status={status} label={showNotRun && (status === 'unmatched' || status === 'pending') ? 'not run' : undefined} />}
       </button>
       {expanded && (
         <div className="space-y-2 px-3 pb-3">

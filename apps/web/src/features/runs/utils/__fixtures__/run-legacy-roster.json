@@ -1,0 +1,319 @@
+{
+  "manifest": {
+    "runId": "2000-01-02T0245-demo",
+    "feature": "legacy-suite",
+    "featureDir": "/workspace/features/legacy-suite",
+    "status": "passed"
+  },
+  "summary": {
+    "complete": true,
+    "total": 23,
+    "passed": 23,
+    "passedNames": [
+      "test-case-recorded-case-001",
+      "test-case-recorded-case-002",
+      "test-case-recorded-case-003",
+      "test-case-recorded-case-004",
+      "test-case-recorded-case-005",
+      "test-case-recorded-case-006",
+      "test-case-recorded-case-007",
+      "test-case-recorded-case-008",
+      "test-case-recorded-case-009",
+      "test-case-recorded-case-010",
+      "test-case-recorded-case-011",
+      "test-case-recorded-case-012",
+      "test-case-recorded-case-013",
+      "test-case-recorded-case-014",
+      "test-case-recorded-case-015",
+      "test-case-recorded-case-016",
+      "test-case-recorded-case-017",
+      "test-case-recorded-case-018",
+      "test-case-recorded-case-019",
+      "test-case-recorded-case-020",
+      "test-case-recorded-case-021",
+      "test-case-recorded-case-022",
+      "test-case-recorded-case-023"
+    ],
+    "passedIds": [
+      "test-id-case-001",
+      "test-id-case-002",
+      "test-id-case-003",
+      "test-id-case-004",
+      "test-id-case-005",
+      "test-id-case-006",
+      "test-id-case-007",
+      "test-id-case-008",
+      "test-id-case-009",
+      "test-id-case-010",
+      "test-id-case-011",
+      "test-id-case-012",
+      "test-id-case-013",
+      "test-id-case-014",
+      "test-id-case-015",
+      "test-id-case-016",
+      "test-id-case-017",
+      "test-id-case-018",
+      "test-id-case-019",
+      "test-id-case-020",
+      "test-id-case-021",
+      "test-id-case-022",
+      "test-id-case-023"
+    ],
+    "knownTests": [
+      {
+        "id": "test-id-case-001",
+        "name": "test-case-recorded-case-001",
+        "title": "recorded case 001",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 01",
+          "recorded case 001"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:119"
+      },
+      {
+        "id": "test-id-case-002",
+        "name": "test-case-recorded-case-002",
+        "title": "recorded case 002",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 01",
+          "recorded case 002"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:127"
+      },
+      {
+        "id": "test-id-case-003",
+        "name": "test-case-recorded-case-003",
+        "title": "recorded case 003",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 01",
+          "recorded case 003"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:135"
+      },
+      {
+        "id": "test-id-case-004",
+        "name": "test-case-recorded-case-004",
+        "title": "recorded case 004",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 01",
+          "recorded case 004"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:145"
+      },
+      {
+        "id": "test-id-case-005",
+        "name": "test-case-recorded-case-005",
+        "title": "recorded case 005",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 01",
+          "recorded case 005"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:153"
+      },
+      {
+        "id": "test-id-case-006",
+        "name": "test-case-recorded-case-006",
+        "title": "recorded case 006",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 02",
+          "recorded case 006"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:165"
+      },
+      {
+        "id": "test-id-case-007",
+        "name": "test-case-recorded-case-007",
+        "title": "recorded case 007",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 02",
+          "recorded case 007"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:178"
+      },
+      {
+        "id": "test-id-case-008",
+        "name": "test-case-recorded-case-008",
+        "title": "recorded case 008",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 02",
+          "recorded case 008"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:194"
+      },
+      {
+        "id": "test-id-case-009",
+        "name": "test-case-recorded-case-009",
+        "title": "recorded case 009",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 02",
+          "recorded case 009"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:207"
+      },
+      {
+        "id": "test-id-case-010",
+        "name": "test-case-recorded-case-010",
+        "title": "recorded case 010",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 03",
+          "recorded case 010"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:221"
+      },
+      {
+        "id": "test-id-case-011",
+        "name": "test-case-recorded-case-011",
+        "title": "recorded case 011",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 03",
+          "recorded case 011"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:247"
+      },
+      {
+        "id": "test-id-case-012",
+        "name": "test-case-recorded-case-012",
+        "title": "recorded case 012",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 03",
+          "recorded case 012"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:274"
+      },
+      {
+        "id": "test-id-case-013",
+        "name": "test-case-recorded-case-013",
+        "title": "recorded case 013",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 04",
+          "recorded case 013"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:295"
+      },
+      {
+        "id": "test-id-case-014",
+        "name": "test-case-recorded-case-014",
+        "title": "recorded case 014",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 05",
+          "recorded case 014"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:320"
+      },
+      {
+        "id": "test-id-case-015",
+        "name": "test-case-recorded-case-015",
+        "title": "recorded case 015",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 06",
+          "recorded case 015"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:335"
+      },
+      {
+        "id": "test-id-case-016",
+        "name": "test-case-recorded-case-016",
+        "title": "recorded case 016",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 07",
+          "recorded case 016"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:350"
+      },
+      {
+        "id": "test-id-case-017",
+        "name": "test-case-recorded-case-017",
+        "title": "recorded case 017",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 07",
+          "recorded case 017"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:361"
+      },
+      {
+        "id": "test-id-case-018",
+        "name": "test-case-recorded-case-018",
+        "title": "recorded case 018",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 07",
+          "recorded case 018"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:372"
+      },
+      {
+        "id": "test-id-case-019",
+        "name": "test-case-recorded-case-019",
+        "title": "recorded case 019",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 07",
+          "recorded case 019"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:385"
+      },
+      {
+        "id": "test-id-case-020",
+        "name": "test-case-recorded-case-020",
+        "title": "recorded case 020",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 08",
+          "recorded case 020"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:404"
+      },
+      {
+        "id": "test-id-case-021",
+        "name": "test-case-recorded-case-021",
+        "title": "recorded case 021",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 08",
+          "recorded case 021"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:414"
+      },
+      {
+        "id": "test-id-case-022",
+        "name": "test-case-recorded-case-022",
+        "title": "recorded case 022",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 08",
+          "recorded case 022"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:424"
+      },
+      {
+        "id": "test-id-case-023",
+        "name": "test-case-recorded-case-023",
+        "title": "recorded case 023",
+        "titlePath": [
+          "legacy.spec.ts",
+          "recorded group 08",
+          "recorded case 023"
+        ],
+        "location": "/workspace/features/legacy-suite/e2e/legacy.spec.ts:434"
+      }
+    ],
+    "failed": []
+  }
+}
