@@ -25,6 +25,8 @@ import { TestIdBadge } from '../ui/TestIdBadge'
 import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
 import { sourceFileInRun } from '@/features/runs'
 import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
+import { useTestVersions } from './use-test-versions'
+import { TestsVersionHeader } from './TestsVersionHeader'
 import { SkeletonBar } from '@/shared/ui/Skeleton'
 
 type TestCardExecutionHighlight = TestExecutionLineHighlight & { sourceLine: number }
@@ -37,6 +39,7 @@ interface ExpandedTestSelection {
 
 interface Props {
   currentTests?: boolean
+  /** Present while a run is selected, including while its details are loading. */
   onCurrentTestsChange?: (current: boolean) => void
   feature: string | null
   /** Workspace discovery is expected to be incomplete while the authoring
@@ -45,6 +48,14 @@ interface Props {
   activeRunSummary: RunSummary | undefined
   activeRunManifest?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'specEdits' | 'runId'>
   activeRunStatus: RunStatus | undefined
+  /** The selected run, whichever source the column is showing. `activeRun*`
+   *  goes undefined while the user inspects workspace source — the results
+   *  belong to the copy, not to what is on disk — but drift is still measured
+   *  against that run's snapshot from both sides, so the baseline has to
+   *  survive the mode switch. */
+  baselineRun?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'runId'>
+  baselineRunSummary?: RunSummary
+  baselineRunStatus?: RunStatus
   onReviewTest?: (file: string, line?: number, baseline?: 'run') => void
   onTotalTestsChange?: (n: number) => void
   /** Spec files flagged as modified, each with the test title(s) actually
@@ -52,7 +63,7 @@ interface Props {
   dirtySpecs?: DirtySpecSummary[]
 }
 
-export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSummary, activeRunManifest, activeRunStatus, onTotalTestsChange, onReviewTest, currentTests = false, onCurrentTestsChange, dirtySpecs = [] }: Props) {
+export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSummary, activeRunManifest, activeRunStatus, baselineRun, baselineRunSummary, baselineRunStatus, onTotalTestsChange, onReviewTest, currentTests = false, onCurrentTestsChange, dirtySpecs = [] }: Props) {
   // The spec list refetches when a `tests-changed` event fires for the selected
   // feature (App gates the invalidation to the visible feature).
   const refreshKey = useInvalidationKey('tests')
@@ -65,13 +76,14 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
   const activeRepair = runId ? undefined : repairState.repairs.find(discoveryRepairActive)
   const [showRepairHistory, setShowRepairHistory] = useState(false)
   const repairCompletion = latestRepair && !discoveryRepairActive(latestRepair) ? latestRepair.id + latestRepair.updatedAt : ''
-  const [loaded, setLoaded] = useState<{ sourceKey: string; specs: FeatureSpecFile[] } | null>(null)
+  const [loaded, setLoaded] = useState<{ sourceKey: string; specs: FeatureSpecFile[]; revision?: string } | null>(null)
   const specs = loaded?.sourceKey === sourceKey ? loaded.specs : null
   const previousLists = useRef(new Map<string, FeatureSpecFile[]>())
   const [discovery, setDiscovery] = useState<{ feature: string; specs: FeatureSpecFile[] } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [retryKey, setRetryKey] = useState(0)
   const [manualRetryAfter, setManualRetryAfter] = useState('')
+  const loadRevision = `${refreshKey}:${retryKey}`
   useEffect(() => { if (repairCompletion) setRetryKey((key) => key + 1) }, [repairCompletion])
   const [promptCopied, setPromptCopied] = useState(false)
   const [copyError, setCopyError] = useState<string | null>(null)
@@ -114,7 +126,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
           )
           previousLists.current.set(sourceKey, data)
           setDiscovery(null)
-          setLoaded({ sourceKey, specs: data })
+          setLoaded({ sourceKey, specs: data, revision: loadRevision })
           setLoadError(null)
           setExpandedTest((current) => {
             if (current?.sourceKey !== sourceKey || current.autoExpandPending) {
@@ -138,20 +150,16 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
 
   const dirtyRevision = JSON.stringify(dirtySpecs)
 
-  const [runDifferences, setRunDifferences] = useState<string[]>([])
-  const runFiles = JSON.stringify((specs ?? []).map((spec) => spec.file))
-  useEffect(() => {
-    let cancelled = false
-    setRunDifferences([])
-    if (feature && runId && activeRunManifest?.suiteSnapshot?.kind === 'taken') {
-      const featureDir = activeRunManifest?.suiteSnapshot?.kind === 'taken' ? activeRunManifest.suiteSnapshot.dir : activeRunManifest?.featureDir
-      const files = (JSON.parse(runFiles) as string[]).map((file) => featureDir && file.startsWith(`${featureDir}/`) ? file.slice(featureDir.length + 1) : file)
-      for (const file of files) void api.getTestFileDifference(feature, file, runId).then((review) => {
-        if (!cancelled && review.changed) setRunDifferences((previous) => [...previous, file])
-      }).catch(() => { /* A missing snapshot is already disclosed in the run detail. */ })
-    }
-    return () => { cancelled = true }
-  }, [feature, runId, runFiles, refreshKey, dirtyRevision, activeRunManifest?.featureDir])
+  const baselineRunId = baselineRun?.runId
+  const snapshotDir = baselineRun?.suiteSnapshot?.kind === 'taken' ? baselineRun.suiteSnapshot.dir : undefined
+  const baselineFeatureDir = baselineRun?.featureDir
+  const versions = useTestVersions({
+    feature, baseline: baselineRun, displayed: specs, recordedView: Boolean(runId),
+    revision: `${loadRevision}:${workspaceAuthoring}:${dirtyRevision}:${JSON.stringify(baselineRunSummary?.knownTests ?? [])}`,
+    ready: loaded?.revision === loadRevision && !loadError && !discovery && !workspaceAuthoring,
+    displayFailed: Boolean(loadError || discovery),
+  })
+  const runDifferences = versions.comparison.differences
 
   const totalTests = specs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
   useEffect(() => {
@@ -191,40 +199,38 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
     }
   }
   const isRunActivelyTesting = activeRunStatus === 'running'
-  const passedCount = (displaySpecs ?? []).reduce(
-    (acc, spec) => acc + spec.tests.filter(
-      (t) => statusForTest(
-        summaryIdentityForWorkspaceTest(t.name, t.line, sourceFileInRun(t.sourceFile ?? spec.file, activeRunManifest), activeRunSummary),
-        activeRunSummary,
-        isRunActivelyTesting,
-      ) === 'passed',
-    ).length,
-    0,
-  )
+  // Header and cards share the same identity/status rules, including skipped
+  // and never-run tests that must not become passes.
+  const testStatuses = statusesForSpecs(displaySpecs, activeRunManifest, activeRunSummary, isRunActivelyTesting)
+  const passedCount = testStatuses.filter((s) => s === 'passed').length
+  const skippedCount = testStatuses.filter((s) => s === 'skipped').length
+
+  const recordedSummary = baselineRunSummary ?? activeRunSummary
+  const recordedStatus = baselineRunStatus ?? activeRunStatus
+  const recordedSpecs = baselineRun ? versions.recorded : runId ? specs : null
+  const recordedStatuses = statusesForSpecs(recordedSpecs, baselineRun ?? activeRunManifest, recordedSummary, recordedStatus === 'running')
 
   return (
     <div className="cl-panel flex h-full flex-col">
-      <div className="cl-panel-header cl-column-header flex items-center justify-between gap-2 px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="cl-kicker">Tests</span>
-          {currentTests && <span className="text-[10px] text-secondary">Current source</span>}
-          {runId && (
-            <span className="text-[10px] text-secondary" title="Tests and statuses are from the selected run. Source is shown only when it was saved with that run.">
-              Selected run
-            </span>
-          )}
-        </div>
-        {(runId || currentTests) && onCurrentTestsChange && <button type="button" className="cl-button px-2 text-[11px]" onClick={() => onCurrentTestsChange(!currentTests)}>{currentTests ? 'View recorded results' : 'View current tests'}</button>}
-        {dirtySpecs.length > 0 && onReviewTest && <button className="cl-button px-2 text-[11px]" onClick={() => onReviewTest(dirtySpecs[0].file)}>Review {dirtySpecs.length} {dirtySpecs.length === 1 ? 'file' : 'files'}</button>}
-        {runDifferences.length > 0 && onReviewTest && <button className="cl-button px-2 text-[11px]" title="Current tests differ from the selected run’s snapshot. Saving in Git does not validate them." onClick={() => onReviewTest(runDifferences[0], undefined, 'run')}>Different from this run</button>}
-        <TestsHeaderIndicator
-          summary={activeRunSummary}
-          totalTests={totalTests}
-          passedCount={passedCount}
-          specsLoaded={Boolean(specs) && !workspaceAuthoring}
-          isRunActivelyTesting={isRunActivelyTesting}
-        />
-      </div>
+      <TestsVersionHeader
+        currentTests={currentTests}
+        onCurrentTestsChange={onCurrentTestsChange}
+        currentTotal={versions.current?.reduce((n, spec) => n + spec.tests.length, 0)}
+        recordedTotal={recordedSpecs?.reduce((n, spec) => n + spec.tests.length, 0)}
+        passed={recordedSummary && recordedSpecs ? recordedStatuses.filter((status) => status === 'passed').length : undefined}
+        failed={recordedStatuses.filter((status) => status === 'failed' || status === 'timedout').length}
+        skipped={recordedStatuses.filter((status) => status === 'skipped').length}
+        running={recordedStatus === 'running'}
+        runId={baselineRunId}
+        comparison={versions.comparison}
+        onReviewTest={onReviewTest}
+        fallback={<>
+          {currentTests && <span className="shrink-0 text-[10px] text-secondary">Current source</span>}
+          {runId && <span className="shrink-0 text-[10px] text-secondary">Recorded tests</span>}
+          <TestsHeaderIndicator summary={activeRunSummary} totalTests={totalTests} passedCount={passedCount} skippedCount={skippedCount}
+            specsLoaded={Boolean(specs) && !workspaceAuthoring} isRunActivelyTesting={isRunActivelyTesting} />
+        </>}
+      />
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3" style={{ scrollbarGutter: 'stable' }}>
         {workspaceAuthoring ? (
           <div data-testid="tests-authoring-placeholder">
@@ -237,7 +243,10 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
             </div>
           </div>
         ) : <>
-        {specs?.some((spec) => spec.recordedSourceUnavailable) && <p role="status" className="mb-3 text-xs text-secondary">Showing recorded tests and results. Historical source is unavailable for some tests in this run.</p>}
+        {specs?.some((spec) => spec.recordedSourceUnavailable) && <div role="status" className="mb-3 text-xs text-secondary">
+          <p>Source wasn’t saved for some tests in this run. Recorded results are still available.</p>
+          {onCurrentTestsChange && <button type="button" className="mt-1 text-accent hover:underline" onClick={() => onCurrentTestsChange(true)}>View current source</button>}
+        </div>}
         {repairState.error && <p role="status" className="mb-2 text-xs text-warning">{repairState.error}</p>}
         {activeRepair ? <DiscoveryRepairActivity repair={activeRepair} /> : <>
         {latestRepair && <details className="mb-2 text-xs" open={showRepairHistory} onToggle={(event) => setShowRepairHistory(event.currentTarget.open)}>
@@ -295,14 +304,27 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
             ? isRunActivelyTesting || activeRunStatus === 'queued' || activeRunStatus === 'healing'
               ? 'Waiting for this run to record its test list.'
               : 'This run has no recorded test list. Select another run or start a new run to record its tests. Any available execution evidence is in Playwright.'
-            : 'No spec files found.'}</div>
+            : 'No test files found.'}
+            {runId && !isRunActivelyTesting && activeRunStatus !== 'queued' && activeRunStatus !== 'healing' && onCurrentTestsChange && (
+              <button type="button" className="ml-1 text-accent underline-offset-2 transition-colors hover:underline" onClick={() => onCurrentTestsChange(true)}>
+                Show current source
+              </button>
+            )}</div>
         ) : (
           <div className="space-y-1.5">
             {displaySpecs.flatMap((spec) => {
-              const dirtySpec = !runId ? dirtySpecs.find((item) => spec.file === item.file || spec.file.endsWith(`/${item.file}`)) : undefined
+              // With a run in play the mark means one thing from both sides:
+              // this test is not what the run executed. Only a column with no
+              // run at all falls back to the committed baseline, because then
+              // there is no run to differ from.
+              const dirtySpec = !baselineRunId ? dirtySpecs.find((item) => spec.file === item.file || spec.file.endsWith(`/${item.file}`)) : undefined
+              const runDifference = runDifferences.find((difference) => [snapshotDir, baselineFeatureDir]
+                .some((dir) => dir && spec.file === `${dir}/${difference.file}`) || spec.file === difference.file)
               return spec.tests.map((t) => {
-                const diff = runId ? undefined : t.sourceChanges
-                const modified = diff ? diff.count > 0 : dirtySpec?.affectedTests.includes(t.name) ?? false
+                const diff = baselineRunId ? undefined : t.sourceChanges
+                const modified = baselineRunId
+                  ? runDifference?.affectedTests.includes(t.name) ?? false
+                  : diff ? diff.count > 0 : dirtySpec?.affectedTests.includes(t.name) ?? false
                 const changedLines = diff ? new Set(diff.changedLines.map((line) => line - (t.bodyLine ?? t.line) + 1)) : undefined
                 // `t.id` used to be read here as a preferred key. The tests
                 // endpoint builds each entry from name/line/bodySource/steps and
@@ -316,6 +338,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
                   t.line,
                   sourceFileInRun(sourceFile, activeRunManifest),
                   activeRunSummary,
+                  Boolean(runId),
                 )
                 const runningTest = isRunActivelyTesting && activeRunSummary
                   ? runningTestForTest(activeRunSummary, testIdentity)
@@ -347,12 +370,14 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
                     test={t}
                     sourceUnavailable={spec.recordedSourceUnavailable}
                     status={statusForTest(testIdentity, activeRunSummary, isRunActivelyTesting)}
-                    showStatus={!currentTests}
+                    sourceStatus={currentTests ? modified && baselineRunId ? 'Changed since run' : 'Not verified' : undefined}
+                    showNotRun={Boolean(runId) && !isRunActivelyTesting}
                     isRunningTest={isRunningTest}
                     runningStep={runningTest?.step}
                     executionHighlight={executionHighlight}
                     expanded={isExpanded}
                     modified={modified}
+                    modifiedLabel={baselineRunId ? 'Changed since this run' : 'Modified since the committed test'}
                     changedLines={changedLines}
                     onToggle={() => setExpandedTest({
                       sourceKey,
@@ -372,6 +397,13 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
   )
 }
 
+function statusesForSpecs(specs: FeatureSpecFile[] | null, manifest: Props['activeRunManifest'], summary: RunSummary | undefined, running: boolean): StepStatus[] {
+  return (specs ?? []).flatMap((spec) => spec.tests.map((test) => statusForTest(
+    summaryIdentityForWorkspaceTest(test.name, test.line, sourceFileInRun(test.sourceFile ?? spec.file, manifest), summary, Boolean(manifest?.runId)),
+    summary, running,
+  )))
+}
+
 function workspaceTestKey(specFile: string, test: ExtractedTest): string {
   return `${test.sourceFile ?? specFile}:${test.line}:${test.name}`
 }
@@ -388,6 +420,7 @@ function summaryIdentityForWorkspaceTest(
   line: number,
   file: string,
   summary: RunSummary | undefined,
+  recorded = false,
 ): TestStatusIdentity {
   const matchesName = (known: NonNullable<RunSummary['knownTests']>[number]) => {
     return known.title === name || known.name === summaryEntryName(name)
@@ -405,7 +438,10 @@ function summaryIdentityForWorkspaceTest(
     ? sameTest[0]
     : sameTest.find((entry) => parseSummaryLocation(entry.location)?.line === line)
   if (known?.id) return { name, id: known.id }
-  return summary?.knownTests?.length
+  const hasExplicitLegacyResult = summary?.passedNames !== undefined
+    || summary?.skippedNames?.includes(summaryEntryName(name))
+    || summary?.failed.some((entry) => entry.name === summaryEntryName(name))
+  return summary?.knownTests?.length || (recorded && !hasExplicitLegacyResult)
     ? { name, allowNameFallback: false }
     : { name }
 }
@@ -464,12 +500,14 @@ function TestCard({
   test,
   sourceUnavailable,
   status,
-  showStatus,
+  sourceStatus,
+  showNotRun,
   isRunningTest,
   runningStep,
   executionHighlight,
   expanded,
   modified,
+  modifiedLabel,
   changedLines,
   onToggle,
 }: {
@@ -478,12 +516,14 @@ function TestCard({
   test: ExtractedTest
   sourceUnavailable?: boolean
   status: StepStatus
-  showStatus: boolean
+  sourceStatus?: 'Changed since run' | 'Not verified'
+  showNotRun: boolean
   isRunningTest: boolean
   runningStep?: RunSummaryRunningStep
   executionHighlight?: TestCardExecutionHighlight
   expanded: boolean
   modified: boolean
+  modifiedLabel: string
   /** Lines in `test.bodySource` that differ from the git HEAD version — see
    *  `changedLineNumbers`. Rendered as changed source, independently of execution status. */
   changedLines?: Set<number>
@@ -523,8 +563,8 @@ function TestCard({
         >
           {modified && <span
             role="img"
-            aria-label="Modified since the committed test"
-            title="Modified since the committed test"
+            aria-label={modifiedLabel}
+            title={modifiedLabel}
             data-testid="test-modified-dot"
             className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
           />}
@@ -540,7 +580,9 @@ function TestCard({
         >
           :{test.line}
         </span>
-        {showStatus && <StepStatusBadge status={status} />}
+        {sourceStatus
+          ? <StepStatusBadge status="unmatched" label={sourceStatus} />
+          : <StepStatusBadge status={status} label={showNotRun && (status === 'unmatched' || status === 'pending') ? 'not run' : undefined} />}
       </button>
       {expanded && (
         <div className="space-y-2 px-3 pb-3">
@@ -586,17 +628,19 @@ function TestsHeaderIndicator({
   summary,
   totalTests,
   passedCount,
+  skippedCount,
   specsLoaded,
   isRunActivelyTesting,
 }: {
   summary: RunSummary | undefined
   totalTests: number
   passedCount: number
+  skippedCount: number
   specsLoaded: boolean
   isRunActivelyTesting: boolean
 }) {
-  if (summary) return <RunningIndicator summary={summary} totalTests={totalTests} passedCount={passedCount} isRunActivelyTesting={isRunActivelyTesting} />
   if (!specsLoaded || totalTests <= 0) return null
+  if (summary) return <RunningIndicator totalTests={totalTests} passedCount={passedCount} skippedCount={skippedCount} isRunActivelyTesting={isRunActivelyTesting} />
   if (isRunActivelyTesting) {
     return (
       <div
@@ -613,22 +657,16 @@ function TestsHeaderIndicator({
 }
 
 function RunningIndicator({
-  summary,
   totalTests,
   passedCount,
+  skippedCount,
   isRunActivelyTesting,
 }: {
-  summary: RunSummary
   totalTests: number
   passedCount: number
+  skippedCount: number
   isRunActivelyTesting: boolean
 }) {
-  // Denominator should reflect the *static* test count parsed from the spec
-  // files, not `summary.total` — Playwright's reporter emits a partial total
-  // until the suite enumeration completes (especially when filtered/retried),
-  // which would briefly read "1/1" while 14 tests are actually queued.
-  const total = totalTests > 0 ? totalTests : summary.total
-  const done = totalTests > 0 ? passedCount : summary.passed
   const isTestRunning = isRunActivelyTesting
   return (
     <div
@@ -638,8 +676,16 @@ function RunningIndicator({
       {isTestRunning && <StatusDot state="running" halo />}
       {isTestRunning && <span style={{ color: 'var(--text-muted)' }}>Running</span>}
       <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
-        {done}<span style={{ color: 'var(--text-muted)' }}>/{total}</span>
+        {passedCount}<span style={{ color: 'var(--text-muted)' }}>/{totalTests}</span>
       </span>
+      {skippedCount > 0 && (
+        <span
+          style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 11 }}
+          title="Tests explicitly reported as skipped. They remain part of the suite."
+        >
+          · {skippedCount} skipped
+        </span>
+      )}
     </div>
   )
 }

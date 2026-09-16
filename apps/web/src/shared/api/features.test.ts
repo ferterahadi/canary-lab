@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   getTestFileReview,
+  getTestFileDifference,
   listFeatures,
   approveDirtySpecs,
   commitDirtySpecs,
@@ -79,6 +80,19 @@ describe('features api', () => {
       'http://x/api/features/feat%2Fa/test-review?file=e2e%2Fa.spec.ts&runId=run+1',
       'http://x/api/features/feat%2Fa/test-review?file=e2e%2Fa.spec.ts',
     ])
+  })
+
+  it('getTestFileDifference always names a run and asks for the summary only', async () => {
+    // The run is the baseline the Tests column marks against, and `summary`
+    // keeps both file versions off the wire — the reply is a verdict, not a diff.
+    const summary = { changed: true, affectedTests: ['pays'], verdict: 'weaker' as const }
+    const fetchImpl = vi.fn(async () => ok(summary))
+    await expect(getTestFileDifference('feat/a', 'e2e/a.spec.ts', 'run 1', { baseUrl: 'http://x', fetchImpl }))
+      .resolves.toEqual(summary)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/features/feat%2Fa/test-review?file=e2e%2Fa.spec.ts&runId=run+1&summary=true',
+      { method: 'GET' },
+    )
   })
 
   it('uses globalThis.fetch by default when no fetchImpl provided', async () => {

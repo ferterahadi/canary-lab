@@ -317,13 +317,13 @@ function sourceRangeIncludesAny(
   )
 }
 
-export function StepStatusBadge({ status }: { status: StepStatus }) {
+export function StepStatusBadge({ status, label }: { status: StepStatus; label?: string }) {
   return (
     <span
       className={`inline-flex shrink-0 items-center justify-center rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${statusPillClassForStatus(status)}`}
       style={{ fontFamily: 'var(--font-mono)', minWidth: '3.5rem' }}
     >
-      {statusLabel(status)}
+      {label ?? statusLabel(status)}
     </span>
   )
 }

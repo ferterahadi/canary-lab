@@ -439,6 +439,40 @@ describe('startRun — refusals', () => {
     expect(h.runStore.list()).toEqual([])
     expect(orchHarness.options).toEqual([])
   })
+
+  it('refuses a suite whose config picks specs by envset', async () => {
+    // The roster Playwright declares before the first test IS the run's record
+    // of what the suite contains; a config that narrows it per envset makes two
+    // runs of one suite incomparable and the unselected tests simply absent.
+    const dir = writeFeature('demo')
+    fs.writeFileSync(
+      path.join(dir, 'playwright.config.ts'),
+      "import { defineConfig } from '@playwright/test'\nexport default defineConfig({ testMatch: mode ? a : b })\n",
+    )
+    const h = harness()
+
+    await expect(h.deps.startRun('demo')).rejects.toMatchObject({
+      statusCode: 409,
+      specSelection: { feature: 'demo', fields: ['testMatch'] },
+    })
+    expect(h.runStore.list()).toEqual([])
+    expect(orchHarness.options).toEqual([])
+  })
+
+  it('lets a boot through — it runs no tests, so it declares no roster to corrupt', async () => {
+    // Refusing the boot would block the very services someone needs up to debug
+    // the config this rule is asking them to fix.
+    const dir = writeFeature('demo')
+    fs.writeFileSync(
+      path.join(dir, 'playwright.config.ts'),
+      "import { defineConfig } from '@playwright/test'\nexport default defineConfig({ testMatch: mode ? a : b })\n",
+    )
+    const h = harness()
+
+    const outcome = await h.deps.startRun('demo', undefined, undefined, undefined, 'boot')
+
+    expect(outcome.kind).toBe('started')
+  })
 })
 
 // ─── startRun: collision + queueing ──────────────────────────────────────────

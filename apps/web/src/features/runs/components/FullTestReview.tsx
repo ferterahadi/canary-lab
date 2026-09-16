@@ -115,7 +115,7 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, revision,
       {data.assessment.reasons?.map((reason) => <p key={reason} className="text-warning">Cannot classify: {reason}</p>)}
       {data?.before.parseError || data?.after.parseError ? <p className="text-warning">English context is incomplete. Code includes the full source.</p> : null}
       {assessments.length ? <p><strong className="text-warning">{[...new Set(assessments.map((item) => item.verdict === 'unclassifiable' ? 'Cannot classify' : `${item.verdict[0].toUpperCase()}${item.verdict.slice(1)} · hint`))].join(' · ')}</strong>{' · '}{[...new Set(assessments.map((item) => item.reason ?? `${item.kind} assertion or execution guard`))].join('; ')}</p>
-        : <p className="text-secondary">{changes.length ? 'Source edit · no assertion assessment.' : `This file matches ${runId ? 'the selected run snapshot' : 'Git HEAD'}.`}</p>}
+        : <p className="text-secondary">{changes.length ? 'Source edit · no assertion assessment.' : `This file matches ${runId ? 'the recorded tests' : 'Git HEAD'}.`}</p>}
       </>}
     </div>
   </>

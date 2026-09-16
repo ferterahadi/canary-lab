@@ -17,6 +17,8 @@ import { captureDirtySpecBaseline } from './run-manifest-writer'
 import { INTEGRITY_HINT_DISCLOSURE, deriveIntegrityHints } from './run-integrity-hints'
 import { detectHealMode } from './auto-heal'
 import { SUITE_SNAPSHOT_SKIP, suiteReviewRevision } from './suite-review'
+import { saveSuiteTestRoster } from '../suite-test-roster'
+import type { TestReviewDecision } from '../../../../../../../shared/test-review'
 
 export type AdoptSpecEditsResult =
   | { ok: true; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
@@ -47,12 +49,14 @@ export function digestOfSpecHashes(hashes: Record<string, string>): string {
  *  every MCP result derived from it — says which live edits the verdict never
  *  executed. Carries the adopted history forward; a run without a snapshot
  *  records nothing, since there is no boundary to measure against. */
-export function recordSpecEdits(ctx: RunContext): void {
+export function recordSpecEdits(ctx: RunContext, decision?: TestReviewDecision): void {
   if (ctx.suiteDir === ctx.feature.featureDir) return
-  const adopted = readManifest(ctx.paths.manifestPath)?.specEdits?.adopted ?? []
+  const previous = readManifest(ctx.paths.manifestPath)?.specEdits
+  const adopted = previous?.adopted ?? []
+  const reviewDecisions = [...(previous?.reviewDecisions ?? []), ...(decision ? [decision] : [])]
   const pending = computePendingEdits(ctx.feature.featureDir, ctx.suiteDir)
   ctx.stateSink.patchManifest(ctx.runId, {
-    specEdits: { checkedAt: new Date().toISOString(), pending, adopted },
+    specEdits: { checkedAt: new Date().toISOString(), pending, adopted, ...(reviewDecisions.length ? { reviewDecisions } : {}) },
     integrity: { hints: deriveIntegrityHints(pending, (rel) => readLive(ctx.feature.featureDir, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
   })
 }
@@ -86,7 +90,8 @@ function readLive(featureDir: string, rel: string): string | undefined {
  *  running process would corrupt the very run it is meant to inform. */
 export async function adoptSpecEdits(ctx: RunContext, expectedRevision?: string): Promise<AdoptSpecEditsResult> {
   if (ctx.playwrightPty) return { ok: false, reason: 'tests-running' }
-  const adopted = await adoptPendingSpecEdits(ctx, 'human', expectedRevision)
+  const revision = expectedRevision ?? (ctx.suiteDir !== ctx.feature.featureDir ? suiteReviewRevision(ctx.suiteDir, ctx.feature.featureDir) : undefined)
+  const adopted = await adoptPendingSpecEdits(ctx, 'human', revision)
   if (!adopted.ok) return adopted
   const signal = ctx.signalGate.observe('rerun', {
     hypothesis: 'A human adopted the edited spec(s) into this run.',
@@ -111,6 +116,7 @@ export function restoreSpecEdits(ctx: RunContext): RestoreSpecEditsResult {
   if (ctx.suiteDir === live) return { ok: false, reason: 'nothing-to-restore' }
   const pending = computePendingEdits(live, ctx.suiteDir)
   if (pending.length === 0) return { ok: false, reason: 'nothing-to-restore' }
+  const revision = suiteReviewRevision(ctx.suiteDir, live)
   const restored: string[] = []
   try {
     for (const edit of pending) {
@@ -129,7 +135,7 @@ export function restoreSpecEdits(ctx: RunContext): RestoreSpecEditsResult {
     recordSpecEdits(ctx)
     return { ok: false, reason: 'restore-failed' }
   }
-  recordSpecEdits(ctx)
+  recordSpecEdits(ctx, { at: new Date().toISOString(), revision, decision: 'restored' })
   return { ok: true, restored }
 }
 
@@ -170,11 +176,12 @@ async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, ex
   if (ctx.suiteDir === live) return { ok: false, reason: 'snapshot-failed' }
   await captureDirtySpecBaseline(ctx)
 
-  const previous = readManifest(ctx.paths.manifestPath)?.specEdits?.adopted ?? []
+  const previous = readManifest(ctx.paths.manifestPath)?.specEdits
   const at = new Date().toISOString()
   const remaining = computePendingEdits(live, ctx.suiteDir)
+  const reviewDecisions: TestReviewDecision[] = [...(previous?.reviewDecisions ?? []), ...(by === 'human' && expectedRevision ? [{ at, revision: expectedRevision, decision: 'adopted' as const }] : [])]
   ctx.stateSink.patchManifest(ctx.runId, {
-    specEdits: { checkedAt: at, pending: remaining, adopted: [...previous, { at, by, files: adopted, ...(expectedRevision ? { reviewRevision: expectedRevision } : {}) }] },
+    specEdits: { checkedAt: at, pending: remaining, adopted: [...(previous?.adopted ?? []), { at, by, files: adopted, ...(expectedRevision ? { reviewRevision: expectedRevision } : {}) }], ...(reviewDecisions.length ? { reviewDecisions } : {}) },
     integrity: { hints: deriveIntegrityHints(remaining, (rel) => readLive(live, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
   })
   return { ok: true, adopted }
@@ -192,6 +199,7 @@ export function snapshotSuite(ctx: RunContext): void {
   try {
     fs.rmSync(target, { recursive: true, force: true })
     copyDirRecursive(live, target, undefined, (rel) => SUITE_SNAPSHOT_SKIP.has(rel))
+    saveSuiteTestRoster(target)
     ctx.suiteDir = target
     ctx.stateSink.patchManifest(ctx.runId, {
       suiteSnapshot: { kind: 'taken', dir: target, takenAt: new Date().toISOString(), digest: suiteDigest(live) },
@@ -222,6 +230,7 @@ function snapshotReviewedSuite(ctx: RunContext, expectedRevision: string): { ok:
     const backup = path.join(scratch, 'original')
     copyDirRecursive(ctx.feature.featureDir, staging, undefined, (rel) => SUITE_SNAPSHOT_SKIP.has(rel))
     if (suiteReviewRevision(target, staging) !== expectedRevision) return { ok: false, reason: 'review-changed' }
+    saveSuiteTestRoster(staging)
     fs.renameSync(target, backup)
     originalMoved = true
     fs.renameSync(staging, target)

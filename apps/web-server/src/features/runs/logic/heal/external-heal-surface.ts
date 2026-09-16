@@ -123,7 +123,7 @@ export function buildSpecEditsWarning(manifest: RunManifest): SpecEditsWarning |
   if (pending.length === 0) return undefined
   const hints = manifest.integrity?.hints ?? []
   const weaker = hints.filter((h) => h.kind === 'weaker')
-  const files = pending.length === 1 ? '1 spec file' : `${pending.length} spec files`
+  const files = pending.length === 1 ? '1 test file' : `${pending.length} test files`
   return {
     pending: pending.map((edit) => ({
       file: edit.file,
@@ -133,11 +133,11 @@ export function buildSpecEditsWarning(manifest: RunManifest): SpecEditsWarning |
     })),
     hints,
     disclosure: INTEGRITY_HINT_DISCLOSURE,
-    message: `⚠️ ${files} changed after this run started. The run executed the run-start copy of the suite, so none of these edits was tested.`,
+    message: `⚠️ ${files} changed after this run started. The run used the recorded tests, so none of these changes was tested.`,
     nextSteps: [
-      'Restore the edited spec(s) to what the run started with, or ask the human to adopt: call get_test_review, show its exact patch, then review_test_changes with review_revision for human elicitation. Unsupported clients use the Canary review page. No MCP tool can self-approve a spec edit; do not report the edited tests as passed.',
+      'Restore the test-file changes to the recorded version, or ask the human to adopt them: call get_test_review, show its exact patch, then review_test_changes with review_revision for human elicitation. Unsupported clients open the Canary review page, then call review_test_changes with wait_for_decision:true and repeat on still_waiting until the human decision arrives. Do not end the turn or click the human controls. No MCP tool can self-approve a test-file change; do not report the changed tests as passed.',
       ...(weaker.length > 0
-        ? [`A hint reads ${weaker.map((h) => `${h.file} › ${h.test}`).join(', ')} as weaker than what ran. Restore it — a weaker assertion is never a repair.`]
+        ? [`A hint marks ${weaker.map((h) => `${h.file} › ${h.test}`).join(', ')} as possibly weaker than the tests that ran. Restore it — a weaker assertion is never a repair.`]
         : []),
     ],
   }

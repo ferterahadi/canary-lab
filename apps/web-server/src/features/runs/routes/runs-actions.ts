@@ -8,6 +8,7 @@ import type { RunStore } from '../logic/run-store'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { isHealClaimAllowed } from '../logic/heal/heal-claim-policy'
 import { type RepoBranchMismatch } from '../../../shared/git-repo'
+import { type SpecSelectionViolation } from '../../../shared/playwright-config'
 import type { ExecutionType } from '../../../../../../shared/verification'
 import { ExternalHealAgentRequest, findActiveRunForFeature, parseExternalHealAgent } from './runs-route-support'
 import { GettingStartedBusyError, type GettingStartedOwner } from '../../config/logic/getting-started-session'
@@ -207,6 +208,13 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       const mismatch = (err as { branchMismatch?: RepoBranchMismatch[] }).branchMismatch
       if (Array.isArray(mismatch) && mismatch.length > 0) {
         return { type: 'repo_branch_mismatch' as const, feature, repos: mismatch, error: message }
+      }
+      // A config that picks specs by envset is refused the same way: nothing
+      // started, and the payload names the fields to rewrite so an agent can fix
+      // the config rather than guess at a 409.
+      const specSelection = (err as { specSelection?: SpecSelectionViolation }).specSelection
+      if (specSelection) {
+        return { type: 'envset_dependent_spec_selection' as const, ...specSelection, error: message }
       }
       return { error: message }
     }

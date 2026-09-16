@@ -89,6 +89,24 @@ describe('runsReducer', () => {
     expect(e.verificationTargetUrls).toEqual({ default: 'https://x' })
   })
 
+  it('update carries the envset onto the derived list entry', () => {
+    // Same field-for-field rule: an active run gets an `update` frame on every
+    // heartbeat, and the envset is what separates a 4/45-passed row from a
+    // 41/45-passed row of the SAME suite (spec selection cannot vary by envset,
+    // so both declare the same roster). Dropping it here blanks the envset
+    // mid-run and the two rows collapse into "one of these went badly".
+    const next = runsReducer(initialRunsState, {
+      type: 'update',
+      runId: 'm1',
+      detail: detail({ runId: 'm1', env: 'meta' }),
+    })
+    expect(next.runs.find((r) => r.runId === 'm1')!.env).toBe('meta')
+
+    // A suite that declares no envsets leaves the field off entirely.
+    const bare = runsReducer(initialRunsState, { type: 'update', runId: 'm2', detail: detail({ runId: 'm2' }) })
+    expect(bare.runs.find((r) => r.runId === 'm2')!).not.toHaveProperty('env')
+  })
+
   it('update mirrors the pending spec-edit and hint counts the backend index carries', () => {
     // Same field-for-field rule as above: the Runs list flags a run with
     // untested spec edits off these counts, and every heartbeat `update` frame

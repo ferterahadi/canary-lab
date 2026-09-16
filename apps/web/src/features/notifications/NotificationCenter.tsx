@@ -1,20 +1,21 @@
 import { useState } from 'react'
 import type { NotificationTarget, WorkspaceNotification } from '@/shared/api/notifications'
 import { timeAgo } from '@/shared/lib/format'
-import { ChevronRightIcon, TrashIcon } from '@/shared/ui/Icons'
+import { TrashIcon } from '@/shared/ui/Icons'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { IconButton, Modal, StatusDot, ToastHost } from '@/shared/ui/atoms'
 import { useNotifications } from './use-notifications'
 
+function needsAttention(item: WorkspaceNotification): boolean {
+  // Retained test-review messages may predate the warning severity mapping.
+  return !item.resolvedAt && !!item.target && (item.target.kind === 'test-review' || item.severity !== 'neutral')
+}
+
 function attentionRank(item: WorkspaceNotification): number {
   if (item.resolvedAt) return 3
   if (item.severity === 'danger') return 0
-  return item.target && item.severity !== 'neutral' ? 1 : 2
+  return needsAttention(item) ? 1 : 2
 }
-
-/** Severity rides the row's dot alone — not a coloured sentence beside the
- *  controls, and not a second tinted edge saying the same thing. */
-type RowState = 'failed' | 'warning' | 'idle'
 
 const DELETE_HINT = 'Delete permanently — this does not resolve or stop its run, and it stays deleted after a restart'
 
@@ -26,14 +27,12 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
 }) {
   const inbox = useNotifications()
   const [unreadOnly, setUnreadOnly] = useState(false)
-  const [showResolved, setShowResolved] = useState(false)
   const items = [...inbox.items].sort((a, b) => attentionRank(a) - attentionRank(b) || b.createdAt.localeCompare(a.createdAt))
-  const unread = items.filter((item) => !item.readAt && !item.resolvedAt)
+  const unread = items.filter((item) => !item.readAt)
   const visible = unreadOnly ? unread : items
-  const active = visible.filter((item) => !item.resolvedAt)
-  const settled = visible.filter((item) => item.resolvedAt)
-  const latest = unread.find((item) => item.target)
-  const hasWeakerHint = unread.some((item) => item.severity === 'danger')
+  // Resolution ends the alert, but only reading the message clears its unread state.
+  const latest = unread.find((item) => !item.resolvedAt && item.target)
+  const hasWeakerHint = unread.some((item) => !item.resolvedAt && item.severity === 'danger')
   const openItem = (item: WorkspaceNotification): void => {
     void inbox.read(item.id)
     onOpenChange(false)
@@ -45,8 +44,9 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
   }
   const row = (item: WorkspaceNotification, lead: boolean) => {
     const hint = !item.resolvedAt && item.severity === 'danger'
-    const state: RowState = item.resolvedAt || item.severity === 'neutral' || !item.target ? 'idle' : 'warning'
+    const state = needsAttention(item) ? 'warning' : 'idle'
     const target = item.target
+    const reviewNeeded = target?.kind === 'test-review' && !item.resolvedAt
     const action = target?.kind === 'flight' ? 'Open flight'
       : target?.kind === 'test-review' && !item.resolvedAt ? 'Review test changes'
       : target && 'runId' in target && target.runId ? 'Open run' : 'Open suite'
@@ -56,7 +56,7 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
     // neither is repeated here.
     const label = item.resolvedAt ? 'Resolved'
       : hint ? 'Test integrity · Hint'
-      : target?.kind === 'test-review' && item.severity === 'neutral' ? 'Tests changed'
+      : reviewNeeded ? 'Review needed'
       : target ? 'Needs input' : 'Note'
     return (
       <li key={item.id} className="flex items-center gap-3 px-5 py-3" data-testid={`notification-${item.id}`}>
@@ -76,7 +76,7 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
         {/* Fixed width, right-aligned: the mark-read control only exists while a
             message is unread, and without a reserved column its disappearance
             would re-flow the title and body beside it. */}
-        <div className="flex w-[104px] shrink-0 items-center justify-end gap-1">
+        <div className={`flex ${reviewNeeded ? 'w-[144px]' : 'w-[104px]'} shrink-0 items-center justify-end gap-1`}>
           {!item.readAt && (
             <IconButton ariaLabel="Mark read" disabled={inbox.busy} onClick={() => { void inbox.read(item.id) }}>
               <span aria-hidden="true" className="text-[13px]">✓</span>
@@ -89,12 +89,12 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
             <>
               <span aria-hidden="true" className="mx-1 h-4 w-px bg-line-strong" />
               <button
-                className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-[13px] ${lead ? 'cl-button-primary' : 'cl-button'}`}
+                className={`inline-flex h-7 ${reviewNeeded ? 'gap-1 px-2' : 'w-7'} items-center justify-center rounded-md text-xs ${lead ? 'cl-button-primary' : 'cl-button'}`}
                 aria-label={action}
                 title={action}
                 onClick={() => openItem(item)}
               >
-                <span aria-hidden="true">→</span>
+                {reviewNeeded && <span>Review</span>}<span aria-hidden="true">→</span>
               </button>
             </>
           )}
@@ -125,8 +125,8 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
         ariaLabel="Notifications"
         testId="notification-center"
         width={640}
-        // Held height, not shrink-to-fit: the tab filter and the resolved group
-        // both change how many rows are in the body, and a dialog that resizes
+        // Held height, not shrink-to-fit: filtering changes the number of rows,
+        // and a dialog that resizes
         // under the pointer moves the control you were reaching for.
         height={440}
         stableScrollGutter
@@ -140,20 +140,7 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
         {inbox.error && <div role="alert" className="px-5 pt-3 text-xs text-danger">{inbox.error} <button className="cl-button px-2 py-1" onClick={() => { void inbox.refresh() }}>Retry</button></div>}
         {inbox.loading && <p className="p-5 text-xs text-secondary">Loading notifications…</p>}
         {!inbox.loading && !inbox.error && !visible.length && <p className="px-5 py-10 text-center text-xs text-secondary">{unreadOnly ? 'No unread notifications.' : 'No notifications. New messages will appear here.'}</p>}
-        <ul className="divide-y divide-line">{active.map((item, index) => row(item, index === 0))}</ul>
-        {settled.length > 0 && (
-          <>
-            <button
-              className="flex w-full items-center gap-2 border-t border-line px-5 py-2.5 text-[11px] text-secondary transition-colors duration-150 hover:text-primary"
-              aria-expanded={showResolved}
-              onClick={() => setShowResolved(!showResolved)}
-            >
-              <span aria-hidden="true" className={showResolved ? 'rotate-90 transition-transform duration-150' : 'transition-transform duration-150'}><ChevronRightIcon /></span>
-              Resolved <span className="cl-count-chip">{settled.length}</span>
-            </button>
-            {showResolved && <ul className="divide-y divide-line border-t border-line">{settled.map((item) => row(item, false))}</ul>}
-          </>
-        )}
+        <ul className="divide-y divide-line">{visible.map((item, index) => row(item, index === 0 && !item.resolvedAt))}</ul>
       </Modal>
     </>
   )

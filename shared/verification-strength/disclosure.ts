@@ -11,7 +11,7 @@
 
 /** Advisory framing plus how the detection was checked. Shown wherever a hint is. */
 export const INTEGRITY_HINT_DISCLOSURE =
-  'Advisory only — this hint never changes a verdict. Its detection was checked by AI: one AI labelled, a second AI checked blind, no human.'
+  'This hint is advisory and does not change the run result. One AI labelled the samples. A second AI checked 40 samples without seeing those labels. No human labelled them.'
 
 /** The `weaker` hint's measured false-positive rate, as a reader sees it. */
 export const INTEGRITY_HINT_FALSE_POSITIVE_RATE = '2.4%'
@@ -19,4 +19,4 @@ export const INTEGRITY_HINT_FALSE_POSITIVE_RATE = '2.4%'
 /** One sentence for a surface that has room for the rate: what the hint claims,
  *  how often that claim was wrong, and the disclosure. */
 export const INTEGRITY_HINT_COPY =
-  `A hint, not a verdict: the differential read this edit as weaker than what ran. On the frozen public-repo holdout that reading was wrong ${INTEGRITY_HINT_FALSE_POSITIVE_RATE} of the time. ${INTEGRITY_HINT_DISCLOSURE}`
+  `A hint, not a verdict. Canary Lab found that this edit may weaken the test that ran. In a fixed sample of public-repository changes, this check falsely flagged a weakening ${INTEGRITY_HINT_FALSE_POSITIVE_RATE} of the time. ${INTEGRITY_HINT_DISCLOSURE}`

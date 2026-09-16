@@ -27,12 +27,12 @@ export interface Expectation {
   poll: boolean
   settlement?: 'resolves' | 'rejects'
   message?: ts.Expression
+  pollOptions?: ts.Expression
 }
 
 export interface ParseExpectationOptions {
-  /** Accept an `expect.poll(...)` receiver. Off by default: readable rendering
-   *  has no prose for a polled subject and keeps its exact-source fallback,
-   *  while the verification-strength collector needs the chain's facts. */
+  /** Accept an `expect.poll(...)` receiver only when the consumer handles
+   * repeated callback evaluation rather than a plain assertion subject. */
   allowPoll?: boolean
 }
 
@@ -122,7 +122,7 @@ export function parseExpectation(call: ts.CallExpression, options?: ParseExpecta
     soft,
     poll,
     ...(settlement ? { settlement } : {}),
-    message: receiver.arguments[1],
+    ...(poll ? { pollOptions: receiver.arguments[1] } : { message: receiver.arguments[1] }),
   }
 }
 

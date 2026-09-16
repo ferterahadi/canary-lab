@@ -3,6 +3,7 @@
 
 import type { Feature } from './types'
 import type { TestFileReview } from '@shared/test-review'
+import type { StrengthVerdict } from '@shared/verification-strength/types'
 import { defaultOpts, request, type ClientOptions } from './internal'
 
 export function getTestFileReview(feature: string, file: string, runId?: string, opts?: ClientOptions): Promise<TestFileReview> {
@@ -11,7 +12,7 @@ export function getTestFileReview(feature: string, file: string, runId?: string,
   return request(`${baseUrl}/api/features/${encodeURIComponent(feature)}/test-review?${query}`, { method: 'GET' }, fetchImpl)
 }
 
-export function getTestFileDifference(feature: string, file: string, runId: string, opts?: ClientOptions): Promise<{ changed: boolean }> {
+export function getTestFileDifference(feature: string, file: string, runId: string, opts?: ClientOptions): Promise<{ changed: boolean; affectedTests?: string[]; verdict?: StrengthVerdict }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   const query = new URLSearchParams({ file, runId, summary: 'true' })
   return request(`${baseUrl}/api/features/${encodeURIComponent(feature)}/test-review?${query}`, { method: 'GET' }, fetchImpl)

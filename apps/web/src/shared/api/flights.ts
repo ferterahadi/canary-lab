@@ -237,12 +237,12 @@ export function deleteFlight(flightId: string, opts?: ClientOptions): Promise<{ 
 export function linkFeatureDocPath(
   feature: string,
   targetPath: string,
-  opts?: ClientOptions,
+  opts?: ClientOptions & { relPath?: string; relink?: boolean },
 ): Promise<{ written: boolean; relativePath: string; linked: boolean }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<{ written: boolean; relativePath: string; linked: boolean }>(
     `${baseUrl}/api/features/${encodeURIComponent(feature)}/docs/link`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: targetPath }) },
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: targetPath, relPath: opts?.relPath, relink: opts?.relink }) },
     fetchImpl,
   )
 }

@@ -4,8 +4,9 @@ import { readManifest } from '../../runs/logic/runtime/manifest'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
 import { readRunSummary } from '../../runs/logic/run-detail'
 import type { PlaywrightListEntry } from '../../runs/logic/playwright-list'
+import { mergeSuiteTestRoster, savedSuiteTestRoster } from '../../runs/logic/suite-test-roster'
 
-/** Read the reporter's roster without evaluating historical spec modules. */
+/** Read the full saved suite, then attach reporter identities without executing it. */
 export function recordedTestList(logsDir: string | undefined, feature: string, runId: string): { dir?: string; tests: PlaywrightListEntry[] } {
   const fail = (message: string, statusCode: number): never => { throw Object.assign(new Error(message), { statusCode }) }
   if (!logsDir || !/^[\w.-]+$/.test(runId) || runId === '.' || runId === '..') return fail('Invalid run', 400)
@@ -27,5 +28,5 @@ export function recordedTestList(logsDir: string | undefined, feature: string, r
     const line = Number(location[2])
     return { file, line, title: test.title, originFile: file, originLine: line }
   })
-  return { dir, tests }
+  return { dir, tests: dir ? mergeSuiteTestRoster(savedSuiteTestRoster(dir), tests) : tests }
 }

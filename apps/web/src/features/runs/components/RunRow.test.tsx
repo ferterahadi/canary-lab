@@ -51,6 +51,18 @@ describe('RunRow (R80 hero props)', () => {
     expect(container.querySelector('span[style*="font-weight: 500"]')?.textContent).toBe('Run z6kc')
   })
 
+  it('names the envset beside the timestamp, and omits it when the run has none', () => {
+    // Previous runs of one suite stack in the flight run stage. Spec selection
+    // cannot vary by envset, so those rows declare the same roster and differ
+    // only in what the environment let execute — the envset is what tells
+    // "41/45 passed" apart from "4/45 passed" one row below.
+    renderRow({ run: { ...run, env: 'meta' } })
+    expect(container.textContent).toContain('meta')
+
+    renderRow()
+    expect(container.textContent).not.toContain('meta')
+  })
+
   it('showPorts=false hides the allocated-ports segment', () => {
     renderRow({ showPorts: false })
     expect(container.textContent).not.toContain(':4123')
@@ -73,7 +85,7 @@ describe('RunRow (R80 hero props)', () => {
     renderRow({ run: { ...run, status: 'healing', pendingSpecEdits: 2 } })
     const chip = container.querySelector('[data-testid="run-pending-edits"]')
     expect(chip?.textContent).toBe('2 pending')
-    expect(chip?.getAttribute('title')).toMatch(/2 spec edits .* not been executed — the verdict is from the run-start snapshot/)
+    expect(chip?.getAttribute('title')).toMatch(/2 test-file changes .* not run. This run result is based on the recorded tests/)
     // Provenance, not an alarm: no danger hue on the companion chip.
     expect(chip?.getAttribute('style') ?? '').not.toContain('--danger')
     // The status chip itself is untouched.

@@ -100,8 +100,8 @@ describe('buildSpecEditsWarning', () => {
   it('says the edits were never tested, and offers only restore or a human adopt', () => {
     const warning = buildSpecEditsWarning(withPending())
 
-    expect(warning?.message).toContain('2 spec files changed after this run started')
-    expect(warning?.message).toContain('none of these edits was tested')
+    expect(warning?.message).toContain('2 test files changed after this run started')
+    expect(warning?.message).toContain('none of these changes was tested')
     const steps = warning?.nextSteps.join('\n') ?? ''
     expect(steps).toContain('Restore')
     expect(steps).toContain('ask the human to adopt')
@@ -140,7 +140,7 @@ describe('buildSpecEditsWarning', () => {
 
     expect(warning?.hints).toEqual([])
     expect(warning?.disclosure).toBe(INTEGRITY_HINT_DISCLOSURE)
-    expect(warning?.message).toContain('1 spec file changed')
+    expect(warning?.message).toContain('1 test file changed')
   })
 })
 

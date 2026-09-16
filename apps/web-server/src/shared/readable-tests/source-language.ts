@@ -19,9 +19,15 @@ export function sourceExpressionText(node: ts.Expression): string {
     return `text formed by joining ${parts.join(', ')}`
   }
   if (ts.isIdentifier(node) || ts.isNumericLiteral(node) || node.kind === ts.SyntaxKind.ThisKeyword || node.kind === ts.SyntaxKind.SuperKeyword) return node.getText()
-  if (ts.isParenthesizedExpression(node)) return `(${sourceExpressionText(node.expression)})`
-  if (ts.isPropertyAccessExpression(node) && !node.questionDotToken) return simpleReference(node.expression)
+  if (ts.isParenthesizedExpression(node)) return `${ts.isOptionalChain(node.expression) ? 'the grouped value ' : ''}(${sourceExpressionText(node.expression)})`
+  if (ts.isPropertyAccessExpression(node) && node.questionDotToken) {
+    return `optional property ${node.name.text} from ${sourceArgumentText(node.expression)}`
+  }
+  if (ts.isPropertyAccessExpression(node)) return simpleReference(node.expression)
     ? `${sourceExpressionText(node.expression)}.${node.name.text}` : `${node.name.text} from ${sourceArgumentText(node.expression)}`
+  if (ts.isElementAccessExpression(node)) {
+    return `${node.questionDotToken ? 'optional item' : 'item'} at ${sourceArgumentText(node.argumentExpression)} from ${sourceArgumentText(node.expression)}`
+  }
   if (ts.isArrayLiteralExpression(node)) {
     return node.elements.length ? `a list containing ${node.elements.map((item) => ts.isSpreadElement(item)
       ? `all items from ${sourceArgumentText(item.expression)}` : ts.isOmittedExpression(item) ? 'an empty slot' : sourceArgumentText(item)).join(', ')}` : 'an empty list'
@@ -51,12 +57,20 @@ export function sourceExpressionText(node: ts.Expression): string {
     return `${signature} that returns ${comparison ? 'whether ' : ''}${sourceExpressionText(node.body)}`
   }
   if (ts.isBinaryExpression(node)) {
+    if (node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
+      return `${sourceArgumentText(node.left)}, falling back to ${sourceArgumentText(node.right)} only when the left value is null or undefined`
+    }
     const operator = BINARY_OPERATOR_PHRASES.get(node.operatorToken.kind)
     if (operator) return `${sourceArgumentText(node.left)} ${operator} ${sourceArgumentText(node.right)}`
   }
   if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken) {
     return `not (${sourceExpressionText(node.operand)})`
   }
+  if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node)) {
+    const operation = ts.isSatisfiesExpression(node) ? 'checked against type' : ts.isAsExpression(node) ? 'asserted as type' : 'asserted with a prefix type assertion as'
+    return `${sourceArgumentText(node.expression)} ${operation} ${renderEnglish(typeEnglish(node.type))}`
+  }
+  if (ts.isNonNullExpression(node)) return `${sourceArgumentText(node.expression)} asserted to be non-null`
   return renderEnglish(expressionEnglish(node))
 }
 
@@ -97,6 +111,8 @@ function sourceArgumentText(node: ts.Expression): string {
   const text = sourceExpressionText(node)
   return ts.isCallExpression(node) || ts.isObjectLiteralExpression(node) || ts.isArrayLiteralExpression(node)
     || ts.isArrowFunction(node) || ts.isAwaitExpression(node) || ts.isBinaryExpression(node) || ts.isTemplateExpression(node)
+    || ts.isElementAccessExpression(node) || ts.isPropertyAccessExpression(node) && !simpleReference(node)
+    || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node) || ts.isNonNullExpression(node)
     ? `(${text})` : text
 }
 
@@ -187,8 +203,14 @@ export function sourceAssertionText(node: ts.Statement): string | undefined {
   const awaited = ts.isAwaitExpression(node.expression)
   const expression = awaited ? node.expression.expression : node.expression
   if (!ts.isCallExpression(expression) || expression.typeArguments?.length || expression.questionDotToken) return undefined
-  const expectation = parseExpectation(expression)
+  const expectation = parseExpectation(expression, { allowPoll: true })
   if (!expectation) return undefined
+  const receiver = expectation.actual.parent as ts.CallExpression
+  // The concise form must not erase optional invocation, generics or extra
+  // arguments on the expect receiver. Those keep the exhaustive grammar.
+  if (receiver.questionDotToken || receiver.typeArguments?.length || receiver.arguments.length > 2
+    || ts.isPropertyAccessExpression(receiver.expression) && receiver.expression.questionDotToken) return undefined
+  if (expectation.poll && expectation.settlement) return undefined
   const propertyCheck = expectation.matcher === 'toHaveProperty'
   if (propertyCheck && (expression.arguments.length < 1 || expression.arguments.length > 2)) return undefined
   const rule = propertyCheck
@@ -202,11 +224,45 @@ export function sourceAssertionText(node: ts.Statement): string | undefined {
   // The second property argument is an expected value, not matcher options.
   const propertyValue = propertyCheck && expression.arguments[1]
   const extra = expression.arguments.slice(propertyCheck ? 2 : rule.expectedArguments)
+  if (expectation.poll) {
+    return `Poll until the returned value ${expectation.negated ? rule.negatedRelation : rule.relation}${expected}`
+      + (propertyValue ? ` equal to ${sourceArgumentText(propertyValue)}` : '')
+      + (extra.length ? `; with matcher arguments ${extra.map(sourceArgumentText).join(', ')}` : '')
+      + (awaited ? '; wait for the check to finish' : '; without awaiting the check')
+      + `\nOn each attempt: ${pollCallbackText(expectation.actual)}`
+      + (expectation.pollOptions ? `\n${pollOptionsText(expectation.pollOptions)}` : '')
+  }
   return `${awaited ? 'Wait for the check' : 'Check'} that ${settled} ${expectation.negated ? rule.negatedRelation : rule.relation}${expected}`
     + (propertyValue ? ` equal to ${sourceArgumentText(propertyValue)}` : '')
     + (expectation.soft ? '; continue collecting failures if this check fails' : '')
     + (expectation.message ? `; with failure message ${sourceExpressionText(expectation.message)}` : '')
     + (extra.length ? `; with additional arguments ${extra.map(sourceArgumentText).join(', ')}` : '')
+}
+
+function pollCallbackText(callback: ts.Expression): string {
+  if (ts.isArrowFunction(callback) && !callback.parameters.length && !callback.typeParameters?.length
+    && !callback.type && !ts.isBlock(callback.body)) {
+    const asynchronous = callback.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)
+    return `read ${sourceExpressionText(callback.body)}${asynchronous ? ', using an asynchronous callback' : ''}`
+  }
+  return `call ${sourceArgumentText(callback)}`
+}
+
+function pollOptionsText(options: ts.Expression): string {
+  if (ts.isStringLiteralLike(options)) return `Failure message: ${sourceExpressionText(options)}`
+  const assignments = ts.isObjectLiteralExpression(options) ? [...options.properties] : undefined
+  if (!assignments || !assignments.every(ts.isPropertyAssignment)) {
+    return `Polling options: ${sourceExpressionText(options)}`
+  }
+  const properties = assignments.map((property) => {
+    const name = ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name) ? property.name.text : undefined
+    const value = sourceExpressionText(property.initializer)
+    if (name === 'timeout' || name === 'interval') return `${name === 'timeout' ? 'timeout' : 'retry interval'} set to ${value} milliseconds`
+    if (name === 'intervals') return `retry intervals in milliseconds set to ${value}`
+    if (name === 'message') return `failure message set to ${value}`
+    return `${property.name.getText()} set to ${value}`
+  })
+  return `Polling options: ${properties.join('; ') || 'an empty object'}`
 }
 const HOOKS: Readonly<Record<string, string>> = {
   beforeAll: 'Before all tests', beforeEach: 'Before each test',

@@ -98,7 +98,7 @@ describe('snapshotSuite', () => {
 
     snapshotSuite(ctx)
 
-    expect(fs.readdirSync(ctx.suiteDir).sort()).toEqual(['e2e'])
+    expect(fs.readdirSync(ctx.suiteDir).sort()).toEqual(['.canary-suite-tests.json', 'e2e'])
   })
 
   it('a mid-run edit to the live spec leaves the copy untouched', () => {
@@ -193,7 +193,7 @@ describe('recordSpecEdits', () => {
     const patch = sink.patches.at(-1) as { integrity: RunManifest['integrity'] }
     expect(patch.integrity).toEqual({
       hints: [{ kind: 'weaker', file: 'e2e/a.spec.ts', test: 'a', requirements: ['cart-1'], was: ['expect(2).toBe(2)'], now: [] }],
-      disclosure: expect.stringContaining('no human'),
+      disclosure: expect.stringContaining('No human labelled them.'),
     })
   })
 
@@ -203,7 +203,7 @@ describe('recordSpecEdits', () => {
     const { ctx, sink } = ctxFor()
     write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
     snapshotSuite(ctx)
-    const adopted = [{ at: '2026-09-06T00:00:00.000Z', files: ['e2e/a.spec.ts'] }]
+    const adopted = [{ at: '2026-09-06T00:00:00.000Z', by: 'human' as const, files: ['e2e/a.spec.ts'] }]
     writeManifest(ctx.paths.manifestPath, {
       runId: ctx.runId, feature: 'demo', startedAt: '', status: 'running', healCycles: 0, services: [],
       specEdits: { checkedAt: '', pending: [], adopted },

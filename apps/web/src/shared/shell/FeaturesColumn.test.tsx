@@ -699,9 +699,8 @@ describe('FeaturesColumn coverage-headline fetching', () => {
   })
 })
 
-// The modified-tests badge carries the differential's reading (D13): `!` rose
-// for a weaker hint, `~` muted for changed / cannot classify, `↑` emerald when
-// every edit reads stronger. Only the weaker row keeps the danger wash.
+// Review remains an attention cue for every edit; the advisory classification
+// must not make a clickable action look disabled or imply a passing result.
 describe('FeaturesColumn modified-tests badge', () => {
   const dirty = (name: string, verdicts: Array<'weaker' | 'equivalent' | 'stronger' | 'unclassifiable' | undefined>) => ({
     name, repos: [], envs: [],
@@ -736,22 +735,23 @@ describe('FeaturesColumn modified-tests badge', () => {
     expect(featureRow('shop').className).toContain('cl-list-row-changed')
   })
 
-  it('~ muted with a neutral wash for equivalent, cannot-classify, or no verdict', () => {
+  it('keeps an amber review action for equivalent, cannot-classify, or no verdict', () => {
     render([dirty('a', ['equivalent']), dirty('b', ['unclassifiable']), dirty('c', [undefined]), dirty('d', ['stronger', 'equivalent'])])
     for (const name of ['a', 'b', 'c', 'd']) {
       const b = badge(name)!
       expect(b.textContent, name).toBe('Review')
       expect(b.getAttribute('style'), name).not.toContain('--danger')
+      expect(b.getAttribute('style'), name).toContain('--warning')
       expect(featureRow(name).className, name).toContain('cl-list-row-changed')
       expect(featureRow(name).className, name).not.toContain('cl-list-row-dirty')
     }
   })
 
-  it('keeps stronger hints neutral because they are not execution results', () => {
+  it('keeps stronger edits amber because they still need review', () => {
     render([dirty('up', ['stronger', 'stronger'])])
     const b = badge('up')!
     expect(b.textContent).toBe('Review')
-    expect(b.getAttribute('style')).toContain('--text-secondary')
+    expect(b.getAttribute('style')).toContain('--warning')
     expect(b.getAttribute('aria-label')).toBe('Review test changes in up')
     expect(featureRow('up').className).toContain('cl-list-row-changed')
   })

@@ -856,14 +856,14 @@ export const FACT_HELP: Record<string, string> = {
   'Distilled to': 'The short summary agents read instead of the full files. Tokens are a rough estimate.',
   // Test authoring
   'Mapped coverage': 'Counted from requirement labels in the test files. Nothing was run, so every test could still be failing.',
-  'Tests written': 'All test cases found in the suite’s spec files. They can exist before coverage mapping links them to requirements.',
+  'Tests written': 'All test cases found in the suite’s test files. They can exist before coverage mapping links them to requirements.',
   // Parallel readiness
   'Parallel': 'Can two runs of this suite start at once without fighting over a port? Checked once.',
   'Services injectable': 'The service reads its port from settings instead of having it fixed in the code.',
   'Files edited': 'Changes Canary made so ports can be swapped. Kept as a patch you can undo.',
   'Instances proven': 'Two copies of the app ran at once and both answered. That is the real proof.',
   // Robustness lab
-  'Cells run': 'One cell is one spec file run again under one disturbance — added delay, a repeated request, or a service restart. A cell nobody could judge is listed, not counted as a pass.',
+  'Cells run': 'One cell is one test file run again under one disturbance — added delay, a repeated request, or a service restart. A cell nobody could judge is listed, not counted as a pass.',
   'Findings': 'Tests that passed in the green run but failed under a disturbance. The green verdict stands; this is what it did not cover.',
   'Confirmed': 'A finding is confirmed when its smallest failing disturbance reproduced 3 times out of 3. Unconfirmed ones stay listed with their trace, never dropped.',
   // Test run history
@@ -914,7 +914,7 @@ export const FACT_GLOSS: Record<string, string> = {
   'Requirements with tests': 'claimed by a test’s label',
   'Tests that passed': 'in the run this report reads',
   'Requirements proven': 'a passing test backs every path',
-  'Cells run': 'spec files × disturbances',
+  'Cells run': 'test files × disturbances',
   'Findings': 'held in the green run, broke here',
   'Confirmed': 'reproduced 3 of 3',
   'Runs performed': 'this suite’s whole history',

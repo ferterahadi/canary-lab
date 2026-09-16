@@ -18,6 +18,7 @@ vi.mock('@/shared/api/client', async () => {
     deleteFeatureDoc: vi.fn(),
     clearPrdSummary: vi.fn(),
     openEditor: vi.fn(),
+    linkFeatureDocPath: vi.fn(),
   }
 })
 
@@ -56,6 +57,7 @@ beforeEach(() => {
   vi.mocked(api.deleteFeatureDoc).mockResolvedValue({ deleted: true })
   vi.mocked(api.clearPrdSummary).mockResolvedValue({ feature: 'checkout', removed: ['_prd-summary.json'], untagged: [] })
   vi.mocked(api.openEditor).mockResolvedValue({ opened: true, editor: 'auto' })
+  vi.mocked(api.linkFeatureDocPath).mockResolvedValue({ written: true, relativePath: 'docs/prd.md', linked: true })
 })
 
 afterEach(() => {
@@ -95,6 +97,51 @@ async function flushUntil(predicate: () => boolean, max = 50): Promise<void> {
 }
 
 describe('CoverageDocsRail', () => {
+  it('offers relinking for a broken source even when a summary freezes the document set', async () => {
+    const listing = structuredClone(LISTING)
+    listing.docs[0] = { ...listing.docs[0], linked: true, broken: true, linkTarget: '/old/prd.md' }
+    vi.mocked(api.listFeatureDocs).mockResolvedValue(listing)
+    const onDocsChanged = vi.fn()
+    await mount({ onDocsChanged })
+    await act(async () => { container.querySelector<HTMLElement>('[data-testid="doc-pill-prd.md"]')!.click() })
+    expect(api.openEditor).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('Source unavailable. Where is the file now?')
+    act(() => { container.querySelector<HTMLButtonElement>('[aria-label="Relink prd.md"]')!.click() })
+    const input = container.querySelector<HTMLInputElement>('[aria-label="New path for prd.md"]')!
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '/new/renamed.md')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    vi.mocked(api.listFeatureDocs).mockResolvedValue(LISTING)
+    await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
+    expect(api.linkFeatureDocPath).toHaveBeenCalledWith('checkout', '/new/renamed.md', { relPath: 'prd.md', relink: true })
+    expect(onDocsChanged).toHaveBeenCalledOnce()
+    expect(container.textContent).not.toContain('Source unavailable')
+    expect(api.clearPrdSummary).not.toHaveBeenCalled()
+  })
+
+  it('keeps an invalid replacement editable and disables relinking during generation', async () => {
+    const listing = structuredClone(LISTING)
+    listing.docs[0] = { ...listing.docs[0], linked: true, broken: true }
+    vi.mocked(api.listFeatureDocs).mockResolvedValue(listing)
+    await mount({ generating: true })
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Relink prd.md"]')!.disabled).toBe(true)
+    await mount()
+    act(() => { container.querySelector<HTMLButtonElement>('[aria-label="Relink prd.md"]')!.click() })
+    const input = container.querySelector<HTMLInputElement>('[aria-label="New path for prd.md"]')!
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '/missing.md')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    vi.mocked(api.linkFeatureDocPath).mockRejectedValue(new Error('target does not exist'))
+    await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe('target does not exist')
+    expect(input.value).toBe('/missing.md')
+    expect(container.textContent).toContain('Broken link')
+    act(() => { Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Cancel')!.click() })
+    expect(container.querySelector('form')).toBeNull()
+  })
+
   it('lists docs when open', async () => {
     await mount({ open: true })
     expect(api.listFeatureDocs).toHaveBeenCalledWith('checkout')

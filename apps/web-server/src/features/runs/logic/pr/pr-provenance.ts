@@ -45,31 +45,31 @@ export function prProvenanceFooter(a: { runId: string; baseSha: string; verdict?
 
 function verdictLines(snapshot: RunSuiteSnapshot, specEdits: RunSpecEdits | undefined, integrity: RunIntegrity | undefined): string[] {
   if (snapshot.kind !== 'taken') {
-    return [`**Verdict provenance.** No run-start snapshot could be taken (${snapshot.reason}): the verdict is from the live suite, so a spec edited while the run was live may have changed what ran.`]
+    return [`**What this run tested.** Canary Lab could not record the tests when the run started (${snapshot.reason}), so a test-file change during the run may have changed what was tested.`]
   }
-  const out = [`**Verdict provenance.** The tests this run passed are the suite as it stood at run start (snapshot \`${snapshot.digest.slice(0, 12)}\`, taken ${snapshot.takenAt}).`]
+  const out = [`**What this run tested.** The tests that passed were recorded when the run started (copy \`${snapshot.digest.slice(0, 12)}\`, recorded ${snapshot.takenAt}).`]
   const pending = specEdits?.pending ?? []
   const adopted = specEdits?.adopted ?? []
   if (pending.length > 0) {
     const files = pending.map((e) => `\`${e.file}\` (${e.change})`).join(', ')
-    out.push(`- Not executed — ${plural(pending.length, 'spec edit')} made after the run started: ${files}. Adopt or restore ${pending.length === 1 ? 'it' : 'them'} in Canary Lab before reading this fix against the live suite.`)
+    out.push(`- Not run — ${plural(pending.length, 'test-file change')} made after the run started: ${files}. Adopt or restore ${pending.length === 1 ? 'it' : 'them'} in Canary Lab before reading this fix against the current tests.`)
   }
   for (const record of adopted) {
     out.push(`- Adopted into the run (${record.by}, ${record.at}): ${record.files.map((f) => `\`${f}\``).join(', ')}.`)
   }
-  if (pending.length === 0 && adopted.length === 0) out.push('- No live spec changed since the snapshot was taken.')
+  if (pending.length === 0 && adopted.length === 0) out.push('- No test files changed after the tests were recorded.')
   for (const hint of integrity?.hints ?? []) {
     if (hint.kind === 'weaker') {
       const was = hint.was.length > 0 ? hint.was.map((s) => `\`${s}\``).join(', ') : 'nothing'
       const now = hint.now.length > 0 ? hint.now.map((s) => `\`${s}\``).join(', ') : 'nothing'
       const reqs = hint.requirements?.length ? ` (${hint.requirements.map((r) => `@${r}`).join(' ')})` : ''
-      out.push(`- Hint, not a verdict — \`${hint.file}\` › ${hint.test}${reqs} reads weaker than what ran: was ${was}; now ${now}.`)
+      out.push(`- Hint, not a verdict — \`${hint.file}\` › ${hint.test}${reqs} may be weaker than the test that ran: was ${was}; now ${now}.`)
     } else {
       out.push(`- Cannot classify — \`${hint.file}\`${hint.test ? ` › ${hint.test}` : ''}: ${hint.reason}.`)
     }
   }
   if (integrity?.hints.length) {
-    out.push(`  Hints are advisory and never change a status; this reading was wrong ${INTEGRITY_HINT_FALSE_POSITIVE_RATE} of the time on the holdout. ${integrity.disclosure}`)
+    out.push(`  Hints are advisory and do not change the run result. In a fixed sample of public-repository changes, this check incorrectly flagged a weakening ${INTEGRITY_HINT_FALSE_POSITIVE_RATE} of the time. ${integrity.disclosure}`)
   }
   return out
 }

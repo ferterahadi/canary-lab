@@ -126,7 +126,11 @@ export interface WorkspaceNavigation {
 }
 
 export function useWorkspaceNavigation(): WorkspaceNavigation {
-  const [currentTests, setCurrentTests] = useState(PERSISTED.currentTests ?? false)
+  // Historical source is an explicit choice for one suite/run. Ordinary run
+  // selection changes the detail pane without replacing the current tests.
+  const [recordedSelection, setRecordedSelection] = useState<{ feature: string | null; run: string } | null>(
+    PERSISTED.currentTests === false && PERSISTED.run ? { feature: PERSISTED.feature, run: PERSISTED.run } : null,
+  )
   const [view, setView] = useState<WorkspaceView>(SEED.view)
   const [selectedFeature, setSelectedFeature] = useState<string | null>(SEED.feature)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(SEED.run)
@@ -178,6 +182,11 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const selectedFlightIdRef = useRef<string | null>(SEED.flight)
   useEffect(() => { selectedFeatureRef.current = selectedFeature }, [selectedFeature])
   useEffect(() => { selectedRunIdRef.current = selectedRunId }, [selectedRunId])
+  const currentTests = !recordedSelection || recordedSelection.run !== selectedRunId || recordedSelection.feature !== selectedFeature
+  const setCurrentTests = useCallback(
+    (current: boolean) => { setRecordedSelection(!current && selectedRunId ? { feature: selectedFeature, run: selectedRunId } : null) },
+    [selectedFeature, selectedRunId],
+  )
   useEffect(() => { selectedFlightIdRef.current = selectedFlightId }, [selectedFlightId])
 
   const state: NavState = {
@@ -207,7 +216,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   // Persist the full route to the URL on every change (durable tier also mirrors
   // to localStorage for cross-tab sync).
   useEffect(() => {
-    persistView({ ...navToPersistedView(state), reviewFocus, ...(currentTests ? { currentTests: true } : {}) })
+    persistView({ ...navToPersistedView(state), reviewFocus, ...(!currentTests ? { currentTests: false } : {}) })
     // Intentionally keyed on the primitive fields, not the freshly-built `state`
     // object (new identity every render).
     // configTab is listed explicitly: the `dialog` value stays 'config' while

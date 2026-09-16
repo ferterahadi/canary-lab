@@ -35,16 +35,19 @@ export function listRuns(logsDir: string, opts: ListRunsOptions = {}): RunIndexE
 }
 
 /** The index mirrors repair evidence/provenance from the manifest. Entries
- *  written before either field existed have gaps; the manifest is truth, so
- *  read it only when one is missing. A cleaned run legitimately stays absent. */
+ *  written before any of these fields existed have gaps; the manifest is truth,
+ *  so read it only when one is missing. A cleaned run legitimately stays absent.
+ *  `env` joined them later, so a run recorded before it existed still shows its
+ *  envset rather than silently reading as "no envset". */
 function fillIndexProvenance(logsDir: string, entry: RunIndexEntry): RunIndexEntry {
-  if (entry.healCycles !== undefined && entry.healMode !== undefined) return entry
+  if (entry.healCycles !== undefined && entry.healMode !== undefined && entry.env !== undefined) return entry
   const manifest = readManifest(path.join(runDirFor(logsDir, entry.runId), 'manifest.json'))
   if (!manifest) return entry
   return {
     ...entry,
     ...(entry.healCycles === undefined && manifest.healCycles ? { healCycles: manifest.healCycles } : {}),
     ...(entry.healMode === undefined && manifest.healMode ? { healMode: manifest.healMode } : {}),
+    ...(entry.env === undefined && manifest.env ? { env: manifest.env } : {}),
   }
 }
 

@@ -43,6 +43,23 @@ async function harness(reply: (params: Record<string, unknown>) => Promise<unkno
 }
 
 describe('SDK 2.0 elicitation over the real compact HTTP dispatcher', () => {
+  it.each([false, true])('relinks a moved document through a real form (legacy=%s)', async (legacy) => {
+    let moved = ''
+    const reply = vi.fn(async () => ({ action: 'accept', content: { local_path: moved } }))
+    const { call, featureDir } = await harness(reply, legacy)
+    const docsDir = path.join(featureDir, 'docs')
+    fs.mkdirSync(docsDir)
+    moved = path.join(featureDir, 'moved.md')
+    fs.writeFileSync(moved, '# Checkout\nUsers can submit an order.')
+    const link = path.join(docsDir, 'requirements.md')
+    fs.symlinkSync(path.join(featureDir, 'old.md'), link)
+    const result = await call('start_external_summary', { feature: 'checkout', session_id: 'relink' })
+    expect(result.status).toBe('document-relinked')
+    expect(reply).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ mode: 'form', message: expect.stringContaining('Where is the file now?') }))
+    expect(fs.readlinkSync(link)).toBe(fs.realpathSync(moved))
+    expect(fs.readdirSync(docsDir)).toEqual(['requirements.md'])
+  })
+
   it('accepts discovered source evidence over HTTP without requesting user input', async () => {
     const reply = vi.fn(async () => ({ action: 'cancel' }))
     const { call, featureDir } = await harness(reply)

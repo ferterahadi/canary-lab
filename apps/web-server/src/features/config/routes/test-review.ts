@@ -10,6 +10,7 @@ import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { readManifest } from '../../runs/logic/runtime/manifest'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
 import { diffSourceText } from '../../runs/logic/dirty-specs/text-diff'
+import { changedTestNames } from '../../runs/logic/dirty-specs/detect'
 import type { FeaturesRouteDeps } from './features-route-deps'
 
 /** Resolve existing parents too: a deleted file behind a symlink must not
@@ -68,7 +69,22 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
         beforeSource = source.stdout
       } else beforeSource = ''
     }
-    if (req.query.summary === 'true') return { changed: beforeSource !== afterSource }
+    if (req.query.summary === 'true') {
+      // The summary carries the affected test names, not just the boolean: the
+      // Tests column marks the individual tests whose source moved since the
+      // run, and re-deriving that client-side would mean shipping both
+      // versions of the file to do an AST diff in the browser.
+      const changed = beforeSource !== afterSource
+      if (!changed) return { changed }
+      return {
+        changed,
+        affectedTests: changedTestNames(file, beforeSource, afterSource),
+        verdict: diffSpecPredicates(
+          extractTestPredicatesFromSource(file, beforeSource),
+          extractTestPredicatesFromSource(file, afterSource),
+        ).verdict,
+      }
+    }
     const extract = (source: string): ReviewSource => {
       const result = extractTestsFromSource(file, source, feature.semanticRules)
       // `endLine` is optional on ExtractedTest only because the tests route

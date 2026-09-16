@@ -473,21 +473,21 @@ function runStats({
     const pending = pendingSpecEdits ?? 0
     const hints = integrityHints ?? 0
     const qualifier = pending > 0
-      ? ` · ${plural(pending, 'pending edit')}${hints > 0 ? ` · ${plural(hints, 'hint')}` : ''}`
+      ? ` · ${plural(pending, 'pending test-file change')}${hints > 0 ? ` · ${plural(hints, 'hint')}` : ''}`
       : ''
     stats.push({
       label: 'Verdict from',
-      value: `run-start snapshot${qualifier}`,
+      value: `recorded tests${qualifier}`,
       title: pending > 0
-        ? `${plural(pending, 'spec edit')} made since the run started ${pending > 1 ? 'were' : 'was'} not executed — the verdict is from the suite as it stood at run start. Adopt or restore them in the review.`
-        : `The suite as it stood when the run started (${suiteSnapshot.digest.slice(0, 12)}). No live spec has changed since.`,
+        ? `${plural(pending, 'test-file change')} made since the run started ${pending > 1 ? 'were' : 'was'} not run. This run result is based on the recorded tests. Review, then adopt or restore the changes.`
+        : `Tests were recorded when the run started (${suiteSnapshot.digest.slice(0, 12)}). No test files have changed since.`,
       ...(pending > 0 && onOpenSpecReview ? { onClick: onOpenSpecReview, testId: 'run-hero-spec-edits' } : {}),
     })
   } else if (suiteSnapshot?.kind === 'unavailable') {
     stats.push({
       label: 'Verdict from',
-      value: 'live suite (no snapshot)',
-      title: `The run-start copy could not be taken: ${suiteSnapshot.reason}. A spec edited mid-run may have changed what this run executed.`,
+      value: 'live tests (not recorded)',
+      title: `Canary Lab could not record the tests when this run started: ${suiteSnapshot.reason}. A test-file change during the run may have changed what was tested.`,
       bad: true,
     })
   }
@@ -554,4 +554,3 @@ function RunControls({
     </div>
   )
 }
-

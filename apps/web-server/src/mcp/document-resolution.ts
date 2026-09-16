@@ -9,6 +9,7 @@ import { resolveRepoPath } from '../shared/git-repo'
 import { renderPrompt } from '../shared/prompts'
 import { publishWorkspaceEvent } from '../shared/workspace-events'
 import { requestDocuments } from './document-input'
+import { requestBrokenDocumentPath } from './document-relink'
 import { inputFingerprint, inputPending, requestUserInput, resumeUrlInput } from './elicitation'
 import { asJsonResult, authoringCtx, errorResult, type ToolGroupContext } from './tool-support'
 
@@ -44,6 +45,8 @@ export async function resolveDocuments(options: ResolveDocumentsOptions): Promis
   const found = findFeature(ctx.deps.featuresDir, feature)
   if (!found?.featureDir) return errorResult(`feature not found: ${feature}`)
   const featureDir = found.featureDir
+  const relink = await requestBrokenDocumentPath({ ...options, featureDir })
+  if (relink) return relink
   const collection = readDocsCollection(featureDir, { includeExcluded: true })
   const roots = (options.repoPaths ?? found.repos?.map((repo) => repo.localPath) ?? []).map((repo) => path.resolve(ctx.deps.projectRoot, resolveRepoPath(repo)))
   const discovery = (reason?: string) => asJsonResult({

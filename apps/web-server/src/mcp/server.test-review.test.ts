@@ -9,13 +9,14 @@ import { runsRoutes } from '../features/runs/routes/runs'
 import { createRegistry, RunStore } from '../features/runs/logic/run-store'
 import { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import { makeHealLoopContext } from '../features/runs/logic/runtime/__fixtures__/heal-loop-context'
-import { adoptSpecEdits, recordSpecEdits, snapshotSuite } from '../features/runs/logic/runtime/run-suite-snapshot'
+import { adoptSpecEdits, recordSpecEdits, restoreSpecEdits, snapshotSuite } from '../features/runs/logic/runtime/run-suite-snapshot'
 import { writeManifest } from '../features/runs/logic/runtime/manifest'
+import { waitForTestReview } from './test-review-wait'
 
 const cleanups: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
 
-async function harness(answer: (live: string) => { action: 'accept' | 'cancel' | 'decline'; content?: { choice: string } }, legacy = false) {
+async function harness(answer: (live: string) => { action: 'accept' | 'cancel' | 'decline'; content?: { choice: string } }, legacy = false, elicitation = true) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-test-review-http-'))
   cleanups.push(async () => fs.rmSync(root, { recursive: true, force: true }))
   const store = new RunStore(path.join(root, 'logs'), createRegistry())
@@ -30,7 +31,12 @@ async function harness(answer: (live: string) => { action: 'accept' | 'cancel' |
   fs.writeFileSync(live, changed)
   recordSpecEdits(ctx)
   ctx.signalGate.beginWaiting()
-  store.registry.set(ctx.runId, { runId: ctx.runId, stop: async () => {}, adoptSpecEdits: (revision) => adoptSpecEdits(ctx, revision) })
+  store.registry.set(ctx.runId, {
+    runId: ctx.runId, stop: async () => {},
+    pauseAndHeal: async () => ({ ok: false, reason: 'already-healing' }),
+    cancelHeal: async () => ({ ok: false, reason: 'no-agent-running' }),
+    adoptSpecEdits: (revision) => adoptSpecEdits(ctx, revision), restoreSpecEdits: () => restoreSpecEdits(ctx),
+  })
   const events: string[] = []
   store.on('event', (event) => events.push(event.kind))
   const broker = new ExternalHealBroker({ now: Date.now, emit: () => {}, patchManifest: (id, patch) => store.patchManifest(id, patch), audit: () => {} })
@@ -48,9 +54,9 @@ async function harness(answer: (live: string) => { action: 'accept' | 'cancel' |
   })
   const address = await app.listen({ host: '127.0.0.1', port: 0 })
   cleanups.push(async () => app.close())
-  const client = new Client({ name: 'test-review-human', version: '1' }, { capabilities: { elicitation: { form: {} } }, versionNegotiation: { mode: legacy ? 'legacy' : { pin: '2026-07-28' } } })
+  const client = new Client({ name: 'test-review-human', version: '1' }, { capabilities: elicitation ? { elicitation: { form: {} } } : {}, versionNegotiation: { mode: legacy ? 'legacy' : { pin: '2026-07-28' } } })
   const reply = vi.fn(async () => answer(live))
-  client.setRequestHandler('elicitation/create', reply)
+  if (elicitation) client.setRequestHandler('elicitation/create', reply)
   await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
   cleanups.push(async () => client.close())
   const call = async (command: string, args: Record<string, unknown>) => {
@@ -62,6 +68,46 @@ async function harness(answer: (live: string) => { action: 'accept' | 'cancel' |
 }
 
 describe('human test review through the real MCP and REST path', () => {
+  it.each(['adopted', 'restored'] as const)('resumes a non-eliciting agent when the human chooses %s in the browser', async (decision) => {
+    const { call, ctx, app, store, reply } = await harness(() => ({ action: 'cancel' }), false, false)
+    const review = await call('get_test_review', { runId: ctx.runId })
+    const args = { runId: ctx.runId, review_revision: review.review_revision }
+    const fallback = await call('review_test_changes', args)
+    expect(fallback).toMatchObject({ reason: 'elicitation-unavailable', review_revision: review.review_revision })
+    expect(fallback.next).toContain('wait_for_decision:true')
+    const listeners = store.listenerCount('event')
+    const pending = call('review_test_changes', { ...args, wait_for_decision: true })
+    await vi.waitFor(() => expect(store.listenerCount('event')).toBeGreaterThan(listeners))
+    const action = decision === 'adopted' ? 'adopt-spec-edits' : 'restore-spec-edits'
+    expect((await app.inject({ method: 'POST', url: `/api/runs/${ctx.runId}/${action}` })).statusCode).toBe(decision === 'adopted' ? 202 : 200)
+    expect(await pending).toMatchObject({ status: decision, nextSteps: ['wait_for_heal_task'] })
+    expect(reply).not.toHaveBeenCalled()
+    expect(store.listenerCount('event')).toBe(listeners)
+    // The click can precede the wait or a reconnect. Re-reading the persisted
+    // receipt must still return it without another prompt or action.
+    recordSpecEdits(ctx)
+    const reloaded = new RunStore(store.logsDir, createRegistry())
+    expect(await waitForTestReview(reloaded, ctx.runId, review.review_revision)).toMatchObject({ status: decision })
+    expect(ctx.signalGate.consume()?.kind ?? null).toBe(decision === 'adopted' ? 'rerun' : null)
+  })
+
+  it('waits without approving, detects changed source, and cleans up on timeout or run end', async () => {
+    const { call, ctx, store, requests } = await harness(() => ({ action: 'cancel' }), false, false)
+    const review = await call('get_test_review', { runId: ctx.runId })
+    const args = { runId: ctx.runId, review_revision: review.review_revision, wait_for_decision: true, timeout_ms: 1 }
+    const listeners = store.listenerCount('event')
+    expect(await call('review_test_changes', args)).toMatchObject({ status: 'still_waiting' })
+    expect(store.listenerCount('event')).toBe(listeners)
+    fs.appendFileSync(path.join(ctx.feature.featureDir, 'e2e/a.spec.ts'), '// later edit\n')
+    expect(await call('review_test_changes', args)).toMatchObject({ status: 'review-changed' })
+    expect(store.listenerCount('event')).toBe(listeners)
+    store.patchManifest(ctx.runId, { status: 'aborted' })
+    expect(await call('review_test_changes', args)).toMatchObject({ status: 'run-ended' })
+    expect(await call('review_test_changes', { ...args, runId: 'missing' })).toMatchObject({ status: 'run-unavailable' })
+    expect(requests).not.toContain('POST')
+    expect(ctx.signalGate.consume()).toBeNull()
+  })
+
   it.each([false, true])('adopts the reviewed bytes and emits run updates after acceptance (legacy=%s)', async (legacy) => {
     const { call, ctx, changed, store, events, requests, reply } = await harness(() => ({ action: 'accept', content: { choice: 'Adopt and rerun' } }), legacy)
     const review = await call('get_test_review', { runId: ctx.runId })

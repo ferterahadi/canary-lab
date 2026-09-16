@@ -68,6 +68,7 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
         runId: m.runId,
         ...(m.executionType ? { executionType: m.executionType } : {}),
         feature: m.feature,
+        ...(m.env ? { env: m.env } : {}),
         startedAt: m.startedAt,
         status: m.status,
         ...(m.endedAt ? { endedAt: m.endedAt } : {}),

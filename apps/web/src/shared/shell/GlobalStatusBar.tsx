@@ -119,7 +119,8 @@ export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocu
     setLocalSpecReviewOpen(open)
     onSpecReviewOpenChange?.(open)
   }
-  const pendingRuns = runs.filter((r) => (isActiveRunStatus(r.status) && (r.pendingSpecEdits ?? 0) > 0) || (reviewFocus?.baseline === 'run' && r.runId === specReviewRunId))
+  // A baseline toggle must not remove the linked suite from the review rail.
+  const pendingRuns = runs.filter((r) => (isActiveRunStatus(r.status) && (r.pendingSpecEdits ?? 0) > 0) || r.runId === specReviewRunId)
   // The right-hand action cluster collapses into a single toggle. Default
   // expanded (actions stay glanceable); the choice persists across reloads.
   const [actionsExpanded, setActionsExpanded] = useState<boolean>(() => {

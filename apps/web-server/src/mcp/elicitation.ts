@@ -39,6 +39,15 @@ export function inputPending(reason: string): CallToolResult {
   })
 }
 
+/** A successful repair can remove the condition that opened its form. Keep
+ * its receipt reachable on transport retries without reopening that question. */
+export function completedUserInput(ctx: ServerContext | undefined, scope: unknown): Promise<ToolResult> | undefined {
+  const state = ctx?.mcpReq.requestState?.()
+  const entry = typeof state === 'string' ? pending.get(state) : undefined
+  return entry && entry.expiresAt > Date.now() && entry.scope === inputFingerprint([ctx?.sessionId, scope])
+    ? entry.result : undefined
+}
+
 /** URL input can advance the domain state before the MCP call resumes. Keep
  * its original completion check so a retry cannot answer a newer checkpoint. */
 export function resumeUrlInput(

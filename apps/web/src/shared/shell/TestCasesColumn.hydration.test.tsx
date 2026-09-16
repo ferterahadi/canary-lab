@@ -257,7 +257,12 @@ it('hydrates the recorded snapshot results without confusing them with live sour
   expect(badges.filter((t) => t.endsWith('SKIPPED'))).toHaveLength(9)
   expect(badges.filter((t) => t.endsWith('PENDING'))).toHaveLength(0)
   expect(container.textContent).toMatch(/77\s*\/\s*98/)
-  expect(container.textContent).toContain('Selected run')
+  // The default view carries no provenance label: a column of recorded statuses
+  // already says which version is on screen. Only the exception is marked, and
+  // this is not it.
+  const header = container.querySelector('.cl-panel-header')
+  expect(header?.textContent).not.toContain('Current source')
+  expect(container.querySelector('[data-testid="suite-version-menu"]')).toBeNull()
 })
 
 it('shows discovery diagnostics and incomplete definitions without presenting them as test results', async () => {
@@ -371,7 +376,7 @@ it('shows the 23 recorded legacy auth passes without offering current source as 
   await act(async () => root.render(<TestCasesColumn feature={legacy.manifest.feature} activeRunManifest={legacy.manifest as RunManifest} activeRunStatus="passed" activeRunSummary={summary} />))
   expect(container.textContent).toContain('23/23')
   expect([...container.querySelectorAll('button')].filter((button) => button.textContent?.endsWith('passed'))).toHaveLength(23)
-  expect(container.textContent).toContain('Historical source is unavailable')
+  expect(container.textContent).toContain('Source wasn’t saved for some tests in this run')
   expect(container.textContent).toContain('Source was not retained for this test')
   expect(container.textContent).not.toContain('Recorded tests unavailable')
   expect(container.textContent).not.toContain('Retry discovery')
@@ -384,7 +389,7 @@ it('explains an aborted run with no roster without inviting discovery retries', 
   await act(async () => root.render(<TestCasesColumn feature="suite" activeRunManifest={manifest} activeRunStatus="aborted" activeRunSummary={undefined} />))
   expect(container.textContent).toContain('This run has no recorded test list')
   expect(container.textContent).not.toContain('Retry discovery')
-  expect(container.textContent).not.toContain('No spec files found')
+  expect(container.textContent).not.toContain('No test files found')
   expect(container.textContent).not.toContain('HTTP 409')
 })
 
@@ -401,18 +406,72 @@ it('lets an empty historical run open current tests without inheriting its verdi
   await act(async () => root.render(<View />))
   expect(container.textContent).toContain('This run has no recorded test list')
   const click = async (label: string) => act(async () => {
-    const button = [...container.querySelectorAll('button')].find((button) => button.textContent === label)
+    const button = [...container.querySelectorAll('button'), ...document.querySelectorAll('[role="menu"] button')]
+      .find((button) => button.getAttribute('aria-label') === label)
     expect(button).toBeTruthy()
-    button!.click()
+    ;(button as HTMLButtonElement).click()
   })
-  await click('View current tests')
+  // Even an empty recorded run keeps the visible source choice.
+  expect(container.querySelector('[aria-label="Test source"]')).not.toBeNull()
+  await click('Current source')
   expect(getFeatureTests).toHaveBeenLastCalledWith('suite', undefined, undefined)
   expect(container.textContent).toContain('current test')
-  expect(container.textContent).toContain('Current source')
+  expect(container.querySelector('[aria-label="Current source"]')?.getAttribute('aria-pressed')).toBe('true')
   expect(container.textContent).not.toContain('pending')
   expect(container.textContent).not.toContain('passed')
-  await click('View recorded results')
+  expect(container.textContent).toContain('Not verified')
+  expect(container.querySelector('[data-testid="suite-version-menu"]')).toBeNull()
+  await click('Recorded run')
   expect(getFeatureTests).toHaveBeenLastCalledWith('suite', undefined, 'old-run')
   expect(container.textContent).toContain('This run has no recorded test list')
   expect(container.textContent).not.toContain('expect(200)')
+  expect(container.querySelector('[aria-label="Test source"]')).not.toBeNull()
+})
+
+it('keeps switching reversible when the saved suite and current source are identical', async () => {
+  const manifest = { runId: 'r1', featureDir: '/tmp/suite', suiteSnapshot: { kind: 'taken' as const, dir: '/tmp/runs/r1/suite', takenAt: 'now', digest: 'same' } }
+  const name = 'same test'
+  vi.mocked(getFeatureTests).mockImplementation(async (_feature, _signal, runId) => [{
+    file: `${runId ? manifest.suiteSnapshot.dir : manifest.featureDir}/e2e/a.spec.ts`,
+    tests: [{ name, line: 1, bodySource: '', steps: [], readable: readableTest(name) }],
+  }])
+  function View() {
+    const [source, setSource] = useState(false)
+    return <TestCasesColumn feature="suite" currentTests={source} onCurrentTestsChange={setSource}
+      baselineRun={manifest} activeRunManifest={source ? undefined : manifest}
+      activeRunStatus={source ? undefined : 'passed'} activeRunSummary={source ? undefined : { complete: true, total: 1, passed: 1, passedNames: ['test-case-same-test'], failed: [] }} />
+  }
+  await act(async () => root.render(<View />))
+  for (const label of ['Current source', 'Recorded run', 'Current source']) {
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Test source"] button')]
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual(['Current source', 'Recorded run'])
+    const button = buttons.find((button) => button.getAttribute('aria-label') === label)!
+    await act(async () => button.click())
+    expect(button.getAttribute('aria-pressed')).toBe('true')
+    expect(container.querySelector('[data-testid="suite-version-menu"]')).toBeNull()
+    expect(container.querySelector('.cl-card')?.textContent).toContain(label === 'Current source' ? 'Not verified' : 'passed')
+  }
+})
+
+it('offers current source from a legacy run while keeping its results in recorded mode', async () => {
+  const { default: legacy } = await import('@/features/runs/utils/__fixtures__/cns-legacy-auth.json')
+  const known = legacy.summary.knownTests[0]
+  const [, file, line] = /^(.*?):(\d+)$/.exec(known.location!)!
+  vi.mocked(getFeatureTests).mockImplementation(async (_feature, _signal, runId) => [{
+    file, ...(runId ? { recordedSourceUnavailable: true } : {}),
+    tests: [{ name: known.title!, line: Number(line), bodySource: '', steps: [], readable: readableTest(known.title!) }],
+  }])
+  function View() {
+    const [current, setCurrent] = useState(false)
+    return <TestCasesColumn feature={legacy.manifest.feature} currentTests={current} onCurrentTestsChange={setCurrent}
+      activeRunManifest={current ? undefined : legacy.manifest as RunManifest}
+      activeRunSummary={current ? undefined : legacy.summary as RunSummary} activeRunStatus={current ? undefined : 'passed'} />
+  }
+  await act(async () => root.render(<View />))
+  expect(container.querySelector('.cl-card')?.textContent).toContain('passed')
+  const action = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'View current source')!
+  await act(async () => action.click())
+  expect(container.textContent).not.toContain('Source wasn’t saved')
+  expect(container.querySelector('.cl-card')?.textContent).toContain('Not verified')
+  expect(container.querySelector('.cl-card')?.textContent).not.toContain('passed')
 })

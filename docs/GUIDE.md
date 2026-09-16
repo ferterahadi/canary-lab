@@ -79,9 +79,9 @@ Canary Lab never borrows a result from another run for an export.
 
 The archive also carries a **behavior certificate** (`certificate.json`) with a
 zero-dependency checker beside it (`verify-certificate.mjs`). The certificate
-states which tests ran from which suite snapshot (the run-start copy and its
+states which tests ran from the test copy recorded at run start (and its
 digest), what each test asserted and how strongly, how the run ended, which live
-spec edits the verdict never executed, and the advisory hints. When the
+test-file changes the run did not execute, and any advisory hints. When the
 Robustness lab has run against that run, the certificate also carries its
 findings: which tests passed green and failed under latency, a duplicated write
 or a restart, the smallest envelope that still reproduces each, and every cell
@@ -148,6 +148,13 @@ source docs mark the summary and dependent coverage state stale instead of
 silently reusing old mappings. See [FEATURES](FEATURES.md#requirement-coverage)
 for the tag contract and [COMMANDS](COMMANDS.md#requirement-coverage-mcp-compact-or-direct-coveragelifecyclefull-profiles)
 for MCP tools.
+
+Linked local documents stay symlinked. If a source moves or is deleted,
+its document card shows **Source unavailable**. Choose **Relink** and enter the
+new absolute or `~/` path. Canary keeps the document's name and existing summary
+baseline, so changed contents still trigger requirements drift. Relinking creates
+no recovery copy; if the new path is invalid or the symlink cannot be created,
+the old link remains available to repair. Uploaded documents remain imported copies. MCP coverage and Flight document steps ask for the new path through elicitation when the client supports forms. After relinking, the agent retries its original command; cancellation leaves the work pending.
 
 ## Repair a failed run
 

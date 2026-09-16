@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent, typ
 import * as api from '@/shared/api/client'
 import type { FeatureDocsListing } from '@/shared/api/types'
 import { DocPill, EmptyDropzone } from './DocPill'
+import { useDocRelink } from './DocRelink'
 
 export { DocPill, EmptyDropzone } from './DocPill'
 
@@ -133,6 +134,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   // Re-list on mount, on feature change, and whenever the parent bumps reloadKey
   // (a generation job completed → the generated PRD artifact now exists).
   useEffect(() => { load() }, [load, reloadKey])
+  const relinkDoc = useDocRelink(feature, () => { load(); onDocsChanged() })
 
   // Import each file SEQUENTIALLY — the md-only extractor + single-flight summary
   // job must not be hammered concurrently. A per-file failure does not abort the
@@ -363,6 +365,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
                   linked={d.linked}
                   linkTarget={d.linkTarget}
                   broken={d.broken}
+                  onRelink={(targetPath) => relinkDoc(d.relPath, targetPath)}
                   busy={locked}
                   onOpen={() => openDoc(d.absPath)}
                   onRemove={docsReadOnly ? undefined : () => removeDoc(d.relPath)}

@@ -392,9 +392,9 @@ function FeatureRow({
             data-tone={tone}
             className="ml-1.5 flex shrink-0 items-center justify-center self-center rounded px-1 py-1 text-[10px] leading-none"
             style={{
-              color: SPEC_TONE[tone].color,
-              background: `color-mix(in srgb, ${SPEC_TONE[tone].color} 14%, transparent)`,
-              border: `1px solid color-mix(in srgb, ${SPEC_TONE[tone].color} 35%, transparent)`,
+              color: 'var(--warning)',
+              background: 'color-mix(in srgb, var(--warning) 14%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--warning) 35%, transparent)',
             }}
           >
             Review

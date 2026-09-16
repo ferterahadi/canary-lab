@@ -31,6 +31,7 @@ vi.mock('../logic/coverage/annotate-engine', async (importActual) => {
 })
 
 import { coverageRoutes } from './coverage'
+import { readDocsCollection } from '../logic/coverage/docs-collection'
 
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
 
@@ -255,6 +256,31 @@ describe('coverage routes', () => {
 })
 
 describe('POST /api/features/:name/docs/link + symlink-aware listing', () => {
+  it('relinks a moved and edited source, emits a refresh, and preserves drift against the old contents', async () => {
+    const dir = writeFeature('checkout', SPEC)
+    const original = path.join(tmpDir, 'original.md')
+    const moved = path.join(tmpDir, 'moved.md')
+    fs.writeFileSync(original, '# Original requirement')
+    await app.inject({ method: 'POST', url: '/api/features/checkout/docs/link', payload: { path: original } })
+    const baseline = readDocsCollection(dir).docsHash
+    fs.renameSync(original, moved)
+    fs.writeFileSync(moved, '# Changed requirement')
+    events.length = 0
+    const res = await app.inject({
+      method: 'POST', url: '/api/features/checkout/docs/link',
+      payload: { path: moved, relPath: 'original.md', relink: true },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ linked: true, relativePath: 'docs/original.md' })
+    expect(events).toContainEqual({ type: 'coverage-changed', feature: 'checkout' })
+    const collection = readDocsCollection(dir)
+    expect(collection.entries).toEqual([{ relPath: 'original.md', content: '# Changed requirement' }])
+    expect(collection.docsHash).not.toBe(baseline)
+    const listing = await app.inject({ method: 'GET', url: '/api/features/checkout/docs' })
+    expect(listing.json().docs).toEqual([expect.objectContaining({ relPath: 'original.md', linked: true, linkTarget: moved })])
+    expect(listing.json().docs[0].broken).toBeUndefined()
+  })
+
   it('links a local path into docs/ and the listing marks it linked', async () => {
     writeFeature('checkout', SPEC)
     const target = path.join(tmpDir, 'external-prd.md')

@@ -23,6 +23,7 @@ import { buildOrchestratorHealPrompt, makeAgentSpawnCommandBuilder, resolveAgent
 import { resolveRunModelPlan, reuseRunModelPlan, type RunModelPlan } from './logic/runtime/run-model-plan'
 import { loadProjectConfig } from './logic/runtime/launcher/project-config'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
+import { assertStableSpecSelection } from '../../shared/playwright-config'
 import { RunnerLog } from './logic/runtime/runner-log'
 import {
   restore,
@@ -98,6 +99,10 @@ export function buildRunsRouteDeps(
       const features = loadFeatures(featuresDir)
       const feature = features.find((f) => f.name === featureName)
       if (!feature) throw new Error(`feature not found: ${featureName}`)
+      // A boot brings services up and runs no tests, so it declares no roster
+      // and this cannot corrupt one — and refusing it would block the very boot
+      // someone needs to debug the config they are here to fix.
+      if (!isBoot) assertStableSpecSelection(feature.featureDir, feature.name)
       await validateConfiguredRepoBranches(feature)
       const runId = generateRunId()
       const runDir = runDirFor(logsDir, runId)

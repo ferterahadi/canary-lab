@@ -140,6 +140,15 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                     r.verificationPlaywrightEnvsetId,
                   ].filter(Boolean).join(' · ')
                 : null
+              // The envset belongs on the row, not just in the run detail: spec
+              // selection is constant across envsets, so two runs of one suite
+              // declare the SAME roster and differ only in which tests the
+              // environment let execute (41 passed / 4 skipped here, 4 passed /
+              // 41 skipped there). With no envset on the row, the second reads
+              // as a run that went badly. A verify row already carries it —
+              // a verify run's `env` IS its config's playwrightEnvsetId
+              // (features/coverage/index.ts) — so only a plain row adds it.
+              const runMeta = [r.runId, r.env].filter(Boolean).join(' · ')
               if (isDeleting) {
                 return (
                   <li key={r.runId}>
@@ -177,7 +186,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                           fontSize: 10.5,
                         }}
                       >
-                        <span className="min-w-0 flex-1 truncate">{verifySummary || `${typeLabel} ${r.runId}`}</span>
+                        <span className="min-w-0 flex-1 truncate">{verifySummary || `${typeLabel} ${runMeta}`}</span>
                         {dur != null && <span className="shrink-0 opacity-60">{formatDuration(dur)}</span>}
                       </div>
                     </div>
@@ -312,7 +321,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                         fontSize: 10.5,
                       }}
                     >
-                      <span className="min-w-0 flex-1 truncate" title={verifySummary || r.runId}>{verifySummary || r.runId}</span>
+                      <span className="min-w-0 flex-1 truncate" title={verifySummary || runMeta}>{verifySummary || runMeta}</span>
                       {dur != null && <span className="shrink-0">{formatDuration(dur)}</span>}
                     </div>
                     {rowError && (

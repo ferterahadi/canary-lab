@@ -193,6 +193,7 @@ export function RequirementsFork({
                   linked={d.linked}
                   linkTarget={d.linkTarget}
                   broken={d.broken}
+                  onRelink={(targetPath) => docs.relinkDoc(d.relPath, targetPath)}
                   busy={disabled}
                   onOpen={() => docs.openDoc(d.absPath)}
                   onRemove={() => docs.removeDoc(d.relPath)}

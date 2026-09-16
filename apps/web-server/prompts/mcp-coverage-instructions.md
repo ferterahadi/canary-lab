@@ -25,3 +25,5 @@ unfinished UI action; never retry or repeat the question automatically. Chat is
 only the fallback when elicitation is unavailable. Never collect passwords, API
 keys, or access tokens in chat or form elicitation: use the returned Canary UI URL.
 Setup and reconnection questions still use chat while MCP is unavailable.
+
+Broken document links are repaired before source discovery: the owning command elicits the moved file's new path on the Canary server. On `document-relinked`, retry that command with the same arguments. Keep the symlink and existing baseline; never omit the missing source or create recovery copies. Cancel/decline leaves work pending. Unsupported clients use Relink in the returned Canary UI.

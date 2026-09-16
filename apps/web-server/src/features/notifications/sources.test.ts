@@ -29,14 +29,14 @@ describe('notification sources', () => {
 })
 
 describe('test changes in the shared inbox', () => {
-  const changes = (verdict: 'weaker' | 'equivalent' = 'weaker') => [{ featureId: 'shop', status: 'dirty' as const, dirtySpecs: [{ strength: { verdict } }] }]
+  const changes = (verdict: 'weaker' | 'equivalent' | 'stronger' | 'unclassifiable' = 'weaker') => [{ featureId: 'shop', status: 'dirty' as const, dirtySpecs: [{ strength: { verdict } }] }]
 
   it('reports weakening outside an active run as an advisory review notification', async () => {
     const { testChangeNotificationSources } = await import('./sources')
     const [source] = testChangeNotificationSources(changes(), [])
     expect(source.message).toMatchObject({ severity: 'danger', target: { kind: 'test-review', feature: 'shop' } })
-    expect(source.message?.title).toContain('may have been weakened')
-    expect(source.message?.body).toContain('a hint, not a verdict')
+    expect(source.message?.title).toContain('possible test weakening')
+    expect(source.message?.body).toContain('A check found a possible weakening')
   })
 
   it('uses one active run alert for dirty files that are also pending, and changes identity on escalation', async () => {
@@ -48,11 +48,11 @@ describe('test changes in the shared inbox', () => {
     expect(testChangeNotificationSources(changes(), [{ ...run, status: 'passed' }])[0].message).toBeDefined()
   })
 
-  it('keeps ordinary edits neutral, resolves clean records, and does not use file counts as notification identity', async () => {
+  it.each(['equivalent', 'stronger', 'unclassifiable'] as const)('marks %s edits for attention, resolves clean records, and keeps a stable identity', async (verdict) => {
     const { testChangeNotificationSources } = await import('./sources')
-    const [record] = changes('equivalent')
+    const [record] = changes(verdict)
     const [source] = testChangeNotificationSources([record], [])
-    expect(source.message?.severity).toBe('neutral')
+    expect(source.message?.severity).toBe('warning')
     expect(testChangeNotificationSources([{ ...record, dirtySpecs: [...record.dirtySpecs, ...record.dirtySpecs] }], [])[0].signature).toBe(source.signature)
     expect(testChangeNotificationSources([{ ...record, status: 'clean' }], [])[0].message).toBeUndefined()
   })

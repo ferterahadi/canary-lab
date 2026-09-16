@@ -93,6 +93,11 @@ export function RunRow({
   const isBoot = run.executionType === 'boot'
   const dot = isBoot && run.status === 'running' ? { state: 'booted' as const, pulse: true } : DOT[run.status]
   const meta: Array<{ text: string; mono?: boolean }> = [{ text: shortTime(run.startedAt) }]
+  // The envset sits next to the timestamp — when and where, before any outcome.
+  // Spec selection cannot vary by envset, so sibling runs of one suite declare
+  // the same roster and differ only in what the environment let execute: this is
+  // what separates "41/45 passed" from "4/45 passed" on the row below it.
+  if (run.env) meta.push({ text: run.env })
   if (ports) meta.push({ text: ports, mono: true })
   if (note) meta.push({ text: note })
   if (marker) meta.push({ text: marker })
@@ -177,7 +182,7 @@ export function RunStatusChip({ status, executionType, pendingSpecEdits, waiting
           label={`${pending} pending`}
           fontSize={10}
           testId="run-pending-edits"
-          title={`${pending} spec edit${pending > 1 ? 's' : ''} made since this run started ${pending > 1 ? 'have' : 'has'} not been executed — the verdict is from the run-start snapshot. Adopt or restore them under Tests changed.`}
+          title={`${pending} test-file change${pending > 1 ? 's' : ''} made since this run started ${pending > 1 ? 'have' : 'has'} not run. This run result is based on the recorded tests. Review, then adopt or restore the changes under Tests changed.`}
         />
       )}
       <Chip

@@ -172,6 +172,7 @@ function indexEntryFromManifest(
     runId: manifest.runId,
     ...(manifest.executionType ? { executionType: manifest.executionType } : {}),
     feature: manifest.feature,
+    ...(manifest.env ? { env: manifest.env } : {}),
     startedAt: manifest.startedAt,
     status,
     ...(endedAt ? { endedAt } : {}),

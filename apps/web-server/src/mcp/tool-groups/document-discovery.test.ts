@@ -40,6 +40,90 @@ function fixture() {
 }
 
 describe('document discovery before MCP 2.0 elicitation', () => {
+  function brokenFixture() {
+    const f = fixture()
+    const original = f.source('original.md')
+    const docsDir = path.join(f.featureDir, 'docs')
+    fs.mkdirSync(docsDir)
+    const link = path.join(docsDir, 'requirements.md')
+    fs.symlinkSync(original.path, link)
+    const baseline = readDocsCollection(f.featureDir).docsHash
+    writeDocumentSelection(f.featureDir, { reviewedDocsHash: baseline, decisionKey: 'reviewed', intent: 'Refunds', searched: [f.repo], sources: [{ ...original, relPath: 'requirements.md' }], excluded: [] })
+    const moved = path.join(f.repo, 'moved.md')
+    fs.renameSync(original.path, moved)
+    return { ...f, link, moved, docsDir, baseline }
+  }
+
+  it('elicits a moved source path before discovery and repairs only the symlink', async () => {
+    const f = brokenFixture()
+    const opened = await f.tools.raw('start_external_summary', f.args, context()) as InputRequiredResult
+    expect(opened.inputRequests?.answer).toMatchObject({ method: 'elicitation/create', params: { mode: 'form', message: expect.stringContaining('requirements.md'), requestedSchema: { required: ['local_path'] } } })
+    expect(coverageJobStore(f.logsDir).list()).toHaveLength(0)
+    const answer = context(opened.requestState, { action: 'accept', content: { local_path: f.moved } })
+    const repaired = await f.tools.raw('start_external_summary', f.args, answer)
+    expect(json(repaired)).toMatchObject({ status: 'document-relinked', linked: true, relativePath: 'docs/requirements.md' })
+    expect(await f.tools.raw('start_external_summary', f.args, answer)).toEqual(repaired)
+    expect(fs.readlinkSync(f.link)).toBe(f.moved)
+    expect(fs.readdirSync(f.docsDir).sort()).toEqual(['_document-selection.json', 'requirements.md'])
+    expect(readDocumentSelection(f.featureDir)?.reviewedDocsHash).toBe(f.baseline)
+    expect(json(await f.tools.raw('start_external_summary', f.args, context())).status).toBe('running')
+  })
+
+  it('requires discovery after relinking changed contents without adopting the new hash', async () => {
+    const f = brokenFixture()
+    fs.writeFileSync(f.moved, '# Refunds\nRefunds now last 7 days.')
+    const opened = await f.tools.raw('start_external_summary', f.args, context()) as InputRequiredResult
+    await f.tools.raw('start_external_summary', f.args, context(opened.requestState, { action: 'accept', content: { local_path: f.moved } }))
+    expect(readDocumentSelection(f.featureDir)?.reviewedDocsHash).toBe(f.baseline)
+    expect(json(await f.tools.raw('start_external_summary', f.args, context())).status).toBe('needs-document-discovery')
+    expect(coverageJobStore(f.logsDir).list()).toHaveLength(0)
+  })
+
+  it.each(['cancel', 'decline', 'invalid-path', 'stale'] as const)('keeps missing-source work pending for %s', async (scenario) => {
+    const f = brokenFixture()
+    const oldTarget = fs.readlinkSync(f.link)
+    const opened = await f.tools.raw('start_external_summary', f.args, context()) as InputRequiredResult
+    if (scenario === 'stale') fs.writeFileSync(path.join(f.docsDir, 'new.md'), 'New requirements')
+    const answer = scenario === 'cancel' || scenario === 'decline' ? { action: scenario } : { action: 'accept', content: { local_path: scenario === 'invalid-path' ? '/missing/relink-source.md' : f.moved } }
+    const result = await f.tools.raw('start_external_summary', f.args, context(opened.requestState, answer))
+    expect(result).not.toHaveProperty('inputRequests')
+    expect(fs.readlinkSync(f.link)).toBe(oldTarget)
+    expect(coverageJobStore(f.logsDir).list()).toHaveLength(0)
+  })
+
+  it('returns the Relink UI when the MCP client cannot render a form', async () => {
+    const f = brokenFixture()
+    const tools = captureTools(registerCoverageAuthoringTools, f, { ...facts, elicitation: { form: false, url: false } })
+    const result = json(await tools.raw('start_external_summary', f.args, context()))
+    expect(result).toMatchObject({ status: 'needs-input', reason: 'elicitation-unavailable', brokenDoc: { relPath: 'requirements.md' }, url: expect.stringContaining('view=coverage') })
+    expect(fs.existsSync(f.link)).toBe(false)
+  })
+
+  it.each(['accept', 'stale-flight', 'busy-summary', 'racing-docs'] as const)('guards relinking while the workflow changes: %s', async (mode) => {
+    const f = brokenFixture()
+    const oldTarget = fs.readlinkSync(f.link)
+    let updatedAt = 'v1'
+    let reads = 0
+    const flight = captureTools(registerFlightTools, { ...f, flightsRequest: async () => {
+      if (++reads === 3 && mode === 'racing-docs') fs.writeFileSync(path.join(f.docsDir, 'new.md'), 'New requirements')
+      return { statusCode: 200, body: { flightId: 'flight', feature: 'checkout', repoPaths: [f.repo], description: 'Refunds', status: 'waiting-for-approval', updatedAt,
+        stages: [{ key: 'docs', status: 'waiting-for-approval', checkpoint: { kind: 'external-work', data: { handOffId: 'current-handoff', context: { mode: 'collect-repo-docs' } } } }] } }
+    } }, facts)
+    const tools = mode === 'busy-summary' ? f.tools : flight
+    const command = mode === 'busy-summary' ? 'start_external_summary' : 'respond_flight_checkpoint'
+    const args = mode === 'busy-summary' ? f.args : { flightId: 'flight' }
+    const opened = await tools.raw(command, args, context()) as InputRequiredResult
+    expect(opened).toHaveProperty('inputRequests')
+    if (mode === 'stale-flight') updatedAt = 'v2'
+    if (mode === 'busy-summary') coverageJobStore(f.logsDir).save({ jobId: 'busy', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: '' })
+    const result = await tools.raw(command, args, context(opened.requestState, { action: 'accept', content: { local_path: f.moved } }))
+    expect(fs.readlinkSync(f.link)).toBe(mode === 'accept' ? f.moved : oldTarget)
+    if (mode === 'accept') {
+      expect(json(result).status).toBe('document-relinked')
+      expect(json(await flight.raw(command, args, context()))).toMatchObject({ status: 'documents-ready', next: expect.stringContaining('current-handoff') })
+    }
+  })
+
   it('hands discovery back to the existing agent without elicitation or a job', async () => {
     const f = fixture()
     const result = await f.tools.raw('start_external_summary', f.args, context())

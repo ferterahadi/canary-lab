@@ -8,11 +8,18 @@ import type { ExecutionType, VerificationRunMetadata } from '@shared/verificatio
 import type { ClientKind } from '@shared/run-mode'
 import type { SpecDiff } from '@shared/verification-strength/types'
 import type { RobustnessEnvelope } from '@shared/robustness/types'
+import type { TestReviewDecision } from '@shared/test-review'
 
 export interface RunIndexEntry {
   runId: string
   executionType?: ExecutionType
   feature: string
+  /** The envset this run used, mirrored from the manifest. Spec selection is
+   *  constant across envsets, so two runs of one suite declare the same roster
+   *  and differ only in which tests the environment let execute. Without the
+   *  envset on the row, a 4-passed/41-skipped run and a 41-passed/4-skipped run
+   *  of the same suite read as one of them having gone badly. */
+  env?: string
   startedAt: string
   status: RunStatus
   endedAt?: string
@@ -115,7 +122,8 @@ export interface PendingSpecEdit {
 export interface RunSpecEdits {
   checkedAt: string
   pending: PendingSpecEdit[]
-  adopted: Array<{ at: string; by: 'human' | 'test-heal'; files: string[] }>
+  adopted: Array<{ at: string; by: 'human' | 'test-heal'; files: string[]; reviewRevision?: string }>
+  reviewDecisions?: TestReviewDecision[]
 }
 
 export type IntegrityHint =

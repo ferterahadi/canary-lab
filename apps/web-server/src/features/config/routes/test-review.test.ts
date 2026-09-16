@@ -90,10 +90,22 @@ it('re-reads edits and committed baselines; commit clears the comparison but not
   fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), before)
   expect((await get()).json<TestFileReview>().after.source).toBe(before)
 })
-it('returns only a lightweight difference flag when full review context is not needed', async () => {
-  expect((await get('file=e2e/a.spec.ts&summary=true')).json()).toEqual({ changed: true })
+it('summarises which tests changed and how, without the full review context', async () => {
+  // The Tests column marks individual cards from this, so the per-test narrowing
+  // has to be the same rule the dirty-spec detector applies — one rule, not two
+  // that can disagree about which card carries the mark.
+  expect((await get('file=e2e/a.spec.ts&summary=true')).json())
+    .toEqual({ changed: true, affectedTests: ['reads own scope'], verdict: 'unclassifiable' })
+  expect((await get('file=e2e/a.spec.ts&summary=true')).json()).not.toHaveProperty('patch')
   git('add', '.'); git('commit', '-qm', 'accept edits')
   expect((await get('file=e2e/a.spec.ts&summary=true')).json()).toEqual({ changed: false })
+})
+it('attributes an edit outside every test body to all tests in the file', async () => {
+  // Shared setup has no test of its own to blame, and it feeds every test here,
+  // so narrowing to "no tests changed" would drop the mark entirely.
+  fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), before.replace('keep this context', 'different context'))
+  expect((await get('file=e2e/a.spec.ts&summary=true')).json())
+    .toMatchObject({ changed: true, affectedTests: ['reads own scope'] })
 })
 it('answers 404 for a suite that does not exist rather than reviewing nothing', async () => {
   expect((await app.inject('/api/features/ghost/test-review?file=e2e/a.spec.ts')).statusCode).toBe(404)

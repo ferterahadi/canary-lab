@@ -1,6 +1,13 @@
 import type { ReadableTest, ReadableTestStory } from './readable-tests/types'
 import type { SpecDiff } from './verification-strength/types'
 
+/** A human decision about one exact run-snapshot versus live-suite revision. */
+export interface TestReviewDecision {
+  at: string
+  revision: string
+  decision: 'adopted' | 'restored'
+}
+
 export interface ReviewTestSource {
   name: string
   line: number

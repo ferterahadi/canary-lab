@@ -3,6 +3,7 @@ import * as api from '@/shared/api/client'
 import type { FlightStage, FlightStageStatus } from '@/shared/api/client'
 import type { FeatureDocsListing } from '@/shared/api/types'
 import { DocPill, readAsBase64 } from '@/features/coverage/components/CoverageDocsRail'
+import { useDocRelink } from '@/features/coverage/components/DocRelink'
 import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '@/shared/ui/PanelCard'
 import { STAGE_COLUMN, StageStatusChip } from './stage-meta'
 import { PANEL_KICKER_CLASS } from './RepoScanPanel'
@@ -43,6 +44,7 @@ export function useFlightDocs(feature: string, refreshKey?: number, onChanged?: 
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [feature, owned])
   useEffect(() => { load() }, [load, refreshKey])
+  const relinkDoc = useDocRelink(feature, () => { load(); onChanged?.() })
 
   const importFiles = useCallback(async (files: FileList) => {
     setBusy(true)
@@ -78,7 +80,7 @@ export function useFlightDocs(feature: string, refreshKey?: number, onChanged?: 
   // The distilled artifact (_prd-summary.md/.json) — the stage's actual OUTPUT.
   // Filtered out of the source list on purpose; it gets its own card.
   const generatedDocs = (listing?.docs ?? []).filter((d) => d.generated)
-  return { sourceDocs, generatedDocs, busy, error, importFiles, removeDoc, openDoc }
+  return { sourceDocs, generatedDocs, busy, error, importFiles, removeDoc, openDoc, relinkDoc }
 }
 
 /** The resting Requirements panel — a read-only lens on docs/ while the stage
@@ -156,7 +158,8 @@ export function FlightDocsPanel({
                 linked={d.linked}
                 linkTarget={d.linkTarget}
                 broken={d.broken}
-                busy={false}
+                onRelink={(targetPath) => docs.relinkDoc(d.relPath, targetPath)}
+                busy={awaiting === 'live' || summaryStatus === 'running'}
                 onOpen={() => docs.openDoc(d.absPath)}
                 removeTitle="Remove doc"
               />

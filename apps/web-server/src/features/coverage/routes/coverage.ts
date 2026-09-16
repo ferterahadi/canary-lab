@@ -156,7 +156,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
   // Requirements stage's "add local path" input and MCP write_feature_doc's
   // link_path both land here (same lib), so the user's original stays the
   // live source.
-  app.post<{ Params: { name: string }; Body: { path?: string; relPath?: string } | undefined }>(
+  app.post<{ Params: { name: string }; Body: { path?: string; relPath?: string; relink?: boolean } | undefined }>(
     '/api/features/:name/docs/link',
     async (req, reply) => {
       const targetPath = req.body?.path
@@ -170,6 +170,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
           feature: req.params.name,
           targetPath: targetPath.trim(),
           ...(typeof req.body?.relPath === 'string' ? { relPath: req.body.relPath } : {}),
+          ...(req.body?.relink === true ? { relink: true } : {}),
         },
       )
       if (!result.ok) {

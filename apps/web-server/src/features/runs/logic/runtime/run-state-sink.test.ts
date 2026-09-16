@@ -150,6 +150,21 @@ describe('FileRunStateSink', () => {
     expect(readRunsIndex(logsDir)[0].healMode).toBe('external')
   })
 
+  it('mirrors the envset into the index so sibling runs of one suite stay distinguishable', () => {
+    // Spec selection cannot vary by envset, so two runs of one suite declare the
+    // SAME roster and differ only in which tests the environment let execute —
+    // 41 passed / 4 skipped under one, 4 passed / 41 skipped under another. The
+    // runs list renders off this index, so without the envset here the second
+    // row reads as a run that went badly rather than a different environment.
+    const sink = new FileRunStateSink(logsDir)
+    sink.bootstrap(manifest({ env: 'meta' }))
+    expect(readRunsIndex(logsDir)[0].env).toBe('meta')
+
+    // A suite that declares no envsets names none: absent, not an empty string.
+    sink.bootstrap(manifest({ runId: 'run-2' }))
+    expect(readRunsIndex(logsDir).find((e) => e.runId === 'run-2')).not.toHaveProperty('env')
+  })
+
   it('mirrors pending spec-edit and hint counts into the index so list_runs can flag a run', () => {
     const sink = new FileRunStateSink(logsDir)
     sink.bootstrap(manifest())

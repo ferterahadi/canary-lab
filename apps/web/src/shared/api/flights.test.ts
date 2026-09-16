@@ -188,6 +188,12 @@ describe('flights api', () => {
     expect(JSON.parse(init.body as string)).toEqual({ path: '/abs/notes.md' })
   })
 
+  it('relinking preserves the document name and requests symlink-only repair', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ written: true, relativePath: 'docs/old.md', linked: true }))
+    await linkFeatureDocPath('checkout', '/moved/new.md', { baseUrl: 'http://x', fetchImpl, relPath: 'old.md', relink: true })
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({ path: '/moved/new.md', relPath: 'old.md', relink: true })
+  })
+
   it('planFeatures POSTs the repo paths and description and returns the task', async () => {
     const task = {
       taskId: 't1',

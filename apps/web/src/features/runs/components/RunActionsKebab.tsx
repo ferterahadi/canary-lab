@@ -164,6 +164,8 @@ export function RunActionsKebab({
   )
 }
 
+/** One row in a popover menu. `neutral` is the plain navigational tone; the
+ *  two status tones are for actions that stop or interrupt a run. */
 export function MenuItem({
   label,
   variant,
@@ -172,14 +174,16 @@ export function MenuItem({
   onClick,
 }: {
   label: string
-  variant: 'warning' | 'danger'
+  variant: 'warning' | 'danger' | 'neutral'
   disabled: boolean
   icon?: React.ReactNode
   onClick: () => void
 }) {
   const color = variant === 'danger'
     ? 'text-danger hover:bg-danger/8 dark:hover:bg-danger/10'
-    : 'text-warning hover:bg-warning/8 dark:hover:bg-warning/10'
+    : variant === 'warning'
+      ? 'text-warning hover:bg-warning/8 dark:hover:bg-warning/10'
+      : 'text-primary hover:bg-[var(--bg-hover)]'
   return (
     <button
       type="button"

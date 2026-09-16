@@ -2,9 +2,10 @@ import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { diffSourceText } from '../dirty-specs/text-diff'
+import { SUITE_TEST_ROSTER_FILE } from '../suite-test-roster'
 
 // Match the snapshot copier: envsets are live secrets, and symlinks are not copied.
-export const SUITE_SNAPSHOT_SKIP = new Set(['envsets', 'node_modules', '.git'])
+export const SUITE_SNAPSHOT_SKIP = new Set(['envsets', 'node_modules', '.git', SUITE_TEST_ROSTER_FILE])
 
 function readSuite(root: string): Map<string, Buffer> {
   const files = new Map<string, Buffer>()

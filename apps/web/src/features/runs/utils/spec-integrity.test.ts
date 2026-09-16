@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DirtySpecSummary, Feature } from '@/shared/api/types'
 import { SPEC_TONE, featureTone, pendingFileScope, specTone, worstTone } from './spec-integrity'
+import { INTEGRITY_HINT_COPY } from '@shared/verification-strength/disclosure'
 
 function spec(verdict?: 'weaker' | 'equivalent' | 'stronger' | 'unclassifiable'): DirtySpecSummary {
   return {
@@ -53,7 +54,8 @@ describe('specTone / featureTone', () => {
 describe('SPEC_TONE', () => {
   it('uses brief, human review copy while keeping the weaker signal advisory', () => {
     expect(SPEC_TONE.weaker.color).toBe('var(--warning)')
-    expect(SPEC_TONE.weaker.title).toBe('Tests may be weaker than the version that ran. This hint does not change the result. AI-only, blind-checked review: 2.4% false positives.')
+    expect(SPEC_TONE.weaker.label).toBe('Possible weakening')
+    expect(SPEC_TONE.weaker.title).toBe(INTEGRITY_HINT_COPY)
     expect(SPEC_TONE.changed.title).toBe('Tests changed after the run. Review before relying on this result.')
     expect(SPEC_TONE.stronger.title).toBe('Tests look stronger than the version that ran. Review and commit the changes.')
     expect(SPEC_TONE.changed.color).not.toContain('danger')

@@ -74,6 +74,40 @@ describe('listRuns', () => {
     expect(listRuns(tmpDir)[0]).toMatchObject({ healCycles: 1, healMode: 'external' })
   })
 
+  it('backfills the envset from the manifest for entries written before it was mirrored', () => {
+    // The runs list tells two runs of one suite apart by their envset. A run
+    // recorded before the field existed would otherwise read as "no envset",
+    // which is indistinguishable from a suite that declares none — so the
+    // manifest, which is truth, fills the gap at read time.
+    writeRunsIndex(tmpDir, [
+      { runId: 'legacy', feature: 'foo', startedAt: '2026-01-02T00:00:00Z', status: 'passed' },
+      { runId: 'envless', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+    ])
+    for (const [runId, env] of [['legacy', 'meta'], ['envless', undefined]] as const) {
+      const dir = runDirFor(tmpDir, runId)
+      fs.mkdirSync(dir, { recursive: true })
+      writeManifest(path.join(dir, 'manifest.json'), {
+        runId, feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed',
+        healCycles: 0, services: [], ...(env ? { env } : {}),
+      })
+    }
+    const byId = Object.fromEntries(listRuns(tmpDir).map((e) => [e.runId, e.env]))
+    expect(byId.legacy).toBe('meta')
+    expect(byId.envless).toBeUndefined()
+  })
+
+  it('reads no manifest at all for a row that already carries every mirrored field', () => {
+    // The early return is the point of the index: the runs list renders without
+    // opening one manifest per row. A complete row survives a cleaned run dir.
+    writeRunsIndex(tmpDir, [
+      {
+        runId: 'complete', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'failed',
+        healCycles: 2, healMode: 'auto', env: 'local',
+      },
+    ])
+    expect(listRuns(tmpDir)[0]).toMatchObject({ healCycles: 2, healMode: 'auto', env: 'local' })
+  })
+
   it('leaves an already-mirrored healCycles alone instead of re-reading the manifest', () => {
     writeRunsIndex(tmpDir, [
       { runId: 'a', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'failed', healCycles: 2 },

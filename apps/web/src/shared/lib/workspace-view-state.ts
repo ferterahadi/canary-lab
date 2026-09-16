@@ -105,7 +105,8 @@ export function checkpointInputToken(flightId: string, checkpointKind: string): 
 }
 
 export interface PersistedView {
-  /** Inspect current suite source independently of the selected run (URL only). */
+  /** Current source is the default. False explicitly opens the selected run's
+   *  recorded tests (URL only). True remains supported for older links. */
   currentTests?: boolean
   reviewFocus?: ReviewFocus
   view: WorkspaceView
@@ -227,7 +228,9 @@ export function readPersistedView(): PersistedView {
     const review = reviewFocus ? { reviewFocus } : {}
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.
-    const tests = feature && (!v || v === 'workspace') && params.get('tests') === 'current' ? { currentTests: true } : {}
+    const source = params.get('tests')
+    const tests = feature && run && (!v || v === 'workspace') && (source === 'current' || source === 'recorded')
+      ? { currentTests: source === 'current' } : {}
     if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, modelsAgent, focusTest, runTab, returnFlight, ...review, ...tests }
     if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, modelsAgent, focusTest, runTab, returnFlight, ...review, ...tests }
   } catch { /* ignore */ }
@@ -251,7 +254,8 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'view', state.view === 'workspace' ? null : state.view)
     setOrDelete(params, 'feature', state.feature)
     setOrDelete(params, 'run', state.run)
-    setOrDelete(params, 'tests', state.view === 'workspace' && state.feature && state.currentTests ? 'current' : null)
+    setOrDelete(params, 'tests', state.view === 'workspace' && state.feature && state.run && state.currentTests !== undefined
+      ? state.currentTests ? 'current' : 'recorded' : null)
     setOrDelete(params, 'dialog', state.dialog)
     // `wf` qualified the retired portify dialog (R50), `task` the retired
     // evaluation dialog (R29), and `draft` the retired external-authoring

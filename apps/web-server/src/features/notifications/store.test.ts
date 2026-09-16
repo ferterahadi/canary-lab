@@ -14,6 +14,22 @@ beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'notifications-')
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
 
 describe('durable notifications', () => {
+  it('upgrades an existing neutral test review to warning without duplicating it or resetting read state', async () => {
+    const { testChangeNotificationSources } = await import('./sources')
+    const [current] = testChangeNotificationSources([{ featureId: 'shop', status: 'dirty', dirtySpecs: [{}] }], [])
+    const store = new NotificationStore(dir, events)
+    store.reconcile([{ ...current, message: { ...current.message!, severity: 'neutral' } }])
+    const original = store.list()[0]
+    store.markRead(original.id)
+    events.publish.mockClear()
+    store.reconcile([current])
+    expect(store.list()).toEqual([expect.objectContaining({ id: original.id, severity: 'warning', readAt: expect.any(String) })])
+    expect(events.publish).toHaveBeenCalledExactlyOnceWith({ type: 'notifications-changed' })
+    store.remove(original.id)
+    store.reconcile([current])
+    expect(store.list()).toEqual([])
+  })
+
   it('never resurrects deleted messages after reload, a fresh store, or repeat source updates', () => {
     const store = new NotificationStore(dir, events)
     store.reconcile([source])

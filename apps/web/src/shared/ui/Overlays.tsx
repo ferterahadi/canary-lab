@@ -67,6 +67,32 @@ export function useEscapeToClose(onClose: () => void, enabled = true): void {
   }, [enabled])
 }
 
+/** Dismiss when a mousedown lands outside every element the surface owns — the
+ *  other half of what a dropdown needs beside `useEscapeToClose`, and drifting
+ *  the same way Escape once did (five near-identical copies across the flight
+ *  controls, the token picker and the cleanup table). Takes a list of refs
+ *  rather than one, because a menu rendered through a portal is not a DOM
+ *  descendant of its trigger: both have to count as "inside". */
+export function useDismissOnOutsideMousedown(
+  onDismiss: () => void,
+  enabled: boolean,
+  refs: ReadonlyArray<RefObject<HTMLElement | null>>,
+): void {
+  const onDismissRef = useRef(onDismiss)
+  onDismissRef.current = onDismiss
+  useEffect(() => {
+    if (!enabled) return
+    const onDown = (event: MouseEvent): void => {
+      if (refs.some((ref) => ref.current?.contains(event.target as Node))) return
+      onDismissRef.current()
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- callers pass a
+    // fresh array literal every render; the refs inside it are stable.
+  }, [enabled, ...refs])
+}
+
 const focusLayers: HTMLElement[] = []
 let bodyOverflow = ''
 

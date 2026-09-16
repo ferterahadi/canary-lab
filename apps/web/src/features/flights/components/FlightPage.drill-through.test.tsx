@@ -395,8 +395,8 @@ describe('stage summary + drill-through (R6)', () => {
     // The rung names the fact (label over value); the link IS the value.
     const rung = link?.closest('[title]')
     expect(rung?.textContent).toContain('Verdict from')
-    expect(link?.textContent).toContain('run-start snapshot · 2 pending edits · 1 hint')
-    expect(rung?.getAttribute('title')).toMatch(/2 spec edits made since the run started were not executed/)
+    expect(link?.textContent).toContain('recorded tests · 2 pending test-file changes · 1 hint')
+    expect(rung?.getAttribute('title')).toMatch(/2 test-file changes made since the run started were not run/)
     await act(async () => { link?.click() })
     expect(onOpenSpecReview).toHaveBeenCalledTimes(1)
   })
@@ -422,7 +422,7 @@ describe('stage summary + drill-through (R6)', () => {
     await renderWithDrill(flight, { onOpenSpecReview: vi.fn() })
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click() })
     let stats = container.querySelector('[data-testid="run-hero-stats"]')
-    expect(stats?.textContent).toContain('Verdict fromrun-start snapshot')
+    expect(stats?.textContent).toContain('Verdict fromrecorded tests')
     expect(container.querySelector('[data-testid="run-hero-spec-edits"]')).toBeNull()
 
     mocks.getRunDetail.mockResolvedValue({
@@ -433,9 +433,9 @@ describe('stage summary + drill-through (R6)', () => {
     await renderWithDrill(flight, {})
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click() })
     stats = container.querySelector('[data-testid="run-hero-stats"]')
-    expect(stats?.textContent).toContain('live suite (no snapshot)')
+    expect(stats?.textContent).toContain('live tests (not recorded)')
     // The one danger-hued segment: a mid-run edit could have moved this verdict.
-    expect(stats?.querySelector('.text-danger')?.textContent).toBe('live suite (no snapshot)')
+    expect(stats?.querySelector('.text-danger')?.textContent).toBe('live tests (not recorded)')
   })
 
   it('omits the fixes link when the run captured no repair', async () => {

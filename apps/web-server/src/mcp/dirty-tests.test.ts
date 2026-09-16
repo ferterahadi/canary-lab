@@ -117,7 +117,7 @@ describe('classifyWaitForHealTask — specEdits', () => {
     expect(value.type).toBe('passed')
     expect(value.specEdits?.pending.map((p) => p.file)).toEqual(['e2e/spec-0.spec.ts', 'e2e/spec-1.spec.ts'])
     expect(value.specEdits?.hints).toEqual([expect.objectContaining({ kind: 'weaker' })])
-    expect(value.specEdits?.disclosure).toContain('no human')
+    expect(value.specEdits?.disclosure).toContain('No human labelled them.')
     expect(value.specEdits?.nextSteps.join(' ')).toContain('ask the human to adopt')
   })
 

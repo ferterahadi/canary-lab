@@ -1,6 +1,6 @@
 import type { DirtySpecSummary, Feature } from '@/shared/api/types'
 import type { StrengthVerdict } from '@shared/verification-strength/types'
-import { INTEGRITY_HINT_COPY, INTEGRITY_HINT_FALSE_POSITIVE_RATE } from '@shared/verification-strength/disclosure'
+import { INTEGRITY_HINT_COPY } from '@shared/verification-strength/disclosure'
 import { ROBUSTNESS_ENVELOPE_RELATIVE_PATH } from '@shared/robustness/types'
 
 // One reading of a feature's modified specs for the three review surfaces (the
@@ -40,8 +40,8 @@ export const SPEC_TONE: Record<SpecEditTone, { glyph: string; color: string; lab
   weaker: {
     glyph: '!',
     color: 'var(--warning)',
-    label: 'Weaker',
-    title: `Tests may be weaker than the version that ran. This hint does not change the result. AI-only, blind-checked review: ${INTEGRITY_HINT_FALSE_POSITIVE_RATE} false positives.`,
+    label: 'Possible weakening',
+    title: INTEGRITY_HINT_COPY,
   },
   changed: {
     glyph: '~',

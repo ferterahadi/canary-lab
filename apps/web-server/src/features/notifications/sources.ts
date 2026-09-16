@@ -54,8 +54,8 @@ export function runNotificationSources(runs: ReviewRun[], changes: TestChangeRec
       key: `run:${run.runId}`,
       signature: attention ? weaker ? 'test-review:weaker' : 'test-review' : 'quiet',
       ...(attention ? { message: {
-        title: weaker ? `${run.feature}: tests may have been weakened` : `${run.feature} is awaiting test review`,
-        body: `${pending} test file${pending === 1 ? '' : 's'} changed after this run started. ${weaker ? 'The checker found possible weakening — a hint, not a verdict. ' : ''}Review the changes, then adopt or restore them.`,
+        title: weaker ? `${run.feature}: possible test weakening` : `${run.feature} is awaiting test review`,
+        body: `${pending} test file${pending === 1 ? '' : 's'} changed after this run started. ${weaker ? 'A check found a possible weakening. This hint does not change the run result. ' : ''}Review the test-file changes, then adopt or restore them.`,
         severity: weaker ? 'danger' as const : 'warning' as const,
         target: { kind: 'test-review' as const, feature: run.feature, runId: run.runId },
       } } : {}),
@@ -75,9 +75,9 @@ export function testChangeNotificationSources(changes: TestChangeRecord[], runs:
       key: `tests:${record.featureId}`,
       signature: attention ? weaker ? 'weaker' : 'changed' : 'quiet',
       ...(attention ? { message: {
-        title: `${record.featureId}: ${weaker ? 'tests may have been weakened' : 'tests changed'}`,
-        body: `${count} test file${count === 1 ? '' : 's'} changed. ${weaker ? 'The checker found possible weakening — a hint, not a verdict. ' : ''}Review the changes before relying on the previous result.`,
-        severity: weaker ? 'danger' as const : 'neutral' as const,
+        title: `${record.featureId}: ${weaker ? 'possible test weakening' : 'tests changed'}`,
+        body: `${count} test file${count === 1 ? '' : 's'} changed. ${weaker ? 'A check found a possible weakening. This hint does not change the run result. ' : ''}Review the test-file changes before relying on the previous run result.`,
+        severity: weaker ? 'danger' as const : 'warning' as const,
         target: { kind: 'test-review' as const, feature: record.featureId },
       } } : {}),
     }

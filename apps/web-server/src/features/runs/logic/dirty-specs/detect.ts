@@ -281,6 +281,22 @@ export async function computeDirty(featureDir: string, baseline: DirtyBaseline):
   return { status: dirtySpecs.length ? 'dirty' : 'clean', dirtySpecs }
 }
 
+/** The tests whose bodies differ between two versions of one spec file. One
+ *  home for the narrowing rule: a modified file reports only the tests that
+ *  changed, and a file with no per-test signal (added, deleted, or edited
+ *  outside any test body) reports every test it declares. The test-review
+ *  summary answers the same question for a single file, so it reads this
+ *  rather than re-deriving it. */
+export function changedTestNames(rel: string, before: string, after: string): string[] {
+  const beforeTests = hashTestBodies(rel, before)
+  const afterTests = hashTestBodies(rel, after)
+  // A missing side is the empty string, so the surviving side names the tests;
+  // both empty cannot reach here — that is a file that did not change.
+  const names = testNamesOf(rel, after || before)
+  const changed = names.filter((name) => beforeTests[testHashKey(rel, name)] !== afterTests[testHashKey(rel, name)])
+  return changed.length > 0 ? changed : names
+}
+
 // Compare the live suite with the run-start copy the run executed. Every spec on
 // either side is reported when it differs: modified (both, different bytes),
 // added (live only) or deleted (copy only). `affectedTests` narrows a modified
@@ -297,10 +313,6 @@ export function computePendingEdits(liveDir: string, snapshotDir: string): Pendi
     const after = live[rel]
     if (before === after) continue
     const change = before === undefined ? 'added' : after === undefined ? 'deleted' : 'modified'
-    const beforeTests = before === undefined ? {} : hashTestBodies(rel, before)
-    const afterTests = after === undefined ? {} : hashTestBodies(rel, after)
-    const names = testNamesOf(rel, after ?? before)
-    const changedTests = names.filter((name) => beforeTests[testHashKey(rel, name)] !== afterTests[testHashKey(rel, name)])
     const strength: SpecStrength = {
       ...diffSpecPredicates(
         extractTestPredicatesFromSource(rel, before ?? ''),
@@ -308,7 +320,7 @@ export function computePendingEdits(liveDir: string, snapshotDir: string): Pendi
       ),
       baseline: 'run-start',
     }
-    pending.push({ file: rel, change, affectedTests: changedTests.length > 0 ? changedTests : names, strength })
+    pending.push({ file: rel, change, affectedTests: changedTestNames(rel, before ?? '', after ?? ''), strength })
   }
   const envelope = envelopePendingEdit(liveDir, snapshotDir)
   if (envelope) pending.push(envelope)

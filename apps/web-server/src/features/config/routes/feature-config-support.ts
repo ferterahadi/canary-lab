@@ -2,11 +2,12 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { readFeatureConfig, writeFeatureConfig } from '../../../shared/config-ast'
+import { PLAYWRIGHT_CONFIG_NAMES } from '../../../shared/playwright-config'
 import { getProjectRoot } from '../../../../../../shared/runtime/project-root'
 
 export const FEATURE_CONFIG_NAMES = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
 
-export const PLAYWRIGHT_CONFIG_NAMES = ['playwright.config.ts', 'playwright.config.js', 'playwright.config.cjs']
+export { PLAYWRIGHT_CONFIG_NAMES }
 
 export interface ResolvedConfigPath {
   path: string

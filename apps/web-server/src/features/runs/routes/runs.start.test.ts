@@ -332,6 +332,30 @@ describe('POST /api/runs', () => {
     expect(res.json().error).toContain('Repo branch check failed')
   })
 
+  it('surfaces an envset-dependent spec selection as a typed 409 naming the fields', async () => {
+    writeFeature('foo')
+    const { app } = await build({
+      startRun: async () => {
+        throw Object.assign(new Error('foo: playwright.config.ts selects specs with a computed testMatch'), {
+          statusCode: 409,
+          specSelection: { feature: 'foo', config: '/w/features/foo/playwright.config.ts', fields: ['testMatch'], rule: 'the rule' },
+        })
+      },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
+    expect(res.statusCode).toBe(409)
+    // The agent reads `fields` + `rule` and rewrites the config; a bare 409 would
+    // leave it guessing which of five selection fields to look at.
+    expect(res.json()).toMatchObject({
+      type: 'envset_dependent_spec_selection',
+      feature: 'foo',
+      config: '/w/features/foo/playwright.config.ts',
+      fields: ['testMatch'],
+      rule: 'the rule',
+    })
+    expect(res.json().error).toContain('computed testMatch')
+  })
+
   it('400s when env is not in feature.envs', async () => {
     const dir = path.join(featuresDir, 'foo')
     fs.mkdirSync(dir, { recursive: true })

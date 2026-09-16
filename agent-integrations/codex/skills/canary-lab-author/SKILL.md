@@ -56,6 +56,14 @@ and never rename it to dodge a collision.
    - **Creating a NEW feature**: call `create_feature` directly with a unique feature name. It creates the skeleton files and returns test-file rules, envset schema, and next-step tool hints. Do not call `list_features` just to avoid collisions; if the name you INVENTED already exists, retry `create_feature` with a different unique name — but never rename away from a feature the user asked for (that is the extending path above).
 2. If the user asks to preserve existing `.env`, `.env.dev`, `application.properties`, or similar repo config files, inspect the source repo enough to identify the files, then call `capture_feature_env_files`. Do not paste secret values into chat; Canary Lab returns redacted previews only. `write_envset` fills in or corrects individual envset values (it is confirm-gated).
 3. Author or edit specs under `<workspace>/features/<feature>/e2e/` — the Canary Lab WORKSPACE, not the product repo under test.
+   **Spec selection never depends on the envset.** In the suite's
+   `playwright.config.*`, keep `testDir`, `testMatch`, `testIgnore`, `grep` and
+   `grepInvert` as constant literals — never derived from
+   `CANARY_LAB_MANIFEST_PATH`, `process.env`, or the recorded env. A test that
+   must not execute in some environment skips ITSELF at runtime:
+   `test.skip(process.env.VERIFICATION_ENV !== 'meta', 'needs the Meta sandbox')`,
+   reading the env from the envset's own values rather than the manifest. See
+   Guardrails for why.
 4. Specs must import:
    ```ts
    import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
@@ -75,4 +83,13 @@ and never rename it to dodge a collision.
   the requirement's own vocabulary (an endpoint name in an API-contract
   requirement stays technical).
 - Canary Lab never writes the test body for external authoring — this client does.
+- **A suite declares ONE roster of tests, and every run of it declares the same
+  one.** Playwright builds that roster by walking the suite with the config's
+  selection fields applied, before the first test starts, and that walk is the
+  run's evidence. A config that narrows it by environment does not hide tests
+  from a run — it deletes them from the record: a `meta` run of a 45-test suite
+  reports a 4-test suite, the other 41 absent rather than "not run", and two runs
+  of one suite can no longer be compared. `test.skip(condition, reason)` keeps
+  the roster whole; a `testMatch` filter destroys it at the source. Canary Lab
+  refuses both the draft that carries such a config and any run of the suite.
 - After authoring, the natural next steps live in sibling skills: map coverage (`canary-lab-coverage`), run + heal (`canary-lab-run`), export the evaluation (`canary-lab-export`). **Running the new test** needs `start_run`: on the setup/plugin `compact` connection, invoke it as the `exec` command and follow `canary-lab-run`. On an intentionally narrow direct `--profile author` connection it is unavailable; reconnect with `npx canary-lab mcp --profile compact` and then run.

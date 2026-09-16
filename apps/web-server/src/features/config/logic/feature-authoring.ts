@@ -11,6 +11,11 @@ import type { FeatureConfig } from '../../../../../../shared/launcher/types'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
 import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
+import {
+  SPEC_SELECTION_RULE,
+  findVariableSpecSelection,
+  isPlaywrightConfigPath,
+} from '../../../shared/playwright-config'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 export { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
@@ -289,6 +294,16 @@ export function applyExternalDraftFiles(input: {
   const files = input.files ?? readExistingSpecFiles(input.featureDir)
   const validation = validateGeneratedSpecFiles(files)
   if (!validation.ok) return { ok: false, error: validation.error }
+  // A draft may carry the playwright config alongside its specs. Refuse an
+  // envset-dependent roster at the door rather than at the first run: the agent
+  // that wrote it is still here to rewrite it.
+  for (const file of files) {
+    if (!isPlaywrightConfigPath(file.path)) continue
+    const fields = findVariableSpecSelection(file.content)
+    if (fields.length > 0) {
+      return { ok: false, error: `${file.path} selects specs with a computed ${fields.join(', ')}. ${SPEC_SELECTION_RULE}` }
+    }
+  }
   const written: string[] = []
   for (const file of files) {
     const target = path.join(input.featureDir, file.path)
@@ -305,6 +320,7 @@ export function externalTestFileRules(): Record<string, unknown> {
   return {
     specs: 'Place Playwright specs directly under e2e/*.spec.ts.',
     requiredImport: 'canary-lab/feature-support/log-marker-fixture',
+    specSelection: SPEC_SELECTION_RULE,
     noInternalAgentSpawn: true,
   }
 }

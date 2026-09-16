@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-import { act, useState } from 'react'
+import { act, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { Modal } from './Overlays'
+import { Modal, useDismissOnOutsideMousedown } from './Overlays'
 
 let container: HTMLDivElement
 let root: Root
@@ -60,4 +61,32 @@ it('does not treat a click inside a modal as a backdrop click', () => {
   expect(close).not.toHaveBeenCalled()
   act(() => container.querySelector<HTMLElement>('.cl-modal-backdrop')!.click())
   expect(close).toHaveBeenCalledTimes(1)
+})
+
+// A portalled menu is not a DOM descendant of the button that opened it, so a
+// single-ref containment check would dismiss the menu on its own first click.
+it('ignores mousedown inside any owned element — trigger or portalled surface — and stops listening when disabled', () => {
+  const dismiss = vi.fn()
+  function Dropdown({ open }: { open: boolean }) {
+    const trigger = useRef<HTMLButtonElement>(null)
+    const menu = useRef<HTMLDivElement>(null)
+    useDismissOnOutsideMousedown(dismiss, open, [trigger, menu])
+    return <>
+      <button id="trigger" ref={trigger}>Menu</button>
+      {open && createPortal(<div id="menu" ref={menu}><button id="item">Item</button></div>, document.body)}
+    </>
+  }
+  const outside = document.createElement('button')
+  document.body.append(outside)
+  act(() => root.render(<Dropdown open />))
+  const down = (el: Element) => act(() => { el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })) })
+  down(document.querySelector('#trigger')!)
+  down(document.querySelector('#item')!)
+  expect(dismiss).not.toHaveBeenCalled()
+  down(outside)
+  expect(dismiss).toHaveBeenCalledTimes(1)
+  act(() => root.render(<Dropdown open={false} />))
+  down(outside)
+  expect(dismiss).toHaveBeenCalledTimes(1)
+  outside.remove()
 })

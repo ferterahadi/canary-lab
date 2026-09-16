@@ -54,7 +54,7 @@ export function SourceComparisonTable({ review, rows, mode, change, scrollRef, s
     <ComparisonTable rows={rows.map((row) => ({ ...row, fullSource: true, code: true,
       selected: change != null && row.change === change, sourceChanged: row.change != null,
       beforeContent: render(row, 'before'), afterContent: render(row, 'after'),
-    }))} beforeLabel={`Before · ${review.baseline === 'run-start' ? 'Run snapshot' : 'Git HEAD'}`}
-      afterLabel="After · Working copy" ariaLabel="Full test comparison" scrollRef={scrollRef} />
+    }))} beforeLabel={review.baseline === 'run-start' ? 'Recorded tests' : 'Committed tests · Git HEAD'}
+      afterLabel="Current source" ariaLabel="Full test comparison" scrollRef={scrollRef} />
   </div>
 }

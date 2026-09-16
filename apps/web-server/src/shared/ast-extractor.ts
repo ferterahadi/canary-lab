@@ -73,6 +73,7 @@ export interface ExtractResult {
 }
 
 export interface ExtractedTestMetadata {
+  unresolvedTitle?: boolean
   requirements?: string[]
   name: string
   line: number
@@ -709,12 +710,12 @@ function testAnnotationsAt(call: ts.CallExpression, sourceFile: ts.SourceFile): 
 /** The integrity scanner needs only stable test names and callback bodies. Keep
  * that evidence path syntax-only: rendering prose or building a TypeChecker
  * cannot change a content hash and must not delay server readiness. */
-export function extractTestMetadataFromSource(file: string, source: string): ExtractMetadataResult {
+export function extractTestMetadataFromSource(file: string, source: string, options: DeclarationWalkOptions = {}): ExtractMetadataResult {
   try {
     const { sourceFile } = parseSource(file, source)
     return {
       file,
-      tests: testDeclarationsFrom(sourceFile).map(({ call, name, line, bodySource, bodyLine }) => {
+      tests: testDeclarationsFrom(sourceFile, options).map(({ call, name, line, bodySource, bodyLine }) => {
         const { requirements } = testAnnotationsAt(call, sourceFile)
         return {
           name,
@@ -722,6 +723,8 @@ export function extractTestMetadataFromSource(file: string, source: string): Ext
           endLine: sourceFile.getLineAndCharacterOfPosition(call.getEnd()).line + 1,
           bodySource,
           bodyLine,
+          ...(options.expandParametrised && !ts.isStringLiteralLike(call.arguments[0])
+            && (name.includes('${') || name === call.arguments[0].getText(sourceFile)) ? { unresolvedTitle: true } : {}),
           ...(requirements ? { requirements } : {}),
         }
       }),

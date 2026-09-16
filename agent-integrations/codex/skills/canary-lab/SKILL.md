@@ -226,3 +226,5 @@ unconfirmed cell is never a pass.
 - `start_flight` accepts `session_id`, `conversation_name`, and `external_session_url` for Activity provenance. Keep the same values on resume/redo/jump. The other Flight tools do not take them.
 - The flight conducts run/heal/coverage/portify itself. While a flight is active, do not drive those stages with the focused skills — answer the flight's checkpoints instead.
 - For one capability on its own (a run, a coverage pass, an export), use the matching focused skill: `canary-lab-run`, `canary-lab-verify`, `canary-lab-author`, `canary-lab-coverage`, `canary-lab-portify`, `canary-lab-export`.
+
+Broken document links are repaired before source discovery: the owning command elicits the moved file's new path on the Canary server. On `document-relinked`, retry that command with the same arguments. Keep the symlink and existing baseline; never omit the missing source or create recovery copies. Cancel/decline leaves work pending. Unsupported clients use Relink in the returned Canary UI.

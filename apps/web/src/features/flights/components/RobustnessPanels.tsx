@@ -86,7 +86,7 @@ export function RobustnessMatrixPanel({ job, awaiting }: { job: RobustnessJobMan
         ) : (
           <div className="rounded border border-line overflow-hidden cl-type-data">
             <div className="grid items-center px-3 py-1.5 cl-rubric border-b border-line" style={{ gridTemplateColumns: cols }}>
-              <span>Spec file</span>
+              <span>Test file</span>
               {atoms.map((atom) => <span key={atom} className="text-center">{ATOM_LABEL[atom]}</span>)}
             </div>
             {files.map((file) => (

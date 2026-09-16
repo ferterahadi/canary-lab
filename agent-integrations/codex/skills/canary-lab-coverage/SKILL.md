@@ -244,3 +244,5 @@ same computation.
 - New tests belong to the `canary-lab-author` skill/profile; this profile maps and measures.
 - Proving coverage takes a run — `canary-lab-run` (or a flight) records the run the `proven` axis reads.
 - The time axis reads run records, never a stored opinion: a `proof-stale` requirement is cleared by a green run, a `wording-ahead` one by matching tests passing after the wording change, a `tests-weakened` one by restoring the assertion.
+
+Broken document links are repaired before source discovery: the owning command elicits the moved file's new path on the Canary server. On `document-relinked`, retry that command with the same arguments. Keep the symlink and existing baseline; never omit the missing source or create recovery copies. Cancel/decline leaves work pending. Unsupported clients use Relink in the returned Canary UI.

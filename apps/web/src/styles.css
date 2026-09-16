@@ -737,6 +737,21 @@ body {
   width: 24px;
 }
 
+.cl-column-header.cl-tests-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  height: auto;
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+.cl-tests-tabs { display: flex; align-items: center; gap: 10px; }
+.cl-tests-tabs .cl-tab { display: inline-flex; align-items: center; gap: 4px; min-height: 39px; padding-bottom: 0; white-space: nowrap; }
+.cl-test-version-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.cl-test-change { gap: 3px; padding-inline: 4px; font-size: 11px; font-variant-numeric: tabular-nums; }
+
 .cl-panel-footer {
   background: var(--bg-surface);
   border-top: 1px solid var(--border-default);

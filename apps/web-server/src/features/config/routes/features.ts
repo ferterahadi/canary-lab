@@ -21,6 +21,7 @@ import type { EnvSetsConfig } from '../../runs/logic/runtime/env-switcher/types'
 import { buildDiscoveryRepairPrompt } from '../logic/discovery-repair-prompt'
 import { attachSourceChanges } from '../logic/test-source-changes'
 import { recordedTestList } from '../logic/recorded-test-list'
+import { mergeSuiteTestRoster, sourceTestRoster } from '../../runs/logic/suite-test-roster'
 import { testReviewRoutes } from './test-review'
 import type { FeaturesRouteDeps } from './features-route-deps'
 
@@ -241,7 +242,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     // in one place instead of a `??` and a conditional spread whose empty arms
     // nothing can reach.
     let discoveryDiagnostics = 'Playwright could not enumerate the test cases.'
-    const pwList = recorded?.tests ?? await listPlaywrightTests(feature.featureDir, {
+    const discovered = recorded?.tests ?? await listPlaywrightTests(feature.featureDir, {
       spawner: deps.playwrightListSpawner,
       onDiagnostics: (diagnostic) => {
         discoveryDiagnostics = diagnostic
@@ -252,7 +253,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       }),
     })
 
-    if (pwList === null) {
+    if (discovered === null) {
       const discoveryRepairPrompt = buildDiscoveryRepairPrompt(feature, discoveryDiagnostics)
       if (specFiles.length === 0) return [{
         file: path.join(feature.featureDir, 'playwright.config.ts'), tests: [],
@@ -272,6 +273,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
         }
       })
     }
+
+    const pwList = recorded ? discovered : mergeSuiteTestRoster(sourceTestRoster(feature.featureDir), discovered, 'reported')
 
     // 3. Group Playwright entries by spec file, then emit one ExtractedTest
     //    per resolved entry. Body/steps come from the AST entry whose `line`

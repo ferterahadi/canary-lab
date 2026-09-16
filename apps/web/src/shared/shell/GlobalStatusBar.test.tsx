@@ -361,6 +361,14 @@ describe('GlobalStatusBar', () => {
 describe('GlobalStatusBar notifications and test review', () => {
   const dirty = { name: 'checkout', description: '', repos: [], envs: [], dirty: { status: 'dirty', specs: [{ file: 'e2e/a.spec.ts', affectedTests: ['a'], strength: { verdict: 'weaker', baseline: 'head', tests: [] } }] } }
 
+  it('retains a linked completed suite when switching to committed tests', async () => {
+    mockRuns.value = [{ runId: 'r1', feature: 'checkout', status: 'passed', pendingSpecEdits: 0 }]
+    for (const baseline of ['run', undefined] as const) {
+      await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} features={[]} specReviewOpen specReviewRunId="r1" specReviewFeature="checkout" reviewFocus={{ baseline }} />))
+      expect(document.querySelector('[data-testid="dirty-review-suite-checkout"]')).not.toBeNull()
+    }
+  })
+
   it('places Notifications in the right cluster and removes the separate changed-tests pill', async () => {
     mockRuns.value = [{ runId: 'r1', feature: 'checkout', status: 'healing', startedAt: '', pendingSpecEdits: 1 }]
     await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} features={[dirty as never]} notificationControl={<button>Notifications</button>} />))

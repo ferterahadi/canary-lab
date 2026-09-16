@@ -447,6 +447,11 @@ export function App() {
           activeRunSummary={nav.currentTests ? undefined : summaryForSelectedFeature}
           activeRunManifest={nav.currentTests ? undefined : statusRunDetail.detail?.manifest}
           activeRunStatus={nav.currentTests ? undefined : statusForSelectedFeature}
+          // Card verdicts stay on recorded source. The header keeps both
+          // versions' counts and the selected run's comparison baseline.
+          baselineRun={statusRunDetail.detail?.manifest}
+          baselineRunSummary={summaryForSelectedFeature}
+          baselineRunStatus={statusForSelectedFeature}
           currentTests={nav.currentTests}
           onCurrentTestsChange={selectedRunForFeature ? nav.setCurrentTests : undefined}
           onReviewTest={(file, line, baseline) => { setReviewFocus({ file, line, baseline, mode: 'english' }); setSpecReviewOpen(true) }}

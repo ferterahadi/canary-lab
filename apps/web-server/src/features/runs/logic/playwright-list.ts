@@ -11,6 +11,8 @@ import path from 'path'
 // which case callers should fall back to the AST extractor.
 
 export interface PlaywrightListEntry {
+  /** A syntax-only declaration whose generated titles need reporter enrichment. */
+  unresolvedTitle?: boolean
   // Absolute path to the *entry-point* spec file Playwright loaded — i.e.
   // the top-level suite's file. For direct `test(...)` calls this equals
   // `originFile`. For tests defined inside a helper (e.g. a factory imported

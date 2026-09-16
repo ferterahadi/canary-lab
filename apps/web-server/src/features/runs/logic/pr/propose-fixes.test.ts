@@ -416,8 +416,8 @@ describe('proposeFixesForRun — agent-written wording', () => {
       const create = h.ghCalls.find((c) => c[1] === 'create')!
       const body = create[create.indexOf('--body') + 1]
       expect(body).toContain('run `run-9`')
-      expect(body).toContain('The tests this run passed are the suite as it stood at run start (snapshot `abcdef012345`')
-      expect(body).toContain('- Not executed — 1 spec edit made after the run started: `e2e/a.spec.ts` (modified).')
+      expect(body).toContain('The tests that passed were recorded when the run started (copy `abcdef012345`')
+      expect(body).toContain('- Not run — 1 test-file change made after the run started: `e2e/a.spec.ts` (modified).')
     }
   })
 

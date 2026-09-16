@@ -26,10 +26,19 @@ describe('workspace-view-state (R12)', () => {
     expect(window.location.search).toContain('tests=current')
     expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ view: 'workspace', feature: 'checkout' })
     persistView(view({ feature: 'checkout', run: 'old-run', currentTests: false }))
-    expect(window.location.search).not.toContain('tests=')
+    expect(window.location.search).toContain('tests=recorded')
+    expect(readPersistedView().currentTests).toBe(false)
     expect(readPersistedView().run).toBe('old-run')
     persistView(view({ view: 'coverage', feature: 'checkout', currentTests: true }))
     expect(window.location.search).not.toContain('tests=')
+  })
+  it('requires a workspace suite and run for explicit recorded-source links', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&run=r1&tests=recorded')
+    expect(readPersistedView().currentTests).toBe(false)
+    for (const query of ['feature=checkout', 'run=r1', 'view=coverage&feature=checkout&run=r1']) {
+      window.history.replaceState(null, '', `/?${query}&tests=recorded`)
+      expect(readPersistedView().currentTests).toBeUndefined()
+    }
   })
   it('defaults to the workspace view with no feature', () => {
     expect(readPersistedView()).toEqual(view({}))
@@ -56,6 +65,30 @@ describe('workspace-view-state (R12)', () => {
     persistView(view({ feature: 'checkout', focusTest: 'test-case-req-r4-otp-guard' }))
     expect(window.location.search).not.toContain('test=')
     expect(readPersistedView().focusTest).toBeNull()
+  })
+
+  // Reading current source is a departure FROM a specific run's results, so it
+  // qualifies a selected run the same way `test` does: without one there is
+  // nothing to depart from, and the flag would outlive its reason.
+  it('drops current test browsing when no run is selected', () => {
+    persistView(view({ feature: 'checkout', currentTests: true }))
+    expect(window.location.search).not.toContain('tests=')
+    expect(readPersistedView().currentTests).toBeUndefined()
+  })
+
+  it('ignores a stale tests=current link that names no run', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&tests=current')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout' }))
+  })
+
+  it('reads tests=current from a link that spells out the workspace view', () => {
+    window.history.replaceState(null, '', '/?view=workspace&feature=checkout&run=r1&tests=current')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', run: 'r1', currentTests: true }))
+  })
+
+  it('ignores tests=current on a view that has no Tests column', () => {
+    window.history.replaceState(null, '', '/?view=coverage&feature=checkout&run=r1&tests=current')
+    expect(readPersistedView().currentTests).toBeUndefined()
   })
 
   it('ignores a stray test param on a URL with no run', () => {

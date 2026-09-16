@@ -70,12 +70,45 @@ describe('useWorkspaceNavigation — seeding from the route', () => {
   it('restores current test browsing and switches back without changing the selected run', async () => {
     await mount(persisted({ feature: 'checkout', run: 'old-run', currentTests: true }))
     expect(nav.currentTests).toBe(true)
-    expect(viewState.persistView).toHaveBeenLastCalledWith(expect.objectContaining({ run: 'old-run', currentTests: true }))
+    expect(viewState.persistView.mock.lastCall![0].currentTests).toBeUndefined()
     await act(async () => nav.setCurrentTests(false))
     expect(nav.currentTests).toBe(false)
     expect(nav.selectedRunId).toBe('old-run')
-    expect(viewState.persistView.mock.lastCall![0].currentTests).toBeUndefined()
+    expect(viewState.persistView.mock.lastCall![0].currentTests).toBe(false)
   })
+  it('keeps current source visible through automatic and manual run selections', async () => {
+    await mount(persisted({ feature: 'checkout' }))
+    expect(nav.currentTests).toBe(true)
+    await act(async () => nav.setSelectedRunId('old-run'))
+    expect(nav.currentTests).toBe(true)
+    await act(async () => nav.setSelectedRunId('new-run'))
+    expect(nav.currentTests).toBe(true)
+    expect(nav.selectedRunId).toBe('new-run')
+  })
+
+  it('scopes explicit recorded browsing to the suite and run it was opened for', async () => {
+    await mount(persisted({ feature: 'checkout', run: 'old-run' }))
+    expect(nav.currentTests).toBe(true)
+    await act(async () => nav.setCurrentTests(false))
+    expect(nav.currentTests).toBe(false)
+    expect(viewState.persistView).toHaveBeenLastCalledWith(expect.objectContaining({ run: 'old-run', currentTests: false }))
+    await act(async () => nav.setSelectedRunId('new-run'))
+    expect(nav.currentTests).toBe(true)
+    await act(async () => nav.setSelectedRunId('old-run'))
+    expect(nav.currentTests).toBe(false)
+    await act(async () => nav.setSelectedFeature('other-suite'))
+    expect(nav.currentTests).toBe(true)
+  })
+
+  it('restores an explicit recorded-source link on refresh', async () => {
+    await mount(persisted({ feature: 'checkout', run: 'old-run', currentTests: false }))
+    expect(nav.currentTests).toBe(false)
+    expect(nav.selectedRunId).toBe('old-run')
+    await act(async () => nav.setCurrentTests(true))
+    expect(nav.currentTests).toBe(true)
+    expect(nav.selectedRunId).toBe('old-run')
+  })
+
   it('starts on the persisted view, feature, run and flight', async () => {
     await mount(persisted({ view: 'flights', feature: 'checkout', run: 'r1', flight: 'fl-1', flightStage: 'run' }))
 

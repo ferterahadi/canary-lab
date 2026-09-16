@@ -4,9 +4,9 @@ Canary Lab — external repair loop. Fix failing runs by editing app/service cod
 2. wait_for_heal_task with the same runId + session_id. It BLOCKS for a bounded window; type:"still_waiting" is NOT terminal — call it again until needs_heal / passed / failed. Never poll get_run_snapshot or get_run in a loop.
 3. On needs_heal follow context.nextSteps (read context.healPrompt.startHere first), apply the fixes YOURSELF, then signal_run ONCE per cycle with hypothesis + fixDescription, and wait_for_heal_task again. The signal requests runner verification; it is not a claim that the fix already passes. Do not start services or run Playwright or other runtime checks yourself. Canary Lab owns affected-service restart, health checks, and targeted Playwright verification after the signal.
 
-Read pass counts from result.counts.statusLine / result.counts.passed, never total - failed (a not-run test is not a pass). dirtyTests/specEdits are signals: relay each message VERBATIM once; never edit the test files to clear them. specEdits = specs changed after the run started and were NOT tested: restore them, or ask the human to adopt: get_test_review → show patch → review_test_changes (no tool can self-approve); a weaker hint → restore.
+Read pass counts from result.counts.statusLine / result.counts.passed, never total - failed (a not-run test is not a pass). dirtyTests/specEdits are signals: relay each message VERBATIM once; never edit the test files to clear them. specEdits = test files changed after the run started and were NOT tested: restore the changes, or ask the human to adopt them: get_test_review → show patch → review_test_changes (no tool can self-approve); a weaker hint → restore.
 
-Full guide (boot failures, escalation, fan-out, rerun vs restart, Robustness Lab): get_workflow_guide(workflow:"repair").
+Full guide: get_workflow_guide(workflow:"repair").
 
 <!-- initialize-cut -->
 Details:
@@ -23,16 +23,16 @@ get_run_snapshot is for verbose debugging only, not for waiting. Read pass count
 
 Two awareness signals can ride a run result. Neither changes the verdict, and you never edit the test files to clear either one.
 
-- dirtyTests (a test spec changed since the last green run): relay its message to the user VERBATIM (e.g. "⚠️ Tests have been modified, please review.⚠️") — once, alongside the pass/fail outcome. Do NOT block, gate, re-run, or revert on it: the user reviews or commits the change.
-- specEdits (a spec changed AFTER this run started): the run executed a copy of the suite taken at run start, so the edited spec was NOT tested — the result you see says nothing about it. Relay specEdits.message and follow specEdits.nextSteps: restore the spec to what the run started with, or ask the human to adopt: call get_test_review(runId), show the exact patch (read patchPath if needed), then call review_test_changes(runId, review_revision) for human elicitation. If available, reviewUrl opens the side-by-side viewer in the client browser panel. Unsupported clients use that page for adoption. Cancel/decline leaves work pending; changed revisions require a fresh review. No MCP tool can self-approve a spec edit, and a passed run with pending specEdits is a pass of the ORIGINAL suite — never report the edited tests as passed. specEdits.hints lists what the strength differential read: a kind:"weaker" hint means an assertion was removed or loosened relative to what ran — restore it, a weaker assertion is never a repair; kind:"cannot-classify" means review by hand. Hints are advisory and carry specEdits.disclosure (one AI labelled, a second AI checked blind, no human) — quote it if you quote a hint.
+- dirtyTests (a test file changed since the last green run): relay its message to the user VERBATIM (e.g. "⚠️ Tests have been modified, please review.⚠️") — once, alongside the pass/fail outcome. Do NOT block, gate, re-run, or revert on it: the user reviews or commits the change.
+- specEdits (test files changed AFTER this run started): the run used the tests recorded at run start, so the changed files were NOT tested — the result you see says nothing about them. Relay specEdits.message and follow specEdits.nextSteps: restore the changes to the recorded version, or ask the human to adopt them: call get_test_review(runId), show the exact patch (read patchPath if needed), then call review_test_changes(runId, review_revision) for human elicitation. If available, reviewUrl opens the side-by-side viewer in the client browser panel. Unsupported clients open that page, then immediately call review_test_changes with the same runId and review_revision plus wait_for_decision:true. Repeat on still_waiting so the human browser decision resumes the agent; do not end the turn or click the human controls. An adopted or restored receipt continues with wait_for_heal_task. Cancel/decline leaves work pending; changed revisions require a fresh review. No MCP tool can self-approve a test-file change, and a passed run with pending specEdits is a pass of the RECORDED tests — never report the changed tests as passed. specEdits.hints carries the advisory check: a kind:"weaker" hint means an assertion was removed or loosened relative to the test that ran — restore it, a weaker assertion is never a repair; kind:"cannot-classify" means review by hand. Quote specEdits.disclosure with any hint you quote: one AI labelled the samples; a second AI checked 40 without seeing those labels; no human labelled them.
 
 
 ## Robustness Lab (defects a green run cannot see)
 
 A passing run proves the app under ideal conditions. The Robustness Lab re-runs a
-GREEN run's spec files under a perturbation envelope — added latency, a duplicated
+GREEN run's test files under a perturbation envelope — added latency, a duplicated
 write, a service restart — injected by a proxy in front of the suite's declared port
-slots, so each cell (spec file × atom) is a full Canary run of the same tests. A cell
+slots, so each cell (test file × atom) is a full Canary run of the same tests. A cell
 that fails is a finding: the tests that passed green and failed perturbed, their @req
 tags, and — after shrinking — the smallest envelope that still reproduces it,
 confirmed 3/3. Nothing here edits tests or the envelope; findings feed THIS repair

@@ -22,6 +22,7 @@ import type { RobustnessEnvelope } from '../../../../../../../shared/robustness/
 import type { RunModelPlan } from './run-model-plan'
 import type { PendingSpecEdit } from '../dirty-specs/detect'
 import type { IntegrityHint } from './run-integrity-hints'
+import type { TestReviewDecision } from '../../../../../../../shared/test-review'
 export type {
   HealEnd,
   QueueReason,
@@ -124,6 +125,7 @@ export interface RunSpecEdits {
   checkedAt: string
   pending: PendingSpecEdit[]
   adopted: Array<{ at: string; by: SpecEditsAdoptedBy; files: string[]; reviewRevision?: string }>
+  reviewDecisions?: TestReviewDecision[]
 }
 
 /** What the strength differential says about `specEdits.pending` (D13).
@@ -336,6 +338,15 @@ export interface RunIndexEntry {
   runId: string
   executionType?: ExecutionType
   feature: string
+  /** The envset this run used, mirrored from the manifest. Spec selection is
+   *  constant across envsets, so two runs of one suite declare the SAME roster
+   *  and differ only in which tests the environment let execute — 41 passed / 4
+   *  skipped under one envset, 4 passed / 41 skipped under another. Without the
+   *  envset on the row those read as one run having gone badly. Carried on the
+   *  index so the runs list needs no manifest read per row; absent on entries
+   *  written before the field existed (backfilled read-time) and on runs that
+   *  named no envset. */
+  env?: string
   startedAt: string
   status: RunStatus
   endedAt?: string

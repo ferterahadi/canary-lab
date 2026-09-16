@@ -190,7 +190,7 @@ with task-specific widths, keyboard focus containment, and a pinned header/foote
 Flights adds search and an attention filter. Test review keeps suite/file selection
 in a rail and presents complete source in two fixed before/after columns. The
 read-only test-review API reads Git HEAD or the explicitly selected run snapshot,
-then derives English, source alignment, and advisory assessments from those same
+then derives English, source alignment, and advisory checks from those same
 versions. English and Code share source-based change navigation across the whole
 file, including imports and shared setup; the selected change's assessment appears
 below the source. File review uses `translateReadableSource` to include imports,
@@ -199,6 +199,10 @@ Function declarations have a signature row and individually translated body stat
 Arrow callbacks use the same natural grammar as ordinary statements, with block
 bodies explicitly described as running when called. Calls with callback arguments list those arguments in order, while
 spread lists describe item inclusion and conditional inclusion explicitly.
+Polling assertions show the required result, the callback evaluated on each attempt,
+and the authored polling options on separate lines. Optional and indexed access,
+nullish fallbacks, and type assertions use compact expressions while preserving
+grouping, negation, and whether the check is awaited.
 Multiline loop headers carry their ending source line so English suppresses
 already-described continuation lines and opens the complete header in Code mode.
 It reuses the story walker and falls back to the exhaustive syntax grammar for
@@ -229,18 +233,23 @@ and requirement labels also read syntax metadata, without translating test bodie
 The English viewer compiles shared helpers once per source extraction and rebuilds
 them on the next edit. Possible weakening also uses
 an amber advisory cue.
-Commit names the selected suite and counts all its tracked dirty spec files.
+Commit names the selected suite and counts all its changed test files.
 A successful commit leaves a saved receipt; the uncommitted review cue clears on
 live refresh. Differences from a selected run remain independently inspectable:
 saving in Git never validates new tests or changes an existing run verdict.
-Restore and adopt remain explicit live-run actions. MCP clients can call
+An active run with pending edits asks "Keep these test changes?" with two actions: "No, restore tests" and "Yes, commit & rerun". Yes commits first, then adopts into the run and requests a rerun; a failed step stays visible for recovery. Queued or completed runs retain the Git-only commit action. MCP clients can call
 `get_test_review` to display the exact snapshot comparison, then
 `review_test_changes` to request human adoption through elicitation. The review
 includes every copied suite file; envsets, dependencies and Git metadata are
 excluded exactly as in the snapshot. Approval is bound to both trees by SHA-256.
 A staged copy is checked before replacing the snapshot, so stale answers and
 copy failures cannot silently adopt a different revision. Cancellation leaves
-work pending; unsupported clients use the existing review page. Adoption signals
+work pending; unsupported clients open the existing review page and call
+`review_test_changes` with `wait_for_decision:true`. This read-only, bounded wait
+subscribes to run-store events and returns the persisted human decision for the
+review revision. Clients repeat `still_waiting` until the browser decision arrives;
+a reconnect reads the same receipt. A clean Git tree is never treated as approval.
+Adoption signals
 a rerun and never changes the verdict into a pass. Editing opens the existing
 editor; validation uses the existing Run flow. Closing Services leaves sessions
 running; stopping is a separate action.
@@ -692,6 +701,12 @@ link, or the per-repo reason there is none.
   document input uses the coverage document rail. Secret entry uses a scoped,
   expiring invitation to the existing flight checkpoint UI; secrets do not
   traverse MCP. Status reads never open a question.
+- **Broken document links** pause coverage/Flight document resolution before
+  discovery. `apps/web-server/src/mcp/document-relink.ts` asks for the new server-local
+  path through form elicitation and repairs the existing symlink. It preserves
+  document names and baselines; `document-relinked` tells the caller to retry the
+  original command. Cancellation and invalid/stale answers do not replace the link.
+  Unsupported clients receive the Relink UI URL. No recovery copies are created.
 - **Document discovery** precedes missing-document elicitation in coverage and
   flight MCP tools. The calling agent searches authorized sources and returns
   `document_resolution`; the shared `mcp/document-resolution.ts` gate validates
@@ -930,7 +945,7 @@ The active pipeline is:
    second parser.
 
 Nothing is persisted as a translated sidecar: the server derives the view from the
-selected source when it extracts tests. For a selected run, `GET /api/features/:name/tests?runId=...` uses the reporter’s recorded roster and saved suite source without executing historical spec modules. Older runs without a snapshot still show recorded tests and verdicts, with an explicit source-unavailable notice; they never read current source as historical evidence. A run without a recorded roster shows an empty or waiting state, not a discovery failure. The Tests header can switch to current workspace tests independently of the selected run (`tests=current`, URL-only and restored on refresh); this source view does not inherit historical result badges. Current workspace changes also remain available through test review. Unmatched workspace tests say “no matching result” instead of “pending”. TypeScript is pinned to 5.9.3 because its AST
+selected source when it extracts tests. For a selected run, `GET /api/features/:name/tests?runId=...` lists the full saved suite independently of envset selection, then merges reporter identities and results without executing historical spec modules. New snapshots save a syntax inventory in `.canary-suite-tests.json`; older snapshots recover that inventory from their own source. Literal parameterised cases are expanded; unresolved generated titles are enriched from the reporter. Tests without execution evidence remain visible as “not run”, distinct from an explicit skip. Older runs without a snapshot still show recorded tests and verdicts, with an explicit source-unavailable notice; they never read current source as historical evidence. A run without reporter results still lists its saved suite. If neither source nor a recorded roster exists, it shows an empty or waiting state, not a discovery failure. The Tests column defaults to current workspace source, independently of run selection. The Tests header keeps Source and Run tabs together with the current count and recorded pass/total count. The Run tab opens historical tests explicitly (`tests=recorded`, URL-only and restored on refresh; older `tests=current` links remain supported). Current-source cards say “Not verified” or “Changed since run” and never inherit historical result badges; the file comparison is not proof that the entire executed suite matches. Recorded-source browsing is scoped to its suite and run, so selecting another run returns to current source. Compact new, changed, and removed indicators compare test identities across both lists, never the difference between totals or pass counts. Each indicator opens the existing comparison dialog at an affected file and line; the compare icon opens it directly even when source matches. Missing or incomplete source keeps change counts unknown. The dialog lists files from both versions, including committed and removed files. Current workspace changes also remain available through test review. Unmatched workspace tests say “no matching result” instead of “pending”. TypeScript is pinned to 5.9.3 because its AST
 is the input language; `compiler-context.ts` and the syntax inventory tests force a
 deliberate vocabulary audit before that compiler version can change. The detailed
 contracts live in the [controlled-English grammar](controlled-english/controlled-english-grammar.md),
