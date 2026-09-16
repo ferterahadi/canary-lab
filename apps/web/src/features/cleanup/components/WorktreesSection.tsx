@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { CleanupWorktree } from '@/shared/api/types'
 import { formatBytes, timeAgo } from '@/shared/lib/format'
+import { ConfirmModal } from '@/shared/ui/atoms'
 import { CleanupEmptyState, QuickSelectMenu, SpinnerGlyph, WarnGlyph, WorktreeGlyph } from './CleanupTableParts'
 import { SEVEN_DAYS_MS, WORKTREE_OWNER_LABEL } from './cleanup-rows'
 
@@ -17,6 +18,13 @@ export function WorktreesSection({ now }: { now: number }) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  // A single worktree awaiting confirmation. This was a `window.confirm`, which
+  // is the one dialog in the app the app does not draw: an OS chrome sheet,
+  // untokened, unthemed, and unstyled by anything here.
+  const [confirmOne, setConfirmOne] = useState<CleanupWorktree | null>(null)
+  // Failures were `window.alert`s for the same reason. They belong in the
+  // page, above the table they are about, like every other action error.
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -36,21 +44,25 @@ export function WorktreesSection({ now }: { now: number }) {
   useEffect(() => { void load() }, [load])
 
   const open = async (wt: CleanupWorktree): Promise<void> => {
+    setActionError(null)
     try {
       const r = await api.openWorktreePath(wt.path)
-      if (!r.opened) window.prompt('Could not launch your editor — copy this path:', wt.path)
+      // The path stays selectable in the error strip, which is what the
+      // `window.prompt` this replaced was really being used for.
+      if (!r.opened) setActionError(`Could not launch your editor. The worktree is at ${wt.path}`)
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : String(e))
+      setActionError(e instanceof Error ? e.message : String(e))
     }
   }
   const remove = async (wt: CleanupWorktree): Promise<void> => {
-    if (!window.confirm(`Remove this worktree?\n\n${wt.path}\n\nRuns "git worktree remove" and frees ~${formatBytes(wt.bytes)}.`)) return
+    setConfirmOne(null)
+    setActionError(null)
     setBusyPath(wt.path)
     try {
       await api.removeWorktree(wt.path)
       await load()
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : String(e))
+      setActionError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusyPath(null)
     }
@@ -84,8 +96,8 @@ export function WorktreesSection({ now }: { now: number }) {
   const selectedTargets = sorted.filter((w) => selected.has(w.path) && !w.active)
   const selectedBytes = selectedTargets.reduce((s, w) => s + w.bytes, 0)
 
-  // Confirmation lives in a modal (mirrors the runs delete flow) rather than a
-  // window.confirm, so the bulk-remove experience matches Log Cleanup exactly.
+  // Both confirmations are the shared `ConfirmModal`, so bulk and single
+  // removal read as the same decision at the same weight.
   const doRemoveSelected = async (): Promise<void> => {
     if (selectedTargets.length === 0) return
     const n = selectedTargets.length
@@ -96,7 +108,7 @@ export function WorktreesSection({ now }: { now: number }) {
     setSelected(new Set())
     setBulkBusy(false)
     await load()
-    if (failures > 0) window.alert(`${failures} of ${n} removals failed (a worktree may have become active).`)
+    setActionError(failures > 0 ? `${failures} of ${n} removals failed (a worktree may have become active). Refreshed below.` : null)
   }
 
   return (
@@ -121,6 +133,9 @@ export function WorktreesSection({ now }: { now: number }) {
           <button type="button" onClick={() => void load()} className="cl-button px-2 py-1" disabled={loading || bulkBusy}>Refresh</button>
         </div>
       </div>
+      {actionError && (
+        <div role="alert" data-testid="worktrees-action-error" className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>{actionError}</div>
+      )}
       <div className="min-h-0 flex-1 overflow-auto px-5 py-2">
       {loading && <CleanupEmptyState icon={<SpinnerGlyph />} title="Scanning worktrees…" />}
       {!loading && err && (
@@ -183,7 +198,7 @@ export function WorktreesSection({ now }: { now: number }) {
                   )}
                   <button
                     type="button"
-                    onClick={() => void remove(wt)}
+                    onClick={() => setConfirmOne(wt)}
                     disabled={wt.active || busyPath === wt.path || bulkBusy}
                     className="cl-button ml-1 px-1.5 py-0.5"
                     style={{ fontSize: 11, color: 'var(--danger)' }}
@@ -221,34 +236,27 @@ export function WorktreesSection({ now }: { now: number }) {
         </div>
       )}
 
-      {/* Confirm dialog — mirrors the runs delete confirm. */}
-      {confirmOpen && (
-        <div className="cl-modal-backdrop fixed inset-0 z-[70] flex items-center justify-center p-6" onClick={() => !bulkBusy && setConfirmOpen(false)}>
-          <div
-            role="dialog"
-            aria-modal="true"
-            className="cl-modal w-full max-w-md p-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Remove worktrees</h2>
-            <p className="mt-2" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-              Run <strong>git worktree remove</strong> on <strong>{selectedTargets.length}</strong> worktree{selectedTargets.length === 1 ? '' : 's'}, reclaiming about <strong>{formatBytes(selectedBytes)}</strong>. The source repos are untouched — this only removes the checked-out copies under logs.
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={() => setConfirmOpen(false)} disabled={bulkBusy} className="cl-button px-3 py-1">Cancel</button>
-              <button
-                type="button"
-                disabled={bulkBusy}
-                onClick={() => void doRemoveSelected()}
-                className="cl-button px-3 py-1"
-                style={{ color: 'var(--danger)' }}
-              >
-                {bulkBusy ? 'Working…' : 'Remove'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmModal
+        open={confirmOpen}
+        title="Remove worktrees"
+        variant="danger"
+        busy={bulkBusy}
+        confirmLabel="Remove"
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => void doRemoveSelected()}
+        message={<>Run <strong>git worktree remove</strong> on <strong>{selectedTargets.length}</strong> worktree{selectedTargets.length === 1 ? '' : 's'}, reclaiming about <strong>{formatBytes(selectedBytes)}</strong>. The source repos are untouched — this only removes the checked-out copies under logs.</>}
+      />
+
+      <ConfirmModal
+        open={confirmOne !== null}
+        title="Remove worktree"
+        variant="danger"
+        busy={busyPath !== null}
+        confirmLabel="Remove"
+        onCancel={() => setConfirmOne(null)}
+        onConfirm={() => { if (confirmOne) void remove(confirmOne) }}
+        message={<>Run <strong>git worktree remove</strong> on <code style={{ fontFamily: 'var(--font-mono)' }}>{confirmOne?.path}</code>, reclaiming about <strong>{formatBytes(confirmOne?.bytes ?? 0)}</strong>. The source repo is untouched — this only removes the checked-out copy under logs.</>}
+      />
     </div>
   )
 }

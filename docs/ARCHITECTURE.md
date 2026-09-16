@@ -376,7 +376,13 @@ The docs collector can return the structured requirements draft in the same
 session. Canary fingerprints the accepted documents and prior summary, then the
 summary stage validates and assembles that draft through the normal stable-ID
 reconciler. Changed inputs, invalid drafts and older handoffs use the separate
-summary producer. Playwright listing and TypeScript validation run concurrently;
+summary producer. Before accepting authored specs, the shared
+`shared/test-readability.ts` policy splits ordinary grouped declarations and
+formats source, rejects unresolved syntax/comma-expression errors, and reports
+nested conditionals for review. External drafts and internal Flight authoring
+share this acceptance path; the `test-readability` CLI applies the same policy
+to existing source without modifying recorded run artifacts. Playwright listing
+and TypeScript validation run concurrently;
 both finish before mapping or another authoring pass. Flight mapping caches
 examined test/requirement pairs, including unmappable answers, and invalidates
 reuse when test bodies, shared helpers, support files, configuration, dependency

@@ -415,12 +415,12 @@ describe('specs-coverage stage', () => {
     const clean = buildSpecsPrompt(base)
     expect(clean).toContain('/abs/features/checkout/e2e')
     expect(clean).toContain('Do NOT reply with JSON')
-    expect(clean).not.toContain('failed to compile/list')
+    expect(clean).not.toContain('failed validation')
     expect(clean).not.toContain('{{')
 
     const huge = 'x'.repeat(5000) + 'OVERFLOW-MARKER'
     const withErrors = buildSpecsPrompt({ ...base, iteration: 2, validationErrors: huge })
-    expect(withErrors).toContain('failed to compile/list')
+    expect(withErrors).toContain('failed validation')
     expect(withErrors).toContain('xxxx')
     expect(withErrors).not.toContain('OVERFLOW-MARKER')
   })

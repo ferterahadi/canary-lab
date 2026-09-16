@@ -75,6 +75,15 @@ and never rename it to dodge a collision.
 
 ## Guardrails
 
+- Write one variable declaration per statement, use descriptive names, and clearly
+  separate setup, action, and assertions. Avoid comma expressions and nested
+  conditionals. Draft acceptance splits ordinary grouped declarations and formats
+  specs; it rejects syntax errors and comma expressions and reports nested
+  conditionals for review. Preserve behavior while resolving any finding.
+- Audit existing tests with `canary-lab test-readability <file-or-directory>`;
+  add `--fix` for safe declaration fixes and formatting, or `--rules-only` to keep
+  existing layout. Review the diff and rerun affected tests. Never weaken assertions
+  or rewrite recorded run artifacts during cleanup.
 - Keep the same `session_id` for the whole conversation.
 - Test titles are read by non-engineers in the coverage ledger and exported
   reports: write each as a plain-English sentence naming the user-visible

@@ -98,12 +98,12 @@ describe('spec-selection guardrail — delivery, not just presence', () => {
     expect(SPEC_SELECTION_RULE.length).toBeLessThan(INSTRUCTIONS_DELIVERED_WINDOW)
   })
 
-  it('refuses a draft that carries an envset-dependent config, naming the field', () => {
+  it('refuses a draft that carries an envset-dependent config, naming the field', async () => {
     // The prose above is advice; this is the door. An agent that ignores the
     // rule still cannot land the config through Canary Lab.
     const featureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-draft-'))
     try {
-      const result = applyExternalDraftFiles({
+      const result = await applyExternalDraftFiles({
         featureDir,
         files: [
           { path: 'e2e/checkout.spec.ts', content: "import { test } from 'canary-lab/feature-support/log-marker-fixture'\n" },
@@ -123,10 +123,10 @@ describe('spec-selection guardrail — delivery, not just presence', () => {
     }
   })
 
-  it('applies a draft whose config keeps selection constant', () => {
+  it('applies a draft whose config keeps selection constant', async () => {
     const featureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-draft-'))
     try {
-      const result = applyExternalDraftFiles({
+      const result = await applyExternalDraftFiles({
         featureDir,
         files: [
           { path: 'e2e/checkout.spec.ts', content: "import { test } from 'canary-lab/feature-support/log-marker-fixture'\n" },

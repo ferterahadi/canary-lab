@@ -8,7 +8,9 @@ import {
   type GeneratedFeatureFile,
 } from '../../../../../../shared/feature-scaffold'
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
+import { describeReadabilityIssue, inspectTestReadability } from '../../../../../../shared/test-readability'
 import { loadFeatures } from '../../../shared/feature-loader'
+import { loadPromptTemplate, promptPath } from '../../../shared/prompts'
 import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
 import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
 import {
@@ -287,10 +289,10 @@ export function deleteFeature(ctx: FeatureAuthoringContext, input: {
   return { ok: true, featureDir }
 }
 
-export function applyExternalDraftFiles(input: {
+export async function applyExternalDraftFiles(input: {
   featureDir: string
   files?: GeneratedFeatureFile[]
-}): { ok: true; written: string[] } | { ok: false; error: string } {
+}): Promise<{ ok: true; written: string[]; warnings?: string[] } | { ok: false; error: string }> {
   const files = input.files ?? readExistingSpecFiles(input.featureDir)
   const validation = validateGeneratedSpecFiles(files)
   if (!validation.ok) return { ok: false, error: validation.error }
@@ -304,8 +306,31 @@ export function applyExternalDraftFiles(input: {
       return { ok: false, error: `${file.path} selects specs with a computed ${fields.join(', ')}. ${SPEC_SELECTION_RULE}` }
     }
   }
-  const written: string[] = []
+  const originalContents = new Map(files.map((file) => {
+    const target = path.join(input.featureDir, file.path)
+    return [target, fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : undefined]
+  }))
+  const normalized: GeneratedFeatureFile[] = []
+  const warnings: string[] = []
+  // Validate the whole batch before writing any normalized source. An unsafe
+  // expression or syntax error must not leave a partially applied draft.
   for (const file of files) {
+    if (!file.path.endsWith('.spec.ts')) {
+      normalized.push(file)
+      continue
+    }
+    const result = await inspectTestReadability(file.content, file.path)
+    const error = result.remaining.find((issue) => issue.severity === 'error')
+    if (error) return { ok: false, error: describeReadabilityIssue(file.path, error) }
+    normalized.push({ ...file, content: result.code })
+    warnings.push(...result.remaining.map((issue) => describeReadabilityIssue(file.path, issue)))
+  }
+  for (const [target, original] of originalContents) {
+    const current = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : undefined
+    if (current !== original) return { ok: false, error: `File changed during readability inspection; retry: ${target}` }
+  }
+  const written: string[] = []
+  for (const file of normalized) {
     const target = path.join(input.featureDir, file.path)
     /* v8 ignore next 3 -- validateGeneratedSpecFiles rejects escaping paths before writes. */
     if (!isWithin(input.featureDir, target)) return { ok: false, error: `file escapes feature directory: ${file.path}` }
@@ -313,7 +338,7 @@ export function applyExternalDraftFiles(input: {
     fs.writeFileSync(target, file.content, 'utf8')
     written.push(target)
   }
-  return { ok: true, written }
+  return { ok: true, written, ...(warnings.length > 0 ? { warnings } : {}) }
 }
 
 export function externalTestFileRules(): Record<string, unknown> {
@@ -321,6 +346,7 @@ export function externalTestFileRules(): Record<string, unknown> {
     specs: 'Place Playwright specs directly under e2e/*.spec.ts.',
     requiredImport: 'canary-lab/feature-support/log-marker-fixture',
     specSelection: SPEC_SELECTION_RULE,
+    readability: loadPromptTemplate(promptPath('test-readability.md')),
     noInternalAgentSpawn: true,
   }
 }

@@ -14,6 +14,7 @@ npx canary-lab env apply <feature> <set>
 npx canary-lab env revert <feature>
 npx canary-lab boot <feature> [env]
 npx canary-lab boot stop <runId>
+npx canary-lab test-readability <file-or-directory...> [--fix] [--rules-only] [--json]
 npx canary-lab upgrade [--silent] [--check] [--force-archive]
 ```
 
@@ -30,6 +31,36 @@ npx canary-lab upgrade [--silent] [--check] [--force-archive]
 - Exit codes are `0` for green, `1` for a completed non-green run, `2` for a checkpoint, and `3` for failure.
 
 The web UI and MCP tools (`start_flight`, `get_flight`, and `respond_flight_checkpoint`) use the same flight record.
+
+### `test-readability`
+
+Audit active test source without executing tests or calling an LLM:
+
+```bash
+npx canary-lab test-readability features/checkout/e2e
+npx canary-lab test-readability features/checkout/e2e --fix
+```
+
+- The default is read-only. `--fix` separates ordinary grouped variable declarations
+  and applies Prettier formatting. It preserves expressions and assertions.
+- Comma expressions and declarations that cannot safely be split require a manual
+  rewrite. Nested conditionals produce advisory warnings. Errors exit with code 1;
+  warnings alone exit with code 0.
+- `--rules-only` checks or fixes syntax style without changing other formatting.
+  `--json` returns file locations, findings, and change counts.
+- Directories select `.test` and `.spec` JavaScript/TypeScript files. Pass a helper's
+  file path explicitly to include it. Generated output, recorded runs, fixture
+  directories, and symbolic links are excluded.
+- Review the diff and rerun the affected tests after cleanup. Existing run results
+  describe their recorded source, not the newly formatted files.
+
+Flight authoring and `apply_external_draft` use the same policy before accepting
+specs. They apply safe fixes and formatting automatically, reject unresolved
+errors before writing the batch, and surface review warnings.
+
+In this repository, `npm run check:test-readability` enforces syntax style across
+the test files; `npm run fix:test-readability` applies the safe declaration fixes.
+The check also runs in `npm run lint` and the package smoke test.
 
 ### Other commands
 

@@ -14,6 +14,7 @@ import { main as createFeature } from './new-feature'
 import { main as runEnv } from './env'
 import { main as runBoot } from './boot'
 import { main as runFlight } from './flight'
+import { main as runTestReadability } from './test-readability'
 import { banner, section, dim, fail, line } from '../../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
 import readline from 'readline'
@@ -44,6 +45,7 @@ export function printUsage(): void {
   console.log(`  canary-lab env revert <feature>`)
   console.log(`  canary-lab boot <feature> ${dim('[env]')}      ${dim('(boot services + hold, no tests; needs `canary-lab ui` running)')}`)
   console.log(`  canary-lab boot stop <runId>`)
+  console.log(`  canary-lab test-readability <path...> ${dim('[--fix] [--rules-only] [--json]')}`)
   console.log(`  canary-lab upgrade ${dim('[--silent] [--check] [--force-archive]')}`)
   console.log(`  canary-lab install-browsers      ${dim('(runs from the scaffold\'s postinstall; honours PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD)')}`)
   line()
@@ -84,6 +86,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       return
     case 'flight':
       await runFlight(args)
+      return
+    case 'test-readability':
+      await runTestReadability(args)
       return
     // Deprecated alias — renamed to `flight`.
     case 'fly':

@@ -9,6 +9,7 @@ const runSetup = vi.fn(async () => {})
 const createFeature = vi.fn(async () => {})
 const runEnv = vi.fn(async () => {})
 const installBrowsers = vi.fn(async () => {})
+const runTestReadability = vi.fn(async () => {})
 
 vi.mock('./init-project', () => ({ main: initProject }))
 vi.mock('./upgrade', () => ({ main: upgradeProject }))
@@ -19,6 +20,7 @@ vi.mock('./setup', () => ({ main: runSetup }))
 vi.mock('./new-feature', () => ({ main: createFeature }))
 vi.mock('./env', () => ({ main: runEnv }))
 vi.mock('./install-browsers', () => ({ main: installBrowsers }))
+vi.mock('./test-readability', () => ({ main: runTestReadability }))
 
 const { main, printUsage } = await import('./cli')
 
@@ -32,6 +34,7 @@ beforeEach(() => {
   createFeature.mockClear()
   runEnv.mockClear()
   installBrowsers.mockClear()
+  runTestReadability.mockClear()
 })
 
 describe('printUsage', () => {
@@ -52,11 +55,16 @@ describe('printUsage', () => {
     expect(out).toContain('canary-lab env revert <feature>')
     expect(out).toContain('canary-lab upgrade')
     expect(out).toContain('canary-lab install-browsers')
+    expect(out).toContain('canary-lab test-readability')
     expect(out).not.toContain('canary-lab run')
   })
 })
 
 describe('main (cli routing)', () => {
+  it('routes test readability checks and fixes', async () => {
+    await main(['test-readability', 'features/checkout/e2e', '--fix'])
+    expect(runTestReadability).toHaveBeenCalledExactlyOnceWith(['features/checkout/e2e', '--fix'])
+  })
   it('routes "init" and forwards remaining args', async () => {
     await main(['init', 'myproj', '--package-spec', '^1.0.0'])
     expect(initProject).toHaveBeenCalledExactlyOnceWith(['myproj', '--package-spec', '^1.0.0'])

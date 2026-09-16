@@ -1868,105 +1868,27 @@ body {
 
 }
 
-.cl-mcp-promo-modal {
-  width: min(880px, calc(100vw - 2rem));
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-}
-
-.cl-mcp-promo-backdrop {
-  padding-block: 10vh;
-  padding-inline: 1rem;
-}
-
-.cl-mcp-promo-video-wrap {
+/* The MCP promo dialog composes the shared `Modal`, so the only thing it needs
+   of its own is the video frame. The asset is 1920x1080; the frame used to
+   declare `1280 / 560`, so `object-fit: contain` pillarboxed a 16:9 video
+   between two black bars. Matching the source removes them, and the slab is a
+   token so light theme gets a surface instead of a black rectangle. */
+.cl-mcp-promo-frame {
   flex: 0 0 auto;
-  aspect-ratio: 1280 / 560;
-  background: #050505;
+  aspect-ratio: 16 / 9;
+  background: var(--bg-base);
   border-bottom: 1px solid var(--border-default);
 }
 
 .cl-mcp-promo-video {
-  aspect-ratio: 1280 / 560;
+  aspect-ratio: 16 / 9;
   height: auto;
   display: block;
   width: 100%;
-  background: #050505;
-  object-fit: contain;
+  background: var(--bg-base);
+  object-fit: cover;
 }
 
-.cl-mcp-promo-body {
-  flex: 0 0 auto;
-  min-height: 0;
-  overflow: auto;
-  padding: 0.9rem 1.25rem 1rem;
-}
-
-.cl-mcp-promo-setup {
-  margin: 0 0 0.75rem;
-  color: var(--text-secondary);
-  font-size: 0.8125rem;
-  line-height: 1.45;
-}
-
-.cl-mcp-promo-setup code {
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  white-space: nowrap;
-}
-
-.cl-mcp-promo-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-@media (max-width: 520px) {
-  .cl-mcp-promo-footer {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .cl-mcp-promo-footer .cl-button-primary {
-    justify-content: center;
-  }
-}
-
-.cl-mcp-promo-close {
-  position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
-  z-index: 2;
-  display: grid;
-  height: 2rem;
-  width: 2rem;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--border-default) 72%, var(--text-primary));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-overlay) 86%, transparent);
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-  font-weight: 700;
-  line-height: 1;
-  box-shadow: var(--shadow-popover);
-  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
-}
-
-.cl-mcp-promo-close:hover {
-  border-color: var(--border-focus);
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-}
-
-.cl-mcp-promo-close:focus-visible {
-  border-color: var(--border-focus);
-  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-popover);
-  outline: none;
-}
 
 /* The verify-deployment dialog carried its own skin here (gradient top rail,
    accent header wash, shadowed slab sections, green mode chips, barber-pole

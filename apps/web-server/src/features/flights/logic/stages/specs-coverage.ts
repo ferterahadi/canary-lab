@@ -136,9 +136,10 @@ export function buildSpecsPrompt(args: {
     iterationNote: args.iteration > 1 ? ` (iteration ${args.iteration} — previous specs did not close these)` : '',
     gaps: JSON.stringify(args.gaps, null, 1),
     featureDir: args.featureDir,
+    testReadability: renderPrompt('test-readability.md', {}),
     validationErrors: errors
       ? [
-          'The previous iteration\'s specs failed to compile/list — fix these errors before adding coverage:',
+          'The previous iteration\'s specs failed validation — fix these errors before adding coverage:',
           '```',
           errors.slice(0, MAX_VALIDATION_ERROR_CHARS),
           '```',
@@ -437,12 +438,13 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     // landed on disk and gate it through the same draft validation as the
     // old JSON-proposal path (fixture import, e2e/ placement, no traversal).
     publishProgress(ctx, ledger, prep.target, state, 'validating')
-    const applied = applyExternalDraftFiles({ featureDir: prep.featureDir })
+    const applied = await applyExternalDraftFiles({ featureDir: prep.featureDir })
     if (!applied.ok) {
       ctx.appendLog(`[specs] spec files rejected: ${applied.error}\n`)
       return runPass(ctx, bumpPass(state, { validationErrors: applied.error, passes: [...state.passes, { pass: state.iteration, note: 'spec files rejected' }] }), ledger)
     }
     ctx.appendLog(`[specs] validated ${applied.written.length} file(s)\n`)
+    for (const warning of applied.warnings ?? []) ctx.appendLog(`[specs] readability review: ${warning}\n`)
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: m.feature })
 
     // Deterministic dry-run: specs that don't compile/list can't raise

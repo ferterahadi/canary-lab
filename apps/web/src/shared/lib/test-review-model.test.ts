@@ -16,6 +16,22 @@ it('uses semantic source ranges instead of colouring formatting-only line edits'
   expect(rows.filter((row) => row.change != null)).toEqual([expect.objectContaining({ beforeLine: 7, afterLine: 7, beforeChanged: true, afterChanged: true })])
   expect(rows.find((row) => row.afterLine === 5)).toMatchObject({ beforeChanged: false, afterChanged: false, change: undefined })
 })
+it('aligns corresponding statements after wrapping without including another test range', () => {
+  const review = testFileReview()
+  review.after.source = review.before.source.replace("test('a', async () => {", "test(\n 'renamed',\n async () => {")
+  review.meaningfulChanges = { before: [3], after: [3, 4, 5] }
+  review.comparisonAlignment = [
+    { before: { line: 20, endLine: 24 }, after: { line: 30, endLine: 34 } },
+    { before: { line: 3, endLine: 3 }, after: { line: 3, endLine: 5 } },
+    { before: { line: 4, endLine: 4 }, after: { line: 6, endLine: 6 } },
+    { before: { line: 5, endLine: 7 }, after: { line: 7, endLine: 9 } },
+  ]
+  const rows = comparedTestRows(review, { file: review.file, name: 'renamed', line: 3, endLine: 10, previous: review.before.tests[0] }, 'changed')
+  expect(rows.find((row) => row.beforeLine === 4)).toMatchObject({ afterLine: 6, before: '  const x = 1', after: '  const x = 1', change: undefined })
+  expect(rows.at(-1)).toMatchObject({ beforeLine: 8, afterLine: 10, before: '})', after: '})' })
+  expect(rows.filter((row) => row.beforeLine != null)).toHaveLength(6)
+  expect(rows.filter((row) => row.afterLine != null)).toHaveLength(8)
+})
 it('aligns only a renamed test despite inserted shared setup and a neighbouring test', () => {
   const review = testFileReview()
   const original = review.before.tests[0]

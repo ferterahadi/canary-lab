@@ -125,12 +125,13 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
       const pair = pairs.find((item) => item.before?.line === test.line && item.before.name === test.name)
       return pair?.after ? { ...test, name: pair.after.name } : test
     }) }
+    const { alignment, ...meaningfulChanges } = await meaningfulChangeLines(pairs)
     const result: TestFileReview = {
       file, currentPath, baseline,
       before: extract(beforeSource), after: extract(afterSource),
       patch: await diffSourceText(beforeSource, afterSource, Math.max(beforeSource.split('\n').length, afterSource.split('\n').length)),
       assessment: diffSpecPredicates(pairedBefore, afterPredicates),
-      meaningfulChanges: await meaningfulChangeLines(pairs),
+      meaningfulChanges, comparisonAlignment: alignment,
     }
     return result
   })

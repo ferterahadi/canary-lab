@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import type { NotificationTarget, WorkspaceNotification } from '@/shared/api/notifications'
 import { timeAgo } from '@/shared/lib/format'
-import { TrashIcon } from '@/shared/ui/Icons'
+import { EmptyState } from '@/shared/ui/EmptyState'
+import { CheckIcon, ChevronRightIcon, TrashIcon } from '@/shared/ui/Icons'
+import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { IconButton, Modal, StatusDot, ToastHost } from '@/shared/ui/atoms'
 import { useNotifications } from './use-notifications'
@@ -79,7 +81,7 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
         <div className={`flex ${reviewNeeded ? 'w-[144px]' : 'w-[104px]'} shrink-0 items-center justify-end gap-1`}>
           {!item.readAt && (
             <IconButton ariaLabel="Mark read" disabled={inbox.busy} onClick={() => { void inbox.read(item.id) }}>
-              <span aria-hidden="true" className="text-[13px]">✓</span>
+              <CheckIcon />
             </IconButton>
           )}
           <IconButton ariaLabel="Delete permanently" title={DELETE_HINT} disabled={inbox.busy} onClick={() => { void inbox.remove(item.id) }}>
@@ -94,7 +96,7 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
                 title={action}
                 onClick={() => openItem(item)}
               >
-                {reviewNeeded && <span>Review</span>}<span aria-hidden="true">→</span>
+                {reviewNeeded && <span>Review</span>}<span aria-hidden="true" className="flex"><ChevronRightIcon /></span>
               </button>
             </>
           )}
@@ -139,7 +141,14 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
       >
         {inbox.error && <div role="alert" className="px-5 pt-3 text-xs text-danger">{inbox.error} <button className="cl-button px-2 py-1" onClick={() => { void inbox.refresh() }}>Retry</button></div>}
         {inbox.loading && <p className="p-5 text-xs text-secondary">Loading notifications…</p>}
-        {!inbox.loading && !inbox.error && !visible.length && <p className="px-5 py-10 text-center text-xs text-secondary">{unreadOnly ? 'No unread notifications.' : 'No notifications. New messages will appear here.'}</p>}
+        {!inbox.loading && !inbox.error && !visible.length && (
+          <div className="px-5 py-6">
+            <EmptyState
+              testId="notification-center-empty"
+              {...(unreadOnly ? EMPTY_COPY.notificationsNoUnread : EMPTY_COPY.notificationsNone)}
+            />
+          </div>
+        )}
         <ul className="divide-y divide-line">{visible.map((item, index) => row(item, index === 0 && !item.resolvedAt))}</ul>
       </Modal>
     </>

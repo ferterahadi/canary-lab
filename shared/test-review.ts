@@ -50,4 +50,5 @@ export interface TestFileReview {
   assessment: SpecDiff
   /** Semantic source edits for test navigation; the raw patch remains complete. */
   meaningfulChanges?: { before: number[]; after: number[] }
+  comparisonAlignment?: Array<{ before?: { line: number; endLine: number }; after?: { line: number; endLine: number } }>
 }

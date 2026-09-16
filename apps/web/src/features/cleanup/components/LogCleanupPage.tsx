@@ -2,10 +2,22 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { CleanupListing } from '@/shared/api/types'
 import { formatBytes, timeAgo } from '@/shared/lib/format'
+import { PageHeader } from '@/shared/ui/PageHeader'
+import { ConfirmModal, useEscapeToClose } from '@/shared/ui/atoms'
 import { CleanupEmptyState, FolderGlyph, QuickSelectMenu, SortHeader, SpinnerGlyph, WarnGlyph } from './CleanupTableParts'
 import { PortifySection } from './PortifySection'
 import { WorktreesSection } from './WorktreesSection'
 import { CLEANUP_TABS, CleanupTab, FOURTEEN_DAYS_MS, HUNDRED_MB, KIND_LABEL, NUMERIC_KEYS, Row, SEVEN_DAYS_MS, STATUS_COLOR, SortKey, THIRTY_DAYS_MS, THREE_DAYS_MS, listingToRows, sortValue } from './cleanup-rows'
+
+/** One toolbar total: the rubric label over a mono, tabular value. */
+function CleanupTotal({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col" style={{ lineHeight: 1.2 }}>
+      <span className="cl-rubric">{label}</span>
+      <span className="text-[12px] tabular-nums" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{value}</span>
+    </div>
+  )
+}
 
 interface Props {
   onClose: () => void
@@ -41,11 +53,11 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
 
   useEffect(() => { void refresh() }, [refresh])
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape' && !confirm) onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose, confirm])
+  // The shared layered stack, not a second document listener: `ConfirmModal`
+  // pushes its own layer, so the innermost surface takes Escape and the page
+  // beneath stays put. A private listener here raced that — the reason the
+  // old one had to test `!confirm` by hand.
+  useEscapeToClose(onClose, !confirm)
 
   const rows = useMemo(() => (listing ? listingToRows(listing) : []), [listing])
   const rowById = useMemo(() => new Map(rows.map((r) => [r.runId, r])), [rows])
@@ -133,10 +145,11 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: 'var(--bg-base)' }}>
-      {/* Header — the title doubles as a toggle between the two cleanup views.
-          Shell-bar chrome + the segmented-control primitive so this overlay
-          reads as the same tool as the workspace. */}
-      <div className="cl-shell-bar flex shrink-0 items-center gap-3 px-4 py-2.5">
+      {/* The screen says what it is before it says which slice of it you are
+          looking at. The tab strip used to sit alone where the name belongs,
+          so cleanup was the one full-screen view with no title — the segmented
+          control now follows the name instead of standing in for it. */}
+      <PageHeader rubric="Workspace" title="Disk cleanup" onClose={onClose} closeLabel="Close cleanup">
         <div className="cl-mode-toggle" style={{ margin: 0 }}>
           {CLEANUP_TABS.map((t) => (
             <button
@@ -152,10 +165,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
             </button>
           ))}
         </div>
-        <button type="button" onClick={onClose} className="cl-button ml-auto px-3 py-1.5" aria-label="Close cleanup">
-          Close ✕
-        </button>
-      </div>
+      </PageHeader>
 
       {/* Presets + totals (runs view only) */}
       {view === 'runs' && (
@@ -167,10 +177,15 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
           </button>
         )}
         {totals && (
-          <div className="ml-auto flex items-center gap-4" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-            <span>Total on disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.totalBytes)}</strong></span>
-            <span>Reclaimable by trim: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableTrimBytes)}</strong></span>
-            <span>By delete: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableDeleteBytes)}</strong></span>
+          <div className="ml-auto flex items-center gap-4">
+            {/* Rubric label over a mono value — the app's fact voice, and the
+                same pair the table's own columns use. As a sentence run
+                ("Total on disk: 591 MB  Reclaimable by trim: …") three
+                independent numbers read as one clause and none of them could
+                be scanned for. */}
+            <CleanupTotal label="On disk" value={formatBytes(totals.totalBytes)} />
+            <CleanupTotal label="Trimmable" value={formatBytes(totals.reclaimableTrimBytes)} />
+            <CleanupTotal label="Deletable" value={formatBytes(totals.reclaimableDeleteBytes)} />
             <button type="button" onClick={() => void refresh()} className="cl-button px-2 py-1" disabled={loading || busy}>Refresh</button>
           </div>
         )}
@@ -312,38 +327,22 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
         </div>
       )}
 
-      {/* Confirm dialog */}
-      {confirm && (
-        <div className="cl-modal-backdrop fixed inset-0 z-[70] flex items-center justify-center p-6" onClick={() => !busy && setConfirm(null)}>
-          <div
-            role="dialog"
-            aria-modal="true"
-            className="cl-modal w-full max-w-md p-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
-              {confirm.action === 'trim' ? 'Trim artifacts' : 'Delete runs'}
-            </h2>
-            <p className="mt-2" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-              {confirm.action === 'trim'
-                ? <>Delete the Playwright video/trace artifacts for <strong>{confirm.ids.length}</strong> run{confirm.ids.length === 1 ? '' : 's'}, reclaiming about <strong>{formatBytes(confirm.bytes)}</strong>. The runs stay in your history but lose video/trace playback.</>
-                : <>Permanently delete <strong>{confirm.ids.length}</strong> run{confirm.ids.length === 1 ? '' : 's'} and their folders, reclaiming about <strong>{formatBytes(confirm.bytes)}</strong>. This cannot be undone.</>}
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={() => setConfirm(null)} disabled={busy} className="cl-button px-3 py-1">Cancel</button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => { const c = confirm; setConfirm(null); void runAction(c.action, c.ids) }}
-                className="cl-button px-3 py-1"
-                style={confirm.action === 'delete' ? { color: 'var(--danger)' } : undefined}
-              >
-                {busy ? 'Working…' : confirm.action === 'trim' ? 'Trim' : 'Delete'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* The shared confirmation, not a hand-built one: this page and the
+          worktrees tab each carried a near-copy of the same backdrop, heading,
+          Cancel/Confirm pair and busy label, free to drift from each other and
+          from every other destructive confirm in the app. */}
+      <ConfirmModal
+        open={confirm !== null}
+        title={confirm?.action === 'trim' ? 'Trim artifacts' : 'Delete runs'}
+        variant="danger"
+        busy={busy}
+        confirmLabel={confirm?.action === 'trim' ? 'Trim' : 'Delete'}
+        onCancel={() => setConfirm(null)}
+        onConfirm={() => { const c = confirm; setConfirm(null); if (c) void runAction(c.action, c.ids) }}
+        message={confirm?.action === 'trim'
+          ? <>Delete the Playwright video/trace artifacts for <strong>{confirm.ids.length}</strong> run{confirm.ids.length === 1 ? '' : 's'}, reclaiming about <strong>{formatBytes(confirm.bytes)}</strong>. The runs stay in your history but lose video/trace playback.</>
+          : <>Permanently delete <strong>{confirm?.ids.length}</strong> run{confirm?.ids.length === 1 ? '' : 's'} and their folders, reclaiming about <strong>{formatBytes(confirm?.bytes ?? 0)}</strong>. This cannot be undone.</>}
+      />
     </div>
   )
 }

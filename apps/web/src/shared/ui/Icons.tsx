@@ -203,6 +203,17 @@ export function FolderIcon() {
   )
 }
 
+/** "Mark this handled" — the affirmative twin of `TrashIcon` in a row's action
+ *  lane. Same 13px stroke weight as the icons beside it, so a row's controls
+ *  read as one set rather than an SVG next to a text glyph. */
+export function CheckIcon({ size = 13 }: { size?: number } = {}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  )
+}
+
 export function ChevronRightIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

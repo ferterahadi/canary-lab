@@ -61,7 +61,7 @@ describe('McpPromoProvider', () => {
       clickButton('Trigger run-test')
     })
     act(() => {
-      clickButton('X')
+      clickClose()
     })
 
     expect(continued).not.toHaveBeenCalled()
@@ -162,6 +162,14 @@ function renderGateProbe(firstAction: McpPromoAction, onContinue: () => void): v
       </McpPromoProvider>,
     )
   })
+}
+
+// The dialog now uses the shared `Modal` chrome, whose close control is an
+// icon labelled for assistive tech rather than a literal "X" glyph.
+function clickClose(): void {
+  const button = document.body.querySelector<HTMLButtonElement>('button[aria-label="Close"]')
+  expect(button).toBeTruthy()
+  button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 }
 
 function clickButton(label: string): void {

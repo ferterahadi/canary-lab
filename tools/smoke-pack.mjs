@@ -2,6 +2,7 @@ import { spawnSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { smokeTestReadability } from './smoke-test-readability.mjs'
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-lab-smoke-'))
@@ -90,6 +91,7 @@ run('node', ['tools/check-feature-boundaries.mjs'], repoRoot)
 // ESLint covers only what needs a type checker or the React plugin (see
 // eslint.config.mjs); 3.7s, so it belongs in the same local gate.
 run('npx', ['eslint', '.'], repoRoot)
+run('npm', ['run', 'check:test-readability'], repoRoot)
 
 run('npm', ['run', 'build'], repoRoot)
 run('npm', ['pack', '--pack-destination', tempRoot], repoRoot)
@@ -265,6 +267,7 @@ const projectDir = path.join(tempRoot, 'smoke-project')
 
 run('npm', ['init', '-y'], tempRoot)
 run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `file:${tarballPath}`], tempRoot)
+smokeTestReadability(path.join(tempRoot, 'node_modules/canary-lab/dist/apps/cli/cli.js'), tempRoot)
 run(
   'npx',
   // --no-install: the smoke run installs deps itself below (and never needs the
@@ -359,6 +362,7 @@ const installedPackagePaths = [
   'node_modules/canary-lab/dist/shared/readable-tests/types.d.ts',
   'node_modules/canary-lab/dist/apps/web-server/prompts/scout.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/specs-coverage.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/test-readability.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/portify.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/prd-summary.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/heal-agent.md',

@@ -43,4 +43,6 @@ Hard rules:
 - Assert real user-observable effects, not merely 200s. No `toHaveURL(/.*/)`, no `waitForTimeout` as an assertion.
 - If a gap cannot be exercised because the app exposes no surface for it, skip it and name it in your one-line summary — do not write a test that fakes the behavior.
 
+{{testReadability}}
+
 Do NOT reply with JSON or file contents — the runner reads the spec files you wrote on disk. When done, reply with a one-line summary of what you changed.

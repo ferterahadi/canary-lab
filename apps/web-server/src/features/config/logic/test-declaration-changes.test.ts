@@ -23,9 +23,11 @@ it('highlights only changed statements when tags, quotes and line wrapping also 
     expect(phone.ready).toBe(true);
   })`
   const pairs = pairTestDeclarations(extractTestMetadataFromSource('a.spec.ts', before).tests, extractTestMetadataFromSource('a.spec.ts', after).tests)
-  expect(await meaningfulChangeLines(pairs)).toEqual({ before: [4], after: [7] })
+  const edits = await meaningfulChangeLines(pairs)
+  expect(edits).toMatchObject({ before: [4], after: [7] })
+  expect(edits.alignment).toContainEqual({ before: { line: 3, endLine: 3 }, after: { line: 5, endLine: 6 } })
   const unchanged = after.replace('toBe(true)', 'toBe(false)')
-  expect(await meaningfulChangeLines(pairTestDeclarations(extractTestMetadataFromSource('a.spec.ts', before).tests, extractTestMetadataFromSource('a.spec.ts', unchanged).tests))).toEqual({ before: [], after: [] })
+  expect(await meaningfulChangeLines(pairTestDeclarations(extractTestMetadataFromSource('a.spec.ts', before).tests, extractTestMetadataFromSource('a.spec.ts', unchanged).tests))).toMatchObject({ before: [], after: [] })
 })
 it('counts entire declarations once, excluding imports, hooks, steps and setup', () => {
   const source = `import { test } from '@playwright/test'

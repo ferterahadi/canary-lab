@@ -247,9 +247,12 @@ describe('specs-coverage stage', () => {
     expect(outcome).toMatchObject({ kind: 'done', evidence: { coveragePct: 100 } })
     expect(engineRuns).toBe(1)
     expect(mappedRequirementIds).toEqual(['R1'])
-    expect(fs.readFileSync(path.join(featuresDir, 'checkout', 'e2e', 'checkout.spec.ts'), 'utf-8')).toBe(SPEC)
+    expect(fs.readFileSync(path.join(featuresDir, 'checkout', 'e2e', 'checkout.spec.ts'), 'utf-8')).toBe(
+      "import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'\n\ntest('checkout @req-R1 @path-happy', async ({ page }) => {\n  expect(1).toBe(1)\n})\n",
+    )
     // Edit-in-place contract: absolute feature dir in the prompt, no inlined specs.
     expect(prompts[0]).toContain(path.join(featuresDir, 'checkout'))
+    expect(prompts[0]).toContain('Declare each variable in a separate statement')
     expect(prompts[0]).not.toContain('{{')
   })
 
@@ -415,8 +418,8 @@ describe('specs-coverage stage', () => {
     expect(engineRuns).toBe(0)
     expect(validations).toBe(0)
     expect(prompts).toHaveLength(5)
-    expect(prompts[0]).not.toContain('failed to compile/list')
-    expect(prompts[1]).toContain('failed to compile/list')
+    expect(prompts[0]).not.toContain('failed validation')
+    expect(prompts[1]).toContain('failed validation')
     expect(prompts[1]).toContain('must import')
   })
 
@@ -443,8 +446,8 @@ describe('specs-coverage stage', () => {
     expect(engineRuns).toBe(1)
     expect(validations).toHaveLength(2)
     expect(validations[0]).toEqual({ featureDir: path.join(featuresDir, 'checkout'), projectRoot: tmpDir })
-    expect(prompts[0]).not.toContain('failed to compile/list')
-    expect(prompts[1]).toContain('failed to compile/list')
+    expect(prompts[0]).not.toContain('failed validation')
+    expect(prompts[1]).toContain('failed validation')
     expect(prompts[1]).toContain('error TS2304')
     // The clean second iteration cleared the carry-over: no third spawn needed.
     expect(prompts).toHaveLength(2)

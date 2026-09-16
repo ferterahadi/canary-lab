@@ -316,11 +316,11 @@ module.exports = { config }
       .toEqual({ ok: false, error: 'feature directory is outside the features root', featureDir: outsideDir })
   })
 
-  it('applies provided or existing external draft spec files', () => {
+  it('applies provided or existing external draft spec files', async () => {
     const featureDir = writeFeatureConfig('checkout')
-    expect(applyExternalDraftFiles({ featureDir, files: [] }))
+    expect(await applyExternalDraftFiles({ featureDir, files: [] }))
       .toEqual({ ok: false, error: 'no generated files' })
-    expect(applyExternalDraftFiles({
+    expect(await applyExternalDraftFiles({
       featureDir,
       files: [{
         path: 'e2e/checkout.spec.ts',
@@ -330,10 +330,45 @@ module.exports = { config }
       ok: true,
       written: [path.join(featureDir, 'e2e', 'checkout.spec.ts')],
     })
-    expect(applyExternalDraftFiles({ featureDir })).toEqual({
+    expect(await applyExternalDraftFiles({ featureDir })).toEqual({
       ok: true,
       written: [path.join(featureDir, 'e2e', 'checkout.spec.ts')],
     })
+  })
+
+  it('normalizes specs from both payloads and disk and preserves the test contract', async () => {
+    const featureDir = writeFeatureConfig('checkout')
+    const source = "import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'\ntest('@req-R1 @path-happy keeps the expected result', () => { const first = 1, second = first + 1; expect(second).toBe(2) })\n"
+    const file = path.join(featureDir, 'e2e/checkout.spec.ts')
+    expect(await applyExternalDraftFiles({ featureDir, files: [{ path: 'e2e/checkout.spec.ts', content: source }] })).toMatchObject({ ok: true })
+    const normalized = fs.readFileSync(file, 'utf8')
+    expect(normalized).toContain("test('@req-R1 @path-happy keeps the expected result', () => {\n  const first = 1\n  const second = first + 1\n  expect(second).toBe(2)\n})")
+    fs.writeFileSync(file, source)
+    expect(await applyExternalDraftFiles({ featureDir })).toMatchObject({ ok: true })
+    expect(fs.readFileSync(file, 'utf8')).toBe(normalized)
+  })
+
+  it('rejects unresolved readability errors before writing any file in the draft', async () => {
+    const featureDir = writeFeatureConfig('checkout')
+    const header = "import { test } from 'canary-lab/feature-support/log-marker-fixture'\n"
+    const result = await applyExternalDraftFiles({ featureDir, files: [
+      { path: 'e2e/first.spec.ts', content: header + 'const first = 1, second = 2\n' },
+      { path: 'e2e/second.spec.ts', content: header + 'const result = (first(), second())\n' },
+    ] })
+    expect(result).toEqual({ ok: false, error: expect.stringContaining('no-sequences') })
+    expect(fs.existsSync(path.join(featureDir, 'e2e'))).toBe(false)
+  })
+
+  it('returns review warnings and preserves concurrent edits during draft normalization', async () => {
+    const featureDir = writeFeatureConfig('checkout')
+    const file = path.join(featureDir, 'e2e/review.spec.ts')
+    const source = "import { test } from 'canary-lab/feature-support/log-marker-fixture'\nconst value = first ? 1 : second ? 2 : 3\n"
+    expect(await applyExternalDraftFiles({ featureDir, files: [{ path: 'e2e/review.spec.ts', content: source }] }))
+      .toMatchObject({ ok: true, warnings: [expect.stringContaining('no-nested-ternary')] })
+    const pending = applyExternalDraftFiles({ featureDir })
+    fs.writeFileSync(file, '// concurrently edited\n')
+    expect(await pending).toEqual({ ok: false, error: expect.stringContaining('File changed during readability inspection') })
+    expect(fs.readFileSync(file, 'utf8')).toBe('// concurrently edited\n')
   })
 
   it('handles malformed envset config and absent config files defensively', () => {
@@ -430,9 +465,9 @@ module.exports = { config }
     })).toMatchObject({ ok: true })
   })
 
-  it('returns no generated files when applying existing specs without an e2e directory', () => {
+  it('returns no generated files when applying existing specs without an e2e directory', async () => {
     const featureDir = writeFeatureConfig('empty_specs')
-    expect(applyExternalDraftFiles({ featureDir }))
+    expect(await applyExternalDraftFiles({ featureDir }))
       .toEqual({ ok: false, error: 'no generated files' })
   })
 

@@ -9,6 +9,19 @@ Full guide (envset-independent spec selection): get_workflow_guide(workflow:"aut
 
 <!-- initialize-cut -->
 
+## Readable test source
+
+Use one variable declaration per statement, descriptive names, and clear setup,
+action, and assertions. Avoid comma expressions and nested conditional expressions.
+Draft acceptance splits ordinary grouped declarations and formats specs before
+accepting them. Syntax errors and comma expressions are rejected; nested conditionals
+produce review warnings. Preserve test behavior when addressing those warnings.
+
+For existing suites, run `canary-lab test-readability <file-or-directory>` to audit,
+then add `--fix` for safe declaration fixes and formatting. `--rules-only` preserves
+the current layout. Review the diff and rerun affected tests. Never weaken assertions
+or modify recorded run artifacts during cleanup.
+
 ## Spec selection never depends on the envset
 
 A suite declares ONE roster of tests, and every run of it declares the same one. Playwright builds that roster by walking the suite with the config's selection fields applied, before the first test starts — that walk is the run's evidence, so a config that narrows it by environment does not hide tests from a run, it deletes them from the record. A `meta` run of a 45-test suite then reports a 4-test suite: the other 41 are absent rather than "not run", and two runs of one suite cannot be compared.

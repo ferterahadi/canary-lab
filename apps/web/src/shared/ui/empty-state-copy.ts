@@ -156,6 +156,16 @@ export const EMPTY_COPY = {
     title: 'Nothing to replay here',
     body: 'Port work leaves no agent transcript of its own. What it produced is the side-by-side boot and the port changes recorded above this rail.',
   },
+  notificationsNone: {
+    reason: 'nothing-to-report',
+    title: 'No notifications',
+    body: 'Canary Lab posts here when a run needs your answer, a repair stalls, or test files change under a result. Nothing has needed you so far.',
+  },
+  notificationsNoUnread: {
+    reason: 'nothing-to-report',
+    title: 'Nothing unread',
+    body: 'Every message in this inbox has been read. A new alert lands here the moment a run needs an answer or a result stops being safe to trust.',
+  },
 } as const satisfies Record<string, EmptyCopy>
 
 /**

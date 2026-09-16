@@ -67,7 +67,10 @@ it.each(['neutral', 'warning', undefined] as const)('keeps unresolved test revie
   const row = () => document.querySelector('[data-testid="notification-n1"]')!
   expect(row().querySelector('.cl-status-dot')?.className).toContain('bg-warning')
   expect(row().textContent).toContain('Review needed')
-  expect(labelled('Review test changes').textContent).toBe('Review→')
+  // The chevron is the shared SVG the rest of the app's "go there" controls
+  // use, so the button's text is the word and the arrow is a mark beside it.
+  expect(labelled('Review test changes').textContent).toBe('Review')
+  expect(labelled('Review test changes').querySelector('svg')).toBeTruthy()
   await act(async () => labelled('Mark read').click())
   expect(row().querySelector('.cl-status-dot')?.className).toContain('bg-warning')
   expect(row().textContent).toContain('Review needed')
@@ -91,7 +94,8 @@ it('keeps neutral notes and resolved reviews grey instead of implying unfinished
 })
 
 it('opens the exact pending run, marks the notification read, and does not delete it on navigation', async () => {
-  const navigate = vi.fn(), open = vi.fn()
+  const navigate = vi.fn()
+  const open = vi.fn()
   await act(async () => root.render(<NotificationCenter open onOpenChange={open} onNavigate={navigate} />))
   await act(async () => labelled('Review test changes').click())
   expect(navigate).toHaveBeenCalledWith(target)

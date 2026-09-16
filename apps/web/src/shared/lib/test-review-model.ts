@@ -27,11 +27,29 @@ export function comparedTestRows(review: TestFileReview, test: VersionTest, kind
     afterLine: after == null ? undefined : ranges.after!.line + after,
     ...(changed ? { change } : {}),
   })
-  while (a < left.length || b < right.length) {
-    if (left[a]?.changed || right[b]?.changed) {
-      change++
-      while (left[a]?.changed || right[b]?.changed) append(left[a]?.changed ? a++ : undefined, right[b]?.changed ? b++ : undefined, true)
-    } else append(a < left.length ? a++ : undefined, b < right.length ? b++ : undefined, false)
+  if (review.comparisonAlignment?.length) {
+    const until = (endA = a, endB = b) => {
+      while (a < endA || b < endB) append(a < endA ? a++ : undefined, b < endB ? b++ : undefined, true)
+    }
+    const relative = (side: 'before' | 'after', line?: number) => line != null && ranges[side] ? line - ranges[side].line : undefined
+    for (const pair of review.comparisonAlignment) {
+      const within = (side: 'before' | 'after') => {
+        const own = ranges[side]; const anchor = pair[side]
+        return own && anchor && contains(own, anchor.line) ? { ...anchor, endLine: Math.min(anchor.endLine, own.endLine) } : undefined
+      }
+      const before = within('before'); const after = within('after')
+      if (!before && !after) continue
+      until(relative('before', before?.line), relative('after', after?.line))
+      until(relative('before', before ? before.endLine + 1 : undefined), relative('after', after ? after.endLine + 1 : undefined))
+    }
+    until(left.length, right.length)
+  } else {
+    while (a < left.length || b < right.length) {
+      if (left[a]?.changed || right[b]?.changed) {
+        change++
+        while (left[a]?.changed || right[b]?.changed) append(left[a]?.changed ? a++ : undefined, right[b]?.changed ? b++ : undefined, true)
+      } else append(a < left.length ? a++ : undefined, b < right.length ? b++ : undefined, false)
+    }
   }
   if (!review.meaningfulChanges) return rows
   const meaningful = { before: new Set(review.meaningfulChanges.before), after: new Set(review.meaningfulChanges.after) }
