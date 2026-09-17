@@ -11,10 +11,13 @@
 // 4-test suite; the other 41 are absent rather than "not run", and two runs of
 // one suite can no longer be compared against each other.
 //
-// The expressible alternative keeps the roster whole: a test that must not
-// execute in an environment skips ITSELF at runtime —
-// `test.skip(process.env.MODE !== 'meta', 'meta only')` — so it stays declared,
-// counted, and visibly skipped.
+// The expressible alternative is one feature per environment lane, each with a
+// literal roster of exactly the specs that run there (`testMatch:
+// '**/*.meta.spec.ts'` in a `<suite>-meta` feature, `'**/*.local.spec.ts'` in the
+// local one). Every run then executes every test it declares. A runtime
+// `test.skip(condition, reason)` is NOT an alternative: the verdict counts a
+// skipped test as not-yet-passed, so a roster that carries another lane's
+// specs can never go green.
 //
 // Enforcement is "prove it constant", not "guess whether it is env-derived": a
 // selection field must be a literal. A computed value may or may not vary per
@@ -39,7 +42,7 @@ export const SPEC_SELECTION_FIELDS = ['testDir', 'testMatch', 'testIgnore', 'gre
  *  validator and the rules payload `create_feature` hands an agent — so the
  *  three cannot drift into saying different things. */
 export const SPEC_SELECTION_RULE =
-  'Spec selection must never depend on the envset. Keep testDir, testMatch, testIgnore, grep and grepInvert as constant literals in playwright.config.* so every run of the suite declares the same roster. A test that must not execute in some environment skips itself at runtime — test.skip(condition, reason) — so it stays declared, counted, and visibly skipped.'
+  'Spec selection must never depend on the envset. Keep testDir, testMatch, testIgnore, grep and grepInvert as constant literals in playwright.config.* so every run of the suite declares the same roster. A test that must not execute in some environment belongs in a sibling feature for that environment (for example <suite>-meta with testMatch **/*.meta.spec.ts), so every run executes every test it declares; a skipped test counts as not passed, so a runtime test.skip cannot make such a roster green.'
 
 /** What the run-start refusal carries alongside its human-readable message:
  *  enough for an agent to open the right file and rewrite the right fields. */
