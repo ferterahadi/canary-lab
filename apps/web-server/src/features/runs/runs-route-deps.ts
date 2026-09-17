@@ -8,6 +8,7 @@ import type { ClientKind } from '../../../../../shared/run-mode'
 import { runsRoutes } from './routes/runs'
 import { pickConfiguredHealAgent } from './pick-heal-agent'
 import { type OrchestratorLike, type StartRunOutcome } from './logic/run-store'
+import type { StartRunOptions } from './routes/runs-route-deps'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
 import { allocatePerturbationPorts } from './logic/runtime/perturbation/run-perturbation'
 import type { ServerContext } from '../../server-context'
@@ -17,6 +18,7 @@ import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
 import { RunOrchestrator, buildServiceSpecs, type AutoHealConfig } from './logic/runtime/orchestrator'
 import { estimateRunCost } from './logic/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from './logic/runtime/repo-collision'
+import { describeRepoUpdates, updateReposToUpstream, updatedFromUpstreamByRepo } from './logic/runtime/repo-upstream-update'
 import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from './logic/runtime/repo-worktree'
 import { overlayExists as portifyOverlayExists } from '../portify/logic/runtime/overlay'
 import { buildOrchestratorHealPrompt, makeAgentSpawnCommandBuilder, resolveAgentBinary } from './logic/runtime/auto-heal'
@@ -89,6 +91,7 @@ export function buildRunsRouteDeps(
       modelsOverride?: unknown,
       perturbationEnvelope?: RobustnessEnvelope,
       cellSelection?: PlaywrightRerunSelection,
+      options?: StartRunOptions,
     ): Promise<StartRunOutcome> => {
       const isBoot = executionType === 'boot'
       // A robustness cell never heals: a failure under perturbation is the
@@ -104,6 +107,15 @@ export function buildRunsRouteDeps(
       // someone needs to debug the config they are here to fix.
       if (!isBoot) assertStableSpecSelection(feature.featureDir, feature.name)
       await validateConfiguredRepoBranches(feature)
+      // Pull each tracked repo to its upstream tip BEFORE anything is allocated:
+      // a refusal (dirty, diverged, in use by an in-place run) is a 409 with
+      // nothing to unwind, and the snapshot below then records the commit the
+      // run actually boots. The branch gate above already guarantees every
+      // pinned repo sits on its branch, which is the fast-forward's precondition.
+      const activeRuns = listActiveForScheduler()
+      const repoUpdates = await updateReposToUpstream(feature, options?.updateRepos, {
+        inUseBy: (repoPath) => detectRepoCollision([repoPath], activeRuns)?.conflictingRunId ?? null,
+      })
       const runId = generateRunId()
       const runDir = runDirFor(logsDir, runId)
       const sourceRepoPaths = normalizeRepoPaths((feature.repos ?? []).map((r) => r.localPath))
@@ -142,7 +154,8 @@ export function buildRunsRouteDeps(
         runnerLog.info(
           `Run started: feature=${feature.name}${env ? ` env=${env}` : ''} runId=${runId}`,
         )
-        const repoBranchSnapshots = await collectRepoBranchSnapshots(feature)
+        for (const line of describeRepoUpdates(repoUpdates)) runnerLog.info(line)
+        const repoBranchSnapshots = await collectRepoBranchSnapshots(feature, updatedFromUpstreamByRepo(repoUpdates))
 
       const portMap = await allocateRunPorts(feature, env)
       // Shim ports are allocated before the envset is written so `${port.<slot>}`

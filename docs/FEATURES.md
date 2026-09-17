@@ -124,6 +124,8 @@ const config = {
   repos: [{
     name: 'checkout-api',
     localPath: appDir,
+    branch: 'main',
+    track: 'upstream',
     envs: ['local'],
     startCommands: [{
       name: 'api',
@@ -145,6 +147,21 @@ source itself ignores the injected value.
 
 Use repository- or command-level `envs: ['local']` to skip local services when
 the selected envset points Playwright at a deployed URL.
+
+A run boots the commit the repository checkout is sitting on: the per-run
+worktree is cut from `HEAD`, so a checkout nobody has pulled boots a stale
+branch. `branch` pins the branch the checkout must be on (a run refuses to start
+otherwise), and `track: 'upstream'` makes every run start with `git fetch` and
+`git merge --ff-only` against that branch's upstream first. The fast-forward
+never discards local work: a dirty, detached, diverged, or off-branch checkout
+refuses the run with a per-repo reason (`repo_update_refused`), and local commits
+the upstream lacks are left alone. Without `track`, a single run can opt in with
+`updateRepos: true` on `POST /api/runs` (`update_repos` on the MCP `start_run`
+tool); `update_repos: false` boots the checkout as-is. The run record's
+`repoBranches[]` carries the booted `sha`, and `updatedFromUpstream` when the
+start pulled to reach it. `GET /api/features/:name/repos/:repo/git` reports
+`behindUpstream` / `aheadUpstream` (add `?fetch=1` to contact the remote first),
+and `POST /api/features/:name/repos/:repo/update` fast-forwards on demand.
 
 ## Requirement coverage
 

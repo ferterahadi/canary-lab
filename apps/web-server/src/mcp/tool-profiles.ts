@@ -48,6 +48,7 @@ export type CanaryLabMcpToolName =
   | 'delete_feature'
   | 'get_feature_repo_status'
   | 'checkout_feature_repo_branch'
+  | 'update_feature_repo_branch'
   | 'start_external_evaluation_export'
   | 'submit_external_evaluation_export'
   | 'list_evaluation_exports'
@@ -168,6 +169,7 @@ export const AUTHOR_TOOLS = [
   'delete_feature',
   'get_feature_repo_status',
   'checkout_feature_repo_branch',
+  'update_feature_repo_branch',
   // Read-only views of the coverage ledger and its source docs. Authoring "a
   // test for the missing behavior" starts from the gap, and without these the
   // narrowest profile that can write a spec cannot see which requirement is

@@ -12,9 +12,9 @@ describe('Canary Lab MCP tool registry', () => {
       clientFacts: () => ({ surface: 'other', canFanOut: false, sampling: false }),
     })
 
-    expect(FULL_TOOLS).toHaveLength(72)
+    expect(FULL_TOOLS).toHaveLength(73)
     expect([...registry.keys()]).toEqual(FULL_TOOLS)
-    expect(registry.size).toBe(72)
+    expect(registry.size).toBe(73)
     for (const definition of registry.values()) {
       expect(definition.config.inputSchema).toBeDefined()
       expect(typeof definition.handler).toBe('function')

@@ -74,6 +74,16 @@ describe('git-repo helpers', () => {
     expect(status.dirty).toBe(false)
     expect(status.localBranches).toContain('feature/demo')
     expect(status.remoteBranches).toContain('origin/main')
+    expect(status.headSha).toBe(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim())
+  })
+
+  it('reports a null HEAD sha on an unborn branch', async () => {
+    const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-git-unborn-')))
+    execFileSync('git', ['init', '-b', 'main'], { cwd: repo, stdio: 'ignore' })
+
+    const status = await getGitStatus(repo)
+
+    expect(status).toMatchObject({ isGitRepo: true, currentBranch: 'main', headSha: null })
   })
 
   it('reports detached git status', async () => {
@@ -196,8 +206,23 @@ describe('git-repo helpers', () => {
         expectedBranch: 'main',
         detached: false,
         dirty: false,
+        sha: expect.stringMatching(/^[0-9a-f]{40}$/),
       },
     ])
+  })
+
+  it('records the upstream pull beside the snapshot of the repo it moved', async () => {
+    const repo = tmpRepo()
+    const feature = {
+      name: 'demo', description: 'd', envs: [], featureDir: repo,
+      repos: [{ name: 'app', localPath: repo, branch: 'main' }, { name: 'other', localPath: repo }],
+    }
+    const pull = { upstream: 'origin/main', from: 'a'.repeat(40), to: 'b'.repeat(40) }
+
+    const snapshots = await collectRepoBranchSnapshots(feature, { app: pull })
+
+    expect(snapshots[0]).toMatchObject({ name: 'app', updatedFromUpstream: pull })
+    expect(snapshots[1]).not.toHaveProperty('updatedFromUpstream')
   })
 
   it('validates happy path and skips repos without branch or string localPath', async () => {

@@ -63,6 +63,9 @@ export interface RepoBranchSnapshot {
   expectedBranch?: string
   detached: boolean
   dirty: boolean
+  /** Commit the run booted from; absent on older records. */
+  sha?: string | null
+  updatedFromUpstream?: { upstream: string; from: string; to: string }
 }
 
 // Imported for local use below and re-exported so existing

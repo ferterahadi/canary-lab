@@ -160,6 +160,8 @@ export function branchTooltip(service: Pick<ServiceManifestEntry, 'cwd'>, repo: 
     `repo: ${repo.name}`,
     `branch: ${label}`,
     ...(repo.expectedBranch ? [`expected: ${repo.expectedBranch}`] : []),
+    ...(repo.sha ? [`commit: ${repo.sha.slice(0, 7)}`] : []),
+    ...(repo.updatedFromUpstream ? [`pulled: ${repo.updatedFromUpstream.from.slice(0, 7)} → ${repo.updatedFromUpstream.to.slice(0, 7)} (${repo.updatedFromUpstream.upstream})`] : []),
     ...(repo.dirty ? ['dirty: yes'] : []),
     ...(repo.expectedBranch && repo.branch !== repo.expectedBranch ? ['mismatch: yes'] : []),
     `repo path: ${repo.path}`,

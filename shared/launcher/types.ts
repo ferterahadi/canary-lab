@@ -6,6 +6,14 @@ export interface RepoPrerequisite {
   cloneUrl?: string      // shown if repo is missing
   /** Optional expected local branch for this repo before a run starts. */
   branch?: string
+  /**
+   * `'upstream'`: before every run boots, fetch this repo's branch and
+   * fast-forward the checkout to its remote tip — but only when the checkout
+   * is clean and on that branch. A dirty or diverged checkout refuses the run
+   * (`repo_update_refused`) instead of discarding work. Omit to boot whatever
+   * commit is checked out; a run can still opt in once with `updateRepos`.
+   */
+  track?: 'upstream'
   // Each entry opens one iTerm tab in this repo's directory.
   // Use multiple entries when one repo needs multiple running processes.
   startCommands?: Array<string | StartCommand>

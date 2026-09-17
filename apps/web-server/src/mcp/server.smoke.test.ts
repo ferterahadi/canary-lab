@@ -85,6 +85,7 @@ const AUTHOR_TOOLS = uniqueSorted([
   'list_runs',
   'start_external_draft',
   'update_external_draft_stage',
+  'update_feature_repo_branch',
   'write_envset',
 ])
 
