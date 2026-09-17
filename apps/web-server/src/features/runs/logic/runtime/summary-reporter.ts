@@ -127,6 +127,7 @@ class SummaryReporter implements Reporter {
   onTestEnd(test: TestCase, result: TestResult): void {
     const passed = result.status === 'passed'
     const failed = result.status !== 'passed' && result.status !== 'skipped'
+    const skipReason = declaredSkipReason(test, result)
     const known = this.rememberKnownTest(test)
     const name = known.name
     this.runningTests.delete(known.id)
@@ -171,6 +172,7 @@ class SummaryReporter implements Reporter {
       ...(locations.length > 0 ? { locations } : {}),
       ...(errorContextFile ? { errorContextFile } : {}),
       ...(harFile ? { harFile } : {}),
+      ...(skipReason ? { skipReason } : {}),
       retry: result.retry,
     }
     this.results.push(entry)
@@ -330,6 +332,12 @@ class SummaryReporter implements Reporter {
     const skippedResults = this.results.filter((r) => r.status === 'skipped')
     const passedIds = passedResults.flatMap((r) => r.id ? [r.id] : [])
     const skippedIds = skippedResults.flatMap((r) => r.id ? [r.id] : [])
+    // A skip the test declared for itself, with a reason, is a settled outcome
+    // (see `declaredSkipReason`); the verdict reads `gatedNames` to tell it
+    // apart from a skip Playwright imposed. `gatedReasons[i]` belongs to
+    // `gatedNames[i]`.
+    const gatedResults = skippedResults.filter((r) => typeof r.skipReason === 'string' && r.skipReason.length > 0)
+    const gatedIds = gatedResults.flatMap((r) => r.id ? [r.id] : [])
     const includeKnownTests = this.sawSuiteInventory
     // Honesty markers for downstream reporting (the coverage ledger's proven
     // axis, the flight's "Tests that passed" tile): a pass that needed a retry
@@ -354,6 +362,13 @@ class SummaryReporter implements Reporter {
             skipped: skippedResults.length,
             skippedNames: skippedResults.map((r) => r.name),
             ...(skippedIds.length ? { skippedIds } : {}),
+            ...(gatedResults.length
+              ? {
+                  gatedNames: gatedResults.map((r) => r.name),
+                  gatedReasons: gatedResults.map((r) => r.skipReason as string),
+                  ...(gatedIds.length ? { gatedIds } : {}),
+                }
+              : {}),
           }
         : {}),
       ...this.runningSummaryFields(),
@@ -417,13 +432,30 @@ class SummaryReporter implements Reporter {
 
     const skippedNames = Array.isArray(parsed.skippedNames) ? parsed.skippedNames : []
     const skippedIds = Array.isArray(parsed.skippedIds) ? parsed.skippedIds : []
+    // A prior execution's declared gates stay declared: without their reasons a
+    // seeded summary would demote every gated test back to not-yet-run.
+    const gatedNames = Array.isArray(parsed.gatedNames) ? parsed.gatedNames : []
+    const gatedReasons = Array.isArray(parsed.gatedReasons) ? parsed.gatedReasons : []
+    const gatedReasonByName = new Map<string, string>()
+    for (const [index, name] of gatedNames.entries()) {
+      const reason = stringAt(gatedReasons, index)
+      if (typeof name === 'string' && name && reason) gatedReasonByName.set(name, reason)
+    }
     for (const [index, name] of skippedNames.entries()) {
       if (typeof name !== 'string' || !name) continue
       const id = stringAt(skippedIds, index) ?? idForExistingResult({ name, knownTests: this.knownTests })
       const key = id ?? name
       if (seen.has(key)) continue
       seen.add(key)
-      this.results.push({ ...(id ? { id } : {}), name, status: 'skipped', passed: false, seeded: true })
+      const skipReason = gatedReasonByName.get(name)
+      this.results.push({
+        ...(id ? { id } : {}),
+        name,
+        status: 'skipped',
+        passed: false,
+        seeded: true,
+        ...(skipReason ? { skipReason } : {}),
+      })
     }
 
     const failed = Array.isArray(parsed.failed) ? parsed.failed : []
@@ -506,3 +538,28 @@ class SummaryReporter implements Reporter {
 }
 
 export default SummaryReporter
+
+interface SkipAnnotation {
+  type: string
+  description?: string
+}
+
+/** The reason a test gave for skipping ITSELF, or `undefined` for every other
+ *  skip. `test.skip(condition, reason)` leaves a `skip` annotation carrying the
+ *  reason on the test; Playwright's own skips — the rest of a serial group after
+ *  a failure, a worker that died — carry none, and a bare `test.skip(true)`
+ *  carries no reason. Only the reasoned declaration is a settled outcome: the
+ *  test looked at its environment and chose not to run. Everything else is a
+ *  test that never got its turn and still has to run before the suite is green. */
+export function declaredSkipReason(
+  test: { annotations?: ReadonlyArray<SkipAnnotation> },
+  result: { status: string; annotations?: ReadonlyArray<SkipAnnotation> },
+): string | undefined {
+  if (result.status !== 'skipped') return undefined
+  for (const annotation of [...(result.annotations ?? []), ...(test.annotations ?? [])]) {
+    if (!annotation || annotation.type !== 'skip') continue
+    const reason = typeof annotation.description === 'string' ? annotation.description.trim() : ''
+    if (reason) return reason
+  }
+  return undefined
+}

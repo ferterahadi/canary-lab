@@ -20,6 +20,11 @@ export interface TestEntry {
   location?: string
   locations?: string[]
   retry?: number
+  /** The reason a declared runtime gate — `test.skip(condition, reason)` —
+   *  skipped this test. Absent on every other skip (a serial group's remainder
+   *  after a failure, a fixture that never ran), so the verdict can tell a test
+   *  that chose not to run here from one that never got its turn. */
+  skipReason?: string
   /** Carried forward from a prior execution's summary by targeted-rerun seeding,
    *  not observed in this one. Never written to disk — it exists so the final
    *  summary can say whether its outcomes span more than one execution. */

@@ -743,3 +743,69 @@ describe('specFileOfKnownTest', () => {
     expect(specFileOfKnownTest({ name: 'a', title: 'a', location: ':12' })).toBeUndefined()
   })
 })
+
+// A test that skips ITSELF with a reason (`test.skip(condition, reason)`) has
+// settled — it looked at this environment and declined — so it must never be
+// selected, and a remainder made only of such gates is all-passed. A skip with
+// no reason (a serial group's remainder after a failure) is a test that never
+// got its turn and must still be selected. Both arms are named here because the
+// spec-selection rule REQUIRES the gate shape: without the first arm every
+// env-gated suite would be permanently red.
+describe('computeVerificationPlan declared gates', () => {
+  const withLine = (name: string, title: string, listLine: string) => ({ name, title, listLine })
+  const knownTests = [
+    withLine('test-case-local', 'local title', 'local.spec.ts › local title'),
+    withLine('test-case-meta', 'meta title', 'meta.spec.ts › meta title'),
+  ]
+
+  it('is all-passed when the only non-passes are reasoned self-skips', () => {
+    const plan = computeVerificationPlan(mkFeatureDir(), {
+      knownTests,
+      passedNames: ['test-case-local'],
+      skippedNames: ['test-case-meta'],
+      gatedNames: ['test-case-meta'],
+      failed: [],
+    })
+    expect(plan).toEqual({ kind: 'all-passed', total: 2 })
+  })
+
+  it('still selects a skip that carries no reason', () => {
+    const plan = computeVerificationPlan(mkFeatureDir(), {
+      knownTests,
+      passedNames: ['test-case-local'],
+      skippedNames: ['test-case-meta'],
+      failed: [],
+    })
+    expect(plan.kind).toBe('targeted')
+    if (plan.kind !== 'targeted') return
+    expect(plan.selection.kind).toBe('test-list')
+    if (plan.selection.kind !== 'test-list') return
+    expect(plan.selection.testList).toEqual(['meta.spec.ts › meta title'])
+  })
+
+  it('never lets a gate hide a failure or a not-run test', () => {
+    const plan = computeVerificationPlan(mkFeatureDir(), {
+      knownTests: [...knownTests, withLine('test-case-pending', 'pending title', 'p.spec.ts › pending title')],
+      passedNames: [],
+      skippedNames: ['test-case-meta'],
+      gatedNames: ['test-case-meta'],
+      failed: [{ name: 'test-case-local' }],
+    })
+    expect(plan.kind).toBe('targeted')
+    if (plan.kind !== 'targeted' || plan.selection.kind !== 'test-list') return
+    expect(plan.selection.testList).toEqual(['local.spec.ts › local title', 'p.spec.ts › pending title'])
+  })
+
+  it('applies the same rule to the source-derived non-passed selection', () => {
+    const featureDir = mkFeatureDir()
+    writeSpec(featureDir, 'gated.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('runs here', async () => {})\n" +
+      "test('meta only', async () => {})\n",
+    )
+    const summary = { passedNames: ['test-case-runs-here'], skippedNames: ['test-case-meta-only'] }
+    expect(computeNonPassedTargets(featureDir, { ...summary, gatedNames: ['test-case-meta-only'] }))
+      .toEqual({ kind: 'all-passed', total: 2 })
+    expect(computeNonPassedTargets(featureDir, summary).kind).toBe('targeted')
+  })
+})

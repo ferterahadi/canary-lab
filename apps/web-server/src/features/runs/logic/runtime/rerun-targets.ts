@@ -116,6 +116,7 @@ export function computeRerunTargetsOrdered(
   const passedRaw = Array.isArray(summary.passedNames) ? summary.passedNames : []
   const passed = new Set(passedRaw.filter((n): n is string => typeof n === 'string'))
   const skipped = skippedNameSet(summary)
+  const gated = gatedNameSet(summary)
 
   const failedSlugs = extractFailedSlugs(summary)
   const failedFirstSlugs = new Set<string>()
@@ -139,6 +140,7 @@ export function computeRerunTargetsOrdered(
     if (passed.has(t.slug)) continue
     if (failedFirstSlugs.has(t.slug)) continue
     if (!skipped.has(t.slug)) continue
+    if (gated.has(t.slug)) continue // declared its own gate: settled, not pending
     if (seenLocations.has(t.location)) continue
     seenLocations.add(t.location)
     skippedLocations.push(t.location)
@@ -202,11 +204,16 @@ export function computeNonPassedTargets(
   const passed = new Set(passedRaw.filter((n): n is string => typeof n === 'string'))
 
   if (passed.size === 0) return { kind: 'no-passed-yet', total: allTests.length }
+  // A reasoned self-skip is settled (see `gatedNameSet`), so it is not a
+  // non-passed target either; otherwise every env-gated suite would re-run its
+  // gates forever and never reach all-passed.
+  const gated = gatedNameSet(summary)
 
   const seen = new Set<string>()
   const locations: string[] = []
   for (const t of allTests) {
     if (passed.has(t.slug)) continue
+    if (gated.has(t.slug)) continue
     if (seen.has(t.location)) continue
     seen.add(t.location)
     locations.push(t.location)
@@ -331,6 +338,14 @@ export function passedNameSet(summary: SummaryShape): Set<string> {
 export function skippedNameSet(summary: SummaryShape): Set<string> {
   const skippedRaw = Array.isArray(summary.skippedNames) ? summary.skippedNames : []
   return new Set(skippedRaw.filter((name): name is string => typeof name === 'string' && name.length > 0))
+}
+
+/** The skipped tests that declared their own gate with a reason (a subset of
+ *  `skippedNameSet`; see `RunSummary.gatedNames`). They are settled, so no
+ *  rerun selects them and a remainder made only of them is all-passed. */
+export function gatedNameSet(summary: SummaryShape): Set<string> {
+  const gatedRaw = Array.isArray(summary.gatedNames) ? summary.gatedNames : []
+  return new Set(gatedRaw.filter((name): name is string => typeof name === 'string' && name.length > 0))
 }
 
 export function summaryHasPassingEvidence(summary: SummaryShape): boolean {

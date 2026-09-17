@@ -14,7 +14,10 @@
 // The expressible alternative keeps the roster whole: a test that must not
 // execute in an environment skips ITSELF at runtime —
 // `test.skip(process.env.MODE !== 'meta', 'meta only')` — so it stays declared,
-// counted, and visibly skipped.
+// counted, and visibly skipped. Because it gave a reason, the verdict reads
+// that skip as settled (`RunSummary.gatedNames`): a run whose only non-passes
+// are such gates is green. A skip WITHOUT a reason is not a gate and still
+// blocks the pass, so the rule and the verdict ask for the same shape.
 //
 // Enforcement is "prove it constant", not "guess whether it is env-derived": a
 // selection field must be a literal. A computed value may or may not vary per
@@ -39,7 +42,7 @@ export const SPEC_SELECTION_FIELDS = ['testDir', 'testMatch', 'testIgnore', 'gre
  *  validator and the rules payload `create_feature` hands an agent — so the
  *  three cannot drift into saying different things. */
 export const SPEC_SELECTION_RULE =
-  'Spec selection must never depend on the envset. Keep testDir, testMatch, testIgnore, grep and grepInvert as constant literals in playwright.config.* so every run of the suite declares the same roster. A test that must not execute in some environment skips itself at runtime — test.skip(condition, reason) — so it stays declared, counted, and visibly skipped.'
+  'Spec selection must never depend on the envset. Keep testDir, testMatch, testIgnore, grep and grepInvert as constant literals in playwright.config.* so every run of the suite declares the same roster. A test that must not execute in some environment skips itself at runtime — test.skip(condition, reason) — so it stays declared, counted, and visibly skipped; the reason is what makes the verdict count that skip as settled rather than not-yet-run.'
 
 /** What the run-start refusal carries alongside its human-readable message:
  *  enough for an agent to open the right file and rewrite the right fields. */

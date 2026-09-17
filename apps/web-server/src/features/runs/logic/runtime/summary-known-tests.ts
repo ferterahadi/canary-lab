@@ -48,6 +48,9 @@ export interface ExistingSummary {
   passedOnRetry?: unknown
   skippedNames?: unknown
   skippedIds?: unknown
+  gatedNames?: unknown
+  gatedIds?: unknown
+  gatedReasons?: unknown
   failed?: unknown
   knownTests?: unknown
 }

@@ -40,6 +40,13 @@ green.** A test edited into passing is the exact failure this product exists to 
   passes — the single most consequential rounding-up available to a reporting agent.
 - A test absent from `passedNames`, `failed`, and `skippedNames` is **not run**, not
   passed. Preserve that distinction in every summary, UI tile, and export.
+- `gatedNames` ⊂ `skippedNames`: tests that skipped THEMSELVES with a reasoned
+  `test.skip(condition, reason)` — the environment gate the spec-selection rule asks
+  for. The verdict treats them as **settled**: a run whose only non-passes are gated
+  skips is `passed`, and the status line says so —
+  `51/55 passed, 0 failed, 4 skipped (4 declared gates), 0 not run`. A skip with no
+  reason (a serial group's remainder after a failure, a bare `test.skip(true)`) is
+  still not-yet-passed. Never report a gated test as passed; it did not run.
 - Coverage % is computed by canary from the tags (covered ÷ active total), never
   asserted by an agent. One computation layer behind both the UI and
   `get_feature_coverage` — don't recompute it in a second place.

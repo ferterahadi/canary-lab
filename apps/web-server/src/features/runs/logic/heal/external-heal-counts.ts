@@ -70,6 +70,11 @@ export function normalizeRunCounts(summary: RunDetail['summary'] | null): Normal
   const passed = typeof summary?.passed === 'number' ? summary.passed : passedNames.length
   const failed = failedNames.length
   const skipped = typeof summary?.skipped === 'number' ? summary.skipped : skippedNames.length
+  // Declared gates are a subset of the skips; the status line names them so a
+  // reader can tell "4 skipped, all gates, run is green" from "4 skipped, a
+  // serial group stopped early".
+  const skippedSet = new Set(skippedNames)
+  const gated = uniqueStrings(summary?.gatedNames ?? []).filter((name) => skippedSet.has(name)).length
   const notRun = knownEntries.length > 0
     ? notRunNames.length
     : Math.max(0, totalKnown - passed - failed - skipped)
@@ -87,13 +92,18 @@ export function normalizeRunCounts(summary: RunDetail['summary'] | null): Normal
     skippedNames,
     skippedIds,
     notRunNames,
-    statusLine: statusLineForCounts({ totalKnown, passed, failed, skipped, notRun }),
+    statusLine: statusLineForCounts({ totalKnown, passed, failed, skipped, notRun, gated }),
   }
 }
 
-export function statusLineForCounts(counts: Pick<NormalizedRunCounts, 'totalKnown' | 'passed' | 'failed' | 'skipped' | 'notRun'>): string {
+export function statusLineForCounts(counts: Pick<NormalizedRunCounts, 'totalKnown' | 'passed' | 'failed' | 'skipped' | 'notRun'> & { gated?: number }): string {
   const parts = [`${counts.passed}/${counts.totalKnown} passed`, `${counts.failed} failed`]
-  if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`)
+  const gated = counts.gated ?? 0
+  if (counts.skipped > 0) {
+    parts.push(gated > 0
+      ? `${counts.skipped} skipped (${gated} declared gate${gated === 1 ? '' : 's'})`
+      : `${counts.skipped} skipped`)
+  }
   parts.push(`${counts.notRun} not run`)
   return parts.join(', ')
 }

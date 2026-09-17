@@ -12,7 +12,7 @@ import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { type RunLifecyclePhase, type RunManifest, type StoppedEarlyReason } from './manifest'
 import { loadFeatures } from '../../../../shared/feature-loader'
-import { KnownSummaryTest, PlaywrightRerunSelection, computeRerunTargetsOrdered, expandForSerialSpecs, grepForKnownTests, isSpecLocation, knownTestsFromSummary, passedNameSet, serialSpecFiles, skippedNameSet, testListForKnownTests, uniqueByName } from './rerun-targets'
+import { KnownSummaryTest, PlaywrightRerunSelection, computeRerunTargetsOrdered, expandForSerialSpecs, gatedNameSet, grepForKnownTests, isSpecLocation, knownTestsFromSummary, passedNameSet, serialSpecFiles, skippedNameSet, testListForKnownTests, uniqueByName } from './rerun-targets'
 
 export { computeNonPassedTargets, computeRerunTargetsOrdered, nonPassedSignatureFromPlan, normalizeRerunSelection, selectionForPlan, summaryHasPassingEvidence } from './rerun-targets'
 export type { NonPassedTargetsResult, PlaywrightRerunSelection, RerunTargetsOrderedResult } from './rerun-targets'
@@ -22,6 +22,7 @@ export interface SummaryShape {
   passed?: unknown
   passedNames?: unknown
   skippedNames?: unknown
+  gatedNames?: unknown
   total?: unknown
   knownTests?: unknown
 }
@@ -108,6 +109,13 @@ export function computeVerificationPlan(
   if (knownTests.length > 0) {
     const passed = passedNameSet(summary)
     const skippedSet = skippedNameSet(summary)
+    // A test that skipped ITSELF with a reason (the roster rule's
+    // `test.skip(condition, reason)` environment gate) has settled: it looked at
+    // this environment and declined. It is never selected, so a suite whose only
+    // non-passes are such gates is all-passed. A skip with no reason — the rest
+    // of a serial group after a failure — is still a test that never got its
+    // turn and stays selected.
+    const gatedSet = gatedNameSet(summary)
     const failedSlugs = extractFailedSlugs(summary).filter((slug) => !passed.has(slug))
     const failedSet = new Set(failedSlugs)
     const knownByName = new Map(knownTests.map((test) => [test.name, test] as const))
@@ -115,7 +123,7 @@ export function computeVerificationPlan(
     const failedFirst = uniqueByName(failedSlugs
       .map((slug) => knownByName.get(slug))
       .filter((test): test is KnownSummaryTest => Boolean(test)))
-    const skipped = knownTests.filter((test) => !passed.has(test.name) && !failedSet.has(test.name) && skippedSet.has(test.name))
+    const skipped = knownTests.filter((test) => !passed.has(test.name) && !failedSet.has(test.name) && skippedSet.has(test.name) && !gatedSet.has(test.name))
     const pending = knownTests.filter((test) => !passed.has(test.name) && !failedSet.has(test.name) && !skippedSet.has(test.name))
     const selected = [...failedFirst, ...skipped, ...pending]
     if (selected.length === 0) return { kind: 'all-passed', total: knownTests.length }

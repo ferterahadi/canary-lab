@@ -61,6 +61,14 @@ export interface RunSummary {
   skipped?: number
   skippedNames?: string[]
   skippedIds?: string[]
+  /** The subset of `skippedNames` that skipped ITSELF through a reasoned
+   *  `test.skip(condition, reason)` — an environment gate the roster rule asks
+   *  for, not a test that never got its turn. The verdict treats these as
+   *  settled; every other skip still blocks a pass. `gatedReasons[i]` is
+   *  `gatedNames[i]`'s reason. */
+  gatedNames?: string[]
+  gatedIds?: string[]
+  gatedReasons?: string[]
   /** The summary was seeded from a prior execution (a targeted heal rerun
    *  merged untouched results forward), so its outcomes span several partial
    *  executions rather than one clean run. Written by the reporter; read by the

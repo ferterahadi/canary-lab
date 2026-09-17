@@ -202,3 +202,66 @@ describe('SummaryReporter', () => {
     expect(readSummary().failed[0].error).toEqual({ message: '' })
   })
 })
+
+// `test.skip(condition, reason)` leaves a `skip` annotation carrying the reason;
+// Playwright's own skips carry none. The summary must keep the two apart —
+// `gatedNames` is what lets the verdict call an env-gated suite green — and a
+// targeted rerun must not lose the distinction when it seeds the prior summary.
+describe('SummaryReporter declared gates', () => {
+  const gate = (title: string, reason?: string) => ({
+    ...mkTest(title, '/meta.spec.ts', 4),
+    annotations: [{ type: 'skip', ...(reason === undefined ? {} : { description: reason }) }],
+  })
+
+  it('records a reasoned self-skip as gated and every other skip as merely skipped', () => {
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(gate('Meta only', 'Real-Meta gate: runs only in the meta environment'), mkResult({ status: 'skipped' }))
+    reporter.onTestEnd(gate('Silenced', ''), mkResult({ status: 'skipped' }))
+    reporter.onTestEnd(mkTest('Serial remainder', '/a.spec.ts', 9), mkResult({ status: 'skipped' }))
+    reporter.onTestEnd(gate('Ran anyway', 'stale annotation'), mkResult({ status: 'passed' }))
+    reporter.onEnd({} as any)
+
+    const out = readSummary()
+    expect(out.skipped).toBe(3)
+    expect(out.skippedNames).toEqual(['test-case-meta-only', 'test-case-silenced', 'test-case-serial-remainder'])
+    expect(out.gatedNames).toEqual(['test-case-meta-only'])
+    expect(out.gatedReasons).toEqual(['Real-Meta gate: runs only in the meta environment'])
+    expect(out.gatedIds).toEqual([expect.any(String)])
+    expect(out.passedNames).toEqual(['test-case-ran-anyway'])
+  })
+
+  it('omits the gated fields when no skip declared a reason', () => {
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(mkTest('Serial remainder', '/a.spec.ts', 9), mkResult({ status: 'skipped' }))
+    reporter.onEnd({} as any)
+    const out = readSummary()
+    expect(out.skippedNames).toEqual(['test-case-serial-remainder'])
+    expect(out).not.toHaveProperty('gatedNames')
+  })
+
+  it('keeps a prior execution’s gates declared when a targeted rerun seeds from it', () => {
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(path.join(LOGS_DIR, 'e2e-summary.json'), JSON.stringify({
+      complete: true,
+      total: 3,
+      passed: 1,
+      passedNames: ['test-case-local'],
+      skipped: 2,
+      skippedNames: ['test-case-meta', 'test-case-remainder'],
+      gatedNames: ['test-case-meta'],
+      gatedReasons: ['Real-Meta gate'],
+      failed: [{ name: 'test-case-flaky' }],
+    }))
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(mkTest('Flaky', '/a.spec.ts', 2), mkResult({ status: 'passed' }))
+    reporter.onEnd({} as any)
+
+    const out = readSummary()
+    expect(out.passedNames).toEqual(expect.arrayContaining(['test-case-local', 'test-case-flaky']))
+    expect(out.skippedNames).toEqual(['test-case-meta', 'test-case-remainder'])
+    expect(out.gatedNames).toEqual(['test-case-meta'])
+    expect(out.gatedReasons).toEqual(['Real-Meta gate'])
+    expect(out.mergedFromPriorExecution).toBe(true)
+  })
+})
