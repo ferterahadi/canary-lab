@@ -71,6 +71,26 @@ describe('classifyMcpClient — sampling capability', () => {
   })
 })
 
+describe('classifyMcpClient — elicitation capability', () => {
+  // Base MCP elicitation IS a form, and the shipped CLI declares a bare
+  // `elicitation: {}` — so "declared, modes unnamed" has to mean form-capable,
+  // or every checkpoint question would fall back to plain prose against the one
+  // client that can actually show a form.
+  it('treats a bare elicitation declaration as form-capable', () => {
+    expect(classifyMcpClient({ name: 'claude-code' }, { elicitation: {} }).elicitation).toEqual({ form: true, url: false })
+  })
+
+  it('reads named modes literally, including a url-only client', () => {
+    expect(classifyMcpClient({ name: 'claude-code' }, { elicitation: { url: {} } }).elicitation).toEqual({ form: false, url: true })
+    expect(classifyMcpClient({ name: 'claude-code' }, { elicitation: { form: {} } }).elicitation).toEqual({ form: true, url: false })
+    expect(classifyMcpClient({ name: 'claude-code' }, { elicitation: { form: {}, url: {} } }).elicitation).toEqual({ form: true, url: true })
+  })
+
+  it('omits the fact entirely when the client declares no elicitation', () => {
+    expect('elicitation' in classifyMcpClient({ name: 'claude-code' }, {})).toBe(false)
+  })
+})
+
 describe('fanOutAdviceFor', () => {
   it('tells a subagent-capable client to divide the reading', () => {
     const advice = fanOutAdviceFor(classifyMcpClient({ name: 'claude-code' }))

@@ -32,7 +32,10 @@ interface ResolveDocumentsOptions {
   intent?: string
   revision?: unknown
   beforeWrite?: () => CallToolResult | undefined | Promise<CallToolResult | undefined>
-  ready: () => Promise<Result>
+  /** Continue the caller's work now that `featureDir`'s sources are settled.
+   *  The directory is handed over because this gate has already proven the
+   *  feature exists — a second lookup in the caller could only fail. */
+  ready: (featureDir: string) => Promise<Result>
 }
 
 /** Semantic judgment belongs to the calling agent. This gate checks its source
@@ -92,7 +95,7 @@ export async function resolveDocuments(options: ResolveDocumentsOptions): Promis
         .map((entry) => ({ relPath: entry.relPath, sha256: documentHash(entry.content) })),
     })
     publishWorkspaceEvent(ctx.deps.workspaceEvents, { type: 'coverage-changed', feature })
-    return ready()
+    return ready(featureDir)
   }
   function validate(sources: DocumentSource[]): string | undefined {
     for (const source of sources) {
@@ -126,17 +129,17 @@ export async function resolveDocuments(options: ResolveDocumentsOptions): Promis
       message: resolution?.status === 'missing' ? `Requirements for ${feature} are missing: ${resolution.reason}` : undefined,
       command })
   if (replay && !options.documentSource && (!resolution || resolution.status === 'resolved')) return inputPending('This discovery outcome has no elicitation to resume. Nothing was applied.')
-  if (!replay && resolution?.status === 'missing' && selection?.decisionKey === decisionKey && selection.reviewedDocsHash === collection.docsHash) return ready()
+  if (!replay && resolution?.status === 'missing' && selection?.decisionKey === decisionKey && selection.reviewedDocsHash === collection.docsHash) return ready(featureDir)
   if (options.documentSource) return askForDocs()
   if (!resolution) {
     if (selection && selection.reviewedDocsHash !== collection.docsHash) return discovery('The reviewed document set changed. Reassess its relevance and conflicts.')
-    return selection && readDocsCollection(featureDir).entries.length > 0 ? ready() : discovery()
+    return selection && readDocsCollection(featureDir).entries.length > 0 ? ready(featureDir) : discovery()
   }
   if (resolution.status === 'missing') return askForDocs()
   const sources = resolution.status === 'resolved' ? resolution.sources : resolution.candidates.flatMap((candidate) => candidate.sources)
   const problem = validate(sources)
   if (problem) return replay ? inputPending(problem) : discovery(problem)
-  if (!replay && selection?.decisionKey === decisionKey && selection.reviewedDocsHash === collection.docsHash) return ready()
+  if (!replay && selection?.decisionKey === decisionKey && selection.reviewedDocsHash === collection.docsHash) return ready(featureDir)
   if (resolution.status === 'resolved') return use(sources)
   const choices = resolution.candidates.map((candidate, i) => `${i + 1}: ${candidate.label}`)
   const schema = z.object({ choice: z.enum([choices[0], ...choices.slice(1), 'Provide requirements', 'Upload documents']) })

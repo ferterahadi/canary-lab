@@ -310,6 +310,12 @@ function functionExpressionEnglish(node: ts.FunctionExpression): EnglishNode {
   return clause('function-expression', segments, 'block')
 }
 
+/** Callback bodies belong to source-linked child rows, just like statement bodies. */
+export function callbackHeaderEnglish(node: ts.ArrowFunction | ts.FunctionExpression): EnglishNode {
+  const english = (ts.isArrowFunction(node) ? arrowFunctionEnglish(node) : functionExpressionEnglish(node)) as EnglishClause
+  return clause(english.tag, english.segments.slice(0, -1), english.layout)
+}
+
 /** Conditions read as predicates: comparison, logical, and negation forms
  *  stand alone; anything else is spelled as an explicit truthiness test. */
 function conditionEnglish(node: ts.Expression): EnglishNode {

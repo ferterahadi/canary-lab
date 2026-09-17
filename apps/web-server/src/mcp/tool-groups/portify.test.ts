@@ -4,6 +4,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunDetail } from '../../features/runs/logic/run-store'
 import { registerPortifyTools } from './portify'
+import { inputFingerprint } from '../elicitation'
 import { BUSY_ACTIVE, captureTools, fakeGettingStartedDemo } from './__fixtures__/tool-group-harness'
 
 // The six port-ification tools, plus the two heal reads' not-found arms.
@@ -357,6 +358,25 @@ describe('cancel_portify and remove_portification', () => {
     // Removing a portification twice lands on the same state, so a retry after a
     // dropped response is safe to make.
     expect(configs.get('remove_portification')!.annotations).toMatchObject({ destructiveHint: true, idempotentHint: true })
+  })
+})
+
+// review_portify hands the agent a fingerprint of the manifest the human saw.
+// Both tools below act on that human's decision, so a manifest that has moved
+// since means the decision was about a different state: refuse before reopening
+// or discarding a verified worktree the human never looked at.
+describe('a stale review_revision blocks the tools that act on a human decision', () => {
+  it.each([
+    ['revise_external_portify', 'reviseExternalPortify', { workflowId: 'wf-1', feedback: 'use 4100' }],
+    ['cancel_portify', 'cancelPortify', { workflowId: 'wf-1', confirm: true }],
+  ])('%s refuses, leaving %s uncalled', async (tool, dep, args) => {
+    const act = vi.fn()
+    const reviewed = manifest({ status: 'ready-to-save', attempts: 1 })
+    const { text } = harness({ [dep]: act, getPortify: () => manifest({ status: 'ready-to-save', attempts: 2 }) })
+
+    expect(await text(tool, { ...args, review_revision: inputFingerprint(reviewed) }))
+      .toContain('The portification review changed. Nothing was applied.')
+    expect(act).not.toHaveBeenCalled()
   })
 })
 

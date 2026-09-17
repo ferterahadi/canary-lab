@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RunDetail } from '../../features/runs/logic/run-store'
 import { CLAIM_SUPPRESSED_MESSAGE } from '../tool-support'
+import type { InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
+import type { McpClientFacts } from '../client-surface'
 import { registerRunLifecycleTools } from './run-lifecycle'
 import { captureTools } from './__fixtures__/tool-group-harness'
 
@@ -56,7 +58,7 @@ function storeOf(details: RunDetail[], over: Record<string, unknown> = {}): Reco
   }
 }
 
-function harness(over: Record<string, unknown> = {}) {
+function harness(over: Record<string, unknown> = {}, facts?: McpClientFacts) {
   const claims: Array<Record<string, unknown>> = []
   const tools = captureTools(registerRunLifecycleTools, {
     store: storeOf([]),
@@ -68,9 +70,46 @@ function harness(over: Record<string, unknown> = {}) {
     },
     startRun: async () => ({ kind: 'started', runId: 'run-new' }),
     ...over,
-  })
+  }, facts)
   return { ...tools, claims }
 }
+
+// The default harness client has no elicitation, which is why every collision
+// case above reads as the chat fallback. These two drive the other half: a client
+// that CAN show the form, and the answering call that comes back with a choice.
+const eliciting: McpClientFacts = { surface: 'codex', canFanOut: false, sampling: false, elicitation: { form: true, url: false } }
+const context = (state?: unknown, answer?: unknown) => ({ sessionId: 'run-lifecycle', mcpReq: { requestState: () => state, inputResponses: { answer } } }) as unknown as ServerContext
+const collision = {
+  kind: 'collision', conflictingRunId: 'run-9', conflictingFeature: 'search',
+  repoPaths: ['/repo/shop'], options: ['worktree', 'queue'], message: 'run-9 is using /repo/shop',
+}
+
+describe.each([
+  ['start_run', START, 'run-new'],
+  ['boot_services', { feature: 'checkout' }, 'boot-1'],
+] as const)('%s: answering the isolation question', (tool, args, runId) => {
+  it('starts nothing until the choice arrives, then starts with it', async () => {
+    const startRun = vi.fn(async (_f: string, _e: unknown, _r: unknown, isolation?: string) =>
+      isolation ? { kind: 'started', runId, booted: true } : collision)
+    const { raw } = harness({ startRun }, eliciting)
+    const opened = await raw(tool, args, context()) as InputRequiredResult
+    expect(opened.inputRequests).toMatchObject({ answer: { params: { message: expect.stringContaining('run-9 is using /repo/shop'), requestedSchema: { properties: { isolation: { enum: ['worktree', 'queue'] } } } } } })
+    expect(startRun.mock.calls.every((callArgs) => callArgs[3] === undefined)).toBe(true)
+
+    const answered = await raw(tool, args, context(opened.requestState, { action: 'accept', content: { isolation: 'worktree' } }))
+    expect(JSON.parse((answered.content as Array<{ text: string }>)[0].text)).toMatchObject({ runId })
+    expect(startRun.mock.lastCall?.[0]).toBe('checkout')
+    expect(startRun.mock.lastCall?.[3]).toBe('worktree')
+  })
+
+  it('leaves the work pending when the answer belongs to another question', async () => {
+    const startRun = vi.fn(async () => collision)
+    const { raw } = harness({ startRun }, eliciting)
+    const forged = await raw(tool, args, context('not-a-real-handle', { action: 'accept', content: { isolation: 'queue' } }))
+    expect(JSON.parse((forged.content as Array<{ text: string }>)[0].text)).toMatchObject({ status: 'needs-input', reason: expect.stringContaining('belongs to a different operation') })
+    expect(startRun).not.toHaveBeenCalled()
+  })
+})
 
 describe('start_run: continuing the run that is already healing', () => {
   it('reuses it, claims heal for this session, and says to wait for the task', async () => {

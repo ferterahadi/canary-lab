@@ -16,6 +16,10 @@ import { recordStageAgentSession } from './stage-agent-sessions'
 import { CHECKPOINT_OPTIONS } from '../types'
 import { prepareRequirementsDraft, saveRequirementsDraft, type RequirementsDraftInput } from './requirements-draft'
 import { documentResolutionInput, type DocumentResolution } from '../../../coverage/logic/coverage/document-resolution'
+
+/** A discovery answer the producer could not settle — the only shapes the
+ *  parked checkpoint can carry back to the user. */
+type UnresolvedDocuments = Exclude<DocumentResolution, { status: 'resolved' }>
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 
 // Populate features/<f>/docs/ — the prd-source checkpoint is a two-path FORK:
@@ -283,10 +287,13 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     const m = ctx.manifest()
     const unresolved = extractJsonCandidates(reply)
       .map((candidate) => documentResolutionInput.safeParse((candidate as { document_resolution?: unknown } | null)?.document_resolution))
-      .find((parsed) => parsed.success && parsed.data.status !== 'resolved')
+      .find((parsed): parsed is { success: true; data: UnresolvedDocuments } => parsed.success && parsed.data.status !== 'resolved')
     if (unresolved?.success) {
       const resolution = unresolved.data
-      const reason = resolution.status === 'missing' ? resolution.reason : 'question' in resolution ? resolution.question : ''
+      // Every unsettled shape explains itself: `missing` carries the reason and
+      // the candidate shapes carry the question. `resolved` is narrowed away
+      // above, so there is no third shape left to default for.
+      const reason = resolution.status === 'missing' ? resolution.reason : resolution.question
       const attempt: PrdSourceAttempt = { mode, outcome: 'empty', reason }
       ctx.appendLog(attemptLogLine(attempt))
       return park(ctx, [], attempt, resolution)

@@ -57,6 +57,33 @@ describe('MCP 2.0 elicitation', () => {
     expect(apply).not.toHaveBeenCalled()
   })
 
+  // The client picks the requestState value it echoes back, so a non-string is
+  // reachable from the wire. It must read as an unknown handle rather than be
+  // used to index the pending map.
+  it('treats a non-string echoed handle as unknown', async () => {
+    const apply = vi.fn(async () => asJsonResult({ applied: true }))
+    const result = await requestUserInput(context(42, { action: 'accept', content: { isolation: 'queue' } }), facts, form('non-string'), apply)
+    expect(JSON.stringify(result)).toContain('belongs to a different operation')
+    expect(apply).not.toHaveBeenCalled()
+  })
+
+  // A peer that echoes a live handle but no parseable answer is a protocol
+  // fault, not a user decision. Recording it as one would bank a decline
+  // receipt and suppress the question for good, so it stays an error and the
+  // handle stays answerable.
+  it('reports a response that is not an elicitation answer as an error, without banking it', async () => {
+    const spec = form('malformed-answer')
+    const apply = vi.fn(async () => asJsonResult({ applied: true }))
+    const opened = await requestUserInput(context(), facts, spec, apply) as InputRequiredResult
+    for (const answer of [undefined, { action: 'approve' }, 'accept', { content: { isolation: 'queue' } }]) {
+      const result = await requestUserInput(context(opened.requestState, answer), facts, spec, apply)
+      expect(JSON.stringify(result)).toContain('Invalid elicitation response')
+    }
+    const accepted = await requestUserInput(context(opened.requestState, { action: 'accept', content: { isolation: 'queue' } }), facts, spec, apply)
+    expect(JSON.stringify(accepted)).toContain('applied')
+    expect(apply).toHaveBeenCalledExactlyOnceWith({ isolation: 'queue' })
+  })
+
   it('expires input after restart/expiry instead of trusting echoed state', async () => {
     vi.useFakeTimers()
     try {
@@ -69,5 +96,20 @@ describe('MCP 2.0 elicitation', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  // Open questions live in a process-wide map that only expiry and answers
+  // drain, so an agent that opens them and walks away must be refused rather
+  // than allowed to grow it without bound. Refusal leaves the work pending, so
+  // nothing is lost — and this runs last because it fills that shared map.
+  it('refuses a new question once the pending map is full, rather than growing it', async () => {
+    const apply = vi.fn(async () => asJsonResult({ applied: true }))
+    const spec = form('flood')
+    let last = await requestUserInput(context(), facts, spec, apply)
+    for (let opened = 1; opened < 1200 && 'inputRequests' in last; opened++) {
+      last = await requestUserInput(context(), facts, spec, apply)
+    }
+    expect(JSON.stringify(last)).toContain('Too many open input requests')
+    expect(apply).not.toHaveBeenCalled()
   })
 })

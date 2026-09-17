@@ -2,7 +2,7 @@ import ts from 'typescript'
 import { UnsupportedSyntaxKindError, statementEnglish } from '../controlled-english/ast-to-ir'
 import { renderEnglish } from '../controlled-english/english-renderer'
 import type { SemanticContext } from '../controlled-english/semantic-context'
-import { hasStructuralCallback, sourceAssertionText, sourceConditionText, sourceDeclarationText, sourceExpressionText, sourceFunctionText, sourceLoopText, sourceStatementText, testRegistration } from './source-language'
+import { hasStructuralCallback, sourceAssertionText, sourceCallbackCall, sourceCallbackExpressionCall, sourceCallbackHeaderText, sourceConditionText, sourceDeclarationText, sourceExpressionText, sourceFunctionText, sourceLoopText, sourceStatementText, testRegistration } from './source-language'
 import type {
   ReadableStoryFlowKind,
   ReadableStoryItem,
@@ -1130,6 +1130,51 @@ export function storyCandidates(
     return candidate ? [candidate] : []
   }
 
+  function sourceCallbackCandidate(
+    node: ts.Node,
+    description: NonNullable<ReturnType<typeof sourceCallbackCall>>,
+    path: number[],
+    options: WalkOptions,
+  ): StoryFlowCandidate {
+    const { call, text, role } = description
+    const sourceCandidate = (node: ts.Node, itemPath: number[], text: string): StoryStepCandidate => ({
+      kind: 'step', node, path: itemPath, role: 'action', text,
+      spans: storySpans(text, variablePhrases(node, text, aliases), true), fidelity: 'derived',
+    })
+    const argumentCandidates = call.arguments.map((argument, index): StoryCandidate => {
+      const argumentPath = [...path, index]
+      if (!ts.isArrowFunction(argument) && !ts.isFunctionExpression(argument)) {
+        return sourceCandidate(argument, argumentPath, `Argument ${index + 1}: ${sourceExpressionText(argument)}`)
+      }
+      const block = ts.isBlock(argument.body)
+      const invocation = ts.isFunctionExpression(argument) && argument.asteriskToken
+        ? 'When the returned generator is advanced' : 'When called'
+      const text = `Argument ${index + 1}: ${sourceCallbackHeaderText(argument)}. ${invocation}${block ? ', run these statements' : ''}:`
+      const returnedCall = !block && sourceCallbackExpressionCall(argument.body)
+      const children = block
+        ? walkStatements(argument.body.statements, argumentPath, options)
+        : returnedCall ? [sourceCallbackCandidate(argument.body,
+          { ...returnedCall, text: `${returnedCall.text} and return its result`, role: 'action' }, [...argumentPath, 0], options)]
+        : [sourceCandidate(argument.body, [...argumentPath, 0], `Return ${sourceExpressionText(argument.body)}`)]
+      if (block && !argument.body.statements.length) children.push(sourceCandidate(argument.body, [...argumentPath, 0], 'Do nothing.'))
+      return { ...sourceCandidate(argument, argumentPath, text), kind: 'flow', flowKind: 'scope', children,
+        headerEndPosition: ts.isArrowFunction(argument) && !block
+          ? argument.equalsGreaterThanToken.getEnd() - 1 : argument.body.getStart(sourceFile) }
+    })
+    // A sole callback needs one boundary, not separate call and argument rows.
+    // Multiple arguments keep their own rows so their order and source ranges survive.
+    if (argumentCandidates.length === 1) {
+      // sourceCallbackCall only accepts calls with a callback, so a sole argument is a flow.
+      const only = argumentCandidates[0] as StoryFlowCandidate
+      const header = `${text}, passing ${only.text.slice('Argument 1: '.length)}`
+      return { ...sourceCandidate(node, path, header), kind: 'flow', flowKind: 'scope', role,
+        headerEndPosition: only.headerEndPosition, children: only.children }
+    }
+    return { ...sourceCandidate(node, path, `${text}. Pass these arguments in order:`),
+      kind: 'flow', flowKind: 'scope', role, children: argumentCandidates,
+      headerEndPosition: call.expression.getEnd() - 1 }
+  }
+
   function expressionCandidates(
     sourceExpression: ts.Expression,
     path: number[],
@@ -1418,9 +1463,6 @@ export function storyCandidates(
       if (assertion) return [{ kind: 'step', node: statement, path, role: 'check', text: assertion,
         spans: storySpans(assertion, variablePhrases(statement, assertion, aliases), true), fidelity: 'derived' }]
       if (renderAssertionStatement(statement, sourceFile)) return []
-      const declaration = sourceDeclarationText(statement)
-      if (declaration) return [{ kind: 'step', node: statement, path, role: 'setup',
-        text: declaration, spans: storySpans(declaration, variablePhrases(statement, declaration, aliases), true), fidelity: 'derived' }]
       const registration = testRegistration(statement, completeContext)
       if (registration) {
         const children = callbackCandidates(registration.callback, [...path, 0], options)
@@ -1428,6 +1470,13 @@ export function storyCandidates(
           ...(registration.role === 'test' ? { headerEndPosition: registration.callback.body.getStart(sourceFile) } : {}),
           text: registration.text, spans: storySpans(registration.text, variablePhrases(statement, registration.text, aliases), true), fidelity: 'derived', children }]
       }
+      if (!authoredStep(statement)) {
+        const callback = sourceCallbackCall(statement)
+        if (callback) return [sourceCallbackCandidate(statement, callback, path, options)]
+      }
+      const declaration = sourceDeclarationText(statement)
+      if (declaration) return [{ kind: 'step', node: statement, path, role: 'setup',
+        text: declaration, spans: storySpans(declaration, variablePhrases(statement, declaration, aliases), true), fidelity: 'derived' }]
       const call = callFromStatement(statement)
       // Unknown callback APIs retain their entire signature and body. Promoting
       // only their children would hide the condition under which they execute.

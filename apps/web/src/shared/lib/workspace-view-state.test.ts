@@ -531,6 +531,32 @@ it('round-trips a test review source, language and baseline without leaking them
   expect(window.location.search).not.toContain('review')
 })
 
+// A URL-mode elicitation invite is scoped to one flight's checkpoint. Navigating
+// inside that flight has to keep it — the human is mid-answer — while leaving the
+// flight or the view drops both params so the invite cannot be replayed elsewhere.
+it('keeps an open elicitation invite while its own flight stays open, and drops it otherwise', () => {
+  window.history.replaceState(null, '', '/?view=flights&flight=fl1&elicitation=fl1%3Amissing-env&inputToken=tok')
+  persistView(view({ view: 'flights', flight: 'fl1', flightStage: 'run' }))
+  expect(window.location.search).toContain('elicitation=fl1%3Amissing-env')
+  expect(window.location.search).toContain('inputToken=tok')
+  persistView(view({ view: 'flights', flight: 'fl2' }))
+  expect(window.location.search).not.toContain('elicitation')
+  expect(window.location.search).not.toContain('inputToken')
+})
+
+// The run baseline narrows in steps: pick the recorded run, then a category,
+// then one test. Each step has to survive a reload on its own — a half-made
+// selection must not invent the missing part or drop the part already chosen.
+it('round-trips a run baseline with no category, and a category with no pinned test', () => {
+  persistView(view({ dialog: 'tests-review', reviewFocus: { file: 'a.spec.ts', baseline: 'run' } }))
+  expect(window.location.search).not.toContain('reviewChange')
+  expect(readPersistedView().reviewFocus).toEqual({ file: 'a.spec.ts', baseline: 'run', line: undefined, mode: 'english' })
+  persistView(view({ dialog: 'tests-review', reviewFocus: { file: 'a.spec.ts', baseline: 'run', change: 'added' } }))
+  expect(window.location.search).toContain('reviewChange=added')
+  expect(window.location.search).not.toContain('reviewTest')
+  expect(readPersistedView().reviewFocus).toEqual({ file: 'a.spec.ts', baseline: 'run', change: 'added', line: undefined, mode: 'english' })
+})
+
 it('ignores unknown review categories and clears the category when switching to Git HEAD', () => {
   window.history.replaceState(null, '', '/?dialog=tests-review&reviewFile=a.spec.ts&reviewBase=run&reviewChange=bogus')
   expect(readPersistedView().reviewFocus?.change).toBeUndefined()

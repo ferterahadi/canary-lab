@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
+import type { AddressInfo } from 'node:net'
 import { randomUUID } from 'crypto'
 import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from '@modelcontextprotocol/node'
 import { createMcpHandler, isInitializeRequest, isLegacyRequest, McpServer } from '@modelcontextprotocol/server'
@@ -49,6 +50,16 @@ export function mcpErrorLogger(
   return (err) => app.log.error({ err }, message)
 }
 
+/** The origin a tool result hands the human to open Canary Lab. Read from the
+ *  live bind rather than from config, so a port fallback cannot produce a link
+ *  to a port nothing is serving. Absent unless the bind is TCP: Node reports
+ *  `null` before `listen` resolves and a plain path string for a unix socket,
+ *  and neither yields a URL an agent can pass on — the tools that need one fall
+ *  back to asking the user in chat instead of inventing a host. */
+export function uiUrlFromAddress(address: AddressInfo | string | null): string | undefined {
+  return address && typeof address !== 'string' ? `http://127.0.0.1:${address.port}` : undefined
+}
+
 export async function registerMcpRoutes(
   app: FastifyInstance,
   deps: McpRouteDeps,
@@ -80,10 +91,7 @@ export async function registerMcpRoutes(
     defaultClientKind: ClientKind | undefined,
   ): McpServer => {
     const mcp = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS_BY_PROFILE[profile] })
-    registerCanaryLabTools(mcp, { ...deps, getUiUrl: () => {
-      const address = app.server.address()
-      return address && typeof address !== 'string' ? `http://127.0.0.1:${address.port}` : undefined
-    } }, {
+    registerCanaryLabTools(mcp, { ...deps, getUiUrl: () => uiUrlFromAddress(app.server.address()) }, {
       profile,
       defaultClientKind,
       onExecCall: (event) => {

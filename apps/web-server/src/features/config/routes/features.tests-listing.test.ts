@@ -200,6 +200,40 @@ test('configured client', async () => {
     expect(body[0].parseError).toBeTruthy()
   })
 
+  // Discovery succeeded and had nothing to say about this file, and its source
+  // declares no tests either. It still belongs in the listing — empty, and with
+  // no parseError, because nothing about it is broken.
+  it('lists a spec file that declares no tests, without inventing a parse error', async () => {
+    const dir = writeFeature('support-only', { spec: "export const base = '/cart'\n" })
+    const app = await build({ spawner: jsonSpawner(() => ({ config: {}, suites: [] })) })
+    const res = await app.inject({ method: 'GET', url: '/api/features/support-only/tests' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual([{ file: path.join(dir, 'e2e', 'a.spec.ts'), tests: [] }])
+    await app.close()
+  })
+
+  // `listSpecFiles` reports what the directory holds; reading a file can still
+  // fail. The live listing degrades to an empty AST for that one file rather
+  // than failing the suite view — and it must NOT raise the recorded-source
+  // flag, which means something quite different: a run's saved copy is gone.
+  it('keeps the live listing when one spec file cannot be read', async () => {
+    const dir = writeFeature('unreadable', { spec: "test('one', async () => {})\n" })
+    const specFile = path.join(dir, 'e2e', 'a.spec.ts')
+    const real = fs.readFileSync as (file: fs.PathOrFileDescriptor, options?: unknown) => unknown
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementation(((file: fs.PathOrFileDescriptor, options?: unknown) => {
+      if (file === specFile) throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+      return real(file, options)
+    }) as typeof fs.readFileSync)
+    try {
+      const app = await build({ spawner: failingSpawner })
+      const res = await app.inject({ method: 'GET', url: '/api/features/unreadable/tests' })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()[0]).toMatchObject({ file: specFile, tests: [], discoveryError: expect.any(String) })
+      expect(res.json()[0]).not.toHaveProperty('recordedSourceUnavailable')
+      await app.close()
+    } finally { spy.mockRestore() }
+  })
+
   it('surfaces parseError alongside Playwright-resolved entries', async () => {
     const dir = writeFeature('deepboth', { spec: deepNestedSpec() })
     const specFile = path.join(dir, 'e2e', 'a.spec.ts')

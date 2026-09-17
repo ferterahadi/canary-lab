@@ -48,9 +48,14 @@ vi.mock('@/features/wizard', async () => ({
 // is handed (against a mocked API client), so the hook's wiring to each
 // all-jobs endpoint is asserted, not assumed.
 const liveReads: Array<{ topic: string; key: string; cache?: string }> = []
+// Captured per topic so the poll predicate can be driven directly: the real
+// hook only calls it once a fetch has resolved, which the stub replaces.
+const pollPredicates = new Map<string, (value: unknown) => boolean>()
 vi.mock('@/shared/state/use-live-resource', () => ({
-  useLiveResource: (topic: string, key: string, fetcher: () => Promise<unknown>, opts?: { cache?: string }) => {
+  useLiveResource: (topic: string, key: string, fetcher: () => Promise<unknown>,
+    opts?: { cache?: string; pollWhile?: (value: unknown) => boolean }) => {
     liveReads.push({ topic, key, ...(opts?.cache ? { cache: opts.cache } : {}) })
+    if (opts?.pollWhile) pollPredicates.set(topic, opts.pollWhile)
     void fetcher()
     return { value: topic === 'robustness' ? stores.robustnessJobs : stores.coverageJobs }
   },
@@ -110,6 +115,22 @@ describe('useFeatureActivity', () => {
     ])
     expect(listAllCoverageJobs).toHaveBeenCalled()
     expect(listAllRobustnessJobs).toHaveBeenCalled()
+  })
+
+  // A coverage job that finishes server-side without its `coverage-changed`
+  // event reaching this client would otherwise stay "running" in the pill
+  // forever, so the coverage read polls until nothing is in flight. Robustness
+  // has no predicate: it relies on its socket topic alone.
+  it('polls the coverage jobs while any is unfinished, and stops once they all settle', () => {
+    pollPredicates.clear()
+    render()
+    const pollWhile = pollPredicates.get('coverage')
+    expect(pollWhile).toBeTypeOf('function')
+    expect(pollWhile!(null)).toBe(true)
+    expect(pollWhile!([{ status: 'done' }, { status: 'running' }])).toBe(true)
+    expect(pollWhile!([{ status: 'done' }, { status: 'error' }])).toBe(false)
+    expect(pollWhile!([])).toBe(false)
+    expect(pollPredicates.has('robustness')).toBe(false)
   })
 
   it('composes all the stores into one verb per feature', () => {

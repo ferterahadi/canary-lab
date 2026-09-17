@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fs from 'fs'
 import os from 'os'
@@ -33,7 +33,7 @@ beforeEach(async () => {
   fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), after)
   app = Fastify(); await testReviewRoutes(app, { featuresDir: path.join(root, 'features'), logsDir: path.join(root, 'logs') })
 })
-afterEach(async () => { await app.close(); fs.rmSync(root, { recursive: true, force: true }) })
+afterEach(async () => { vi.restoreAllMocks(); await app.close(); fs.rmSync(root, { recursive: true, force: true }) })
 const get = (query = 'file=e2e/a.spec.ts') => app.inject(`/api/features/alpha/test-review?${query}`)
 it('returns full source and source-linked English from the same committed/current versions', async () => {
   const response = await get(); expect(response.statusCode).toBe(200)
@@ -192,6 +192,20 @@ it('rejects missing, mismatched and unavailable source comparison baselines', as
   const dir = saveSnapshot()
   fs.rmSync(path.join(dir, 'suite'), { recursive: true })
   expect((await getComparison('alpha', 'runId=run-1')).statusCode).toBe(409)
+})
+// A spec that is absent reads as empty on purpose — a deleted test is a real
+// comparison. A spec that exists and cannot be read is not: folding it into the
+// same silence would show "no change" for a file nobody could look at.
+it('fails the comparison when a spec exists but cannot be read', async () => {
+  saveSnapshot()
+  const real = fs.readFileSync as (file: fs.PathOrFileDescriptor, options?: unknown) => unknown
+  vi.spyOn(fs, 'readFileSync').mockImplementation(((file: fs.PathOrFileDescriptor, options?: unknown) => {
+    if (typeof file === 'string' && file.endsWith('a.spec.ts')) throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+    return real(file, options)
+  }) as typeof fs.readFileSync)
+  const result = await app.inject('/api/features/alpha/test-source-comparison?runId=run-1')
+  expect(result.statusCode).toBe(500)
+  expect(result.json().message).toContain('EACCES')
 })
 it('does not read outside a source tree through a linked e2e directory', async () => {
   saveSnapshot()

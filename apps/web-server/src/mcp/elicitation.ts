@@ -5,12 +5,13 @@ import type { McpClientFacts } from './client-surface'
 import { asJsonResult, errorResult } from './tool-support'
 
 type ToolResult = CallToolResult | InputRequiredResult
-type InputSpec<T> = {
+/** Everything needed to recognise an answer to a question already asked. */
+type AnswerSpec<T> = {
   scope: unknown
   revision?: unknown
-  message: string
-  fallback: () => CallToolResult
-} & ({ mode: 'form'; schema: z.ZodType<T> } | { mode: 'url'; url: string })
+} & ({ mode: 'form'; schema: z.ZodType<T> } | { mode: 'url' })
+type InputSpec<T> = AnswerSpec<T> & { message: string; fallback: () => CallToolResult }
+  & ({ mode: 'form' } | { mode: 'url'; url: string })
 
 interface PendingInput {
   scope: string
@@ -61,6 +62,56 @@ export function resumeUrlInput(
   return requestUserInput(ctx, facts, { ...entry.url.spec, scope }, entry.url.complete)
 }
 
+/** Drop handles nobody answered in time, so a server that runs for weeks does
+ *  not keep every abandoned question. Returns the sweep's clock. */
+function expirePending(): number {
+  const now = Date.now()
+  for (const [id, entry] of pending) {
+    if (entry.expiresAt <= now) pending.delete(id)
+  }
+  return now
+}
+
+/** Match a client's echoed handle to the question it answers, then apply it at
+ *  most once. Every rejection here leaves the domain untouched. */
+async function applyAnswer<T>(
+  ctx: ServerContext | undefined,
+  spec: AnswerSpec<T>,
+  apply: (value: T) => Promise<ToolResult>,
+  state: unknown,
+): Promise<ToolResult> {
+  const entry = typeof state === 'string' ? pending.get(state) : undefined
+  if (!entry || entry.scope !== inputFingerprint([ctx?.sessionId, spec.scope])) return inputPending('The input request expired or belongs to a different operation. Nothing was applied.')
+  if (entry.result) return entry.result
+  if (entry.revision !== inputFingerprint(spec.revision)) return inputPending('The work changed while the question was open. Nothing was applied; review its current state before resuming.')
+  const response = z.object({ action: z.enum(['accept', 'decline', 'cancel']), content: z.unknown().optional() }).safeParse(ctx?.mcpReq.inputResponses?.answer)
+  if (!response.success) return errorResult('Invalid elicitation response. Nothing was applied.')
+  if (response.data.action !== 'accept') {
+    entry.result = Promise.resolve(inputPending(`The user chose ${response.data.action}. Nothing was applied.`))
+  } else if (spec.mode === 'form') {
+    const parsed = spec.schema.safeParse(response.data.content)
+    if (!parsed.success) return errorResult('The submitted input does not match the requested fields. Nothing was applied.')
+    entry.result = Promise.resolve().then(() => apply(parsed.data))
+  } else {
+    // URL-mode carries no input data. Completion must be checked in the
+    // existing domain store by apply(), never inferred from opening a URL.
+    entry.result = Promise.resolve().then(() => apply(undefined as T))
+  }
+  return entry.result
+}
+
+/** Answer a question this server already asked. Separate from `requestUserInput`
+ *  because a call carrying `requestState` IS the answer: it can never reach the
+ *  capability fallback, so a caller that only ever resumes has none to invent. */
+export async function applyUserInput<T>(
+  ctx: ServerContext | undefined,
+  spec: AnswerSpec<T>,
+  apply: (value: T) => Promise<ToolResult>,
+): Promise<ToolResult> {
+  expirePending()
+  return applyAnswer(ctx, spec, apply, ctx?.mcpReq.requestState?.())
+}
+
 /** MCP SDK 2.0 multi-round-trip elicitation. Its default legacy shim handles
  * older peers; never call the deprecated push-style elicitInput API here. */
 export async function requestUserInput<T>(
@@ -69,34 +120,12 @@ export async function requestUserInput<T>(
   spec: InputSpec<T>,
   apply: (value: T) => Promise<ToolResult>,
 ): Promise<ToolResult> {
-  const now = Date.now()
-  for (const [id, entry] of pending) {
-    if (entry.expiresAt <= now) pending.delete(id)
-  }
+  const now = expirePending()
+  const state = ctx?.mcpReq.requestState?.()
+  if (state !== undefined) return applyAnswer(ctx, spec, apply, state)
+
   const scope = inputFingerprint([ctx?.sessionId, spec.scope])
   const revision = inputFingerprint(spec.revision)
-  const state = ctx?.mcpReq.requestState?.()
-  if (state !== undefined) {
-    const entry = typeof state === 'string' ? pending.get(state) : undefined
-    if (!entry || entry.scope !== scope) return inputPending('The input request expired or belongs to a different operation. Nothing was applied.')
-    if (entry.result) return entry.result
-    if (entry.revision !== revision) return inputPending('The work changed while the question was open. Nothing was applied; review its current state before resuming.')
-    const response = z.object({ action: z.enum(['accept', 'decline', 'cancel']), content: z.unknown().optional() }).safeParse(ctx?.mcpReq.inputResponses?.answer)
-    if (!response.success) return errorResult('Invalid elicitation response. Nothing was applied.')
-    if (response.data.action !== 'accept') {
-      entry.result = Promise.resolve(inputPending(`The user chose ${response.data.action}. Nothing was applied.`))
-    } else if (spec.mode === 'form') {
-      const parsed = spec.schema.safeParse(response.data.content)
-      if (!parsed.success) return errorResult('The submitted input does not match the requested fields. Nothing was applied.')
-      entry.result = Promise.resolve().then(() => apply(parsed.data))
-    } else {
-      // URL-mode carries no input data. Completion must be checked in the
-      // existing domain store by apply(), never inferred from opening a URL.
-      entry.result = Promise.resolve().then(() => apply(undefined as T))
-    }
-    return entry.result
-  }
-
   const supported = facts.elicitation?.[spec.mode] === true
   if (!ctx || !supported) return spec.fallback()
   if (pending.size >= MAX_PENDING_INPUTS) return inputPending('Too many open input requests. Resume after an earlier request expires.')

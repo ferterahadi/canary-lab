@@ -112,3 +112,59 @@ it('does not match declarations in different files or report parse failures as d
   expect(invalid).toMatchObject({ state: 'unavailable', reasons: [expect.stringContaining('deep.spec.ts')] })
   expect(invalid).not.toHaveProperty('changes')
 })
+// A body passed by reference — a shared flow the spec hands to `test` instead of
+// an inline callback. There is no callback to look inside, so the declaration is
+// one unit whose range has to span the whole call, not stop at a callback that
+// isn't there.
+it('treats a declaration whose body is passed by reference as one whole unit', async () => {
+  const before = "test('same',\n  sharedFlow)"
+  const after = before.replace('sharedFlow', 'replacementFlow')
+  expect(compare(before, after).changes.changed).toHaveLength(1)
+  const edits = await meaningfulChangeLines(pairTestDeclarations(extractTestMetadataFromSource('a.spec.ts', before).tests, extractTestMetadataFromSource('a.spec.ts', after).tests))
+  expect(edits).toMatchObject({ before: [1, 2], after: [1, 2] })
+  expect(edits.alignment).toEqual([{ before: { line: 1, endLine: 2 }, after: { line: 1, endLine: 2 } }])
+})
+// The two callback spellings that are not an arrow with a block. If either were
+// skipped the body would contribute no statements, and the whole declaration —
+// not the one edited line — would light up as changed.
+it.each([
+  ['a function expression', "it('same', function () {\n  a()\n  expect(value).toBe(1)\n})", 3],
+  ['a concise arrow body', "test('same', async () =>\n  expect(value).toBe(1))", 2],
+])('locates the edit inside %s', async (_label, before, line) => {
+  const after = before.replace('toBe(1)', 'toBe(2)')
+  expect(compare(before, after).changes.changed).toHaveLength(1)
+  const edits = await meaningfulChangeLines(pairTestDeclarations(extractTestMetadataFromSource('a.spec.ts', before).tests, extractTestMetadataFromSource('a.spec.ts', after).tests))
+  expect(edits).toMatchObject({ before: [line], after: [line] })
+})
+// A details object assembled from a shared constant. `tag` and `annotation` are
+// registration metadata and drop out, but a spread hides what it contributes, so
+// whatever survives the drop keeps the object inside the comparison.
+it('keeps a details object that carries more than tags', () => {
+  const source = "test('same', { ...BASE, tag: '@req-R1' }, () => { work() })"
+  expect(compare(source, source.replace('@req-R1', '@req-R2')).changes).toEqual({ added: [], changed: [], removed: [] })
+  expect(compare(source, source.replace('...BASE', '...OTHER')).changes.changed).toHaveLength(1)
+})
+// A rename is inferred from shared title vocabulary plus shared code. A title
+// made only of symbols contributes no words at all, so there is no vocabulary to
+// share and position alone must not become the rename evidence.
+it('never guesses a rename between symbol-only titles over unrelated bodies', () => {
+  const { changes } = compare("test('🛒', () => { addToCart() })", "test('🧾', () => { openReceipt() })")
+  expect(changes.changed).toEqual([])
+  expect(changes.added.map((test) => test.name)).toEqual(['🧾'])
+  expect(changes.removed.map((test) => test.name)).toEqual(['🛒'])
+})
+// An insertion can land on a line that already holds a matched statement, and it
+// exists on one side only. The alignment stays one row per source line pair: the
+// one-sided row must neither invent a range on the empty side nor push the
+// matched statement out of the row its own line belongs to.
+it('keeps one alignment row per source line when insertions share lines with matches', async () => {
+  const before = "test('same', () => {\n  a()\n  b(); c()\n})"
+  const after = "test('same', () => {\n  a(); x()\n  y(); b(); c()\n})"
+  const edits = await meaningfulChangeLines(pairTestDeclarations(extractTestMetadataFromSource('a.spec.ts', before).tests, extractTestMetadataFromSource('a.spec.ts', after).tests))
+  expect(edits).toMatchObject({ before: [], after: [2, 3] })
+  expect(edits.alignment).toEqual([
+    { before: { line: 1, endLine: 1 }, after: { line: 1, endLine: 1 } },
+    { before: { line: 2, endLine: 2 }, after: { line: 2, endLine: 2 } },
+    { before: { line: 3, endLine: 3 }, after: { line: 3, endLine: 3 } },
+  ])
+})

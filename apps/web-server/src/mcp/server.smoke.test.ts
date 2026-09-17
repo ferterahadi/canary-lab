@@ -4,7 +4,7 @@ import path from 'path'
 import type { FastifyInstance } from 'fastify'
 
 import { createServer } from '../server'
-import { mcpErrorLogger, mcpRequestUrl } from './server'
+import { mcpErrorLogger, mcpRequestUrl, uiUrlFromAddress } from './server'
 
 import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
@@ -240,6 +240,17 @@ describe('MCP HTTP server (smoke)', () => {
     const cause = new Error('broken adapter')
     mcpErrorLogger({ log }, 'adapter failed')(cause)
     expect(error).toHaveBeenCalledWith({ err: cause }, 'adapter failed')
+  })
+
+  // The UI origin handed to agents comes from the live bind, so the port in a
+  // tool result is the port something is actually serving even after a fallback.
+  // Non-TCP binds have no origin to offer: `address()` is null until `listen`
+  // resolves, and a unix socket reports its path. Both must stay absent rather
+  // than become a link to a guessed host.
+  it('derives the UI origin from a TCP bind only', () => {
+    expect(uiUrlFromAddress({ address: '127.0.0.1', family: 'IPv4', port: 7420 })).toBe('http://127.0.0.1:7420')
+    expect(uiUrlFromAddress(null)).toBeUndefined()
+    expect(uiUrlFromAddress('/tmp/canary-lab.sock')).toBeUndefined()
   })
 
   // These E2E tests exercise claim flows across interactive client kinds

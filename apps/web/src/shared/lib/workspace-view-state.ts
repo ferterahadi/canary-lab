@@ -89,19 +89,21 @@ export interface RunOpenTarget {
 export interface ReviewFocus { file?: string; line?: number; mode?: 'english' | 'code'; baseline?: 'run'; change?: 'added' | 'changed' | 'removed'; test?: string }
 
 /** URL-mode MCP elicitation explicitly invites the human to answer this
- * checkpoint in the existing UI. This is a UI ownership hint, not authority
- * for an API call, and cannot unlock agent-work checkpoints or another flight. */
-export function isElicitationReview(flightId: string, checkpointKind: string): boolean {
+ * checkpoint in the existing UI. The token is the fact and the review flag is
+ * derived from it, so the two can never disagree about the same URL. This is a
+ * UI ownership hint, not authority for an API call, and cannot unlock
+ * agent-work checkpoints or another flight. */
+export function checkpointInputToken(flightId: string, checkpointKind: string): string | undefined {
   const params = new URLSearchParams(window.location.search)
+  const token = params.get('inputToken')
   return checkpointKind !== 'external-work' && params.get('view') === 'flights'
     && params.get('flight') === flightId
-    && !!params.get('inputToken')
     && params.get('elicitation') === `${flightId}:${checkpointKind}`
+    && token ? token : undefined
 }
 
-export function checkpointInputToken(flightId: string, checkpointKind: string): string | undefined {
-  return isElicitationReview(flightId, checkpointKind)
-    ? new URLSearchParams(window.location.search).get('inputToken') ?? undefined : undefined
+export function isElicitationReview(flightId: string, checkpointKind: string): boolean {
+  return checkpointInputToken(flightId, checkpointKind) !== undefined
 }
 
 export interface PersistedView {

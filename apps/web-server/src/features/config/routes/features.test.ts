@@ -511,6 +511,33 @@ describe('POST /api/features/:name/commit-dirty', () => {
     }
   })
 
+  // `git diff --cached --quiet` answers in its exit code: 0 clean, 1 staged
+  // changes. Anything else is git failing, not an answer — committing on it
+  // would treat "I could not tell" as "there is something to accept".
+  it('refuses to commit when the staged-change check itself fails', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+
+    const realRunGit = vi.mocked(runGit).getMockImplementation()!
+    vi.mocked(runGit).mockImplementation(async (cwd, args) =>
+      args[0] === 'diff' ? { code: 2, stdout: '', stderr: '' } : realRunGit(cwd, args),
+    )
+    try {
+      const app = await build({ dirtySpecStore: store })
+      const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
+      expect(res.statusCode).toBe(500)
+      expect((res.json() as { error: string }).error).toBe('git diff failed')
+      // Nothing was committed on an unreadable answer.
+      expect(execFileSync('git', ['status', '--porcelain'], { cwd: dir }).toString()).toContain('e2e/a.spec.ts')
+    } finally {
+      vi.mocked(runGit).mockImplementation(realRunGit)
+    }
+  })
+
   it('falls back to "git commit failed" when git exits nonzero with no output', async () => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
     initGitFeature(dir)

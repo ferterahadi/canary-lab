@@ -52,6 +52,20 @@ describe('elicited domain input', () => {
     expect(JSON.parse(text(result)).targetUrls.default).toBe('https://staging.example.com')
   })
 
+  // An update omitting targetUrls asks for them the same way a create does, and
+  // the answer is written against the configuration that was on disk when the
+  // question was asked.
+  it('elicits target URLs for an update that omits them, then saves the answer', async () => {
+    const f = feature()
+    const tools = captureTools(registerReadTools, f, facts)
+    const created = JSON.parse(text(await tools.raw('create_verification_config', { featureId: 'checkout', name: 'Staging', playwrightEnvsetId: 'local', targetUrls: { default: 'https://staging.example.com' } }, context())))
+    const args = { featureId: 'checkout', configId: created.id, name: 'Beta', playwrightEnvsetId: 'local' }
+    const opened = await tools.raw('update_verification_config', args, context()) as InputRequiredResult
+    expect(opened.resultType).toBe('input_required')
+    const saved = await tools.raw('update_verification_config', args, context(opened.requestState, { action: 'accept', content: { default: 'https://beta.example.com' } }))
+    expect(JSON.parse(text(saved))).toMatchObject({ id: created.id, name: 'Beta', targetUrls: { default: 'https://beta.example.com' } })
+  })
+
   it('uses the current flight options, rejects stale replies, and leaves agent work alone', async () => {
     const f = feature()
     let manifest = { flightId: 'flight', feature: 'checkout', status: 'waiting-for-approval', updatedAt: 'v1', stages: [{ key: 'similarity', status: 'waiting-for-approval', checkpoint: { kind: 'similarity-choice', message: 'Reuse or create?', options: ['rerun', 'new'] } }] }
@@ -119,5 +133,59 @@ describe('elicited domain input', () => {
     const stale = await tools.raw('save_portify', { workflowId: 'w1', confirm: true, review_revision: JSON.parse(text(accepted)).review_revision }, context())
     expect(text(stale)).toContain('changed')
     expect(savePortify).not.toHaveBeenCalled()
+  })
+
+  it('carries a revise decision and its feedback to the command that needs both', async () => {
+    const manifest = { workflowId: 'w1', feature: 'checkout', status: 'ready-to-save', verification: { ok: true, instances: [{ ok: true }] } }
+    const tools = captureTools(registerPortifyTools, { getPortify: () => manifest }, facts)
+    const args = { workflowId: 'w1' }
+    const opened = await tools.raw('review_portify', args, context()) as InputRequiredResult
+    // No diff on this manifest: the review still reports diff stats rather than
+    // failing to summarize, because the verification is the proof being reviewed.
+    expect(JSON.stringify(opened.inputRequests)).toContain('diffStats')
+    const revised = JSON.parse(text(await tools.raw('review_portify', args, context(opened.requestState, { action: 'accept', content: { choice: 'revise', feedback: 'use the sibling overlay' } }))))
+    expect(revised).toMatchObject({ decision: 'revise', feedback: 'use the sibling overlay', next: expect.stringContaining('revise_external_portify') })
+  })
+
+  it('points a discard decision at cancel_portify, not save_portify', async () => {
+    const manifest = { workflowId: 'w1', feature: 'checkout', status: 'ready-to-save', verification: { ok: true, instances: [] }, diff: '' }
+    const tools = captureTools(registerPortifyTools, { getPortify: () => manifest }, facts)
+    const args = { workflowId: 'w1' }
+    const opened = await tools.raw('review_portify', args, context()) as InputRequiredResult
+    const discarded = JSON.parse(text(await tools.raw('review_portify', args, context(opened.requestState, { action: 'accept', content: { choice: 'discard' } }))))
+    expect(discarded).toMatchObject({ decision: 'discard', next: expect.stringContaining('cancel_portify') })
+    expect(discarded).not.toHaveProperty('feedback')
+  })
+
+  // The review asks about a VERIFIED diff. Without one there is nothing to
+  // decide, so neither of these may open a question the user could answer wrongly.
+  it.each([
+    ['the workflow is gone', undefined, /not found: w1/],
+    ['it has not been verified yet', { workflowId: 'w1', feature: 'checkout', status: 'running' }, /The workflow is running/],
+  ])('refuses to ask for a decision when %s', async (_case, manifest, expected) => {
+    const tools = captureTools(registerPortifyTools, { getPortify: () => manifest }, facts)
+    const result = await tools.raw('review_portify', { workflowId: 'w1' }, context())
+    expect(result).not.toHaveProperty('inputRequests')
+    expect(text(result)).toMatch(expected)
+  })
+
+  it('hands the verified proof to the agent to ask in chat when the client has no form', async () => {
+    const manifest = { workflowId: 'w1', feature: 'checkout', status: 'ready-to-save', verification: { ok: true, instances: [{ ok: true }] }, diff: '--- a\n+++ b\n' }
+    const tools = captureTools(registerPortifyTools, { getPortify: () => manifest }, { surface: 'other', canFanOut: false, sampling: false })
+    const result = JSON.parse(text(await tools.raw('review_portify', { workflowId: 'w1' }, context())))
+    expect(result).toMatchObject({ workflowId: 'w1', status: 'needs-input', reason: 'elicitation-unavailable', verification: { ok: true } })
+    expect(result.next).toMatch(/revise_external_portify requires their feedback/)
+  })
+
+  // Target URLs are the one verification input the user must supply, and a client
+  // with no form has to be told to ask rather than pick something plausible.
+  it('asks in chat for target URLs when the client cannot show a form', async () => {
+    const f = feature()
+    const tools = captureTools(registerReadTools, f, { surface: 'other', canFanOut: false, sampling: false })
+    const result = JSON.parse(text(await tools.raw('create_verification_config', { featureId: 'checkout', name: 'Staging', playwrightEnvsetId: 'local' }, context())))
+    expect(result).toMatchObject({ status: 'needs-input', reason: 'elicitation-unavailable' })
+    expect(result.targets.length).toBeGreaterThan(0)
+    expect(result.next).toMatch(/Never invent URLs or select production implicitly/)
+    expect(fs.existsSync(path.join(f.dir, 'verification.configs.json'))).toBe(false)
   })
 })

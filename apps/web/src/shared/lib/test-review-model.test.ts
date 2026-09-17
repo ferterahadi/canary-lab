@@ -16,6 +16,17 @@ it('uses semantic source ranges instead of colouring formatting-only line edits'
   expect(rows.filter((row) => row.change != null)).toEqual([expect.objectContaining({ beforeLine: 7, afterLine: 7, beforeChanged: true, afterChanged: true })])
   expect(rows.find((row) => row.afterLine === 5)).toMatchObject({ beforeChanged: false, afterChanged: false, change: undefined })
 })
+// The reverse of the test above: semantic analysis can flag a line the text diff
+// paired as equal (a helper it calls now behaves differently). Such a row carries
+// no diff group of its own, so it joins the first one rather than rendering plain.
+it('colours a line the text diff called equal when semantic analysis flags it', () => {
+  const review = testFileReview()
+  review.meaningfulChanges = { before: [4], after: [4] }
+  const rows = comparedTestRows(review, { file: review.file, ...review.after.tests[0] }, 'changed')
+  expect(rows.filter((row) => row.change != null)).toEqual([
+    expect.objectContaining({ beforeLine: 4, afterLine: 4, change: 1, beforeChanged: true, afterChanged: true }),
+  ])
+})
 it('aligns corresponding statements after wrapping without including another test range', () => {
   const review = testFileReview()
   review.after.source = review.before.source.replace("test('a', async () => {", "test(\n 'renamed',\n async () => {")
@@ -31,6 +42,22 @@ it('aligns corresponding statements after wrapping without including another tes
   expect(rows.at(-1)).toMatchObject({ beforeLine: 8, afterLine: 10, before: '})', after: '})' })
   expect(rows.filter((row) => row.beforeLine != null)).toHaveLength(6)
   expect(rows.filter((row) => row.afterLine != null)).toHaveLength(8)
+})
+// File-level alignment pairs a line inside the selected test with one outside it
+// (shared setup, an import, a neighbouring test). Only the half that falls inside
+// may contribute a row — the other half belongs to whatever selection owns it —
+// and the selected declaration must still be reported line for line.
+it('takes only the inside half of an alignment pair that reaches outside the selected test', () => {
+  const review = testFileReview()
+  review.comparisonAlignment = [
+    { before: { line: 1, endLine: 1 }, after: { line: 4, endLine: 4 } },
+    { before: { line: 6, endLine: 6 }, after: { line: 1, endLine: 1 } },
+  ]
+  const rows = comparedTestRows(review, { file: review.file, ...review.after.tests[0] }, 'changed')
+  expect(rows.filter((row) => row.beforeLine != null).map((row) => row.beforeLine)).toEqual([3, 4, 5, 6, 7, 8])
+  expect(rows.filter((row) => row.afterLine != null).map((row) => row.afterLine)).toEqual([3, 4, 5, 6, 7, 8])
+  expect(rows.filter((row) => row.before === null)).toHaveLength(4)
+  expect(rows.filter((row) => row.after === null)).toHaveLength(4)
 })
 it('aligns only a renamed test despite inserted shared setup and a neighbouring test', () => {
   const review = testFileReview()

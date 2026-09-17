@@ -297,6 +297,49 @@ describe('adoptSpecEdits', () => {
 
     expect(await adoptSpecEdits(ctx)).toEqual({ ok: false, reason: 'snapshot-failed' })
   })
+
+  // The two failures that land AFTER the reviewed copy is already in place. The
+  // run's verdict is measured against that copy, so a half-installed one is
+  // worse than a refused adoption.
+  function installed(runnerLog: RunnerLog) {
+    const { ctx } = ctxFor({}, { runnerLog })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', WEAKER)
+    recordSpecEdits(ctx)
+    return ctx
+  }
+
+  it('rolls the executed copy back when the manifest write fails', async () => {
+    const runnerLog = fakeRunnerLog()
+    const ctx = installed(runnerLog)
+    vi.spyOn(ctx.stateSink, 'patchManifest').mockImplementation(() => { throw new Error('manifest locked') })
+
+    expect(await adoptSpecEdits(ctx)).toEqual({ ok: false, reason: 'snapshot-failed' })
+    // The bytes the run actually executed are back, not the adopted edit.
+    expect(fs.readFileSync(path.join(ctx.paths.suiteSnapshotDir, 'e2e', 'a.spec.ts'), 'utf8')).toBe(SPEC_A)
+    expect(runnerLog.warnings.join('\n')).toContain('reviewed suite snapshot failed: manifest locked')
+  })
+
+  it('says where the original was left when the rollback itself fails', async () => {
+    const runnerLog = fakeRunnerLog()
+    const ctx = installed(runnerLog)
+    // A non-Error throw: the log line is the only record of what happened, so it
+    // has to stay readable for anything a collaborator can throw.
+    vi.spyOn(ctx.stateSink, 'patchManifest').mockImplementation(() => { throw 'manifest locked' })
+    const realRename = fs.renameSync
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (String(from).endsWith(`${path.sep}original`)) throw new Error('EPERM')
+      return realRename(from, to)
+    })
+
+    expect(await adoptSpecEdits(ctx)).toEqual({ ok: false, reason: 'snapshot-failed' })
+    const warned = runnerLog.warnings.join('\n')
+    // Unfindable original bytes would be the same as losing them.
+    expect(warned).toMatch(/suite rollback failed; original retained at .*\.review-/)
+    expect(warned).toContain('reviewed suite snapshot failed: manifest locked')
+    expect(fs.existsSync(path.join(warned.match(/retained at (\S+):/)![1], 'original', 'e2e', 'a.spec.ts'))).toBe(true)
+  })
 })
 
 describe('refreshSpecEdits', () => {

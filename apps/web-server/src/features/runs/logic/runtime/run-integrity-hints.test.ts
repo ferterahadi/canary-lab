@@ -141,8 +141,8 @@ describe('deriveIntegrityHints', () => {
 
 describe('INTEGRITY_HINT_DISCLOSURE', () => {
   it('names how the detection was checked, in the words the disclosure rule requires', () => {
-    expect(INTEGRITY_HINT_DISCLOSURE).toContain('one AI labelled')
-    expect(INTEGRITY_HINT_DISCLOSURE).toContain('a second AI checked blind')
-    expect(INTEGRITY_HINT_DISCLOSURE).toContain('no human')
+    expect(INTEGRITY_HINT_DISCLOSURE).toMatch(/one AI labelled/i)
+    expect(INTEGRITY_HINT_DISCLOSURE).toMatch(/second AI checked 40 samples without seeing those labels/i)
+    expect(INTEGRITY_HINT_DISCLOSURE).toMatch(/no human/i)
   })
 })

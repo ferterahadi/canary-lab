@@ -125,3 +125,59 @@ it('reads historical names and bodies without executing specs or including new w
     expect(spawner).not.toHaveBeenCalled()
   } finally { await app.close() }
 })
+
+// A helper-declared test: Playwright reports the spec that loaded it as `file`
+// and the helper that ran `test(...)` as `originFile`. The saved roster keeps
+// both, so a recorded listing has to AST-extract the helper too — the body and
+// steps a reader sees live there, not in the spec.
+function helperDeclaredRun(): { featuresDir: string; logsDir: string; snapshot: string; spec: string } {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'recorded-helper-')))
+  roots.push(root)
+  const featuresDir = path.join(root, 'features')
+  const featureDir = path.join(featuresDir, 'merchant')
+  fs.mkdirSync(featureDir, { recursive: true })
+  fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), "module.exports = { config: { name: 'merchant', featureDir: __dirname, repos: [], envs: ['local'] } }")
+  const runDir = path.join(root, 'logs/runs/r1')
+  const snapshot = path.join(runDir, 'suite')
+  fs.mkdirSync(path.join(snapshot, 'e2e'), { recursive: true })
+  fs.writeFileSync(path.join(snapshot, 'e2e/shared.ts'), "export const declare = () => {\n  test('checks out via helper', async () => { await page.goto('/cart') })\n}\n")
+  const spec = path.join(snapshot, 'e2e/a.spec.ts')
+  fs.writeFileSync(spec, "import { declare } from './shared'\n\ndeclare()\n")
+  fs.writeFileSync(path.join(snapshot, '.canary-suite-tests.json'), JSON.stringify([
+    { file: 'e2e/a.spec.ts', line: 2, title: 'checks out via helper', originFile: 'e2e/shared.ts', originLine: 2 },
+  ]))
+  writeManifest(path.join(runDir, 'manifest.json'), { runId: 'r1', feature: 'merchant', featureDir, startedAt: 'now', status: 'passed', services: [], healCycles: 0, suiteSnapshot: { kind: 'taken', dir: snapshot, takenAt: 'now', digest: 'digest' } })
+  // No reporter identities: the roster alone is the inventory, which is what a
+  // run that never executed the helper's test looks like.
+  fs.writeFileSync(path.join(runDir, 'e2e-summary.json'), JSON.stringify({ complete: true, total: 0, passed: 0, passedNames: [], failed: [], knownTests: [] }))
+  return { featuresDir, logsDir: path.join(root, 'logs'), snapshot, spec }
+}
+
+async function listRecorded(featuresDir: string, logsDir: string) {
+  const app = Fastify()
+  await featuresRoutes(app, { featuresDir, logsDir, playwrightListSpawner: vi.fn(() => { throw new Error('Historical modules must not execute') }) })
+  try {
+    const response = await app.inject('/api/features/merchant/tests?runId=r1')
+    expect(response.statusCode).toBe(200)
+    return response.json()
+  } finally { await app.close() }
+}
+
+it('reads a helper-declared test out of the saved helper file, not the spec that loaded it', async () => {
+  const { featuresDir, logsDir, snapshot } = helperDeclaredRun()
+  const specs = await listRecorded(featuresDir, logsDir)
+  expect(specs).toHaveLength(1)
+  expect(specs[0].file).toBe(path.join(snapshot, 'e2e/a.spec.ts'))
+  expect(specs[0].tests).toEqual([expect.objectContaining({ name: 'checks out via helper', bodySource: expect.stringContaining('/cart') })])
+  expect(specs[0]).not.toHaveProperty('recordedSourceUnavailable')
+})
+
+// The snapshot is the only source a recorded listing may read, so a file missing
+// from it is not something to go looking for in today's workspace: the row stays,
+// flagged, with no body.
+it('flags a recorded spec whose saved source is gone instead of falling back to the workspace', async () => {
+  const { featuresDir, logsDir, spec } = helperDeclaredRun()
+  fs.rmSync(spec)
+  const specs = await listRecorded(featuresDir, logsDir)
+  expect(specs[0]).toMatchObject({ file: spec, recordedSourceUnavailable: true })
+})

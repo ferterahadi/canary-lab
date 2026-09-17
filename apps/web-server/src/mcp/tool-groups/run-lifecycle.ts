@@ -4,7 +4,7 @@
 // profile arrays in ../tool-support.ts (see the cl_add-mcp-tool skill).
 import { z } from 'zod'
 import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/server'
-import { requestUserInput } from '../elicitation'
+import { applyUserInput, requestUserInput } from '../elicitation'
 import { normalizeRunCounts } from '../../features/runs/logic/heal/external-heal-surface'
 import { isHealClaimAllowed } from '../../features/runs/logic/heal/heal-claim-policy'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
@@ -34,10 +34,12 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     },
   }, async (args, request) => {
     const { feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new, perturbation } = args
-    const ask = (fallback: () => CallToolResult, message = 'Another run uses these repositories. Run now in an isolated worktree, or queue until they are free?') => requestUserInput(request, ctx.clientFacts(), {
-      scope: ['run-isolation', deps.projectRoot, args], mode: 'form',
-      schema: z.object({ isolation: z.enum(['worktree', 'queue']) }), message, fallback,
-    }, async (answer) => begin(answer.isolation))
+    const isolationQuestion = { scope: ['run-isolation', deps.projectRoot, args], mode: 'form' as const, schema: z.object({ isolation: z.enum(['worktree', 'queue']) }) }
+    // One `chosen` for both entries: the fresh ask never runs it (it returns the
+    // question), and the answering call reaches it through `applyUserInput`.
+    const chosen = async (answer: { isolation: 'worktree' | 'queue' }) => begin(answer.isolation)
+    const ask = (fallback: () => CallToolResult, message = 'Another run uses these repositories. Run now in an isolated worktree, or queue until they are free?') =>
+      requestUserInput(request, ctx.clientFacts(), { ...isolationQuestion, message, fallback }, chosen)
     const begin = async (isolation = args.isolation): Promise<CallToolResult | InputRequiredResult> => {
       try {
         const requestedRef = runId ?? run_ref
@@ -207,7 +209,10 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         return failureResult(err)
       }
     }
-    return request?.mcpReq.requestState?.() !== undefined ? ask(() => errorResult('Elicitation unavailable')) : begin()
+    // A call carrying requestState is ANSWERING the isolation question, not asking
+    // to start again: matching it to the open question is what turns the user's
+    // choice into the run. It needs no capability fallback — the answer is here.
+    return request?.mcpReq.requestState?.() !== undefined ? applyUserInput(request, isolationQuestion, chosen) : begin()
   })
 
   registerTool('boot_services', {
@@ -220,10 +225,12 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     },
   }, async (args, request) => {
     const { feature, env } = args
-    const ask = (fallback: () => CallToolResult, message = 'Boot in an isolated worktree now, or queue until the repositories are free?') => requestUserInput(request, ctx.clientFacts(), {
-      scope: ['boot-isolation', deps.projectRoot, args], mode: 'form',
-      schema: z.object({ isolation: z.enum(['worktree', 'queue']) }), message, fallback,
-    }, async (answer) => begin(answer.isolation))
+    const isolationQuestion = { scope: ['boot-isolation', deps.projectRoot, args], mode: 'form' as const, schema: z.object({ isolation: z.enum(['worktree', 'queue']) }) }
+    // One `chosen` for both entries: the fresh ask never runs it (it returns the
+    // question), and the answering call reaches it through `applyUserInput`.
+    const chosen = async (answer: { isolation: 'worktree' | 'queue' }) => begin(answer.isolation)
+    const ask = (fallback: () => CallToolResult, message = 'Boot in an isolated worktree now, or queue until the repositories are free?') =>
+      requestUserInput(request, ctx.clientFacts(), { ...isolationQuestion, message, fallback }, chosen)
     const begin = async (isolation = args.isolation): Promise<CallToolResult | InputRequiredResult> => {
       try {
         const outcome = await deps.startRun(feature, env, undefined, isolation, 'boot')
@@ -263,7 +270,10 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         return failureResult(err)
       }
     }
-    return request?.mcpReq.requestState?.() !== undefined ? ask(() => errorResult('Elicitation unavailable')) : begin()
+    // A call carrying requestState is ANSWERING the isolation question, not asking
+    // to start again: matching it to the open question is what turns the user's
+    // choice into the boot. It needs no capability fallback — the answer is here.
+    return request?.mcpReq.requestState?.() !== undefined ? applyUserInput(request, isolationQuestion, chosen) : begin()
   })
 
   registerTool('pause_run', {

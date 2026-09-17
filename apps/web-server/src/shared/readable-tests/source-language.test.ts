@@ -90,10 +90,17 @@ describe('whole-file English', () => {
   it.each(['id', 'newId'])('renders the reported nested polling callback as prose while preserving %s and the second argument', (id) => {
     const source = `await poll(async () => (await allMessages(request)).messages.find((message: any) => message.messageId === ${id}), 60_000)`
     const item = rows(source)[0]
-    expect(item.text).toBe(`Call poll and wait for it to finish. Pass these arguments in order:\n1. an asynchronous arrow function with no parameters that returns the result of find on (messages from (the awaited result of allMessages with request)) with (an arrow function receiving message of type any that returns whether message.messageId is strictly equal to ${id})\n2. 60_000`)
+    expect(item).toMatchObject({ kind: 'flow', text: 'Call poll and wait for it to finish. Pass these arguments in order:', children: [
+      { kind: 'flow', text: 'Argument 1: an asynchronous arrow function with no parameters. When called:', children: [
+        { kind: 'flow', text: 'Call find on (messages from (the awaited result of allMessages with request)) and return its result, passing an arrow function receiving message of type any. When called:', children: [
+          { text: `Return message.messageId is strictly equal to ${id}` },
+        ] },
+      ] },
+      { text: 'Argument 2: 60_000' },
+    ] })
     expect(item.source.snippet).toBe(source)
     expect(item.spans.map((span) => span.text).join('')).toBe(item.text)
-    expect(item.text).not.toMatch(/await:|call:|property `|with arguments:|returning:/)
+    expect(english(source)).not.toMatch(/await:|call:|property `|with arguments:|returning:/)
   })
 
   it('explains conditional spread lists in order and records the complete loop header range', () => {
@@ -126,7 +133,7 @@ describe('whole-file English', () => {
     ['this.api.send(value)', 'Call this.api.send with value'],
     ['super.send(value)', 'Call super.send with value'],
     ['(await build()).send(value)', 'Call send on ((the awaited result of build())) with value'],
-    ['use(value => value + 1)', '1. an arrow function receiving value that returns value plus 1'],
+    ['use(value => value + 1)', 'passing an arrow function receiving value. When called:\nReturn value plus 1'],
     ['await complete', 'Wait for complete'],
     ['await optional?.()', 'optional'],
   ])('keeps related nesting readable and explicit: %s', (source, expected) => {
@@ -155,11 +162,13 @@ describe('whole-file English', () => {
 }, 90_000)`
     const text = english(source)
     expect(text).toContain('Call poll and wait for it to finish. Pass these arguments in order:')
-    expect(text).toContain('an asynchronous arrow function with no parameters that runs these statements when called:')
-    expect(text).toContain('  Set constant data to the awaited result of allMessages with request')
-    expect(text).toContain('  If data is falsy:\n    Return null')
-    expect(text).toContain('  If data.ready is truthy:\n    Check that data.count equals 1\n    Return true\n  Else:\n    Return false')
-    expect(text).toContain('\n2. 90_000')
+    expect(rows(source)[1]).toMatchObject({ kind: 'flow', text: 'Argument 1: an asynchronous arrow function with no parameters. When called, run these statements:', children: [
+      { text: 'Set constant data to the awaited result of allMessages with request' },
+      { kind: 'flow', text: 'If data is falsy', children: [{ text: 'Return null' }] },
+      { kind: 'flow', text: 'If data.ready is truthy', children: [{ text: 'Check that data.count equals 1' }, { text: 'Return true' }] },
+      { kind: 'flow', text: 'Else', children: [{ text: 'Return false' }] },
+    ] })
+    expect(text).toContain('\nArgument 2: 90_000')
     expect(english('run(() => {})')).toContain('Do nothing.')
     expect(english('run(() => { debugger; })')).toContain('debugger')
     expect(rows(source)[0].source.snippet).toBe(source)
@@ -192,8 +201,9 @@ describe('whole-file English', () => {
     ])
     expect(story.children[0].text).toContain('request.get with (text formed by joining baseUrl, "/v4/whatsapp/conversations"), (an object with headers set to existingHeaders; params set to scope)')
     expect(story.children[4].text).toContain('value of type any')
-    expect(story.children[4].text).toContain('is strictly equal to')
-    expect(story.children[4].text).toContain('(the result of normalizePhone with value.guestAddress) is strictly equal to (the result of normalizePhone with approvedRecipient)')
+    expect(story.children[4]).toMatchObject({ kind: 'flow', children: [
+      { text: 'Return (the result of normalizePhone with value.guestAddress) is strictly equal to (the result of normalizePhone with approvedRecipient)' },
+    ] })
     expect(story.children[8].text).toBe('Return row')
     for (const item of story.children) {
       expect(item.source.snippet).toBe(source.split('\n')[item.source.startLine - 1].trim())

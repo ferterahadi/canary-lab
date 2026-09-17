@@ -81,7 +81,10 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
         })
       } catch (err) {
         abandonClaim()
-        if (err instanceof FeatureNotFoundError) return errorResult(err.message)
+        // No FeatureNotFoundError arm: `resolve()` runs first and already
+        // returned "feature not found" on the same lookup, so `begin` only ever
+        // runs for a feature that exists. The other three tools here call their
+        // engine directly and do need one.
         if (err instanceof CoverageJobConflictError) return errorResult(`${err.message} (existing job ${err.existingJobId})`)
         throw err
       }

@@ -13,6 +13,14 @@ describe('coverage activity ownership', () => {
     const later = { ...job, jobId: 'j2', startedAt: '2026-09-11T00:01:00Z' }
     expect(stageCoverageJobs([later, { ...job, feature: 'other' }, { ...job, kind: 'coverage' }, job], 'checkout', 'docs')).toEqual([job, later])
   })
+  // Two jobs can carry the same `startedAt`: the index stores whole seconds, and
+  // a summary and its mapping job are kicked off together when a stage reruns.
+  // Without the jobId tie-break the rows would swap between renders.
+  it('orders jobs started in the same instant by jobId, whatever order they arrive in', () => {
+    const first = { ...job, jobId: 'j0' }
+    expect(stageCoverageJobs([job, first], 'checkout', 'docs')).toEqual([first, job])
+    expect(stageCoverageJobs([first, job], 'checkout', 'docs')).toEqual([first, job])
+  })
   it('tails only running internal sessions and leaves external jobs to the existing external Activity rows', () => {
     const sessions = coverageSessionSources([job, { ...job, jobId: 'j2', kind: 'coverage', status: 'running' }, { ...job, producer: 'external' }])
     expect(sessions).toEqual([

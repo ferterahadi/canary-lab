@@ -146,8 +146,7 @@ export function registerReadTools(ctx: ToolGroupContext): void {
     if (!feature) return errorResult(`feature not found: ${featureId}`)
     const save = async (urls: Record<string, string>) => {
       try {
-        const config = createVerificationConfig(feature, { name, targetUrls: urls, playwrightEnvsetId }, deps.workspaceEvents)
-        return config ? asJsonResult(config) : errorResult('verification config not found')
+        return asJsonResult(createVerificationConfig(feature, { name, targetUrls: urls, playwrightEnvsetId }, deps.workspaceEvents))
       } catch (err) {
         return failureResult(err)
       }

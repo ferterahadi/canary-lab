@@ -100,17 +100,20 @@ function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   }
 }
 
-function ctxFor(m: FlightManifest, flightDir = path.join(logsDir, 'flights', m.flightId)): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[] } {
+function ctxFor(m: FlightManifest, flightDir = path.join(logsDir, 'flights', m.flightId)): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[]; logs: string[] } {
   const state = { m }
   const progressLog: unknown[] = []
+  const logs: string[] = []
   const setStage = (key: FlightStageKey, patch: Partial<FlightStage>): void => {
     state.m = { ...state.m, stages: state.m.stages.map((s) => (s.key === key ? { ...s, ...patch } : s)) }
   }
   return {
     progressLog,
+    logs,
     ctx: stageContextStub({
       manifest: () => state.m,
       flightDir,
+      appendLog: (line) => { logs.push(line) },
       setProgress: (progress) => { progressLog.push(progress) },
       addAgentSession: (session) => {
         const stage = state.m.stages.find((candidate) => candidate.key === 'specs-coverage')
@@ -131,6 +134,17 @@ function ctxFor(m: FlightManifest, flightDir = path.join(logsDir, 'flights', m.f
 
 describe('specs-coverage stage', () => {
   const SPEC = `import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'\n\ntest('checkout @req-R1 @path-happy', async ({ page }) => { expect(1).toBe(1) })\n`
+  // A nested ternary is the one readability finding that is a warning rather
+  // than an error: the spec ships, and the finding still has to be said out loud.
+  const NESTED_TERNARY_SPEC = [
+    "import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'",
+    '',
+    "test('checkout @req-R1 @path-happy', async ({ page }) => {",
+    "  const label = 1 > 0 ? (2 > 1 ? 'a' : 'b') : 'c'",
+    "  expect(label).toBe('a')",
+    '})',
+    '',
+  ].join('\n')
 
   function ledger(pct: number, requirementId = 'R1'): CoverageLedger {
     return {
@@ -254,6 +268,23 @@ describe('specs-coverage stage', () => {
     expect(prompts[0]).toContain(path.join(featuresDir, 'checkout'))
     expect(prompts[0]).toContain('Declare each variable in a separate statement')
     expect(prompts[0]).not.toContain('{{')
+  })
+
+  // A non-fatal readability finding still has to reach the stage log: it is the
+  // only place a human learns the shipped spec carries prose the readable view
+  // cannot render, and the pass is allowed to continue past it.
+  it('logs a non-fatal readability finding instead of dropping it', async () => {
+    const ledgers = [ledger(0), ledger(0), ledger(100)]
+    const d = deps({
+      spawnAgent: writingSpawnAgent([], NESTED_TERNARY_SPEC),
+      validateSpecs: async () => ({ ok: true }),
+      coverage: { compute: (() => ledgers.shift() ?? ledger(100)) as never, runEngine: (async () => ({}) as never) as never },
+    })
+    const { ctx, logs } = ctxFor(manifest())
+
+    expect(await specsCoverageStage(d).run(ctx)).toMatchObject({ kind: 'done' })
+
+    expect(logs.join('')).toMatch(/\[specs\] readability review: .*no-nested-ternary/)
   })
 
   it('keeps tests on the allocated port when a hardcoded listener is portified later', () => {

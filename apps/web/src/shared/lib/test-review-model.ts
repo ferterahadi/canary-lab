@@ -48,7 +48,12 @@ export function comparedTestRows(review: TestFileReview, test: VersionTest, kind
       if (left[a]?.changed || right[b]?.changed) {
         change++
         while (left[a]?.changed || right[b]?.changed) append(left[a]?.changed ? a++ : undefined, right[b]?.changed ? b++ : undefined, true)
-      } else append(a < left.length ? a++ : undefined, b < right.length ? b++ : undefined, false)
+      // Both sides always have a row here: `compareText` appends unchanged text
+      // to `before` and `after` together, so unchanged rows are paired 1:1 in
+      // order, and the inner loop above has already drained every changed run.
+      // An exhausted side can therefore only be followed by changed rows on the
+      // other, which is the branch above — never this one.
+      } else append(a++, b++, false)
     }
   }
   if (!review.meaningfulChanges) return rows

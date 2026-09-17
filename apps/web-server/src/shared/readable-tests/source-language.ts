@@ -1,5 +1,5 @@
 import ts from 'typescript'
-import { BINARY_OPERATOR_PHRASES, expressionEnglish, parameterEnglish, statementEnglish, statementHeaderEnglish, typeEnglish } from '../controlled-english/ast-to-ir'
+import { BINARY_OPERATOR_PHRASES, callbackHeaderEnglish, expressionEnglish, parameterEnglish, statementEnglish, statementHeaderEnglish, typeEnglish } from '../controlled-english/ast-to-ir'
 import { renderEnglish } from '../controlled-english/english-renderer'
 import { symbolEvidence, type SemanticContext } from '../controlled-english/semantic-context'
 import { ASSERTION_RULES } from '../controlled-english/structured-english'
@@ -33,8 +33,8 @@ export function sourceExpressionText(node: ts.Expression): string {
       ? `all items from ${sourceArgumentText(item.expression)}` : ts.isOmittedExpression(item) ? 'an empty slot' : sourceArgumentText(item)).join(', ')}` : 'an empty list'
   }
   if (ts.isSpreadElement(node)) return `each item from ${sourceArgumentText(node.expression)} as a separate argument`
-  if (ts.isCallExpression(node) && !node.questionDotToken && !node.typeArguments?.length) {
-    return `the result of ${callTargetText(node.expression)}${node.arguments.length ? ` with ${node.arguments.map(sourceArgumentText).join(', ')}` : '()'}`
+  if (ts.isCallExpression(node) && !node.questionDotToken) {
+    return `the result of ${callTargetText(node.expression)}${callTypeArgumentsText(node)}${node.arguments.length ? ` with ${node.arguments.map(sourceArgumentText).join(', ')}` : '()'}`
   }
   if (ts.isAwaitExpression(node)) {
     const value = sourceExpressionText(node.expression)
@@ -49,9 +49,7 @@ export function sourceExpressionText(node: ts.Expression): string {
   }
   if (ts.isConditionalExpression(node)) return `(${sourceExpressionText(node.whenTrue)} if ${sourceConditionText(node.condition)}; otherwise ${sourceExpressionText(node.whenFalse)})`
   if (ts.isArrowFunction(node) && !node.typeParameters?.length) {
-    const asynchronous = node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)
-    const parameters = node.parameters.length ? `receiving ${node.parameters.map(sourceParameterText).join(', ')}` : 'with no parameters'
-    const signature = `an ${asynchronous ? 'asynchronous ' : ''}arrow function ${parameters}${node.type ? ` with return type ${renderEnglish(typeEnglish(node.type))}` : ''}`
+    const signature = sourceCallbackHeaderText(node)
     if (ts.isBlock(node.body)) return `${signature} that runs these statements when called:\n${indentText(callbackStatementText(node.body))}`
     const comparison = ts.isBinaryExpression(node.body) && COMPARISON_OPERATORS.has(node.body.operatorToken.kind)
     return `${signature} that returns ${comparison ? 'whether ' : ''}${sourceExpressionText(node.body)}`
@@ -84,9 +82,50 @@ function callTargetText(node: ts.Expression): string {
     ? `${node.name.text} on (${sourceExpressionText(node.expression)})` : sourceArgumentText(node)
 }
 
-/** Ordinary arrows already have a complete natural rendering. Other
- * callbacks retain the full grammar until their signatures and bodies can be
- * represented without losing any authored syntax. */
+function callTypeArgumentsText(node: ts.CallExpression): string {
+  return node.typeArguments?.length
+    ? ` with type ${node.typeArguments.length === 1 ? 'argument' : 'arguments'} ${node.typeArguments.map((type) => renderEnglish(typeEnglish(type))).join(', ')}`
+    : ''
+}
+
+export function sourceCallbackHeaderText(node: ts.ArrowFunction | ts.FunctionExpression): string {
+  if (ts.isFunctionExpression(node) || node.typeParameters?.length) return renderEnglish(callbackHeaderEnglish(node))
+  const asynchronous = node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)
+  const parameters = node.parameters.length ? `receiving ${node.parameters.map(sourceParameterText).join(', ')}` : 'with no parameters'
+  return `an ${asynchronous ? 'asynchronous ' : ''}arrow function ${parameters}${node.type ? ` with return type ${renderEnglish(typeEnglish(node.type))}` : ''}`
+}
+
+export function sourceCallbackExpressionCall(expression: ts.Expression): { call: ts.CallExpression; text: string } | undefined {
+  const awaited = ts.isAwaitExpression(expression)
+  const call = awaited ? expression.expression : expression
+  if (!ts.isCallExpression(call) || call.questionDotToken
+    || !call.arguments.some((argument) => ts.isArrowFunction(argument) || ts.isFunctionExpression(argument))) return undefined
+  return { call, text: `Call ${callTargetText(call.expression)}${callTypeArgumentsText(call)}${awaited ? ' and wait for it to finish' : ''}` }
+}
+
+/** Only split a direct call whose surrounding evaluation is represented here.
+ * Wrapped or optional expressions keep their complete expression rendering. */
+export function sourceCallbackCall(node: ts.Statement): { call: ts.CallExpression; text: string; role: 'setup' | 'action' } | undefined {
+  const binding = ts.isVariableStatement(node) && !node.modifiers?.length
+    && !(node.declarationList.flags & ts.NodeFlags.Using) && node.declarationList.declarations.length === 1
+    ? node.declarationList.declarations[0] : undefined
+  if (binding && (!ts.isIdentifier(binding.name) || binding.exclamationToken)) return undefined
+  const expression = ts.isExpressionStatement(node) || ts.isReturnStatement(node) ? node.expression : binding?.initializer
+  if (!expression) return undefined
+  const description = sourceCallbackExpressionCall(expression)
+  if (!description) return undefined
+  let { text } = description
+  if (ts.isReturnStatement(node)) text += ' and return its result'
+  if (binding && ts.isVariableStatement(node)) {
+    const kind = node.declarationList.flags & ts.NodeFlags.Const ? 'constant'
+      : node.declarationList.flags & ts.NodeFlags.Let ? 'variable' : 'function-scoped variable'
+    text += ` and store its result in ${kind} ${binding.name.getText()}${binding.type ? ` of type ${renderEnglish(typeEnglish(binding.type))}` : ''}`
+  }
+  return { call: description.call, text, role: binding ? 'setup' : 'action' }
+}
+
+/** Callbacks still embedded in an expression retain the full grammar when
+ * their signatures cannot be rendered inline without losing authored syntax. */
 export function hasStructuralCallback(node: ts.Node): boolean {
   if (ts.isFunctionExpression(node)) return true
   if (ts.isArrowFunction(node) && node.typeParameters?.length) return true
@@ -185,9 +224,9 @@ export function sourceStatementText(node: ts.Statement): string | undefined {
   }
   if (ts.isCallExpression(expression) || ts.isAwaitExpression(expression)) {
     const call = ts.isAwaitExpression(expression) ? expression.expression : expression
-    if (!ts.isCallExpression(call) || call.questionDotToken || call.typeArguments?.length) return ts.isAwaitExpression(expression)
+    if (!ts.isCallExpression(call) || call.questionDotToken) return ts.isAwaitExpression(expression)
       ? `Wait for ${sourceExpressionText(call)}` : sourceExpressionText(expression)
-    const target = callTargetText(call.expression)
+    const target = `${callTargetText(call.expression)}${callTypeArgumentsText(call)}`
     const wait = ts.isAwaitExpression(expression) ? ' and wait for it to finish' : ''
     if (call.arguments.some(ts.isArrowFunction)) {
       return `Call ${target}${wait}. Pass these arguments in order:\n`

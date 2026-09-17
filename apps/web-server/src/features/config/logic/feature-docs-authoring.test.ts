@@ -212,7 +212,10 @@ describe('linkFeatureDoc', () => {
     if (kind !== 'missing') expect(fs.readFileSync(dest, 'utf8')).toBe(kind === 'regular' ? 'existing' : 'original')
   })
 
-  it('keeps the broken link when symlink creation fails, with no copy or staging residue', () => {
+  // The thrown value is parameterized because the reported error is the whole
+  // channel: whatever the filesystem raises has to come back as readable text,
+  // not as "[object Object]".
+  it.each([['an Error', new Error('EPERM')], ['a bare string', 'EPERM']])('keeps the broken link when symlink creation fails with %s, leaving no copy or staging residue', (_label, thrown) => {
     const featureDir = writeFeatureConfig('relink_failure')
     const docsDir = path.join(featureDir, 'docs')
     fs.mkdirSync(docsDir)
@@ -220,7 +223,7 @@ describe('linkFeatureDoc', () => {
     fs.symlinkSync(path.join(tmpDir, 'gone.md'), dest)
     const target = path.join(tmpDir, 'moved.md')
     fs.writeFileSync(target, 'current source')
-    vi.spyOn(fs, 'symlinkSync').mockImplementation(() => { throw new Error('EPERM') })
+    vi.spyOn(fs, 'symlinkSync').mockImplementation(() => { throw thrown })
     const res = linkFeatureDoc(ctx(), { feature: 'relink_failure', targetPath: target, relPath: 'prd.md', relink: true })
     expect(res).toMatchObject({ ok: false, error: expect.stringContaining('EPERM') })
     expect(fs.readlinkSync(dest)).toBe(path.join(tmpDir, 'gone.md'))

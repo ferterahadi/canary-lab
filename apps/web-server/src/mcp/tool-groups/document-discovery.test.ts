@@ -6,8 +6,9 @@ import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelc
 import { captureTools } from './__fixtures__/tool-group-harness'
 import { registerCoverageAuthoringTools } from './authoring-coverage'
 import { registerFlightTools } from './flight'
-import { readDocsCollection } from '../../features/coverage/logic/coverage/docs-collection'
-import { documentHash, readDocumentSelection, writeDocumentSelection } from '../../features/coverage/logic/coverage/document-resolution'
+import { computeDocsHash, readDocsCollection } from '../../features/coverage/logic/coverage/docs-collection'
+import { documentHash, documentResolutionInput, readDocumentSelection, writeDocumentSelection } from '../../features/coverage/logic/coverage/document-resolution'
+import { inputFingerprint } from '../elicitation'
 import { coverageJobStore } from '../../features/coverage/logic/coverage/jobs/store'
 
 const facts = { surface: 'codex' as const, canFanOut: false, sampling: false, elicitation: { form: true, url: true } }
@@ -53,6 +54,63 @@ describe('document discovery before MCP 2.0 elicitation', () => {
     fs.renameSync(original.path, moved)
     return { ...f, link, moved, docsDir, baseline }
   }
+
+  // The previous path is read from the link at ask time, so a link replaced
+  // between the listing and the read has none to report. The question still has
+  // to name the document that needs repairing rather than collapse into prose
+  // about an empty path.
+  it('still asks for the moved path when the old target can no longer be read', async () => {
+    const f = brokenFixture()
+    const realReadlink = fs.readlinkSync
+    const readlink = vi.spyOn(fs, 'readlinkSync').mockImplementation(((target: fs.PathLike) => {
+      if (String(target) === f.link) throw new Error('EINVAL: replaced between the listing and the read')
+      return realReadlink(target)
+    }) as unknown as typeof fs.readlinkSync)
+    try {
+      const opened = await f.tools.raw('start_external_summary', f.args, context()) as InputRequiredResult
+      expect(opened.inputRequests?.answer).toMatchObject({ params: { message: expect.stringContaining('requirements.md') } })
+      expect(opened.inputRequests?.answer).toMatchObject({ params: { message: expect.stringContaining('Previous path: unknown') } })
+      expect(coverageJobStore(f.logsDir).list()).toHaveLength(0)
+    } finally {
+      readlink.mockRestore()
+    }
+  })
+
+  // Relink has to keep working for a client with neither elicitation nor a Canary
+  // UI to point at: it hands the broken document and its old path to the agent to
+  // ask in chat, and offers no link it cannot build.
+  it('hands the broken document to the agent when there is no elicitation and no UI to link', async () => {
+    const f = brokenFixture()
+    const tools = captureTools(registerCoverageAuthoringTools,
+      { projectRoot: f.projectRoot, featuresDir: f.featuresDir, store: { logsDir: f.logsDir }, workspaceEvents: { publish: f.publish } },
+      { surface: 'other', canFanOut: false, sampling: false })
+    const result = json(await tools.raw('start_external_summary', f.args, context()))
+    expect(result).toMatchObject({ status: 'needs-input', reason: 'elicitation-unavailable', brokenDoc: { relPath: 'requirements.md', linkTarget: path.join(f.repo, 'original.md') } })
+    expect(result).not.toHaveProperty('url')
+    expect(result.next).toMatch(/Do not omit the missing source or create a recovery copy/)
+    expect(coverageJobStore(f.logsDir).list()).toHaveLength(0)
+  })
+
+  // The receipt written when the user had nothing to add: every present document
+  // is excluded and no source was selected. Replaying that decision must not open
+  // a summary job with nothing to read — it sends the agent back to discovery.
+  it('returns to discovery when the recorded decision selected no documents', async () => {
+    const f = fixture()
+    const docsDir = path.join(f.featureDir, 'docs')
+    fs.mkdirSync(docsDir, { recursive: true })
+    fs.writeFileSync(path.join(docsDir, 'rejected.md'), 'not the requirements')
+    const resolution = { status: 'missing' as const, searched: [f.repo], reason: 'Nothing in the repository describes refunds.' }
+    writeDocumentSelection(f.featureDir, {
+      reviewedDocsHash: computeDocsHash([{ relPath: 'rejected.md', content: 'not the requirements' }]),
+      decisionKey: inputFingerprint(documentResolutionInput.parse(resolution)),
+      sources: [], searched: resolution.searched,
+      excluded: [{ relPath: 'rejected.md', sha256: documentHash('not the requirements') }],
+    })
+    const result = json(await f.tools.raw('start_external_summary', { ...f.args, document_resolution: resolution }, context()))
+    expect(result).toMatchObject({ status: 'needs-document-discovery', feature: 'checkout' })
+    expect(result.next).toMatch(/Never invent requirements/)
+    expect(coverageJobStore(f.logsDir).list()).toHaveLength(0)
+  })
 
   it('elicits a moved source path before discovery and repairs only the symlink', async () => {
     const f = brokenFixture()

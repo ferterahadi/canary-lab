@@ -2,7 +2,6 @@ import { z } from 'zod'
 import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import type { ExternalWorkCheckpointData, FlightManifest, FlightCheckpointResponse } from '../../../../shared/flights/types'
 import { readDocsCollection } from '../features/coverage/logic/coverage/docs-collection'
-import { findFeature } from '../features/config/logic/feature-authoring'
 import { resolveDocuments } from './document-resolution'
 import { issueCheckpointInput } from '../features/flights/logic/checkpoint-input'
 import { featureInputUrl } from './document-input'
@@ -60,12 +59,11 @@ export async function requestFlightCheckpoint(
       } : undefined),
       documentSource, repoPaths: flight.repoPaths, intent: flight.description,
       command: `respond_flight_checkpoint(flightId:"${flightId}")`, beforeWrite: unchanged,
-      ready: async () => {
+      ready: async (featureDir) => {
         const blocked = await unchanged()
         if (blocked) return blocked
-        const featureDir = findFeature(ctx.deps.featuresDir, flight.feature)?.featureDir
-        const sources = featureDir ? readDocsCollection(featureDir) : undefined
-        if (!sources?.entries.length) return inputPending('No requirements documents have been imported yet.')
+        const sources = readDocsCollection(featureDir)
+        if (!sources.entries.length) return inputPending('No requirements documents have been imported yet.')
         if (external) return asJsonResult({ flightId, status: 'documents-ready', docs: sources.entries.map((entry) => ({ relPath: entry.relPath, docsDir: sources.docsDir })),
           next: `Use only these selected source documents for the current docs handoff. Write its required output and submit with handOffId ${handoff?.handOffId}. Preserve the existing flight; do not start a separate coverage job or ask again.`,
         })

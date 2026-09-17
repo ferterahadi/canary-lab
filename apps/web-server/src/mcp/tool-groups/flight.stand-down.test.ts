@@ -133,6 +133,15 @@ describe('respond_flight_checkpoint — a stopped flight tells the client to sta
     expect(requests[0].payload).toMatchObject({ response: { choice: 'submit', token: 'abc12345' } })
   })
 
+  // A missing-env checkpoint has no options: the answer IS the values. Sending a
+  // `choice` alongside them would have the server read the submit as an option
+  // pick and never write the env file.
+  it('sends a missing-env answer as values alone, inventing no choice', async () => {
+    const { call, requests } = harness({ reply: { statusCode: 200, body: parkedFlight() } })
+    await call('respond_flight_checkpoint', { flightId: 'fl-1', values: { STRIPE_KEY: 'sk_test_x' } })
+    expect((requests[0].payload as { response: Record<string, unknown> }).response).toEqual({ values: { STRIPE_KEY: 'sk_test_x' } })
+  })
+
   it('omits the token when the caller passes none', async () => {
     const { call, requests } = harness({ reply: { statusCode: 200, body: parkedFlight() } })
     await call('respond_flight_checkpoint', { flightId: 'fl-1', choice: 'continue' })
