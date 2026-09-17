@@ -28,15 +28,13 @@ A suite declares ONE roster of tests, and every run of it declares the same one.
 
 So in `features/<feature>/playwright.config.*`, keep `testDir`, `testMatch`, `testIgnore`, `grep` and `grepInvert` as constant literals. Never derive one from `CANARY_LAB_MANIFEST_PATH`, `process.env`, or the recorded env — a `testMatch` built from that env is forbidden, and Canary Lab refuses both the draft that carries it and any run of the suite.
 
-A test that must not execute in some environment skips ITSELF at runtime, so it stays declared, counted, and visibly skipped:
+A test that must not execute in some environment belongs in a sibling feature for that environment, with its own literal roster — never behind a runtime `test.skip`. The verdict counts a skipped test as not passed, so a roster that carries another lane's specs can never go green:
 
-```ts
-test('merchant can connect a Meta template', async ({ page }) => {
-  test.skip(process.env.VERIFICATION_ENV !== 'meta', 'needs the Meta sandbox')
-  …
-})
+```
+features/<suite>/playwright.config.ts        testMatch: '**/*.local.spec.ts'   envs: ['local']
+features/<suite>-meta/playwright.config.ts   testMatch: '**/*.meta.spec.ts'    envs: ['meta']
 ```
 
-Read the env from the envset's own values (a slot in `envsets/<env>/…`), not from the manifest.
+Each lane's config may refuse to run in the wrong environment (throw when the manifest's env is not its lane); that guards the boot, it does not select tests. Read any env value a test needs from the envset's own values (a slot in `envsets/<env>/…`), not from the manifest.
 
 Repo checkouts: get_feature_repo_status(feature, repo) reports the checkout's branch plus where the pinned branch stands against its upstream (upstreamSha, behindUpstream, aheadUpstream; fetch:true by default). When it is behind, update_feature_repo_branch(feature, repo, confirm:true) fast-forwards it so the next run boots the latest commit; it refuses and changes nothing when the checkout is dirty, detached, on another branch or diverged — report the reason, never discard the user's work. checkout_feature_repo_branch switches branches. A repo declared track:'upstream' in feature.config.cjs is fast-forwarded automatically at every run start.

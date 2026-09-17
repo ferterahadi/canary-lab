@@ -59,8 +59,9 @@ describe('spec-selection guardrail — the author workflow guide', () => {
   })
 
   it('gives the expressible alternative that keeps the roster whole', () => {
-    expect(guide).toMatch(/test\.skip\(/)
-    expect(guide).toMatch(/declared, counted, and visibly skipped/i)
+    expect(guide).toMatch(/sibling feature/i)
+    expect(guide).toMatch(/counts a skipped test as not passed/i)
+    expect(guide).not.toMatch(/test\.skip\(process\.env/)
   })
 })
 
@@ -72,7 +73,7 @@ describe('spec-selection guardrail — shipped agent skills', () => {
   })
 
   it.each(authorSkills.map((f) => [path.relative(REPO_ROOT, f), f]))(
-    '%s forbids envset-dependent spec selection and gives the test.skip alternative',
+    '%s forbids envset-dependent spec selection and gives the sibling-feature alternative',
     (_label, file) => {
       const text = fs.readFileSync(file, 'utf8')
       expect(text).toMatch(/selection never depends on the envset/i)
@@ -94,7 +95,8 @@ describe('spec-selection guardrail — delivery, not just presence', () => {
 
   it('the rule is a sentence an agent can act on without fetching the guide', () => {
     expect(SPEC_SELECTION_RULE).toMatch(/testMatch/)
-    expect(SPEC_SELECTION_RULE).toMatch(/test\.skip\(condition, reason\)/)
+    expect(SPEC_SELECTION_RULE).toMatch(/sibling feature/)
+    expect(SPEC_SELECTION_RULE).not.toMatch(/test\.skip\(condition/)
     expect(SPEC_SELECTION_RULE.length).toBeLessThan(INSTRUCTIONS_DELIVERED_WINDOW)
   })
 
