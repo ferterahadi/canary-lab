@@ -225,7 +225,8 @@ export function classifyWaitForHealTask(
   ) {
     // A signal has been written, but the runner's watcher has not consumed it
     // yet. Returning this same task would invite a duplicate repair cycle.
-    if (hasPendingHealSignal(deps.store.logsDir, runId)) return null
+    if (hasPendingHealSignal(deps.store.logsDir, runId)
+      || deps.store.registry.get(runId)?.isWaitingForHealSignal?.() === false) return null
     const latest = deps.store.get(runId)
     if (!latest) return { ok: false, error: `run not found: ${runId}` }
     const full = buildExternalHealContext({

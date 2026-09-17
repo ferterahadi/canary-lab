@@ -8,6 +8,7 @@ import { fingerprintRequirement } from './fingerprints'
 import type { AnnotateTestInput } from './annotate-engine'
 import { docsDirFor, readDocsCollection } from './docs-collection'
 import { PRD_SUMMARY_JSON } from './prd-summary-render'
+import { CoverageInputReads } from './input-reads'
 
 export interface MappingTestInput extends AnnotateTestInput {
   file: string
@@ -37,14 +38,14 @@ function hash(value: unknown): string {
 /** Read dependency content rather than mtimes: an imported helper can change
  * while its test body stays identical. Package/config inputs also invalidate
  * reuse, and unresolved local imports stay in the hash until they resolve. */
-function sourceContext(featureDir: string, file: string, options: ts.CompilerOptions): string {
+function sourceContext(featureDir: string, file: string, options: ts.CompilerOptions, reads: CoverageInputReads, host: ts.ModuleResolutionHost): string {
   const files = new Map<string, string>()
   const visit = (absolute: string, spec: boolean): void => {
     if (files.has(absolute)) return
-    const source = fs.readFileSync(absolute, 'utf-8')
+    const source = reads.text(absolute)
     files.set(absolute, spec ? extractTestMappingContext(absolute, source) : source)
     for (const dependency of ts.preProcessFile(source, true, true).importedFiles) {
-      const resolved = ts.resolveModuleName(dependency.fileName, absolute, options, ts.sys).resolvedModule
+      const resolved = ts.resolveModuleName(dependency.fileName, absolute, options, host).resolvedModule
       if (resolved && !resolved.isExternalLibraryImport) visit(resolved.resolvedFileName, false)
       else if (!resolved && dependency.fileName.startsWith('.')) files.set(path.resolve(path.dirname(absolute), dependency.fileName), 'unresolved')
     }
@@ -56,24 +57,24 @@ function sourceContext(featureDir: string, file: string, options: ts.CompilerOpt
 /** Data files and dynamically loaded helpers inside e2e have no static import
  * edge. Include that support tree, excluding top-level specs (hashed per test)
  * and dependency/output directories. An unreadable input disables reuse. */
-function supportContext(featureDir: string): string {
+function supportContext(featureDir: string, reads: CoverageInputReads): string {
   const files: Array<[string, string]> = []
   const visited = new Set<string>()
   const walk = (dir: string): void => {
-    const real = fs.realpathSync(dir)
+    const real = reads.realpath(dir)
     if (visited.has(real)) return
     visited.add(real)
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    for (const entry of reads.directory(dir)) {
       if (['node_modules', '.git', 'test-results', 'playwright-report'].includes(entry.name)) continue
       const target = path.join(dir, entry.name)
-      if (fs.statSync(target).isDirectory()) walk(target)
+      if (reads.isDirectory(target)) walk(target)
       else if (!(dir === path.join(featureDir, 'e2e') && entry.name.endsWith('.spec.ts'))) {
-        files.push([path.relative(featureDir, target), fs.readFileSync(target).toString('base64')])
+        files.push([path.relative(featureDir, target), reads.read(target).toString('base64')])
       }
     }
   }
   const dir = path.join(featureDir, 'e2e')
-  if (fs.existsSync(dir)) walk(dir)
+  if (reads.exists(dir)) walk(dir)
   return hash(files.sort(([a], [b]) => a.localeCompare(b)))
 }
 
@@ -82,17 +83,26 @@ export function mappingInferenceSnapshot(
   tests: MappingTestInput[],
   requirements: Requirement[],
   variantDimension?: VariantDimension,
+  reads = new CoverageInputReads(),
 ): MappingInferenceSnapshot {
   const requirementHashes = Object.fromEntries(requirements.filter((r) => !r.deprecated)
     .map((r) => [r.id, hash([fingerprintRequirement(r), variantDimension])]))
   try {
-    const config = ts.findConfigFile(featureDir, ts.sys.fileExists)
+    const host = {
+      ...ts.sys,
+      fileExists: (file: string) => reads.isFile(file),
+      directoryExists: (dir: string) => reads.isDirectory(dir),
+      realpath: (file: string) => reads.realpath(file),
+      // Track raw bytes while preserving TypeScript's BOM/encoding handling.
+      readFile: (file: string) => { reads.optional(file); return ts.sys.readFile(file) },
+    }
+    const config = ts.findConfigFile(featureDir, host.fileExists)
     // Resolve inherited options without enumerating compilation inputs. A
     // fatal config read throws into the optional-cache fallback below, so a
     // successful parse always returns options.
     const options = config
       ? ts.getParsedCommandLineOfConfigFile(config, {}, {
-          ...ts.sys,
+          ...host,
           readDirectory: () => [],
           onUnRecoverableConfigFileDiagnostic: (diagnostic) => { throw new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')) },
         })!.options
@@ -101,17 +111,17 @@ export function mappingInferenceSnapshot(
     for (let dir = featureDir; ; dir = path.dirname(dir)) {
       for (const name of ['feature.config.cjs', 'playwright.config.ts', 'playwright.config.js', 'tsconfig.json', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock']) {
         const target = path.join(dir, name)
-        if (fs.existsSync(target)) environment.push([target, fs.readFileSync(target, 'utf-8')])
+        if (reads.exists(target)) environment.push([target, reads.text(target)])
       }
       if (path.dirname(dir) === dir) break
     }
-    const support = supportContext(featureDir)
+    const support = supportContext(featureDir, reads)
     const contexts = new Map<string, string>()
     const fingerprints: Record<string, string> = {}
     for (const test of tests) {
       let context = contexts.get(test.file)
       if (context === undefined) {
-        context = sourceContext(featureDir, test.file, options)
+        context = sourceContext(featureDir, test.file, options, reads, host)
         contexts.set(test.file, context)
       }
       fingerprints[test.name] = hash({ file: test.file, body: test.bodySource, assertions: test.assertions, annotations: test.annotations, context, support, environment, options })

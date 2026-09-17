@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { ServerContext } from '../../server-context'
 import { NotificationStore } from './store'
-import { coverageNotificationSources, flightNotificationSources, testReviewNotificationSources } from './sources'
+import { coverageNotificationSources, flightNotificationSources, testReviewNotificationSources, verificationNotificationSources } from './sources'
 
 export async function register(app: FastifyInstance, ctx: ServerContext): Promise<void> {
   // Reconcile before the first inbox write: an empty startup cache is not
@@ -12,12 +12,14 @@ export async function register(app: FastifyInstance, ctx: ServerContext): Promis
   const sync = (): void => {
     try {
       const runs = ctx.runStore.list()
+      const coverage = (ctx.coverageMonitor?.list() ?? []).map((change) => ({
+        ...change, flightId: ctx.flightStore.latestForFeature(change.feature)?.flightId,
+      }))
       store.reconcile([
         ...flightNotificationSources(ctx.flightStore.list()),
         ...testReviewNotificationSources(runs, changes),
-        ...coverageNotificationSources((ctx.coverageMonitor?.list() ?? []).map((change) => ({
-          ...change, flightId: ctx.flightStore.latestForFeature(change.feature)?.flightId,
-        }))),
+        ...coverageNotificationSources(coverage),
+        ...verificationNotificationSources(coverage),
       ])
     } catch (error) {
       // Inbox persistence must not interrupt the run whose event triggered it.

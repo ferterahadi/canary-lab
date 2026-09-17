@@ -260,11 +260,11 @@ describe('spec-edit boundary — humans adopt, hints advise', () => {
       // reached through app.inject() would be reachable from every client.
       // Keep the retired requirement-confirmation action forbidden too; removing
       // its UI must never transfer that action to an agent.
-      expect(text, path.relative(REPO_ROOT, file)).not.toMatch(/restore-spec-edits|approve-dirty|commit-dirty|adoptSpecEdits\(|restoreSpecEdits\(|requirements\/[^'"`]*\/accept|acceptRequirementWording\(/)
+      expect(text, path.relative(REPO_ROOT, file)).not.toMatch(/approve-dirty|commit-dirty|adoptSpecEdits\(|restoreSpecEdits\(|requirements\/[^'"`]*\/accept|acceptRequirementWording\(/)
       if (file === path.join(MCP_SRC, 'tool-groups', 'test-review.ts')) {
         expect(text).toContain('requestUserInput(')
         expect(text).toContain('expectedRevision: review_revision')
-      } else expect(text, path.relative(REPO_ROOT, file)).not.toContain('adopt-spec-edits')
+      } else expect(text, path.relative(REPO_ROOT, file)).not.toMatch(/adopt-spec-edits|restore-spec-edits/)
     }
   })
 

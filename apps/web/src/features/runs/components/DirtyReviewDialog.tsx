@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { DirtySpecSummary, Feature, RunDetail, RunIndexEntry } from '@/shared/api/types'
+import type { RunTestReview } from '@shared/test-review'
 import * as api from '@/shared/api/client'
 import { useInvalidationKey } from '@/shared/state/invalidation'
+import { useLiveResource } from '@/shared/state/use-live-resource'
 import { shortRunRef } from '@/shared/lib/format'
 import { TEST_CHANGE_KINDS, type TestChangeKind, type TestVersionChanges, type VersionTest } from '@/shared/lib/test-versions'
 import { ChevronLeftIcon, ChevronRightIcon, Modal, StatusDot } from '@/shared/ui/atoms'
@@ -105,11 +107,18 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   }
   const tone = spec ? specTone(spec) : selected?.feature ? featureTone(selected.feature) : null
   const run = selected?.run
+  const runReview = useLiveResource<RunTestReview>('tests', run?.runId ?? null, api.getRunTestReview, {
+    reconcileMs: 5000,
+    leaseMs: 15000,
+  })
   const comparisonRunId = againstRun && selected && selected.name === focusFeature && focusRunId && (!focusRunDetail || focusRunDetail.manifest.feature === selected.name) ? focusRunId
     : run?.runId ?? (focusRunDetail?.manifest.feature === selected?.name ? focusRunId ?? undefined : undefined)
   const useRunBaseline = !!comparisonRunId && (againstRun || !selected?.feature)
   const commitFileCount = selected?.feature?.dirty?.specs.length ?? 0
-  const activeRun = run && (!useRunBaseline || run.runId === comparisonRunId) && ['running', 'healing'].includes(run.status) && (run.pendingSpecEdits ?? 0) > 0 ? run : undefined
+  const activeRun = run && (!useRunBaseline || run.runId === comparisonRunId) && ['running', 'healing'].includes(run.status)
+    && runReview.value?.canAdopt && runReview.value.files.length > 0 ? run : undefined
+  const reviewRevision = activeRun ? runReview.value?.review_revision : undefined
+  const reviewFileCount = activeRun ? runReview.value?.files.length ?? 0 : 0
   const reviewKey = JSON.stringify([selected?.name, spec?.file])
   const comparisonFeature = selected?.name
   const comparisonManifest = focusRunDetail?.manifest.runId === comparisonRunId ? focusRunDetail?.manifest
@@ -145,6 +154,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     ?? TEST_CHANGE_KINDS.find((kind) => changes?.[kind].length) ?? 'added'
   const tests = changes?.[category] ?? []
   const changeTotal = changes ? TEST_CHANGE_KINDS.reduce((total, kind) => total + changes[kind].length, 0) : 0
+  const changedFileCount = currentRunFiles?.changedFiles.length ?? 0
   const exactIndex = tests.findIndex((test) => test.file === spec?.file && test.line === focus?.line && (!focus?.test || test.name === focus.test))
   const testIndex = exactIndex >= 0 ? exactIndex : tests.findIndex((test) => test.file === spec?.file)
   const selectedTest = tests[testIndex]
@@ -154,23 +164,27 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   }
   const reviewFocus = selectedTest ? { ...focus, file: selectedTest.file, line: selectedTest.line, change: category, test: selectedTest.name } : focus
 
-  const keepChanges = async (): Promise<void> => {
+  const commitChanges = async (): Promise<void> => {
     if (!selected) return
     const result = await api.commitDirtySpecs(selected.name)
     onFeaturesChanged?.()
     if (!result.committed && result.status !== 'clean') throw new Error(result.reason ?? 'No spec changes were committed.')
-    if (result.committed) setSaved({ name: selected.name, files: commitFileCount || specs.length })
-    if (!activeRun) return
+    if (result.committed) setSaved({ name: selected.name, files: commitFileCount })
+  }
+
+  const adoptChanges = async (): Promise<void> => {
+    if (!activeRun || !reviewRevision) return
+    if (commitFileCount > 0) await commitChanges()
     // Git and the run snapshot are separate boundaries. A successful commit
     // must not dismiss this review before the run accepts the changed tests.
     try {
-      const adopted = await api.adoptSpecEdits(activeRun.runId)
+      const adopted = await api.adoptSpecEdits(activeRun.runId, { expectedRevision: reviewRevision })
       if (adopted.rerun === 'not-waiting-for-signal') {
-        setError('Saved in Git and accepted for this run, but no rerun started. Start a new run to validate these tests.')
+        setError('Adopted for this run, but no rerun started. Start a new run to validate these files.')
         return
       }
     } catch (err) {
-      throw new Error(`Saved in Git, but the run could not accept the changes. ${err instanceof Error ? err.message : 'Try again.'}`)
+      throw new Error(`${commitFileCount > 0 ? 'Saved in Git, but the run' : 'The run'} could not adopt the reviewed changes. ${err instanceof Error ? err.message : 'Try again.'}`)
     }
     onClose()
   }
@@ -190,18 +204,19 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
         bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
         footer={<div className="cl-review-footer" data-testid="dirty-review-actions">
           <div className="cl-review-commit-context">
-            {activeRun ? <p data-testid={`dirty-review-pending-${selected?.name}`}><strong className="text-primary">Keep these test changes?</strong> Yes saves all changed tests in this suite to Git and reruns them. No restores the tests recorded for run {shortRunRef(activeRun.runId)}.</p>
+            {activeRun ? <p data-testid={`dirty-review-pending-${selected?.name}`}><strong className="text-primary">Adopt these suite changes?</strong> Adopt accepts all {reviewFileCount} reviewed {reviewFileCount === 1 ? 'file' : 'files'} into run {shortRunRef(activeRun.runId)} and reruns it{commitFileCount > 0 ? ', saving changed test files to Git first' : ''}. Restore puts the recorded files back.</p>
               : saved ? <p role="status">Saved in Git · {saved.files} {saved.files === 1 ? 'file' : 'files'} in {saved.name}. Run again when ready to validate these tests.</p> : null}
           </div>
           <div className="cl-review-commit-buttons">
             {activeRun ? <>
-              <button className="cl-button px-3 py-1.5 text-xs" disabled={busy} onClick={() => { void act(async () => {
-                await api.restoreSpecEdits(activeRun.runId)
+              <button className="cl-button px-3 py-1.5 text-xs" disabled={busy || !runReview.confirmed} onClick={() => { void act(async () => {
+                if (!reviewRevision) return
+                await api.restoreSpecEdits(activeRun.runId, { expectedRevision: reviewRevision })
                 onFeaturesChanged?.()
                 onClose()
-              }) }}>No, restore tests</button>
-              <button className="cl-button-primary px-3 py-1.5 text-xs" disabled={busy} onClick={() => { void act(keepChanges) }}>Yes, commit &amp; rerun</button>
-            </> : selected?.feature && commitFileCount > 0 && <button className="cl-button-primary px-3 py-1.5 text-xs" disabled={busy} title={`Commit all ${commitFileCount} changed test files in ${selected.name}, including files not opened here`} onClick={() => { void act(keepChanges) }}>Commit suite · {commitFileCount} {commitFileCount === 1 ? 'file' : 'files'}</button>}
+              }) }}>Restore recorded files</button>
+              <button className="cl-button-primary px-3 py-1.5 text-xs" disabled={busy || !runReview.confirmed} onClick={() => { void act(adoptChanges) }}>Adopt &amp; rerun</button>
+            </> : selected?.feature && commitFileCount > 0 && <button className="cl-button-primary px-3 py-1.5 text-xs" disabled={busy} title={`Commit all ${commitFileCount} changed test files in ${selected.name}, including files not opened here`} onClick={() => { void act(commitChanges) }}>Commit suite · {commitFileCount} {commitFileCount === 1 ? 'file' : 'files'}</button>}
           </div>
           <div className="cl-review-footer-navigation" ref={setNavigationTarget}>
             {useRunBaseline && <div className="cl-review-change-nav" role="group" aria-label="Test changes across this suite" title="One item per test(...) declaration. Imports and setup do not count. Loops count once.">
@@ -214,10 +229,11 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
                 tooltip={`${changes[kind].length} ${TEST_CHANGE_MARKS[kind].label} ${changes[kind].length === 1 ? 'test' : 'tests'} in this suite. ${TEST_CHANGE_MARKS[kind].explanation} Step through them here.`}
                 ariaLabel={`Show ${changes[kind].length} ${TEST_CHANGE_MARKS[kind].label} ${changes[kind].length === 1 ? 'test' : 'tests'}`} />)}
               <button className="cl-icon-button" aria-label="Previous test change" disabled={!changes || testIndex <= 0 || busy} onClick={() => selectTest(category, tests[testIndex - 1])}><ChevronLeftIcon /></button>
-              <span className="cl-review-change-status" aria-live="polite" title={selectedTest?.name}>{!changes ? currentRunFiles?.error ? 'Unavailable' : 'Loading…' : changeTotal === 0 ? 'No test changes' : selectedTest ? `${testIndex + 1} / ${tests.length}` : `— / ${tests.length}`}</span>
+              <span className="cl-review-change-status" aria-live="polite" title={selectedTest?.name}>{!changes ? currentRunFiles?.error ? 'Unavailable' : 'Loading…' : changeTotal === 0 ? changedFileCount > 0 ? `${changedFileCount} changed ${changedFileCount === 1 ? 'file' : 'files'} · no test declaration changes` : 'No test changes' : selectedTest ? `${testIndex + 1} / ${tests.length}` : `— / ${tests.length}`}</span>
               <button className="cl-icon-button" aria-label="Next test change" disabled={!changes || testIndex >= tests.length - 1 || busy} onClick={() => selectTest(category, tests[testIndex + 1])}><ChevronRightIcon /></button>
             </div>}
           </div>
+          {run && runReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this run’s review state. {runReview.error}</p>}
           {error && <p role="alert" className="cl-review-action-message text-danger">{error}</p>}
         </div>}
       >

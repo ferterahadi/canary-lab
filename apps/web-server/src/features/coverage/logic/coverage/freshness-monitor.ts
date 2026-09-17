@@ -2,11 +2,10 @@ import fs from 'fs'
 import path from 'path'
 import { COVERAGE_RECONCILE_MS, type FeatureCoverageChange } from '../../../../../../../shared/coverage/freshness'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
-import { loadFeatures } from '../../../../shared/feature-loader'
 import type { WorkspaceEventBus } from '../../../../shared/workspace-events'
-import { computeFeatureCoverage } from './service'
 import { coverageRevision } from './freshness'
 import { docsDirFor } from './docs-collection'
+import { CoverageSnapshotCache } from './snapshot-cache'
 
 /** One process-owned observer backs the UI, inbox, and agent waits. Filesystem
  * events are hints; content reconciliation also follows links and catches
@@ -21,17 +20,24 @@ export class CoverageFreshnessMonitor {
   private unsubscribe?: () => void
   private closed = false
   private scanning = false
+  private readonly snapshots: CoverageSnapshotCache
 
   constructor(
     private readonly paths: { featuresDir: string; logsDir: string },
     private readonly events: WorkspaceEventBus,
     private readonly warn: (error: unknown) => void,
-  ) {}
+  ) { this.snapshots = new CoverageSnapshotCache(paths) }
 
-  read(feature: string, featureDir?: string): FeatureCoverageChange {
+  ledger(feature: string): CoverageLedger {
+    const ledger = this.snapshots.get(feature)
+    this.observe(ledger)
+    return ledger
+  }
+
+  read(feature: string, featureDir?: string, context?: ReturnType<CoverageSnapshotCache['context']>): FeatureCoverageChange {
     let change: FeatureCoverageChange
     try {
-      const ledger = computeFeatureCoverage({ ...this.paths, feature, featureDir })
+      const ledger = this.snapshots.get(feature, featureDir, context)
       change = this.observe(ledger)
     } catch (error) {
       change = { feature, delivery: 'tool-response-and-wait', freshness: {
@@ -61,6 +67,11 @@ export class CoverageFreshnessMonitor {
 
   list(): FeatureCoverageChange[] { return [...this.values.values()] }
 
+  readAll(): FeatureCoverageChange[] {
+    const context = this.snapshots.context()
+    return this.snapshots.features().map((feature) => this.read(feature.name, feature.featureDir, context))
+  }
+
   schedule(): void {
     if (this.closed || this.pending) return
     this.pending = setTimeout(() => {
@@ -78,15 +89,17 @@ export class CoverageFreshnessMonitor {
       // attachment during reconciliation instead of losing fast updates forever.
       this.watch(this.paths.featuresDir, true)
       this.watch(this.paths.logsDir, true)
-      const features = loadFeatures(this.paths.featuresDir)
+      const features = this.snapshots.features()
+      const context = this.snapshots.context()
       const present = new Set(features.map((feature) => feature.name))
       for (const feature of this.values.keys()) if (!present.has(feature)) {
         this.values.delete(feature)
+        this.snapshots.remove(feature)
         this.events.publish({ type: 'coverage-changed', feature })
       }
       for (const feature of features) {
         if (this.closed) break
-        this.read(feature.name, feature.featureDir)
+        this.read(feature.name, feature.featureDir, context)
         if (feature.featureDir) this.watchLinkedDocs(feature.featureDir)
         // Large workspaces must not monopolize the event loop between suites.
         await new Promise<void>((resolve) => setImmediate(resolve))
@@ -167,5 +180,6 @@ export class CoverageFreshnessMonitor {
     for (const cancel of this.waiting) cancel()
     for (const watcher of this.watchers.values()) watcher.close()
     this.watchers.clear()
+    this.snapshots.clear()
   }
 }

@@ -758,6 +758,10 @@ describe('trailer model (R14–R18)', () => {
 // changed, only who was credited for it.
 describe('a skipped stage that HAS evidence keeps its settled mark', () => {
   it('renders the resumed flight\'s earlier steps as done, not skipped', async () => {
+    const { LEDGER } = await import('@/features/coverage/components/__fixtures__/CoverageLedgerPage.part2-fixtures')
+    // A done marker now also requires confirmed coverage; this case tests the
+    // resumed-stage evidence rule, not an unavailable freshness read.
+    mocks.getFeatureCoverage.mockResolvedValue({ ...LEDGER, freshness: { ...LEDGER.freshness!, state: 'current', reasons: [], nextAction: undefined } })
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'running',
       currentStage: 'run',

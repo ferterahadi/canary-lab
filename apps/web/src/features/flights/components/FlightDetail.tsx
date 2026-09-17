@@ -7,7 +7,8 @@ import { isActivePortify, usePortify } from '@/features/portify'
 import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
-import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { DisabledControlTooltip, Tooltip } from '@/shared/ui/Tooltip'
+import { AlertCircleIcon } from '@/shared/ui/Icons'
 import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
 import { ACTIVITY_CHIP, featureChipState } from './FlightChipState'
 import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
@@ -29,7 +30,7 @@ import { FlightDrillThroughs, FlightPage } from './FlightPage'
 import { FlightSummaryStrip } from './FlightSummaryStrip'
 import { StageDetail, truncate } from './StageDetail'
 import { useLiveCoverage } from '@/shared/state/use-live-coverage'
-import { CoverageFreshnessNotice } from '@/shared/ui/CoverageFreshnessNotice'
+import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 
 // Flight detail — the routed full-screen view (?view=flights&flight=<id>)
 // that owns a flight's lifecycle: a stage rail on the left (harness-computed
@@ -205,6 +206,10 @@ export function FlightDetail({
   }, [indexEntry, flightId])
   const flight = derivedManifest ?? (derivedFeature ? null : (liveFlight ?? fetched ?? seed))
   const coverage = useLiveCoverage(flight?.feature ?? derivedFeature ?? null)
+  const coverageWarningText = coverageWarning(coverage.value?.freshness, coverage.confirmed, coverage.error)
+  const coverageNextAction = coverage.value?.freshness?.nextAction
+  const coverageRecovery = coverageWarningText && coverage.confirmed && coverageNextAction && coverage.value?.freshness?.state !== 'updating'
+    ? { stage: coverageNextAction.stage, warning: coverageWarningText } : undefined
   const seeded = !derivedManifest && !derivedFeature && !liveFlight && !fetched && seed != null
   /** The stage a "Continue" would enter at — first one without evidence. */
   const derivedEntry = derivedRail ? derivedEntryStage(derivedRail) : null
@@ -590,13 +595,15 @@ export function FlightDetail({
           </>
         ) : derivedFeature ? (
           <>
-            {derivedEntry ? (!activeCoverageJob && (
+            {derivedEntry || coverageRecovery ? (!activeCoverageJob && (
               <ContinueMenu
                 flight={flight}
                 onAction={act}
                 onStartFlight={onStartFlight}
                 externalMutationOwner={externalMutationOwner}
-                recordlessEntry={derivedEntry}
+                recordlessEntry={derivedEntry ?? coverageRecovery!.stage}
+                selectedStage={stageKey}
+                coverageRecovery={coverageRecovery}
               />
             )) : (
               <DisabledControlTooltip>
@@ -622,7 +629,8 @@ export function FlightDetail({
               <DownloadEvaluationAction flight={flight} stage={evalStage} testId="flight-primary-download" primary />
             )}
             {!activeCoverageJob && (flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
-              <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} externalMutationOwner={externalMutationOwner} />
+              <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} externalMutationOwner={externalMutationOwner}
+                selectedStage={stageKey} coverageRecovery={coverageRecovery} />
             )}
             <FlightMenu flight={flight} onAction={act} onDeleted={onBackToList} externalMutationOwner={externalMutationOwner} />
           </>
@@ -638,11 +646,6 @@ export function FlightDetail({
           ✕
         </button>
       </header>
-      <CoverageFreshnessNotice freshness={coverage.value?.freshness} confirmed={coverage.confirmed} error={coverage.error} inFlight
-        blockedReason={externalMutationOwner ? externalMutationTooltip(externalMutationOwner, 'update coverage')
-          : activeCoverageJob || flight.status === 'running' || flight.status === 'waiting-for-approval'
-            ? 'Work is already active. Continue with its current owner; no duplicate recovery will be started.' : undefined}
-        onRecover={onStartFlight ? (stage) => { setSelectedStage(stage); onStartFlight(flight.feature, 'refly', stage) } : undefined} />
       {actionError && (
         <div
           data-testid="flight-action-error"
@@ -724,7 +727,9 @@ export function FlightDetail({
             const selected = s.key === stageKey
             const rowWaiting = s.key === activityRowKey ? featureActivity?.waiting : undefined
             const displayStatus = stagePresentationStatus(s.status, rowWaiting)
-            const t = stageStatusTone(displayStatus)
+            const warning = (s.key === 'specs-coverage' || s.key === (coverageNextAction ? stageRowKey(coverageNextAction.stage) : null))
+              ? coverageWarningText : undefined
+            const t = warning ? 'var(--warning)' : stageStatusTone(displayStatus)
             // A merged row's duration sums its primary + folded companion
             // (run→heal, scaffold→env-capture, docs→prd-summary) — R61. Work
             // time, not wall clock: checkpoint parks and pauses don't count.
@@ -735,7 +740,8 @@ export function FlightDetail({
             // it rides here instead, under the static blurb, so hovering a rail
             // row still answers both "what is this step" and "what's it done".
             const stateLine = primary ? stageStateLine(primary, flight, folded) : null
-            const tooltip = rowWaiting ? `${rowWaiting.label}. ${rowWaiting.detail}` : stateLine ? `${STAGE_BLURB[s.key]}\n\n${stateLine}` : STAGE_BLURB[s.key]
+            const tooltip = warning ? `${warning} Use Continue → From a step… to update the affected step.`
+              : rowWaiting ? `${rowWaiting.label}. ${rowWaiting.detail}` : stateLine ? `${STAGE_BLURB[s.key]}\n\n${stateLine}` : STAGE_BLURB[s.key]
             return (
               <Fragment key={s.key}>
                 {s.key === 'portify' && (
@@ -746,10 +752,11 @@ export function FlightDetail({
                     </div>
                   </div>
                 )}
-                <button
+                <Tooltip label={tooltip}><button
                   type="button"
                   data-testid={`stage-rail-${s.key}`}
                   aria-current={selected ? 'true' : undefined}
+                  aria-label={warning ? `${s.label} — ${warning}` : undefined}
                   onClick={() => setSelectedStage(s.key)}
                   title={tooltip}
                   className={`cl-hover-row flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors${selected ? ' bg-selected' : ''}`}
@@ -757,7 +764,7 @@ export function FlightDetail({
                   {/* Status hue stays a computed token string (one source of
                       truth in stageStatusTone), so this one keeps `color`. */}
                   <span className="w-3 shrink-0 text-center font-semibold" style={{ color: t }} aria-hidden="true">
-                    {STAGE_ICON[displayStatus]}
+                    {warning ? <AlertCircleIcon size={12} /> : STAGE_ICON[displayStatus]}
                   </span>
                   <span className={`min-w-0 flex-1 truncate${s.status === 'pending' ? ' text-muted' : ''}`}>
                     {s.label}
@@ -777,7 +784,7 @@ export function FlightDetail({
                   )}
                   {rowWaiting && <span className="shrink-0 text-[10px]" style={{ color: t }}>{rowWaiting.label}</span>}
                   {displayStatus === 'running' && <StatusDot state="running" className="shrink-0" />}
-                </button>
+                </button></Tooltip>
               </Fragment>
             )
           })}

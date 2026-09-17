@@ -53,7 +53,7 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
     const side = focus?.change === 'removed' ? 'before' : 'after'
     if (selectedTest && focus?.change && data[side].tests.some((test) => test.line === selectedTest.line && test.name === selectedTest.name)) return comparedTestRows(data, selectedTest, focus.change)
     const context = sourceRows(data)
-    return runId ? context.map(({ change: _change, ...row }) => row) : context
+    return runId && !data.supportingFile ? context.map(({ change: _change, ...row }) => row) : context
   }, [data, selectedTest, focus?.change, runId])
   const changes = [...new Set(rows.flatMap((row) => row.change == null ? [] : [row.change]))]
   const focusedChange = rows.find((row) => row.afterLine != null && row.afterLine >= (focus?.line ?? 0) && row.change != null)?.change
@@ -61,7 +61,9 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
   const testSide = focus?.change === 'removed' ? 'before' : 'after'
   const sourceTest = selectedTest && (data?.[testSide].tests.find((test) => test.line === selectedTest.line && test.name === selectedTest.name)
     ?? data?.[testSide].tests.find((test) => test.name === selectedTest.name))
-  const change = runId ? undefined : changes[index]
+  const change = runId && !data?.supportingFile ? undefined : changes[index]
+  const supportingEnglish = !!data?.supportingFile && Boolean(data.before.story?.steps.length || data.after.story?.steps.length)
+  const displayMode = data?.supportingFile && !supportingEnglish ? 'code' : mode
   const selectedRows = sourceTest && data ? rowsForTest(rows, { key: `${testSide}:${sourceTest.line}`, side: testSide, test: sourceTest }, data)
     : rows.filter((row) => change != null && row.change === change)
   const sourceLine = selectedRows.find((row) => row.afterLine != null)?.afterLine ?? focus?.line ?? 1
@@ -118,7 +120,7 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
   }
   return <>
     <div className="cl-context-toolbar">
-      <TestLanguageSwitch mode={mode} onChange={changeMode} />
+      {data?.supportingFile && !supportingEnglish ? <span className="text-xs text-secondary">Supporting file · Code</span> : <TestLanguageSwitch mode={mode} onChange={changeMode} />}
       {selectedTest && <><span className="text-xs text-secondary">{focus?.change === 'removed' ? 'Removed test' : focus?.change === 'added' ? 'Added test' : 'Changed test'}</span>
         <span className="min-w-0 truncate text-xs text-secondary" title={selectedTest.previous && selectedTest.previous.name !== selectedTest.name ? `${selectedTest.previous.name} → ${selectedTest.name}` : selectedTest.name} data-testid="review-selected-test">{selectedTest.name}</span></>}
       {baselineControl}
@@ -132,7 +134,7 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
       </div>, navigationTarget)}
     {error ? <div role="alert" className="flex-1 p-4 text-sm">{error}<button className="cl-button ml-3 px-3 py-1" onClick={() => setRetry(retry + 1)}>Retry</button></div>
       : loading || !data ? <div role="status" className="flex-1 p-4 text-sm text-secondary">Loading complete test source…</div>
-      : <div className="cl-context-table min-h-0 flex-1"><SourceComparisonTable review={data} rows={rows} mode={mode} change={change} scrollRef={scroll}
+      : <div className="cl-context-table min-h-0 flex-1"><SourceComparisonTable review={data} rows={rows} mode={displayMode} change={change} scrollRef={scroll}
         emptySide={selectedTest && focus?.change === 'removed' ? 'after' : selectedTest && focus?.change === 'added' ? 'before' : undefined}
         returnSelection={englishReturn?.selection} onReturnToEnglish={() => changeMode('english')}
         selection={selection} onSelectSource={(next) => {
@@ -145,7 +147,8 @@ export function FullTestReview({ feature, file, runId, focus, onFocus, selectedT
       {!loading && !error && data && <>
       {data.assessment.reasons?.map((reason) => <p key={reason} className="text-warning">{testAssessmentReason(reason)}</p>)}
       {data?.before.parseError || data?.after.parseError ? <p className="text-warning">The plain-English view is incomplete. Switch to Code to see the complete source.</p> : null}
-      {selectedTest && focus?.change === 'removed' ? <p className="text-secondary">This test was removed from the current source.</p>
+      {data.supportingFile ? <p className="text-secondary">Supporting-file changes affect the suite executed by this run. They are included in approval, but are not counted as changed test declarations.</p>
+        : selectedTest && focus?.change === 'removed' ? <p className="text-secondary">This test was removed from the current source.</p>
         : selectedTest && focus?.change === 'added' ? <p className="text-secondary">This test was added after the recorded version.</p>
         : runId && !selectedTest ? <p className="text-secondary">{comparisonReady ? 'No title or test-content changes in this file. Tag and formatting edits are excluded.' : 'Test change information is not available yet.'}</p>
         : assessments.length ? <div className="text-warning">{[...new Set(assessments.map(testAssessmentFinding))].map((finding) => <p key={finding}>{finding}</p>)}</div>

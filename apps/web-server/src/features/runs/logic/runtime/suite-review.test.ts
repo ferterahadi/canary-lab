@@ -41,10 +41,10 @@ describe('exact suite review', () => {
     expect(review.patch).not.toContain('cl-text-diff-')
   })
 
-  it('omits secrets and symlinks exactly like the suite copier', async () => {
+  it('omits envsets, materialized env targets, backups and symlinks exactly like the suite copier', async () => {
     const { before, live } = fixture()
     const revision = suiteReviewRevision(before, live)
-    for (const file of ['envsets/local/app.env', 'node_modules/a.js', '.git/HEAD']) write(live, file, 'SECRET')
+    for (const file of ['envsets/local/app.env', '.env', '.env.bak.1789653324105', 'node_modules/a.js', '.git/HEAD']) write(live, file, 'SECRET')
     fs.symlinkSync(path.join(live, 'envsets/local/app.env'), path.join(live, 'secret-link'))
     expect(suiteReviewRevision(before, live)).toBe(revision)
     expect((await buildSuiteReview(before, live)).patch).not.toContain('SECRET')

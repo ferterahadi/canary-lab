@@ -243,6 +243,15 @@ describe('dirtyTestsWarning', () => {
 })
 
 describe('classifyWaitForHealTask', () => {
+  it('waits for an in-memory adoption signal and its transition to execution', () => {
+    const store = fakeStore(() => needsHealDetail())
+    const ready = vi.fn(() => false)
+    store.registry.get.mockReturnValue({ isWaitingForHealSignal: ready })
+    const deps = asDeps({ store, broker: ownedBroker() })
+    expect(classifyWaitForHealTask(deps, 'run-1', 'sess-1')).toBeNull()
+    ready.mockReturnValue(true)
+    expect(classifyWaitForHealTask(deps, 'run-1', 'sess-1')).toMatchObject({ value: { type: 'needs_heal' } })
+  })
   const dirtyStore = {
     get: () => ({ status: 'dirty', dirtySpecs: [{ file: 'e2e/checkout.spec.ts' }], message: 'review the specs' }),
   }

@@ -159,7 +159,7 @@ export const EMPTY_COPY = {
   notificationsNoAttention: {
     reason: 'nothing-to-report',
     title: 'Nothing needs attention',
-    body: 'Nothing needs your action now. Canary Lab interrupts you here only when a run is blocked, a flight stalls, or test integrity is at risk.',
+    body: 'Nothing needs your action. Test changes, outdated coverage, and workflow issues appear as alerts here, each linking to the relevant view.',
   },
   notificationsNoHistory: {
     reason: 'nothing-to-report',

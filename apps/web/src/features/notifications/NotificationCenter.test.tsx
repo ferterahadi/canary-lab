@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({ getNotifications: vi.fn(), deleteNotification: v
 vi.mock('@/shared/api/notifications', () => api)
 import { NotificationCenter } from './NotificationCenter'
 import { useNotifications } from './use-notifications'
+import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 
 let container: HTMLDivElement
 let root: Root
@@ -24,6 +25,41 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); container.remove() })
 const button = (text: string) => [...document.querySelectorAll('button')].find((b) => b.textContent === text)!
 const labelled = (label: string) => document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!
+
+it('keeps test changes and outdated coverage separate in an already-open inbox', async () => {
+  const coverage = { kind: 'coverage' as const, feature: 'shop', flightId: 'f1', stage: 'specs-coverage' as const }
+  const navigate = vi.fn()
+  let invalidate!: ReturnType<typeof useInvalidation>['invalidate']
+  function View() {
+    invalidate = useInvalidation().invalidate
+    return <NotificationCenter open onOpenChange={vi.fn()} onNavigate={navigate} />
+  }
+  await act(async () => root.render(<InvalidationProvider><View /></InvalidationProvider>))
+  rows.push({ id: 'coverage', title: 'shop: coverage out of date', body: 'Mapping inputs changed.', severity: 'warning', target: coverage, createdAt: '2026-09-08T10:00:00Z' })
+  await act(async () => { invalidate('notifications') })
+  expect(labelled('Notifications, 2 need attention')).not.toBeNull()
+  await act(async () => labelled('Review test changes').click())
+  expect(navigate).toHaveBeenLastCalledWith(target)
+  await act(async () => labelled('Open flight').click())
+  expect(navigate).toHaveBeenLastCalledWith(coverage)
+  rows = rows.map((row) => row.id === 'coverage' ? { ...row, resolvedAt: 'now' } : row)
+  await act(async () => { invalidate('notifications') })
+  expect(labelled('Notifications, 1 need attention')).not.toBeNull()
+  expect(labelled('Review test changes')).not.toBeNull()
+  expect(labelled('Open flight')).toBeNull()
+})
+
+it.each([
+  { kind: 'coverage' as const, feature: 'shop', stage: 'specs-coverage' as const, label: 'Open flight' },
+  { kind: 'run' as const, feature: 'shop', runId: 'r1', label: 'Open run' },
+])('labels the $kind toast with its real destination', async ({ label, ...destination }) => {
+  rows = [{ ...rows[0], target: destination, severity: 'warning' }]
+  const navigate = vi.fn()
+  await act(async () => root.render(<NotificationCenter open={false} onOpenChange={vi.fn()} onNavigate={navigate} />))
+  await act(async () => button(label).click())
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(destination)
+  expect(api.deleteNotification).not.toHaveBeenCalled()
+})
 
 it('opens the affected Flight stage from a coverage warning without running recovery', async () => {
   const coverage = { kind: 'coverage' as const, feature: 'shop', flightId: 'fl-shop', stage: 'prd-summary' as const }
@@ -202,14 +238,13 @@ it('has no manual note creation and opens a feature-level weakening hint without
   expect(navigate).toHaveBeenCalledWith({ kind: 'test-review', feature: 'shop' })
 })
 
-it('orders weakening hints before ordinary attention and separates resolved history', async () => {
+it('orders weakening hints before ordinary attention without accenting an arrow', async () => {
   rows.push({ id: 'weak', title: 'Possible weakening', body: 'Review', severity: 'danger', target: { kind: 'test-review', feature: 'shop' }, createdAt: '2026-09-07T10:00:00Z' })
   rows.push({ id: 'done', title: 'Resolved', body: '', target, resolvedAt: 'now', createdAt: '2026-09-09T10:00:00Z' })
   await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={vi.fn()} />))
   expect([...document.querySelectorAll('[data-testid^="notification-"]')].map((element) => element.getAttribute('data-testid'))).toEqual(['notification-center', 'notification-weak', 'notification-n1'])
-  // Only the row to act on first carries the filled accent; the rest stay ghost
-  // buttons, so the fill reads as "start here" rather than "this is a button".
-  expect(document.querySelector('[data-testid="notification-weak"] [aria-label="Review test changes"]')?.className).toContain('cl-button-primary')
+  expect(document.querySelector('[data-testid="notification-weak"] [aria-label="Review test changes"]')?.className).toContain('cl-button')
+  expect(document.querySelector('[data-testid="notification-weak"] [aria-label="Review test changes"]')?.className).not.toContain('cl-button-primary')
   expect(document.querySelector('[data-testid="notification-n1"] [aria-label="Review test changes"]')?.className).not.toContain('cl-button-primary')
   await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="notification-weak"] [aria-label="Mark read"]')!.click())
   expect(document.querySelector('[data-testid="notification-weak"]')).not.toBeNull()

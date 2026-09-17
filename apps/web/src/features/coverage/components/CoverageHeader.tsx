@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from 'react'
 import type { CoverageLedger, GapType, TestCoverage, TestStrength } from '@/shared/api/types'
 import { EmptyGlyph } from '@/shared/ui/EmptyState'
+import { CoverageFreshnessIndicator, coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { GAP_META, STRENGTH_META, STRENGTH_ORDER, countFor } from './CoverageCards'
 
 // Empty main (summary ABSENT). The rail owns the docs and the Generate button, so
@@ -226,6 +227,7 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
   const mapped = total - untested
   const orphans = ledger.orphanRequirementIds.length
   const current = confirmed && ledger.freshness?.state === 'current'
+  const warning = coverageWarning(ledger.freshness, confirmed)
   const latestFailed = ledger.tests.filter((test) => test.lastRun?.passed === false).length
   const latestPassed = ledger.tests.filter((test) => test.lastRun?.passed === true).length
   // The ring's third slice. `provenUnchanged` can only land on a `covered`
@@ -244,11 +246,16 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
           roll-up sit in the same hover card the strips use; a stale-tag warning keeps an
           amber dot at rest so it is never fully hidden (status = dot + tooltip). */}
       <div className="clcov-hero clcov-strip" tabIndex={0} data-testid="coverage-hero">
-        {current && <CoverageRing pct={ledger.coveragePct} provenPct={latestFailed ? 0 : proven === undefined ? undefined : (proven / total) * 100} />}
+        <CoverageRing pct={ledger.coveragePct} provenPct={latestFailed ? 0 : proven === undefined ? undefined : (proven / total) * 100} />
         <div className="clcov-hero-text">
-          <div className="clcov-pct" data-testid="coverage-pct">{current ? `${Math.round(ledger.coveragePct)}%` : '—'}</div>
+          <div className="flex items-center gap-2">
+            <div className="clcov-pct" data-testid="coverage-pct">{Math.round(ledger.coveragePct)}%</div>
+            <CoverageFreshnessIndicator message={warning ? [warning,
+              ledger.provenRunId ? `Last run: ${latestPassed} passed · ${latestFailed} failed · ${ledger.tests.length - latestPassed - latestFailed} not run.` : undefined,
+            ].filter(Boolean).join(' ') : undefined} />
+          </div>
           <div className="clcov-sentence" data-testid="coverage-sentence">
-            {current ? `${covered} of ${total} covered` : `Last calculation: ${Math.round(ledger.coveragePct)}% · ${covered}/${total} — historical`}
+            {covered} of {total} covered
             {orphans > 0 && (
               <span
                 className="clcov-alert clcov-hero-alert"
@@ -272,14 +279,14 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
                 ? 'Proven — a run passed every test mapped to the requirement, and neither the tests nor the wording have changed since. Unproven — a test covers it, but nothing has proved it yet.'
                 : 'No run has been recorded for this suite, so nothing is proven yet — every covered requirement is a claim.'}
             >
-              {!current ? 'Current coverage not confirmed' : latestFailed ? `${latestFailed} failed in latest run` : !enf?.runId
+              {latestFailed ? `${latestFailed} failed in latest run` : !enf?.runId
                 ? 'no run yet — nothing proven'
                 : claimedOnly > 0
                   ? `${proven} proven · ${claimedOnly} unproven`
                   : `${proven} proven`}
             </div>
           )}
-          {current && ledger.provenRunId && <div className="clcov-proof" data-testid="coverage-latest-run">
+          {current && ledger.provenRunId && <div className="clcov-proof sr-only" data-testid="coverage-latest-run">
             Latest run {ledger.provenRunId}: {latestPassed} passed · {latestFailed} failed · {ledger.tests.length - latestPassed - latestFailed} not run
           </div>}
         </div>
@@ -290,7 +297,7 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
               <span className="clcov-sub-sep" aria-hidden="true">·</span>
               <span data-testid="proven-stat" title="Requirements whose proof — a green run over every mapped test — is newer than both their tests' and their wording's last change">
                 {ledger.enforcement.provenUnchanged}/{ledger.enforcement.total}
-                {ledger.enforcement.runId ? <> historically proven in run <code className="clcov-sub-run">{ledger.enforcement.runId}</code></> : ' proven · no run yet'}
+                {ledger.enforcement.runId ? <> proven in run <code className="clcov-sub-run">{ledger.enforcement.runId}</code></> : ' proven · no run yet'}
               </span>
             </>
           )}

@@ -53,7 +53,7 @@ export function deriveCoverageFreshness(args: {
     nextAction = action('prd-summary', 'Generate requirements & coverage', 'start_external_summary')
   } else if (summary.docsHash !== args.docsHash) {
     state = 'stale'
-    reasons.push('Source requirements changed since the summary was generated.')
+    reasons.push('Requirements changed after this coverage was generated.')
     nextAction = action('prd-summary', 'Update requirements & coverage', 'start_external_summary')
   } else if (ledger.state?.coverage === 'absent') {
     state = 'not-measured'

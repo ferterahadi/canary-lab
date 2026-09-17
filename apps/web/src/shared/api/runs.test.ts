@@ -18,6 +18,7 @@ import {
   openRunRepo,
   proposeRunPr,
   stopRun,
+  getRunTestReview,
   adoptSpecEdits,
   restoreSpecEdits,
   deleteRun,
@@ -154,6 +155,14 @@ describe('runs api', () => {
     expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r3/abort', { method: 'POST' })
   })
 
+  it('getRunTestReview fetches the lightweight authoritative review state', async () => {
+    const review = { runId: 'r4', feature: 'alpha', baseline: 'run-start', review_revision: 'a'.repeat(64),
+      files: [{ file: 'e2e/fixture.ts', change: 'modified' }], canAdopt: true }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(review))
+    await expect(getRunTestReview('r 4', { fetchImpl })).resolves.toEqual(review)
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r%204/test-review?summary=true', { method: 'GET' })
+  })
+
   it('adoptSpecEdits POSTs to /adopt-spec-edits and returns the 202 body', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ status: 'adopted', adopted: ['e2e/a.spec.ts'], rerun: 'signalled' }), {
@@ -169,6 +178,18 @@ describe('runs api', () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ status: 'restored', restored: ['e2e/a.spec.ts'] }))
     await expect(restoreSpecEdits('r4', { baseUrl: '', fetchImpl })).resolves.toEqual({ status: 'restored', restored: ['e2e/a.spec.ts'] })
     expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r4/restore-spec-edits', { method: 'POST' })
+  })
+
+  it('sends the exact reviewed revision when adopting or restoring', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(ok({ status: 'adopted', adopted: ['e2e/fixture.ts'], rerun: 'signalled' }, 202))
+      .mockResolvedValueOnce(ok({ status: 'restored', restored: ['e2e/fixture.ts'] }))
+    const options = { fetchImpl, expectedRevision: 'b'.repeat(64) }
+    await adoptSpecEdits('r4', options)
+    await restoreSpecEdits('r4', options)
+    const init = { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision: 'b'.repeat(64) }) }
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, '/api/runs/r4/adopt-spec-edits', init)
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, '/api/runs/r4/restore-spec-edits', init)
   })
 
   it('pauseHealRun resolves with the success body on 202', async () => {

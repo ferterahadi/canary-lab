@@ -13,7 +13,6 @@ import { CoverageEmptyMain, CoverageHeader, HeadlinePill, readRailPref, writeRai
 import { COVERAGE_CSS } from './coverage-ledger-css'
 import { coverageTestSources, type CoverageTestSource } from './coverage-test-sources'
 import { useLiveCoverage } from '@/shared/state/use-live-coverage'
-import { CoverageFreshnessNotice } from '@/shared/ui/CoverageFreshnessNotice'
 import type { CoverageRecoveryStage } from '@shared/coverage/freshness'
 
 // The two stages a coverage generation spawns (the summary job chains the
@@ -316,7 +315,6 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
           Close <span aria-hidden="true">✕</span>
         </button>
       </header>
-      <CoverageFreshnessNotice freshness={ledger?.freshness} confirmed={confirmed} error={error} onRecover={onOpenRecovery} />
 
       {/* Execution stays on Flight; the ledger remains a results surface. */}
       {generatingFlight && !activeJob && (
@@ -371,6 +369,11 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
             onGenerate={startJob}
             onDocsChanged={refresh}
             reloadKey={docsReloadKey}
+            recovery={onOpenRecovery && ledger.freshness?.nextAction && ledger.freshness.nextAction.stage !== 'run' ? {
+              onClick: () => onOpenRecovery(ledger.freshness!.nextAction!.stage),
+              disabledReason: !confirmed ? 'Checking coverage freshness before starting work.'
+                : generating ? 'Coverage work is already active. Open its Flight to follow progress.' : undefined,
+            } : undefined}
           />
           <div className="flex min-h-0 flex-1 flex-col">
             {actionError && (

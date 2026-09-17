@@ -149,7 +149,11 @@ describe('HealSignalGate', () => {
       reason: 'signal-already-pending',
       pendingKind: 'restart',
     })
+    expect(gate.isReadyForSignal()).toBe(false)
     expect(gate.consume()).toEqual({ kind: 'restart', body: { hypothesis: 'fix' } })
+    expect(gate.isReadyForSignal()).toBe(true)
+    gate.endWaiting()
+    expect(gate.isReadyForSignal()).toBe(false)
     expect(gate.consume()).toBeNull()
   })
 })

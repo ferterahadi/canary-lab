@@ -5,6 +5,8 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { InvalidationProvider, useInvalidation } from './invalidation'
 import { useLiveResource, type LiveResource } from './use-live-resource'
+import { getFeatureCoverage } from '../api/coverage'
+import type { CoverageLedger } from '../api/types'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -47,6 +49,38 @@ const read = (testId: string): string | undefined =>
   container.querySelector(`[data-testid="${testId}"]`)?.textContent ?? undefined
 
 describe('useLiveResource', () => {
+  it('coalesces mounted readers but starts new reads after an event or a missed-event recovery round', async () => {
+    vi.useFakeTimers()
+    const replies: Array<(response: Response) => void> = []
+    const fetchImpl = vi.fn(() => new Promise<Response>((resolve) => replies.push(resolve)))
+    const values: Array<LiveResource<CoverageLedger>> = []
+    let bump!: () => void
+    function Reader({ index }: { index: number }) {
+      const { invalidate } = useInvalidation()
+      bump = () => invalidate('coverage')
+      values[index] = useLiveResource('coverage', 'shop', (key, opts) => getFeatureCoverage(key, { ...opts, fetchImpl }), { reconcileMs: 5000, leaseMs: 15000 })
+      return <span>{values[index].value?.coveragePct ?? 'pending'}</span>
+    }
+    await act(async () => root.render(<InvalidationProvider><Reader index={0} /><Reader index={1} /></InvalidationProvider>))
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    await act(async () => bump())
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      replies[1](new Response(JSON.stringify({ coveragePct: 50 })))
+    })
+    expect(values.every((value) => value.confirmed && value.value?.coveragePct === 50)).toBe(true)
+    await act(async () => replies[0](new Response(JSON.stringify({ coveragePct: 100 }))))
+    expect(values.every((value) => value.value?.coveragePct === 50)).toBe(true)
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+    // This request hangs. The next safety check must not join it forever.
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(fetchImpl).toHaveBeenCalledTimes(4)
+    await act(async () => replies[3](new Response(JSON.stringify({ coveragePct: 25 }))))
+    await act(async () => replies[2](new Response(JSON.stringify({ coveragePct: 50 }))))
+    expect(values.every((value) => value.confirmed && value.value?.coveragePct === 25)).toBe(true)
+  })
+
   it('withdraws trust offline, reconciles on visibility/focus, and exposes explicit retry', async () => {
     vi.useFakeTimers()
     let live!: LiveResource<string>

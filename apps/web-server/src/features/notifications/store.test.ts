@@ -6,12 +6,65 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationStore } from './store'
 import { notificationRoutes } from './index'
 import type { NotificationSource } from '../../../../../shared/notifications/types'
+import type { FeatureCoverageChange } from '../../../../../shared/coverage/freshness'
 
 let dir: string
 const events = { publish: vi.fn() }
 const source: NotificationSource = { key: 'flight:f1', signature: 'failed:run', message: { title: 'checkout paused', body: 'Test run failed', target: { kind: 'flight', flightId: 'f1' } } }
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'notifications-')); events.publish.mockClear() })
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+it('creates and resolves test-change and coverage topics independently through their owning events', async () => {
+  const { register } = await import('./index')
+  const dirtyListeners = new Set<() => void>()
+  let onWorkspaceEvent!: (event: { type: string }) => void
+  let dirty = true
+  const coverage: FeatureCoverageChange = {
+    feature: 'shop', delivery: 'tool-response-and-wait',
+    freshness: { revision: 'v1', checkedAt: 'now', state: 'stale', reasons: ['Mapping inputs changed.'], changedTests: ['checkout'], latestRunFailed: false, proofNeedsRun: false },
+  }
+  const app = Fastify()
+  await register(app, {
+    logsDir: dir, workspaceEvents: { ...events, subscribe: (fn: typeof onWorkspaceEvent) => { onWorkspaceEvent = fn; return vi.fn() } },
+    coverageMonitor: { reconcile: vi.fn(), list: () => [coverage] },
+    dirtySpecStore: {
+      list: () => [{ featureId: 'shop', status: dirty ? 'dirty' : 'clean', dirtySpecs: dirty ? [{}] : [] }],
+      onEvent: (fn: () => void) => dirtyListeners.add(fn), offEvent: (fn: () => void) => dirtyListeners.delete(fn),
+    },
+    runStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
+    flightStore: { list: () => [], latestForFeature: () => ({ flightId: 'f1' }), onEvent: vi.fn(), offEvent: vi.fn() },
+  } as unknown as import('../../server-context').ServerContext)
+  try {
+    const initial = (await app.inject('/api/notifications')).json()
+    expect(initial).toHaveLength(2)
+    const review = initial.find((item: { target: { kind: string } }) => item.target.kind === 'test-review')
+    const mapping = initial.find((item: { target: { kind: string } }) => item.target.kind === 'coverage')
+    expect(review.title).toBe('shop: tests changed')
+    expect(mapping.target).toEqual({ kind: 'coverage', feature: 'shop', flightId: 'f1', stage: 'specs-coverage' })
+    events.publish.mockClear()
+    for (const fn of dirtyListeners) fn()
+    onWorkspaceEvent({ type: 'coverage-changed' })
+    expect(events.publish).not.toHaveBeenCalled()
+
+    coverage.freshness.state = 'current'
+    onWorkspaceEvent({ type: 'coverage-changed' })
+    let current = (await app.inject('/api/notifications')).json()
+    expect(current.find((item: { id: string }) => item.id === mapping.id).resolvedAt).toBeTruthy()
+    expect(current.find((item: { id: string }) => item.id === review.id).resolvedAt).toBeUndefined()
+    expect(events.publish).toHaveBeenCalledWith({ type: 'notifications-changed' })
+
+    coverage.freshness.state = 'stale'
+    onWorkspaceEvent({ type: 'coverage-changed' })
+    dirty = false
+    for (const fn of dirtyListeners) fn()
+    current = (await app.inject('/api/notifications')).json()
+    expect(current.find((item: { id: string }) => item.id === review.id).resolvedAt).toBeTruthy()
+    expect(current.filter((item: { resolvedAt?: string }) => !item.resolvedAt)).toEqual([
+      expect.objectContaining({ target: { kind: 'coverage', feature: 'shop', flightId: 'f1', stage: 'specs-coverage' } }),
+    ])
+  } finally { await app.close() }
+  expect(dirtyListeners.size).toBe(0)
+})
 
 describe('durable notifications', () => {
   it('upgrades an existing neutral test review to warning without duplicating it or resetting read state', () => {
@@ -183,7 +236,7 @@ it('keeps one alert when a weakening moves from an active run back to its featur
   } finally { await app.close() }
 })
 
-it('resolves an ordinary run review without creating a feature-level follow-up', async () => {
+it('keeps ordinary test changes actionable after the active run ends', async () => {
   const { register } = await import('./index')
   const runListeners = new Set<() => void>()
   let runs = [{ runId: 'r1', feature: 'shop', status: 'healing', pendingSpecEdits: 1 }]
@@ -201,7 +254,8 @@ it('resolves an ordinary run review without creating a feature-level follow-up',
     for (const fn of runListeners) fn()
     const after = (await app.inject('/api/notifications')).json()
     expect(after).toHaveLength(1)
-    expect(after[0]).toMatchObject({ id: active.id, resolvedAt: expect.any(String) })
+    expect(after[0]).toMatchObject({ id: active.id, target: { kind: 'test-review', feature: 'shop' } })
+    expect(after[0].resolvedAt).toBeUndefined()
   } finally { await app.close() }
 })
 

@@ -159,9 +159,33 @@ function saveSnapshot() {
   const dir = path.join(root, 'logs/runs/run-1')
   fs.mkdirSync(path.join(dir, 'suite/e2e'), { recursive: true })
   fs.writeFileSync(path.join(dir, 'suite/e2e/a.spec.ts'), before)
+  fs.copyFileSync(path.join(suite, 'feature.config.cjs'), path.join(dir, 'suite/feature.config.cjs'))
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ feature: 'alpha', suiteSnapshot: { kind: 'taken', dir: path.join(dir, 'suite') } }))
   return dir
 }
+it('includes a fixture-only change in the comparison and exposes its complete recorded/current bytes', async () => {
+  const dir = saveSnapshot()
+  fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), before)
+  fs.writeFileSync(path.join(dir, 'suite/e2e/fixture.ts'), 'export const ready = false\n')
+  fs.writeFileSync(path.join(suite, 'e2e/fixture.ts'), 'export const ready = true\n')
+  const comparison = (await app.inject('/api/features/alpha/test-source-comparison?runId=run-1')).json()
+  expect(comparison).toMatchObject({ state: 'ready', files: ['e2e/a.spec.ts', 'e2e/fixture.ts'],
+    differences: [{ file: 'e2e/fixture.ts', affectedTests: [] }], changes: { added: [], changed: [], removed: [] } })
+  const response = await get('file=e2e/fixture.ts&runId=run-1')
+  expect(response.statusCode).toBe(200)
+  expect(response.json()).toMatchObject({ supportingFile: true, baseline: 'run-start',
+    before: { source: 'export const ready = false\n', tests: [] }, after: { source: 'export const ready = true\n', tests: [] } })
+  expect(response.json().before.story.steps).toEqual(expect.arrayContaining([
+    expect.objectContaining({ text: expect.stringContaining('ready'), source: expect.objectContaining({ file: 'e2e/fixture.ts', startLine: 1 }) }),
+  ]))
+  expect(response.json().after.story.steps).toEqual(expect.arrayContaining([
+    expect.objectContaining({ text: expect.stringContaining('ready'), source: expect.objectContaining({ file: 'e2e/fixture.ts', startLine: 1 }) }),
+  ]))
+  expect(response.json().patch).toContain('+export const ready = true')
+  fs.mkdirSync(path.join(suite, 'envsets'))
+  fs.writeFileSync(path.join(suite, 'envsets/secret.env'), 'PRIVATE')
+  expect((await get('file=envsets/secret.env&runId=run-1')).statusCode).toBe(400)
+})
 it('compares retained checks across a rename and reports only the real assertion addition', async () => {
   saveSnapshot()
   fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), before.replace('reads own scope', 'reads local scope').replace('  const body = await response.json()', '  const body = await response.json()\n  expect(body.ready).toBe(true)'))

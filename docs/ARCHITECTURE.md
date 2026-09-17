@@ -173,9 +173,24 @@ Filesystem and workspace events trigger reconciliation; a five-second content
 scan recovers dropped events and changes made while disconnected. Coverage reads
 use the syntax-only assertion/tag extractor, not readable-test prose compilation.
 
+The observer owns a shared in-memory ledger snapshot per suite. Reads and the
+fallback compare input bytes, directory membership, dependency-resolution
+candidates, configuration, and suite-scoped run/job evidence; unchanged inputs
+reuse that snapshot without reparsing tests or rebuilding coverage. A workspace
+pass shares file checks across suites. Missing inputs and linked targets are
+checked too; timestamps alone never certify freshness. Changes during calculation
+fail closed and retry. Browser requests coalesce within the same invalidation and
+reconciliation round; a newer event or recovery round never joins an older request.
+
 Mapping percentage remains requirement coverage, not a pass rate. A stale,
 unreadable, updating, or unconfirmed snapshot never displays its old percentage
-as current. Historical measurements remain labelled. UI readers reconcile every
+as current. Coverage pages and Flight metric tiles retain the last figures with
+an adjacent warning icon; its hover/focus tooltip explains freshness and provenance.
+Flight rail warnings replace the completed tick on affected steps, rather than
+adding a page banner. Continue offers targeted recovery, replacing Resume when
+the affected step is selected. The ledger's Recalculate Coverage action sits above
+Redo from the start and opens the Flight launcher at the affected step.
+UI readers reconcile every
 five seconds, withdraw confirmation on failed reads or connection loss, and expire
 their freshness lease after fifteen seconds without a successful read. Late
 responses cannot replace newer reads. Latest-run failures remain visible; a newer
@@ -204,9 +219,9 @@ state. The server owns writes; client tabs subscribe to `notifications-changed` 
 refetch on reconnect, with a bounded reconciliation for a dropped event that does
 not disconnect the socket. The dialog is addressable as `?dialog=notifications`.
 
-Flight attention transitions, active runs blocked on pending test edits, and
-advisory test-weakening hints create messages even when the browser is closed.
-Ordinary test edits stay on the feature surface instead of interrupting the user.
+Flight attention transitions and changed test files create messages even when
+the browser is closed. Test changes open the comparison dialog; a blocked run
+supplies its exact review target, and a weakening hint escalates the same topic.
 Reading a message preserves it. Deleting one removes its content permanently while
 retaining the source signature, so refreshing or restarting cannot recreate it. A
 later quiet-to-attention transition creates a new message. Recovery marks retained
@@ -218,7 +233,11 @@ review; they never change the run verdict or adopt test edits themselves.
 
 Coverage freshness uses one persistent attention identity per suite. Repeated
 file saves update its reason and earliest recovery stage instead of creating
-duplicates. It resolves only when mapping freshness and execution proof recover.
+duplicates. It resolves when mapping freshness recovers, independently of test
+review. Execution failures and missing verification have a separate identity:
+failures open the exact run; missing verification opens Flight's Test run step.
+Tests changed and coverage outdated can coexist for one suite. Neither reviewing
+tests nor recalculating mappings dismisses the other topic automatically.
 
 The run detail keeps a visible review banner above its tabs while it awaits test
 review. Its button opens the existing changed-tests dialog with that run first.
@@ -277,16 +296,25 @@ live refresh. Differences from a selected run remain independently inspectable:
 saving in Git never validates new tests or changes an existing run verdict.
 An active run with pending edits asks "Keep these test changes?" with two actions: "No, restore tests" and "Yes, commit & rerun". Yes commits first, then adopts into the run and requests a rerun; a failed step stays visible for recovery. Queued or completed runs retain the Git-only commit action. MCP clients can call
 `get_test_review` to display the exact snapshot comparison, then
-`review_test_changes` to request human adoption through elicitation. The review
+`review_test_changes` to request adoption or restoration through human elicitation
+inside the agent session. The UI is optional inspection, not a required control
+surface. The comparison includes fixtures and supporting files without counting
+them as changed test declarations. The review
 includes every copied suite file; envsets, dependencies and Git metadata are
 excluded exactly as in the snapshot. Approval is bound to both trees by SHA-256.
 A staged copy is checked before replacing the snapshot, so stale answers and
 copy failures cannot silently adopt a different revision. Cancellation leaves
-work pending; unsupported clients open the existing review page and call
-`review_test_changes` with `wait_for_decision:true`. This read-only, bounded wait
+work pending. A first call with `wait_for_decision:true` still elicits instead of
+silently waiting for a question that was never presented. Unsupported clients
+receive an explicit capability limitation and a session/run/revision-bound
+`browser_wait_token`; only a human-chosen browser fallback uses that token with
+`wait_for_decision:true`. This read-only, bounded wait
 subscribes to run-store events and returns the persisted human decision for the
 review revision. Clients repeat `still_waiting` until the browser decision arrives;
-a reconnect reads the same receipt. A clean Git tree is never treated as approval.
+a reconnect reads the same receipt. The normal elicited path returns that receipt
+without any browser click; retries do not apply the decision twice. Restoration
+checks the reviewed revision before changing files and rejects symlink paths.
+A clean Git tree is never treated as approval.
 Adoption signals
 a rerun and never changes the verdict into a pass. Editing opens the existing
 editor; validation uses the existing Run flow. Closing Services leaves sessions

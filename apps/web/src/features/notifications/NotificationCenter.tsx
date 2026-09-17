@@ -21,6 +21,13 @@ function attentionRank(item: WorkspaceNotification): number {
 
 const DELETE_HINT = 'Delete permanently — this does not resolve or stop its run, and it stays deleted after a restart'
 
+function notificationAction(item: WorkspaceNotification): string {
+  const target = item.target
+  return target?.kind === 'flight' || target?.kind === 'coverage' ? 'Open flight'
+    : target?.kind === 'test-review' && !item.resolvedAt ? 'Review test changes'
+    : target && 'runId' in target && target.runId ? 'Open run' : 'Open suite'
+}
+
 export function NotificationCenter({ open, suppressToast = false, onOpenChange, onNavigate }: {
   open: boolean
   suppressToast?: boolean
@@ -44,14 +51,12 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
       onNavigate(target.runId ? { ...target, kind: 'run', runId: target.runId } : { kind: 'feature', feature: target.feature })
     } else onNavigate(target)
   }
-  const row = (item: WorkspaceNotification, lead: boolean) => {
+  const row = (item: WorkspaceNotification) => {
     const hint = !item.resolvedAt && item.severity === 'danger' && item.target?.kind === 'test-review'
     const state = needsAttention(item) ? 'warning' : 'idle'
     const target = item.target
     const reviewNeeded = target?.kind === 'test-review' && !item.resolvedAt
-    const action = target?.kind === 'flight' || target?.kind === 'coverage' ? 'Open flight'
-      : target?.kind === 'test-review' && !item.resolvedAt ? 'Review test changes'
-      : target && 'runId' in target && target.runId ? 'Open run' : 'Open suite'
+    const action = notificationAction(item)
     // Every row's meta line answers the same two questions — what kind of alert
     // this is, and how old it is. The suite name is already the first word of
     // every title, and the hint's "not a verdict" caveat is in the body, so
@@ -91,7 +96,7 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
             <>
               <span aria-hidden="true" className="mx-1 h-4 w-px bg-line-strong" />
               <button
-                className={`inline-flex h-7 ${reviewNeeded ? 'gap-1 px-2' : 'w-7'} items-center justify-center rounded-md text-xs ${lead ? 'cl-button-primary' : 'cl-button'}`}
+                className={`cl-button inline-flex h-7 ${reviewNeeded ? 'gap-1 px-2' : 'w-7'} items-center justify-center rounded-md text-xs`}
                 aria-label={action}
                 title={action}
                 onClick={() => openItem(item)}
@@ -116,7 +121,7 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
         ariaLabel={inbox.error ? 'Notifications unavailable — open to retry' : `Notifications, ${attention.length} need attention`}
       />
       {!open && !suppressToast && latest && (
-        <ToastHost toasts={[{ id: latest.id, title: latest.title, body: latest.body, sticky: true, dismissOnOpen: false, dismissLabel: 'Delete notification permanently', actionLabel: latest.target?.kind === 'test-review' ? 'Review test changes' : 'Open details', onClick: () => openItem(latest) }]} onDismiss={(id) => { void inbox.remove(id) }} />
+        <ToastHost toasts={[{ id: latest.id, title: latest.title, body: latest.body, sticky: true, dismissOnOpen: false, dismissLabel: 'Delete notification permanently', actionLabel: notificationAction(latest), onClick: () => openItem(latest) }]} onDismiss={(id) => { void inbox.remove(id) }} />
       )}
       <Modal
         open={open}
@@ -149,7 +154,7 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
             />
           </div>
         )}
-        <ul className="divide-y divide-line">{visible.map((item, index) => row(item, index === 0 && !showHistory))}</ul>
+        <ul className="divide-y divide-line">{visible.map(row)}</ul>
       </Modal>
     </>
   )

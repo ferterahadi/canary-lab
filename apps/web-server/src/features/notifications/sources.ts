@@ -44,10 +44,8 @@ export function flightNotificationSources(flights: FlightIndexEntry[]): Notifica
   })
 }
 
-/** Test review is one attention problem per feature. A run can supply the most
- * useful target while it is blocked, but ownership changes must not create a
- * second alert for the same files. Ordinary edits stay on the feature surface;
- * only a blocked run or a possible weakening earns an interruption. */
+/** One test-change topic per suite, independent of coverage freshness. A blocked
+ * run supplies the review target; resolving coverage must never dismiss edits. */
 export function testReviewNotificationSources(runs: ReviewRun[], changes: TestChangeRecord[] = []): NotificationSource[] {
   const changesByFeature = new Map(changes.map((record) => [record.featureId, record]))
   const pendingRunByFeature = new Map<string, ReviewRun>()
@@ -60,7 +58,7 @@ export function testReviewNotificationSources(runs: ReviewRun[], changes: TestCh
     const record = changesByFeature.get(feature)
     const run = pendingRunByFeature.get(feature)
     const weaker = hasWeakerHint(record)
-    const attention = !!run || weaker
+    const attention = !!run || (record?.status === 'dirty' && record.dirtySpecs.length > 0)
     const pending = run?.pendingSpecEdits ?? record?.dirtySpecs.length ?? 0
     return {
       key: `test-review:${feature}`,
@@ -69,10 +67,10 @@ export function testReviewNotificationSources(runs: ReviewRun[], changes: TestCh
       // place; quiet -> attention still creates a fresh episode later.
       signature: attention ? 'attention' : 'quiet',
       ...(attention ? { message: {
-        title: weaker ? `${feature}: possible test weakening` : `${feature} is awaiting test review`,
+        title: weaker ? `${feature}: possible test weakening` : `${feature}: tests changed`,
         body: run
           ? `${pending} test file${pending === 1 ? '' : 's'} changed after this run started. ${weaker ? 'A check found a possible weakening. This hint does not change the run result. ' : ''}Review the test-file changes, then adopt or restore them.`
-          : `${pending} test file${pending === 1 ? '' : 's'} changed. A check found a possible weakening. This hint does not change the run result. Review the test-file changes before relying on the previous run result.`,
+          : `${pending} test file${pending === 1 ? '' : 's'} changed. ${weaker ? 'A check found a possible weakening. This hint does not change the run result. ' : ''}Compare the test versions and review the changes.`,
         severity: weaker ? 'danger' as const : 'warning' as const,
         target: run
           ? { kind: 'test-review' as const, feature, runId: run.runId }
@@ -88,17 +86,35 @@ import type { FeatureCoverageChange } from '../../../../../shared/coverage/fresh
 export function coverageNotificationSources(changes: FeatureCoverageChange[]): NotificationSource[] {
   return changes.map(({ feature, freshness, flightId }) => {
     const attention = ['stale', 'unavailable', 'updating'].includes(freshness.state)
-      || (freshness.state === 'current' && (freshness.latestRunFailed || freshness.proofNeedsRun))
     return {
       key: `coverage:${feature}`,
       signature: attention ? 'attention' : 'quiet',
       ...(attention ? { message: {
-        title: `${feature}: ${freshness.latestRunFailed ? 'latest run has failures' : freshness.state === 'current' ? 'current tests need verification' : freshness.state === 'updating' ? 'coverage update in progress' : 'coverage freshness needs attention'}`,
-        body: [...freshness.reasons, freshness.state === 'current'
-          ? 'Mapping is not proof of a passing run. Review the latest evidence in Flight.'
-          : 'Previous coverage figures are historical until current inputs are checked. Open Flight to resume the affected stage.'].join(' '),
-        severity: freshness.latestRunFailed ? 'danger' as const : 'warning' as const,
+        title: `${feature}: ${freshness.state === 'updating' ? 'coverage update in progress' : freshness.state === 'unavailable' ? 'coverage freshness unavailable' : 'coverage out of date'}`,
+        body: [...freshness.reasons, 'Previous coverage figures are historical until current inputs are checked. Open Flight to resume the affected stage.'].join(' '),
+        severity: 'warning' as const,
         target: { kind: 'coverage' as const, feature, stage: freshness.nextAction?.stage ?? 'specs-coverage', ...(flightId ? { flightId } : {}) },
+      } } : {}),
+    }
+  })
+}
+
+/** Execution evidence is not mapping freshness or test review. Keep its own
+ * identity so a failed run cannot rename an outdated-coverage notification. */
+export function verificationNotificationSources(changes: FeatureCoverageChange[]): NotificationSource[] {
+  return changes.map(({ feature, freshness, flightId }) => {
+    const attention = freshness.latestRunFailed || (freshness.state === 'current' && freshness.proofNeedsRun)
+    return {
+      key: `verification:${feature}`,
+      signature: attention ? 'attention' : 'quiet',
+      ...(attention ? { message: {
+        title: `${feature}: ${freshness.latestRunFailed ? 'latest run has failures' : 'current tests need verification'}`,
+        body: freshness.latestRunFailed ? 'Review the latest run results. Updating coverage mappings does not resolve a failed test.'
+          : 'Coverage mapping is not proof of a passing run. Open the Test run step to verify the current tests.',
+        severity: freshness.latestRunFailed ? 'danger' as const : 'warning' as const,
+        target: freshness.latestRunFailed && freshness.latestRunId
+          ? { kind: 'run' as const, feature, runId: freshness.latestRunId }
+          : { kind: 'coverage' as const, feature, stage: 'run' as const, ...(flightId ? { flightId } : {}) },
       } } : {}),
     }
   })

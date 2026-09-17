@@ -4,6 +4,7 @@ import type { CoverageLedger, EvaluationExportTask, GapType, RunDetail, ServiceM
 import { useEvaluationExports } from '@/features/evaluation'
 import { GAP_META, SEG_ORDER, STRENGTH_META, STRENGTH_ORDER, countFor } from '@/features/coverage'
 import { PanelCard } from '@/shared/ui/PanelCard'
+import { CoverageFreshnessIndicator, coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { SkeletonBar, SkeletonBead, SkeletonPanel, type AwaitingState } from '@/shared/ui/Skeleton'
 import { StatusDot } from '@/shared/ui/atoms'
 import { evaluationArchiveFilename, formatBytes, formatDuration, timeAgo } from '@/shared/lib/format'
@@ -296,8 +297,8 @@ export function CoverageCompositionPanel({ ledger, awaiting, confirmed }: { ledg
   const strengthOf = (t: TestCoverage): TestStrength => t.strength ?? 'shallow'
   return (
     <StageColumn>
-      <PanelCard kicker="What the tests cover" testId={composed ? 'coverage-composition' : 'coverage-composition-skeleton'}>
-        {composed && (!confirmed || ledger?.freshness?.state !== 'current') && <p className="text-[11px] text-warning">Historical calculation — current coverage is unconfirmed.</p>}
+      <PanelCard kicker="What the tests cover" testId={composed ? 'coverage-composition' : 'coverage-composition-skeleton'}
+        aside={composed ? <CoverageFreshnessIndicator message={coverageWarning(composed.freshness, confirmed === true)} /> : undefined}>
         {/* gap-x-6 / gap-y-4: at the old uniform 12px the two distributions ran
             together into one wall of dots, side by side AND stacked. */}
         <div className="mt-1 grid gap-x-6 gap-y-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))' }}>

@@ -24,6 +24,7 @@ beforeEach(() => {
 })
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers(); vi.resetAllMocks() })
 const text = (id: string) => host.querySelector(`[data-testid="${id}"]`)?.textContent
+const warning = () => host.querySelector('[data-testid="coverage-freshness-warning"]')?.getAttribute('aria-label')
 const mount = async (onOpenRecovery = vi.fn()) => {
   function View() {
     const { invalidate } = useInvalidation()
@@ -33,7 +34,7 @@ const mount = async (onOpenRecovery = vi.fn()) => {
 }
 
 describe('an already-open coverage page', () => {
-  it('withdraws a green headline, updates its test count, and opens the necessary Flight stage without refreshing', async () => {
+  it('marks the saved percentage with a warning, updates its test count, and recovers through the docs footer without refreshing', async () => {
     const recover = vi.fn()
     await mount(recover)
     expect(text('coverage-pct')).toBe('33%')
@@ -41,10 +42,12 @@ describe('an already-open coverage page', () => {
     stale.tests.push({ name: 'new test', requirements: [], pathTypes: [], strength: 'shallow' })
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(stale)
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="change"]')!.click())
-    expect(text('coverage-pct')).toBe('—')
-    expect(text('coverage-sentence')).toContain('historical')
+    expect(text('coverage-pct')).toBe('33%')
+    expect(warning()).toContain('not confirmed current coverage')
+    expect(host.querySelector('[data-testid="coverage-freshness-notice"]')).toBeNull()
     expect(host.textContent).toContain('new test')
-    const button = host.querySelector<HTMLButtonElement>('[data-testid="coverage-freshness-notice"] button')!
+    const button = host.querySelector<HTMLButtonElement>('[data-testid="recalculate-coverage"]')!
+    expect(button.parentElement?.textContent).toContain('Redo from the start')
     await act(async () => button.click())
     expect(recover).toHaveBeenCalledWith('prd-summary')
   })
@@ -57,7 +60,7 @@ describe('an already-open coverage page', () => {
     failed.freshness.latestRunFailed = true
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(failed)
     await act(async () => vi.advanceTimersByTimeAsync(COVERAGE_RECONCILE_MS))
-    expect(text('coverage-freshness-notice')).toContain('Latest run has failures')
+    expect(warning()).toContain('Latest run has failures')
     expect(text('coverage-latest-run')).toContain('1 failed')
   })
 
@@ -65,14 +68,16 @@ describe('an already-open coverage page', () => {
     await mount()
     vi.mocked(api.getFeatureCoverage).mockRejectedValue(new Error('offline'))
     await act(async () => vi.advanceTimersByTimeAsync(COVERAGE_RECONCILE_MS))
-    expect(text('coverage-pct')).toBe('—')
-    expect(text('coverage-sentence')).toContain('historical')
+    expect(text('coverage-pct')).toBe('33%')
+    expect(warning()).toContain('Coverage freshness unconfirmed')
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(fresh())
     await act(async () => window.dispatchEvent(new Event('online')))
     expect(text('coverage-pct')).toBe('33%')
+    expect(warning()).toBeUndefined()
     vi.mocked(api.getFeatureCoverage).mockImplementation(() => new Promise(() => {}))
     await act(async () => vi.advanceTimersByTimeAsync(COVERAGE_FRESHNESS_LEASE_MS + 1))
-    expect(text('coverage-pct')).toBe('—')
+    expect(text('coverage-pct')).toBe('33%')
+    expect(warning()).toContain('Coverage freshness unconfirmed')
   })
 
   it('ignores a delayed old response after a newer change has been rendered', async () => {
@@ -82,7 +87,7 @@ describe('an already-open coverage page', () => {
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(LEDGER))
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="change"]')!.click())
     await act(async () => old(fresh()))
-    expect(text('coverage-pct')).toBe('—')
-    expect(text('coverage-freshness-notice')).toContain('Coverage out of date')
+    expect(text('coverage-pct')).toBe('33%')
+    expect(warning()).toContain('Coverage out of date')
   })
 })

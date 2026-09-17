@@ -24,6 +24,7 @@ import { readPrdSummary } from './prd-summary'
 import { mappingInputs } from './coverage-engine'
 import { mappingInferenceSnapshot } from './mapping-cache'
 import { deriveCoverageFreshness, unreadableSourceDocs } from './freshness'
+import type { CoverageInputReads } from './input-reads'
 
 export { LEGACY_MAPPINGS_JSON, applyExternalCoverageMappings, buildCoverageMappingContext, flagMappingIssues, hasPrdSummary, runCoverageEngine } from './coverage-engine'
 export type { ApplyExternalCoverageArgs, ApplyExternalCoverageResult, CoverageMappingContext, CoverageMappingTest, MappingTestSource, RunCoverageEngineArgs, RunCoverageEngineDeps, RunCoverageEngineResult } from './coverage-engine'
@@ -161,6 +162,8 @@ export interface ComputeFeatureCoverageArgs {
    *  workspace without it cost 34 full loads per request (1122 requires for 33
    *  features). Omit it and the directory is resolved as before. */
   featureDir?: string
+  /** The observer retains resolution/config dependencies for cheap content checks. */
+  inputReads?: CoverageInputReads
 }
 
 /** Assemble the full ledger (breadth + depth + drift) for one feature. */
@@ -241,7 +244,7 @@ export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): Covera
   }
   ledger.state = deriveCoverageStateView(stateInput)
   ledger.docsDrift = summaryDrifted // back-compat mirror
-  const snapshot = mappingInferenceSnapshot(featureDir, mappingInputs(featureDir), requirements, summary?.variantDimension)
+  const snapshot = mappingInferenceSnapshot(featureDir, mappingInputs(featureDir), requirements, summary?.variantDimension, args.inputReads)
   const unreadable = unreadableSourceDocs(featureDir)
   for (const file of listSpecFiles(featureDir)) {
     try { fs.readFileSync(file) } catch { unreadable.push(path.relative(featureDir, file)) }

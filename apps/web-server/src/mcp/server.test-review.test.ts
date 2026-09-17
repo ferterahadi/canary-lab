@@ -35,7 +35,7 @@ async function harness(answer: (live: string) => { action: 'accept' | 'cancel' |
     runId: ctx.runId, stop: async () => {},
     pauseAndHeal: async () => ({ ok: false, reason: 'already-healing' }),
     cancelHeal: async () => ({ ok: false, reason: 'no-agent-running' }),
-    adoptSpecEdits: (revision) => adoptSpecEdits(ctx, revision), restoreSpecEdits: () => restoreSpecEdits(ctx),
+    adoptSpecEdits: (revision) => adoptSpecEdits(ctx, revision), restoreSpecEdits: (revision) => restoreSpecEdits(ctx, revision),
   })
   const events: string[] = []
   store.on('event', (event) => events.push(event.kind))
@@ -76,7 +76,7 @@ describe('human test review through the real MCP and REST path', () => {
     expect(fallback).toMatchObject({ reason: 'elicitation-unavailable', review_revision: review.review_revision })
     expect(fallback.next).toContain('wait_for_decision:true')
     const listeners = store.listenerCount('event')
-    const pending = call('review_test_changes', { ...args, wait_for_decision: true })
+    const pending = call('review_test_changes', { ...args, browser_wait_token: fallback.browser_wait_token, wait_for_decision: true })
     await vi.waitFor(() => expect(store.listenerCount('event')).toBeGreaterThan(listeners))
     const action = decision === 'adopted' ? 'adopt-spec-edits' : 'restore-spec-edits'
     expect((await app.inject({ method: 'POST', url: `/api/runs/${ctx.runId}/${action}` })).statusCode).toBe(decision === 'adopted' ? 202 : 200)
@@ -94,7 +94,10 @@ describe('human test review through the real MCP and REST path', () => {
   it('waits without approving, detects changed source, and cleans up on timeout or run end', async () => {
     const { call, ctx, store, requests } = await harness(() => ({ action: 'cancel' }), false, false)
     const review = await call('get_test_review', { runId: ctx.runId })
-    const args = { runId: ctx.runId, review_revision: review.review_revision, wait_for_decision: true, timeout_ms: 1 }
+    const first = { runId: ctx.runId, review_revision: review.review_revision, wait_for_decision: true, timeout_ms: 1 }
+    const fallback = await call('review_test_changes', first)
+    expect(fallback).toMatchObject({ status: 'needs-input', reason: 'elicitation-unavailable' })
+    const args = { ...first, browser_wait_token: fallback.browser_wait_token }
     const listeners = store.listenerCount('event')
     expect(await call('review_test_changes', args)).toMatchObject({ status: 'still_waiting' })
     expect(store.listenerCount('event')).toBe(listeners)
@@ -114,7 +117,8 @@ describe('human test review through the real MCP and REST path', () => {
     expect(review.patch).toContain('+test')
     expect(fs.readFileSync(review.patchPath, 'utf8')).toBe(review.patch)
     expect(requests).toEqual(['GET'])
-    const result = await call('review_test_changes', { runId: ctx.runId, review_revision: review.review_revision })
+    // The exact regression: an agent's first wait must still ask the human.
+    const result = await call('review_test_changes', { runId: ctx.runId, review_revision: review.review_revision, wait_for_decision: true })
     expect(result).toMatchObject({ status: 'adopted', rerun: 'signalled' })
     expect(reply).toHaveBeenCalledTimes(1)
     expect(fs.readFileSync(path.join(ctx.suiteDir, 'e2e/a.spec.ts'), 'utf8')).toBe(changed)
@@ -122,6 +126,25 @@ describe('human test review through the real MCP and REST path', () => {
     expect(events).toContain('changed')
     expect(ctx.signalGate.consume()?.kind).toBe('rerun')
     expect(store.get(ctx.runId)?.manifest.status).toBe('healing')
+    expect(await call('review_test_changes', { runId: ctx.runId, review_revision: review.review_revision })).toMatchObject({ status: 'adopted' })
+    expect(reply).toHaveBeenCalledTimes(1)
+    expect(requests.filter((method) => method === 'POST')).toHaveLength(1)
+  })
+
+  it.each(['Adopt and rerun', 'Restore recorded files'])('elicits a fixture-only change and records %s without browser interaction', async (choice) => {
+    const { call, ctx, store, reply } = await harness(() => ({ action: 'accept', content: { choice } }))
+    fs.copyFileSync(path.join(ctx.suiteDir, 'e2e/a.spec.ts'), path.join(ctx.feature.featureDir, 'e2e/a.spec.ts'))
+    fs.writeFileSync(path.join(ctx.suiteDir, 'e2e/fixture.ts'), 'export const ready = false\n')
+    fs.writeFileSync(path.join(ctx.feature.featureDir, 'e2e/fixture.ts'), 'export const ready = true\n')
+    const review = await call('get_test_review', { runId: ctx.runId })
+    expect(review.files).toEqual([{ file: 'e2e/fixture.ts', change: 'modified' }])
+    const result = await call('review_test_changes', { runId: ctx.runId, review_revision: review.review_revision, wait_for_decision: true })
+    const decision = choice === 'Adopt and rerun' ? 'adopted' : 'restored'
+    expect(result).toMatchObject({ status: decision, nextSteps: ['wait_for_heal_task'] })
+    expect(reply).toHaveBeenCalledTimes(1)
+    expect(store.get(ctx.runId)?.manifest.specEdits?.reviewDecisions).toContainEqual(expect.objectContaining({ revision: review.review_revision, decision }))
+    expect(fs.readFileSync(path.join(ctx.suiteDir, 'e2e/fixture.ts'), 'utf8')).toBe(fs.readFileSync(path.join(ctx.feature.featureDir, 'e2e/fixture.ts'), 'utf8'))
+    expect(ctx.signalGate.consume()?.kind ?? null).toBe(decision === 'adopted' ? 'rerun' : null)
   })
 
   it.each(['cancel', 'decline'] as const)('does not mutate or rerun on %s', async (action) => {

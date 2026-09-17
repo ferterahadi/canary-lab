@@ -348,6 +348,10 @@ export class HealSignalGate {
     this.waiting = false
   }
 
+  isReadyForSignal(): boolean {
+    return this.waiting && this.pending === null
+  }
+
   observe(kind: HealSignalKind, body: Record<string, unknown>): HealSignalGateResult {
     if (!this.waiting) {
       return { accepted: false, kind, reason: 'not-waiting-for-signal' }

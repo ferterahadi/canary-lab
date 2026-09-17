@@ -68,6 +68,8 @@ export function ContinueMenu({
   onStartFlight,
   externalMutationOwner,
   recordlessEntry,
+  selectedStage,
+  coverageRecovery,
 }: {
   flight: FlightManifest
   onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
@@ -78,9 +80,12 @@ export function ContinueMenu({
   /** A derived flight has evidence but no persisted record. Resume mints that
    *  first record directly at this stage instead of reopening the launcher. */
   recordlessEntry?: FlightStageKey
+  selectedStage?: FlightStageKey | null
+  coverageRecovery?: { stage: FlightStageKey; warning: string }
 }) {
   const [open, setOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [redoFrom, setRedoFrom] = useState<FlightStageKey | null>(null)
   const [preparing, setPreparing] = useState(false)
   const [modelsGate, setModelsGate] = useState<{
     body: api.StartFlightBody
@@ -88,8 +93,11 @@ export function ContinueMenu({
     config: api.ProjectConfig
   } | null>(null)
   const ref = useRef<HTMLDivElement | null>(null)
-  const menuMode = flight.status === 'paused' || recordlessEntry !== undefined
+  const menuMode = flight.status === 'paused' || recordlessEntry !== undefined || coverageRecovery !== undefined
   const resumeTarget = resumeTargetLabel(flight)
+  const recoveryStage = coverageRecovery ? stageRowKey(coverageRecovery.stage) : undefined
+  const recoveryLabel = REDO_STAGES.find(({ key }) => key === recoveryStage)?.label
+  const replacesResume = recoveryStage !== undefined && (selectedStage === recoveryStage || resumeTarget === null)
 
   const startRecordless = (fromStage: FlightStageKey, feedback?: string): void => {
     if (preparing) return
@@ -160,7 +168,7 @@ export function ContinueMenu({
           role="menu"
           className="cl-popover absolute right-0 top-full z-20 mt-1 flex w-[260px] flex-col gap-1 p-1.5"
         >
-          <button
+          {!replacesResume && <button
             type="button"
             role="menuitem"
             data-testid="flight-resume"
@@ -177,12 +185,21 @@ export function ContinueMenu({
             <span className="block text-[10.5px] text-muted">
               Keeps every finished step and retries the first unfinished one
             </span>
-          </button>
+          </button>}
+          {coverageRecovery && recoveryStage && (
+            <button type="button" role="menuitem" data-testid="flight-coverage-recover"
+              onClick={() => { setOpen(false); setRedoFrom(recoveryStage); setDialogOpen(true) }}
+              title={coverageRecovery.warning}
+              className="cl-hover-row rounded px-2 py-1.5 text-left transition-colors">
+              <span className="block text-xs font-medium">↻ Run from {recoveryLabel}</span>
+              <span className="block text-[10.5px] text-muted">Update the out-of-date coverage from this step</span>
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
             data-testid="flight-redo-open"
-            onClick={() => { setOpen(false); setDialogOpen(true) }}
+            onClick={() => { setOpen(false); setRedoFrom(null); setDialogOpen(true) }}
             className="cl-hover-row rounded px-2 py-1.5 text-left transition-colors"
           >
             <span className="block text-xs font-medium">↻ From a step…</span>
@@ -199,6 +216,7 @@ export function ContinueMenu({
           onClose={() => setDialogOpen(false)}
           onStartFresh={onStartFlight ? () => { setDialogOpen(false); onStartFlight(flight.feature, 'fresh') } : undefined}
           onRedo={recordlessEntry ? startRecordless : undefined}
+          initialStage={redoFrom}
         />
       )}
       {modelsGate && (
@@ -233,6 +251,7 @@ export function RedoFlightDialog({
   onClose,
   onStartFresh,
   onRedo,
+  initialStage = null,
 }: {
   flight: FlightManifest
   onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
@@ -243,10 +262,11 @@ export function RedoFlightDialog({
   /** A recordless flight starts through POST /api/flights; recorded flights
    *  keep using their id-scoped redo endpoint. */
   onRedo?: (fromStage: FlightStageKey, feedback?: string) => void
+  initialStage?: FlightStageKey | null
 }) {
   const [entry, setEntry] = useState<Awaited<ReturnType<typeof api.getFlightEntryOptions>> | null>(null)
   const [entryFailed, setEntryFailed] = useState(false)
-  const [fromStage, setFromStage] = useState<FlightStageKey | null>(null)
+  const [fromStage, setFromStage] = useState<FlightStageKey | null>(initialStage)
   const [feedback, setFeedback] = useState('')
 
   useEffect(() => {
@@ -282,7 +302,7 @@ export function RedoFlightDialog({
           <button
             type="button"
             data-testid="flight-redo-submit"
-            disabled={fromStage === null}
+            disabled={fromStage === null || !entryFor(fromStage).allowed}
             onClick={() => {
               const stage = fromStage
               if (!stage) return

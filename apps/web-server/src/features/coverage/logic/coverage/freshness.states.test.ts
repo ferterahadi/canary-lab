@@ -30,7 +30,8 @@ describe('freshness state boundaries', () => {
   })
 
   it('distinguishes changed requirement meanings, missing state, and active summary/mapping work', () => {
-    expect(deriveCoverageFreshness({ ...input, ledger: { ...input.ledger, state: { ...input.ledger.state!, coverage: 'stale' } } }).reasons[0]).toContain('Requirements changed')
+    expect(deriveCoverageFreshness({ ...input, ledger: { ...input.ledger, state: { ...input.ledger.state!, coverage: 'stale' } } }).reasons[0]).toBe('Requirements changed since coverage was mapped.')
+    expect(deriveCoverageFreshness({ ...input, docsHash: 'source-docs-changed' }).reasons[0]).toBe('Requirements changed after this coverage was generated.')
     expect(deriveCoverageFreshness({ ...input, snapshot: { ...input.snapshot, requirements: { R1: 'changed' } } }).state).toBe('stale')
     expect(deriveCoverageFreshness({ ...input, ledger: { ...input.ledger, state: undefined } }).state).toBe('current')
     for (const state of [{ ...input.ledger.state!, summary: 'generating' as const }, { ...input.ledger.state!, coverage: 'generating' as const }]) {

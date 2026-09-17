@@ -55,7 +55,7 @@ export async function waitForTestReview(store: RunStore, runId: string, revision
       } catch { /* Missing source cannot be accepted as the reviewed revision. */ }
       finish({ status: unchanged ? 'still_waiting' : 'review-changed', runId, review_revision: revision,
         next: unchanged
-          ? 'The human has not decided yet. Immediately call review_test_changes again with the same runId, review_revision and wait_for_decision:true. Do not end the turn or click the review controls yourself.'
+          ? 'No browser decision is recorded yet. Repeat review_test_changes with the same runId, review_revision, browser_wait_token and wait_for_decision:true. Do not click review controls yourself.'
           : 'The suite changed without a decision for this revision. Fetch get_test_review and show the fresh diff before requesting another review.' })
     }, Math.min(Math.max(timeoutMs, 1), TEST_REVIEW_WAIT_MS))
     timer.unref()

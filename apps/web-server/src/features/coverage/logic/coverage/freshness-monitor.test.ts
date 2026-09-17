@@ -22,9 +22,11 @@ const ledger = (revision = 'v1'): CoverageLedger => ({ feature: 'shop', coverage
 })
 
 beforeEach(() => {
+  vi.clearAllMocks()
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-watch-'))
   fs.mkdirSync(path.join(root, 'features'))
   fs.mkdirSync(path.join(root, 'logs'))
+  fs.mkdirSync(path.join(root, 'features', 'shop', 'docs'), { recursive: true })
   bus = new WorkspaceEventBus(); warn = vi.fn(); watchers = new Map()
   vi.mocked(loadFeatures).mockReturnValue([{ name: 'shop', featureDir: path.join(root, 'features', 'shop') }] as never)
   vi.mocked(computeFeatureCoverage).mockReturnValue(ledger())
@@ -43,6 +45,7 @@ describe('observer recovery and lifetime', () => {
   it('removes disappeared suites and coalesces repeated/concurrent scans', async () => {
     const events: unknown[] = []; bus.subscribe((event) => events.push(event))
     monitor.read('shop')
+    fs.rmSync(path.join(root, 'features', 'shop'), { recursive: true })
     vi.mocked(loadFeatures).mockReturnValue([])
     await Promise.all([monitor.reconcile(), monitor.reconcile()])
     expect(monitor.list()).toEqual([])
@@ -74,10 +77,15 @@ describe('observer recovery and lifetime', () => {
     expect(warn).toHaveBeenCalledOnce()
     await vi.advanceTimersByTimeAsync(200)
     expect(watchers.get(path.join(root, 'features'))).not.toBe(featureWatch)
+    // A real input change must still be recovered after watcher reattachment;
+    // no-op signals alone no longer justify rebuilding a ledger.
+    fs.writeFileSync(path.join(root, 'features', 'shop', 'docs', 'spec.md'), 'new input')
+    vi.mocked(computeFeatureCoverage).mockReturnValue(ledger('v2'))
     bus.publish({ type: 'tests-changed', feature: 'shop' })
     bus.publish({ type: 'notifications-changed' })
     await vi.advanceTimersByTimeAsync(5000)
-    expect(vi.mocked(computeFeatureCoverage).mock.calls.length).toBeGreaterThan(2)
+    expect(monitor.list()[0].freshness.revision).toBe('v2')
+    expect(computeFeatureCoverage).toHaveBeenCalledTimes(2)
   })
 
   it('keeps reconciling if a watcher cannot attach or a linked input is renamed', async () => {
@@ -98,6 +106,12 @@ describe('observer recovery and lifetime', () => {
 
   it('closes the wait registration race and settles an event only once', async () => {
     vi.mocked(computeFeatureCoverage).mockReturnValueOnce(ledger()).mockReturnValue(ledger('v2'))
+    const read = monitor.read.bind(monitor)
+    vi.spyOn(monitor, 'read').mockImplementationOnce((...args) => {
+      const first = read(...args)
+      fs.writeFileSync(path.join(root, 'features', 'shop', 'docs', 'spec.md'), 'changed between read and subscription')
+      return first
+    })
     expect(await monitor.wait('shop', 'v1', 1000)).toMatchObject({ changed: true, change: { freshness: { revision: 'v2' } } })
   })
 

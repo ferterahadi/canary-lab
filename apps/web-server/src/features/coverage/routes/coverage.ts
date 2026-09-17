@@ -71,12 +71,12 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
 
   app.get<{ Params: { name: string } }>('/api/features/:name/coverage', async (req, reply) => {
     try {
+      if (deps.coverageMonitor) return deps.coverageMonitor.ledger(req.params.name)
       const ledger = computeFeatureCoverage({
         featuresDir: deps.featuresDir,
         logsDir: deps.logsDir,
         feature: req.params.name,
       })
-      deps.coverageMonitor?.observe(ledger)
       return ledger
     } catch (err) {
       if (err instanceof FeatureNotFoundError) {
@@ -284,6 +284,18 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
   // Production badges share the authoritative observer with the ledger, inbox
   // and agents. The manifest-only fallback is retained for isolated embedders.
   app.get('/api/coverage/states', async () => {
+    if (deps.coverageMonitor) {
+      return deps.coverageMonitor.readAll().map(({ feature, freshness: fresh, measurement }) => {
+        const measured = fresh.state === 'current' && measurement
+        return { feature,
+          headline: measured ? fresh.latestRunFailed ? 'Latest run failed' : fresh.proofNeedsRun ? 'Mapped · needs verification' : `Covered ${Math.round(measurement.coveragePct)}%`
+            : fresh.state === 'updating' ? 'Generating' : fresh.state === 'unavailable' ? 'Freshness unconfirmed' : fresh.state === 'not-measured' ? 'No coverage' : 'Stale',
+          summary: fresh.nextAction?.stage === 'prd-summary' ? fresh.state === 'not-measured' ? 'absent' : 'stale' : 'fresh',
+          coverage: measured ? 'fresh' : fresh.state === 'updating' ? 'generating' : fresh.state === 'not-measured' ? 'absent' : 'stale',
+          coveragePct: measured ? measurement.coveragePct : null,
+        }
+      })
+    }
     const out: Array<{ feature: string; headline: string | null; summary: string | null; coverage: string | null; coveragePct: number | null }> = []
     const activeJobs = new Map<string, CoverageJobKind>()
     for (const job of jobStore.list()) {
@@ -295,18 +307,6 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
     for (const f of loadFeatures(deps.featuresDir)) {
       try {
         if (!f.featureDir) throw new FeatureNotFoundError(f.name)
-        if (deps.coverageMonitor) {
-          const { freshness: fresh, measurement } = deps.coverageMonitor.read(f.name, f.featureDir)
-          const measured = fresh.state === 'current' && measurement
-          out.push({ feature: f.name,
-            headline: measured ? fresh.latestRunFailed ? 'Latest run failed' : fresh.proofNeedsRun ? 'Mapped · needs verification' : `Covered ${Math.round(measurement.coveragePct)}%`
-              : fresh.state === 'updating' ? 'Generating' : fresh.state === 'unavailable' ? 'Freshness unconfirmed' : fresh.state === 'not-measured' ? 'No coverage' : 'Stale',
-            summary: fresh.nextAction?.stage === 'prd-summary' ? fresh.state === 'not-measured' ? 'absent' : 'stale' : 'fresh',
-            coverage: measured ? 'fresh' : fresh.state === 'updating' ? 'generating' : fresh.state === 'not-measured' ? 'absent' : 'stale',
-            coveragePct: measured ? measurement.coveragePct : null,
-          })
-          continue
-        }
         const summary = readPrdSummary(f.featureDir)
         const runState = summary ? readCoverageRunState(f.featureDir) : null
         const summaryDrifted = summary

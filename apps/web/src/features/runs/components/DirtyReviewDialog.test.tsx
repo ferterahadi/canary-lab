@@ -9,7 +9,7 @@ import { DirtyReviewDialog } from './DirtyReviewDialog'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 vi.mock('@/shared/api/client', async (original) => ({ ...await original<typeof api>(),
-  getTestFileReview: vi.fn(), getTestSourceComparison: vi.fn(), getFeatureTests: vi.fn(), commitDirtySpecs: vi.fn(), adoptSpecEdits: vi.fn(), restoreSpecEdits: vi.fn(), openEditor: vi.fn(), openWorkspace: vi.fn(),
+  getTestFileReview: vi.fn(), getTestSourceComparison: vi.fn(), getFeatureTests: vi.fn(), getRunTestReview: vi.fn(), commitDirtySpecs: vi.fn(), adoptSpecEdits: vi.fn(), restoreSpecEdits: vi.fn(), openEditor: vi.fn(), openWorkspace: vi.fn(),
 }))
 vi.mock('../state/RunsContext', () => ({ useRun: () => ({ detail: undefined, error: null }) }))
 let root: Root
@@ -17,11 +17,14 @@ let container: HTMLDivElement
 const feature = (name = 'alpha', files = ['e2e/a.spec.ts']): Feature => ({ name, description: '', envs: [], repos: [], dirty: { status: 'dirty', specs: files.map((file) => ({ file, affectedTests: ['a'] })) } })
 const run = { runId: 'run-1', feature: 'alpha', status: 'healing', pendingSpecEdits: 1 } as RunIndexEntry
 const detail = { manifest: { runId: 'run-1', feature: 'alpha', specEdits: { pending: [{ file: 'e2e/a.spec.ts', affectedTests: ['a'] }] } } } as RunDetail
+const reviewRevision = 'a'.repeat(64)
 beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(api.getFeatureTests).mockResolvedValue([])
   vi.mocked(api.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [], differences: [], changes: { added: [], changed: [], removed: [] } })
   vi.mocked(api.getTestFileReview).mockResolvedValue(testFileReview())
+  vi.mocked(api.getRunTestReview).mockResolvedValue({ runId: 'run-1', feature: 'alpha', baseline: 'run-start', review_revision: reviewRevision,
+    files: [{ file: 'e2e/a.spec.ts', change: 'modified' }], canAdopt: true })
   vi.mocked(api.commitDirtySpecs).mockResolvedValue({ committed: true })
   vi.mocked(api.adoptSpecEdits).mockResolvedValue({ status: 'adopted', adopted: ['e2e/a.spec.ts'], rerun: 'signalled' })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
@@ -33,6 +36,26 @@ async function render(props: Partial<Parameters<typeof DirtyReviewDialog>[0]> = 
   await act(async () => root.render(<DirtyReviewDialog features={[feature()]} onClose={vi.fn()} {...props} />))
 }
 const click = async (label: string) => act(async () => button(label).click())
+it('shows a readable fixture in English and Code with visible edits, not an empty test comparison', async () => {
+  const fixture = 'e2e/fixture.ts'
+  vi.mocked(api.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [fixture], differences: [{ file: fixture, affectedTests: [] }], changes: { added: [], changed: [], removed: [] } })
+  vi.mocked(api.getTestFileReview).mockResolvedValue({ file: fixture, currentPath: `/suite/${fixture}`, baseline: 'run-start', supportingFile: true,
+    before: { source: 'export const ready = false\n', tests: [], story: { steps: [{ id: 'before', role: 'setup', text: 'Export ready as false', spans: [{ text: 'Export ready as false' }], fidelity: 'derived', source: { file: fixture, startLine: 1, endLine: 1, snippet: 'export const ready = false' } }] } },
+    after: { source: 'export const ready = true\n', tests: [], story: { steps: [{ id: 'after', role: 'setup', text: 'Export ready as true', spans: [{ text: 'Export ready as true' }], fidelity: 'derived', source: { file: fixture, startLine: 1, endLine: 1, snippet: 'export const ready = true' } }] } },
+    patch: '@@ -1 +1 @@\n-export const ready = false\n+export const ready = true\n', assessment: { verdict: 'unclassifiable', tests: [] } })
+  await render({ focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: detail, focus: { file: fixture, baseline: 'run' } })
+  expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', fixture, 'run-1')
+  expect(button('English')).not.toBeUndefined()
+  expect(button('Code')).not.toBeUndefined()
+  expect(document.body.textContent).not.toContain('Supporting file · Code')
+  expect(document.body.textContent).toContain('Export ready as false')
+  expect(document.body.textContent).toContain('Export ready as true')
+  await click('Code')
+  expect(document.body.textContent).toContain('export const ready = false')
+  expect(document.body.textContent).toContain('export const ready = true')
+  expect(document.body.textContent).not.toContain('No title or test-content changes in this file')
+  expect(document.querySelector('.cl-review-file[data-changed="true"]')?.getAttribute('title')).toBe(fixture)
+})
 it('returns from a deep-linked import continuation to its English range and highlights that range in Code', async () => {
   const review = multilineImportReview()
   vi.mocked(api.getTestFileReview).mockResolvedValue(review)
@@ -101,8 +124,8 @@ it('does not replace an explicitly selected historical baseline with another pen
   await render({ focusFeature: 'alpha', focusRunId: 'old-run', focus: { file: 'e2e/a.spec.ts', baseline: 'run' },
     focusRunDetail: { ...detail, manifest: { ...detail.manifest, runId: 'old-run' } }, pendingRuns: [run] })
   expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', 'old-run')
-  expect(button('Yes, commit & rerun')).toBeUndefined()
-  expect(button('No, restore tests')).toBeUndefined()
+  expect(button('Adopt & rerun')).toBeUndefined()
+  expect(button('Restore recorded files')).toBeUndefined()
 })
 
 it('scopes the rail to the entry suite and keeps its file positions when the baseline changes', async () => {
@@ -289,14 +312,14 @@ it('surfaces a failed commit and allows retry', async () => {
   expect(document.body.textContent).toContain('Git rejected the commit')
   expect(button('Commit suite · 1 file').disabled).toBe(false)
 })
-it('offers exactly one yes/no decision and commits before accepting changes into the selected run', async () => {
+it('offers one review decision and commits before adopting changes into the selected run', async () => {
   const onClose = vi.fn()
   await render({ pendingRuns: [run], focusRunDetail: detail, onClose })
-  expect([...document.querySelectorAll('.cl-review-commit-buttons button')].map((item) => item.textContent)).toEqual(['No, restore tests', 'Yes, commit & rerun'])
-  expect(document.body.textContent).toContain('Keep these test changes?')
-  await click('Yes, commit & rerun')
+  expect([...document.querySelectorAll('.cl-review-commit-buttons button')].map((item) => item.textContent)).toEqual(['Restore recorded files', 'Adopt & rerun'])
+  expect(document.body.textContent).toContain('Adopt these suite changes?')
+  await click('Adopt & rerun')
   expect(api.commitDirtySpecs).toHaveBeenCalledExactlyOnceWith('alpha')
-  expect(api.adoptSpecEdits).toHaveBeenCalledExactlyOnceWith('run-1')
+  expect(api.adoptSpecEdits).toHaveBeenCalledExactlyOnceWith('run-1', { expectedRevision: reviewRevision })
   expect(vi.mocked(api.commitDirtySpecs).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(api.adoptSpecEdits).mock.invocationCallOrder[0])
   expect(api.restoreSpecEdits).not.toHaveBeenCalled()
   expect(onClose).toHaveBeenCalledExactlyOnceWith()
@@ -305,8 +328,8 @@ it('restores the selected run tests on no without committing or accepting change
   const onClose = vi.fn()
   const onFeaturesChanged = vi.fn()
   await render({ pendingRuns: [run], focusRunDetail: detail, onClose, onFeaturesChanged })
-  await click('No, restore tests')
-  expect(api.restoreSpecEdits).toHaveBeenCalledWith('run-1')
+  await click('Restore recorded files')
+  expect(api.restoreSpecEdits).toHaveBeenCalledWith('run-1', { expectedRevision: reviewRevision })
   expect(api.adoptSpecEdits).not.toHaveBeenCalled()
   expect(api.commitDirtySpecs).not.toHaveBeenCalled()
   expect(onFeaturesChanged).toHaveBeenCalledExactlyOnceWith()
@@ -316,34 +339,34 @@ it('keeps the decision open when restoring fails', async () => {
   const onClose = vi.fn()
   vi.mocked(api.restoreSpecEdits).mockRejectedValue(new Error('tests-running'))
   await render({ pendingRuns: [run], focusRunDetail: detail, onClose })
-  await click('No, restore tests')
+  await click('Restore recorded files')
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('tests-running')
   expect(onClose).not.toHaveBeenCalled()
-  expect(button('No, restore tests').disabled).toBe(false)
+  expect(button('Restore recorded files').disabled).toBe(false)
 })
 it.each(['rejected', 'no-op'])('does not accept edits when the commit is %s', async (failure) => {
   const onClose = vi.fn()
   if (failure === 'rejected') vi.mocked(api.commitDirtySpecs).mockRejectedValue(new Error('Git rejected the commit'))
   else vi.mocked(api.commitDirtySpecs).mockResolvedValue({ committed: false, reason: 'No files committed' })
   await render({ pendingRuns: [run], focusRunDetail: detail, onClose })
-  await click('Yes, commit & rerun')
+  await click('Adopt & rerun')
   expect(document.querySelector('[role="alert"]')).not.toBeNull()
   expect(api.adoptSpecEdits).not.toHaveBeenCalled()
   expect(onClose).not.toHaveBeenCalled()
-  expect(button('Yes, commit & rerun').disabled).toBe(false)
+  expect(button('Adopt & rerun').disabled).toBe(false)
 })
 it('can retry accepting already-committed tests after the run rejects them', async () => {
   const onClose = vi.fn()
   vi.mocked(api.adoptSpecEdits).mockRejectedValueOnce(new Error('tests-running'))
   await render({ pendingRuns: [run], focusRunDetail: detail, onClose })
-  await click('Yes, commit & rerun')
-  expect(document.querySelector('[role="alert"]')?.textContent).toContain('Saved in Git, but the run could not accept the changes.')
+  await click('Adopt & rerun')
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('Saved in Git, but the run could not adopt the reviewed changes.')
   expect(onClose).not.toHaveBeenCalled()
   vi.mocked(api.commitDirtySpecs).mockResolvedValue({ committed: false, status: 'clean' })
   // The Git watcher removes the dirty feature after the successful commit;
   // pending run edits must still expose the same decision for retry.
   await render({ features: [], pendingRuns: [run], focusRunDetail: detail, onClose })
-  await click('Yes, commit & rerun')
+  await click('Adopt & rerun')
   expect(api.adoptSpecEdits).toHaveBeenCalledTimes(2)
   expect(onClose).toHaveBeenCalledExactlyOnceWith()
 })
@@ -351,7 +374,7 @@ it('discloses when changes were accepted but no rerun could start', async () => 
   const onClose = vi.fn()
   vi.mocked(api.adoptSpecEdits).mockResolvedValue({ status: 'adopted', adopted: ['e2e/a.spec.ts'], rerun: 'not-waiting-for-signal' })
   await render({ pendingRuns: [run], focusRunDetail: detail, onClose })
-  await click('Yes, commit & rerun')
+  await click('Adopt & rerun')
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('no rerun started')
   expect(onClose).not.toHaveBeenCalled()
 })
@@ -359,19 +382,36 @@ it('closes when the accepted changes already have a pending rerun signal', async
   const onClose = vi.fn()
   vi.mocked(api.adoptSpecEdits).mockResolvedValue({ status: 'adopted', adopted: ['e2e/a.spec.ts'], rerun: 'signal-already-pending' })
   await render({ pendingRuns: [run], focusRunDetail: detail, onClose })
-  await click('Yes, commit & rerun')
+  await click('Adopt & rerun')
   expect(onClose).toHaveBeenCalledExactlyOnceWith()
 })
 it.each([
   { ...run, status: 'queued' as const },
-  { ...run, pendingSpecEdits: 0 },
   { ...run, status: 'passed' as const },
-])('does not offer run actions without active pending edits: %o', async (pending) => {
+])('does not offer run actions for a non-active run: %o', async (pending) => {
   await render({ pendingRuns: [pending] })
-  expect(button('Yes, commit & rerun')).toBeUndefined()
-  expect(button('No, restore tests')).toBeUndefined()
+  expect(button('Adopt & rerun')).toBeUndefined()
+  expect(button('Restore recorded files')).toBeUndefined()
   await click('Commit suite · 1 file')
   expect(api.adoptSpecEdits).not.toHaveBeenCalled()
+})
+it('offers Adopt for an active supporting-only review even when no test declarations changed', async () => {
+  const fixture = 'e2e/fixture.ts'
+  vi.mocked(api.getRunTestReview).mockResolvedValue({ runId: 'run-1', feature: 'alpha', baseline: 'run-start', review_revision: reviewRevision,
+    files: [{ file: fixture, change: 'modified' }], canAdopt: true })
+  vi.mocked(api.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [fixture], differences: [{ file: fixture, affectedTests: [] }], changes: { added: [], changed: [], removed: [] } })
+  const supportingOnly = { ...run, pendingSpecEdits: 0 }
+  const onClose = vi.fn()
+  await render({ features: [{ ...feature(), dirty: undefined }], pendingRuns: [supportingOnly], focusFeature: 'alpha', focusRunId: 'run-1',
+    focusRunDetail: { manifest: { ...detail.manifest, specEdits: { pending: [] } } } as RunDetail, focus: { file: fixture, baseline: 'run' }, onClose })
+  expect(button('Adopt & rerun')).not.toBeUndefined()
+  expect(button('Restore recorded files')).not.toBeUndefined()
+  expect(document.body.textContent).toContain('1 reviewed file')
+  expect(document.body.textContent).toContain('no test declaration changes')
+  await click('Adopt & rerun')
+  expect(api.commitDirtySpecs).not.toHaveBeenCalled()
+  expect(api.adoptSpecEdits).toHaveBeenCalledExactlyOnceWith('run-1', { expectedRevision: reviewRevision })
+  expect(onClose).toHaveBeenCalledExactlyOnceWith()
 })
 it('uses the selected run snapshot only when reviewing differences from that run', async () => {
   await render({ pendingRuns: [run], focusRunDetail: detail, focusRunId: 'run-1' })
@@ -397,8 +437,8 @@ it('supports a committed file that differs from a completed run without showing 
   await render({ ...props, focus: onFocus.mock.calls.at(-1)![0] })
   expect(document.querySelector('table')).not.toBeNull()
   expect(document.body.textContent).not.toContain('Loading test files')
-  expect(button('Yes, commit & rerun')).toBeUndefined()
-  expect(button('No, restore tests')).toBeUndefined()
+  expect(button('Adopt & rerun')).toBeUndefined()
+  expect(button('Restore recorded files')).toBeUndefined()
   expect(button('Commit suite · 1 file')).toBeUndefined()
 })
 it('shows a recoverable empty state when a completed run has no selected file', async () => {

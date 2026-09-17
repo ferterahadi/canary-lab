@@ -168,7 +168,7 @@ export function FeaturesColumn({
   // scan is lightweight now, but duplicate requests are still needless work.
   const canOpenCoverage = Boolean(onOpenCoverage)
   const coverage = useLiveResource('coverage', canOpenCoverage && features.length ? featureKey : null,
-    () => api.listCoverageStates(), { reconcileMs: COVERAGE_RECONCILE_MS, leaseMs: COVERAGE_FRESHNESS_LEASE_MS })
+    (_key, opts) => api.listCoverageStates(opts), { reconcileMs: COVERAGE_RECONCILE_MS, leaseMs: COVERAGE_FRESHNESS_LEASE_MS })
   const coverageHeadlines = useMemo(() => Object.fromEntries((coverage.value ?? []).map((state) => [state.feature,
     coverage.confirmed ? state.headline : 'Freshness unconfirmed'])), [coverage.value, coverage.confirmed])
 

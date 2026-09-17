@@ -5,6 +5,8 @@ import { formatBytes, formatDuration } from '@/shared/lib/format'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { SkeletonBar, type AwaitingState } from '@/shared/ui/Skeleton'
 import { Tooltip, TOOLTIP_ANCHOR_ATTR } from '@/shared/ui/Tooltip'
+import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
+import { AlertCircleIcon } from '@/shared/ui/Icons'
 import type { RobustnessJobManifest } from '@shared/robustness/jobs'
 import { STAGE_COLUMN, evidenceOf, num, progressOf, specsCoverageProgress, str } from './stage-meta'
 import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, overlayDiffStat, runHistoryStats, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
@@ -39,6 +41,7 @@ export interface StageFact {
    *  from every other tile carrying the same label. Nothing needs it yet — the
    *  labels that repeat (`Requirements`, `Env files`) repeat the same concept. */
   help?: string
+  warning?: string
 }
 
 import { plural } from '@shared/lib/plural'
@@ -484,12 +487,6 @@ function measuredStageFacts(
               ? { sub: `across ${plural(testFiles, 'test file')}` }
               : {}),
           }
-      if (band.ledger && (!band.ledgerConfirmed || band.ledger.freshness?.state !== 'current')) {
-        return [
-          { label: 'Mapped coverage', value: '—', sub: `Current value unconfirmed · last calculation ${band.ledger.coveragePct}%` },
-          ...(testsWrittenFact ? [testsWrittenFact] : []),
-        ]
-      }
       // A probed suite with no requirements has UNDEFINED coverage, not 0%. The
       // percentage tile (amber 0%) would read as a failing suite when the
       // truth is there is no PRD to measure its specs against.
@@ -532,6 +529,7 @@ function measuredStageFacts(
               value: `${pct}%`,
               big: true as const,
               tone: pct >= target ? 'good' as const : 'warn' as const,
+              warning: band.ledger ? coverageWarning(band.ledger.freshness, band.ledgerConfirmed === true) : undefined,
             }]
           : []),
         // How many requirements exist at all — the denominator the percentage
@@ -1002,7 +1000,7 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
   awaiting?: AwaitingState
 }) {
   const toneColor = f.tone ? FACT_TONE[f.tone] : null
-  const help = f.help ?? FACT_HELP[f.label]
+  const help = f.warning ?? f.help ?? FACT_HELP[f.label]
   // The static gloss stands in for a missing `sub` on a placeholder too: it is
   // true before the figure lands and after it, so the tile keeps its height and
   // nothing shifts when the stage settles. A failed placeholder overrides it:
@@ -1015,7 +1013,7 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
       : undefined
   const sub = f.awaiting && emptySub ? emptySub : f.sub ?? FACT_GLOSS[f.label]
   const tile = (
-    <div className="group/fact min-w-0 rounded-md px-3 py-2.5 bg-elevated" data-testid="fact-tile">
+    <div className="group/fact min-w-0 rounded-md px-3 py-2.5 bg-elevated" data-testid="fact-tile" tabIndex={f.warning ? 0 : undefined}>
       {/* Sentence case, NOT the uppercase `.cl-rubric` the card kickers use. A
           tile label is read alongside a 22px number, and at that pairing the
           letter-spaced caps compete with the figure instead of labelling it. The
@@ -1023,7 +1021,7 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
           its register — this is the tile's own label, one level down. */}
       <div className="flex min-w-0 items-center gap-1 cl-type-data text-muted">
         <span className="min-w-0 truncate">{f.label}</span>
-        {help ? <FactHelpMark /> : null}
+        {f.warning ? <span {...{ [TOOLTIP_ANCHOR_ATTR]: '' }} role="img" aria-label={f.warning} className="inline-flex text-warning"><AlertCircleIcon /></span> : help ? <FactHelpMark /> : null}
       </div>
       {help ? <span className="sr-only">{help}</span> : null}
       {f.awaiting ? (

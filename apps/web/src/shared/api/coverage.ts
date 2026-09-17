@@ -10,16 +10,11 @@ import type {
   FeatureDocsListing,
   PrdSummary,
 } from './types'
-import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
+import { ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
 import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
 export function getFeatureCoverage(feature: string, opts?: ClientOptions): Promise<CoverageLedger> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<CoverageLedger>(
-    `${baseUrl}/api/features/${encodeURIComponent(feature)}/coverage`,
-    { method: 'GET' },
-    fetchImpl,
-  )
+  return requestSnapshot(`/api/features/${encodeURIComponent(feature)}/coverage`, opts)
 }
 
 export function listFeatureDocs(feature: string, opts?: ClientOptions): Promise<FeatureDocsListing> {
@@ -77,23 +72,8 @@ export interface CoverageStateSummary {
   coveragePct: number | null
 }
 
-let coverageStatesInFlight: {
-  baseUrl: string
-  fetchImpl: typeof fetch
-  promise: Promise<CoverageStateSummary[]>
-} | null = null
-
 export function listCoverageStates(opts?: ClientOptions): Promise<CoverageStateSummary[]> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  if (coverageStatesInFlight?.baseUrl === baseUrl && coverageStatesInFlight.fetchImpl === fetchImpl) {
-    return coverageStatesInFlight.promise
-  }
-  const promise = request<CoverageStateSummary[]>(`${baseUrl}/api/coverage/states`, { method: 'GET' }, fetchImpl)
-    .finally(() => {
-      if (coverageStatesInFlight?.promise === promise) coverageStatesInFlight = null
-    })
-  coverageStatesInFlight = { baseUrl, fetchImpl, promise }
-  return promise
+  return requestSnapshot('/api/coverage/states', opts)
 }
 
 export function regeneratePrdSummary(

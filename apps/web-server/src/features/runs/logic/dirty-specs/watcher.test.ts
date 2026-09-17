@@ -194,16 +194,18 @@ describe('startDirtySpecWatcher', () => {
     expect(recompute).toHaveBeenCalledWith('alpha', dir)
   })
 
-  it('ignores non-.spec.ts filenames in the e2e dir', async () => {
+  it.each(['fixture.ts', 'helpers/api.ts', 'notes.txt'])('refreshes open comparisons when the supporting file %s changes', async (filename) => {
     writeFeature('alpha', { withE2eDir: true })
     const { store, recompute } = fakeStore()
-    watcher = startWatcher({ featuresDir, store, debounceMs: 20 })
+    const changed = vi.fn()
+    watcher = startWatcher({ featuresDir, store, debounceMs: 20, onSpecFileChanged: changed })
     await watcher.startInitialScan()
     recompute.mockClear()
 
-    expect(watchControl.fire(path.join('alpha', 'e2e'), 'notes.txt')).toBe(true)
-    await new Promise((r) => setTimeout(r, 150))
-    expect(recompute).not.toHaveBeenCalled()
+    expect(watchControl.fire(path.join('alpha', 'e2e'), filename)).toBe(true)
+    await waitFor(() => changed.mock.calls.length === 1)
+    expect(recompute).toHaveBeenCalledTimes(1)
+    expect(changed).toHaveBeenCalledWith('alpha')
   })
 
   it('calls onSpecFileChanged once when a real spec-content change triggers the debounce', async () => {

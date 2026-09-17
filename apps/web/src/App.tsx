@@ -581,6 +581,7 @@ export function App() {
               onOpenRecovery={(stage) => {
                 openFlight(flights.find((flight) => flight.feature === selectedFeature)?.flightId ?? derivedFlightToken(selectedFeature))
                 setFlightStage(stage)
+                setFlightStartFor(selectedFeature, 'refly', stage)
               }}
               onOpenGeneration={(job) => {
                 invalidate('coverage')

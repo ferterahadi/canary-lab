@@ -125,12 +125,13 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
   })
 
-  it('withholds the reassuring ring when requirements are stale', async () => {
+  it('keeps the familiar ring and percentage with an explicit stale-warning icon', async () => {
     await mount()
     const ring = container.querySelector('[data-testid="coverage-ring"]')
-    expect(ring).toBeNull()
+    expect(ring).toBeTruthy()
+    expect(container.querySelector('[data-testid="coverage-freshness-warning"]')?.getAttribute('aria-label')).toContain('Coverage out of date')
     // The headline block carries the big % beside the ring; the ring itself stays label-free.
-    expect(container.querySelector('[data-testid="coverage-hero"] [data-testid="coverage-pct"]')?.textContent).toBe('—')
+    expect(container.querySelector('[data-testid="coverage-hero"] [data-testid="coverage-pct"]')?.textContent).toBe('33%')
     expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
   })
 

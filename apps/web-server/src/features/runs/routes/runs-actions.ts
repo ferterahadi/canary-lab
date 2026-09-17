@@ -351,14 +351,18 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
   // POST /api/runs/:runId/restore-spec-edits — a human puts the live specs back
   // to what the run executed (the run-start copy), so the pending edits and
   // their hints clear without moving the boundary. The other human-only lever
-  // beside adopt; no MCP tool wraps it either (pinned by mcp/repair-guardrail).
-  app.post<{ Params: { runId: string } }>('/api/runs/:runId/restore-spec-edits', async (req, reply) => {
+  // beside adopt; MCP reaches it only through revision-bound human elicitation.
+  app.post<{ Params: { runId: string }; Body?: { expectedRevision?: string } }>('/api/runs/:runId/restore-spec-edits', async (req, reply) => {
     const orch = deps.store.registry.get(req.params.runId)
     if (!orch?.restoreSpecEdits) {
       reply.code(404)
       return { error: 'run not active; restore the spec files from git instead' }
     }
-    const result = orch.restoreSpecEdits()
+    const revision = req.body?.expectedRevision
+    if (revision !== undefined && (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision))) {
+      return reply.code(400).send({ error: 'Invalid review revision' })
+    }
+    const result = orch.restoreSpecEdits(revision)
     if (!result.ok) {
       reply.code(409)
       return { reason: result.reason }

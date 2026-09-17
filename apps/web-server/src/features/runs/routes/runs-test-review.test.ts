@@ -84,6 +84,18 @@ describe('GET /api/runs/:runId/test-review', () => {
     expect(res.json().patch).toContain('expect(2).toBe(2)')
   })
 
+  it('serves lightweight review state without writing a patch artifact', async () => {
+    const app = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/test-review?summary=true' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ runId: 'r1', feature: 'demo', baseline: 'run-start',
+      files: [{ file: 'e2e/a.spec.ts', change: 'modified' }], canAdopt: false })
+    expect(res.json().review_revision).toMatch(/^[a-f0-9]{64}$/)
+    expect(res.json()).not.toHaveProperty('patch')
+    expect(res.json()).not.toHaveProperty('patchPath')
+    expect(fs.existsSync(path.join(runDirFor(path.join(tmpDir, 'logs'), 'r1'), 'test-reviews'))).toBe(false)
+  })
+
   // A revision the human never saw must not be offered for approval: the patch in
   // the reply would be stale the moment it was written.
   it('refuses to serve a review whose suite changed while the patch was built', async () => {

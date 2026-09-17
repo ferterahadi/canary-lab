@@ -9,6 +9,7 @@ import { diffSpecPredicates } from '../../../shared/verification-strength/differ
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { readManifest } from '../../runs/logic/runtime/manifest'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
+import { suiteReviewFiles } from '../../runs/logic/runtime/suite-review'
 import { diffSourceText } from '../../runs/logic/dirty-specs/text-diff'
 import { changedTestNames } from '../../runs/logic/dirty-specs/detect'
 import type { FeaturesRouteDeps } from './features-route-deps'
@@ -50,10 +51,13 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
     const relativeFiles = (root: string) => listSpecFiles(root).map((file) => path.relative(root, file))
     const files = [...new Set([...relativeFiles(feature.featureDir), ...relativeFiles(snapshot.dir)])].sort()
     try {
-      return compareTestDeclarations(files.map((file) => ({ file,
+      const comparison = compareTestDeclarations(files.map((file) => ({ file,
         before: readSource(confinedFile(snapshot.dir, file)),
         after: readSource(confinedFile(feature.featureDir, file)),
       })))
+      const supporting = suiteReviewFiles(snapshot.dir, feature.featureDir).files.filter(({ file }) => !files.includes(file))
+      return { ...comparison, files: [...comparison.files, ...supporting.map(({ file }) => file)].sort(),
+        differences: [...comparison.differences, ...supporting.map(({ file }) => ({ file, affectedTests: [] }))] }
     } catch (error) {
       if (error instanceof Error && error.message === 'Test file is outside the suite') return reply.code(400).send({ error: error.message })
       throw error
@@ -63,22 +67,49 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
     const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
     if (!feature) return reply.code(404).send({ error: 'Suite not found' })
     const file = req.query.file
-    if (!file || path.isAbsolute(file) || file.split(/[\\/]/).includes('..') || !/\.(spec|test)\.[cm]?[jt]sx?$/.test(file)) {
+    const supportingFile = !!file && !/\.(spec|test)\.[cm]?[jt]sx?$/.test(file)
+    if (!file || path.isAbsolute(file) || file.split(/[\\/]/).includes('..') || (supportingFile && !req.query.runId)) {
       return reply.code(400).send({ error: 'A suite-relative test file is required' })
     }
     let currentPath: string
     try { currentPath = confinedFile(feature.featureDir, file) } catch {
       return reply.code(400).send({ error: 'Test file is outside the suite' })
     }
-    const afterSource = readSource(currentPath)
+    let afterSource: string
     let beforeSource: string
     let baseline: TestFileReview['baseline'] = 'head'
     if (req.query.runId) {
       const snapshot = runSnapshot(deps, feature.name, req.query.runId)
       if ('error' in snapshot) return reply.code(snapshot.status).send({ error: snapshot.error })
+      if (supportingFile) {
+        const inventory = suiteReviewFiles(snapshot.dir, feature.featureDir)
+        const old = inventory.before.get(file)
+        const current = inventory.after.get(file)
+        if (!old && !current) return reply.code(400).send({ error: 'File is not part of the reviewed suite' })
+        if ([old, current].some((bytes) => bytes && (bytes.includes(0) || !Buffer.from(bytes.toString('utf8')).equals(bytes)))) {
+          return reply.code(409).send({ error: 'Binary suite changes require a file viewer' })
+        }
+        const before = old?.toString('utf8') ?? ''
+        const after = current?.toString('utf8') ?? ''
+        if (req.query.summary === 'true') return { changed: before !== after, affectedTests: [], verdict: 'unclassifiable' }
+        const readableSource = (source: string): ReviewSource => {
+          if (!/\.[cm]?[jt]sx?$/.test(file)) return { source, tests: [] }
+          const parsed = extractTestsFromSource(file, source, feature.semanticRules)
+          return { source, tests: [], ...(!parsed.parseError
+            ? { story: translateReadableSource(file, source, feature.semanticRules) }
+            : { parseError: parsed.parseError }) }
+        }
+        return { file, currentPath, baseline: 'run-start', supportingFile: true,
+          before: readableSource(before), after: readableSource(after),
+          patch: await diffSourceText(before, after, Math.max(before.split('\n').length, after.split('\n').length)),
+          assessment: { verdict: 'unclassifiable', tests: [] },
+        } satisfies TestFileReview
+      }
+      afterSource = readSource(currentPath)
       beforeSource = readSource(confinedFile(snapshot.dir, file))
       baseline = 'run-start'
     } else {
+      afterSource = readSource(currentPath)
       const root = await getGitRoot(feature.featureDir)
       if (!root) return reply.code(409).send({ error: 'No committed baseline is available for this suite' })
       const head = await runGit(root, ['rev-parse', '--verify', 'HEAD'])

@@ -67,7 +67,7 @@ const lastResolved = new Map<string, unknown>()
 export function useLiveResource<T>(
   topic: InvalidationTopic,
   key: string | null,
-  fetcher: (key: string) => Promise<T | null>,
+  fetcher: (key: string, opts?: { readRevision: string }) => Promise<T | null>,
   opts: {
     scope?: string
     /** Opt IN to the stale-then-fresh remount cache with a tag naming WHAT is
@@ -130,9 +130,12 @@ export function useLiveResource<T>(
     setError(null)
     let requested = 0
     let lease: ReturnType<typeof setTimeout> | undefined
-    const fetch = () => {
+    const fetch = (event?: Event) => {
       const request = ++requested
-      Promise.resolve().then(() => fetcherRef.current(key))
+      // Join sibling readers, never a previous reconciliation round or a read
+      // started before reconnect/focus. A hung HTTP request cannot stall recovery.
+      const readRevision = JSON.stringify([readKey, reconcileMs ? Math.floor(Date.now() / reconcileMs) : 0, event?.type, event?.timeStamp])
+      Promise.resolve().then(() => reconcileMs ? fetcherRef.current(key, { readRevision }) : fetcherRef.current(key))
         .then((next) => {
           if (!alive || request !== requested) return
           current = next ?? null
@@ -159,8 +162,8 @@ export function useLiveResource<T>(
       if (reconcileMs || pollWhileRef.current?.(current)) fetch()
     }, reconcileMs ?? 2500) : undefined
     const offline = () => { requested++; setConfirmed(false); setError('Connection lost; freshness is unconfirmed.') }
-    const visible = () => {
-      if (document.visibilityState === 'visible') { setConfirmed(false); fetch() }
+    const visible = (event: Event) => {
+      if (document.visibilityState === 'visible') { setConfirmed(false); fetch(event) }
     }
     if (reconcileMs) {
       window.addEventListener('focus', fetch)

@@ -105,8 +105,12 @@ export class RunOrchestrator extends EventEmitter {
     return adoptSpecEdits(this.ctx, expectedRevision)
   }
 
-  restoreSpecEdits(): ReturnType<typeof restoreSpecEdits> {
-    return restoreSpecEdits(this.ctx)
+  isWaitingForHealSignal(): boolean {
+    return this.ctx.signalGate.isReadyForSignal()
+  }
+
+  restoreSpecEdits(expectedRevision?: string): ReturnType<typeof restoreSpecEdits> {
+    return restoreSpecEdits(this.ctx, expectedRevision)
   }
 
   refreshSpecEdits(feature: string): void {

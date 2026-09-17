@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { flightNotificationSources, testReviewNotificationSources } from './sources'
+import { coverageNotificationSources, flightNotificationSources, testReviewNotificationSources, verificationNotificationSources } from './sources'
 import type { FlightIndexEntry } from '../../../../../shared/flights/types'
+import type { FeatureCoverageChange } from '../../../../../shared/coverage/freshness'
 
 const flight = (over: Partial<FlightIndexEntry> = {}): FlightIndexEntry => ({ flightId: 'f1', feature: 'shop', status: 'paused', pauseReason: 'stage-failed', currentStage: 'run', ...over } as FlightIndexEntry)
 
@@ -47,13 +48,18 @@ describe('test changes in the shared inbox', () => {
     expect(testReviewNotificationSources([{ ...run, status: 'passed' }], changes())[0].message).toMatchObject({ severity: 'danger', target: { kind: 'test-review', feature: 'shop' } })
   })
 
-  it.each(['equivalent', 'stronger', 'unclassifiable'] as const)('keeps ordinary %s edits inline instead of interrupting the user', (verdict) => {
+  it.each(['equivalent', 'stronger', 'unclassifiable'] as const)('reports ordinary %s edits as their own test-change topic', (verdict) => {
     const [record] = changes(verdict)
     const [source] = testReviewNotificationSources([], [record])
-    expect(source).toMatchObject({ key: 'test-review:shop', signature: 'quiet' })
-    expect(source.message).toBeUndefined()
-    expect(testReviewNotificationSources([], [{ ...record, dirtySpecs: [...record.dirtySpecs, ...record.dirtySpecs] }])[0]).toEqual(source)
+    expect(source).toMatchObject({ key: 'test-review:shop', signature: 'attention', message: {
+      title: 'shop: tests changed', severity: 'warning', target: { kind: 'test-review', feature: 'shop' },
+    } })
+    expect(source.message?.body).not.toContain('weakening')
+    expect(testReviewNotificationSources([], [{ ...record, dirtySpecs: [...record.dirtySpecs, ...record.dirtySpecs] }])[0]).toMatchObject({
+      key: source.key, signature: source.signature, message: { body: expect.stringContaining('2 test files changed') },
+    })
     expect(testReviewNotificationSources([], [{ ...record, status: 'clean' }])[0].message).toBeUndefined()
+    expect(testReviewNotificationSources([], [{ ...record, dirtySpecs: [] }])[0].message).toBeUndefined()
   })
 
   it('coalesces concurrent pending runs for one feature onto its newest run', () => {
@@ -64,5 +70,39 @@ describe('test changes in the shared inbox', () => {
     const sources = testReviewNotificationSources(runs)
     expect(sources).toHaveLength(1)
     expect(sources[0].message?.target).toEqual({ kind: 'test-review', feature: 'shop', runId: 'new' })
+  })
+})
+
+describe('independent notification topics', () => {
+  const change: FeatureCoverageChange = {
+    feature: 'shop', flightId: 'f1', delivery: 'tool-response-and-wait',
+    freshness: { revision: 'v1', checkedAt: 'now', state: 'stale', reasons: ['Requirements changed.'],
+      changedTests: ['test without mapping provenance'], latestRunFailed: false, proofNeedsRun: false,
+      nextAction: { stage: 'prd-summary', label: 'Update requirements', command: 'start_external_summary', arguments: { feature: 'shop' } },
+    },
+  }
+
+  it('keeps outdated coverage in Flight and does not invent a test-change notification from mapping inputs', () => {
+    expect(coverageNotificationSources([change])[0]).toMatchObject({ key: 'coverage:shop', message: {
+      title: 'shop: coverage out of date', target: { kind: 'coverage', feature: 'shop', flightId: 'f1', stage: 'prd-summary' },
+    } })
+    expect(testReviewNotificationSources([])).toEqual([])
+    expect(verificationNotificationSources([change])[0].message).toBeUndefined()
+  })
+
+  it('keeps a failed run separate even while coverage is outdated', () => {
+    const failed = { ...change, freshness: { ...change.freshness, latestRunFailed: true, latestRunId: 'r1' } }
+    expect(coverageNotificationSources([failed])[0].message).toMatchObject({ title: 'shop: coverage out of date', severity: 'warning' })
+    expect(verificationNotificationSources([failed])[0]).toMatchObject({ key: 'verification:shop', message: {
+      title: 'shop: latest run has failures', severity: 'danger', target: { kind: 'run', feature: 'shop', runId: 'r1' },
+    } })
+  })
+
+  it('resolves coverage when mapping is current even if a verification run is still required', () => {
+    const current = { ...change, freshness: { ...change.freshness, state: 'current' as const, proofNeedsRun: true } }
+    expect(coverageNotificationSources([current])[0].message).toBeUndefined()
+    expect(verificationNotificationSources([current])[0].message).toMatchObject({
+      title: 'shop: current tests need verification', target: { kind: 'coverage', feature: 'shop', flightId: 'f1', stage: 'run' },
+    })
   })
 })

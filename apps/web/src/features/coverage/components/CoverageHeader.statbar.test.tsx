@@ -60,7 +60,7 @@ describe('CoverageHeader — headline block', () => {
     render(led)
     const sub = q('coverage-sub')
     expect(sub?.textContent).toContain('2/3 mapped')
-    expect(sub?.textContent).toContain('1/3 historically proven in run run-9')
+    expect(sub?.textContent).toContain('1/3 proven in run run-9')
     expect(sub?.querySelector('[data-testid="orphan-note"]')?.textContent).toContain('1 stale tag')
     expect(sub?.classList.contains('clcov-card')).toBe(true)
     expect(q('coverage-hero')?.contains(sub!)).toBe(true)
@@ -70,6 +70,23 @@ describe('CoverageHeader — headline block', () => {
   it('shows no stale-tag dot when every tag resolves', () => {
     render(LEDGER)
     expect(q('orphan-dot')).toBeNull()
+  })
+
+  it('shows stale results without exposing run or proof source IDs', () => {
+    const led = structuredClone(LEDGER)
+    led.provenRunId = 'run-123'
+    led.freshness!.reasons = ['Requirements changed after this coverage was generated.']
+    led.enforcement = { runId: 'run-456', provenUnchanged: 1, total: 3, states: { 'proven-unchanged': 1, 'tests-weakened': 0, 'wording-ahead': 1, 'proof-stale': 1 } }
+    led.tests[0].lastRun = { runId: 'run-123', passed: true }
+    act(() => {
+      root.render(<CoverageHeader ledger={led} gapFilter={null} onToggleGap={() => {}} strengthFilter={null} onToggleStrength={() => {}} />)
+    })
+    expect(q('coverage-freshness-warning')?.getAttribute('aria-label')).toBe([
+      'Coverage out of date.',
+      'Requirements changed after this coverage was generated.',
+      'Showing results from the last calculation.',
+      'Last run: 1 passed · 0 failed · 1 not run.',
+    ].join(' '))
   })
 
   it('an empty ledger still reads as a sentence, not a blank', () => {

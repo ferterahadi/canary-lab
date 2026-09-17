@@ -50,6 +50,54 @@ function fakeRunnerLog(): RunnerLog & { warnings: string[] } {
 const SPEC_A = "test('a', async () => { expect(1).toBe(1) })\n"
 
 describe('snapshotSuite', () => {
+  it('does not record whole-suite restoration when the legacy action leaves a helper changed', () => {
+    const { ctx, sink } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    write(ctx.feature.featureDir, 'e2e/fixture.ts', 'recorded')
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', `${SPEC_A}// edited`)
+    write(ctx.feature.featureDir, 'e2e/fixture.ts', 'edited helper')
+    expect(restoreSpecEdits(ctx)).toEqual({ ok: true, restored: ['e2e/a.spec.ts'] })
+    expect(sink.patches.at(-1)?.specEdits?.reviewDecisions).toBeUndefined()
+    expect(fs.readFileSync(path.join(ctx.feature.featureDir, 'e2e/fixture.ts'), 'utf8')).toBe('edited helper')
+  })
+  it('restores exactly reviewed supporting-file additions, deletions and changes', () => {
+    const { ctx, sink } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/fixture.ts', 'old fixture')
+    write(ctx.feature.featureDir, 'e2e/deleted.ts', 'recorded')
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/fixture.ts', 'new fixture')
+    write(ctx.feature.featureDir, 'e2e/added.ts', 'added')
+    fs.unlinkSync(path.join(ctx.feature.featureDir, 'e2e/deleted.ts'))
+    const revision = suiteReviewRevision(ctx.suiteDir, ctx.feature.featureDir)
+    expect(restoreSpecEdits(ctx, revision)).toEqual({ ok: true, restored: ['e2e/added.ts', 'e2e/deleted.ts', 'e2e/fixture.ts'] })
+    expect(fs.readFileSync(path.join(ctx.feature.featureDir, 'e2e/fixture.ts'), 'utf8')).toBe('old fixture')
+    expect(fs.readFileSync(path.join(ctx.feature.featureDir, 'e2e/deleted.ts'), 'utf8')).toBe('recorded')
+    expect(fs.existsSync(path.join(ctx.feature.featureDir, 'e2e/added.ts'))).toBe(false)
+    expect(sink.patches.at(-1)?.specEdits?.reviewDecisions).toContainEqual(expect.objectContaining({ revision, decision: 'restored' }))
+  })
+  it('refuses stale restore approval without discarding the newer edit', () => {
+    const { ctx } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/fixture.ts', 'recorded')
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/fixture.ts', 'reviewed')
+    const revision = suiteReviewRevision(ctx.suiteDir, ctx.feature.featureDir)
+    write(ctx.feature.featureDir, 'e2e/fixture.ts', 'newer')
+    expect(restoreSpecEdits(ctx, revision)).toEqual({ ok: false, reason: 'review-changed' })
+    expect(fs.readFileSync(path.join(ctx.feature.featureDir, 'e2e/fixture.ts'), 'utf8')).toBe('newer')
+  })
+  it('refuses a symlink restore before writing any reviewed file', () => {
+    const { ctx } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/fixture.ts', 'recorded')
+    snapshotSuite(ctx)
+    const outside = path.join(tmpDir, 'outside'); fs.mkdirSync(outside)
+    write(outside, 'fixture.ts', 'private')
+    fs.rmSync(path.join(ctx.feature.featureDir, 'e2e'), { recursive: true })
+    fs.symlinkSync(outside, path.join(ctx.feature.featureDir, 'e2e'))
+    const revision = suiteReviewRevision(ctx.suiteDir, ctx.feature.featureDir)
+    expect(restoreSpecEdits(ctx, revision)).toEqual({ ok: false, reason: 'restore-failed' })
+    expect(fs.readFileSync(path.join(outside, 'fixture.ts'), 'utf8')).toBe('private')
+  })
   it('adopts a reviewed helper-only correction without requiring an unrelated spec edit', async () => {
     const { ctx } = ctxFor()
     write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
@@ -97,14 +145,16 @@ describe('snapshotSuite', () => {
     expect(fs.readFileSync(path.join(ctx.suiteDir, 'robustness', 'envelope.json'), 'utf8')).toBe('{"format":"canary-lab/robustness-envelope@1"}\n')
   })
 
-  it('leaves envsets, node_modules and .git out of the copy', () => {
+  it('leaves envsets, materialized env targets, backups, node_modules and .git out of the copy', () => {
     // Envsets carry secrets and are read from the live dir by the env switcher;
-    // node_modules resolves by walking up from the copy exactly as it does from
-    // features/<suite>/; .git is never suite content.
+    // its target and backup are runtime state, node_modules resolves by walking
+    // up from the copy, and .git is never suite content.
     const { ctx } = ctxFor()
     const live = ctx.feature.featureDir
     write(live, 'e2e/a.spec.ts', SPEC_A)
     write(live, 'envsets/local/api.env', 'SECRET=1\n')
+    write(live, '.env', 'SECRET=1\n')
+    write(live, '.env.bak.1789653324105', 'OLD_SECRET=1\n')
     write(live, 'node_modules/pkg/index.js', '')
     write(live, '.git/HEAD', 'ref: refs/heads/main\n')
 

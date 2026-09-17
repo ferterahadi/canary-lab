@@ -1,6 +1,6 @@
 // POST /api/runs/:runId/restore-spec-edits — the human-only lever that puts the
-// live specs back to what the run executed (D9). HTTP only, beside adopt: no
-// MCP tool wraps it, which `mcp/repair-guardrail.test.ts` pins.
+// live specs back to what the run executed (D9). Agent access requires human
+// elicitation for the exact revision, pinned by MCP integration regressions.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -57,7 +57,16 @@ describe('POST /api/runs/:runId/restore-spec-edits', () => {
     expect(res.json()).toEqual({ status: 'restored', restored: ['e2e/a.spec.ts'] })
   })
 
-  it.each(['tests-running', 'nothing-to-restore', 'restore-failed'] as const)('409s with reason=%s', async (reason) => {
+  it('validates and forwards the human-reviewed revision', async () => {
+    const { app, registry } = await build()
+    const restore = vi.fn(() => ({ ok: true as const, restored: ['e2e/fixture.ts'] }))
+    registry.set('r1', stub(restore))
+    expect((await app.inject({ method: 'POST', url: '/api/runs/r1/restore-spec-edits', payload: { expectedRevision: 'invalid' } })).statusCode).toBe(400)
+    expect(restore).not.toHaveBeenCalled()
+    expect((await app.inject({ method: 'POST', url: '/api/runs/r1/restore-spec-edits', payload: { expectedRevision: 'a'.repeat(64) } })).statusCode).toBe(200)
+    expect(restore).toHaveBeenCalledWith('a'.repeat(64))
+  })
+  it.each(['tests-running', 'nothing-to-restore', 'restore-failed', 'review-changed'] as const)('409s with reason=%s', async (reason) => {
     const { app, registry } = await build()
     registry.set('r1', stub(() => ({ ok: false, reason })))
     const res = await app.inject({ method: 'POST', url: '/api/runs/r1/restore-spec-edits' })

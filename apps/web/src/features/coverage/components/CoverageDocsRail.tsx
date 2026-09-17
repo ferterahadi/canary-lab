@@ -3,6 +3,7 @@ import * as api from '@/shared/api/client'
 import type { FeatureDocsListing } from '@/shared/api/types'
 import { DocPill, EmptyDropzone } from './DocPill'
 import { useDocRelink } from './DocRelink'
+import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 
 export { DocPill, EmptyDropzone } from './DocPill'
 
@@ -102,6 +103,7 @@ interface Props {
    *  _prd-summary.md now exists, so re-list the docs (items 1+2: the pill must
    *  appear live, without a manual refresh). */
   reloadKey?: number
+  recovery?: { onClick: () => void; disabledReason?: string }
 }
 
 /** Joins names the way a sentence would: "a", "a and b", "a, b and c". */
@@ -385,6 +387,16 @@ export function CoverageDocsRail(props: Props): JSX.Element {
         className="flex flex-col"
         style={{ gap: 8, padding: '12px 14px', borderTop: '1px solid var(--border-default)', background: 'var(--bg-surface)' }}
       >
+        {props.recovery && !confirmingRedo && (
+          <DisabledControlTooltip wrapperClassName="flex">
+            <button type="button" data-testid="recalculate-coverage" onClick={props.recovery.onClick}
+              disabled={locked || Boolean(props.recovery.disabledReason)}
+              title={props.recovery.disabledReason ?? 'Open Flight to recalculate coverage from the affected step'}
+              className="cl-button w-full px-3 py-1.5">
+              Recalculate Coverage
+            </button>
+          </DisabledControlTooltip>
+        )}
         {summaryAbsent ? (
           <button
             type="button"

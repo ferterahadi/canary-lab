@@ -16,7 +16,7 @@ import { readManifest, type SpecEditsAdoptedBy } from './manifest'
 import { captureDirtySpecBaseline } from './run-manifest-writer'
 import { INTEGRITY_HINT_DISCLOSURE, deriveIntegrityHints } from './run-integrity-hints'
 import { detectHealMode } from './auto-heal'
-import { SUITE_SNAPSHOT_SKIP, buildSuiteReview, suiteReviewRevision } from './suite-review'
+import { buildSuiteReview, skipSuiteSnapshotPath, suiteReviewRevision, suiteReviewFiles } from './suite-review'
 import { saveSuiteTestRoster } from '../suite-test-roster'
 import type { TestReviewDecision } from '../../../../../../../shared/test-review'
 
@@ -26,7 +26,7 @@ export type AdoptSpecEditsResult =
 
 export type RestoreSpecEditsResult =
   | { ok: true; restored: string[] }
-  | { ok: false; reason: 'tests-running' | 'nothing-to-restore' | 'restore-failed' }
+  | { ok: false; reason: 'tests-running' | 'nothing-to-restore' | 'restore-failed' | 'review-changed' }
 
 /** One digest over every spec's content, independent of listing order. Lets a
  *  reader check that the copy still holds what it held at run start. */
@@ -105,20 +105,39 @@ export async function adoptSpecEdits(ctx: RunContext, expectedRevision?: string)
  *  is undone from the run-start copy (a modified or deleted spec is rewritten
  *  from the copy, an added one removed) and the manifest re-measured, so
  *  `specEdits.pending` and the hints empty out. The other human-only lever
- *  beside adopt (D9/D13); reached from its HTTP route alone, wrapped by no MCP
- *  tool. Nothing moves the boundary or reruns: the verdict already rests on the
+ *  beside adopt (D9/D13); MCP reaches it only after human elicitation for an
+ *  exact revision. Nothing moves the boundary or reruns: the verdict rests on the
  *  copy, and after this the live suite says the same thing. Refused while
  *  Playwright runs — the agent's edit is inert to the run either way, and a
  *  restore mid-execution would only race the agent for the same files. */
-export function restoreSpecEdits(ctx: RunContext): RestoreSpecEditsResult {
+export function restoreSpecEdits(ctx: RunContext, expectedRevision?: string): RestoreSpecEditsResult {
   if (ctx.playwrightPty) return { ok: false, reason: 'tests-running' }
   const live = ctx.feature.featureDir
   if (ctx.suiteDir === live) return { ok: false, reason: 'nothing-to-restore' }
-  const pending = computePendingEdits(live, ctx.suiteDir)
+  const review = suiteReviewFiles(ctx.suiteDir, live)
+  if (expectedRevision && review.revision !== expectedRevision) return { ok: false, reason: 'review-changed' }
+  // Preserve the browser's legacy spec-only action. The agent form explicitly
+  // reviews and restores all changed suite files, including helpers and config.
+  const pending = expectedRevision ? review.files : computePendingEdits(live, ctx.suiteDir)
   if (pending.length === 0) return { ok: false, reason: 'nothing-to-restore' }
-  const revision = suiteReviewRevision(ctx.suiteDir, live)
+  const revision = review.revision
   const restored: string[] = []
   try {
+    // Refuse the whole restore before writing if an edited path now traverses
+    // a symlink (including a broken one). Never follow it outside the suite.
+    for (const edit of pending) {
+      for (const root of [live, ctx.suiteDir]) {
+        let target = root
+        for (const segment of edit.file.split('/')) {
+          target = path.join(target, segment)
+          try {
+            if (fs.lstatSync(target).isSymbolicLink()) throw new Error('Restore path contains a symlink')
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          }
+        }
+      }
+    }
     for (const edit of pending) {
       const liveFile = path.join(live, edit.file)
       if (edit.change === 'added') {
@@ -135,7 +154,10 @@ export function restoreSpecEdits(ctx: RunContext): RestoreSpecEditsResult {
     recordSpecEdits(ctx)
     return { ok: false, reason: 'restore-failed' }
   }
-  recordSpecEdits(ctx, { at: new Date().toISOString(), revision, decision: 'restored' })
+  // The legacy browser action may restore specs while leaving other reviewed
+  // files alone. Do not claim that it settled a whole-suite agent review.
+  const fullyRestored = review.files.every((file) => restored.includes(file.file))
+  recordSpecEdits(ctx, fullyRestored ? { at: new Date().toISOString(), revision, decision: 'restored' } : undefined)
   return { ok: true, restored }
 }
 
@@ -202,7 +224,7 @@ export function snapshotSuite(ctx: RunContext): void {
   const target = ctx.paths.suiteSnapshotDir
   try {
     fs.rmSync(target, { recursive: true, force: true })
-    copyDirRecursive(live, target, undefined, (rel) => SUITE_SNAPSHOT_SKIP.has(rel))
+    copyDirRecursive(live, target, undefined, skipSuiteSnapshotPath)
     saveSuiteTestRoster(target)
     ctx.suiteDir = target
     ctx.stateSink.patchManifest(ctx.runId, {
@@ -232,7 +254,7 @@ function snapshotReviewedSuite(ctx: RunContext, expectedRevision: string): { ok:
     scratch = fs.mkdtempSync(`${target}.review-`)
     const staging = path.join(scratch, 'candidate')
     const backup = path.join(scratch, 'original')
-    copyDirRecursive(ctx.feature.featureDir, staging, undefined, (rel) => SUITE_SNAPSHOT_SKIP.has(rel))
+    copyDirRecursive(ctx.feature.featureDir, staging, undefined, skipSuiteSnapshotPath)
     if (suiteReviewRevision(target, staging) !== expectedRevision) return { ok: false, reason: 'review-changed' }
     saveSuiteTestRoster(staging)
     fs.renameSync(target, backup)

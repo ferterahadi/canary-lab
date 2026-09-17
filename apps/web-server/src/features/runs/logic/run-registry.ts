@@ -34,7 +34,7 @@ export type OrchestratorAdoptSpecEditsResult =
 
 export type OrchestratorRestoreSpecEditsResult =
   | { ok: true; restored: string[] }
-  | { ok: false; reason: 'tests-running' | 'nothing-to-restore' | 'restore-failed' }
+  | { ok: false; reason: 'tests-running' | 'nothing-to-restore' | 'restore-failed' | 'review-changed' }
 
 export type OrchestratorInterjectResult =
   | { ok: true }
@@ -56,9 +56,11 @@ export interface OrchestratorLike {
   /** A human adopts the live spec edits into the run: re-snapshot, re-baseline,
    *  rerun. Human-only by construction — reached from the HTTP route alone. */
   adoptSpecEdits?(expectedRevision?: string): Promise<OrchestratorAdoptSpecEditsResult>
+  /** Includes in-memory approval signals, not just files awaiting the watcher. */
+  isWaitingForHealSignal?(): boolean
   /** A human puts the live specs back to what the run executed. Human-only by
    *  construction, the same way as adopt. */
-  restoreSpecEdits?(): OrchestratorRestoreSpecEditsResult
+  restoreSpecEdits?(expectedRevision?: string): OrchestratorRestoreSpecEditsResult
   /** A live spec of `feature` changed on disk: re-measure the run's pending
    *  edits now rather than at the next Playwright exit, so the run's own count
    *  (hero, chip, review) says what is pending while the run waits on a heal.
