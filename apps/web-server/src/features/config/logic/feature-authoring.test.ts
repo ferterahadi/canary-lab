@@ -20,6 +20,27 @@ import {
   writeFeatureDoc,
 } from './feature-authoring'
 
+it('shows a workspace-owned suite envset with a distinct materialized consumer target', () => {
+  expect(envsetSchema('checkout')).toEqual({
+    configPath: 'features/checkout/envsets/envsets.config.json',
+    valueFiles: 'features/checkout/envsets/<env>/<slot>',
+    configShape: {
+      appRoots: {},
+      slots: {
+        'checkout.env': {
+          description: 'Suite environment',
+          target: '$CANARY_LAB_PROJECT_ROOT/features/checkout/.env',
+        },
+      },
+      feature: {
+        slots: ['checkout.env'],
+        testCommand: 'npx playwright test',
+        testCwd: '$CANARY_LAB_PROJECT_ROOT/features/checkout',
+      },
+    },
+  })
+})
+
 let tmpDir: string
 
 let featuresDir: string

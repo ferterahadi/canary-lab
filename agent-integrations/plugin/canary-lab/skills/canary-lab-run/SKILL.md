@@ -147,6 +147,14 @@ outlast the latency.
 
 ## Guardrails
 
+- Envset values belong in `features/<feature>/envsets/<env>/<slot>` in the selected
+  workspace. A suite `.env` is a materialized consumer target, not a second source.
+  Never create pointer-only envsets or target `.runtime/envsets`, an envset source,
+  or a personal source checkout merely because an old variable points there.
+  If the user authorizes an envset repair, read
+  `get_workflow_guide(workflow:"author")` and trace source → target → consumer
+  before updating the values and consumer together. Otherwise report the mapping
+  problem; repair permission for app code does not authorize a suite migration.
 - `session_id` recipe: generate one id at the start of the conversation (any unique string) and pass that identical value in every tool call for the rest of the conversation.
 - A FLIGHT can hand you a run via an `external-work` checkpoint carrying a `runId`: the run was started in external-heal mode UNCLAIMED for you — `claim_heal` it with your own `session_id` and drive this exact loop, then re-call `get_flight` and release with `respond_flight_checkpoint(flightId, choice: "submit")` once the run is terminal (a failed run is a valid terminal answer; Canary reads the verdict from the run record). If that re-check carries `checkpoint.data.takeoverRequestedAt`, stop your repair work and release with `choice: "run-internally"` instead — do not submit. Never `abort_run` a flight-owned run to escape it, and never start another run for that feature while the flight owns it. The flight will wait on you indefinitely — a parked hand-off has no deadline — so do not end your turn with it open; after 45 minutes with no `get_flight` contact the read reports `handOffIdle` on it.
 - `heartbeat` is a low-level liveness refresh for long local repair stretches. `wait_for_heal_task` heartbeats while waiting, and `signal_run` and `get_heal_context` refresh liveness, so call explicit `heartbeat` only before or after a long stretch of local `Read` / `Edit` / `Write` / `Bash` work.

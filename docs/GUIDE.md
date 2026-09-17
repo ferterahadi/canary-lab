@@ -11,6 +11,23 @@ Canary Lab backs up each configured target, writes the selected values before
 the run, and restores the originals during teardown. Manage envsets in the UI;
 their source files live under `features/<feature>/envsets/`.
 
+For a suite that reads `.env`, store its actual values in
+`features/<feature>/envsets/local/<feature>.env` and set that slot's target to
+`$CANARY_LAB_PROJECT_ROOT/features/<feature>/.env`. The source stays in the
+workspace; the target is materialized for the run. Existing target files are
+backed up and restored; targets absent before the run are removed at teardown.
+Slots absent from the selected envset do not change or claim their targets.
+An interrupted process that cannot execute teardown still needs inspection;
+do not delete pre-existing user files when cleaning up a run.
+
+A target names the file a launcher, application, or test actually reads. Do not
+point it at `.runtime/envsets` or back into the envset sources. Importing values
+from a personal checkout does not make that checkout the correct target:
+`capture_feature_env_files` defaults an omitted target to its source path, so set
+the target explicitly when the consumer lives elsewhere. Store actual values
+instead of a pointer to another unmanaged env file. Separate slots remain valid
+for required file inputs such as JSON configuration or certificates.
+
 Suite configuration can also make service startup environment-specific. A
 typical suite starts local services for `local` and skips them for
 `production`, where Playwright points at a deployed URL.

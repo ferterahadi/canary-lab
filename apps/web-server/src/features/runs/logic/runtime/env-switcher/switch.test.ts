@@ -161,20 +161,45 @@ describe('backup / applySet / restore round-trip', () => {
 
     expect(records).toHaveLength(1)
     expect(records[0].backupPath).toBe(`${targetPath}.bak.1234`)
-    expect(fs.readFileSync(records[0].backupPath, 'utf-8')).toBe('OLD=original')
+    expect(fs.readFileSync(`${targetPath}.bak.1234`, 'utf-8')).toBe('OLD=original')
 
     applySet(envSetsDir, 'staging', targets)
     expect(fs.readFileSync(targetPath, 'utf-8')).toBe('NEW=staging')
 
     restore(records)
     expect(fs.readFileSync(targetPath, 'utf-8')).toBe('OLD=original')
-    expect(fs.existsSync(records[0].backupPath)).toBe(false)
+    expect(fs.existsSync(`${targetPath}.bak.1234`)).toBe(false)
   })
 
-  it('backup skips non-existent targets', () => {
+  it('restores prior absence without creating a backup file', () => {
     const root = mkTmp()
-    const targets = [{ slot: 'x.env', targetPath: path.join(root, 'x.env') }]
-    expect(backup(targets, 1)).toEqual([])
+    const targetPath = path.join(root, '.env')
+    const targets = [{ slot: 'x.env', targetPath }]
+    const records = backup(targets, 1)
+    expect(records).toEqual([{ originalPath: targetPath, backupPath: null }])
+    fs.writeFileSync(targetPath, 'GENERATED=value')
+    restore(records)
+    expect(fs.existsSync(targetPath)).toBe(false)
+    expect(fs.existsSync(`${targetPath}.bak.1`)).toBe(false)
+    expect(() => restore(records)).not.toThrow()
+  })
+
+  it('does not mistake a pre-existing dangling symlink for an absent target', () => {
+    const root = mkTmp()
+    const targetPath = path.join(root, '.env')
+    fs.symlinkSync(path.join(root, 'missing.env'), targetPath)
+    expect(() => backup([{ slot: 'x.env', targetPath }], 1)).toThrow()
+    expect(fs.lstatSync(targetPath).isSymbolicLink()).toBe(true)
+  })
+
+  it('refuses recursive removal when a created target has become a directory', () => {
+    const root = mkTmp()
+    const targetPath = path.join(root, '.env')
+    const records = backup([{ slot: 'x.env', targetPath }], 1)
+    fs.mkdirSync(targetPath)
+    fs.writeFileSync(path.join(targetPath, 'user-data'), 'keep')
+    expect(() => restore(records)).toThrow()
+    expect(fs.readFileSync(path.join(targetPath, 'user-data'), 'utf-8')).toBe('keep')
   })
 
   it('applySet creates parent directories as needed', () => {

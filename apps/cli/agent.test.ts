@@ -170,6 +170,16 @@ describe('canary-lab agent install', () => {
       expect(body).toContain('Only a `run not found` result')
     }
 
+    for (const skill of ['canary-lab-author', 'canary-lab-run']) {
+      for (const skillPath of mirrors(skill)) {
+        const body = fs.readFileSync(skillPath, 'utf-8')
+        expect(body).toContain('features/<feature>/envsets/<env>/<slot>')
+        expect(body).toContain('Never create pointer-only envsets')
+        expect(body).toContain('`.runtime/envsets`')
+        expect(body).toContain('source → target → consumer')
+      }
+      expect(fs.readFileSync(mirrors(skill)[2])).toEqual(fs.readFileSync(mirrors(skill)[1]))
+    }
     // Authoring rules live in canary-lab-author.
     for (const skillPath of mirrors('canary-lab-author')) {
       const body = fs.readFileSync(skillPath, 'utf-8')

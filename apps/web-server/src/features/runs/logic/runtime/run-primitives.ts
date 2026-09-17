@@ -4,7 +4,7 @@ import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { collectPortSlots } from './orchestrator'
 import { allocatePorts } from './port-allocator'
 import { resolvePortTokens } from './launcher/interpolate'
-import { getEnvSetsDir, loadConfig, backup, applySet, resolveVars } from './env-switcher/switch'
+import { getEnvSetsDir, getSlotFilesInSet, loadConfig, backup, applySet, restore, resolveVars } from './env-switcher/switch'
 import type { BackupRecord } from './env-switcher/types'
 
 // Run primitives shared by every feature that starts a run: the run loop itself,
@@ -33,7 +33,8 @@ export function applyFeatureEnvset(
   const envSetsDir = getEnvSetsDir(featureDir)
   if (!fs.existsSync(path.join(envSetsDir, 'envsets.config.json'))) return null
   const config = loadConfig(featureDir)
-  const targets = config.feature.slots.map((slot) => ({
+  // A missing slot is not applied and must not grant teardown ownership of its target.
+  const targets = getSlotFilesInSet(envSetsDir, setName, config.feature.slots).map((slot) => ({
     slot,
     targetPath: resolveVars(config.slots[slot].target, config.appRoots),
   }))
@@ -44,6 +45,12 @@ export function applyFeatureEnvset(
   const resolve = portMap && portMap.size > 0
     ? (content: string) => resolvePortTokens(content, portMap)
     : undefined
-  applySet(envSetsDir, setName, targets, resolve)
+  try {
+    applySet(envSetsDir, setName, targets, resolve)
+  } catch (error) {
+    // The caller never receives the records on failure, so unwind partial writes here.
+    restore(backups)
+    throw error
+  }
   return backups
 }

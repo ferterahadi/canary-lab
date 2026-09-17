@@ -5,9 +5,43 @@ Canary Lab — authoring profile. Create or extend features and write specs; Can
 - Test titles (both paths): write each as a plain-English sentence naming the user-visible behavior — `user can reset their password after requesting a reset link`, not `POST /reset-token returns 200`; keep a technical term only when it is the requirement's own vocabulary. Reviewers read titles directly in the ledger and exported reports.
 - Draft flow: start_external_draft → update_external_draft_stage (scaffolding → authoring-tests → validating → ready → applied) → apply_external_draft. start_external_draft only creates a visible task (no server-side agent is spawned); this client writes the specs and calls apply_external_draft when they are ready.
 
-Full guide (envset-independent spec selection): get_workflow_guide(workflow:"author").
+Before changing envsets or spec selection: get_workflow_guide(workflow:"author").
 
 <!-- initialize-cut -->
+
+## Envset source and target
+
+Store the actual configuration values in the selected workspace at
+`features/<feature>/envsets/<env>/<slot>`. For a suite that reads `.env`, use
+`envsets/local/<feature>.env` with a slot target of
+`$CANARY_LAB_PROJECT_ROOT/features/<feature>/.env`. That target is the temporary
+file the launcher and Playwright read; the envset file is the durable source.
+The runner applies it before startup and restores backed-up targets at teardown.
+The intended lifecycle for a new suite `.env` target is absent at rest: verify
+that teardown removes targets absent before the run. If it does not, report or
+fix that lifecycle gap within the authorized scope; do not delete pre-existing
+user files to force that state.
+
+Inspect each consumer before choosing a target. Do not target `.runtime/envsets`,
+the envset source directory itself, or a personal source checkout merely because
+an existing environment variable points there. `capture_feature_env_files`
+defaults an omitted target to `sourcePath`: pass an explicit target when importing
+values for a different consumer. Existing paths are evidence to investigate,
+not instructions to preserve their ownership.
+
+Never create pointer-only envsets that outsource configuration to an unmanaged
+env file. Capture its actual values and update the launcher/configuration together
+to read the materialized target. A genuine file input (certificate, binary bundle,
+or JSON configuration) may keep a separate slot when its consumer requires that
+format; verify that reference and target together. Do not flatten every suite
+into one slot or encode files into environment variables merely for uniformity.
+
+For an all-suites migration, inspect every suite, preserve existing values, and
+change only incorrect mappings. Verify source → target → consumer and teardown,
+including local/live variants, before calling it complete. Keep secret values out
+of chat, logs, and commits. Do not invent `.recovery` trees or copy credentials to
+new locations as a precaution; retain the original until its replacement works,
+and use the runner's existing target backup/restore lifecycle during runs.
 
 ## Readable test source
 

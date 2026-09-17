@@ -47,6 +47,26 @@ describe('MCP initialize instructions fit the delivered window', () => {
   })
 })
 
+describe('envset ownership guidance', () => {
+  it('delivers the envset guide entry point before the initialize cut', () => {
+    expect(INSTRUCTIONS_BY_PROFILE.author).toContain('Before changing envsets')
+    expect(INSTRUCTIONS_BY_PROFILE.author).toContain('get_workflow_guide(workflow:"author")')
+  })
+
+  it('separates durable values, consumer targets, and the capture default', () => {
+    const author = WORKFLOW_GUIDES.author
+    expect(author).toContain('$CANARY_LAB_PROJECT_ROOT/features/<feature>/.env')
+    expect(author).toContain('defaults an omitted target to `sourcePath`')
+    expect(author).toContain('Never create pointer-only envsets')
+    expect(author).toContain('Do not target `.runtime/envsets`')
+    expect(author).toContain('that teardown removes targets absent before the run')
+    expect(author).toContain('Do not flatten every suite')
+    expect(author).toContain('Do not invent `.recovery` trees')
+    expect(WORKFLOW_GUIDES.repair).toContain('get_workflow_guide(workflow:"author")')
+    expect(WORKFLOW_GUIDES.repair).toContain('Never create pointer-only envsets')
+  })
+})
+
 describe('splitAtInitializeCut', () => {
   it('delivers a marker-less file whole on both surfaces', () => {
     expect(splitAtInitializeCut('short guidance', 'x.md')).toEqual({ lead: 'short guidance', guide: 'short guidance' })

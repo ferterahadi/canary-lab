@@ -73,6 +73,38 @@ and never rename it to dodge a collision.
 7. Call `apply_external_draft` with `draftId`, `confirm: true`, and `files: [{path, content}, …]` for the externally authored files (omit `files` if you already wrote them directly under `<workspace>/features/<feature>/e2e/` — it then validates what's on disk), so Canary Lab validates and records the applied draft. Do not ask Canary Lab to spawn another Claude/Codex agent for MCP-created authoring. On a validation error, fix the named file and re-call `apply_external_draft`.
 8. `get_feature_repo_status` / `checkout_feature_repo_branch` inspect and switch the feature's bound repo branches when the user asks to test a different branch. The status also reports where the pinned branch stands against its upstream (`upstreamSha`, `behindUpstream`, `aheadUpstream`); when it is behind, `update_feature_repo_branch(feature, repo, confirm: true)` fast-forwards the checkout to the upstream tip so the next run boots the latest commit. It refuses — and changes nothing — when the checkout is dirty, detached, on another branch, or has diverged; report the reason and let the user reconcile rather than discarding their work. A repo declared with `track: 'upstream'` in `feature.config.cjs` is fast-forwarded automatically at every run start.
 
+## Envset source and target
+
+Store actual values in the selected workspace at
+`features/<feature>/envsets/<env>/<slot>`. A suite that reads `.env` normally uses
+`envsets/local/<feature>.env` with target
+`$CANARY_LAB_PROJECT_ROOT/features/<feature>/.env`. The envset file is the durable
+source; the target is the temporary file the launcher and Playwright consume.
+The runner applies it before startup and restores backed-up targets at teardown.
+Verify that teardown also removes targets absent before the run, keeping new
+suite `.env` targets absent at rest. If it does not, report or fix the lifecycle
+gap within the authorized scope; preserve pre-existing user files.
+
+Inspect each consumer before choosing a target. Never target `.runtime/envsets`,
+the envset source directory itself, or a personal source checkout merely because
+an existing environment variable points there. `capture_feature_env_files`
+defaults an omitted target to `sourcePath`; pass an explicit consumer target when
+importing values from elsewhere. Existing paths are evidence, not authority.
+
+Never create pointer-only envsets that outsource their values to an unmanaged env
+file. Capture the actual values and update their launcher/configuration together.
+Keep separate slots for genuine file inputs (certificates, binary bundles, JSON)
+when their consumer requires that format; verify reference and target together.
+Do not flatten every suite into one slot or encode files as environment variables
+just for uniformity. For an all-suites request, inspect every suite and correct
+only bad mappings, preserving the working variants and existing values.
+
+Verify source → target → consumer and teardown before declaring a migration done.
+Keep secrets out of chat, logs, and commits. Do not invent `.recovery` trees or
+duplicate credentials as a precaution; retain the original until its replacement
+works, and let the runner manage its existing backup/restore lifecycle. The full
+contract is also available through `get_workflow_guide(workflow:"author")`.
+
 ## Guardrails
 
 - Write one variable declaration per statement, use descriptive names, and clearly

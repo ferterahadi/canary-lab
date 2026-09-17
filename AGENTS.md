@@ -39,6 +39,15 @@ copied to `dist/templates/` during build.
   `npm run check:conventions` rejects personal home paths and symlinks in fixture
   directories under `apps/`, `shared/`, and `tools/`; `npm run smoke:pack` runs
   that gate too. This is a repository check, not a filesystem sandbox.
+- **Envset sources and targets have different ownership.** Durable values belong
+  in the selected workspace under `features/<feature>/envsets/<env>/<slot>`.
+  Trace source → target → consumer before changing a mapping. A suite that reads
+  `.env` normally targets `$CANARY_LAB_PROJECT_ROOT/features/<feature>/.env`;
+  the runner materializes it and restores the prior state at teardown. Never
+  invent pointer-only envsets, target `.runtime/envsets`, or choose a personal
+  source checkout just because an old env variable points there. Preserve genuine
+  file inputs and update their consumers together. The full migration contract
+  lives in `apps/web-server/prompts/mcp-author-instructions.md`.
 - **Never run the canary-apply rebuild/restart cycle** — the user runs it themselves
   (see the `cl_verify-changes` skill for the hand-off). Sole exception: a checkout
   that carries a gitignored `cl_apply-local` skill has opted in locally — follow that

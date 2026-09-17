@@ -390,10 +390,10 @@ export function envsetSchema(feature: string): Record<string, unknown> {
     configPath: `features/${feature}/envsets/envsets.config.json`,
     valueFiles: `features/${feature}/envsets/<env>/<slot>`,
     configShape: {
-      appRoots: { REPO_VAR: '/absolute/path/to/repo' },
-      slots: { 'slot-name.ext': { description: 'human label', target: '/absolute/path/or/$APPROOT/file' } },
+      appRoots: {},
+      slots: { [`${feature}.env`]: { description: 'Suite environment', target: `$CANARY_LAB_PROJECT_ROOT/features/${feature}/.env` } },
       feature: {
-        slots: ['slot-name.ext'],
+        slots: [`${feature}.env`],
         testCommand: 'npx playwright test',
         testCwd: `$CANARY_LAB_PROJECT_ROOT/features/${feature}`,
       },

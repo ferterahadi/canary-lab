@@ -11,6 +11,14 @@ Full guide: get_workflow_guide(workflow:"repair").
 <!-- initialize-cut -->
 Details:
 
+Envset values belong in `features/<feature>/envsets/<env>/<slot>` in the selected
+workspace. A suite `.env` is a materialized consumer target, not a second source.
+Never create pointer-only envsets or target `.runtime/envsets`, an envset source,
+or a personal source checkout merely because an old variable points there.
+For a user-authorized envset repair, read get_workflow_guide(workflow:"author")
+and trace source → target → consumer before updating values and consumer together.
+App-code repair permission alone does not authorize a suite migration.
+
 wait_for_heal_task waits for pending signals to be consumed and for live runners to finalize before reporting terminal results. A transient failed test result can still lead into healing; keep the same run.
 
 A matching active run is reused even with force_new:true. Intentional concurrent runs of the same feature start from the Run panel. For a failed/aborted run, start_run(run_ref) preserves its recorded suite and journal. A fresh start cannot bypass pending test review: resume the original run and use get_test_review then review_test_changes. abort_run requires a human form response; confirm:true alone cannot stop anything. Clients without forms use Stop in the Run panel.
