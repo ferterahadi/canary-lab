@@ -1,7 +1,7 @@
 // MCP tools — envset capture/inspection, feature deletion, and the feature repo
 // branch surface. Split out of authoring.ts; bodies are unchanged.
 import { z } from 'zod'
-import { captureFeatureEnvFiles, checkoutFeatureRepoBranch, deleteFeature, getFeatureEnvsetSummary, getFeatureRepoStatus, type EnvFileSource } from '../../features/config/logic/feature-authoring'
+import { captureFeatureEnvFiles, checkoutFeatureRepoBranch, deleteFeature, getFeatureEnvsetSummary, getFeatureRepoStatus, updateFeatureRepoBranch, type EnvFileSource } from '../../features/config/logic/feature-authoring'
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
 import { type ToolGroupContext, asJsonResult, authoringCtx, errorResult, failureResult, isToolErrorPayload } from '../tool-support'
 
@@ -82,16 +82,37 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('get_feature_repo_status', {
-    description: 'Get git branch/dirty status for a repo declared in feature.config.cjs.',
-    inputSchema: { feature: z.string(), repo: z.string() },
-  }, async ({ feature, repo }) => {
-    const status = await getFeatureRepoStatus({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, feature, repo)
+    description: 'Get git status for a repo declared in feature.config.cjs: branch, dirty files, headSha, and where the pinned branch stands against its upstream (upstream, upstreamSha, aheadUpstream, behindUpstream). behindUpstream > 0 means a run would boot a stale commit — update_feature_repo_branch (or start_run update_repos:true) fast-forwards it. trackUpstream reports the repo\'s `track: \'upstream\'` setting.',
+    inputSchema: {
+      feature: z.string(),
+      repo: z.string(),
+      fetch: z.boolean().default(true).describe('Contact the remote first so the counts describe its current tip (default). false reads the last fetch only; a failed fetch is reported as fetchError beside the stale counts.'),
+    },
+  }, async ({ feature, repo, fetch }) => {
+    const status = await getFeatureRepoStatus({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, feature, repo, { fetch })
     if (!status) return errorResult(`repo not found: ${feature}/${repo}`)
     return asJsonResult(status)
   })
 
+  registerTool('update_feature_repo_branch', {
+    description: 'Fast-forward a declared repo\'s checkout to its upstream tip (git fetch + merge --ff-only) so the next run boots the branch\'s latest commit. Targets the feature\'s pinned branch (else the checked-out one). Refused — nothing changes — when the checkout is dirty, detached, on another branch, has diverged from upstream, or the fetch fails; local commits ahead of upstream are left alone. Confirm-gated because it changes the user repo checkout.',
+    inputSchema: {
+      feature: z.string(),
+      repo: z.string(),
+      confirm: z.literal(true),
+    },
+    annotations: { destructiveHint: true, idempotentHint: true },
+  }, async ({ feature, repo, confirm }) => {
+    const result = await updateFeatureRepoBranch(
+      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents },
+      { feature, repo, confirm },
+    )
+    if (isToolErrorPayload(result)) return errorResult(result.error)
+    return asJsonResult(result)
+  })
+
   registerTool('checkout_feature_repo_branch', {
-    description: 'Checkout a branch in a repo declared in feature.config.cjs. Confirm-gated because it changes the user repo checkout.',
+    description: 'Checkout a branch in a repo declared in feature.config.cjs. Confirm-gated because it changes the user repo checkout. To bring an already-checked-out branch to its upstream tip use update_feature_repo_branch instead.',
     inputSchema: {
       feature: z.string(),
       repo: z.string(),

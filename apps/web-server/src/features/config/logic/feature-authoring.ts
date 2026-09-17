@@ -11,7 +11,13 @@ import type { FeatureConfig } from '../../../../../../shared/launcher/types'
 import { describeReadabilityIssue, inspectTestReadability } from '../../../../../../shared/test-readability'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { loadPromptTemplate, promptPath } from '../../../shared/prompts'
-import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
+import { checkoutBranch, findRepo, resolveRepoPath } from '../../../shared/git-repo'
+import {
+  describeFastForward,
+  describeRepoCheckout,
+  fastForwardToUpstream,
+  type RepoCheckoutStatus,
+} from '../../../shared/git-upstream'
 import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
 import {
   SPEC_SELECTION_RULE,
@@ -231,15 +237,43 @@ export function captureFeatureEnvFiles(ctx: FeatureAuthoringContext, input: {
   return { ok: true, captured, summary: summary! }
 }
 
-export async function getFeatureRepoStatus(ctx: FeatureAuthoringContext, featureName: string, repoName: string): Promise<Record<string, unknown> | null> {
+export async function getFeatureRepoStatus(
+  ctx: FeatureAuthoringContext,
+  featureName: string,
+  repoName: string,
+  opts: { fetch?: boolean } = {},
+): Promise<RepoCheckoutStatus | null> {
   const feature = findFeature(ctx.featuresDir, featureName)
   if (!feature) return null
   const repo = findRepo(feature, repoName)
   if (!repo) return null
+  return describeRepoCheckout(repo, opts)
+}
+
+/**
+ * Fast-forward a declared repo's checkout to its upstream tip. The pinned
+ * `branch` is the target when the feature has one; otherwise whatever branch is
+ * checked out. Announces on the bus only when the checkout actually moved — an
+ * up-to-date or ahead checkout changed nothing the Repos tab needs to refetch.
+ */
+export async function updateFeatureRepoBranch(ctx: FeatureAuthoringContext, input: {
+  feature: string
+  repo: string
+  confirm: true
+}): Promise<Record<string, unknown> | { error: string; statusCode: number }> {
+  const feature = findFeature(ctx.featuresDir, input.feature)
+  if (!feature) return { error: 'feature not found', statusCode: 404 }
+  const repo = findRepo(feature, input.repo)
+  if (!repo) return { error: 'repo not found', statusCode: 404 }
+  const outcome = await fastForwardToUpstream(repo.localPath, { branch: repo.branch })
+  if (outcome.kind === 'refused') {
+    return { error: `${outcome.reason}: ${outcome.message}`, statusCode: 409 }
+  }
+  if (outcome.kind === 'fast-forwarded') publishWorkspaceEvent(ctx.workspaceEvents, { type: 'features-changed' })
   return {
-    ...await getGitStatus(repo.localPath),
-    path: resolveRepoPath(repo.localPath),
-    expectedBranch: repo.branch ?? null,
+    update: outcome,
+    summary: describeFastForward(outcome),
+    ...await describeRepoCheckout(repo),
   }
 }
 

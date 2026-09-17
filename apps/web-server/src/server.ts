@@ -58,6 +58,7 @@ import { RunScheduler, type SchedulerActiveRun } from './features/runs/logic/run
 import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './features/runs/logic/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from './features/runs/logic/runtime/repo-collision'
 import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from './features/runs/logic/runtime/repo-worktree'
+import type { RepoUpdateRefusal } from './features/runs/logic/runtime/repo-upstream-update'
 import { overlayExists as portifyOverlayExists } from './features/portify/logic/runtime/overlay'
 import { revertPortification } from './features/portify/logic/runtime/unportify'
 import {
@@ -409,7 +410,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })() as unknown
       return { statusCode: resp.statusCode, body }
     },
-	    startRun: async (feature, env, healAgent, isolation, executionType, perturbation) => {
+	    startRun: async (feature, env, healAgent, isolation, executionType, perturbation, updateRepos) => {
 	      const demoWorkflow = executionType === 'boot' ? null : gettingStartedRunWorkflow(feature)
 	      const resp = await app.inject({
 	        method: 'POST',
@@ -421,6 +422,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
             ...(isolation ? { isolation } : {}),
             ...(executionType === 'boot' ? { mode: 'boot' } : {}),
             ...(perturbation !== undefined ? { perturbation } : {}),
+            ...(updateRepos !== undefined ? { updateRepos } : {}),
             ...(demoWorkflow
               ? { gettingStartedSource: 'external', gettingStartedWorkflow: demoWorkflow }
               : {}),
@@ -441,6 +443,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 	          repoPaths: Array.isArray(body.repoPaths) ? body.repoPaths as string[] : [],
 	          options: ['worktree', 'queue'],
 	          message: String(body.message ?? 'Same-app collision.'),
+	        }
+	      }
+	      if (resp.statusCode === 409 && body.type === 'repo_update_refused') {
+	        return {
+	          kind: 'repo-update-refused',
+	          repos: Array.isArray(body.repos) ? body.repos as RepoUpdateRefusal[] : [],
+	          message: String(body.error ?? 'Repo upstream update refused.'),
 	        }
 	      }
 	      if (resp.statusCode === 409 && body.type === 'getting_started_busy') {

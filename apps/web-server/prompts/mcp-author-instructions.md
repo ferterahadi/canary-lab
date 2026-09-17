@@ -38,3 +38,5 @@ test('merchant can connect a Meta template', async ({ page }) => {
 ```
 
 Read the env from the envset's own values (a slot in `envsets/<env>/…`), not from the manifest.
+
+Repo checkouts: get_feature_repo_status(feature, repo) reports the checkout's branch plus where the pinned branch stands against its upstream (upstreamSha, behindUpstream, aheadUpstream; fetch:true by default). When it is behind, update_feature_repo_branch(feature, repo, confirm:true) fast-forwards it so the next run boots the latest commit; it refuses and changes nothing when the checkout is dirty, detached, on another branch or diverged — report the reason, never discard the user's work. checkout_feature_repo_branch switches branches. A repo declared track:'upstream' in feature.config.cjs is fast-forwarded automatically at every run start.

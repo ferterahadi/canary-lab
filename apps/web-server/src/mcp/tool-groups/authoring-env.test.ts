@@ -282,6 +282,46 @@ describe('the feature repo branch surface', () => {
     expect(published).toEqual([{ type: 'features-changed' }])
   })
 
+  it('reports where the pinned branch stands against its upstream', async () => {
+    // A bare origin one commit ahead of the checkout, so the counts are non-zero.
+    const originDir = path.join(tmpDir, 'origin.git')
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', originDir])
+    git('remote', 'add', 'origin', originDir)
+    git('push', '-q', '-u', 'origin', 'main')
+    const seedDir = path.join(tmpDir, 'seed')
+    execFileSync('git', ['clone', '-q', originDir, seedDir])
+    execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=T', 'commit', '-q', '--allow-empty', '-m', 'upstream'], { cwd: seedDir })
+    execFileSync('git', ['push', '-q', 'origin', 'main'], { cwd: seedDir })
+    writeFeature('checkout', [{ name: 'shop', localPath: repoDir, branch: 'main', track: 'upstream' }])
+    const { call, published } = harness()
+
+    // The default fetches, so the remote's new tip is what the count reflects.
+    const before = await call('get_feature_repo_status', { feature: 'checkout', repo: 'shop', fetch: true })
+    expect(before).toMatchObject({ upstream: 'origin/main', behindUpstream: 1, aheadUpstream: 0, trackUpstream: true })
+
+    const updated = await call('update_feature_repo_branch', { feature: 'checkout', repo: 'shop', confirm: true })
+
+    expect(updated).toMatchObject({
+      update: { kind: 'fast-forwarded', behind: 1 },
+      summary: expect.stringContaining('fast-forwarded main'),
+      behindUpstream: 0,
+      headSha: (updated as { upstreamSha: string }).upstreamSha,
+    })
+    expect(git('rev-parse', 'HEAD')).toBe(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: seedDir, encoding: 'utf8' }).trim())
+    expect(published).toEqual([{ type: 'features-changed' }])
+  })
+
+  it('refuses to update a dirty checkout and announces nothing', async () => {
+    fs.writeFileSync(path.join(repoDir, 'README.md'), '# edited\n')
+    writeFeature('checkout', [{ name: 'shop', localPath: repoDir, branch: 'main' }])
+    const { text, published } = harness()
+
+    const out = await text('update_feature_repo_branch', { feature: 'checkout', repo: 'shop', confirm: true })
+
+    expect(out).toContain('dirty: checkout has uncommitted changes')
+    expect(published).toEqual([])
+  })
+
   it('surfaces a refused checkout without announcing a move that did not happen', async () => {
     writeFeature('checkout', [{ name: 'shop', localPath: repoDir }])
     const { text, published } = harness()

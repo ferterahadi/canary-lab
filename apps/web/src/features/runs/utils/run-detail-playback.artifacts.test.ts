@@ -203,6 +203,19 @@ describe('branch helpers', () => {
       'service cwd: /workspace/app',
     ].join('\n'))
 
+    expect(branchTooltip(service('/workspace/app'), {
+      ...repo('/workspace', 'main'),
+      sha: 'abcdef0123456789',
+      updatedFromUpstream: { upstream: 'origin/main', from: '1234567890ab', to: 'abcdef0123456789' },
+    })).toBe([
+      'repo: repo',
+      'branch: main',
+      'commit: abcdef0',
+      'pulled: 1234567 → abcdef0 (origin/main)',
+      'repo path: /workspace',
+      'service cwd: /workspace/app',
+    ].join('\n'))
+
     expect(branchTooltip(service('/workspace/app'), repo('/workspace/', 'main'))).toBe([
       'repo: repo',
       'branch: main',

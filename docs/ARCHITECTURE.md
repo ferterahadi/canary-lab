@@ -470,6 +470,19 @@ in a per-run Git worktree under `<runDir>/worktrees/`. Each worktree starts from
 untracked work in progress through `hydrateWorkingTreeDiff`, so the run normally
 tests the checkout's current state rather than committed state alone.
 
+`HEAD` is whatever commit the checkout was left on, so a pinned branch nobody has
+pulled boots stale. Before anything is allocated, `startRun` runs
+`updateReposToUpstream` (`apps/web-server/src/features/runs/logic/runtime/repo-upstream-update.ts`): each repo
+declared `track: 'upstream'` — or every repo when the start carries
+`updateRepos: true` — is fetched and fast-forwarded to its upstream by
+`fastForwardToUpstream` (`apps/web-server/src/shared/git-upstream.ts`). The move is ff-only and never
+discards work: a dirty, detached, off-branch or diverged checkout, a failed fetch,
+or a checkout an in-place run is booted from refuses the start with a typed
+`repo_update_refused` 409 (sibling of `repo_branch_mismatch`), which the MCP
+`start_run` / `boot_services` tools relay with the per-repo rows. The snapshot in
+`manifest.repoBranches[]` then records the booted `sha` and, when the start
+pulled, `updatedFromUpstream: { upstream, from, to }`.
+
 Isolation is best-effort for a non-portified repo. If `git worktree add` fails,
 the run logs the failure and uses the source checkout in place. That fallback
 keeps the run usable, but it also means the repair agent may edit the checkout

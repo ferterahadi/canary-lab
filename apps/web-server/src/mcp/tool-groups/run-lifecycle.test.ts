@@ -370,6 +370,7 @@ describe('start_run: starting fresh', () => {
       'worktree',
       undefined,
       undefined,
+      undefined,
     )
     expect(out).toEqual({ runId: 'run-new', reused: false, claimed: true, nextSteps: ['wait_for_heal_task'] })
   })
@@ -400,6 +401,7 @@ describe('start_run: starting fresh', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
     )
     expect(out).toEqual({
       runId: 'run-new',
@@ -408,6 +410,28 @@ describe('start_run: starting fresh', () => {
       claimSuppressed: true,
       message: CLAIM_SUPPRESSED_MESSAGE,
     })
+  })
+
+  it('forwards the update_repos choice as the seventh factory argument', async () => {
+    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const { call } = harness({ startRun })
+
+    await call('start_run', { ...START, update_repos: false })
+
+    expect(startRun.mock.calls[0]?.[6]).toBe(false)
+  })
+
+  it('relays a refused upstream update with the per-repo rows, having started nothing', async () => {
+    const repos = [{ name: 'app', path: '/repo/shop', branch: 'main', reason: 'diverged', message: 'main has 1 local commit(s)' }]
+    const { call } = harness({
+      startRun: async () => ({ kind: 'repo-update-refused', repos, message: 'Repo upstream update refused:\napp: main has 1 local commit(s)' }),
+    })
+
+    const out = await call('start_run', START)
+
+    expect(out).toMatchObject({ type: 'repo_update_refused', feature: 'checkout', repos })
+    expect(String(out.nextSteps)).toContain('update_repos:false')
+    expect(out).not.toHaveProperty('runId')
   })
 
   it('stands down when a Getting Started demo owns the workspace', async () => {
@@ -524,6 +548,19 @@ describe('boot_services', () => {
       options: ['queue'],
       nextSteps: ['ask_user_worktree_or_queue'],
     })
+  })
+
+  it('relays a refused upstream update for a tracked repo, having booted nothing', async () => {
+    const repos = [{ name: 'app', path: '/repo/shop', branch: 'main', reason: 'dirty', message: 'uncommitted changes' }]
+    const { call } = harness({
+      startRun: async () => ({ kind: 'repo-update-refused', repos, message: 'Repo upstream update refused' }),
+    })
+
+    const out = await call('boot_services', { feature: 'checkout' })
+
+    expect(out).toMatchObject({ type: 'repo_update_refused', feature: 'checkout', repos, message: 'Repo upstream update refused' })
+    expect(String(out.nextSteps)).toContain('re-call boot_services')
+    expect(out).not.toHaveProperty('booted')
   })
 
   it('reports a parked boot as queued', async () => {

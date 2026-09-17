@@ -16,6 +16,7 @@ import {
   getFeatureRepoStatus,
   linkFeatureDoc,
   parseRedactedEntries,
+  updateFeatureRepoBranch,
   writeFeatureDoc,
 } from './feature-authoring'
 
@@ -288,6 +289,51 @@ module.exports = { config }
       branch: 'topic',
       confirm: true,
     })).resolves.toMatchObject({ expectedBranch: null })
+  })
+
+  it('fast-forwards a repo to its upstream and announces the move only when one happened', async () => {
+    const originDir = path.join(tmpDir, 'origin.git')
+    const repoDir = path.join(tmpDir, 'repo')
+    const seedDir = path.join(tmpDir, 'seed')
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', originDir])
+    initGitRepo(seedDir)
+    execFileSync('git', ['remote', 'add', 'origin', originDir], { cwd: seedDir })
+    execFileSync('git', ['push', '-q', '-u', 'origin', 'main'], { cwd: seedDir })
+    execFileSync('git', ['clone', '-q', originDir, repoDir])
+    execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'upstream'], { cwd: seedDir })
+    execFileSync('git', ['push', '-q', 'origin', 'main'], { cwd: seedDir })
+    const tip = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: seedDir, encoding: 'utf8' }).trim()
+    writeFeatureConfig('checkout', '', `[{ name: 'app', localPath: ${JSON.stringify(repoDir)}, branch: 'main' }]`)
+    const published: unknown[] = []
+    const withEvents = { ...ctx(), workspaceEvents: { publish: (e: unknown) => published.push(e) } }
+
+    await expect(updateFeatureRepoBranch(withEvents, { feature: 'missing', repo: 'app', confirm: true }))
+      .resolves.toEqual({ error: 'feature not found', statusCode: 404 })
+    await expect(updateFeatureRepoBranch(withEvents, { feature: 'checkout', repo: 'missing', confirm: true }))
+      .resolves.toEqual({ error: 'repo not found', statusCode: 404 })
+
+    await expect(updateFeatureRepoBranch(withEvents, { feature: 'checkout', repo: 'app', confirm: true })).resolves.toMatchObject({
+      update: { kind: 'fast-forwarded', to: tip },
+      summary: expect.stringContaining('fast-forwarded main'),
+      headSha: tip,
+      behindUpstream: 0,
+      expectedBranch: 'main',
+    })
+    expect(published).toEqual([{ type: 'features-changed' }])
+
+    // Already there: a no-op is reported as such, and nothing is announced.
+    await expect(updateFeatureRepoBranch(withEvents, { feature: 'checkout', repo: 'app', confirm: true })).resolves.toMatchObject({
+      update: { kind: 'up-to-date', sha: tip },
+    })
+    expect(published).toHaveLength(1)
+
+    // Refusals carry the reason first so an agent can branch on it.
+    fs.writeFileSync(path.join(repoDir, 'README.md'), 'edited\n', 'utf8')
+    await expect(updateFeatureRepoBranch(withEvents, { feature: 'checkout', repo: 'app', confirm: true })).resolves.toEqual({
+      error: 'dirty: checkout has uncommitted changes (1 file(s)) — commit or stash them first',
+      statusCode: 409,
+    })
+    expect(published).toHaveLength(1)
   })
 
   it('deletes only confirmed terminal feature directories', () => {

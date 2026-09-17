@@ -30,10 +30,11 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       guidance: z.string().optional().describe('Optional user guidance when restarting a failed/aborted run by runId or run_ref.'),
       force_new: z.boolean().default(false).describe('Start a fresh concurrent run even if a matching run is healing (it continues independently). A same-repo collision still asks you to choose isolation.'),
       isolation: z.enum(['worktree', 'queue']).optional().describe('Only needed after start_run returns repo_collision_requires_choice: "worktree" isolates this run in a per-run git worktree and starts it now (concurrent); "queue" waits until the conflicting run finishes.'),
+      update_repos: z.boolean().optional().describe('Fast-forward each declared repo checkout to its upstream tip (git fetch + ff-only) before booting, so the run tests the branch\'s latest commit rather than whatever was checked out. Omitted = only repos with `track: \'upstream\'` in feature.config.cjs; true = every repo; false = none. Refused (type:"repo_update_refused", nothing started) when a checkout is dirty, has diverged, or an in-place run is booted from it — local work is never discarded; get_feature_repo_status shows behindUpstream first. Fresh starts only.'),
       perturbation: z.record(z.string(), z.unknown()).optional().describe('Robustness envelope (the `envelope` object from a get_robustness finding, or the suite\'s robustness/envelope.json) to boot the services under: latency, duplicated writes and slot restarts through a per-slot proxy. Use it to repair a Robustness Lab finding — the failing test fails again under the same environment, and the heal context carries `perturbation` (with a one-line `repro`) so the fix targets the app\'s tolerance, not the test. Applies to fresh starts only; omitted = unperturbed.'),
     },
   }, async (args, request) => {
-    const { feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new, perturbation } = args
+    const { feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new, perturbation, update_repos } = args
     const isolationQuestion = { scope: ['run-isolation', deps.projectRoot, args], mode: 'form' as const, schema: z.object({ isolation: z.enum(['worktree', 'queue']) }) }
     // One `chosen` for both entries: the fresh ask never runs it (it returns the
     // question), and the answering call reaches it through `applyUserInput`.
@@ -165,6 +166,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
           isolation,
           undefined,
           perturbation,
+          update_repos,
         )
         if (outcome.kind === 'getting-started-busy') {
           return asJsonResult({
@@ -172,6 +174,21 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
             active: outcome.active,
             message: outcome.message,
             nextSteps: ['follow the active demo in its current owner; do not start another run or flight'],
+          })
+        }
+        if (outcome.kind === 'repo-update-refused') {
+          // A tracked repo could not be brought to its upstream tip. Nothing
+          // started; the rows say what to reconcile, and update_repos:false is
+          // the explicit way to boot the checked-out commit anyway.
+          return asJsonResult({
+            type: 'repo_update_refused',
+            feature,
+            repos: outcome.repos,
+            message: outcome.message,
+            nextSteps: [
+              'tell the user which repo refused and why (dirty / diverged / in-use); do not stash, reset or discard their work',
+              'once they have reconciled, re-call start_run; or re-call with update_repos:false to boot the checked-out commit as-is',
+            ],
           })
         }
         if (outcome.kind === 'collision') {
@@ -240,6 +257,22 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
             active: outcome.active,
             message: outcome.message,
             nextSteps: ['follow the active demo in its current owner; do not start another run or flight'],
+          })
+        }
+        if (outcome.kind === 'repo-update-refused') {
+          // Boots honour the feature's `track: 'upstream'` setting too, so a
+          // dirty or diverged checkout stops the boot the same way it stops a
+          // run. boot_services has no update_repos switch; use start_run for
+          // an explicit as-is boot of the checked-out commit.
+          return asJsonResult({
+            type: 'repo_update_refused',
+            feature,
+            repos: outcome.repos,
+            message: outcome.message,
+            nextSteps: [
+              'tell the user which repo refused and why (dirty / diverged / in-use); do not stash, reset or discard their work',
+              'once they have reconciled, re-call boot_services',
+            ],
           })
         }
         if (outcome.kind === 'collision') {

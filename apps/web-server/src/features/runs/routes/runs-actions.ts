@@ -8,6 +8,7 @@ import type { RunStore } from '../logic/run-store'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { isHealClaimAllowed } from '../logic/heal/heal-claim-policy'
 import { type RepoBranchMismatch } from '../../../shared/git-repo'
+import type { RepoUpdateRefusal } from '../logic/runtime/repo-upstream-update'
 import { type SpecSelectionViolation } from '../../../shared/playwright-config'
 import type { ExecutionType } from '../../../../../../shared/verification'
 import { ExternalHealAgentRequest, findActiveRunForFeature, parseExternalHealAgent } from './runs-route-support'
@@ -40,6 +41,9 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       gettingStartedWorkflow?: GettingStartedRunWorkflow
       /** A robustness envelope to boot under; validated below. */
       perturbation?: unknown
+      /** Fast-forward the repo checkouts to their upstream tips first — see
+       *  `StartRunOptions.updateRepos`. Non-boolean values read as unset. */
+      updateRepos?: unknown
     }
   }>('/api/runs', async (req, reply) => {
     const feature = req.body?.feature
@@ -151,8 +155,12 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       ? req.body.isolation
       : undefined
     const executionType: ExecutionType = req.body?.mode === 'boot' ? 'boot' : 'run'
+    const updateRepos = typeof req.body?.updateRepos === 'boolean' ? req.body.updateRepos : undefined
     try {
-      const outcome = await deps.startRun(feature, env, externalRunReq, isolation, executionType, req.body?.models, perturbation)
+      const outcome = await deps.startRun(
+        feature, env, externalRunReq, isolation, executionType, req.body?.models, perturbation, undefined,
+        updateRepos === undefined ? undefined : { updateRepos },
+      )
       if (outcome.kind === 'collision') {
         if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
         // Same-repo collision and the caller didn't choose how to handle it.
@@ -208,6 +216,13 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       const mismatch = (err as { branchMismatch?: RepoBranchMismatch[] }).branchMismatch
       if (Array.isArray(mismatch) && mismatch.length > 0) {
         return { type: 'repo_branch_mismatch' as const, feature, repos: mismatch, error: message }
+      }
+      // A refused upstream fast-forward is its sibling: the run never started,
+      // and the rows say per repo why (dirty, diverged, in use) so the agent can
+      // tell the user what to reconcile — or re-send with updateRepos:false.
+      const repoUpdate = (err as { repoUpdate?: RepoUpdateRefusal[] }).repoUpdate
+      if (Array.isArray(repoUpdate) && repoUpdate.length > 0) {
+        return { type: 'repo_update_refused' as const, feature, repos: repoUpdate, error: message }
       }
       // A config that picks specs by envset is refused the same way: nothing
       // started, and the payload names the fields to rewrite so an agent can fix

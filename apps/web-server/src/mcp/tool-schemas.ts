@@ -12,6 +12,7 @@ import type { RunDetail } from '../features/runs/logic/run-store'
 import type { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import type { ClientKind } from '../../../../shared/run-mode'
 import type { DirtySpecStore } from '../features/runs/logic/dirty-specs/store'
+import type { RepoUpdateRefusal } from '../features/runs/logic/runtime/repo-upstream-update'
 import { type ResolveVerificationInput } from '../features/coverage/logic/verification'
 import { buildTestReviewPacket, deterministicEvaluationRewrite, evaluationTextSlots } from '../features/evaluation/logic/test-review-export'
 import { type WorkspaceEventPublisher } from '../shared/workspace-events'
@@ -93,6 +94,13 @@ export type McpStartRunOutcome =
       message: string
     }
   | {
+      /** A tracked repo could not be fast-forwarded to its upstream — nothing
+       *  started; `repos` says per repo why (dirty, diverged, in use). */
+      kind: 'repo-update-refused'
+      repos: RepoUpdateRefusal[]
+      message: string
+    }
+  | {
       kind: 'collision'
       conflictingRunId: string
       conflictingFeature: string
@@ -130,6 +138,9 @@ export interface CanaryLabMcpDeps {
      *  JSON: the REST route parses it, so a bad envelope is one 400 with one
      *  reason instead of two validators drifting apart. */
     perturbation?: unknown,
+    /** Fast-forward the repo checkouts to their upstream tips before booting;
+     *  unset defers to each repo's `track: 'upstream'` config. */
+    updateRepos?: boolean,
   ) => Promise<McpStartRunOutcome>
   restartExternalRun?: (
     runId: string,

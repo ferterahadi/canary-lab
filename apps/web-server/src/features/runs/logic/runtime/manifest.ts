@@ -78,6 +78,11 @@ export interface RepoBranchSnapshot {
   expectedBranch?: string
   detached: boolean
   dirty: boolean
+  /** Commit the checkout sat on when the run launched — what the run booted.
+   *  Absent on records written before it was recorded; null on an unborn branch. */
+  sha?: string | null
+  /** Set when run start fast-forwarded the checkout to its upstream first. */
+  updatedFromUpstream?: { upstream: string; from: string; to: string }
 }
 
 // Imported for local use below and re-exported so existing `from './manifest'`

@@ -117,7 +117,7 @@ describe('POST /api/runs', () => {
     const envelope = { format: 'canary-lab/robustness-envelope@1', latency: { ms: 250 } }
     const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', perturbation: envelope } })
     expect(res.statusCode).toBe(201)
-    expect(startRun).toHaveBeenCalledWith('foo', undefined, undefined, undefined, 'run', undefined, envelope)
+    expect(startRun).toHaveBeenCalledWith('foo', undefined, undefined, undefined, 'run', undefined, envelope, undefined, undefined)
   })
 
   // The envelope is human-edited JSON; a bad one is named, never booted as "no perturbation".
@@ -330,6 +330,41 @@ describe('POST /api/runs', () => {
     })
     // Human message preserved for REST/MCP callers that don't parse the type.
     expect(res.json().error).toContain('Repo branch check failed')
+  })
+
+  it('surfaces a refused upstream update as a typed 409 with per-repo rows', async () => {
+    writeFeature('foo')
+    const repoUpdate = [
+      { name: 'app', path: '/repo', branch: 'main', reason: 'dirty', message: 'checkout has uncommitted changes (1 file(s))' },
+    ]
+    const { app } = await build({
+      startRun: async () => {
+        throw Object.assign(new Error('Repo upstream update refused:\napp: checkout has uncommitted changes (1 file(s))'), {
+          statusCode: 409,
+          repoUpdate,
+        })
+      },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({ type: 'repo_update_refused', feature: 'foo', repos: repoUpdate })
+    expect(res.json().error).toContain('Repo upstream update refused')
+  })
+
+  it('forwards a boolean updateRepos as the start option, and nothing when it is absent or malformed', async () => {
+    writeFeature('foo')
+    const startRun = vi.fn(async () => ({ kind: 'started' as const, orch: makeStub('run-u') }))
+    const { app } = await build({ startRun })
+
+    await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', updateRepos: true } })
+    expect(startRun.mock.calls[0]?.[8]).toEqual({ updateRepos: true })
+
+    await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', updateRepos: false } })
+    expect(startRun.mock.calls[1]?.[8]).toEqual({ updateRepos: false })
+
+    // A string is not a choice: the feature's own `track` setting decides.
+    await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', updateRepos: 'yes' } })
+    expect(startRun.mock.calls[2]?.[8]).toBeUndefined()
   })
 
   it('surfaces an envset-dependent spec selection as a typed 409 naming the fields', async () => {
