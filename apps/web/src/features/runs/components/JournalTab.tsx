@@ -8,6 +8,7 @@ import {
   classifyOutcome,
   newestFirst,
   outcomeBadgeClass,
+  outcomeLabel,
   parseBodyFields,
   presentJournalFields,
 } from '../utils/journal-utils'
@@ -106,7 +107,7 @@ function EntryCard({ entry }: { entry: JournalEntry }) {
         )}
         <div className="min-w-2 flex-1" />
         <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${outcomeBadgeClass(outcome)}`}>
-          {outcome}
+          {outcomeLabel(outcome)}
         </span>
       </header>
       {headline && (

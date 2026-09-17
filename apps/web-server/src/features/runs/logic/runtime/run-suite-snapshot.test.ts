@@ -8,6 +8,7 @@ import path from 'path'
 import { createHash } from 'crypto'
 import { adoptSpecEdits, adoptTestHealSpecEdits, digestOfSpecHashes, recordSpecEdits, refreshSpecEdits, restoreSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
 import { hashFeatureSpecs } from '../dirty-specs/detect'
+import { suiteReviewRevision } from './suite-review'
 import { writeManifest, type RunManifest } from './manifest'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
@@ -49,6 +50,17 @@ function fakeRunnerLog(): RunnerLog & { warnings: string[] } {
 const SPEC_A = "test('a', async () => { expect(1).toBe(1) })\n"
 
 describe('snapshotSuite', () => {
+  it('adopts a reviewed helper-only correction without requiring an unrelated spec edit', async () => {
+    const { ctx } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    write(ctx.feature.featureDir, 'e2e/helper.ts', 'export const value = 1')
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/helper.ts', 'export const value = 2')
+    const revision = suiteReviewRevision(ctx.suiteDir, ctx.feature.featureDir)
+    const result = await adoptSpecEdits(ctx, revision)
+    expect(result).toMatchObject({ ok: true, adopted: ['e2e/helper.ts'] })
+    expect(fs.readFileSync(path.join(ctx.suiteDir, 'e2e/helper.ts'), 'utf8')).toBe('export const value = 2')
+  })
   it('copies the suite under the run dir and points the run at the copy', () => {
     const { ctx, sink } = ctxFor()
     const live = ctx.feature.featureDir

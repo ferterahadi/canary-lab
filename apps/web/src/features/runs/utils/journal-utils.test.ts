@@ -100,7 +100,10 @@ describe('parseBodyFields', () => {
 describe('classifyOutcome', () => {
   it.each([
     ['pending', 'pending'],
-    ['all_passed', 'all_passed'],
+    ['all_passed', 'no_failures_recorded'],
+    ['all_tests_passed', 'all_tests_passed'],
+    ['applicable_passed', 'applicable_passed'],
+    ['failures_cleared', 'failures_cleared'],
     ['advanced', 'advanced'],
     ['partial', 'partial'],
     ['no_change', 'no_change'],
@@ -121,7 +124,7 @@ describe('classifyOutcome', () => {
 
 describe('outcomeBadgeClass', () => {
   it('returns distinct classes per outcome', () => {
-    const outcomes = ['pending', 'all_passed', 'advanced', 'partial', 'no_change', 'regression', 'unknown'] as const
+    const outcomes = ['pending', 'all_tests_passed', 'advanced', 'partial', 'no_change', 'regression', 'unknown'] as const
     const seen = new Set<string>()
     for (const o of outcomes) {
       const cls = outcomeBadgeClass(o)

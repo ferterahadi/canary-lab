@@ -4,11 +4,11 @@
 // profile arrays in ../tool-support.ts (see the cl_add-mcp-tool skill).
 import { z } from 'zod'
 import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/server'
-import { applyUserInput, requestUserInput } from '../elicitation'
+import { applyUserInput, completedUserInput, inputPending, requestUserInput } from '../elicitation'
 import { normalizeRunCounts } from '../../features/runs/logic/heal/external-heal-surface'
 import { isHealClaimAllowed } from '../../features/runs/logic/heal/heal-claim-policy'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
-import { type ToolGroupContext, CLAIM_SUPPRESSED_MESSAGE, asJsonResult, bootSessionValue, claimRun, errorResult, failureResult, findHealingRunForFeature, healWaitNext, isActiveBootRun, resolveRunRef, runCandidate } from '../tool-support'
+import { type ToolGroupContext, CLAIM_SUPPRESSED_MESSAGE, asJsonResult, bootSessionValue, claimRun, errorResult, failureResult, findContinuingRunForFeature, healWaitNext, isActiveBootRun, resolveRunRef, runCandidate } from '../tool-support'
 
 export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -17,7 +17,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
 
   registerTool('start_run', {
     description:
-      'Smart entrypoint for runs. If a matching run is healing, returns it and blocks fresh/different starts until cancel_heal stops it. If runId/run_ref targets a failed/aborted run and no heal is active, restarts it in remaining-test mode (failed → skipped → pending/not-run). Otherwise starts a new run. To retry a failed/aborted run prefer this rerun path (pass run_ref) over abort_run + a fresh start — a fresh start re-runs the whole suite, only worth it when prior passes are invalidated (e.g. a global data/state change). The rerun path already re-runs skipped + pending tests (failed → skipped → pending/not-run), so it is complete — do NOT force_new just to avoid "skipped" tests; force_new on a portified feature spins a brand-new per-run worktree and resets the heal journal to Iteration 1, losing the prior cycles. After code changes call signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run.',
+      'Start or continue a run. A matching active run is reused even with force_new:true; an intentional concurrent run of the same feature must be started from the Run panel. Pass run_ref to resume a failed/aborted run with its recorded suite and journal, retesting failed, skipped and pending tests. Fresh starts cannot adopt unreviewed suite changes from an unfinished run. After a code fix use signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run. Ordinary skips remain incomplete; only reporter-observed, predeclared environment exclusions settle as not applicable and never count as passes.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       env: z.string().optional().describe('Envset name. Defaults to the feature\'s first declared env.'),
@@ -28,7 +28,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       client_kind: clientKindInput,
       conversation_name: z.string().optional().describe('Human label shown in the Canary Lab UI (e.g. "fix checkout").'),
       guidance: z.string().optional().describe('Optional user guidance when restarting a failed/aborted run by runId or run_ref.'),
-      force_new: z.boolean().default(false).describe('Start a fresh concurrent run even if a matching run is healing (it continues independently). A same-repo collision still asks you to choose isolation.'),
+      force_new: z.boolean().default(false).describe('Request a fresh run only when no matching run is active and no pending test review would be bypassed. An active run is reused even when true; use the Run panel for an intentional separate concurrent run.'),
       isolation: z.enum(['worktree', 'queue']).optional().describe('Only needed after start_run returns repo_collision_requires_choice: "worktree" isolates this run in a per-run git worktree and starts it now (concurrent); "queue" waits until the conflicting run finishes.'),
       update_repos: z.boolean().optional().describe('Fast-forward each declared repo checkout to its upstream tip (git fetch + ff-only) before booting, so the run tests the branch\'s latest commit rather than whatever was checked out. Omitted = only repos with `track: \'upstream\'` in feature.config.cjs; true = every repo; false = none. Refused (type:"repo_update_refused", nothing started) when a checkout is dirty, has diverged, or an in-place run is booted from it — local work is never discarded; get_feature_repo_status shows behindUpstream first. Fresh starts only.'),
       perturbation: z.record(z.string(), z.unknown()).optional().describe('Robustness envelope (the `envelope` object from a get_robustness finding, or the suite\'s robustness/envelope.json) to boot the services under: latency, duplicated writes and slot restarts through a per-slot proxy. Use it to repair a Robustness Lab finding — the failing test fails again under the same environment, and the heal context carries `perturbation` (with a one-line `repro`) so the fix targets the app\'s tolerance, not the test. Applies to fresh starts only; omitted = unperturbed.'),
@@ -56,13 +56,10 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         const suppressionFields = claimSuppressed
           ? { claimSuppressed: true, message: CLAIM_SUPPRESSED_MESSAGE }
           : {}
-        // Default (no explicit ref, no force_new): continue the run that's
-        // already healing for this feature — the external-heal continuation
-        // pattern. With concurrency, `force_new` (or targeting a different run)
-        // no longer blocks: it falls through to a fresh concurrent start, where
-        // same-repo collisions surface a worktree/queue choice.
-        const healing = findHealingRunForFeature(deps, feature, env)
-        if (healing && !force_new && !requestedRef) {
+        // An agent cannot turn a repair into a new baseline by setting a flag.
+        // Deliberate concurrent runs remain available through the human Run UI.
+        const healing = findContinuingRunForFeature(deps, feature, env)
+        if (healing && (!requestedRef || force_new)) {
           const claim = claimAllowed ? claimRun(deps, healing.manifest.runId, session_id, client_kind, conversation_name) : null
           return asJsonResult({
             runId: healing.manifest.runId,
@@ -71,6 +68,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
             claimed: claimAllowed ? claim?.accepted === true : false,
             claim,
             ...suppressionFields,
+            ...(force_new ? { freshStartBlocked: true, message: 'Continue this run with signal_run. A separate concurrent run must be started from the Run panel.' } : {}),
             ...(claimAllowed ? healWaitNext() : {}),
           })
         }
@@ -297,7 +295,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         return asJsonResult({
           runId: outcome.runId,
           booted: true,
-          nextSteps: ['services are booting and will be held — exercise them, then call abort_run (confirm:true) to stop services + revert the envset. A service that fails its readiness probe is marked failed (status "timeout") but the session stays held; boot does not self-abort on a health-check failure'],
+          nextSteps: ['services are booting and will be held — exercise them, then request abort_run and let the human accept its stop form to stop services + revert the envset. A service that fails its readiness probe is marked failed (status "timeout") but the session stays held; boot does not self-abort on a health-check failure'],
         })
       } catch (err) {
         return failureResult(err)
@@ -333,16 +331,35 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
 
   registerTool('abort_run', {
     description:
-      'Hard-abort an active run. Requires `confirm: true` because this kills Playwright + services and cannot be undone. Do not abort just to re-run: for an active healing run use `signal_run`, and to retry a failed/aborted run pass its `run_ref` to `start_run` (rerun, remaining-test mode). Abort is for killing a run you no longer want.',
+      'Request human confirmation to stop an active run and its services. An agent-supplied confirm:true does not authorize cancellation. The owning command opens a user form; clients without forms must use the Run panel Stop action. Do not abort just to re-run: use signal_run for an active healing run, or start_run with run_ref for a failed/aborted run.',
     inputSchema: {
       runId: z.string(),
-      confirm: z.literal(true).describe('Must be true. Guard against accidental aborts.'),
+      confirm: z.literal(true).describe('Must be true. Compatibility flag only; the human must accept the stop form.'),
     },
     annotations: { destructiveHint: true, idempotentHint: false },
-  }, async ({ runId }) => {
-    const result = await deps.store.abort(runId)
-    if (!result.ok) return errorResult(`could not abort: ${result.reason}`)
-    return asJsonResult({ aborted: true, runId })
+  }, async ({ runId }, request) => {
+    const scope = ['abort-run', deps.projectRoot, runId]
+    const completed = completedUserInput(request, scope)
+    if (completed) return completed
+    const detail = deps.store.get(runId)
+    if (!detail) return errorResult(`run not found: ${runId}`)
+    if (!isActiveRunStatus(detail.manifest.status)) return errorResult(`run not active: ${runId}`)
+    return requestUserInput(request, ctx.clientFacts(), {
+      scope,
+      revision: [detail.manifest.startedAt, detail.manifest.status, detail.manifest.healCycles],
+      mode: 'form',
+      schema: z.object({ action: z.enum(['keep', 'abort']).describe('Keep the existing run, or stop it and its services.') }),
+      message: `Stop run ${runId} (${detail.manifest.feature}) and its services? Keeping it preserves the current repair cycle.`,
+      fallback: () => asJsonResult({
+        type: 'abort_requires_confirmation', runId,
+        message: 'Stop this run from its Run panel. confirm:true from an agent is not a human cancellation decision.',
+        nextSteps: ['continue the existing run with signal_run, or let the human stop it in Canary Lab'],
+      }),
+    }, async ({ action }) => {
+      if (action === 'keep') return inputPending('The user kept the run. Nothing was stopped.')
+      const result = await deps.store.abort(runId)
+      return result.ok ? asJsonResult({ aborted: true, runId }) : errorResult(`could not abort: ${result.reason}`)
+    })
   })
 
 }

@@ -10,7 +10,7 @@ import path from 'path'
 import { EventEmitter } from 'events'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { type RunPaths } from './run-paths'
-import { type RunManifest } from './manifest'
+import { readManifest, type RunManifest } from './manifest'
 import type { RunnerLog } from './runner-log'
 import { planRestart } from './restart-planner'
 import { releasePorts } from './port-allocator'
@@ -159,8 +159,12 @@ export class RunOrchestrator extends EventEmitter {
   // signals to the consumer. Does NOT block on Playwright by itself — the
   // caller drives Playwright via runPlaywright(), which lets the future
   // server show "services up" before tests start.
-  async start(): Promise<void> {
-    prepareRun(this.ctx, 'starting')
+  async start({ resume = false }: { resume?: boolean } = {}): Promise<void> {
+    const previous = resume ? readManifest(this.ctx.paths.manifestPath) : null
+    if (previous?.suiteSnapshot?.kind === 'taken' && !fs.existsSync(this.ctx.paths.suiteSnapshotDir)) {
+      throw new Error('Cannot resume: the recorded suite snapshot is missing. Restore it before continuing this run.')
+    }
+    prepareRun(this.ctx, 'starting', previous ?? undefined)
     // Copy the suite before any service (and therefore any heal agent) can
     // touch a test file: Playwright runs from the copy, so a mid-run spec edit
     // is inert until a human adopts it (D9). Then hash that copy as the
@@ -168,7 +172,8 @@ export class RunOrchestrator extends EventEmitter {
     // green promotion compares against. Both are best-effort: integrity
     // tracking must never block a run from booting, and a failed copy is
     // recorded on the manifest rather than hidden.
-    snapshotSuite(this.ctx)
+    if (!resume || !fs.existsSync(this.ctx.paths.suiteSnapshotDir)) snapshotSuite(this.ctx)
+    else refreshSpecEdits(this.ctx, this.ctx.feature.name)
     await captureDirtySpecBaseline(this.ctx)
     // Apply the ephemeral port overlay BEFORE any service spawns. A failure
     // here throws out of start() so the caller's `.catch` runs stop('aborted')
@@ -377,7 +382,7 @@ export class RunOrchestrator extends EventEmitter {
   }
 
   async restartTerminalRun(userGuidance?: string): Promise<RunManifest['status']> {
-    await this.start()
+    await this.start({ resume: true })
     if (this.ctx.stopped) return this.ctx.status
     if (this.ctx.bootFailure) return await this.failRunForBootFailure()
     if (userGuidance) {

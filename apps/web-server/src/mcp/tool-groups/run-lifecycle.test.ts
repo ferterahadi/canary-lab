@@ -181,11 +181,13 @@ describe('start_run: continuing the run that is already healing', () => {
     expect(claims).toEqual([])
   })
 
-  it('starts a fresh concurrent run beside the healing one on force_new', async () => {
-    const { call } = harness({ store: storeOf([runDetail({ status: 'healing' })]) })
+  it('keeps the existing repair and journal even when an agent asks for force_new', async () => {
+    const startRun = vi.fn()
+    const { call } = harness({ store: storeOf([runDetail({ status: 'healing' })]), startRun })
 
     expect(await call('start_run', { ...START, force_new: true }))
-      .toEqual({ runId: 'run-new', reused: false, claimed: true, nextSteps: ['wait_for_heal_task'] })
+      .toMatchObject({ runId: 'run-1', reused: true, freshStartBlocked: true, nextSteps: ['wait_for_heal_task'] })
+    expect(startRun).not.toHaveBeenCalled()
   })
 })
 
@@ -637,16 +639,46 @@ describe('abort_run', () => {
   })
 
   it('relays the store\'s refusal verbatim', async () => {
-    const { text } = harness({ store: storeOf([], { abort: async () => ({ ok: false, reason: 'already terminal' }) }) })
-
-    expect(await text('abort_run', { runId: 'run-1', confirm: true })).toBe('could not abort: already terminal')
+    const { raw } = harness({ store: storeOf([runDetail()], { abort: async () => ({ ok: false, reason: 'already terminal' }) }) }, eliciting)
+    const args = { runId: 'run-1', confirm: true }
+    const question = await raw('abort_run', args, context()) as InputRequiredResult
+    const result = await raw('abort_run', args, context(question.requestState, { action: 'accept', content: { action: 'abort' } }))
+    expect(result.content).toEqual([{ type: 'text', text: 'could not abort: already terminal' }])
   })
 
-  it('aborts the run and echoes which one', async () => {
+  it('stops only after a human answer, and applies transport retries once', async () => {
     const abort = vi.fn(async () => ({ ok: true }))
-    const { call } = harness({ store: storeOf([], { abort }) })
-
-    expect(await call('abort_run', { runId: 'run-1', confirm: true })).toEqual({ aborted: true, runId: 'run-1' })
+    const { raw } = harness({ store: storeOf([runDetail()], { abort }) }, eliciting)
+    const args = { runId: 'run-1', confirm: true }
+    const question = await raw('abort_run', args, context()) as InputRequiredResult
+    expect(question.resultType).toBe('input_required')
+    expect(abort).not.toHaveBeenCalled()
+    const accepted = context(question.requestState, { action: 'accept', content: { action: 'abort' } })
+    const result = await raw('abort_run', args, accepted)
+    expect(JSON.parse((result.content as Array<{ text: string }>)[0].text)).toEqual({ aborted: true, runId: 'run-1' })
+    expect(await raw('abort_run', args, accepted)).toEqual(result)
+    expect(abort).toHaveBeenCalledTimes(1)
     expect(abort).toHaveBeenCalledWith('run-1')
+  })
+
+  it('never treats confirm:true as authority when the client cannot show a form', async () => {
+    const abort = vi.fn()
+    const { call } = harness({ store: storeOf([runDetail()], { abort }) })
+    expect(await call('abort_run', { runId: 'run-1', confirm: true })).toMatchObject({ type: 'abort_requires_confirmation' })
+    expect(abort).not.toHaveBeenCalled()
+  })
+
+  it.each(['decline', 'cancel', 'keep', 'forged', 'stale'])('does not stop a run after %s input', async (choice) => {
+    const detail = runDetail()
+    const abort = vi.fn()
+    const { raw } = harness({ store: storeOf([detail], { abort }) }, eliciting)
+    const args = { runId: 'run-1', confirm: true }
+    const question = await raw('abort_run', args, context()) as InputRequiredResult
+    if (choice === 'stale') detail.manifest.healCycles = 2
+    await raw('abort_run', args, context(choice === 'forged' ? 'forged-handle' : question.requestState, {
+      action: choice === 'decline' || choice === 'cancel' ? choice : 'accept',
+      content: { action: choice === 'keep' ? 'keep' : 'abort' },
+    }))
+    expect(abort).not.toHaveBeenCalled()
   })
 })

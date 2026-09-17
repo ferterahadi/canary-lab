@@ -64,6 +64,7 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
       CANARY_LAB_PROJECT_ROOT: ctx.feature.featureDir,
       CANARY_LAB_MANIFEST_PATH: ctx.paths.manifestPath,
       CANARY_LAB_SUMMARY_PATH: ctx.paths.summaryPath,
+      CANARY_LAB_ENV: ctx.env ?? '',
       ...(rerunSelection ? { CANARY_LAB_TARGETED_RERUN: '1' } : {}),
     },
   })

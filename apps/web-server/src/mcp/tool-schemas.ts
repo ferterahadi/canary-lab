@@ -26,9 +26,9 @@ import type {
 // helper or REST handler. The translation pattern: validate input via zod,
 // call the helper, format the result as a CallToolResult.
 //
-// Confirmation gates: destructive tools (abort_run, delete_run, etc.) require
-// `confirm: true` literally in the input schema so a misbehaving model can't
-// invoke them by accident.
+// Destructive tools require confirm:true as an accidental-call guard. It is
+// not human authorization: abort_run additionally uses the shared elicitation
+// gate, and suite adoption binds that gate to the reviewed revision.
 
 export const evaluationTextSlotInput = z.object({
   id: z.string(),

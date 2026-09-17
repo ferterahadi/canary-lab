@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import type { PathType } from '../../../../../../shared/coverage/types'
+import type { EnvironmentExclusion } from '../../../../../../shared/run-applicability'
 import { readManifest, type RunLifecycleEvent, type RunManifest } from './runtime/manifest'
 import { buildRunPaths, runDirFor } from './runtime/run-paths'
 import { PlaywrightArtifactGroup, indexPlaywrightArtifacts } from './run-artifacts'
@@ -48,6 +49,8 @@ export interface RunSummaryRunningStep {
 }
 
 export interface RunSummary {
+  environment?: string
+  environmentExclusions?: EnvironmentExclusion[]
   complete: boolean
   total: number
   passed: number

@@ -36,6 +36,7 @@ afterEach(() => {
   delete process.env.CANARY_LAB_MANIFEST_PATH
   delete process.env.CANARY_LAB_BENCHMARK_MODE
   delete process.env.CANARY_LAB_TARGETED_RERUN
+  delete process.env.CANARY_LAB_ENV
 })
 
 function mkTest(title: string, file = '/spec.ts', line = 1): any {
@@ -66,6 +67,36 @@ describe('slugify', () => {
 })
 
 describe('SummaryReporter', () => {
+  it('records only environment exclusions declared before execution and retains them on targeted reruns', () => {
+    process.env.CANARY_LAB_ENV = 'local'
+    const meta = { ...mkTest('provider contract'), annotations: [{ type: 'canary:environments', description: '["meta"]' }] }
+    const late = { ...mkTest('late skip'), annotations: [] as Array<{ type: string; description: string }> }
+    const reporter = new SummaryReporter()
+    reporter.onBegin({}, { allTests: () => [meta, late] } as never)
+    late.annotations.push({ type: 'canary:environments', description: '["meta"]' })
+    reporter.onTestEnd(meta, mkResult({ status: 'skipped' }))
+    reporter.onTestEnd(late, mkResult({ status: 'skipped' }))
+    const summary = readSummary()
+    expect(summary).toMatchObject({ total: 2, passed: 0, skipped: 2, environment: 'local' })
+    expect(summary.environmentExclusions).toEqual([{ id: expect.any(String), name: 'test-case-provider-contract', environment: 'local', environments: ['meta'] }])
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    const next = new SummaryReporter()
+    next.onBegin({}, { allTests: () => [late] } as never)
+    expect(readSummary().environmentExclusions).toEqual(summary.environmentExclusions)
+  })
+
+  it('never excuses ordinary skips, current-environment skips, or failures with an environment declaration', () => {
+    process.env.CANARY_LAB_ENV = 'local'
+    const ordinary = { ...mkTest('serial dependency'), annotations: [{ type: 'skip', description: 'missing prerequisite' }] }
+    const local = { ...mkTest('local skip'), annotations: [{ type: 'canary:environments', description: '["local"]' }] }
+    const meta = { ...mkTest('provider failure'), annotations: [{ type: 'canary:environments', description: '["meta"]' }] }
+    const reporter = new SummaryReporter()
+    reporter.onBegin({}, { allTests: () => [ordinary, local, meta] } as never)
+    reporter.onTestEnd(ordinary, mkResult({ status: 'skipped' }))
+    reporter.onTestEnd(local, mkResult({ status: 'skipped' }))
+    reporter.onTestEnd(meta, mkResult({ status: 'interrupted' }))
+    expect(readSummary()).not.toHaveProperty('environmentExclusions')
+  })
   it('writes partial and final e2e-summary.json with failure details', () => {
     const reporter = new SummaryReporter()
     reporter.onTestEnd(mkTest('A happy test', '/a.spec.ts', 10), mkResult())

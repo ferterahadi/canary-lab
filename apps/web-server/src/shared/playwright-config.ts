@@ -15,6 +15,9 @@
 // execute in an environment skips ITSELF at runtime —
 // `test.skip(process.env.MODE !== 'meta', 'meta only')` — so it stays declared,
 // counted, and visibly skipped.
+// Known environment boundaries also declare `canary:environments` before
+// execution. The reporter can settle those skips as not applicable without
+// counting them as passes; ordinary skips still require repair.
 //
 // Enforcement is "prove it constant", not "guess whether it is env-derived": a
 // selection field must be a literal. A computed value may or may not vary per
@@ -39,7 +42,7 @@ export const SPEC_SELECTION_FIELDS = ['testDir', 'testMatch', 'testIgnore', 'gre
  *  validator and the rules payload `create_feature` hands an agent — so the
  *  three cannot drift into saying different things. */
 export const SPEC_SELECTION_RULE =
-  'Spec selection must never depend on the envset. Keep testDir, testMatch, testIgnore, grep and grepInvert as constant literals in playwright.config.* so every run of the suite declares the same roster. A test that must not execute in some environment skips itself at runtime — test.skip(condition, reason) — so it stays declared, counted, and visibly skipped.'
+  'Spec selection must never depend on the envset. Keep testDir, testMatch, testIgnore, grep and grepInvert as constant literals in playwright.config.* so every run of the suite declares the same roster. A test that must not execute in some environment skips itself at runtime — test.skip(condition, reason) — so it stays declared, counted, and visibly skipped. Declare its allowed envsets before execution with the canary:environments annotation (a JSON string array); only these reporter-observed exclusions can settle as not applicable. Ordinary skips remain incomplete; changing applicability during repair requires human test review.'
 
 /** What the run-start refusal carries alongside its human-readable message:
  *  enough for an agent to open the right file and rewrite the right fields. */

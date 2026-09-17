@@ -66,6 +66,7 @@ function fakeStore(get: () => RunDetail | undefined) {
   const listeners = new Set<RunStoreEventListener>()
   return {
     logsDir,
+    registry: { get: vi.fn((_runId: string): unknown => undefined) },
     get,
     onEvent: (l: RunStoreEventListener) => { listeners.add(l) },
     offEvent: (l: RunStoreEventListener) => { listeners.delete(l) },
@@ -416,6 +417,44 @@ describe('classifyWaitForHealTask', () => {
 })
 
 describe('waitForHealTask', () => {
+  it('waits through the transient failed verdict into the next heal task', async () => {
+    let detail = runDetail({ status: 'running', healMode: 'external' })
+    const store = fakeStore(() => detail)
+    store.registry.get.mockReturnValue({ runId: 'run-1' })
+    const settled = vi.fn()
+    const waiting = waitForHealTask(asDeps({ store, broker: ownedBroker() }), 'run-1', 'sess-1', 'claude', 5000).then(settled)
+    detail = runDetail({ status: 'failed', healMode: 'external' })
+    store.emit({ kind: 'changed', runId: 'run-1' })
+    await Promise.resolve()
+    expect(settled).not.toHaveBeenCalled()
+    detail = needsHealDetail()
+    store.emit({ kind: 'changed', runId: 'run-1' })
+    await waiting
+    expect(settled).toHaveBeenCalledWith(expect.objectContaining({ value: expect.objectContaining({ type: 'needs_heal' }) }))
+  })
+
+  it.each(['passed', 'failed'] as const)('waits for %s finalization while the runner is alive', async (status) => {
+    const detail = runDetail({ status })
+    const store = fakeStore(() => detail)
+    store.registry.get.mockReturnValue({ runId: 'run-1' })
+    const deps = asDeps({ store, broker: ownedBroker() })
+    expect(classifyWaitForHealTask(deps, 'run-1', 'sess-1')).toBeNull()
+    detail.manifest.endedAt = '2026-01-01T00:00:01Z'
+    expect(classifyWaitForHealTask(deps, 'run-1', 'sess-1')).toMatchObject({ value: { type: status } })
+  })
+
+  it('does not redeliver a heal task while its signal awaits consumption', async () => {
+    const dir = path.join(logsDir, 'runs', 'run-1', 'signals')
+    fs.mkdirSync(dir, { recursive: true })
+    const signal = path.join(dir, '.restart')
+    fs.writeFileSync(signal, '{}')
+    const store = fakeStore(() => needsHealDetail())
+    const deps = asDeps({ store, broker: ownedBroker() })
+    expect(classifyWaitForHealTask(deps, 'run-1', 'sess-1')).toBeNull()
+    fs.unlinkSync(signal)
+    expect(classifyWaitForHealTask(deps, 'run-1', 'sess-1')).toMatchObject({ value: { type: 'needs_heal' } })
+  })
+
   it('answers a boot session without claiming heal', async () => {
     const claim = vi.fn()
     const store = fakeStore(() => runDetail({ executionType: 'boot', status: 'running' }))

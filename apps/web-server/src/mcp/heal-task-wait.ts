@@ -1,6 +1,6 @@
 import type { RunDetail, RunStoreEvent } from '../features/runs/logic/run-store'
 import type { ClientKind } from '../../../../shared/run-mode'
-import { buildExternalHealContext, buildSpecEditsWarning, normalizeRunCounts, slimRepeatHealContext, type ExternalHealContext, type NormalizedRunCounts, type SpecEditsWarning } from '../features/runs/logic/heal/external-heal-surface'
+import { buildExternalHealContext, buildSpecEditsWarning, hasPendingHealSignal, normalizeRunCounts, slimRepeatHealContext, type ExternalHealContext, type NormalizedRunCounts, type SpecEditsWarning } from '../features/runs/logic/heal/external-heal-surface'
 import { isActiveRunStatus, isTerminalRunStatus } from '../../../../shared/run-state'
 import type { CanaryLabMcpDeps } from './tool-schemas'
 import { ensureExternalClaimForMcpCall } from './tool-support'
@@ -33,7 +33,7 @@ export function healWaitNext(): { nextSteps: string[] } {
 }
 
 export const BOOT_SESSION_MESSAGE =
-  'Boot-only session: services are up and held. No tests run and there is no heal task. A service that fails its readiness probe is marked failed (status "timeout") but the session stays held — boot does not self-abort on a health-check failure. Stop with abort_run (confirm:true) when done.'
+  'Boot-only session: services are up and held. No tests run and there is no heal task. A service that fails its readiness probe is marked failed (status "timeout") but the session stays held — boot does not self-abort on a health-check failure. Request abort_run when done; its human stop form must be accepted (without forms, use Stop in the Run panel).'
 
 // A boot run (started via boot_services) holds its services up with no Playwright
 // tests and no heal loop. Following or waiting on one must not claim heal or block
@@ -81,7 +81,7 @@ export function bootSessionValue(detail: RunDetail): Extract<WaitForHealTaskValu
     claimed: false,
     lifecycle: detail.manifest.lifecycle ?? null,
     message: BOOT_SESSION_MESSAGE,
-    nextSteps: ['boot session — services are up and held; a service that failed its readiness probe shows status "timeout" but the session stays held (boot does not self-abort on health failure); exercise the live ones, then abort_run (confirm:true) when done'],
+    nextSteps: ['boot session — services are up and held; a service that failed its readiness probe shows status "timeout" but the session stays held (boot does not self-abort on health failure); exercise the live ones, then request abort_run for human stop approval when done'],
   }
 }
 
@@ -173,6 +173,9 @@ export function classifyWaitForHealTask(
   if (isActiveBootRun(detail)) return { ok: true, value: bootSessionValue(detail) }
 
   const status = detail.manifest.status
+  // Playwright's verdict is written before the orchestrator enters healing
+  // or finishes teardown. Only finalization ends a live runner's wait.
+  if (isTerminalRunStatus(status) && !detail.manifest.endedAt && deps.store.registry.get(runId)) return null
   const dirtyTests = dirtyTestsWarning(deps, detail.manifest.feature)
   const specEdits = buildSpecEditsWarning(detail.manifest)
   if (status === 'passed') {
@@ -220,6 +223,9 @@ export function classifyWaitForHealTask(
     detail.manifest.healMode === 'external' &&
     detail.manifest.lifecycle?.phase === 'waiting-for-signal'
   ) {
+    // A signal has been written, but the runner's watcher has not consumed it
+    // yet. Returning this same task would invite a duplicate repair cycle.
+    if (hasPendingHealSignal(deps.store.logsDir, runId)) return null
     const latest = deps.store.get(runId)
     if (!latest) return { ok: false, error: `run not found: ${runId}` }
     const full = buildExternalHealContext({

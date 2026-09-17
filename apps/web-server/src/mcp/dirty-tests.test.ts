@@ -36,7 +36,7 @@ function dirtyRecord(feature: string): DirtySpecRecord {
 
 function makeDeps(run: RunDetail, dirty?: DirtySpecRecord): CanaryLabMcpDeps {
   return {
-    store: { get: () => run } as unknown as RunStore,
+    store: { get: () => run, registry: { get: () => undefined } } as unknown as RunStore,
     broker: {} as ExternalHealBroker,
     featuresDir: '/tmp/features',
     projectRoot: '/tmp',

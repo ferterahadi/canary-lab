@@ -773,8 +773,11 @@ link, or the per-repo reason there is none.
 - Each legacy MCP session gets its own transport (`mcp/server.ts`) — a singleton
   would reject the 2nd client with `-32600 Server already initialized`. Modern
   MCP requests are stateless and do not enter that session map.
-- Destructive tools gate on `confirm: z.literal(true)` in their input schema
-  (e.g. `abort_run`, `write_envset`).
+- Destructive tools retain `confirm: z.literal(true)` as an accidental-call guard.
+  `abort_run` also requires human elicitation; the flag alone cannot stop a run.
+  `start_run` reuses a matching active run even with `force_new`. Terminal resumes
+  preserve the original suite snapshot and review history; fresh starts cannot
+  bypass outstanding test review.
 - **Steering skill-less clients**: external clients act on the initialize/discovery
   instructions + tool *results*, not the Canary Lab skill. The source text lives in
   `apps/web-server/prompts/mcp-*-instructions.md`; `mcp/instructions.ts` loads it into

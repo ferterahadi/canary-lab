@@ -1,0 +1,512 @@
+{
+  "complete": true,
+  "total": 55,
+  "passed": 51,
+  "skipped": 4,
+  "knownTests": [
+    {
+      "id": "case-01",
+      "name": "contract-01",
+      "title": "Contract 01",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:1",
+      "listLine": "contracts.spec.ts \u203a Contract 01"
+    },
+    {
+      "id": "case-02",
+      "name": "contract-02",
+      "title": "Contract 02",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:2",
+      "listLine": "contracts.spec.ts \u203a Contract 02"
+    },
+    {
+      "id": "case-03",
+      "name": "contract-03",
+      "title": "Contract 03",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:3",
+      "listLine": "contracts.spec.ts \u203a Contract 03"
+    },
+    {
+      "id": "case-04",
+      "name": "contract-04",
+      "title": "Contract 04",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:4",
+      "listLine": "contracts.spec.ts \u203a Contract 04"
+    },
+    {
+      "id": "case-05",
+      "name": "contract-05",
+      "title": "Contract 05",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:5",
+      "listLine": "contracts.spec.ts \u203a Contract 05"
+    },
+    {
+      "id": "case-06",
+      "name": "contract-06",
+      "title": "Contract 06",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:6",
+      "listLine": "contracts.spec.ts \u203a Contract 06"
+    },
+    {
+      "id": "case-07",
+      "name": "contract-07",
+      "title": "Contract 07",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:7",
+      "listLine": "contracts.spec.ts \u203a Contract 07"
+    },
+    {
+      "id": "case-08",
+      "name": "contract-08",
+      "title": "Contract 08",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:8",
+      "listLine": "contracts.spec.ts \u203a Contract 08"
+    },
+    {
+      "id": "case-09",
+      "name": "contract-09",
+      "title": "Contract 09",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:9",
+      "listLine": "contracts.spec.ts \u203a Contract 09"
+    },
+    {
+      "id": "case-10",
+      "name": "contract-10",
+      "title": "Contract 10",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:10",
+      "listLine": "contracts.spec.ts \u203a Contract 10"
+    },
+    {
+      "id": "case-11",
+      "name": "contract-11",
+      "title": "Contract 11",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:11",
+      "listLine": "contracts.spec.ts \u203a Contract 11"
+    },
+    {
+      "id": "case-12",
+      "name": "contract-12",
+      "title": "Contract 12",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:12",
+      "listLine": "contracts.spec.ts \u203a Contract 12"
+    },
+    {
+      "id": "case-13",
+      "name": "contract-13",
+      "title": "Contract 13",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:13",
+      "listLine": "contracts.spec.ts \u203a Contract 13"
+    },
+    {
+      "id": "case-14",
+      "name": "contract-14",
+      "title": "Contract 14",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:14",
+      "listLine": "contracts.spec.ts \u203a Contract 14"
+    },
+    {
+      "id": "case-15",
+      "name": "contract-15",
+      "title": "Contract 15",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:15",
+      "listLine": "contracts.spec.ts \u203a Contract 15"
+    },
+    {
+      "id": "case-16",
+      "name": "contract-16",
+      "title": "Contract 16",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:16",
+      "listLine": "contracts.spec.ts \u203a Contract 16"
+    },
+    {
+      "id": "case-17",
+      "name": "contract-17",
+      "title": "Contract 17",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:17",
+      "listLine": "contracts.spec.ts \u203a Contract 17"
+    },
+    {
+      "id": "case-18",
+      "name": "contract-18",
+      "title": "Contract 18",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:18",
+      "listLine": "contracts.spec.ts \u203a Contract 18"
+    },
+    {
+      "id": "case-19",
+      "name": "contract-19",
+      "title": "Contract 19",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:19",
+      "listLine": "contracts.spec.ts \u203a Contract 19"
+    },
+    {
+      "id": "case-20",
+      "name": "contract-20",
+      "title": "Contract 20",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:20",
+      "listLine": "contracts.spec.ts \u203a Contract 20"
+    },
+    {
+      "id": "case-21",
+      "name": "contract-21",
+      "title": "Contract 21",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:21",
+      "listLine": "contracts.spec.ts \u203a Contract 21"
+    },
+    {
+      "id": "case-22",
+      "name": "contract-22",
+      "title": "Contract 22",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:22",
+      "listLine": "contracts.spec.ts \u203a Contract 22"
+    },
+    {
+      "id": "case-23",
+      "name": "contract-23",
+      "title": "Contract 23",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:23",
+      "listLine": "contracts.spec.ts \u203a Contract 23"
+    },
+    {
+      "id": "case-24",
+      "name": "contract-24",
+      "title": "Contract 24",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:24",
+      "listLine": "contracts.spec.ts \u203a Contract 24"
+    },
+    {
+      "id": "case-25",
+      "name": "contract-25",
+      "title": "Contract 25",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:25",
+      "listLine": "contracts.spec.ts \u203a Contract 25"
+    },
+    {
+      "id": "case-26",
+      "name": "contract-26",
+      "title": "Contract 26",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:26",
+      "listLine": "contracts.spec.ts \u203a Contract 26"
+    },
+    {
+      "id": "case-27",
+      "name": "contract-27",
+      "title": "Contract 27",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:27",
+      "listLine": "contracts.spec.ts \u203a Contract 27"
+    },
+    {
+      "id": "case-28",
+      "name": "contract-28",
+      "title": "Contract 28",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:28",
+      "listLine": "contracts.spec.ts \u203a Contract 28"
+    },
+    {
+      "id": "case-29",
+      "name": "contract-29",
+      "title": "Contract 29",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:29",
+      "listLine": "contracts.spec.ts \u203a Contract 29"
+    },
+    {
+      "id": "case-30",
+      "name": "contract-30",
+      "title": "Contract 30",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:30",
+      "listLine": "contracts.spec.ts \u203a Contract 30"
+    },
+    {
+      "id": "case-31",
+      "name": "contract-31",
+      "title": "Contract 31",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:31",
+      "listLine": "contracts.spec.ts \u203a Contract 31"
+    },
+    {
+      "id": "case-32",
+      "name": "contract-32",
+      "title": "Contract 32",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:32",
+      "listLine": "contracts.spec.ts \u203a Contract 32"
+    },
+    {
+      "id": "case-33",
+      "name": "contract-33",
+      "title": "Contract 33",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:33",
+      "listLine": "contracts.spec.ts \u203a Contract 33"
+    },
+    {
+      "id": "case-34",
+      "name": "contract-34",
+      "title": "Contract 34",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:34",
+      "listLine": "contracts.spec.ts \u203a Contract 34"
+    },
+    {
+      "id": "case-35",
+      "name": "contract-35",
+      "title": "Contract 35",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:35",
+      "listLine": "contracts.spec.ts \u203a Contract 35"
+    },
+    {
+      "id": "case-36",
+      "name": "contract-36",
+      "title": "Contract 36",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:36",
+      "listLine": "contracts.spec.ts \u203a Contract 36"
+    },
+    {
+      "id": "case-37",
+      "name": "contract-37",
+      "title": "Contract 37",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:37",
+      "listLine": "contracts.spec.ts \u203a Contract 37"
+    },
+    {
+      "id": "case-38",
+      "name": "contract-38",
+      "title": "Contract 38",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:38",
+      "listLine": "contracts.spec.ts \u203a Contract 38"
+    },
+    {
+      "id": "case-39",
+      "name": "contract-39",
+      "title": "Contract 39",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:39",
+      "listLine": "contracts.spec.ts \u203a Contract 39"
+    },
+    {
+      "id": "case-40",
+      "name": "contract-40",
+      "title": "Contract 40",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:40",
+      "listLine": "contracts.spec.ts \u203a Contract 40"
+    },
+    {
+      "id": "case-41",
+      "name": "contract-41",
+      "title": "Contract 41",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:41",
+      "listLine": "contracts.spec.ts \u203a Contract 41"
+    },
+    {
+      "id": "case-42",
+      "name": "contract-42",
+      "title": "Contract 42",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:42",
+      "listLine": "contracts.spec.ts \u203a Contract 42"
+    },
+    {
+      "id": "case-43",
+      "name": "contract-43",
+      "title": "Contract 43",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:43",
+      "listLine": "contracts.spec.ts \u203a Contract 43"
+    },
+    {
+      "id": "case-44",
+      "name": "contract-44",
+      "title": "Contract 44",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:44",
+      "listLine": "contracts.spec.ts \u203a Contract 44"
+    },
+    {
+      "id": "case-45",
+      "name": "contract-45",
+      "title": "Contract 45",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:45",
+      "listLine": "contracts.spec.ts \u203a Contract 45"
+    },
+    {
+      "id": "case-46",
+      "name": "contract-46",
+      "title": "Contract 46",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:46",
+      "listLine": "contracts.spec.ts \u203a Contract 46"
+    },
+    {
+      "id": "case-47",
+      "name": "contract-47",
+      "title": "Contract 47",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:47",
+      "listLine": "contracts.spec.ts \u203a Contract 47"
+    },
+    {
+      "id": "case-48",
+      "name": "contract-48",
+      "title": "Contract 48",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:48",
+      "listLine": "contracts.spec.ts \u203a Contract 48"
+    },
+    {
+      "id": "case-49",
+      "name": "contract-49",
+      "title": "Contract 49",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:49",
+      "listLine": "contracts.spec.ts \u203a Contract 49"
+    },
+    {
+      "id": "case-50",
+      "name": "contract-50",
+      "title": "Contract 50",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:50",
+      "listLine": "contracts.spec.ts \u203a Contract 50"
+    },
+    {
+      "id": "case-51",
+      "name": "contract-51",
+      "title": "Contract 51",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:51",
+      "listLine": "contracts.spec.ts \u203a Contract 51"
+    },
+    {
+      "id": "case-52",
+      "name": "contract-52",
+      "title": "Contract 52",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:52",
+      "listLine": "contracts.spec.ts \u203a Contract 52"
+    },
+    {
+      "id": "case-53",
+      "name": "contract-53",
+      "title": "Contract 53",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:53",
+      "listLine": "contracts.spec.ts \u203a Contract 53"
+    },
+    {
+      "id": "case-54",
+      "name": "contract-54",
+      "title": "Contract 54",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:54",
+      "listLine": "contracts.spec.ts \u203a Contract 54"
+    },
+    {
+      "id": "case-55",
+      "name": "contract-55",
+      "title": "Contract 55",
+      "location": "/workspace/features/example/e2e/contracts.spec.ts:55",
+      "listLine": "contracts.spec.ts \u203a Contract 55"
+    }
+  ],
+  "passedNames": [
+    "contract-01",
+    "contract-02",
+    "contract-03",
+    "contract-04",
+    "contract-05",
+    "contract-06",
+    "contract-07",
+    "contract-08",
+    "contract-09",
+    "contract-10",
+    "contract-11",
+    "contract-12",
+    "contract-13",
+    "contract-14",
+    "contract-15",
+    "contract-16",
+    "contract-17",
+    "contract-18",
+    "contract-19",
+    "contract-20",
+    "contract-21",
+    "contract-22",
+    "contract-23",
+    "contract-24",
+    "contract-25",
+    "contract-26",
+    "contract-27",
+    "contract-28",
+    "contract-29",
+    "contract-30",
+    "contract-31",
+    "contract-32",
+    "contract-33",
+    "contract-48",
+    "contract-49",
+    "contract-50",
+    "contract-51",
+    "contract-52",
+    "contract-53",
+    "contract-54",
+    "contract-55",
+    "contract-34",
+    "contract-35",
+    "contract-36",
+    "contract-37",
+    "contract-38",
+    "contract-39",
+    "contract-40",
+    "contract-41",
+    "contract-42",
+    "contract-43"
+  ],
+  "skippedNames": [
+    "contract-44",
+    "contract-45",
+    "contract-46",
+    "contract-47"
+  ],
+  "passedIds": [
+    "case-01",
+    "case-02",
+    "case-03",
+    "case-04",
+    "case-05",
+    "case-06",
+    "case-07",
+    "case-08",
+    "case-09",
+    "case-10",
+    "case-11",
+    "case-12",
+    "case-13",
+    "case-14",
+    "case-15",
+    "case-16",
+    "case-17",
+    "case-18",
+    "case-19",
+    "case-20",
+    "case-21",
+    "case-22",
+    "case-23",
+    "case-24",
+    "case-25",
+    "case-26",
+    "case-27",
+    "case-28",
+    "case-29",
+    "case-30",
+    "case-31",
+    "case-32",
+    "case-33",
+    "case-48",
+    "case-49",
+    "case-50",
+    "case-51",
+    "case-52",
+    "case-53",
+    "case-54",
+    "case-55",
+    "case-34",
+    "case-35",
+    "case-36",
+    "case-37",
+    "case-38",
+    "case-39",
+    "case-40",
+    "case-41",
+    "case-42",
+    "case-43"
+  ],
+  "skippedIds": [
+    "case-44",
+    "case-45",
+    "case-46",
+    "case-47"
+  ],
+  "failed": []
+}

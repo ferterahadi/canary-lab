@@ -1,6 +1,8 @@
 import type { RunDetail } from '../run-store'
+import { environmentExclusions } from '../../../../../../../shared/run-applicability'
 
 export interface CompactRunCounts {
+  notApplicable?: number
   totalKnown: number
   passed: number
   failed: number
@@ -10,6 +12,7 @@ export interface CompactRunCounts {
 }
 
 export interface NormalizedRunCounts {
+  notApplicable?: number
   totalKnown: number
   passed: number
   failed: number
@@ -33,6 +36,7 @@ export function compactCounts(counts: NormalizedRunCounts): CompactRunCounts {
     skipped: counts.skipped,
     notRun: counts.notRun,
     statusLine: counts.statusLine,
+    ...(counts.notApplicable ? { notApplicable: counts.notApplicable } : {}),
   }
 }
 
@@ -73,6 +77,7 @@ export function normalizeRunCounts(summary: RunDetail['summary'] | null): Normal
   const notRun = knownEntries.length > 0
     ? notRunNames.length
     : Math.max(0, totalKnown - passed - failed - skipped)
+  const notApplicable = environmentExclusions(summary ?? {}).length
 
   return {
     totalKnown,
@@ -80,6 +85,7 @@ export function normalizeRunCounts(summary: RunDetail['summary'] | null): Normal
     failed,
     skipped,
     notRun,
+    ...(notApplicable ? { notApplicable } : {}),
     passedNames,
     passedIds,
     failedNames,
@@ -87,13 +93,13 @@ export function normalizeRunCounts(summary: RunDetail['summary'] | null): Normal
     skippedNames,
     skippedIds,
     notRunNames,
-    statusLine: statusLineForCounts({ totalKnown, passed, failed, skipped, notRun }),
+    statusLine: statusLineForCounts({ totalKnown, passed, failed, skipped, notRun, notApplicable }),
   }
 }
 
-export function statusLineForCounts(counts: Pick<NormalizedRunCounts, 'totalKnown' | 'passed' | 'failed' | 'skipped' | 'notRun'>): string {
+export function statusLineForCounts(counts: Pick<NormalizedRunCounts, 'totalKnown' | 'passed' | 'failed' | 'skipped' | 'notRun' | 'notApplicable'>): string {
   const parts = [`${counts.passed}/${counts.totalKnown} passed`, `${counts.failed} failed`]
-  if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`)
+  if (counts.skipped > 0) parts.push(`${counts.skipped} skipped${counts.notApplicable ? ` (${counts.notApplicable} outside this environment)` : ''}`)
   parts.push(`${counts.notRun} not run`)
   return parts.join(', ')
 }

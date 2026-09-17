@@ -16,7 +16,7 @@ import { readManifest, type SpecEditsAdoptedBy } from './manifest'
 import { captureDirtySpecBaseline } from './run-manifest-writer'
 import { INTEGRITY_HINT_DISCLOSURE, deriveIntegrityHints } from './run-integrity-hints'
 import { detectHealMode } from './auto-heal'
-import { SUITE_SNAPSHOT_SKIP, suiteReviewRevision } from './suite-review'
+import { SUITE_SNAPSHOT_SKIP, buildSuiteReview, suiteReviewRevision } from './suite-review'
 import { saveSuiteTestRoster } from '../suite-test-roster'
 import type { TestReviewDecision } from '../../../../../../../shared/test-review'
 
@@ -164,10 +164,14 @@ async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, ex
   const live = ctx.feature.featureDir
   const hadSnapshot = ctx.suiteDir !== live
   const pending = hadSnapshot ? computePendingEdits(live, ctx.suiteDir) : []
-  if (hadSnapshot && pending.length === 0) return { ok: false, reason: 'nothing-to-adopt' }
+  const reviewed = hadSnapshot && by === 'human' && expectedRevision !== undefined
+    ? await buildSuiteReview(ctx.suiteDir, live) : undefined
+  if (reviewed && reviewed.revision !== expectedRevision) return { ok: false, reason: 'review-changed' }
+  if (hadSnapshot && pending.length === 0 && !reviewed?.files.length) return { ok: false, reason: 'nothing-to-adopt' }
   // With no copy yet (the boundary was unavailable at boot) adopting means
   // taking the first one: every spec the live suite holds is what gets adopted.
-  const adopted = hadSnapshot ? pending.map((edit) => edit.file) : Object.keys(hashFeatureSpecs(live)).sort()
+  const adopted = reviewed ? reviewed.files.map((edit) => edit.file)
+    : hadSnapshot ? pending.map((edit) => edit.file) : Object.keys(hashFeatureSpecs(live)).sort()
 
   if (expectedRevision !== undefined) {
     const result = snapshotReviewedSuite(ctx, expectedRevision)

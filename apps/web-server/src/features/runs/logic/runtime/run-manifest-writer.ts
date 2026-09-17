@@ -15,12 +15,12 @@ import { appendJournalIteration as appendJournalIterationToFile, type JournalApp
 import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
 import { signalLabel, startingServicesDetail } from './run-verdict'
 
-export function prepareRun(ctx: RunContext, serviceStatus: ServiceManifestEntry['status']): void {
-  ctx.startedAt = new Date().toISOString()
+export function prepareRun(ctx: RunContext, serviceStatus: ServiceManifestEntry['status'], previous?: RunManifest): void {
+  ctx.startedAt = previous?.startedAt ?? new Date().toISOString()
   fs.mkdirSync(ctx.runDir, { recursive: true })
   fs.mkdirSync(ctx.paths.signalsDir, { recursive: true })
 
-  writeInitialManifest(ctx, serviceStatus)
+  writeInitialManifest(ctx, serviceStatus, previous)
   recordLifecycle(ctx, 'starting-services', 'Starting services', {
     detail: startingServicesDetail(ctx.services.length),
   })
@@ -45,7 +45,7 @@ export function appendJournalIteration(ctx: RunContext, input: JournalAppendInpu
   ctx.stateSink.recordJournalChange(ctx.runId)
 }
 
-export function writeInitialManifest(ctx: RunContext, serviceStatus: ServiceManifestEntry['status'] = 'starting'): void {
+export function writeInitialManifest(ctx: RunContext, serviceStatus: ServiceManifestEntry['status'] = 'starting', previous?: RunManifest): void {
   const services: ServiceManifestEntry[] = ctx.services.map((s) => ({
     repoName: s.repoName,
     name: s.name,
@@ -71,6 +71,14 @@ export function writeInitialManifest(ctx: RunContext, serviceStatus: ServiceMani
     startedAt: ctx.startedAt,
     status: ctx.status,
     healCycles: ctx.healCycles,
+    // Continuing a run preserves the evidence and review boundary. Runtime
+    // status and service state are rebuilt below for the new process.
+    ...(previous ? {
+      suiteSnapshot: previous.suiteSnapshot,
+      specEdits: previous.specEdits,
+      integrity: previous.integrity,
+      healCycleHistory: previous.healCycleHistory,
+    } : {}),
     services,
     // Reflect the actual paths this run occupies: worktree-isolated repos
     // point at their worktree so a later run can take the freed source in

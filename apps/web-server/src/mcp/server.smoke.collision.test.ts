@@ -188,11 +188,11 @@ describe('MCP HTTP server (smoke)', () => {
       )
       await client.connect(new StreamableHTTPClientTransport(new URL('/mcp?profile=lifecycle', address)))
 
-      // A run already occupying the storefront repo (running, not healing,
-      // so the route's heal-reuse path doesn't short-circuit).
+      // Another feature already occupies the same app repo. Same-feature
+      // starts continue the existing run before reaching collision handling.
       runStore.bootstrap({
         runId: 'busy-run',
-        feature: 'storefront-journey',
+        feature: 'other-storefront-suite',
         env: 'local',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'running',

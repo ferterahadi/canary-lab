@@ -82,17 +82,24 @@ export function presentJournalFields(fields: readonly ParsedField[]): ParsedFiel
   for (const field of fields) {
     const label = formatJournalFieldKey(field.key)
     if (label === null) continue
-    out.push({ key: label, value: field.value })
+    const outcome = field.key === 'outcome' ? classifyOutcome(field.value) : 'unknown'
+    out.push({ key: label, value: outcome === 'unknown' ? field.value : outcomeLabel(outcome) })
   }
   return out
 }
 
-export type OutcomeBadge = 'pending' | 'all_passed' | 'advanced' | 'partial' | 'no_change' | 'regression' | 'unknown'
+export type OutcomeBadge = 'pending' | 'all_tests_passed' | 'applicable_passed' | 'failures_cleared' | 'no_failures_recorded' | 'advanced' | 'partial' | 'no_change' | 'regression' | 'unknown'
 
 export function classifyOutcome(outcome: string | null | undefined): OutcomeBadge {
   switch (outcome) {
-    case 'pending':
+    // Legacy journals only checked failed.length; do not retroactively claim
+    // those iterations ran every test. Their raw entries stay untouched.
     case 'all_passed':
+      return 'no_failures_recorded'
+    case 'pending':
+    case 'all_tests_passed':
+    case 'applicable_passed':
+    case 'failures_cleared':
     case 'advanced':
     case 'partial':
     case 'no_change':
@@ -105,7 +112,8 @@ export function classifyOutcome(outcome: string | null | undefined): OutcomeBadg
 
 export function outcomeBadgeClass(outcome: OutcomeBadge): string {
   switch (outcome) {
-    case 'all_passed':
+    case 'all_tests_passed':
+    case 'applicable_passed':
       return 'border-success/40 text-success bg-success/10'
     // Its own hue rather than a second success or warning shade: `advanced` is
     // the label most likely to be misread, and it sits in journals right next
@@ -114,6 +122,8 @@ export function outcomeBadgeClass(outcome: OutcomeBadge): string {
     case 'advanced':
       return 'border-accent/40 text-accent bg-accent/10'
     case 'partial':
+    case 'failures_cleared':
+    case 'no_failures_recorded':
       return 'border-warning/50 text-warning bg-warning/10'
     case 'no_change':
       return 'border-danger/40 text-danger bg-danger/10'
@@ -125,4 +135,9 @@ export function outcomeBadgeClass(outcome: OutcomeBadge): string {
     default:
       return 'border-line-strong text-secondary bg-selected/60'
   }
+}
+
+export function outcomeLabel(outcome: OutcomeBadge): string {
+  if (outcome === 'applicable_passed') return 'applicable tests passed'
+  return outcome.replaceAll('_', ' ')
 }

@@ -211,6 +211,43 @@ Fix application or service code. Never delete, skip, weaken, or loosen a test to
 turn the run green. Signal once per repair cycle, with the hypothesis and change
 description, then wait on the same run again.
 
+`start_run` continues a matching active run even with `force_new:true`. Use the
+Run panel for a deliberate concurrent run of the same feature. Resume a stopped
+run with `start_run(run_ref)` to retain its recorded tests and journal. A fresh
+start cannot adopt outstanding suite changes without review. Use `get_test_review`
+then `review_test_changes`; the human reviews the exact patch before adoption.
+`abort_run` requests human stop approval. An agent-written `confirm:true` alone
+does not stop a run; clients without forms use Stop in the Run panel.
+
+### Environment-specific tests
+
+Keep the same test roster in every environment. If a contract applies only to a
+known envset, declare that boundary in the suite before execution and skip it in
+other envsets:
+
+```ts
+test.describe('Provider contracts', {
+  annotation: { type: 'canary:environments', description: '["meta"]' },
+}, () => {
+  test.skip(process.env.CANARY_LAB_ENV !== 'meta', 'Requires the meta envset')
+  // Provider-specific tests go here.
+})
+```
+
+The runner sets `CANARY_LAB_ENV` to the selected envset. The reporter captures the
+declaration before tests start and records an exclusion only for an actual skip
+outside the allowed envsets. For example, **51 passed, 4 skipped (outside local)**
+can finish the local run, but proves nothing about those four Meta contracts.
+The summary still says 51/55 passed; `counts.notApplicable` is a subset of skipped.
+Ordinary skips, interrupted tests, and missing prerequisites remain incomplete.
+A run with no applicable passes cannot pass. Never add a declaration to evade a
+failure; changing this boundary during repair requires human test review.
+
+New Journal entries distinguish **all tests passed**, **applicable tests passed**,
+and **failures cleared**. Older `all_passed` entries display **no failures recorded**
+because that label did not establish complete execution. Their raw history remains
+unchanged.
+
 Setup-installed sessions intentionally expose one MCP tool: `exec`. Atomic names
 such as `get_feature_coverage` are command values and do not appear as public
 tools. If `exec` itself is missing, run `npx canary-lab setup --force`, reconnect

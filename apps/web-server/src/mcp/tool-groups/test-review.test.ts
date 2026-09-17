@@ -72,7 +72,7 @@ describe('test review human gate', () => {
   it('reports inactive runs and empty reviews without an adoption prompt', async () => {
     const { tools, review } = fixture()
     review.canAdopt = false
-    expect((await tools.call('get_test_review', args)).next).toContain('new run')
+    expect((await tools.call('get_test_review', args)).next).toContain('start_run(run_ref)')
     expect(value(await tools.raw('review_test_changes', args, context())).reason).toContain('no longer active')
     review.canAdopt = true
     review.files = []

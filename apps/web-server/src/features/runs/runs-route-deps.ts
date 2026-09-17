@@ -26,6 +26,7 @@ import { resolveRunModelPlan, reuseRunModelPlan, type RunModelPlan } from './log
 import { loadProjectConfig } from './logic/runtime/launcher/project-config'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
 import { assertStableSpecSelection } from '../../shared/playwright-config'
+import { assertNoPendingRunReview } from './logic/runtime/run-review-gate'
 import { RunnerLog } from './logic/runtime/runner-log'
 import {
   restore,
@@ -102,6 +103,7 @@ export function buildRunsRouteDeps(
       const features = loadFeatures(featuresDir)
       const feature = features.find((f) => f.name === featureName)
       if (!feature) throw new Error(`feature not found: ${featureName}`)
+      if (!isBoot && !isCell) assertNoPendingRunReview(runStore, feature.name, feature.featureDir)
       // A boot brings services up and runs no tests, so it declares no roster
       // and this cannot corrupt one — and refusing it would block the very boot
       // someone needs to debug the config they are here to fix.
@@ -150,6 +152,7 @@ export function buildRunsRouteDeps(
       // construction + kickoff. Deferred and reused by the queue when the run
       // can't start immediately.
       const launch = async (): Promise<OrchestratorLike> => {
+        if (!isBoot && !isCell) assertNoPendingRunReview(runStore, feature.name, feature.featureDir, runId)
         const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
         runnerLog.info(
           `Run started: feature=${feature.name}${env ? ` env=${env}` : ''} runId=${runId}`,

@@ -231,11 +231,11 @@ describe('truncateDiffForJournal', () => {
 })
 
 describe('classifyJournalOutcome', () => {
-  it('marks a clean verification rerun as all_passed', () => {
+  it('marks a clean verification rerun as all_tests_passed', () => {
     expect(classifyJournalOutcome(
       { failed: [{ name: 'a' }] },
-      { failed: [] },
-    )).toBe('all_passed')
+      { failed: [], total: 1, passed: 1 },
+    )).toBe('all_tests_passed')
   })
 
   it('distinguishes partial, no_change, and regression outcomes', () => {
@@ -323,7 +323,7 @@ describe('classifyJournalOutcome', () => {
   })
 
   it('treats a summary object with no `failed` field as zero failures', () => {
-    expect(classifyJournalOutcome({}, {})).toBe('all_passed')
+    expect(classifyJournalOutcome({}, {})).toBe('failures_cleared')
   })
 })
 
@@ -354,13 +354,13 @@ describe('updateLatestPendingJournalOutcome', () => {
     expect(updateLatestPendingJournalOutcome({
       journalPath,
       runId: 'run-a',
-      outcome: 'all_passed',
+      outcome: 'all_tests_passed',
     })).toBe(true)
 
     const body = fs.readFileSync(journalPath, 'utf-8')
     expect(body).toContain('## Iteration 1 — t1\n\n- run: run-a\n- hypothesis: old\n- outcome: pending')
     expect(body).toContain('## Iteration 2 — t2\n\n- run: run-b\n- hypothesis: other\n- outcome: pending')
-    expect(body).toContain('## Iteration 3 — t3\n\n- run: run-a\n- hypothesis: latest\n- outcome: all_passed')
+    expect(body).toContain('## Iteration 3 — t3\n\n- run: run-a\n- hypothesis: latest\n- outcome: all_tests_passed')
   })
 
   it('returns false when no pending section matches', () => {
@@ -374,7 +374,7 @@ describe('updateLatestPendingJournalOutcome', () => {
     expect(updateLatestPendingJournalOutcome({
       journalPath,
       runId: 'run-a',
-      outcome: 'all_passed',
+      outcome: 'all_tests_passed',
     })).toBe(false)
   })
 
@@ -396,11 +396,11 @@ describe('updateLatestPendingJournalOutcome', () => {
     expect(updateLatestPendingJournalOutcome({
       journalPath,
       runId: 'run-a',
-      outcome: 'all_passed',
+      outcome: 'all_tests_passed',
     })).toBe(true)
 
     const body = fs.readFileSync(journalPath, 'utf-8')
-    expect(body).toContain('- run: run-a\n- outcome: all_passed')
+    expect(body).toContain('- run: run-a\n- outcome: all_tests_passed')
     // The skipped (non-matching, newer) section is untouched.
     expect(body).toContain('- run: run-b\n- outcome: pending')
   })

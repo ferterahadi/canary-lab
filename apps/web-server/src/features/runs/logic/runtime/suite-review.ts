@@ -39,6 +39,17 @@ export function suiteReviewRevision(snapshotDir: string, liveDir: string): strin
   return revision(readSuite(snapshotDir), readSuite(liveDir))
 }
 
+/** Runtime env files and generated documentation change during a run. The
+ * fresh-start gate watches test inputs, while human adoption still reviews
+ * the complete copied suite. */
+export function suiteExecutionRevision(snapshotDir: string, liveDir: string): string {
+  const inputs = (dir: string) => new Map([...readSuite(dir)].filter(([file]) =>
+    !file.startsWith('docs/') && file !== 'feature.config.cjs' &&
+    (file.startsWith('e2e/') || /\.(?:[cm]?[jt]sx?|json)$/.test(file)),
+  ))
+  return revision(inputs(snapshotDir), inputs(liveDir))
+}
+
 export async function buildSuiteReview(snapshotDir: string, liveDir: string) {
   const before = readSuite(snapshotDir)
   const after = readSuite(liveDir)

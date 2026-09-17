@@ -11,7 +11,7 @@ import type { RunDetail } from '../features/runs/logic/run-store'
 import type { ClientKind } from '../../../../shared/run-mode'
 import type { SummaryState } from '../../../../shared/coverage/types'
 import { type DraftRecord, type ExternalDraftStage } from '../features/wizard/logic/draft-store'
-import { isTerminalRunStatus } from '../../../../shared/run-state'
+import { isActiveRunStatus, isTerminalRunStatus } from '../../../../shared/run-state'
 import { encodeToonTable } from '../shared/toon'
 import type { McpClientFacts } from './client-surface'
 import type { CanaryLabMcpDeps, GettingStartedBusyActive } from './tool-schemas'
@@ -103,16 +103,16 @@ export function claimRun(
     : { accepted: false, reason: result.reason }
 }
 
-export function findHealingRunForFeature(
+export function findContinuingRunForFeature(
   deps: CanaryLabMcpDeps,
   feature: string,
   env: string | undefined,
 ): RunDetail | null {
   const candidates: Array<{ detail: RunDetail; startedAt: string }> = []
   for (const entry of deps.store.list({ feature })) {
-    if (entry.status !== 'healing') continue
+    if (!isActiveRunStatus(entry.status)) continue
     const detail = deps.store.get(entry.runId)
-    if (!detail) continue
+    if (!detail || detail.manifest.executionType === 'boot') continue
     if (env && detail.manifest.env !== env) continue
     candidates.push({ detail, startedAt: entry.startedAt })
   }

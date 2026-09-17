@@ -243,6 +243,8 @@ export interface RunSummaryRunningStep {
 }
 
 export interface RunSummary {
+  environment?: string
+  environmentExclusions?: import('../../../../../shared/run-applicability').EnvironmentExclusion[]
   complete: boolean
   total: number
   passed: number

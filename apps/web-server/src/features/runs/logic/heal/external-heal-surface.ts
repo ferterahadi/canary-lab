@@ -229,7 +229,7 @@ export const EXTERNAL_HEAL_NEXT_STEPS: readonly string[] = [
   // of INSTRUCTIONS_BY_PROFILE.repair, i.e. past the CLI's 2048-char cut, so the
   // result is the only channel that delivers it.
   'Read pass counts from result.counts.statusLine / counts.passed — never total - failed. A test absent from every result list is not run, not passed; do not report it as a pass.',
-  'To re-execute, reuse the run rather than tearing it down: signal_run re-runs the failed tests in place for an active healing run; for a failed/aborted run pass its run_ref to start_run (reruns failed → skipped → pending/not-run only). The run_ref rerun already covers skipped + pending, so it is complete — do NOT force_new just to avoid "skipped" tests; force_new on a portified feature spins a fresh per-run worktree and resets THIS journal to Iteration 1. Do not abort_run then start a fresh run — a fresh start re-runs the whole suite and is only worth it when prior passes are invalidated.',
+  'Continue this run: signal_run requests verification after a fix. For a failed/aborted run pass run_ref to start_run; it preserves the recorded suite and journal. force_new cannot replace an active run, and fresh starts cannot bypass pending test review. Use get_test_review then review_test_changes for human adoption. abort_run requires human confirmation; do not abort to verify a fix.',
 ]
 
 // Where to edit, for a worktree-isolated run. Conditional because it is only true
@@ -533,6 +533,11 @@ export function writeHealSignal(input: WriteHealSignalInput): { kind: HealSignal
   fs.mkdirSync(path.dirname(target), { recursive: true })
   fs.writeFileSync(target, JSON.stringify(input.body))
   return { kind: input.kind, path: target }
+}
+
+export function hasPendingHealSignal(logsDir: string, runId: string): boolean {
+  const paths = buildRunPaths(runDirFor(logsDir, runId))
+  return [paths.restartSignal, paths.rerunSignal, paths.healSignal].some((file) => fs.existsSync(file))
 }
 
 function healSignalPath(paths: ReturnType<typeof buildRunPaths>, kind: HealSignalKind): string {

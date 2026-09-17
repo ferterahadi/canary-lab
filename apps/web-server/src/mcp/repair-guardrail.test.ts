@@ -303,7 +303,7 @@ describe('spec-edit boundary — humans adopt, hints advise', () => {
     const summary = { complete: true, total: 1, passed: 1, passedNames: ['a'], failed: [] } as unknown as RunDetail['summary']
     const detail = { runId: 'run-1', manifest: passedWithWeakerHint(), summary } as unknown as RunDetail
     const deps = {
-      store: { get: () => detail } as unknown as RunStore,
+      store: { get: () => detail, registry: { get: () => undefined } } as unknown as RunStore,
       broker: {},
       featuresDir: '/tmp/features',
       projectRoot: '/tmp',
