@@ -1,10 +1,12 @@
 import fs from 'fs'
 import path from 'path'
 import { loadFeatures, listSpecFiles } from '../../../../shared/feature-loader'
-import { extractTestsFromSource, extractTestMetadataFromSource } from '../../../../shared/ast-extractor'
+import { extractCoverageTestsFromSource, extractTestMetadataFromSource } from '../../../../shared/ast-extractor'
 import type { CoverageLedger, PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
 import { computeCoverageLedger, type CoverageTestInput } from './ledger'
 import { lastRunOutcomeForTitle, readLatestRunOutcomes } from '../../../runs/logic/runtime/run-outcomes'
+import { readRunsIndex } from '../../../runs/logic/runtime/manifest'
+import { isAuxiliaryExecution } from '../../../../../../../shared/verification'
 import { applyTestStrength, type TestAssertions } from './strength'
 import { applyEnforcement } from './enforcement'
 import { historyForTests, readFeatureRunHistory } from './requirement-history'
@@ -19,6 +21,9 @@ import { readCoverageRunState } from './run-state'
 import { coverageJobStore } from './jobs/store'
 import { GENERATED_DOC_PREFIX, readDocsCollection } from './docs-collection'
 import { readPrdSummary } from './prd-summary'
+import { mappingInputs } from './coverage-engine'
+import { mappingInferenceSnapshot } from './mapping-cache'
+import { deriveCoverageFreshness, unreadableSourceDocs } from './freshness'
 
 export { LEGACY_MAPPINGS_JSON, applyExternalCoverageMappings, buildCoverageMappingContext, flagMappingIssues, hasPrdSummary, runCoverageEngine } from './coverage-engine'
 export type { ApplyExternalCoverageArgs, ApplyExternalCoverageResult, CoverageMappingContext, CoverageMappingTest, MappingTestSource, RunCoverageEngineArgs, RunCoverageEngineDeps, RunCoverageEngineResult } from './coverage-engine'
@@ -78,7 +83,8 @@ export function collectTests(featureDir: string): CollectedTests {
   for (const file of listSpecFiles(featureDir)) {
     let source = ''
     try { source = fs.readFileSync(file, 'utf-8') } catch { continue }
-    const extracted = extractTestsFromSource(file, source)
+    const extracted = extractCoverageTestsFromSource(file, source)
+    if (extracted.parseError) throw new Error(`Cannot parse ${path.relative(featureDir, file)}: ${extracted.parseError}`)
     for (const t of extracted.tests) {
       const absFile = t.sourceFile ?? file
       const existing = byName.get(t.name)
@@ -168,7 +174,11 @@ export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): Covera
   // Proven axis: join each test's latest-run outcome (pass/fail) so the ledger
   // can distinguish "covered (claimed by a tag)" from "covered (proven by a
   // passing run)". Additive — gap types and coveragePct stay claim-based.
-  const outcomes = readLatestRunOutcomes(args.logsDir, args.feature)
+  const latestRun = readRunsIndex(args.logsDir).filter((run) => run.feature === args.feature && !isAuxiliaryExecution(run.executionType))
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0]
+  const availableOutcomes = readLatestRunOutcomes(args.logsDir, args.feature)
+  // A newer attempt with no summary is unknown, not the older attempt's pass.
+  const outcomes = availableOutcomes?.runId === latestRun?.runId ? availableOutcomes : null
   if (outcomes) {
     for (const t of tests) {
       const lastRun = lastRunOutcomeForTitle(outcomes, t.name)
@@ -231,6 +241,18 @@ export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): Covera
   }
   ledger.state = deriveCoverageStateView(stateInput)
   ledger.docsDrift = summaryDrifted // back-compat mirror
+  const snapshot = mappingInferenceSnapshot(featureDir, mappingInputs(featureDir), requirements, summary?.variantDimension)
+  const unreadable = unreadableSourceDocs(featureDir)
+  for (const file of listSpecFiles(featureDir)) {
+    try { fs.readFileSync(file) } catch { unreadable.push(path.relative(featureDir, file)) }
+  }
+  if (snapshot.readable === false) unreadable.push('test dependencies or configuration')
+  if (tests.length > 0 && Object.keys(snapshot.tests).length !== tests.length) unreadable.push('test dependencies or configuration')
+  ledger.freshness = deriveCoverageFreshness({ ledger, summary, docsHash: live.docsHash, snapshot, runState, unreadable, latestRun })
+  if (ledger.freshness.state === 'stale' && ledger.state.coverage === 'fresh') {
+    ledger.state.coverage = 'stale'
+    ledger.state.headline = 'Stale'
+  }
   return ledger
 }
 

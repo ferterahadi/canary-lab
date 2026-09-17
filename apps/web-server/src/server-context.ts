@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import type { CoverageFreshnessMonitor } from './features/coverage/logic/coverage/freshness-monitor'
 import type { TestsDraftRouteDeps } from './features/wizard/routes/tests-draft'
 import type { ExternalHealBroker } from './features/runs/logic/heal/external-heal-broker'
 import type { OrchestratorRegistry, RunStore } from './features/runs/logic/run-store'
@@ -81,6 +82,7 @@ export interface ServerContext {
   benchmarkStore: BenchmarkRunStore
   portifyStore: PortifyRunStore
   coverageJobStore: CoverageJobRunStore
+  coverageMonitor?: CoverageFreshnessMonitor
   robustnessJobStore: RobustnessJobRunStore
   flightStore: FlightRunStore
   planStore: PlanFeaturesStore

@@ -26,7 +26,7 @@ afterEach(() => {
 
 function render(ledger: CoverageLedger): void {
   act(() => {
-    root.render(<CoverageHeader ledger={ledger} gapFilter={null} onToggleGap={() => {}} strengthFilter={null} onToggleStrength={() => {}} />)
+    root.render(<CoverageHeader ledger={{ ...ledger, freshness: { ...LEDGER.freshness!, state: 'current', reasons: [] } }} gapFilter={null} onToggleGap={() => {}} strengthFilter={null} onToggleStrength={() => {}} />)
   })
 }
 
@@ -36,7 +36,7 @@ describe('CoverageHeader — proven in run', () => {
     led.enforcement = { runId: 'run-9', provenUnchanged: 1, total: 3, states: { 'proven-unchanged': 1, 'tests-weakened': 0, 'wording-ahead': 1, 'proof-stale': 1 } }
     render(led)
     const stat = container.querySelector('[data-testid="proven-stat"]')
-    expect(stat?.textContent).toContain('1/3 proven in run run-9')
+    expect(stat?.textContent).toContain('1/3 historically proven in run run-9')
   })
 
   it('a feature with no run yet says so rather than inventing a run', () => {

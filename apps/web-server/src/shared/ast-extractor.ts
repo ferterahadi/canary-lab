@@ -911,3 +911,29 @@ export function extractTestsFromSource(
     }
   }
 }
+
+/** Coverage needs source assertions and linkage, never the expensive readable
+ * prose/TypeChecker pipeline. Both readers use the same declaration walker,
+ * annotation precedence and assertion collector so their evidence agrees. */
+export function extractCoverageTestsFromSource(file: string, source: string): {
+  file: string
+  tests: Array<Partial<ExtractedTest> & Pick<ExtractedTest, 'name' | 'line' | 'bodySource'>>
+  parseError?: string
+} {
+  try {
+    const { sourceFile } = parseSource(file, source)
+    // TypeScript recovers a partial tree on malformed input. That tree is useful
+    // for an editor, but must never certify coverage while a file is being saved.
+    const diagnostics = (sourceFile as ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics
+    if (diagnostics?.length) {
+      return { file, tests: [], parseError: diagnostics.map((item) => ts.flattenDiagnosticMessageText(item.messageText, '\n')).join('; ') }
+    }
+    return { file, tests: testDeclarationsFrom(sourceFile).map(({ call, name, line, body, bodySource }) => ({
+      name, line, bodySource,
+      ...testAnnotationsAt(call, sourceFile),
+      assertions: body ? collectAssertionSnippets(body, sourceFile) : [],
+    })) }
+  } catch (error) {
+    return { file, tests: [], parseError: error instanceof Error ? error.message : String(error) }
+  }
+}

@@ -12,6 +12,9 @@ import { Hovered, RequirementCard, TestCard, TestCardSkeleton, compareRequiremen
 import { CoverageEmptyMain, CoverageHeader, HeadlinePill, readRailPref, writeRailPref } from './CoverageHeader'
 import { COVERAGE_CSS } from './coverage-ledger-css'
 import { coverageTestSources, type CoverageTestSource } from './coverage-test-sources'
+import { useLiveCoverage } from '@/shared/state/use-live-coverage'
+import { CoverageFreshnessNotice } from '@/shared/ui/CoverageFreshnessNotice'
+import type { CoverageRecoveryStage } from '@shared/coverage/freshness'
 
 // The two stages a coverage generation spawns (the summary job chains the
 // mapping engine) — the models gate scopes its rows to them.
@@ -27,18 +30,18 @@ interface Props {
   // `job` takeover below can't know about them.
   generatingFlight?: { flightId: string; stage: FlightStageKey; stageStatus: FlightStageStatus } | null
   onOpenFlight?: (flightId: string) => void
+  onOpenRecovery?: (stage: CoverageRecoveryStage) => void
   onOpenGeneration: (job: CoverageJobIndexEntry) => void
   coverageJobs?: CoverageJobIndexEntry[]
 }
 
-export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, onOpenFlight, onOpenGeneration, coverageJobs = [] }: Props) {
+export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, onOpenFlight, onOpenRecovery, onOpenGeneration, coverageJobs = [] }: Props) {
   // Documents and results refresh when either an agent or another view writes
   // coverage evidence. Execution stays on Flight.
   const coverageRefreshKey = useInvalidationKey('coverage')
   const testsRefreshKey = useInvalidationKey('tests')
-  const [ledger, setLedger] = useState<CoverageLedger | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const jobsKey = coverageJobs.filter((job) => job.feature === feature).map((job) => `${job.jobId}:${job.status}`).join('|')
+  const { value: ledger, loading, error, confirmed, refresh } = useLiveCoverage(feature, jobsKey)
   const [hovered, setHovered] = useState<Hovered | null>(null)
   const [gapFilter, setGapFilter] = useState<GapType | null>(null)
   const [strengthFilter, setStrengthFilter] = useState<TestStrength | null>(null)
@@ -60,16 +63,6 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   const activeJob = coverageJobs.find((job) => job.feature === feature && job.status === 'running')
 
   const toggleRail = useCallback(() => setRailOpen((v) => { writeRailPref(!v); return !v }), [])
-
-  const refresh = useCallback(() => {
-    setLoading(true)
-    api.getFeatureCoverage(feature)
-      .then((data) => { setLedger(data); setError(null) })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false))
-  }, [feature])
-
-  useEffect(() => { refresh() }, [refresh])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -131,14 +124,11 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   // Refresh results on workspace events and on authoritative job transitions.
   // The shared jobs read reconciles missed completion events without leaving a
   // second lifecycle or poller in the ledger.
-  const jobsKey = coverageJobs.filter((job) => job.feature === feature)
-    .map((job) => `${job.jobId}:${job.status}`).join('|')
   const coverageKeyMounted = useRef(false)
   useEffect(() => {
     if (!coverageKeyMounted.current) { coverageKeyMounted.current = true; return }
-    refresh()
     setDocsReloadKey((k) => k + 1)
-  }, [coverageRefreshKey, jobsKey, refresh])
+  }, [coverageRefreshKey, jobsKey, ledger?.freshness?.revision])
 
   // Canonical per-test ids, shared with the Tests column + Playback.
   const testNumbering = useMemo(
@@ -168,7 +158,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
       })
       .finally(() => { if (!cancelled) setSpecSourceLoading(false) })
     return () => { cancelled = true }
-  }, [feature, specSourceRequested, testsRefreshKey, coverageRefreshKey])
+  }, [feature, specSourceRequested, testsRefreshKey, coverageRefreshKey, ledger?.freshness?.revision])
 
   // Generated titles need discovery before expansion; literal titles keep the
   // existing lazy source load. Never substitute a guessed loop value.
@@ -321,11 +311,12 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
           <span className="cl-rubric">Semantic Coverage</span>
           <span className="clcov-feature">{feature}</span>
         </div>
-        {state && <HeadlinePill headline={state.headline} />}
+        {state && <HeadlinePill headline={confirmed ? state.headline : 'Freshness unconfirmed'} />}
         <button type="button" onClick={onClose} className="clcov-close ml-auto" aria-label="Close coverage">
           Close <span aria-hidden="true">✕</span>
         </button>
       </header>
+      <CoverageFreshnessNotice freshness={ledger?.freshness} confirmed={confirmed} error={error} onRecover={onOpenRecovery} />
 
       {/* Execution stays on Flight; the ledger remains a results surface. */}
       {generatingFlight && !activeJob && (
@@ -366,7 +357,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
       {/* Unified view (R22): Docs rail + main, always one screen. The rail is
           ALWAYS present (even while generating, with destructive actions disabled);
           only the main area changes by state — no tabs, nothing unmounts. */}
-      {!error && ledger && (
+      {ledger && (
         <div className="flex min-h-0 flex-1">
           <CoverageDocsRail
             feature={feature}
@@ -393,6 +384,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
               <>
                 <CoverageHeader
                   ledger={ledger}
+                  confirmed={confirmed}
                   gapFilter={gapFilter}
                   onToggleGap={(g) => setGapFilter((cur) => (cur === g ? null : g))}
                   strengthFilter={strengthFilter}

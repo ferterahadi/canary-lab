@@ -213,8 +213,9 @@ export function gapWord(g: GapType, n: number): string {
 // card with the number-first figures, and the figures are the filters (see Strip). The strips
 // sit beside the headline at every usable width — a narrow bar tightens the headline instead
 // of moving it — and only drop under it when the bar is genuinely cramped.
-export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter, onToggleStrength }: {
+export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter, onToggleStrength, confirmed = true }: {
   ledger: CoverageLedger
+  confirmed?: boolean
   gapFilter: GapType | null
   onToggleGap: (g: GapType) => void
   strengthFilter: TestStrength | null
@@ -224,12 +225,15 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
   const covered = countFor(ledger, 'covered')
   const mapped = total - untested
   const orphans = ledger.orphanRequirementIds.length
+  const current = confirmed && ledger.freshness?.state === 'current'
+  const latestFailed = ledger.tests.filter((test) => test.lastRun?.passed === false).length
+  const latestPassed = ledger.tests.filter((test) => test.lastRun?.passed === true).length
   // The ring's third slice. `provenUnchanged` can only land on a `covered`
   // requirement — enforcement.ts withholds the proof from a partial one — so
   // proven + claimed-only + not-covered partitions the requirement set exactly,
   // which is the whole reason one ring can carry both axes.
   const enf = total > 0 ? ledger.enforcement : undefined
-  const proven = enf?.provenUnchanged
+  const proven = ledger.freshness?.proofNeedsRun ? 0 : enf?.provenUnchanged
   const claimedOnly = proven === undefined ? 0 : covered - proven
   // The wrapper is a size container so the bar's breakpoints follow the width the
   // main column actually has (the Docs rail can take a third of the viewport).
@@ -240,11 +244,11 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
           roll-up sit in the same hover card the strips use; a stale-tag warning keeps an
           amber dot at rest so it is never fully hidden (status = dot + tooltip). */}
       <div className="clcov-hero clcov-strip" tabIndex={0} data-testid="coverage-hero">
-        <CoverageRing pct={ledger.coveragePct} provenPct={proven === undefined ? undefined : (proven / total) * 100} />
+        {current && <CoverageRing pct={ledger.coveragePct} provenPct={latestFailed ? 0 : proven === undefined ? undefined : (proven / total) * 100} />}
         <div className="clcov-hero-text">
-          <div className="clcov-pct" data-testid="coverage-pct" aria-hidden="true">{Math.round(ledger.coveragePct)}%</div>
+          <div className="clcov-pct" data-testid="coverage-pct">{current ? `${Math.round(ledger.coveragePct)}%` : '—'}</div>
           <div className="clcov-sentence" data-testid="coverage-sentence">
-            {covered} of {total} covered
+            {current ? `${covered} of ${total} covered` : `Last calculation: ${Math.round(ledger.coveragePct)}% · ${covered}/${total} — historical`}
             {orphans > 0 && (
               <span
                 className="clcov-alert clcov-hero-alert"
@@ -268,13 +272,16 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
                 ? 'Proven — a run passed every test mapped to the requirement, and neither the tests nor the wording have changed since. Unproven — a test covers it, but nothing has proved it yet.'
                 : 'No run has been recorded for this suite, so nothing is proven yet — every covered requirement is a claim.'}
             >
-              {!enf?.runId
+              {!current ? 'Current coverage not confirmed' : latestFailed ? `${latestFailed} failed in latest run` : !enf?.runId
                 ? 'no run yet — nothing proven'
                 : claimedOnly > 0
                   ? `${proven} proven · ${claimedOnly} unproven`
                   : `${proven} proven`}
             </div>
           )}
+          {current && ledger.provenRunId && <div className="clcov-proof" data-testid="coverage-latest-run">
+            Latest run {ledger.provenRunId}: {latestPassed} passed · {latestFailed} failed · {ledger.tests.length - latestPassed - latestFailed} not run
+          </div>}
         </div>
         <div className="clcov-card clcov-sub" data-testid="coverage-sub" role="group" aria-label="Coverage breadth and proof">
           <span data-testid="mapped-stat" title="Requirements with at least one test mapped to them">{mapped}/{total} mapped</span>
@@ -283,7 +290,7 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
               <span className="clcov-sub-sep" aria-hidden="true">·</span>
               <span data-testid="proven-stat" title="Requirements whose proof — a green run over every mapped test — is newer than both their tests' and their wording's last change">
                 {ledger.enforcement.provenUnchanged}/{ledger.enforcement.total}
-                {ledger.enforcement.runId ? <> proven in run <code className="clcov-sub-run">{ledger.enforcement.runId}</code></> : ' proven · no run yet'}
+                {ledger.enforcement.runId ? <> historically proven in run <code className="clcov-sub-run">{ledger.enforcement.runId}</code></> : ' proven · no run yet'}
               </span>
             </>
           )}

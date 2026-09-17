@@ -14,9 +14,12 @@ beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'notifications-')
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
 
 describe('durable notifications', () => {
-  it('upgrades an existing neutral test review to warning without duplicating it or resetting read state', async () => {
-    const { testChangeNotificationSources } = await import('./sources')
-    const [current] = testChangeNotificationSources([{ featureId: 'shop', status: 'dirty', dirtySpecs: [{}] }], [])
+  it('upgrades an existing neutral test review to warning without duplicating it or resetting read state', () => {
+    const current: NotificationSource = {
+      key: 'test-review:shop',
+      signature: 'attention',
+      message: { title: 'shop awaits review', body: '1 changed file', severity: 'warning', target: { kind: 'test-review', feature: 'shop' } },
+    }
     const store = new NotificationStore(dir, events)
     store.reconcile([{ ...current, message: { ...current.message!, severity: 'neutral' } }])
     const original = store.list()[0]
@@ -53,6 +56,21 @@ describe('durable notifications', () => {
     store.remove(original.id)
     store.reconcile([source])
     expect(store.list()).toEqual([])
+  })
+
+  it('re-arms one retained message when the same issue escalates to danger', () => {
+    const store = new NotificationStore(dir, events)
+    store.reconcile([source])
+    const original = store.list()[0]
+    store.markRead(original.id)
+    store.reconcile([{ ...source, message: { ...source.message!, severity: 'danger', body: 'Possible integrity weakening' } }])
+    const [escalated] = store.list()
+    expect(escalated).toMatchObject({
+      id: original.id,
+      severity: 'danger',
+      body: 'Possible integrity weakening',
+    })
+    expect(escalated).not.toHaveProperty('readAt')
   })
 
   it('creates a new notification when a recovered flight fails again, without restoring its old message', () => {
@@ -139,6 +157,52 @@ it('records source transitions without a browser and detaches subscriptions on s
   } finally { await app.close() }
   expect(runListeners.size).toBe(0)
   expect(flightListeners.size).toBe(0)
+})
+
+it('keeps one alert when a weakening moves from an active run back to its feature', async () => {
+  const { register } = await import('./index')
+  const runListeners = new Set<() => void>()
+  let runs = [{ runId: 'r1', feature: 'shop', status: 'healing', pendingSpecEdits: 1 }]
+  const changes = [{ featureId: 'shop', status: 'dirty' as const, dirtySpecs: [{ strength: { verdict: 'weaker' as const } }] }]
+  const app = Fastify()
+  await register(app, {
+    logsDir: dir, workspaceEvents: events,
+    dirtySpecStore: { list: () => changes, onEvent: vi.fn(), offEvent: vi.fn() },
+    runStore: { list: () => runs, onEvent: (fn: () => void) => runListeners.add(fn), offEvent: (fn: () => void) => runListeners.delete(fn) },
+    flightStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
+  } as unknown as import('../../server-context').ServerContext)
+  try {
+    const [active] = (await app.inject('/api/notifications')).json()
+    expect(active.target).toEqual({ kind: 'test-review', feature: 'shop', runId: 'r1' })
+    runs = [{ ...runs[0], status: 'passed' }]
+    for (const fn of runListeners) fn()
+    const after = (await app.inject('/api/notifications')).json()
+    expect(after).toHaveLength(1)
+    expect(after[0]).toMatchObject({ id: active.id, severity: 'danger', target: { kind: 'test-review', feature: 'shop' } })
+    expect(after[0].resolvedAt).toBeUndefined()
+  } finally { await app.close() }
+})
+
+it('resolves an ordinary run review without creating a feature-level follow-up', async () => {
+  const { register } = await import('./index')
+  const runListeners = new Set<() => void>()
+  let runs = [{ runId: 'r1', feature: 'shop', status: 'healing', pendingSpecEdits: 1 }]
+  const changes = [{ featureId: 'shop', status: 'dirty' as const, dirtySpecs: [{ strength: { verdict: 'equivalent' as const } }] }]
+  const app = Fastify()
+  await register(app, {
+    logsDir: dir, workspaceEvents: events,
+    dirtySpecStore: { list: () => changes, onEvent: vi.fn(), offEvent: vi.fn() },
+    runStore: { list: () => runs, onEvent: (fn: () => void) => runListeners.add(fn), offEvent: (fn: () => void) => runListeners.delete(fn) },
+    flightStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
+  } as unknown as import('../../server-context').ServerContext)
+  try {
+    const [active] = (await app.inject('/api/notifications')).json()
+    runs = [{ ...runs[0], status: 'passed' }]
+    for (const fn of runListeners) fn()
+    const after = (await app.inject('/api/notifications')).json()
+    expect(after).toHaveLength(1)
+    expect(after[0]).toMatchObject({ id: active.id, resolvedAt: expect.any(String) })
+  } finally { await app.close() }
 })
 
 it('persists test-change alerts from dirty-store events, preserves deletion, and resolves recovery', async () => {

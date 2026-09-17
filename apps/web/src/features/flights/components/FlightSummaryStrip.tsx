@@ -119,11 +119,11 @@ export function FlightSummaryStrip({
     })
   } else if (coveragePct != null) {
     items.push({
-      label: 'Coverage',
+      label: 'Coverage at this flight',
       value: `${coveragePct}%`,
       // Gaps open is what the loop reports; without it, a full 100% is the same
       // statement — every requirement claimed by some spec.
-      tone: (lastMapped ? lastMapped.gapsOpen === 0 : coveragePct >= 100) ? 'var(--success)' : 'var(--warning)',
+      tone: 'var(--text-muted)',
       stage: 'specs-coverage',
       // This figure is the flight's record; the stage tiles read the LIVE
       // ledger, which moves the moment a requirement or test changes. Saying so

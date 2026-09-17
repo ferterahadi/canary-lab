@@ -76,9 +76,16 @@ export class NotificationStore {
       if (previous?.signature === source.signature) {
         const item = data.items.find((item) => item.id === previous.notificationId)
         // Keep a retained message accurate as more files change, without
-        // resetting read state or recreating a deleted message.
+        // recreating a deleted message. A danger escalation is the exception
+        // to retained read state: the same issue became materially more urgent,
+        // so it must be eligible for the one attention toast again.
         if (item && source.message && (item.title !== source.message.title || item.body !== source.message.body || item.severity !== source.message.severity || JSON.stringify(item.target) !== JSON.stringify(source.message.target))) {
+          const escalatedToDanger = item.severity !== 'danger' && source.message.severity === 'danger'
           Object.assign(item, source.message)
+          if (escalatedToDanger) {
+            delete item.readAt
+            item.createdAt = now
+          }
           changed = true
         }
         continue

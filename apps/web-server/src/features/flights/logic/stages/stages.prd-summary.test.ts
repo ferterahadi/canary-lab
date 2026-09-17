@@ -39,6 +39,7 @@ import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightSt
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
 import { stageContextStub } from './__fixtures__/stage-context'
+import { readDocsCollection } from '../../../coverage/logic/coverage/docs-collection'
 
 let tmpDir: string
 
@@ -134,10 +135,10 @@ describe('prd-summary stage', () => {
     fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', 'prd.md'), '# PRD')
   })
 
-  const summaryJson = (count: number, generatedAt: string) =>
+  const summaryJson = (count: number, generatedAt: string, docsHash = 'h') =>
     JSON.stringify({
       requirements: Array.from({ length: count }, (_, i) => ({ id: `R${i + 1}`, title: `t${i}`, text: 'x', pathTypes: ['happy'] })),
-      docsHash: 'h',
+      docsHash,
       sourceDocs: ['prd.md'],
       generatedAt,
     })
@@ -168,19 +169,30 @@ describe('prd-summary stage', () => {
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('no requirements') })
   })
 
-  it('reuses a summary fresher than the docs', async () => {
-    fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', '_prd-summary.json'), summaryJson(1, new Date(Date.now() + 60_000).toISOString()))
+  it('reuses a summary matching the actual source hash, regardless of its age', async () => {
+    fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', '_prd-summary.json'), summaryJson(1, new Date(0).toISOString(), readDocsCollection(path.join(featuresDir, 'checkout')).docsHash))
     const outcome = await prdSummaryStage(deps()).run(ctxFor(manifest()).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { reused: true } })
   })
 
-  it('reuses a summary fresher than the docs with multiple doc files (mtime scan keeps the true newest)', async () => {
-    // A second, OLDER doc must not overwrite "newest" once a newer one is seen.
+  it('includes every source document in the reuse predicate', async () => {
     fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', 'older.md'), 'older content')
     fs.utimesSync(path.join(featuresDir, 'checkout', 'docs', 'older.md'), new Date(0), new Date(0))
-    fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', '_prd-summary.json'), summaryJson(1, new Date(Date.now() + 60_000).toISOString()))
+    fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', '_prd-summary.json'), summaryJson(1, new Date(Date.now() + 60_000).toISOString(), readDocsCollection(path.join(featuresDir, 'checkout')).docsHash))
     const outcome = await prdSummaryStage(deps()).run(ctxFor(manifest()).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { reused: true } })
+  })
+
+  it('does not reuse old requirements when content changes but file timestamps are preserved', async () => {
+    const dir = path.join(featuresDir, 'checkout')
+    const source = path.join(dir, 'docs', 'prd.md')
+    const time = fs.statSync(source)
+    fs.writeFileSync(path.join(dir, 'docs', '_prd-summary.json'), summaryJson(1, '2999-01-01T00:00:00Z', readDocsCollection(dir).docsHash))
+    fs.writeFileSync(source, '# Changed requirement')
+    fs.utimesSync(source, time.atime, time.mtime)
+    const regenerate = vi.fn(async () => { fs.writeFileSync(path.join(dir, 'docs', '_prd-summary.json'), summaryJson(2, new Date().toISOString(), readDocsCollection(dir).docsHash)); return {} as never })
+    expect(await prdSummaryStage(deps({ coverage: { regenerate } })).run(ctxFor(manifest()).ctx)).toMatchObject({ kind: 'done', evidence: { requirementCount: 2 } })
+    expect(regenerate).toHaveBeenCalledOnce()
   })
 
   it('uses the real regeneratePrdSummary default when deps.coverage is not injected (fails fast: unknown feature)', async () => {

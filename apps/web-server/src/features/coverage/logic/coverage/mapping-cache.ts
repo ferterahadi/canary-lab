@@ -6,6 +6,8 @@ import { extractTestMappingContext } from '../../../../shared/ast-extractor'
 import type { Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
 import { fingerprintRequirement } from './fingerprints'
 import type { AnnotateTestInput } from './annotate-engine'
+import { docsDirFor, readDocsCollection } from './docs-collection'
+import { PRD_SUMMARY_JSON } from './prd-summary-render'
 
 export interface MappingTestInput extends AnnotateTestInput {
   file: string
@@ -24,6 +26,8 @@ export interface MappingInferenceCache {
 export interface MappingInferenceSnapshot {
   tests: Record<string, string>
   requirements: Record<string, string>
+  sourceRevision?: string
+  readable?: boolean
 }
 
 function hash(value: unknown): string {
@@ -112,11 +116,13 @@ export function mappingInferenceSnapshot(
       }
       fingerprints[test.name] = hash({ file: test.file, body: test.bodySource, assertions: test.assertions, annotations: test.annotations, context, support, environment, options })
     }
-    return { tests: fingerprints, requirements: requirementHashes }
+    const summaryPath = path.join(docsDirFor(featureDir), PRD_SUMMARY_JSON)
+    const sourceRevision = hash([readDocsCollection(featureDir).docsHash, fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf-8') : null])
+    return { tests: fingerprints, requirements: requirementHashes, sourceRevision, readable: true }
   } catch {
     // Reuse is optional. If any source/config input cannot be read, re-examine
     // the suite without certifying those inputs in the cache.
-    return { tests: {}, requirements: requirementHashes }
+    return { tests: {}, requirements: requirementHashes, readable: false }
   }
 }
 

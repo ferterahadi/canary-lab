@@ -16,6 +16,16 @@ copied to `dist/templates/` during build.
 
 ## Hard rules
 
+- **Live state is part of completion.** Every change to documents, tests, runs,
+  jobs, or configuration must reach all affected open views without a browser
+  refresh, reopening the view, or restarting Canary. Read `cl_live-state-sync`
+  and `cl_ws-driven-state` before changing a producer or consumer of that state.
+  Include direct file edits, linked sources, MCP writes, and standalone runs;
+  update derived counts, freshness, and evidence as well as the source viewer.
+  Relevant changes must also reach connected Claude/Codex workflows through a
+  supported agent delivery path with recovery for missed changes. An emitted
+  event or a correct response after reload is insufficient: verify the already
+  open UI and agent consumer, and identify any unverified client limitation.
 - **Keep workspace data in the workspace.** Feature suites, their fixtures, and
   original run artifacts belong in the selected Canary workspace, never this
   package's source tree. Repository unit/regression fixtures stay beside their
@@ -126,13 +136,12 @@ natively.)
   `apps/web`: assign it a URL param so it's deep-linkable and survives refresh.
   Covers the cold-load test (which dialogs to route), the two-tier URL schema,
   and the hydration checklist + gotchas.
-- `cl_ws-driven-state` — adding any server-side mutation (route, background job,
-  MCP tool) that changes visible UI state: emit a `WorkspaceEvent` so the client
-  updates live. Covers the full chain + checklist + the two gaps fixed in 1.4.0
-  (portify save, coverage job completion).
-- `cl_live-state-sync` — a UI that must react in real time to a backend state
-  change, or anything that "only updates after refresh": picking
-  broadcast-push vs task-scoped stream vs refetch.
+- `cl_ws-driven-state` — changing a state producer, including routes, jobs, MCP
+  writes, direct files, and run results: publish through the owning store/event
+  path and trace delivery to every affected consumer.
+- `cl_live-state-sync` — changing any displayed or agent-consumed state: keep
+  open views and connected Claude/Codex workflows current, recover missed
+  changes, and verify updates without refresh or another user action.
 - `cl_surfacing-agent-work` — any UI showing an agent's progress/output (live
   or historical): know what the agent actually produces before designing the
   viewer.

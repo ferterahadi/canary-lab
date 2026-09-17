@@ -10,6 +10,7 @@ import type { FlightStageDeps } from './context'
 import type { StageContext, StageOutcome } from '../conductor'
 import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightStageKey } from '../types'
 import { stageContextStub } from './__fixtures__/stage-context'
+import { readDocsCollection } from '../../../coverage/logic/coverage/docs-collection'
 
 // The hand-off path: `opts.stageProducer === 'external'` makes the thinking
 // stages (scout, docs, prd-summary, specs↔coverage) park on an `external-work`
@@ -83,10 +84,10 @@ function ctxFor(m: FlightManifest): { ctx: StageContext; setStage: (k: FlightSta
 }
 
 /** The checkpoint a hand-off parks on, or a failure if it did something else. */
-function handOffOf(outcome: StageOutcome): { kind: string; data: Record<string, unknown>; options?: string[] } {
+function handOffOf(outcome: StageOutcome): Extract<StageOutcome, { kind: 'checkpoint' }>['checkpoint'] & { data: Record<string, unknown> } {
   expect(outcome.kind).toBe('checkpoint')
   const cp = (outcome as Extract<StageOutcome, { kind: 'checkpoint' }>).checkpoint
-  return { kind: cp.kind, data: (cp.data ?? {}) as Record<string, unknown>, ...(cp.options ? { options: cp.options } : {}) }
+  return { ...cp, data: (cp.data ?? {}) as Record<string, unknown> }
 }
 
 const CONFIG_SOURCE = "const config = {\n  name: 'checkout',\n  envs: ['local'],\n  repos: [],\n}\nmodule.exports = { config }\n"
@@ -453,6 +454,28 @@ describe('prd-summary — external producer', () => {
 
   const REQUIREMENT = { title: 'create todo', text: 'a user can create a new todo item', pathTypes: ['happy'] }
 
+  it('rejects an answer to an actual hand-off after its source changes, then accepts refreshed work', async () => {
+    const dir = writeFeature()
+    const { ctx, setStage } = ctxFor(prdManifest())
+    const stage = prdSummaryStage(prdDeps())
+    const first = handOffOf(await stage.run(ctx))
+    setStage('prd-summary', { checkpoint: first })
+    fs.appendFileSync(path.join(dir, 'docs', 'spec.md'), '\nChanged requirement.')
+    const rejected = handOffOf(await stage.onCheckpointResponse!(ctx, { choice: 'submit', token: String(first.data.handOffId), data: { requirements: [REQUIREMENT] } }))
+    expect((rejected.data.context as { lastRejection: string }).lastRejection).toContain('Source documents changed')
+    expect(fs.existsSync(path.join(dir, 'docs', '_prd-summary.json'))).toBe(false)
+    setStage('prd-summary', { checkpoint: rejected })
+    expect(await stage.onCheckpointResponse!(ctx, { choice: 'submit', token: String(rejected.data.handOffId), data: { requirements: [REQUIREMENT] } })).toMatchObject({ kind: 'done' })
+  })
+
+  it('refreshes legacy hand-offs which did not record a source revision', async () => {
+    writeFeature()
+    const { ctx, setStage } = ctxFor(prdManifest())
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'legacy' } })
+    const next = handOffOf(await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, { choice: 'submit', data: { requirements: [REQUIREMENT] } }))
+    expect(next.data.context).toMatchObject({ docsHash: expect.any(String), lastRejection: expect.stringContaining('not recorded') })
+  })
+
   it('parks with the summary engine\'s own prompt and context instead of spawning', async () => {
     writeFeature()
     const { ctx } = ctxFor(prdManifest())
@@ -471,7 +494,7 @@ describe('prd-summary — external producer', () => {
     const dir = writeFeature()
     fs.writeFileSync(
       path.join(dir, 'docs', '_prd-summary.json'),
-      JSON.stringify({ requirements: [{ id: 'R1', title: 't', text: 'x', pathTypes: ['happy'] }], generatedAt: '2999-01-01T00:00:00Z' }),
+      JSON.stringify({ requirements: [{ id: 'R1', title: 't', text: 'x', pathTypes: ['happy'] }], docsHash: readDocsCollection(dir).docsHash, generatedAt: '2999-01-01T00:00:00Z' }),
     )
     const out = await prdSummaryStage(prdDeps()).run(ctxFor(prdManifest()).ctx)
     expect(out).toMatchObject({ kind: 'done', evidence: { requirementCount: 1, reused: true } })
@@ -486,7 +509,7 @@ describe('prd-summary — external producer', () => {
   it('applies a submitted requirements list through the canonical assembler and settles from disk', async () => {
     writeFeature()
     const { ctx, setStage } = ctxFor(prdManifest())
-    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { docsHash: readDocsCollection(path.join(featuresDir, 'checkout')).docsHash } } } })
     const out = await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
       choice: 'submit',
       data: { requirements: [REQUIREMENT] },
@@ -499,7 +522,7 @@ describe('prd-summary — external producer', () => {
   it('parses a submission handed back as a JSON string', async () => {
     writeFeature()
     const { ctx, setStage } = ctxFor(prdManifest())
-    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { docsHash: readDocsCollection(path.join(featuresDir, 'checkout')).docsHash } } } })
     const out = await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
       choice: 'submit',
       data: '```json\n' + JSON.stringify({ requirements: [REQUIREMENT] }) + '\n```',
@@ -514,7 +537,7 @@ describe('prd-summary — external producer', () => {
       JSON.stringify({ requirements: [{ id: 'R1', title: 'create todo', text: 'old text', pathTypes: ['happy'] }], generatedAt: '2020-01-01T00:00:00Z' }),
     )
     const { ctx, setStage } = ctxFor(prdManifest())
-    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { docsHash: readDocsCollection(path.join(featuresDir, 'checkout')).docsHash } } } })
     const out = await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
       choice: 'submit',
       data: { requirements: [{ id: 'R1', ...REQUIREMENT }] },
@@ -526,7 +549,7 @@ describe('prd-summary — external producer', () => {
   it('RE-PARKS an empty requirements list before anything lands on disk', async () => {
     writeFeature()
     const { ctx, setStage } = ctxFor(prdManifest())
-    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { docsHash: readDocsCollection(path.join(featuresDir, 'checkout')).docsHash } } } })
     const cp = handOffOf(await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
       choice: 'submit',
       data: { requirements: [] },
@@ -539,7 +562,7 @@ describe('prd-summary — external producer', () => {
   it('re-parks a submission missing required requirement fields, naming the first', async () => {
     writeFeature()
     const { ctx, setStage } = ctxFor(prdManifest())
-    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { docsHash: readDocsCollection(path.join(featuresDir, 'checkout')).docsHash } } } })
     const cp = handOffOf(await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
       choice: 'submit',
       data: { requirements: [{ title: 'only a title' }] },
@@ -551,7 +574,7 @@ describe('prd-summary — external producer', () => {
   it('re-parks an unparseable string submission', async () => {
     writeFeature()
     const { ctx, setStage } = ctxFor(prdManifest())
-    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { docsHash: readDocsCollection(path.join(featuresDir, 'checkout')).docsHash } } } })
     const cp = handOffOf(await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
       choice: 'submit',
       data: 'no json here at all',
@@ -574,7 +597,7 @@ describe('prd-summary — external producer', () => {
   it('runs the engine locally when the client hands the step back', async () => {
     const dir = writeFeature()
     const { ctx, setStage, logs } = ctxFor(prdManifest())
-    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { docsHash: readDocsCollection(path.join(featuresDir, 'checkout')).docsHash } } } })
     const d = deps({
       coverage: {
         regenerate: (async () => {
@@ -595,7 +618,7 @@ describe('prd-summary — external producer', () => {
   it('carries a submitted variantDimension through the canonical assembler', async () => {
     writeFeature()
     const { ctx, setStage } = ctxFor(prdManifest())
-    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { docsHash: readDocsCollection(path.join(featuresDir, 'checkout')).docsHash } } } })
     const out = await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
       choice: 'submit',
       data: { requirements: [{ ...REQUIREMENT, variants: ['email', 'sms'] }], variantDimension: { name: 'channel', values: ['email', 'sms'] } },
@@ -608,7 +631,7 @@ describe('prd-summary — external producer', () => {
   it('re-parks a non-object submission with the top-level reason (no field path to name)', async () => {
     writeFeature()
     const { ctx, setStage } = ctxFor(prdManifest())
-    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { docsHash: readDocsCollection(path.join(featuresDir, 'checkout')).docsHash } } } })
     const cp = handOffOf(await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, { choice: 'submit', data: 42 }))
     expect(cp.kind).toBe('external-work')
     expect(typeof (cp.data.context as { lastRejection: string }).lastRejection).toBe('string')

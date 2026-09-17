@@ -1,5 +1,6 @@
 export type NotificationTarget =
   | { kind: 'flight'; flightId: string }
+  | { kind: 'coverage'; feature: string; stage: import('../coverage/freshness').CoverageRecoveryStage; flightId?: string }
   | { kind: 'feature'; feature: string }
   | { kind: 'test-review'; feature: string; runId?: string }
   | { kind: 'run'; feature: string; runId: string }

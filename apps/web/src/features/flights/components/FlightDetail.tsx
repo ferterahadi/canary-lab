@@ -28,6 +28,8 @@ import { FlightTakeoverAction } from './FlightTakeoverAction'
 import { FlightDrillThroughs, FlightPage } from './FlightPage'
 import { FlightSummaryStrip } from './FlightSummaryStrip'
 import { StageDetail, truncate } from './StageDetail'
+import { useLiveCoverage } from '@/shared/state/use-live-coverage'
+import { CoverageFreshnessNotice } from '@/shared/ui/CoverageFreshnessNotice'
 
 // Flight detail — the routed full-screen view (?view=flights&flight=<id>)
 // that owns a flight's lifecycle: a stage rail on the left (harness-computed
@@ -202,6 +204,7 @@ export function FlightDetail({
     }
   }, [indexEntry, flightId])
   const flight = derivedManifest ?? (derivedFeature ? null : (liveFlight ?? fetched ?? seed))
+  const coverage = useLiveCoverage(flight?.feature ?? derivedFeature ?? null)
   const seeded = !derivedManifest && !derivedFeature && !liveFlight && !fetched && seed != null
   /** The stage a "Continue" would enter at — first one without evidence. */
   const derivedEntry = derivedRail ? derivedEntryStage(derivedRail) : null
@@ -635,6 +638,11 @@ export function FlightDetail({
           ✕
         </button>
       </header>
+      <CoverageFreshnessNotice freshness={coverage.value?.freshness} confirmed={coverage.confirmed} error={coverage.error} inFlight
+        blockedReason={externalMutationOwner ? externalMutationTooltip(externalMutationOwner, 'update coverage')
+          : activeCoverageJob || flight.status === 'running' || flight.status === 'waiting-for-approval'
+            ? 'Work is already active. Continue with its current owner; no duplicate recovery will be started.' : undefined}
+        onRecover={onStartFlight ? (stage) => { setSelectedStage(stage); onStartFlight(flight.feature, 'refly', stage) } : undefined} />
       {actionError && (
         <div
           data-testid="flight-action-error"

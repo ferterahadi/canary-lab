@@ -47,6 +47,37 @@ const read = (testId: string): string | undefined =>
   container.querySelector(`[data-testid="${testId}"]`)?.textContent ?? undefined
 
 describe('useLiveResource', () => {
+  it('withdraws trust offline, reconciles on visibility/focus, and exposes explicit retry', async () => {
+    vi.useFakeTimers()
+    let live!: LiveResource<string>
+    const fetcher = vi.fn(async () => 'current')
+    function Task() {
+      live = useLiveResource('coverage', 'events', fetcher, { reconcileMs: 5000, leaseMs: 15000, cache: 'live-events' })
+      return null
+    }
+    await act(async () => root.render(<Task />))
+    expect(live.confirmed).toBe(true)
+    await act(async () => window.dispatchEvent(new Event('offline')))
+    expect(live.confirmed).toBe(false)
+    expect(live.error).toContain('Connection lost')
+    await act(async () => window.dispatchEvent(new Event('focus')))
+    expect(live.confirmed).toBe(true)
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    const count = fetcher.mock.calls.length
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+    expect(fetcher).toHaveBeenCalledTimes(count)
+    visibility.mockReturnValue('visible')
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+    expect(fetcher).toHaveBeenCalledTimes(count + 1)
+    fetcher.mockRejectedValueOnce('unavailable')
+    await act(async () => live.refresh())
+    expect(live.error).toBe('unavailable')
+    expect(live.value).toBe('current')
+    await act(async () => window.dispatchEvent(new Event('online')))
+    expect(live.confirmed).toBe(true)
+    visibility.mockRestore()
+  })
+
   it('reconciles a missed completion event, retains state through failures, and stops terminal polling', async () => {
     vi.useFakeTimers()
     const fetcher = vi.fn<() => Promise<string>>()
@@ -141,6 +172,26 @@ describe('useLiveResource', () => {
   it('treats a resolved undefined as absent', async () => {
     await render({ id: 'checkout', fetcher: async () => undefined as unknown as string })
     expect(read('value')).toBe('—')
+    await render({ id: 'cached-absent', cache: 'absent', fetcher: async () => undefined as unknown as string })
+    expect(read('value')).toBe('—')
+  })
+
+  it('ignores an already queued freshness-expiry callback after unmount', async () => {
+    const original = globalThis.setTimeout
+    let expiry: (() => void) | undefined
+    const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((handler: () => void, ms?: number) => {
+      if (ms === 15000) expiry = handler
+      return original(handler, ms)
+    }) as typeof setTimeout)
+    function Task() {
+      useLiveResource('coverage', 'late-lease', async () => 'current', { reconcileMs: 5000, leaseMs: 15000 })
+      return null
+    }
+    await act(async () => root.render(<Task />))
+    expect(expiry).toBeDefined()
+    await act(async () => root.render(null))
+    await act(async () => expiry!())
+    timer.mockRestore()
   })
 
   it('ignores a fetch that resolves after its key changed', async () => {

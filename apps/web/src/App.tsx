@@ -539,6 +539,11 @@ export function App() {
         onReturnToFlight={openFlight}
         notificationControl={<NotificationCenter open={nav.notificationsOpen} suppressToast={nav.routedDialog !== null} onOpenChange={nav.setNotificationsOpen} onNavigate={(target) => {
           if (target.kind === 'flight') openFlight(target.flightId)
+          else if (target.kind === 'coverage') {
+            setSelectedFeature(target.feature)
+            openFlight(target.flightId ?? derivedFlightToken(target.feature))
+            setFlightStage(target.stage)
+          }
           else {
             if ('runId' in target && target.runId) navigateToRun(target.feature, target.runId)
             else { setSelectedFeature(target.feature); setSelectedRunId(null); setView('workspace') }
@@ -573,6 +578,10 @@ export function App() {
               generatingFlight={coverageGeneratingFlight}
               onOpenFlight={openFlight}
               coverageJobs={coverageJobs}
+              onOpenRecovery={(stage) => {
+                openFlight(flights.find((flight) => flight.feature === selectedFeature)?.flightId ?? derivedFlightToken(selectedFeature))
+                setFlightStage(stage)
+              }}
               onOpenGeneration={(job) => {
                 invalidate('coverage')
                 openActivity(job.feature, { kind: job.kind === 'summary' ? 'condensing' : 'mapping', jobId: job.jobId })

@@ -97,6 +97,28 @@ a job.
 
 ## Coverage Loop
 
+### Freshness and connected-session updates
+
+Canary must show current state without refreshing the browser. Read `freshness`
+and the `coverageUpdate` added to related tool replies before reporting numbers
+or choosing the next action. Stale, updating, unavailable or missing freshness
+means the displayed measurements are historical; do not call them current.
+While actively monitoring this suite, use `wait_for_feature_change(feature,
+afterRevision, timeout_ms:30000)` and retain its revision. Omit the revision to
+catch up after reconnecting. This reaches the agent through a tool response; it
+does not promise to wake an idle Claude/Codex host.
+
+Follow `nextAction` only within the user's task and existing launch permissions.
+Documents invalidate requirements then mapping; test/helper/config changes
+invalidate mapping and may require a later verification run. Reuse valid earlier
+Flight stages. Respect `activeJobId`, its owner and any active Flight: continue
+owned work, never create a competing recovery. A rejected stale-input submission
+releases its job; obtain new context instead of resubmitting an obsolete answer.
+After recovery, re-read the ledger. Mapping completeness, latest-run outcomes and
+historical enforcement proof are separate; an old pass cannot conceal a newer
+failure. Do not clear summaries, weaken tests or launch paid work just to remove
+a freshness warning.
+
 **Start by reading the ledger, not by regenerating it**: call
 `get_feature_coverage(feature)` first and branch on `state`:
 

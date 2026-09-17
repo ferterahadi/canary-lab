@@ -375,6 +375,8 @@ export interface ProposedMapping {
 }
 
 export interface CoverageLedger {
+  /** Present on authoritative suite reads; absent on the pure math result. */
+  freshness?: import('./freshness').CoverageFreshness
   feature: string
   requirements: RequirementCoverage[]
   tests: TestCoverage[]
@@ -435,6 +437,9 @@ export interface CoverageJobModels {
 }
 
 export interface CoverageJobManifest {
+  /** Input revision pinned before handing work to an external agent. */
+  inputRevision?: string
+  inferenceSnapshot?: { tests: Record<string, string>; requirements: Record<string, string>; sourceRevision?: string; readable?: boolean }
   jobId: string
   feature: string
   kind: CoverageJobKind

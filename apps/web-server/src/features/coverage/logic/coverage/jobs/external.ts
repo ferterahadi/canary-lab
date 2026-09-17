@@ -51,6 +51,17 @@ function defaultJobId(): string {
   return `cj_${crypto.randomBytes(6).toString('hex')}`
 }
 
+/** A stale answer cannot be retried against its old context. Release the job's
+ * single-flight claim so the same session can request current inputs. */
+function applyCurrentInputs<T>(job: CoverageJobManifest, deps: ExternalCoverageDeps, now: () => string, apply: () => T): T {
+  try { return apply() } catch (error) {
+    if (error instanceof Error && 'statusCode' in error && error.statusCode === 409) {
+      deps.store.save({ ...job, status: 'failed', endedAt: now(), error: error.message, log: job.log + `[external] ${error.message}\n` })
+    }
+    throw error
+  }
+}
+
 /** Create an external coverage job and return the mapping context for the client.
  *  Returns `needs-summary` (no job created) when the feature has no PRD summary —
  *  the client must run start_external_summary (then submit_external_summary) first.
@@ -85,6 +96,7 @@ export function startExternalCoverage(
     // covers it. Recomputing the roster at submit time instead would blame the
     // client for a test added to the feature after it started reading.
     externalTestRoster: context.tests.map((t) => t.testName),
+    inferenceSnapshot: context.inferenceSnapshot,
     ...(args.clientKind ? { externalClientKind: args.clientKind } : {}),
     externalSessionId: args.sessionId,
     ...(args.conversationName ? { externalConversationName: args.conversationName } : {}),
@@ -145,13 +157,14 @@ export function submitExternalCoverage(
     if (missing.length) throw new IncompleteCoverageAnswerError(missing, job.externalTestRoster.length)
   }
 
-  const result = applyExternalCoverageMappings({
+  const result = applyCurrentInputs(job, deps, now, () => applyExternalCoverageMappings({
     featuresDir: args.featuresDir,
     logsDir: args.logsDir,
     feature: job.feature,
     mappings: args.mappings,
+    ...(job.inferenceSnapshot ? { inference: { snapshot: job.inferenceSnapshot, roster: job.externalTestRoster ?? [] } } : {}),
     now: now(),
-  })
+  }))
 
   const manifest: CoverageJobManifest = {
     ...job,
@@ -209,6 +222,7 @@ export function startExternalSummary(
     jobId: newJobId(),
     feature: args.feature,
     kind: 'summary',
+    inputRevision: built.context.docsHash,
     status: 'running',
     startedAt: now(),
     log: '[external] PRD summary offloaded to the calling client — Canary will write the summary on submit_external_summary\n',
@@ -250,13 +264,14 @@ export function submitExternalSummary(
   if (job.producer !== 'external') throw new Error('only external summary jobs can be submitted through this tool')
   if (job.kind !== 'summary') throw new Error(`job ${args.jobId} is a ${job.kind} job, not a summary job`)
 
-  const result = applyExternalSummary({
+  const result = applyCurrentInputs(job, deps, now, () => applyExternalSummary({
     featuresDir: args.featuresDir,
     feature: job.feature,
     requirements: args.requirements,
+    expectedDocsHash: job.inputRevision,
     ...(args.variantDimension ? { variantDimension: args.variantDimension } : {}),
     now: now(),
-  })
+  }))
 
   const manifest: CoverageJobManifest = {
     ...job,

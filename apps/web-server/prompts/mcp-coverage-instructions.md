@@ -1,4 +1,4 @@
-Canary Lab — coverage profile. Feature docs → PRD summary → coverage ledger; this client reads docs/tests and submits the mapping.
+Canary Lab — coverage: docs → requirements → test mappings.
 
 - Docs: write_feature_doc puts markdown into features/<feature>/docs/ (or link_path links a LOCAL file); list_/delete_feature_doc list/remove them. After any doc change refresh the summary YOURSELF (start_external_summary → submit_external_summary).
 - Ledger: get_feature_coverage(feature) returns requirements → covering tests → gap type (untested/path-incomplete/covered), a claim-based coverage %, per-test strength, orphanTestNames, a proven axis when a run exists (provenPct: the covering test passed), and per requirement an enforcement.state — proven-unchanged / tests-weakened (a mapped test got weaker AFTER the proof: restore the assertion, never re-run) / proof-stale / wording-ahead; report the state, never your own claim. Link a test to a requirement with tags ON the test: test('…', { tag: ['@req-R3', '@path-happy'] }, …). When BLOCKED follow next. start_external_summary discovers sources first; elicit only unresolved material. Never invent requirements.
@@ -6,7 +6,12 @@ Canary Lab — coverage profile. Feature docs → PRD summary → coverage ledge
 
 Full guide: get_workflow_guide(workflow:"coverage").
 
+Read coverageUpdate; wait_for_feature_change monitors freshness.
+
 <!-- initialize-cut -->
+
+Freshness is mandatory: read freshness and coverageUpdate on related replies. Stale/updating/unavailable/missing freshness means historical measurements, never current coverage. Use wait_for_feature_change(feature, afterRevision, timeout_ms:30000) while actively monitoring; omit the revision after reconnecting for catch-up. Follow nextAction only within the authorized task: requirements then mappings after document changes, mappings after test/helper/config changes, verification after changed inputs. Existing jobs/Flight owners take precedence; never spawn duplicate recovery. A stale-input submission is rejected and releases its job: obtain new context, do not resubmit the old answer. Latest-run outcomes and historical enforcement proof are distinct; a newer failure is not hidden by an older pass. Re-read the ledger after recovery.
+
 Details:
 
 - Docs: write_feature_doc puts markdown into features/<feature>/docs/ (create-or-replace, .md/.markdown only), or links a LOCAL file in place via link_path (symlink — the user's original stays the live source; .txt allowed for links) — the home for feature-scoped prose, and where "add this plan/distillation to feature <name>" or "use ~/…/prd.md as the requirements" goes (use a descriptive relPath). list_feature_docs(feature) lists the docs feeding the PRD; delete_feature_doc(feature, relPath) removes a source doc. After any doc change refresh the summary YOURSELF with start_external_summary(feature, session_id) → submit_external_summary (requirement ids are preserved).

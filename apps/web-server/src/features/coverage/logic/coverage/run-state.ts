@@ -24,6 +24,16 @@ export interface CoverageRunState {
    *  number until the next real coverage computation refreshes the record. */
   coveragePct?: number
   ranAt: string
+  /** Conservative proof boundary: changed mapping inputs need a later run.
+   * Re-mapping cannot launder an older pass into proof of new helper/config bytes. */
+  verificationRequiredAfter?: string
+}
+
+export function verificationBoundary(prior: CoverageRunState | null, tests: Record<string, string>, now: string): string | undefined {
+  const previous = prior?.mappingInference?.tests
+  const changed = !previous || Object.keys(previous).length !== Object.keys(tests).length
+    || Object.entries(tests).some(([name, fingerprint]) => previous[name]?.fingerprint !== fingerprint)
+  return changed ? now : prior?.verificationRequiredAfter
 }
 
 function statePath(featureDir: string): string {

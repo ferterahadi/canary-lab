@@ -447,10 +447,10 @@ describe('useWorkspaceData — workspace events', () => {
     const before = api.listFeatures.mock.calls.length
 
     await fire({ type: 'tests-changed', feature: 'search' })
-    expect(harness.invalidated).toEqual([])
+    expect(harness.invalidated).toEqual([['coverage', undefined]])
 
     await fire({ type: 'tests-changed', feature: 'checkout' })
-    expect(harness.invalidated).toEqual([['tests', undefined]])
+    expect(harness.invalidated).toEqual([['coverage', undefined], ['coverage', undefined], ['tests', undefined]])
     expect(api.listFeatures.mock.calls.length).toBe(before + 2)
   })
 
@@ -459,9 +459,9 @@ describe('useWorkspaceData — workspace events', () => {
     await mount({ initialSelectedFeature: 'checkout' })
     harness.featureRef.current = 'checkout'
     await fire({ type: 'tests-dirty-changed', feature: 'search' })
-    expect(harness.invalidated).toEqual([])
+    expect(harness.invalidated).toEqual([['coverage', undefined]])
     await fire({ type: 'tests-dirty-changed', feature: 'checkout' })
-    expect(harness.invalidated).toEqual([['tests', undefined]])
+    expect(harness.invalidated).toEqual([['coverage', undefined], ['coverage', undefined], ['tests', undefined]])
   })
 
   it('re-reads features on envset and dirty-test changes' , async () => {
@@ -472,7 +472,7 @@ describe('useWorkspaceData — workspace events', () => {
     await fire({ type: 'tests-dirty-changed', feature: 'checkout' })
 
     expect(api.listFeatures.mock.calls.length).toBe(before + 2)
-    expect(harness.invalidated).toEqual([])
+    expect(harness.invalidated).toEqual([['coverage', undefined]])
   })
 
   it('invalidates the robustness slot on a robustness job write', async () => {

@@ -51,7 +51,9 @@ describe('retired requirement confirmation endpoint', () => {
     const res = await app.inject({ method: 'POST', url: '/api/features/checkout/requirements/R1/accept' })
     expect(res.statusCode).toBe(404)
     expect(fs.readFileSync(file, 'utf-8')).toBe(before)
-    expect((await app.inject({ method: 'GET', url: '/api/features/checkout/coverage' })).json()).toEqual(ledgerBefore)
+    expect((await app.inject({ method: 'GET', url: '/api/features/checkout/coverage' })).json()).toEqual({
+      ...ledgerBefore, freshness: { ...ledgerBefore.freshness, checkedAt: expect.any(String) },
+    })
     expect(events).toEqual([])
   })
 })

@@ -39,6 +39,7 @@ export interface SummaryAuthoringDoc {
 }
 
 export interface SummaryAuthoringContext {
+  docsHash: string
   feature: string
   /** The source docs to read (their absolute paths are embedded in the prompt). */
   docs: SummaryAuthoringDoc[]
@@ -66,6 +67,7 @@ export function buildSummaryAuthoringContext(args: { featuresDir: string; featur
   return {
     kind: 'ok',
     context: {
+      docsHash: collection.docsHash,
       feature: args.feature,
       docs: collection.entries.map((e) => ({ relPath: e.relPath, absPath: path.join(collection.docsDir, e.relPath) })),
       previousRequirementIds: (previous?.requirements ?? []).map((r) => r.id),
@@ -75,6 +77,7 @@ export function buildSummaryAuthoringContext(args: { featuresDir: string; featur
 }
 
 export interface ApplyExternalSummaryArgs {
+  expectedDocsHash?: string
   featuresDir: string
   feature: string
   requirements: ParsedRequirement[]
@@ -100,6 +103,9 @@ export function applyExternalSummary(args: ApplyExternalSummaryArgs): ApplyExter
   const featureDir = found.featureDir
   const collection = readDocsCollection(featureDir)
   const previous = readPrdSummary(featureDir)
+  if (args.expectedDocsHash !== undefined && args.expectedDocsHash !== collection.docsHash) {
+    throw Object.assign(new Error('Source documents changed during summarization. Start a new summary pass against the current documents.'), { statusCode: 409 })
+  }
   const summary = assembleSummary(collection, previous, args.requirements, args.variantDimension, args.now)
   const written = writePrdSummary(featureDir, found.name, summary)
   return {
@@ -252,6 +258,9 @@ export async function regeneratePrdSummary(
     onSession: args.onAgentSession,
     models: args.models,
   })
+  if (readDocsCollection(featureDir).docsHash !== collection.docsHash) {
+    throw Object.assign(new Error('Source documents changed during summarization. Retry against the current documents.'), { statusCode: 409 })
+  }
   const written = writePrdSummary(featureDir, found.name, summary)
   return {
     feature: args.feature,

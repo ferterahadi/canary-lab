@@ -30,7 +30,7 @@ function render(ledger: CoverageLedger, extra: Partial<Parameters<typeof Coverag
   act(() => {
     root.render(
       <CoverageHeader
-        ledger={ledger}
+        ledger={{ ...ledger, freshness: { ...LEDGER.freshness!, state: 'current', reasons: [] } }}
         gapFilter={null}
         onToggleGap={() => {}}
         strengthFilter={null}
@@ -60,7 +60,7 @@ describe('CoverageHeader — headline block', () => {
     render(led)
     const sub = q('coverage-sub')
     expect(sub?.textContent).toContain('2/3 mapped')
-    expect(sub?.textContent).toContain('1/3 proven in run run-9')
+    expect(sub?.textContent).toContain('1/3 historically proven in run run-9')
     expect(sub?.querySelector('[data-testid="orphan-note"]')?.textContent).toContain('1 stale tag')
     expect(sub?.classList.contains('clcov-card')).toBe(true)
     expect(q('coverage-hero')?.contains(sub!)).toBe(true)

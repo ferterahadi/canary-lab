@@ -12,7 +12,7 @@ import {
 } from './annotate-engine'
 import { writeCoversTag } from './tag-writer'
 import { changedRequirementIds, requirementFingerprintMap, requirementsSetHash } from './fingerprints'
-import { readCoverageRunState, writeCoverageRunState } from './run-state'
+import { readCoverageRunState, verificationBoundary, writeCoverageRunState } from './run-state'
 import { mappingInferenceSnapshot, rememberMappingInference, unexaminedMappingTests, type MappingInferenceSnapshot, type MappingTestInput } from './mapping-cache'
 import { readPrdSummary } from './prd-summary'
 import { clearPrdSummary } from './feature-docs'
@@ -73,7 +73,7 @@ export interface RunCoverageEngineResult {
   ledger: CoverageLedger
 }
 
-function mappingInputs(featureDir: string): MappingTestInput[] {
+export function mappingInputs(featureDir: string): MappingTestInput[] {
   return collectTests(featureDir).collected.map((c) => ({
     name: c.input.name,
     file: path.relative(featureDir, c.absFile),
@@ -195,7 +195,7 @@ export async function runCoverageEngine(
   const inputsUnchanged = JSON.stringify(snapshot) === JSON.stringify(
     mappingInferenceSnapshot(featureDir, mappingInputs(featureDir), liveRequirements, liveSummary?.variantDimension),
   )
-  if (args.incremental && !inputsUnchanged) {
+  if (!inputsUnchanged || snapshot.readable === false) {
     throw Object.assign(new Error('Mapping inputs changed while the agent worked — retry against the current tests.'), { statusCode: 409 })
   }
 
@@ -222,6 +222,7 @@ export async function runCoverageEngine(
   // Record the requirements set the engine just ran against — coverage drops to
   // STALE when the set later moves (R3 signal; R10 turns it into a delta re-infer).
   const runState = {
+    verificationRequiredAfter: verificationBoundary(prior, snapshot.tests, args.now ?? new Date().toISOString()),
     requirementsHash: summary?.requirementsHash ?? requirementsSetHash(requirements),
     requirementFingerprints: requirementFingerprintMap(requirements),
     mappingInference: inputsUnchanged ? rememberMappingInference(
@@ -299,7 +300,7 @@ export function buildCoverageMappingContext(args: { featuresDir: string; feature
       assertions: t.assertions,
     })),
     prompt,
-    ...(args.incremental ? { inferenceSnapshot: snapshot } : {}),
+    inferenceSnapshot: snapshot,
   }
 }
 
@@ -333,11 +334,12 @@ export function applyExternalCoverageMappings(args: ApplyExternalCoverageArgs): 
     : requirements
   if (args.inference) {
     const live = mappingInferenceSnapshot(featureDir, mappingInputs(featureDir), inferredRequirements, summary?.variantDimension)
-    if (JSON.stringify(live) !== JSON.stringify(args.inference.snapshot)) {
+    if (live.readable === false || JSON.stringify(live) !== JSON.stringify(args.inference.snapshot)) {
       throw Object.assign(new Error('Mapping inputs changed during the handoff — rebuild the mapping context before submitting.'), { statusCode: 409 })
     }
   }
   const prior = readCoverageRunState(featureDir)
+  const beforeTests = mappingInferenceSnapshot(featureDir, mappingInputs(featureDir), requirements, summary?.variantDimension).tests
   const knownIds = new Set(inferredRequirements.filter((r) => !r.deprecated).map((r) => r.id))
 
   const { collected } = collectTests(featureDir)
@@ -370,6 +372,7 @@ export function applyExternalCoverageMappings(args: ApplyExternalCoverageArgs): 
   // Mirror runCoverageEngine: record the requirements set this pass ran against,
   // so coverage drops to STALE when the set later moves.
   const runState = {
+    verificationRequiredAfter: verificationBoundary(prior, beforeTests, args.now ?? new Date().toISOString()),
     requirementsHash: summary?.requirementsHash ?? requirementsSetHash(requirements),
     requirementFingerprints: requirementFingerprintMap(requirements),
     ...(args.inference ? {

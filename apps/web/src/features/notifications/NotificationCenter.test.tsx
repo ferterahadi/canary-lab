@@ -24,7 +24,21 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); container.remove() })
 const button = (text: string) => [...document.querySelectorAll('button')].find((b) => b.textContent === text)!
 const labelled = (label: string) => document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!
-it('counts unread messages independently of resolution and shows them directly in both filters', async () => {
+
+it('opens the affected Flight stage from a coverage warning without running recovery', async () => {
+  const coverage = { kind: 'coverage' as const, feature: 'shop', flightId: 'fl-shop', stage: 'prd-summary' as const }
+  rows = [{ ...rows[0], title: 'shop: coverage freshness needs attention', body: 'Source requirements changed.', severity: 'warning', target: coverage }]
+  const navigate = vi.fn()
+  const close = vi.fn()
+  await act(async () => root.render(<NotificationCenter open onOpenChange={close} onNavigate={navigate} />))
+  await act(async () => labelled('Open flight').click())
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(coverage)
+  expect(close).toHaveBeenCalledWith(false)
+  expect(api.readNotification).toHaveBeenCalledWith('n1')
+  expect(api.deleteNotification).not.toHaveBeenCalled()
+})
+
+it('counts only actionable messages and keeps resolved rows in history', async () => {
   rows = [
     { ...rows[0], id: 'resolved-unread', resolvedAt: 'now' },
     { ...rows[0], id: 'resolved-read', resolvedAt: 'now', readAt: 'now' },
@@ -32,30 +46,32 @@ it('counts unread messages independently of resolution and shows them directly i
     { ...rows[0], id: 'active-unread' },
   ]
   await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={vi.fn()} />))
-  expect(labelled('Notifications, 2 unread')).not.toBeNull()
-  expect(button('All 4')).toBeDefined()
-  expect(button('Unread 2')).toBeDefined()
-  expect([...document.querySelectorAll('button')].some((element) => element.textContent?.startsWith('Resolved'))).toBe(false)
-  for (const item of rows) expect(document.querySelector(`[data-testid="notification-${item.id}"]`)).not.toBeNull()
-  expect(api.readNotification).not.toHaveBeenCalled()
-  await act(async () => button('Unread 2').click())
-  expect(document.querySelector('[data-testid="notification-resolved-unread"]')?.textContent).toContain('Unread')
+  expect(labelled('Notifications, 2 need attention')).not.toBeNull()
+  expect(button('Needs attention 2')).toBeDefined()
+  expect(button('History 2')).toBeDefined()
+  expect(document.querySelector('[data-testid="notification-active-read"]')).not.toBeNull()
   expect(document.querySelector('[data-testid="notification-active-unread"]')).not.toBeNull()
+  expect(document.querySelector('[data-testid="notification-resolved-unread"]')).toBeNull()
   expect(document.querySelector('[data-testid="notification-resolved-read"]')).toBeNull()
+  expect(api.readNotification).not.toHaveBeenCalled()
+  await act(async () => labelled('Mark read').click())
+  expect(labelled('Notifications, 2 need attention')).not.toBeNull()
+  expect(document.querySelector('[data-testid="notification-active-unread"]')).not.toBeNull()
+  await act(async () => button('History 2').click())
+  expect(document.querySelector('[data-testid="notification-resolved-unread"]')?.textContent).toContain('Unread')
+  expect(document.querySelector('[data-testid="notification-resolved-read"]')).not.toBeNull()
+  expect(document.querySelector('[data-testid="notification-active-unread"]')).toBeNull()
   expect(document.querySelector('[data-testid="notification-active-read"]')).toBeNull()
   await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="notification-resolved-unread"] [aria-label="Mark read"]')!.click())
-  expect(labelled('Notifications, 1 unread')).not.toBeNull()
-  expect(button('Unread 1')).toBeDefined()
-  expect(document.querySelector('[data-testid="notification-resolved-unread"]')).toBeNull()
-  await act(async () => button('All 4').click())
+  expect(labelled('Notifications, 2 need attention')).not.toBeNull()
   expect(document.querySelector('[data-testid="notification-resolved-unread"]')?.textContent).toContain('Resolved')
   expect(document.querySelector('[data-testid="notification-resolved-unread"]')?.textContent).not.toContain('Unread')
 })
 
-it('counts resolved unread alerts without presenting them as active review toasts', async () => {
+it('keeps resolved unread alerts out of the attention count and toast', async () => {
   rows = [{ ...rows[0], resolvedAt: 'now', severity: 'danger' }]
   await act(async () => root.render(<NotificationCenter open={false} onOpenChange={vi.fn()} onNavigate={vi.fn()} />))
-  expect(labelled('Notifications, 1 unread')).not.toBeNull()
+  expect(labelled('Notifications, 0 need attention')).not.toBeNull()
   expect(button('Review test changes')).toBeUndefined()
   expect(labelled('Delete notification permanently')).toBeNull()
 })
@@ -86,6 +102,7 @@ it('keeps neutral notes and resolved reviews grey instead of implying unfinished
     { ...rows[0], id: 'resolved', resolvedAt: 'now', severity: 'warning' },
   ]
   await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={vi.fn()} />))
+  await act(async () => button('History 2').click())
   for (const id of ['note', 'resolved']) {
     expect(document.querySelector(`[data-testid="notification-${id}"] .cl-status-dot`)?.className).toContain('bg-idle')
   }
@@ -112,7 +129,7 @@ it('deletes through the persistent API and removes the row only after success', 
   expect(document.querySelector('[data-testid="notification-n1"]')).not.toBeNull()
   await act(async () => labelled('Delete permanently').click())
   expect(document.querySelector('[data-testid="notification-n1"]')).toBeNull()
-  expect(document.body.textContent).toContain('No notifications')
+  expect(document.body.textContent).toContain('Nothing needs attention')
 })
 
 it('shows a retryable loading failure rather than an empty inbox', async () => {
@@ -151,11 +168,25 @@ it('ignores an older fetch arriving after a read mutation', async () => {
   expect(state.items[0].readAt).toBe('now')
 })
 
+it('reconciles notifications after a dropped workspace event', async () => {
+  vi.useFakeTimers()
+  function Probe() { useNotifications(); return null }
+  try {
+    await act(async () => root.render(<Probe />))
+    expect(api.getNotifications).toHaveBeenCalledTimes(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(api.getNotifications).toHaveBeenCalledTimes(2)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 
 it('opens the run instead of asking for another review after a notification resolves', async () => {
   rows = rows.map((row) => ({ ...row, resolvedAt: '2026-09-08T12:00:00Z' }))
   const navigate = vi.fn()
   await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={navigate} />))
+  await act(async () => button('History 1').click())
   await act(async () => labelled('Open run').click())
   expect(navigate).toHaveBeenCalledWith({ kind: 'run', feature: 'shop', runId: 'run-1' })
 })
@@ -171,26 +202,27 @@ it('has no manual note creation and opens a feature-level weakening hint without
   expect(navigate).toHaveBeenCalledWith({ kind: 'test-review', feature: 'shop' })
 })
 
-it('orders weakening hints before ordinary attention and filters only read items', async () => {
+it('orders weakening hints before ordinary attention and separates resolved history', async () => {
   rows.push({ id: 'weak', title: 'Possible weakening', body: 'Review', severity: 'danger', target: { kind: 'test-review', feature: 'shop' }, createdAt: '2026-09-07T10:00:00Z' })
   rows.push({ id: 'done', title: 'Resolved', body: '', target, resolvedAt: 'now', createdAt: '2026-09-09T10:00:00Z' })
   await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={vi.fn()} />))
-  expect([...document.querySelectorAll('[data-testid^="notification-"]')].map((element) => element.getAttribute('data-testid'))).toEqual(['notification-center', 'notification-weak', 'notification-n1', 'notification-done'])
+  expect([...document.querySelectorAll('[data-testid^="notification-"]')].map((element) => element.getAttribute('data-testid'))).toEqual(['notification-center', 'notification-weak', 'notification-n1'])
   // Only the row to act on first carries the filled accent; the rest stay ghost
   // buttons, so the fill reads as "start here" rather than "this is a button".
   expect(document.querySelector('[data-testid="notification-weak"] [aria-label="Review test changes"]')?.className).toContain('cl-button-primary')
   expect(document.querySelector('[data-testid="notification-n1"] [aria-label="Review test changes"]')?.className).not.toContain('cl-button-primary')
   await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="notification-weak"] [aria-label="Mark read"]')!.click())
-  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('nav[aria-label="Notification filter"] button')][1].click())
-  expect(document.querySelector('[data-testid="notification-weak"]')).toBeNull()
+  expect(document.querySelector('[data-testid="notification-weak"]')).not.toBeNull()
+  await act(async () => button('History 1').click())
   expect(document.querySelector('[data-testid="notification-done"]')).not.toBeNull()
-  expect(document.querySelector('[data-testid="notification-n1"]')).not.toBeNull()
+  expect(document.querySelector('[data-testid="notification-n1"]')).toBeNull()
 })
 
 it('opens a resolved feature-only alert as the suite, not an active review', async () => {
   rows = [{ id: 'resolved', title: 'Tests changed', body: '', target: { kind: 'test-review', feature: 'shop' }, resolvedAt: 'now', createdAt: '2026-09-09T10:00:00Z' }]
   const navigate = vi.fn()
   await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={navigate} />))
+  await act(async () => button('History 1').click())
   await act(async () => labelled('Open suite').click())
   expect(navigate).toHaveBeenCalledWith({ kind: 'feature', feature: 'shop' })
 })

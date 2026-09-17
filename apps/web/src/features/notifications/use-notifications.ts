@@ -24,6 +24,13 @@ export function useNotifications() {
     void refresh()
     return () => { generation.current++ }
   }, [refresh, version])
+  // Workspace events are the fast path. The bus has no replay, so a bounded
+  // reconciliation keeps this attention surface current after a dropped frame
+  // even when the socket never disconnects and triggers its full resync.
+  useEffect(() => {
+    const interval = setInterval(() => { void refresh() }, 10_000)
+    return () => clearInterval(interval)
+  }, [refresh])
 
   const act = async (action: () => Promise<unknown>): Promise<boolean> => {
     setBusy(true)

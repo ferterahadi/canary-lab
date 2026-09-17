@@ -1,8 +1,5 @@
 import type {
-  CallToolResult,
   Icon,
-  InputRequiredResult,
-  ServerContext,
   ToolAnnotations,
 } from '@modelcontextprotocol/server'
 import type { z } from 'zod'
@@ -14,6 +11,10 @@ import { registerRobustnessTools } from './tool-groups/robustness'
 import { registerReadTools } from './tool-groups/reads'
 import { registerTestReviewTools } from './tool-groups/test-review'
 import { registerRunLifecycleTools } from './tool-groups/run-lifecycle'
+import { registerCoverageChangeTools } from './tool-groups/coverage-changes'
+import { withCoverageCatchup } from './coverage-catchup'
+import type { CanaryLabToolHandler } from './tool-schemas'
+export type { CanaryLabToolHandler } from './tool-schemas'
 import {
   FULL_TOOLS,
   type CanaryLabMcpToolName,
@@ -29,11 +30,6 @@ export interface CanaryLabToolConfig {
   icons?: Icon[]
   _meta?: Record<string, unknown>
 }
-
-export type CanaryLabToolHandler = (
-  args: Record<string, unknown>,
-  ctx: ServerContext,
-) => CallToolResult | InputRequiredResult | Promise<CallToolResult | InputRequiredResult>
 
 export interface CanaryLabToolDefinition {
   name: CanaryLabMcpToolName
@@ -62,7 +58,7 @@ export function createCanaryLabToolRegistry(
     if (captured.has(toolName)) {
       throw new Error(`MCP tool is registered more than once: ${name}`)
     }
-    captured.set(toolName, { name: toolName, config, handler })
+    captured.set(toolName, { name: toolName, config, handler: withCoverageCatchup(toolName, handler, baseContext.deps) })
   }) as unknown as ToolGroupContext['registerTool']
 
   const ctx: ToolGroupContext = { ...baseContext, registerTool }
@@ -74,6 +70,7 @@ export function createCanaryLabToolRegistry(
   registerHealFlowTools(ctx)
   registerDiscoveryRepairTools(ctx)
   registerRobustnessTools(ctx)
+  registerCoverageChangeTools(ctx)
 
   const missing = FULL_TOOLS.filter((name) => !captured.has(name))
   if (missing.length > 0) {

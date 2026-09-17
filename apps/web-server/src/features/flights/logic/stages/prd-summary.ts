@@ -12,6 +12,7 @@ import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectS
 import { agentProgressSink } from './agent-progress'
 import { recordStageAgentSession } from './stage-agent-sessions'
 import { clearRequirementsDraft, readRequirementsDraft } from './requirements-draft'
+import { readDocsCollection } from '../../../coverage/logic/coverage/docs-collection'
 
 // Distill features/<f>/docs/ into the requirement summary through the
 // existing agentic PRD engine (stable requirement ids preserved by the engine
@@ -25,21 +26,6 @@ import { clearRequirementsDraft, readRequirementsDraft } from './requirements-dr
 // context), and the submitted requirements go through the SAME canonical
 // assembler (applyExternalSummary: id reconciliation, summary write). The
 // verdict is still this stage's own disk predicate, whoever produced it.
-
-function newestDocMtime(featureDir: string): number {
-  const docsDir = path.join(featureDir, 'docs')
-  let newest = 0
-  try {
-    for (const f of fs.readdirSync(docsDir)) {
-      if (f.startsWith('_')) continue
-      const mtime = fs.statSync(path.join(docsDir, f)).mtimeMs
-      if (mtime > newest) newest = mtime
-    }
-  } catch {
-    /* no docs dir */
-  }
-  return newest
-}
 
 export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
   const liveCount = (s: NonNullable<ReturnType<typeof readPrdSummary>>) =>
@@ -126,6 +112,7 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
         ? `That summary was rejected: ${lastRejection}. Fix it and respond again with { requirements[] } on \`data\` — or answer "run-internally" to hand the step to Canary's own agent.`
         : 'Distill the requirement docs into testable requirements in your own client (the prompt lists the docs to read and the prior ids to preserve), then respond with { requirements[], variantDimension? } on `data`. Canary reconciles ids against the prior summary and writes the summary files itself.',
       context: {
+        docsHash: built.context.docsHash,
         docs: built.context.docs,
         previousRequirementIds: built.context.previousRequirementIds,
         answerShape: { requirements: 'requirement[] — the shape the prompt specifies', variantDimension: '{ name, values }?' },
@@ -153,7 +140,7 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
       }
 
       const existing = readPrdSummary(featureDir)
-      if (existing && liveCount(existing) > 0 && Date.parse(existing.generatedAt) >= newestDocMtime(featureDir)) {
+      if (existing && liveCount(existing) > 0 && existing.docsHash === readDocsCollection(featureDir).docsHash) {
         return { kind: 'done', evidence: { requirementCount: liveCount(existing), reused: true } }
       }
 
@@ -177,12 +164,21 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
       if (!decoded.ok) return handOff(ctx, decoded.error)
       const parsed = parseSummarySubmission(decoded.data)
       if (!parsed.ok) return handOff(ctx, parsed.error)
-      applyExternalSummary({
-        featuresDir: deps.featuresDir,
-        feature: ctx.manifest().feature,
-        requirements: parsed.submission.requirements,
-        ...(parsed.submission.variantDimension ? { variantDimension: parsed.submission.variantDimension } : {}),
-      })
+      const checkpoint = ctx.manifest().stages.find((stage) => stage.key === 'prd-summary')?.checkpoint
+      const context = (checkpoint?.data as { context?: { docsHash?: string } } | undefined)?.context
+      if (!context?.docsHash) return handOff(ctx, 'Source revision was not recorded. Read the current source documents before submitting.')
+      try {
+        applyExternalSummary({
+          featuresDir: deps.featuresDir,
+          feature: ctx.manifest().feature,
+          expectedDocsHash: context.docsHash,
+          requirements: parsed.submission.requirements,
+          ...(parsed.submission.variantDimension ? { variantDimension: parsed.submission.variantDimension } : {}),
+        })
+      } catch (error) {
+        if ((error as { statusCode?: number }).statusCode !== 409) throw error
+        return handOff(ctx, 'Source documents changed. Read the refreshed context before submitting.')
+      }
       // The apply wrote through the canonical assembler (id spine preserved);
       // the verdict is still the disk re-read, same as the internal spawn's.
       return settleFromDisk(ctx)

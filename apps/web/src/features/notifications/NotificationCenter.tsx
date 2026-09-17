@@ -28,13 +28,13 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
   onNavigate: (target: NotificationTarget) => void
 }) {
   const inbox = useNotifications()
-  const [unreadOnly, setUnreadOnly] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
   const items = [...inbox.items].sort((a, b) => attentionRank(a) - attentionRank(b) || b.createdAt.localeCompare(a.createdAt))
-  const unread = items.filter((item) => !item.readAt)
-  const visible = unreadOnly ? unread : items
-  // Resolution ends the alert, but only reading the message clears its unread state.
-  const latest = unread.find((item) => !item.resolvedAt && item.target)
-  const hasWeakerHint = unread.some((item) => !item.resolvedAt && item.severity === 'danger')
+  const attention = items.filter(needsAttention)
+  const history = items.filter((item) => !needsAttention(item))
+  const visible = showHistory ? history : attention
+  const latest = attention.find((item) => !item.readAt && item.target)
+  const hasWeakerHint = attention.some((item) => item.severity === 'danger')
   const openItem = (item: WorkspaceNotification): void => {
     void inbox.read(item.id)
     onOpenChange(false)
@@ -45,11 +45,11 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
     } else onNavigate(target)
   }
   const row = (item: WorkspaceNotification, lead: boolean) => {
-    const hint = !item.resolvedAt && item.severity === 'danger'
+    const hint = !item.resolvedAt && item.severity === 'danger' && item.target?.kind === 'test-review'
     const state = needsAttention(item) ? 'warning' : 'idle'
     const target = item.target
     const reviewNeeded = target?.kind === 'test-review' && !item.resolvedAt
-    const action = target?.kind === 'flight' ? 'Open flight'
+    const action = target?.kind === 'flight' || target?.kind === 'coverage' ? 'Open flight'
       : target?.kind === 'test-review' && !item.resolvedAt ? 'Review test changes'
       : target && 'runId' in target && target.runId ? 'Open run' : 'Open suite'
     // Every row's meta line answers the same two questions — what kind of alert
@@ -108,12 +108,12 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
     <>
       <StatusPill
         name="Notifications"
-        dotState={inbox.error ? 'failed' : unread.length ? 'warning' : 'idle'}
-        count={unread.length}
+        dotState={inbox.error ? 'failed' : attention.length ? 'warning' : 'idle'}
+        count={attention.length}
         countTone={hasWeakerHint ? 'boot' : undefined}
         onClick={() => onOpenChange(true)}
-        title={inbox.error ?? `${items.length} notifications. Open the inbox to review messages.`}
-        ariaLabel={inbox.error ? 'Notifications unavailable — open to retry' : `Notifications, ${unread.length} unread`}
+        title={inbox.error ?? `${attention.length} need attention. ${history.length} in history.`}
+        ariaLabel={inbox.error ? 'Notifications unavailable — open to retry' : `Notifications, ${attention.length} need attention`}
       />
       {!open && !suppressToast && latest && (
         <ToastHost toasts={[{ id: latest.id, title: latest.title, body: latest.body, sticky: true, dismissOnOpen: false, dismissLabel: 'Delete notification permanently', actionLabel: latest.target?.kind === 'test-review' ? 'Review test changes' : 'Open details', onClick: () => openItem(latest) }]} onDismiss={(id) => { void inbox.remove(id) }} />
@@ -134,8 +134,8 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
         stableScrollGutter
         subheader={
           <nav className="flex gap-5 border-b border-line px-5 pt-2" aria-label="Notification filter">
-            <button className={`cl-tab ${!unreadOnly ? 'cl-tab-active' : ''}`} aria-pressed={!unreadOnly} onClick={() => setUnreadOnly(false)}>All <span className="cl-count-chip">{items.length}</span></button>
-            <button className={`cl-tab ${unreadOnly ? 'cl-tab-active' : ''}`} aria-pressed={unreadOnly} onClick={() => setUnreadOnly(true)}>Unread <span className="cl-count-chip">{unread.length}</span></button>
+            <button className={`cl-tab ${!showHistory ? 'cl-tab-active' : ''}`} aria-pressed={!showHistory} onClick={() => setShowHistory(false)}>Needs attention <span className="cl-count-chip">{attention.length}</span></button>
+            <button className={`cl-tab ${showHistory ? 'cl-tab-active' : ''}`} aria-pressed={showHistory} onClick={() => setShowHistory(true)}>History <span className="cl-count-chip">{history.length}</span></button>
           </nav>
         }
       >
@@ -145,11 +145,11 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
           <div className="px-5 py-6">
             <EmptyState
               testId="notification-center-empty"
-              {...(unreadOnly ? EMPTY_COPY.notificationsNoUnread : EMPTY_COPY.notificationsNone)}
+              {...(showHistory ? EMPTY_COPY.notificationsNoHistory : EMPTY_COPY.notificationsNoAttention)}
             />
           </div>
         )}
-        <ul className="divide-y divide-line">{visible.map((item, index) => row(item, index === 0 && !item.resolvedAt))}</ul>
+        <ul className="divide-y divide-line">{visible.map((item, index) => row(item, index === 0 && !showHistory))}</ul>
       </Modal>
     </>
   )

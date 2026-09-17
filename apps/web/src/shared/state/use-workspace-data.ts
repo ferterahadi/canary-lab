@@ -175,6 +175,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
             return
           }
           if (event.type === 'tests-changed') {
+            invalidate('coverage')
             if (selectedFeatureRef.current === event.feature) invalidate('tests')
             // Authored specs light the picker's derived rail (specs evidence).
             refreshFeatures(selectedFeatureRef.current)
@@ -189,6 +190,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
           // trace); a write to any of them re-reads the slot.
           if (event.type === 'robustness-changed') invalidate('robustness')
           if (event.type === 'tests-dirty-changed') {
+            invalidate('coverage')
             refreshFeatures(selectedFeatureRef.current)
             if (selectedFeatureRef.current === event.feature) invalidate('tests')
           }

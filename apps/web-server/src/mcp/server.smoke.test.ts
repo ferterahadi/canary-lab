@@ -28,6 +28,7 @@ const inertPtyFactory: PtyFactory = () => ({
 const uniqueSorted = (values: string[]): string[] => Array.from(new Set(values)).sort()
 
 const REPAIR_TOOLS = uniqueSorted([
+  'wait_for_feature_change',
   'get_test_review',
   'review_test_changes',
   'start_discovery_repair',
@@ -54,6 +55,7 @@ const REPAIR_TOOLS = uniqueSorted([
 ])
 
 const VERIFY_TOOLS = uniqueSorted([
+  'wait_for_feature_change',
   'get_workflow_guide',
   'abort_run',
   'boot_services',
@@ -69,6 +71,7 @@ const VERIFY_TOOLS = uniqueSorted([
 ])
 
 const AUTHOR_TOOLS = uniqueSorted([
+  'wait_for_feature_change',
   'get_workflow_guide',
   'apply_external_draft',
   'capture_feature_env_files',
@@ -90,6 +93,7 @@ const AUTHOR_TOOLS = uniqueSorted([
 ])
 
 const COVERAGE_TOOLS = uniqueSorted([
+  'wait_for_feature_change',
   'get_workflow_guide',
   'clear_prd_summary',
   'delete_feature_doc',
@@ -104,6 +108,7 @@ const COVERAGE_TOOLS = uniqueSorted([
 ])
 
 const EXPORT_TOOLS = uniqueSorted([
+  'wait_for_feature_change',
   'get_workflow_guide',
   'delete_evaluation_export',
   'download_evaluation_export',
@@ -117,6 +122,7 @@ const EXPORT_TOOLS = uniqueSorted([
 ])
 
 const FLIGHT_TOOLS = uniqueSorted([
+  'wait_for_feature_change',
   'get_test_review',
   'review_test_changes',
   'get_workflow_guide',

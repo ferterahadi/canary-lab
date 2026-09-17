@@ -161,11 +161,11 @@ describe('incremental mapping with real source inputs', () => {
     } })).rejects.toThrow('Mapping inputs changed')
   })
 
-  it('does not cache a full inference when its source changed during the agent call', async () => {
-    await runCoverageEngine({ ...args(), incremental: false }, { propose: async () => {
+  it('rejects a full inference when its source changed during the agent call', async () => {
+    await expect(runCoverageEngine({ ...args(), incremental: false }, { propose: async () => {
       fs.writeFileSync(spec, source.replace('expect(1)', 'expect(99)'))
       return []
-    } })
+    } })).rejects.toThrow('Mapping inputs changed')
     expect(readCoverageRunState(featureDir)?.mappingInference).toBeUndefined()
   })
 })

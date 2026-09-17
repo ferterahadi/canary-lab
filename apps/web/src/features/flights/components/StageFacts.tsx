@@ -50,6 +50,7 @@ export { plural }
  *  leaves its frontend-owned slot as a skeleton rather than becoming zero or
  *  changing the band's shape. */
 export interface StageBandData {
+  ledgerConfirmed?: boolean
   /** A source below is being fetched for the FIRST time. Settling is about what
    *  the STAGE produced; this is about what the PANE has read, and the two are
    *  a REST round-trip apart — so a settled stage holds its placeholders until
@@ -458,7 +459,7 @@ function measuredStageFacts(
       // Evidence lands when the stage settles; while the loop runs the same
       // facts come from the live progress shape.
       const evPct = num(ev, 'coveragePct')
-      const pct = evPct ?? p?.coveragePct ?? null
+      const pct = band.ledger?.coveragePct ?? evPct ?? p?.coveragePct ?? null
       // The mapper runs at the END of a pass, so while the authoring agent works
       // `progress.coveragePct` is still the ledger the pass STARTED from. On a
       // first flight that start is 0 — and rendering it as an amber "0%" for the
@@ -483,6 +484,12 @@ function measuredStageFacts(
               ? { sub: `across ${plural(testFiles, 'test file')}` }
               : {}),
           }
+      if (band.ledger && (!band.ledgerConfirmed || band.ledger.freshness?.state !== 'current')) {
+        return [
+          { label: 'Mapped coverage', value: '—', sub: `Current value unconfirmed · last calculation ${band.ledger.coveragePct}%` },
+          ...(testsWrittenFact ? [testsWrittenFact] : []),
+        ]
+      }
       // A probed suite with no requirements has UNDEFINED coverage, not 0%. The
       // percentage tile (amber 0%) would read as a failing suite when the
       // truth is there is no PRD to measure its specs against.

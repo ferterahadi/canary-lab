@@ -44,41 +44,61 @@ export function flightNotificationSources(flights: FlightIndexEntry[]): Notifica
   })
 }
 
-export function runNotificationSources(runs: ReviewRun[], changes: TestChangeRecord[] = []): NotificationSource[] {
-  const byFeature = new Map(changes.map((record) => [record.featureId, record]))
-  return runs.map((run) => {
-    const pending = run.pendingSpecEdits ?? 0
-    const attention = awaitsTestReview(run)
-    const weaker = hasWeakerHint(byFeature.get(run.feature))
+/** Test review is one attention problem per feature. A run can supply the most
+ * useful target while it is blocked, but ownership changes must not create a
+ * second alert for the same files. Ordinary edits stay on the feature surface;
+ * only a blocked run or a possible weakening earns an interruption. */
+export function testReviewNotificationSources(runs: ReviewRun[], changes: TestChangeRecord[] = []): NotificationSource[] {
+  const changesByFeature = new Map(changes.map((record) => [record.featureId, record]))
+  const pendingRunByFeature = new Map<string, ReviewRun>()
+  for (const run of runs) {
+    if (awaitsTestReview(run) && !pendingRunByFeature.has(run.feature)) pendingRunByFeature.set(run.feature, run)
+  }
+  const features = new Set([...changesByFeature.keys(), ...pendingRunByFeature.keys()])
+
+  return [...features].map((feature) => {
+    const record = changesByFeature.get(feature)
+    const run = pendingRunByFeature.get(feature)
+    const weaker = hasWeakerHint(record)
+    const attention = !!run || weaker
+    const pending = run?.pendingSpecEdits ?? record?.dirtySpecs.length ?? 0
     return {
-      key: `run:${run.runId}`,
-      signature: attention ? weaker ? 'test-review:weaker' : 'test-review' : 'quiet',
+      key: `test-review:${feature}`,
+      // Message detail and severity may evolve, but the user still has one
+      // unresolved issue. Keeping one active signature updates that issue in
+      // place; quiet -> attention still creates a fresh episode later.
+      signature: attention ? 'attention' : 'quiet',
       ...(attention ? { message: {
-        title: weaker ? `${run.feature}: possible test weakening` : `${run.feature} is awaiting test review`,
-        body: `${pending} test file${pending === 1 ? '' : 's'} changed after this run started. ${weaker ? 'A check found a possible weakening. This hint does not change the run result. ' : ''}Review the test-file changes, then adopt or restore them.`,
+        title: weaker ? `${feature}: possible test weakening` : `${feature} is awaiting test review`,
+        body: run
+          ? `${pending} test file${pending === 1 ? '' : 's'} changed after this run started. ${weaker ? 'A check found a possible weakening. This hint does not change the run result. ' : ''}Review the test-file changes, then adopt or restore them.`
+          : `${pending} test file${pending === 1 ? '' : 's'} changed. A check found a possible weakening. This hint does not change the run result. Review the test-file changes before relying on the previous run result.`,
         severity: weaker ? 'danger' as const : 'warning' as const,
-        target: { kind: 'test-review' as const, feature: run.feature, runId: run.runId },
+        target: run
+          ? { kind: 'test-review' as const, feature, runId: run.runId }
+          : { kind: 'test-review' as const, feature },
       } } : {}),
     }
   })
 }
+import type { FeatureCoverageChange } from '../../../../../shared/coverage/freshness'
 
-/** Feature edits also exist without a running test. A pending run owns its
- * review alert while active, avoiding a second message for the same files. */
-export function testChangeNotificationSources(changes: TestChangeRecord[], runs: ReviewRun[]): NotificationSource[] {
-  const pendingFeatures = new Set(runs.filter(awaitsTestReview).map((run) => run.feature))
-  return changes.map((record) => {
-    const attention = record.status === 'dirty' && !pendingFeatures.has(record.featureId)
-    const weaker = hasWeakerHint(record)
-    const count = record.dirtySpecs.length
+/** One persistent issue per suite, not one alert per save. A changed revision
+ * updates its explanation; only recovery followed by new drift starts an episode. */
+export function coverageNotificationSources(changes: FeatureCoverageChange[]): NotificationSource[] {
+  return changes.map(({ feature, freshness, flightId }) => {
+    const attention = ['stale', 'unavailable', 'updating'].includes(freshness.state)
+      || (freshness.state === 'current' && (freshness.latestRunFailed || freshness.proofNeedsRun))
     return {
-      key: `tests:${record.featureId}`,
-      signature: attention ? weaker ? 'weaker' : 'changed' : 'quiet',
+      key: `coverage:${feature}`,
+      signature: attention ? 'attention' : 'quiet',
       ...(attention ? { message: {
-        title: `${record.featureId}: ${weaker ? 'possible test weakening' : 'tests changed'}`,
-        body: `${count} test file${count === 1 ? '' : 's'} changed. ${weaker ? 'A check found a possible weakening. This hint does not change the run result. ' : ''}Review the test-file changes before relying on the previous run result.`,
-        severity: weaker ? 'danger' as const : 'warning' as const,
-        target: { kind: 'test-review' as const, feature: record.featureId },
+        title: `${feature}: ${freshness.latestRunFailed ? 'latest run has failures' : freshness.state === 'current' ? 'current tests need verification' : freshness.state === 'updating' ? 'coverage update in progress' : 'coverage freshness needs attention'}`,
+        body: [...freshness.reasons, freshness.state === 'current'
+          ? 'Mapping is not proof of a passing run. Review the latest evidence in Flight.'
+          : 'Previous coverage figures are historical until current inputs are checked. Open Flight to resume the affected stage.'].join(' '),
+        severity: freshness.latestRunFailed ? 'danger' as const : 'warning' as const,
+        target: { kind: 'coverage' as const, feature, stage: freshness.nextAction?.stage ?? 'specs-coverage', ...(flightId ? { flightId } : {}) },
       } } : {}),
     }
   })

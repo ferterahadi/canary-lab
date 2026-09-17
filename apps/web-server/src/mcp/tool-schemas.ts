@@ -5,8 +5,11 @@
 // it without importing tools.ts back — tools.ts imports the groups, so anything
 // they share has to live below both of them.
 
-import type { CallToolResult } from '@modelcontextprotocol/server'
+import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import { z } from 'zod'
+
+export type CanaryLabToolHandler = (args: Record<string, unknown>, ctx: ServerContext) =>
+  CallToolResult | InputRequiredResult | Promise<CallToolResult | InputRequiredResult>
 import type { RunStore } from '../features/runs/logic/run-store'
 import type { RunDetail } from '../features/runs/logic/run-store'
 import type { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
@@ -110,6 +113,7 @@ export type McpStartRunOutcome =
     }
 
 export interface CanaryLabMcpDeps {
+  coverageRequest?: (opts: { method: 'GET'; url: string }) => Promise<{ statusCode: number; body: unknown }>
   testReviewRequest?: (opts: { method: 'GET' | 'POST'; url: string; payload?: unknown }) => Promise<{ statusCode: number; body: unknown }>
   getUiUrl?: () => string | undefined
   discoveryRepairRequest?: (opts: { method: 'GET' | 'POST'; url: string; payload?: unknown }) => Promise<{ statusCode: number; body: unknown }>

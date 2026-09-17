@@ -287,7 +287,7 @@ export function OverlayPanel({ portify, awaiting }: { portify: PortifyManifest |
  *  card it becomes. A generic three-line `SkeletonPanel` here was 74px short, so
  *  the Passes card below still jumped when the ledger landed, which is the shift
  *  the placeholder existed to prevent. */
-export function CoverageCompositionPanel({ ledger, awaiting }: { ledger: CoverageLedger | null; awaiting?: AwaitingState }) {
+export function CoverageCompositionPanel({ ledger, awaiting, confirmed }: { ledger: CoverageLedger | null; awaiting?: AwaitingState; confirmed?: boolean }) {
   // A ledger with no requirements composes nothing — for the panel that is the
   // same state as no ledger at all.
   const composed = ledger && ledger.totals.total > 0 ? ledger : null
@@ -297,6 +297,7 @@ export function CoverageCompositionPanel({ ledger, awaiting }: { ledger: Coverag
   return (
     <StageColumn>
       <PanelCard kicker="What the tests cover" testId={composed ? 'coverage-composition' : 'coverage-composition-skeleton'}>
+        {composed && (!confirmed || ledger?.freshness?.state !== 'current') && <p className="text-[11px] text-warning">Historical calculation — current coverage is unconfirmed.</p>}
         {/* gap-x-6 / gap-y-4: at the old uniform 12px the two distributions ran
             together into one wall of dots, side by side AND stacked. */}
         <div className="mt-1 grid gap-x-6 gap-y-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))' }}>

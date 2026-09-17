@@ -125,18 +125,19 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
   })
 
-  it('shows the coverage % as a ring left of the bar', async () => {
+  it('withholds the reassuring ring when requirements are stale', async () => {
     await mount()
     const ring = container.querySelector('[data-testid="coverage-ring"]')
-    expect(ring?.getAttribute('aria-label')).toBe('33.3% covered')
+    expect(ring).toBeNull()
     // The headline block carries the big % beside the ring; the ring itself stays label-free.
-    expect(container.querySelector('[data-testid="coverage-hero"] [data-testid="coverage-pct"]')?.textContent).toBe('33%')
+    expect(container.querySelector('[data-testid="coverage-hero"] [data-testid="coverage-pct"]')?.textContent).toBe('—')
     expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
   })
 
   it('suppresses the state pill in the covered state (the ring owns the %)', async () => {
     const led = structuredClone(LEDGER)
     led.state = { ...led.state!, summary: 'fresh', headline: 'Covered 36.7%' }
+    led.freshness = { ...led.freshness!, state: 'current', reasons: [] }
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
     await mount()
     // Covered → no redundant pill; the ring carries it.

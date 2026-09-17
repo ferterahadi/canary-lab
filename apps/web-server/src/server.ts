@@ -38,6 +38,7 @@ import {
   resolveWorkflowAgentRef,
 } from './features/agent-sessions/logic/agent-session-log'
 import { WorkspaceEventBus } from './shared/workspace-events'
+import { CoverageFreshnessMonitor } from './features/coverage/logic/coverage/freshness-monitor'
 import { GettingStartedBusyError, GettingStartedSessionStore, isGettingStartedRunActive } from './features/config/logic/getting-started-session'
 import { WORKBENCH_SUITE, gettingStartedRunWorkflow, isGettingStartedFlightStart } from './features/config/routes/onboarding'
 import type { ServerContext } from './server-context'
@@ -165,6 +166,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // process's session and are deliberately left alone.
   reconcileInterruptedDrafts(logsDir, () => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
+  const coverageMonitor = new CoverageFreshnessMonitor({ featuresDir, logsDir }, workspaceEvents, (error) => app.log.warn({ error }, 'Coverage freshness reconciliation failed'))
+  const refreshRunCoverage = () => coverageMonitor.schedule()
+  runStore.onEvent(refreshRunCoverage)
+  app.addHook('onListen', () => coverageMonitor.start())
+  app.addHook('onClose', async () => { runStore.offEvent(refreshRunCoverage); coverageMonitor.close() })
   const gettingStarted = new GettingStartedSessionStore(logsDir, {
     status: (target) => {
       switch (target.kind) {
@@ -319,6 +325,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     benchmarkStore,
     portifyStore,
     coverageJobStore,
+    coverageMonitor,
     robustnessJobStore,
     flightStore,
     planStore,
@@ -364,6 +371,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // registered above; for `start_run` we reuse `app.inject()` rather than
   // duplicating the 270-line orchestrator-construction code.
   await app.register(registerMcpRoutes, {
+    coverageRequest: async (request) => {
+      const response = await app.inject(request)
+      return { statusCode: response.statusCode, body: response.json() }
+    },
     testReviewRequest: async (request) => {
       const response = await app.inject({ method: request.method, url: request.url, payload: request.payload as Record<string, unknown> | undefined })
       return { statusCode: response.statusCode, body: response.json() }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { flightNotificationSources, runNotificationSources } from './sources'
+import { flightNotificationSources, testReviewNotificationSources } from './sources'
 import type { FlightIndexEntry } from '../../../../../shared/flights/types'
 
 const flight = (over: Partial<FlightIndexEntry> = {}): FlightIndexEntry => ({ flightId: 'f1', feature: 'shop', status: 'paused', pauseReason: 'stage-failed', currentStage: 'run', ...over } as FlightIndexEntry)
@@ -22,38 +22,47 @@ describe('notification sources', () => {
   })
   it('links a healing run with pending edits directly to test review, and retires the notification when it resumes', () => {
     const run = { runId: 'r1', feature: 'shop', status: 'healing', pendingSpecEdits: 1 }
-    expect(runNotificationSources([run])[0].message).toMatchObject({ body: expect.stringContaining('1 test file changed'), target: { kind: 'test-review', feature: 'shop', runId: 'r1' } })
-    expect(runNotificationSources([{ ...run, status: 'passed' }])[0].message).toBeUndefined()
-    expect(runNotificationSources([{ ...run, pendingSpecEdits: 0 }])[0].message).toBeUndefined()
+    expect(testReviewNotificationSources([run])[0]).toMatchObject({ key: 'test-review:shop', signature: 'attention', message: { body: expect.stringContaining('1 test file changed'), target: { kind: 'test-review', feature: 'shop', runId: 'r1' } } })
+    expect(testReviewNotificationSources([{ ...run, status: 'passed' }])).toEqual([])
+    expect(testReviewNotificationSources([{ ...run, pendingSpecEdits: 0 }])).toEqual([])
   })
 })
 
 describe('test changes in the shared inbox', () => {
   const changes = (verdict: 'weaker' | 'equivalent' | 'stronger' | 'unclassifiable' = 'weaker') => [{ featureId: 'shop', status: 'dirty' as const, dirtySpecs: [{ strength: { verdict } }] }]
 
-  it('reports weakening outside an active run as an advisory review notification', async () => {
-    const { testChangeNotificationSources } = await import('./sources')
-    const [source] = testChangeNotificationSources(changes(), [])
+  it('reports weakening outside an active run as an advisory review notification', () => {
+    const [source] = testReviewNotificationSources([], changes())
     expect(source.message).toMatchObject({ severity: 'danger', target: { kind: 'test-review', feature: 'shop' } })
     expect(source.message?.title).toContain('possible test weakening')
     expect(source.message?.body).toContain('A check found a possible weakening')
   })
 
-  it('uses one active run alert for dirty files that are also pending, and changes identity on escalation', async () => {
-    const { testChangeNotificationSources } = await import('./sources')
+  it('uses one feature alert while an active run owns the review and updates it in place on escalation', () => {
     const run = { runId: 'r1', feature: 'shop', status: 'healing', pendingSpecEdits: 1 }
-    expect(testChangeNotificationSources(changes(), [run])[0].message).toBeUndefined()
-    expect(runNotificationSources([run], changes())[0].message).toMatchObject({ severity: 'danger', target: { kind: 'test-review', feature: 'shop', runId: 'r1' } })
-    expect(runNotificationSources([run], changes())[0].signature).not.toBe(runNotificationSources([run], changes('equivalent'))[0].signature)
-    expect(testChangeNotificationSources(changes(), [{ ...run, status: 'passed' }])[0].message).toBeDefined()
+    const [weak] = testReviewNotificationSources([run], changes())
+    const [ordinary] = testReviewNotificationSources([run], changes('equivalent'))
+    expect(weak).toMatchObject({ key: 'test-review:shop', signature: 'attention', message: { severity: 'danger', target: { kind: 'test-review', feature: 'shop', runId: 'r1' } } })
+    expect(ordinary).toMatchObject({ key: weak.key, signature: weak.signature, message: { severity: 'warning' } })
+    expect(testReviewNotificationSources([{ ...run, status: 'passed' }], changes())[0].message).toMatchObject({ severity: 'danger', target: { kind: 'test-review', feature: 'shop' } })
   })
 
-  it.each(['equivalent', 'stronger', 'unclassifiable'] as const)('marks %s edits for attention, resolves clean records, and keeps a stable identity', async (verdict) => {
-    const { testChangeNotificationSources } = await import('./sources')
+  it.each(['equivalent', 'stronger', 'unclassifiable'] as const)('keeps ordinary %s edits inline instead of interrupting the user', (verdict) => {
     const [record] = changes(verdict)
-    const [source] = testChangeNotificationSources([record], [])
-    expect(source.message?.severity).toBe('warning')
-    expect(testChangeNotificationSources([{ ...record, dirtySpecs: [...record.dirtySpecs, ...record.dirtySpecs] }], [])[0].signature).toBe(source.signature)
-    expect(testChangeNotificationSources([{ ...record, status: 'clean' }], [])[0].message).toBeUndefined()
+    const [source] = testReviewNotificationSources([], [record])
+    expect(source).toMatchObject({ key: 'test-review:shop', signature: 'quiet' })
+    expect(source.message).toBeUndefined()
+    expect(testReviewNotificationSources([], [{ ...record, dirtySpecs: [...record.dirtySpecs, ...record.dirtySpecs] }])[0]).toEqual(source)
+    expect(testReviewNotificationSources([], [{ ...record, status: 'clean' }])[0].message).toBeUndefined()
+  })
+
+  it('coalesces concurrent pending runs for one feature onto its newest run', () => {
+    const runs = [
+      { runId: 'new', feature: 'shop', status: 'healing', pendingSpecEdits: 2 },
+      { runId: 'old', feature: 'shop', status: 'running', pendingSpecEdits: 1 },
+    ]
+    const sources = testReviewNotificationSources(runs)
+    expect(sources).toHaveLength(1)
+    expect(sources[0].message?.target).toEqual({ kind: 'test-review', feature: 'shop', runId: 'new' })
   })
 })

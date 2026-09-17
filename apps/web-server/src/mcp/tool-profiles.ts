@@ -16,6 +16,7 @@ export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
 export const DEFAULT_CANARY_LAB_MCP_PROFILE: CanaryLabMcpProfile = 'compact'
 
 export type CanaryLabMcpToolName =
+  | 'wait_for_feature_change'
   | 'start_discovery_repair'
   | 'get_discovery_repair'
   | 'update_discovery_repair'
@@ -107,6 +108,7 @@ export interface CanaryLabMcpExecCallEvent {
 }
 
 export const REPAIR_TOOLS = [
+  'wait_for_feature_change',
   'get_test_review',
   'review_test_changes',
   'start_discovery_repair',
@@ -137,6 +139,7 @@ export const REPAIR_TOOLS = [
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
 export const VERIFY_TOOLS = [
+  'wait_for_feature_change',
   'get_workflow_guide',
   'list_features',
   'list_runs',
@@ -157,6 +160,7 @@ export const VERIFY_TOOLS = [
 // array; the split keeps each skill/client surface lean while `lifecycle`/`full`
 // stay the same computed unions.
 export const AUTHOR_TOOLS = [
+  'wait_for_feature_change',
   'get_workflow_guide',
   'list_features',
   'list_runs',
@@ -185,6 +189,7 @@ export const AUTHOR_TOOLS = [
 // Coverage = feature docs → PRD summary → semantic coverage ledger (carved out
 // of the old author array; the tools are unchanged).
 export const COVERAGE_TOOLS = [
+  'wait_for_feature_change',
   'get_workflow_guide',
   'list_features',
   'write_feature_doc',
@@ -201,6 +206,7 @@ export const COVERAGE_TOOLS = [
 // Export = evaluation archives for a terminal run (carved out of the old
 // author array). list_runs/get_run ride along to pick the run to export.
 export const EXPORT_TOOLS = [
+  'wait_for_feature_change',
   'get_workflow_guide',
   'list_features',
   'list_runs',
@@ -216,6 +222,7 @@ export const EXPORT_TOOLS = [
 // Flight = the conducted end-to-end pipeline. write_feature_doc rides along so
 // the client can distill conversation docs at the prd-source checkpoint.
 export const FLIGHT_TOOLS = [
+  'wait_for_feature_change',
   'get_test_review',
   'review_test_changes',
   'get_workflow_guide',

@@ -13,13 +13,13 @@ vi.mock('../../../../shared/ast-extractor', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../../../shared/ast-extractor')>()
   return {
     ...original,
-    extractTestsFromSource: vi.fn(original.extractTestsFromSource),
+    extractCoverageTestsFromSource: vi.fn(original.extractCoverageTestsFromSource),
   }
 })
 
 import { readPersistedCoverageState, computeFeatureCoverage, runCoverageEngine as runCoverageEngineReal, regeneratePrdSummary as regeneratePrdSummaryReal, clearPrdSummary, buildCoverageMappingContext, applyExternalCoverageMappings, applyExternalSummary } from './service'
 
-import { extractTestsFromSource } from '../../../../shared/ast-extractor'
+import { extractCoverageTestsFromSource } from '../../../../shared/ast-extractor'
 
 import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
 
@@ -46,7 +46,7 @@ beforeEach(() => {
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
-  vi.mocked(extractTestsFromSource).mockReset()
+  vi.mocked(extractCoverageTestsFromSource).mockReset()
 })
 
 afterEach(() => {
@@ -111,14 +111,14 @@ describe('clearPrdSummary — strips coverage tags from specs', () => {
 describe('collectTests — sourceFile override (service.ts line 86)', () => {
   it('uses t.sourceFile as absFile when the extractor sets it (FALSE branch of t.sourceFile ?? file)', async () => {
     // The AST extractor normally never sets sourceFile, so `t.sourceFile ?? file`
-    // always falls back to `file`. Mock extractTestsFromSource to return a test
+    // always falls back to `file`. Mock extractCoverageTestsFromSource to return a test
     // with an explicit sourceFile → exercises the FALSE branch (t.sourceFile IS defined).
     const dir = writeFeature('checkout')
     const realSpecFile = path.join(dir, 'e2e', 'a.spec.ts')
     const helperFile = path.join(dir, 'e2e', 'helper.ts')
     fs.writeFileSync(helperFile, '// helper\n')
 
-    vi.mocked(extractTestsFromSource).mockReturnValue({
+    vi.mocked(extractCoverageTestsFromSource).mockReturnValue({
       file: realSpecFile,
       tests: [
         {
@@ -135,7 +135,7 @@ describe('collectTests — sourceFile override (service.ts line 86)', () => {
 
     await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
 
-    // computeFeatureCoverage calls collectTests which calls extractTestsFromSource;
+    // computeFeatureCoverage calls collectTests which calls extractCoverageTestsFromSource;
     // absFile is helperFile (not realSpecFile) because sourceFile was set.
     // The ledger is computed without throwing — this is the primary assertion.
     const ledger = computeFeatureCoverage({ featuresDir, logsDir, feature: 'checkout' })
@@ -159,11 +159,11 @@ describe('buildCoverageMappingContext — null PRD summary branches', () => {
   })
 
   it('returns empty file (falsy t.file path) when sourceFile equals featureDir', () => {
-    // Mock extractTestsFromSource to return sourceFile = featureDir so that
+    // Mock extractCoverageTestsFromSource to return sourceFile = featureDir so that
     // path.relative(featureDir, featureDir) = '' (empty string, falsy) → line 371
     // false branch: file = t.file (empty string) instead of path.join(featureDir, t.file)
     const dir = writeFeature('checkout')
-    vi.mocked(extractTestsFromSource).mockReturnValueOnce({
+    vi.mocked(extractCoverageTestsFromSource).mockReturnValueOnce({
       file: path.join(dir, 'e2e', 'a.spec.ts'),
       tests: [{
         name: 'shared',
@@ -337,14 +337,12 @@ describe('collectTests — duplicate name merge (service.ts unionList)', () => {
 
     await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
 
-    vi.mocked(extractTestsFromSource)
-      .mockReturnValueOnce({
+    vi.mocked(extractCoverageTestsFromSource).mockImplementation((file) => file === specB ? {
+      file: specB,
+      tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], readable: readable('shared') }],
+    } : {
         file: path.join(dir, 'e2e', 'a.spec.ts'),
         tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], readable: readable('shared'), requirements: ['R1'], pathTypes: ['happy'] }],
-      })
-      .mockReturnValueOnce({
-        file: specB,
-        tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], readable: readable('shared') }],
       })
 
     const result = await runCoverageEngine({ featuresDir, feature: 'checkout', logsDir, now: '2026-01-01T00:00:00Z' })
@@ -359,7 +357,7 @@ describe('collectTests — duplicate name merge (service.ts unionList)', () => {
     const specB = path.join(dir, 'e2e', 'b.spec.ts')
     fs.writeFileSync(specB, `import { test } from '@playwright/test'\ntest('shared', async () => {})\n`)
 
-    vi.mocked(extractTestsFromSource)
+    vi.mocked(extractCoverageTestsFromSource)
       .mockReturnValueOnce({
         file: specA,
         tests: [{ name: 'shared', line: 1, bodySource: 'async () => {}', steps: [], readable: readable('shared'), requirements: ['R1'], pathTypes: ['happy'] }],
@@ -381,17 +379,17 @@ describe('runCoverageEngine — engineInputs null-guard fallbacks (service.ts li
   it('defaults bodySource/assertions to empty when the extractor omits them', async () => {
     // The real extractor always sets bodySource (required string) and assertions
     // defaults to []; only a non-standard extractor result can hit the `?? []` /
-    // `?? ''` fallbacks in engineInputs. Mock extractTestsFromSource to omit both.
+    // `?? ''` fallbacks in engineInputs. Mock extractCoverageTestsFromSource to omit both.
     const dir = writeFeature('checkout')
     await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
 
-    vi.mocked(extractTestsFromSource).mockReturnValueOnce({
+    vi.mocked(extractCoverageTestsFromSource).mockReturnValue({
       file: path.join(dir, 'e2e', 'a.spec.ts'),
       tests: [{
         name: 'shared',
         line: 1,
         // bodySource/assertions intentionally omitted from the extractor result.
-      } as unknown as ReturnType<typeof extractTestsFromSource>['tests'][number]],
+      } as unknown as ReturnType<typeof extractCoverageTestsFromSource>['tests'][number]],
     })
 
     const result = await runCoverageEngine({ featuresDir, feature: 'checkout', logsDir, now: '2026-01-01T00:00:00Z' })
@@ -521,9 +519,9 @@ it('reads suite-list mapping evidence without invoking the English presentation 
   const dir = writeFeature('metadata')
   fs.writeFileSync(path.join(dir, 'docs', '_prd-summary.json'), JSON.stringify({ requirementsHash: 'h1', requirements: [] }))
   fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('tagged', { tag: ['@req-R1'] }, () => {})")
-  vi.mocked(extractTestsFromSource).mockImplementation(() => { throw new Error('English is not needed for metadata') })
+  vi.mocked(extractCoverageTestsFromSource).mockImplementation(() => { throw new Error('English is not needed for metadata') })
   expect(readPersistedCoverageState(dir)).toBe('fresh')
-  expect(extractTestsFromSource).not.toHaveBeenCalled()
+  expect(extractCoverageTestsFromSource).not.toHaveBeenCalled()
 })
 
 it('reports mapping absent while the suite still has no distilled requirements to map against', () => {

@@ -156,15 +156,15 @@ export const EMPTY_COPY = {
     title: 'Nothing to replay here',
     body: 'Port work leaves no agent transcript of its own. What it produced is the side-by-side boot and the port changes recorded above this rail.',
   },
-  notificationsNone: {
+  notificationsNoAttention: {
     reason: 'nothing-to-report',
-    title: 'No notifications',
-    body: 'Canary Lab posts here when a run needs your answer, a repair stalls, or test files change under a result. Nothing has needed you so far.',
+    title: 'Nothing needs attention',
+    body: 'Nothing needs your action now. Canary Lab interrupts you here only when a run is blocked, a flight stalls, or test integrity is at risk.',
   },
-  notificationsNoUnread: {
+  notificationsNoHistory: {
     reason: 'nothing-to-report',
-    title: 'Nothing unread',
-    body: 'Every message in this inbox has been read. A new alert lands here the moment a run needs an answer or a result stops being safe to trust.',
+    title: 'No notification history',
+    body: 'Resolved notifications stay here as history. Nothing is listed because no earlier attention item has completed or stopped requiring action.',
   },
 } as const satisfies Record<string, EmptyCopy>
 

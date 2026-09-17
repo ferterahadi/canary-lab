@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import * as api from '../api/client'
 import type { ExecutionType, Feature, RunStatus, VersionStatus } from '../api/types'
 import { useMcpPromo } from './McpPromoContext'
@@ -9,7 +9,8 @@ import { ThemeToggle } from '../ui/ThemeToggle'
 import { VersionUpdateButton } from './VersionUpdateButton'
 import { ChevronRightIcon } from '@/shared/ui/atoms'
 import { Tooltip } from '../ui/Tooltip'
-import { useInvalidationKey } from '../state/invalidation'
+import { useLiveResource } from '../state/use-live-resource'
+import { COVERAGE_FRESHNESS_LEASE_MS, COVERAGE_RECONCILE_MS } from '@shared/coverage/freshness'
 import type { ModelsAgent } from '../lib/workspace-view-state'
 
 interface Props {
@@ -63,6 +64,8 @@ interface Props {
 function coverageHeadlineColor(headline: string | null | undefined): string | undefined {
   if (!headline) return undefined
   if (headline.startsWith('Covered')) return 'var(--success)'
+  if (headline === 'Latest run failed') return 'var(--danger)'
+  if (headline === 'Freshness unconfirmed' || headline === 'Mapped · needs verification') return 'var(--warning)'
   if (headline === 'Stale') return 'var(--warning)'
   return undefined
 }
@@ -147,7 +150,6 @@ export function FeaturesColumn({
 }: Props) {
   const { gatePromo } = useMcpPromo()
   // Coverage headlines re-fetch when a coverage job finishes (`coverage-changed`).
-  const coverageRefreshKey = useInvalidationKey('coverage')
   const [configFor, setConfigFor] = useState<string | null>(null)
   // Controlled when App drives it from the route; uncontrolled otherwise.
   const [settingsOpenInternal, setSettingsOpenInternal] = useState(false)
@@ -157,29 +159,18 @@ export function FeaturesColumn({
     else setSettingsOpenInternal(open)
   }, [onSettingsOpenChange])
   // Per-feature coverage headline → colours the column's Coverage icon (R8).
-  // Fetched on mount + when the feature set changes (not polled — generating
-  // state is surfaced by the status-bar pill instead, which avoids recomputing
-  // every feature's coverage on a tight loop).
-  const [coverageHeadlines, setCoverageHeadlines] = useState<Record<string, string | null>>({})
+  // Workspace events plus bounded reconciliation keep source changes live.
+  // Failed reads or an expired freshness lease withdraw the previous badge.
   const featureKey = features.map((f) => f.name).join(',')
   // The effect only asks *whether* coverage is reachable, never calls the handler.
   // Depending on the callback itself made every App re-render refetch the same
   // workspace status index — App passes a fresh arrow each render. The server
   // scan is lightweight now, but duplicate requests are still needless work.
   const canOpenCoverage = Boolean(onOpenCoverage)
-  useEffect(() => {
-    if (!canOpenCoverage || features.length === 0) return
-    let alive = true
-    api.listCoverageStates()
-      .then((states) => {
-        if (!alive) return
-        const map: Record<string, string | null> = {}
-        for (const s of states) map[s.feature] = s.headline
-        setCoverageHeadlines(map)
-      })
-      .catch(() => {})
-    return () => { alive = false }
-  }, [featureKey, canOpenCoverage, features.length, coverageRefreshKey])
+  const coverage = useLiveResource('coverage', canOpenCoverage && features.length ? featureKey : null,
+    () => api.listCoverageStates(), { reconcileMs: COVERAGE_RECONCILE_MS, leaseMs: COVERAGE_FRESHNESS_LEASE_MS })
+  const coverageHeadlines = useMemo(() => Object.fromEntries((coverage.value ?? []).map((state) => [state.feature,
+    coverage.confirmed ? state.headline : 'Freshness unconfirmed'])), [coverage.value, coverage.confirmed])
 
   // R55: features declaring a `group` collapse under an accordion; the rest
   // stay flat. Sections order worst-first (a group with a running/dirty

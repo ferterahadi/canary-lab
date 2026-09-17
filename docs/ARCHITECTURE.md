@@ -163,24 +163,62 @@ realtime surface should **not** carry an empty `ws/`.
 
 **When a module belongs in `shared/`, not a feature.** If several features use a module and it imports no feature code, treat it as shared infrastructure. Shared agent views, sockets, atoms, and client branding already follow this rule. Two recorded cross-feature exemptions remain; `npm run check:boundaries` is the source of truth. Moving code into `apps/web/src/shared/api/**` or `shared/lib/**` also brings it into the 100% coverage gate.
 
+## Coverage freshness
+
+The coverage observer owns one content-derived revision per suite for the ledger,
+suite badges, Flights, notifications, and connected agents. It compares source
+documents (including linked files), the requirement summary, mapping input
+fingerprints (tests, helpers, configuration), and the latest execution evidence.
+Filesystem and workspace events trigger reconciliation; a five-second content
+scan recovers dropped events and changes made while disconnected. Coverage reads
+use the syntax-only assertion/tag extractor, not readable-test prose compilation.
+
+Mapping percentage remains requirement coverage, not a pass rate. A stale,
+unreadable, updating, or unconfirmed snapshot never displays its old percentage
+as current. Historical measurements remain labelled. UI readers reconcile every
+five seconds, withdraw confirmation on failed reads or connection loss, and expire
+their freshness lease after fifteen seconds without a successful read. Late
+responses cannot replace newer reads. Latest-run failures remain visible; a newer
+attempt without results cannot borrow an older pass. Remapping changed inputs
+requires subsequent verification before old results can count as current proof.
+
+Recovery starts at the earliest invalid Flight stage: Requirements for changed
+documents, Coverage for changed test/mapping inputs, Run for missing/currently
+failing execution evidence. Notification actions only open that stage. Its normal
+launch, ownership, and permission controls still govern regeneration/execution.
+Summary and mapping submissions carry input revisions; a concurrent edit rejects
+old work and provides refreshed context instead of certifying stale inputs.
+
+MCP tools append suite-scoped freshness and recovery actions to relevant replies.
+`wait_for_feature_change` accepts the last revision for bounded waits and catch-up
+after reconnect/restart. This delivers into tool responses in compact and direct
+profiles; it does not claim to wake an idle Claude/Codex host. Agents act only
+within their existing task authority and respect active jobs/Flight ownership.
+
 ## Notifications
 
 The Notifications inbox stores messages and source-transition history together in
 `logs/notifications/state.json` inside each workspace. The notification store uses
 the shared atomic writer so a crash cannot persist a message without its deduplication
 state. The server owns writes; client tabs subscribe to `notifications-changed` and
-refetch on reconnect. The dialog is addressable as `?dialog=notifications`.
+refetch on reconnect, with a bounded reconciliation for a dropped event that does
+not disconnect the socket. The dialog is addressable as `?dialog=notifications`.
 
-Flight attention transitions, active runs with pending test edits, and feature-level test changes create
-messages even when the browser is closed. Reading a message preserves it. Deleting
-one removes its content permanently while retaining the source signature, so
-refreshing or restarting cannot recreate it. A later quiet-to-attention transition
-creates a new message. Recovery marks retained messages resolved. The right-side
-Notifications control is the single entry point for test-change alerts, including
-advisory weakening hints. A pending run owns the alert for its feature so the same
-files do not create a second active message. Manual note creation is not available.
+Flight attention transitions, active runs blocked on pending test edits, and
+advisory test-weakening hints create messages even when the browser is closed.
+Ordinary test edits stay on the feature surface instead of interrupting the user.
+Reading a message preserves it. Deleting one removes its content permanently while
+retaining the source signature, so refreshing or restarting cannot recreate it. A
+later quiet-to-attention transition creates a new message. Recovery marks retained
+messages resolved and moves them from the default Needs attention view into History.
+One feature-level identity owns test review across run transitions, so target or
+severity updates do not create a second active message. Manual note creation is not available.
 Notification actions navigate to the relevant flight or test
 review; they never change the run verdict or adopt test edits themselves.
+
+Coverage freshness uses one persistent attention identity per suite. Repeated
+file saves update its reason and earliest recovery stage instead of creating
+duplicates. It resolves only when mapping freshness and execution proof recover.
 
 The run detail keeps a visible review banner above its tabs while it awaits test
 review. Its button opens the existing changed-tests dialog with that run first.

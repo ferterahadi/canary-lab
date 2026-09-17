@@ -20,6 +20,16 @@ Setup and reconnection questions still use chat while MCP is unavailable.
 
 ## MCP Invocation
 
+Read `coverageUpdate` in related tool replies: it is the suite's current
+freshness, revision, owner and next required action. Canary's UI must update
+without a manual refresh. Stale/unavailable/updating coverage is historical,
+not current; an old passing run cannot hide a newer failure. While actively
+monitoring the suite, use `wait_for_feature_change(feature, afterRevision,
+timeout_ms:30000)`; omit the revision to catch up after reconnecting. Tool replies
+deliver this into the agent's context; an idle host is not promised an unsolicited
+wake-up. Respect active owners and launch permissions. Resume from the earliest
+invalid stage, reuse valid prior stages, and re-read the ledger after recovery.
+
 Setup and the plugin expose one public Canary Lab MCP tool: `exec` (usually
 rendered as `mcp__Canary_Lab__exec`). Every
 Canary Lab tool name below is the exact `command` value, not a separate public
