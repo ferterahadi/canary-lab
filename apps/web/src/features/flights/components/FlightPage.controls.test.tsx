@@ -296,11 +296,15 @@ describe('flight controls (R48/R71)', () => {
     const rail = container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')!
     expect(rail.textContent).not.toContain('✓')
     expect(rail.getAttribute('aria-label')).toContain('Coverage out of date')
-    expect(rail.getAttribute('title')).toBe('Coverage out of date. Source requirements changed. Showing results from the last calculation. Use Continue → From a step… to update the affected step.')
+    expect(rail.getAttribute('title')).toBeNull()
+    act(() => { rail.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent)
+      .toBe('Coverage out of date. Source requirements changed. Showing results from the last calculation. Use Continue → From a step… to update the affected step.')
     expect(container.querySelector('[data-testid="coverage-freshness-notice"]')).toBeNull()
     await act(async () => container.querySelector<HTMLButtonElement>(`[data-testid="stage-rail-${selectedStage}"]`)!.click())
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')!.click())
-    expect(container.querySelectorAll('[role="menuitem"]')).toHaveLength(selectedStage === 'run' ? 3 : 2)
+    expect(container.querySelectorAll('[role="menuitem"]')).toHaveLength(3)
+    expect(container.querySelector('[data-testid="flight-resume"]')?.textContent).toContain('Resume at Test run')
     const recovery = container.querySelector<HTMLButtonElement>('[data-testid="flight-coverage-recover"]')!
     expect(recovery.textContent).toContain('Run from Tests & coverage')
     await act(async () => recovery.click())
@@ -321,6 +325,19 @@ describe('flight controls (R48/R71)', () => {
     await act(async () => recovery.click())
     expect(container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-submit"]')!.disabled).toBe(true)
     expect(mocks.redoFlight).not.toHaveBeenCalled()
+  })
+
+  it('shows only recovery when Resume would enter the same stage', async () => {
+    mocks.getFeatureCoverage.mockResolvedValue(structuredClone(LEDGER))
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', currentStage: 'prd-summary' }))
+    await render('fl_1')
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')!.click())
+
+    expect(container.querySelector('[data-testid="flight-resume"]')).toBeNull()
+    expect(container.querySelector('[data-testid="flight-coverage-recover"]')?.textContent)
+      .toContain('Run from Requirements')
+    expect(container.querySelectorAll('[role="menuitem"]')).toHaveLength(2)
   })
 
   const openMenu = async () => {
@@ -629,11 +646,13 @@ describe('rail follow mode (R71/W2)', () => {
     expect(container.querySelector('[data-testid="rail-following"]')).toBeTruthy()
   })
 
-  it('rail and stage-header tooltips speak the STAGE_BLURB, not internal keys', async () => {
+  it('uses one short custom tooltip for a rail row', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ stages: runningStages() }))
     await render('fl_1')
-    const title = container.querySelector('[data-testid="stage-rail-scout"]')?.getAttribute('title')
-    expect(title).toContain('Reads your repo')
-    expect(title).not.toBe('scout')
+    const row = container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scout"]')!
+    expect(row.getAttribute('title')).toBeNull()
+    act(() => { row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent)
+      .toBe('Checks your repo and how to start it.')
   })
 })

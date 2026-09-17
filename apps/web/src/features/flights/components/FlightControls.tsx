@@ -41,7 +41,7 @@ export const REDO_STAGES: Array<{ key: FlightStageKey; label: string }> = REDO_S
  *  so a `done` primary (docs) made the row look finished and the label named the
  *  NEXT row while resume in fact re-entered this one. Scan every stage in
  *  execution order instead, then fold the companion back onto its row. */
-export function resumeTargetLabel(flight: FlightManifest): string | null {
+function resumeTargetStage(flight: FlightManifest): FlightStageKey | null {
   const settled = new Set<FlightStageStatus>(['done', 'skipped'])
   const unsettled = (stage: FlightManifest['stages'][number] | undefined): boolean =>
     stage != null && !settled.has(stage.status)
@@ -56,7 +56,12 @@ export function resumeTargetLabel(flight: FlightManifest): string | null {
     .find(unsettled)
   if (!open) return null
   const rowKey = stageRowKey(open.key)
-  return REDO_STAGES.find(({ key }) => key === rowKey)?.label ?? null
+  return REDO_STAGE_KEY_SET.has(rowKey) ? rowKey : null
+}
+
+export function resumeTargetLabel(flight: FlightManifest): string | null {
+  const target = resumeTargetStage(flight)
+  return REDO_STAGES.find(({ key }) => key === target)?.label ?? null
 }
 
 /** R74/R81: ONE Continue control for a resumable flight. A persisted pause and
@@ -68,7 +73,6 @@ export function ContinueMenu({
   onStartFlight,
   externalMutationOwner,
   recordlessEntry,
-  selectedStage,
   coverageRecovery,
 }: {
   flight: FlightManifest
@@ -80,7 +84,6 @@ export function ContinueMenu({
   /** A derived flight has evidence but no persisted record. Resume mints that
    *  first record directly at this stage instead of reopening the launcher. */
   recordlessEntry?: FlightStageKey
-  selectedStage?: FlightStageKey | null
   coverageRecovery?: { stage: FlightStageKey; warning: string }
 }) {
   const [open, setOpen] = useState(false)
@@ -94,10 +97,14 @@ export function ContinueMenu({
   } | null>(null)
   const ref = useRef<HTMLDivElement | null>(null)
   const menuMode = flight.status === 'paused' || recordlessEntry !== undefined || coverageRecovery !== undefined
-  const resumeTarget = resumeTargetLabel(flight)
+  const resumeStage = resumeTargetStage(flight)
+  const resumeTarget = REDO_STAGES.find(({ key }) => key === resumeStage)?.label ?? null
   const recoveryStage = coverageRecovery ? stageRowKey(coverageRecovery.stage) : undefined
   const recoveryLabel = REDO_STAGES.find(({ key }) => key === recoveryStage)?.label
-  const replacesResume = recoveryStage !== undefined && (selectedStage === recoveryStage || resumeTarget === null)
+  // A stale-coverage shortcut replaces Resume only when both enter the same
+  // user-facing stage. Which rail row happens to be selected does not change
+  // the available actions.
+  const replacesResume = recoveryStage !== undefined && (recoveryStage === resumeStage || resumeStage === null)
 
   const startRecordless = (fromStage: FlightStageKey, feedback?: string): void => {
     if (preparing) return

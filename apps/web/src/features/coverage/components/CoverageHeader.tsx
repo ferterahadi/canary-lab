@@ -464,11 +464,11 @@ export function CoverageGlossary() {
     <span className="clcov-info" tabIndex={0} role="note" aria-label="What these terms mean">
       <span aria-hidden="true" className="clcov-info-i">i</span>
       <span className="clcov-info-pop" role="tooltip">
-        <span><strong style={{ color: GAP_META.covered.color }}>Covered</strong> — every path the requirement declares (happy/sad/edge) has a mapped test.</span>
-        <span><strong style={{ color: GAP_META['path-incomplete'].color }}>Path gap</strong> — a test exists, but some declared path has none.</span>
-        <span><strong style={{ color: GAP_META['variant-incomplete'].color }}>Variant gap</strong> — a test exists, but the requirement spans a dimension (e.g. channel) only partly exercised.</span>
-        <span><strong style={{ color: 'var(--text-secondary)' }}>Untested</strong> — no test maps to the requirement.</span>
-        <span><strong>Mapped</strong> — has ≥1 test (covered + path/variant-incomplete). Coverage is decoupled from test runs.</span>
+        <span><strong style={{ color: GAP_META.covered.color }}>Covered</strong> — a test covers every expected outcome.</span>
+        <span><strong style={{ color: GAP_META['path-incomplete'].color }}>Path gap</strong> — tests exist, but an expected outcome has no test.</span>
+        <span><strong style={{ color: GAP_META['variant-incomplete'].color }}>Variant gap</strong> — tests cover only some versions, such as one channel.</span>
+        <span><strong style={{ color: 'var(--text-secondary)' }}>Untested</strong> — no test is linked to this requirement.</span>
+        <span><strong>Mapped</strong> — at least one test is linked to this requirement. This shows coverage, not whether tests passed.</span>
       </span>
     </span>
   )

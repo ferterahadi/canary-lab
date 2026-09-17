@@ -79,18 +79,18 @@ export function StageColumn({ children }: { children: ReactNode }) {
  *  every locked row repeating the same "unlocks after the first flight" note
  *  (that lock is stated once, on the section header). */
 export const STAGE_BLURB: Record<FlightStageKey, string> = {
-  'similarity': 'Runs every step below, start to finish.',
-  'scout': 'Reads your repo to learn what it is built with and how it starts.',
-  'scaffold': 'Creates the test suite in your workspace, with settings and a start command.',
-  'env-capture': 'Copies the settings the app needs to start.',
-  'docs': 'Collects the documents that describe what the suite should do.',
-  'prd-summary': 'Turns those documents into a short list of things to test.',
-  'specs-coverage': 'Writes tests and maps them to requirements against your coverage target.',
-  'portify': 'Lets each service take its port from settings, so two runs can go at once.',
-  'run': 'Starts the app and runs the tests, fixing failures as they come up.',
-  'heal': 'Fixes failures by editing the app, then runs the tests again.',
-  'robustness': 'Reruns the passing tests under slow links, repeated writes and restarts, and shrinks each failure to a one-line repro.',
-  'evaluation-export': 'Packs the finished run into a report you can download.',
+  'similarity': 'Checks whether the flight can start.',
+  'scout': 'Checks your repo and how to start it.',
+  'scaffold': 'Creates your test suite setup.',
+  'env-capture': 'Copies your app startup settings.',
+  'docs': 'Finds documents that describe what to test.',
+  'prd-summary': 'Lists what those documents say to test.',
+  'specs-coverage': 'Writes and maps your tests.',
+  'portify': 'Sets ports so services can run side by side.',
+  'run': 'Starts the app, runs tests, and fixes failures.',
+  'heal': 'Fixes failed tests, then runs them again.',
+  'robustness': 'Checks passing tests under tougher conditions.',
+  'evaluation-export': 'Creates a downloadable report.',
 }
 
 /** The single status hue map — rail, chip, mini rail, and any artifact surface

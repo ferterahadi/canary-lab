@@ -9,16 +9,6 @@ import { PortifySection } from './PortifySection'
 import { WorktreesSection } from './WorktreesSection'
 import { CLEANUP_TABS, CleanupTab, FOURTEEN_DAYS_MS, HUNDRED_MB, KIND_LABEL, NUMERIC_KEYS, Row, SEVEN_DAYS_MS, STATUS_COLOR, SortKey, THIRTY_DAYS_MS, THREE_DAYS_MS, listingToRows, sortValue } from './cleanup-rows'
 
-/** One toolbar total: the rubric label over a mono, tabular value. */
-function CleanupTotal({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-col" style={{ lineHeight: 1.2 }}>
-      <span className="cl-rubric">{label}</span>
-      <span className="text-[12px] tabular-nums" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{value}</span>
-    </div>
-  )
-}
-
 interface Props {
   onClose: () => void
   // Opens a run in the workspace (selects its feature + run, leaves cleanup).
@@ -177,15 +167,10 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
           </button>
         )}
         {totals && (
-          <div className="ml-auto flex items-center gap-4">
-            {/* Rubric label over a mono value — the app's fact voice, and the
-                same pair the table's own columns use. As a sentence run
-                ("Total on disk: 591 MB  Reclaimable by trim: …") three
-                independent numbers read as one clause and none of them could
-                be scanned for. */}
-            <CleanupTotal label="On disk" value={formatBytes(totals.totalBytes)} />
-            <CleanupTotal label="Trimmable" value={formatBytes(totals.reclaimableTrimBytes)} />
-            <CleanupTotal label="Deletable" value={formatBytes(totals.reclaimableDeleteBytes)} />
+          <div className="ml-auto flex items-center gap-4" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            <span>On disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.totalBytes)}</strong></span>
+            <span>Trimmable: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableTrimBytes)}</strong></span>
+            <span>Deletable: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableDeleteBytes)}</strong></span>
             <button type="button" onClick={() => void refresh()} className="cl-button px-2 py-1" disabled={loading || busy}>Refresh</button>
           </div>
         )}

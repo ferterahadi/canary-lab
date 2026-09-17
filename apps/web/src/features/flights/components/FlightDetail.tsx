@@ -16,7 +16,6 @@ import { ACTIVITY_STAGE, type FeatureActivity, type FeatureExternalHistory } fro
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
 import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageRailRows, stageRowKey, stageStatusTone, stagePresentationStatus } from './stage-meta'
-import { stageStateLine } from './StageStatusLines'
 import {
   buildDerivedManifest,
   derivedEntryStage,
@@ -602,7 +601,6 @@ export function FlightDetail({
                 onStartFlight={onStartFlight}
                 externalMutationOwner={externalMutationOwner}
                 recordlessEntry={derivedEntry ?? coverageRecovery!.stage}
-                selectedStage={stageKey}
                 coverageRecovery={coverageRecovery}
               />
             )) : (
@@ -630,7 +628,7 @@ export function FlightDetail({
             )}
             {!activeCoverageJob && (flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
               <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} externalMutationOwner={externalMutationOwner}
-                selectedStage={stageKey} coverageRecovery={coverageRecovery} />
+                coverageRecovery={coverageRecovery} />
             )}
             <FlightMenu flight={flight} onAction={act} onDeleted={onBackToList} externalMutationOwner={externalMutationOwner} />
           </>
@@ -736,12 +734,11 @@ export function FlightDetail({
             const primary = flight.stages.find((st) => st.key === s.key)
             const folded = flight.stages.find((st) => st.key === STAGE_COMPANION[s.key])
             const duration = formatStageDuration(primary, folded)
-            // R84: the stage panel no longer paints its "where are we" sentence —
-            // it rides here instead, under the static blurb, so hovering a rail
-            // row still answers both "what is this step" and "what's it done".
-            const stateLine = primary ? stageStateLine(primary, flight, folded) : null
+            // One custom tooltip owns the rail row. Status remains visible in its
+            // icon and the selected-stage pane; folding it into the short stage
+            // explanation made the hover copy needlessly dense.
             const tooltip = warning ? `${warning} Use Continue → From a step… to update the affected step.`
-              : rowWaiting ? `${rowWaiting.label}. ${rowWaiting.detail}` : stateLine ? `${STAGE_BLURB[s.key]}\n\n${stateLine}` : STAGE_BLURB[s.key]
+              : rowWaiting ? `${rowWaiting.label}. ${rowWaiting.detail}` : STAGE_BLURB[s.key]
             return (
               <Fragment key={s.key}>
                 {s.key === 'portify' && (
@@ -758,7 +755,6 @@ export function FlightDetail({
                   aria-current={selected ? 'true' : undefined}
                   aria-label={warning ? `${s.label} — ${warning}` : undefined}
                   onClick={() => setSelectedStage(s.key)}
-                  title={tooltip}
                   className={`cl-hover-row flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors${selected ? ' bg-selected' : ''}`}
                 >
                   {/* Status hue stays a computed token string (one source of

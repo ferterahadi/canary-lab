@@ -103,6 +103,17 @@ describe('CoverageHeader — headline block', () => {
 })
 
 describe('CoverageHeader — Requirements group', () => {
+  it('explains coverage in plain language without confusing it with passed tests', () => {
+    render(LEDGER)
+    expect(container.querySelector('.clcov-info-pop')?.textContent).toBe([
+      'Covered — a test covers every expected outcome.',
+      'Path gap — tests exist, but an expected outcome has no test.',
+      'Variant gap — tests cover only some versions, such as one channel.',
+      'Untested — no test is linked to this requirement.',
+      'Mapped — at least one test is linked to this requirement. This shows coverage, not whether tests passed.',
+    ].join(''))
+  })
+
   it('is labelled with its total and lists the legend number-first, in plain words', () => {
     render(LEDGER)
     const grp = q('requirements-group')
