@@ -84,6 +84,34 @@ const collision = {
   repoPaths: ['/repo/shop'], options: ['worktree', 'queue'], message: 'run-9 is using /repo/shop',
 }
 
+function coverageChange(
+  state: 'current' | 'stale' = 'stale',
+  revision = 'coverage-v1',
+  over: Record<string, unknown> = {},
+) {
+  return {
+    changed: true,
+    change: {
+      feature: 'checkout',
+      freshness: {
+        revision,
+        state,
+        reasons: state === 'stale' ? ['2 test inputs changed since coverage was mapped.'] : [],
+        changedTests: state === 'stale' ? ['checkout.spec.ts', 'refund.spec.ts'] : [],
+        latestRunFailed: false,
+        proofNeedsRun: state === 'current',
+        nextAction: state === 'stale'
+          ? { stage: 'specs-coverage', label: 'Update coverage mappings', command: 'start_external_coverage', arguments: { feature: 'checkout' } }
+          : { stage: 'run', label: 'Verify current tests', command: 'start_run', arguments: { feature: 'checkout' } },
+      },
+      delivery: 'tool-response-and-wait',
+      ...over,
+    },
+  }
+}
+
+const coverageRequest = (body = coverageChange()) => vi.fn(async () => ({ statusCode: 200, body }))
+
 describe.each([
   ['start_run', START, 'run-new'],
   ['boot_services', { feature: 'checkout' }, 'boot-1'],
@@ -112,6 +140,14 @@ describe.each([
 })
 
 describe('start_run: continuing the run that is already healing', () => {
+  it('does not gate reuse on current coverage freshness', async () => {
+    const read = coverageRequest()
+    const { call } = harness({ store: storeOf([runDetail({ status: 'healing' })]), coverageRequest: read })
+
+    expect(await call('start_run', START)).toMatchObject({ runId: 'run-1', reused: true })
+    expect(read).not.toHaveBeenCalled()
+  })
+
   it('reuses it, claims heal for this session, and says to wait for the task', async () => {
     const startRun = vi.fn()
     const { call, claims } = harness({
@@ -279,6 +315,19 @@ describe('start_run: restarting a failed run in remaining-test mode', () => {
     knownTests: [{ name: 'pays with card' }, { name: 'applies a promo' }, { name: 'refunds an order' }],
   }
 
+  it('does not gate a recorded failed-run restart on current coverage freshness', async () => {
+    const read = coverageRequest()
+    const restartExternalRun = vi.fn(async () => ({ runId: 'run-1', mode: 'remaining' as const }))
+    const { call } = harness({
+      store: storeOf([runDetail({ status: 'failed' }, { summary })]),
+      coverageRequest: read,
+      restartExternalRun,
+    })
+
+    expect(await call('start_run', { ...START, run_ref: 'run-1' })).toMatchObject({ restarted: true })
+    expect(read).not.toHaveBeenCalled()
+  })
+
   it('says so when the restarter is not wired', async () => {
     const { text } = harness({ store: storeOf([runDetail({ status: 'failed' })]) })
 
@@ -357,6 +406,155 @@ describe('start_run: restarting a failed run in remaining-test mode', () => {
 })
 
 describe('start_run: starting fresh', () => {
+  it('starts nothing and tells a form-less client to ask when coverage mapping is stale', async () => {
+    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const { call } = harness({ startRun, coverageRequest: coverageRequest() })
+
+    expect(await call('start_run', START)).toMatchObject({
+      type: 'coverage_update_requires_choice',
+      runStarted: false,
+      feature: 'checkout',
+      options: ['Update coverage first', 'Run now with stale coverage'],
+    })
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('elicits stale coverage and leaves the run stopped when the user chooses the update', async () => {
+    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
+
+    const opened = await raw('start_run', START, context()) as InputRequiredResult
+    expect(opened.inputRequests).toMatchObject({ answer: { params: {
+      message: expect.stringContaining('Previous coverage percentages do not describe the current tests'),
+      requestedSchema: { properties: { choice: { enum: ['Update coverage first', 'Run now with stale coverage'] } } },
+    } } })
+    const answered = await raw('start_run', START, context(opened.requestState, {
+      action: 'accept', content: { choice: 'Update coverage first' },
+    }))
+
+    expect(JSON.parse((answered.content as Array<{ text: string }>)[0].text)).toMatchObject({
+      type: 'coverage_update_required', runStarted: false,
+    })
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('points update-first at the existing coverage owner instead of duplicating work', async () => {
+    const body = coverageChange('stale', 'coverage-v1', { activeJobId: 'coverage-job-1', activeJobOwner: 'session-2' })
+    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const { raw } = harness({ startRun, coverageRequest: coverageRequest(body) }, eliciting)
+    const opened = await raw('start_run', START, context()) as InputRequiredResult
+
+    const answered = await raw('start_run', START, context(opened.requestState, {
+      action: 'accept', content: { choice: 'Update coverage first' },
+    }))
+    const result = JSON.parse((answered.content as Array<{ text: string }>)[0].text)
+
+    expect(result).toMatchObject({
+      type: 'coverage_update_required', activeJobId: 'coverage-job-1', activeJobOwner: 'session-2',
+      nextSteps: ['follow the existing coverage owner', 'confirm coverage freshness', 'retry start_run'],
+    })
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it.each(['decline', 'cancel'])('starts nothing when the user chooses %s on the stale-coverage question', async (action) => {
+    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
+    const opened = await raw('start_run', START, context()) as InputRequiredResult
+
+    const answered = await raw('start_run', START, context(opened.requestState, { action }))
+
+    expect(JSON.stringify(answered)).toContain(`user chose ${action}`)
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('starts a diagnostic run only after the user accepts stale coverage, and qualifies the result', async () => {
+    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
+    const opened = await raw('start_run', START, context()) as InputRequiredResult
+
+    const answered = await raw('start_run', START, context(opened.requestState, {
+      action: 'accept', content: { choice: 'Run now with stale coverage' },
+    }))
+    const result = JSON.parse((answered.content as Array<{ text: string }>)[0].text)
+
+    expect(result).toMatchObject({
+      runId: 'run-new', coverageStale: true, coverageRevision: 'coverage-v1',
+      coverageMessage: expect.stringContaining('does not update'),
+    })
+    expect(startRun).toHaveBeenCalledOnce()
+  })
+
+  it('keeps coverage and repository isolation as two ordered user questions', async () => {
+    const startRun = vi.fn(async (_f: string, _e: unknown, _r: unknown, isolation?: string) =>
+      isolation ? { kind: 'started', runId: 'run-new' } : collision)
+    const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
+    const coverageOpened = await raw('start_run', START, context()) as InputRequiredResult
+
+    const isolationOpened = await raw('start_run', START, context(coverageOpened.requestState, {
+      action: 'accept', content: { choice: 'Run now with stale coverage' },
+    })) as InputRequiredResult
+    expect(isolationOpened.requestState).not.toBe(coverageOpened.requestState)
+    expect(isolationOpened.inputRequests).toMatchObject({ answer: { params: {
+      requestedSchema: { properties: { isolation: { enum: ['worktree', 'queue'] } } },
+    } } })
+
+    const answered = await raw('start_run', START, context(isolationOpened.requestState, {
+      action: 'accept', content: { isolation: 'worktree' },
+    }))
+    expect(JSON.parse((answered.content as Array<{ text: string }>)[0].text)).toMatchObject({
+      runId: 'run-new', coverageStale: true,
+    })
+    expect(startRun).toHaveBeenCalledTimes(2)
+    expect(startRun.mock.lastCall?.[3]).toBe('worktree')
+  })
+
+  it('rejects an approval when the coverage revision changes while the form is open', async () => {
+    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const read = vi.fn()
+      .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('stale', 'coverage-v1') })
+      .mockResolvedValue({ statusCode: 200, body: coverageChange('stale', 'coverage-v2') })
+    const { raw } = harness({ startRun, coverageRequest: read }, eliciting)
+    const opened = await raw('start_run', START, context()) as InputRequiredResult
+
+    const answered = await raw('start_run', START, context(opened.requestState, {
+      action: 'accept', content: { choice: 'Run now with stale coverage' },
+    }))
+
+    expect(JSON.stringify(answered)).toContain('work changed while the question was open')
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('rejects repository isolation when coverage changes after run-now approval', async () => {
+    const startRun = vi.fn(async (_f: string, _e: unknown, _r: unknown, isolation?: string) =>
+      isolation ? { kind: 'started', runId: 'run-new' } : collision)
+    const read = vi.fn()
+      .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('stale', 'coverage-v1') })
+      .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('stale', 'coverage-v1') })
+      .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('stale', 'coverage-v1') })
+      .mockResolvedValue({ statusCode: 200, body: coverageChange('stale', 'coverage-v2') })
+    const { raw } = harness({ startRun, coverageRequest: read }, eliciting)
+    const coverageOpened = await raw('start_run', START, context()) as InputRequiredResult
+    const isolationOpened = await raw('start_run', START, context(coverageOpened.requestState, {
+      action: 'accept', content: { choice: 'Run now with stale coverage' },
+    })) as InputRequiredResult
+
+    const answered = await raw('start_run', START, context(isolationOpened.requestState, {
+      action: 'accept', content: { isolation: 'worktree' },
+    }))
+
+    expect(JSON.stringify(answered)).toContain('work changed while the question was open')
+    expect(startRun).toHaveBeenCalledOnce()
+    expect(startRun.mock.calls[0]?.[3]).toBeUndefined()
+  })
+
+  it('starts normally when coverage is current but still needs a proving run', async () => {
+    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const { call } = harness({ startRun, coverageRequest: coverageRequest(coverageChange('current')) })
+
+    expect(await call('start_run', START)).toMatchObject({ runId: 'run-new' })
+    expect(startRun).toHaveBeenCalledOnce()
+  })
+
   it('forwards the session, the claimability and the isolation choice', async () => {
     const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
     const { call } = harness({ startRun })

@@ -166,7 +166,7 @@ realtime surface should **not** carry an empty `ws/`.
 ## Coverage freshness
 
 The coverage observer owns one content-derived revision per suite for the ledger,
-suite badges, Flights, notifications, and connected agents. It compares source
+suite badges, Flights, and connected agents. It compares source
 documents (including linked files), the requirement summary, mapping input
 fingerprints (tests, helpers, configuration), and the latest execution evidence.
 Filesystem and workspace events trigger reconciliation; a five-second content
@@ -199,7 +199,7 @@ requires subsequent verification before old results can count as current proof.
 
 Recovery starts at the earliest invalid Flight stage: Requirements for changed
 documents, Coverage for changed test/mapping inputs, Run for missing/currently
-failing execution evidence. Notification actions only open that stage. Its normal
+failing execution evidence. Inline recovery actions only open that stage. Its normal
 launch, ownership, and permission controls still govern regeneration/execution.
 Summary and mapping submissions carry input revisions; a concurrent edit rejects
 old work and provides refreshed context instead of certifying stale inputs.
@@ -219,9 +219,15 @@ state. The server owns writes; client tabs subscribe to `notifications-changed` 
 refetch on reconnect, with a bounded reconciliation for a dropped event that does
 not disconnect the socket. The dialog is addressable as `?dialog=notifications`.
 
-Flight attention transitions and changed test files create messages even when
-the browser is closed. Test changes open the comparison dialog; a blocked run
-supplies its exact review target, and a weakening hint escalates the same topic.
+Flight attention transitions and test changes that block an active run create
+messages even when the browser is closed. A possible test weakening also stays
+in the inbox as an advisory integrity review after the run ends. Ordinary edits,
+coverage freshness, verification readiness, and failed-run evidence remain on
+their owning suite, Coverage, Flight, and run surfaces instead of creating inbox
+messages. A Flight parked on the `run-failed` decision still notifies because the
+user must choose rerun or report; that is a blocked-work alert, not a duplicate
+failure report. Test-review actions open the comparison dialog; a blocked run supplies
+its exact review target, and a weakening hint escalates the same topic.
 Reading a message preserves it. Deleting one removes its content permanently while
 retaining the source signature, so refreshing or restarting cannot recreate it. A
 later quiet-to-attention transition creates a new message. Recovery marks retained
@@ -231,13 +237,11 @@ severity updates do not create a second active message. Manual note creation is 
 Notification actions navigate to the relevant flight or test
 review; they never change the run verdict or adopt test edits themselves.
 
-Coverage freshness uses one persistent attention identity per suite. Repeated
-file saves update its reason and earliest recovery stage instead of creating
-duplicates. It resolves when mapping freshness recovers, independently of test
-review. Execution failures and missing verification have a separate identity:
-failures open the exact run; missing verification opens Flight's Test run step.
-Tests changed and coverage outdated can coexist for one suite. Neither reviewing
-tests nor recalculating mappings dismisses the other topic automatically.
+Inbox eligibility and toast eligibility are separate. A blocked Flight or active
+run review can raise the sticky toast; an advisory weakening hint remains in the
+durable inbox without interrupting the user. A retained item becomes toast-eligible
+again when the same issue starts blocking work, which re-arms it as unread. Every
+toast therefore represents work that cannot continue without the user.
 
 The run detail keeps a visible review banner above its tabs while it awaits test
 review. Its button opens the existing changed-tests dialog with that run first.
@@ -294,14 +298,15 @@ Commit names the selected suite and counts all its changed test files.
 A successful commit leaves a saved receipt; the uncommitted review cue clears on
 live refresh. Differences from a selected run remain independently inspectable:
 saving in Git never validates new tests or changes an existing run verdict.
-An active run with pending edits asks "Keep these test changes?" with two actions: "No, restore tests" and "Yes, commit & rerun". Yes commits first, then adopts into the run and requests a rerun; a failed step stays visible for recovery. Queued or completed runs retain the Git-only commit action. MCP clients can call
+An active run with pending edits asks whether to adopt the exact revision and rerun or restore it. A terminal passed, failed, or aborted run instead offers exact-revision approval for a new run or restoration; approval preserves the old snapshot and verdict, and the new run must execute before those bytes have test evidence. A failed step stays visible for recovery. MCP clients can call
 `get_test_review` to display the exact snapshot comparison, then
 `review_test_changes` to request adoption or restoration through human elicitation
 inside the agent session. The UI is optional inspection, not a required control
 surface. The comparison includes fixtures and supporting files without counting
 them as changed test declarations. The review
 includes every copied suite file; envsets, dependencies and Git metadata are
-excluded exactly as in the snapshot. Approval is bound to both trees by SHA-256.
+excluded exactly as in the snapshot. Engine-owned coverage state is excluded as
+runtime metadata. Approval is bound to both trees by SHA-256.
 A staged copy is checked before replacing the snapshot, so stale answers and
 copy failures cannot silently adopt a different revision. Cancellation leaves
 work pending. A first call with `wait_for_decision:true` still elicits instead of
@@ -315,8 +320,9 @@ a reconnect reads the same receipt. The normal elicited path returns that receip
 without any browser click; retries do not apply the decision twice. Restoration
 checks the reviewed revision before changing files and rejects symlink paths.
 A clean Git tree is never treated as approval.
-Adoption signals
-a rerun and never changes the verdict into a pass. Editing opens the existing
+Active adoption signals a rerun. Terminal approval is carried into fresh-run
+snapshot capture, rechecked before and during the copy, and recorded as provenance
+on the new run. Neither decision changes a verdict into a pass. Editing opens the existing
 editor; validation uses the existing Run flow. Closing Services leaves sessions
 running; stopping is a separate action.
 

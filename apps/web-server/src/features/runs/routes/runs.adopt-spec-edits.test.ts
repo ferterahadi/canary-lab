@@ -9,6 +9,9 @@ import Fastify from 'fastify'
 import { runsRoutes } from './runs'
 import { createRegistry, RunStore, type OrchestratorLike } from '../logic/run-store'
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
+import { writeManifest, readManifest } from '../logic/runtime/manifest'
+import { runDirFor } from '../logic/runtime/run-paths'
+import { suiteReviewRevision } from '../logic/runtime/suite-review'
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 
@@ -30,7 +33,24 @@ async function build(events: WorkspaceEvent[] = []) {
     startRun: async () => { throw new Error('not configured') },
     workspaceEvents: { publish: (event) => { events.push(event) } },
   })
-  return { app, registry }
+  return { app, registry, store }
+}
+
+function terminalReview(status: 'passed' | 'failed' | 'aborted' = 'passed') {
+  const featureDir = path.join(tmpDir, 'features', 'demo')
+  const runDir = runDirFor(path.join(tmpDir, 'logs'), 'terminal')
+  const snapshot = path.join(runDir, 'suite')
+  for (const dir of [featureDir, snapshot]) fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
+  fs.writeFileSync(path.join(snapshot, 'e2e/a.spec.ts'), 'recorded\n')
+  fs.writeFileSync(path.join(featureDir, 'e2e/a.spec.ts'), 'candidate\n')
+  const revision = suiteReviewRevision(snapshot, featureDir)
+  writeManifest(path.join(runDir, 'manifest.json'), {
+    runId: 'terminal', feature: 'demo', featureDir, startedAt: 'now', status,
+    services: [], healCycles: 0,
+    suiteSnapshot: { kind: 'taken', dir: snapshot, takenAt: 'now', digest: 'digest' },
+    specEdits: { checkedAt: 'now', pending: [{ file: 'e2e/a.spec.ts', change: 'modified', affectedTests: [] }], adopted: [] },
+  })
+  return { featureDir, runDir, snapshot, revision }
 }
 
 function stub(adopt: OrchestratorLike['adoptSpecEdits']): OrchestratorLike {
@@ -76,5 +96,41 @@ describe('POST /api/runs/:runId/adopt-spec-edits', () => {
     const res = await app.inject({ method: 'POST', url: '/api/runs/r1/adopt-spec-edits' })
     expect(res.statusCode).toBe(409)
     expect(res.json()).toEqual({ reason })
+  })
+
+  it('approves exact terminal-run bytes for a new run without changing the old snapshot or verdict', async () => {
+    const { app } = await build()
+    const seeded = terminalReview('passed')
+    const payload = { expectedRevision: seeded.revision }
+
+    const first = await app.inject({ method: 'POST', url: '/api/runs/terminal/adopt-spec-edits', payload })
+    expect(first.statusCode).toBe(202)
+    expect(first.json()).toMatchObject({ status: 'approved-for-new-run', newRunRequired: true })
+    expect(fs.readFileSync(path.join(seeded.snapshot, 'e2e/a.spec.ts'), 'utf8')).toBe('recorded\n')
+    expect(readManifest(path.join(seeded.runDir, 'manifest.json'))).toMatchObject({
+      status: 'passed',
+      specEdits: { reviewDecisions: [{ revision: seeded.revision, decision: 'approved-for-new-run' }] },
+    })
+    const replay = await app.inject({ method: 'POST', url: '/api/runs/terminal/adopt-spec-edits', payload })
+    expect(replay.statusCode).toBe(200)
+    expect(readManifest(path.join(seeded.runDir, 'manifest.json'))?.specEdits?.reviewDecisions).toHaveLength(1)
+  })
+
+  it('rejects stale and competing terminal decisions, including concurrent requests', async () => {
+    const { app } = await build()
+    const stale = terminalReview('failed')
+    fs.appendFileSync(path.join(stale.featureDir, 'e2e/a.spec.ts'), 'newer\n')
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/adopt-spec-edits', payload: { expectedRevision: stale.revision } })).statusCode).toBe(409)
+
+    fs.rmSync(stale.runDir, { recursive: true, force: true })
+    const current = terminalReview('aborted')
+    const [approve, restore] = await Promise.all([
+      app.inject({ method: 'POST', url: '/api/runs/terminal/adopt-spec-edits', payload: { expectedRevision: current.revision } }),
+      app.inject({ method: 'POST', url: '/api/runs/terminal/restore-spec-edits', payload: { expectedRevision: current.revision } }),
+    ])
+    const codes = [approve.statusCode, restore.statusCode]
+    expect(codes.filter((code) => code === 409)).toHaveLength(1)
+    expect(codes.some((code) => code === 200 || code === 202)).toBe(true)
+    expect(readManifest(path.join(current.runDir, 'manifest.json'))?.specEdits?.reviewDecisions).toHaveLength(1)
   })
 })

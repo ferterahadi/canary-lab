@@ -43,6 +43,45 @@ it('tracks support data and dynamic helpers, handles directory cycles, and exclu
   expect(snapshot()).not.toEqual(before)
 })
 
+it('ignores a Canary tarball repack but tracks its feature support and other dependencies', () => {
+  const canaryDir = path.join(featureDir, 'node_modules/canary-lab/dist/shared')
+  fs.mkdirSync(path.join(canaryDir, 'configs'), { recursive: true })
+  fs.mkdirSync(path.join(canaryDir, 'e2e-runner'), { recursive: true })
+  fs.writeFileSync(path.join(canaryDir, 'configs/playwright.base.js'), 'export const baseConfig = {}')
+  fs.writeFileSync(path.join(canaryDir, 'e2e-runner/log-marker-fixture.js'), 'export const test = {}')
+  const lock = (canaryIntegrity: string, appIntegrity: string) => JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      'node_modules/canary-lab': { version: '2.3.0', resolved: 'file:canary-lab-2.3.0.tgz', integrity: canaryIntegrity },
+      'node_modules/app-runtime': { version: '1.0.0', integrity: appIntegrity },
+    },
+  })
+  const lockFile = path.join(featureDir, 'package-lock.json')
+  fs.writeFileSync(lockFile, lock('canary-build-1', 'app-build-1'))
+  const before = snapshot()
+
+  fs.writeFileSync(lockFile, lock('canary-build-2', 'app-build-1'))
+  expect(snapshot()).toEqual(before)
+
+  fs.writeFileSync(path.join(canaryDir, 'configs/playwright.base.js'), 'export const baseConfig = { retries: 1 }')
+  expect(snapshot()).not.toEqual(before)
+
+  const afterSupportChange = snapshot()
+  fs.writeFileSync(lockFile, lock('canary-build-2', 'app-build-2'))
+  expect(snapshot()).not.toEqual(afterSupportChange)
+})
+
+it('keeps malformed package locks freshness-sensitive', () => {
+  const canaryDir = path.join(featureDir, 'node_modules/canary-lab/dist/shared/configs')
+  fs.mkdirSync(canaryDir, { recursive: true })
+  fs.writeFileSync(path.join(canaryDir, 'playwright.base.js'), 'export const baseConfig = {}')
+  const lockFile = path.join(featureDir, 'package-lock.json')
+  fs.writeFileSync(lockFile, '{broken:1}')
+  const before = snapshot()
+  fs.writeFileSync(lockFile, '{broken:2}')
+  expect(snapshot()).not.toEqual(before)
+})
+
 it('re-examines inputs it cannot read instead of remembering a partial fingerprint', () => {
   fs.rmSync(path.join(featureDir, 'e2e/test.spec.ts'))
   expect(snapshot().tests).toEqual({})

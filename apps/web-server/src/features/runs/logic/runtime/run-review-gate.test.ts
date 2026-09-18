@@ -3,6 +3,7 @@ import os from 'os'
 import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { assertNoPendingRunReview } from './run-review-gate'
+import { suiteReviewRevision } from './suite-review'
 import type { RunDetail, RunStore } from '../run-store'
 import type { RunManifest } from './manifest'
 
@@ -74,5 +75,23 @@ describe('fresh-run review boundary', () => {
     ]
     fs.writeFileSync(path.join(live, 'e2e', 'contract.spec.ts'), 'weakened test')
     expect(() => assertNoPendingRunReview(store, 'example', live, 'new-run')).toThrow(/original/)
+  })
+
+  it.each(['passed', 'failed', 'aborted'] as const)('carries exact terminal approval into a new run after %s', (status) => {
+    const { store, live, snapshot, manifest } = setup(status)
+    fs.writeFileSync(path.join(live, 'e2e', 'contract.spec.ts'), 'approved candidate')
+    const revision = suiteReviewRevision(snapshot, live)
+    manifest.specEdits = {
+      checkedAt: 'now',
+      pending: [{ file: 'e2e/contract.spec.ts', change: 'modified', affectedTests: [] }],
+      adopted: [],
+      reviewDecisions: [{ at: 'approved-at', revision, decision: 'approved-for-new-run' }],
+    }
+
+    expect(assertNoPendingRunReview(store, 'example', live)).toEqual({
+      sourceRunId: 'original', revision, approvedAt: 'approved-at',
+    })
+    fs.appendFileSync(path.join(live, 'e2e', 'contract.spec.ts'), '\nnewer')
+    expect(() => assertNoPendingRunReview(store, 'example', live)).toThrow(/test_review_required/)
   })
 })

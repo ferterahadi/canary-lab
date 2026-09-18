@@ -74,7 +74,7 @@ export function registerHealFlowTools(ctx: ToolGroupContext): void {
       client_kind: clientKindInput,
       timeout_ms: z.number().int().positive().max(WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS)
         .default(WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS)
-        .describe('Per-call block budget in ms (default 90s). A single call blocks at most ~2 minutes regardless; larger values are clamped, then you get still_waiting to loop on. This is not the overall heal budget — that is unbounded across re-calls.'),
+        .describe('Per-call block budget in ms (default 45s). A single call blocks at most 45 seconds regardless; larger values are clamped, then you get still_waiting to loop on. This is not the overall heal budget — that is unbounded across re-calls.'),
     },
   }, async ({ runId, session_id, client_kind, timeout_ms }) => {
     const result = await waitForHealTask(deps, runId, session_id, client_kind, timeout_ms)

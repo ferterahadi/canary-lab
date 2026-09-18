@@ -107,18 +107,36 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   }
   const tone = spec ? specTone(spec) : selected?.feature ? featureTone(selected.feature) : null
   const run = selected?.run
+  // RunStore decisions arrive through the run WebSocket as a new manifest.
+  // Use that pushed revision to refetch the REST-only review immediately;
+  // bounded reconciliation below remains the missed-event recovery path.
+  const reviewRefreshKey = JSON.stringify([
+    detail?.manifest.specEdits?.checkedAt,
+    detail?.manifest.specEdits?.reviewDecisions,
+  ])
   const runReview = useLiveResource<RunTestReview>('tests', run?.runId ?? null, api.getRunTestReview, {
     reconcileMs: 5000,
     leaseMs: 15000,
+    refreshKey: reviewRefreshKey,
   })
   const comparisonRunId = againstRun && selected && selected.name === focusFeature && focusRunId && (!focusRunDetail || focusRunDetail.manifest.feature === selected.name) ? focusRunId
     : run?.runId ?? (focusRunDetail?.manifest.feature === selected?.name ? focusRunId ?? undefined : undefined)
   const useRunBaseline = !!comparisonRunId && (againstRun || !selected?.feature)
   const commitFileCount = selected?.feature?.dirty?.specs.length ?? 0
-  const activeRun = run && (!useRunBaseline || run.runId === comparisonRunId) && ['running', 'healing'].includes(run.status)
-    && runReview.value?.canAdopt && runReview.value.files.length > 0 ? run : undefined
-  const reviewRevision = activeRun ? runReview.value?.review_revision : undefined
-  const reviewFileCount = activeRun ? runReview.value?.files.length ?? 0 : 0
+  const reviewState = runReview.value?.reviewState ?? (runReview.value?.canAdopt && run && ['running', 'healing'].includes(run.status) ? 'pending-active' : undefined)
+  const reviewStateMatchesRun = reviewState === 'pending-active'
+    ? !!run && ['running', 'healing'].includes(run.status)
+    : reviewState === 'pending-terminal'
+      ? !!run && ['passed', 'failed', 'aborted'].includes(run.status)
+      : false
+  const reviewRun = run && reviewStateMatchesRun && (!useRunBaseline || run.runId === comparisonRunId)
+    && runReview.value?.files.length
+    && (runReview.value.allowedActions ?? (runReview.value.canAdopt ? ['adopt-and-rerun', 'restore'] : []))
+      .some((action) => action === 'adopt-and-rerun' || action === 'approve-new-run' || action === 'restore')
+    ? run : undefined
+  const terminalReview = reviewState === 'pending-terminal'
+  const reviewRevision = reviewRun ? runReview.value?.review_revision : undefined
+  const reviewFileCount = reviewRun ? runReview.value?.files.length ?? 0 : 0
   const reviewKey = JSON.stringify([selected?.name, spec?.file])
   const comparisonFeature = selected?.name
   const comparisonManifest = focusRunDetail?.manifest.runId === comparisonRunId ? focusRunDetail?.manifest
@@ -173,13 +191,13 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   }
 
   const adoptChanges = async (): Promise<void> => {
-    if (!activeRun || !reviewRevision) return
+    if (!reviewRun || !reviewRevision) return
     if (commitFileCount > 0) await commitChanges()
     // Git and the run snapshot are separate boundaries. A successful commit
     // must not dismiss this review before the run accepts the changed tests.
     try {
-      const adopted = await api.adoptSpecEdits(activeRun.runId, { expectedRevision: reviewRevision })
-      if (adopted.rerun === 'not-waiting-for-signal') {
+      const adopted = await api.adoptSpecEdits(reviewRun.runId, { expectedRevision: reviewRevision })
+      if (adopted.status === 'adopted' && adopted.rerun === 'not-waiting-for-signal') {
         setError('Adopted for this run, but no rerun started. Start a new run to validate these files.')
         return
       }
@@ -204,18 +222,18 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
         bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
         footer={<div className="cl-review-footer" data-testid="dirty-review-actions">
           <div className="cl-review-commit-context">
-            {activeRun ? <p data-testid={`dirty-review-pending-${selected?.name}`}><strong className="text-primary">Adopt these suite changes?</strong> Adopt accepts all {reviewFileCount} reviewed {reviewFileCount === 1 ? 'file' : 'files'} into run {shortRunRef(activeRun.runId)} and reruns it{commitFileCount > 0 ? ', saving changed test files to Git first' : ''}. Restore puts the recorded files back.</p>
+            {reviewRun ? <p data-testid={`dirty-review-pending-${selected?.name}`}><strong className="text-primary">{terminalReview ? 'Approve these suite changes for a new run?' : 'Adopt these suite changes?'}</strong> {terminalReview ? 'Approval preserves the old verdict and lets the next run snapshot' : 'Adopt accepts'} all {reviewFileCount} reviewed {reviewFileCount === 1 ? 'file' : 'files'} {terminalReview ? `from run ${shortRunRef(reviewRun.runId)}` : `into run ${shortRunRef(reviewRun.runId)} and reruns it`}{commitFileCount > 0 ? ', saving changed test files to Git first' : ''}. Restore puts the recorded files back.</p>
               : saved ? <p role="status">Saved in Git · {saved.files} {saved.files === 1 ? 'file' : 'files'} in {saved.name}. Run again when ready to validate these tests.</p> : null}
           </div>
           <div className="cl-review-commit-buttons">
-            {activeRun ? <>
+            {reviewRun ? <>
               <button className="cl-button px-3 py-1.5 text-xs" disabled={busy || !runReview.confirmed} onClick={() => { void act(async () => {
                 if (!reviewRevision) return
-                await api.restoreSpecEdits(activeRun.runId, { expectedRevision: reviewRevision })
+                await api.restoreSpecEdits(reviewRun.runId, { expectedRevision: reviewRevision })
                 onFeaturesChanged?.()
                 onClose()
               }) }}>Restore recorded files</button>
-              <button className="cl-button-primary px-3 py-1.5 text-xs" disabled={busy || !runReview.confirmed} onClick={() => { void act(adoptChanges) }}>Adopt &amp; rerun</button>
+              <button className="cl-button-primary px-3 py-1.5 text-xs" disabled={busy || !runReview.confirmed} onClick={() => { void act(adoptChanges) }}>{terminalReview ? 'Approve for new run' : <>Adopt &amp; rerun</>}</button>
             </> : selected?.feature && commitFileCount > 0 && <button className="cl-button-primary px-3 py-1.5 text-xs" disabled={busy} title={`Commit all ${commitFileCount} changed test files in ${selected.name}, including files not opened here`} onClick={() => { void act(commitChanges) }}>Commit suite · {commitFileCount} {commitFileCount === 1 ? 'file' : 'files'}</button>}
           </div>
           <div className="cl-review-footer-navigation" ref={setNavigationTarget}>

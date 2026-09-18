@@ -50,6 +50,11 @@ export interface RunPaths {
   // never reaches the process that produces the verdict; replaced only when a
   // human adopts the edit. Envsets, node_modules and .git are left out.
   suiteSnapshotDir: string
+  /** Ephemeral, run-owned copies of selected suite-local env targets. The
+   * directory is removed at teardown; the adjacent inventory is retained only
+   * as secret-free cleanup evidence. */
+  suiteRuntimeInputsDir: string
+  suiteRuntimeInputsInventoryPath: string
   failedDir: string
   signalsDir: string
   restartSignal: string
@@ -87,6 +92,8 @@ export function buildRunPaths(runDir: string, overrides?: { signalsDir?: string 
     healAgentTailPath: path.join(runDir, 'heal-agent-tail.txt'),
     fixesDir: path.join(runDir, 'fixes'),
     suiteSnapshotDir: path.join(runDir, 'suite'),
+    suiteRuntimeInputsDir: path.join(runDir, '.suite-runtime-inputs'),
+    suiteRuntimeInputsInventoryPath: path.join(runDir, 'suite-runtime-inputs.json'),
     failedDir: path.join(runDir, 'failed'),
     signalsDir,
     restartSignal: path.join(signalsDir, '.restart'),

@@ -410,7 +410,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
         if (mappingState === 'generating') return 'Matching tests to requirements…'
         if (mappingState === 'stale') return 'Tests are written, but coverage mapping is stale — run Coverage again.'
         const of = covered != null && total != null ? ` — ${covered} of ${total} requirement${total === 1 ? '' : 's'} mapped` : ''
-        return `Tests written. Mapped coverage is ${pct ?? '?'}%${of}. Nothing has run yet.`
+        return `Tests written. Mapped coverage is ${pct ?? '?'}%${of}. Run results are tracked separately.`
       }
       return `Coverage target met${pct != null ? ` — ${pct}%` : ''}.`
     }

@@ -49,6 +49,14 @@ export function completedUserInput(ctx: ServerContext | undefined, scope: unknow
     ? entry.result : undefined
 }
 
+/** True only when this request is answering the named open question. Tools
+ * with more than one possible elicitation use it to route the echoed handle. */
+export function matchesUserInput(ctx: ServerContext | undefined, scope: unknown): boolean {
+  const state = ctx?.mcpReq.requestState?.()
+  const entry = typeof state === 'string' ? pending.get(state) : undefined
+  return Boolean(entry && entry.expiresAt > Date.now() && entry.scope === inputFingerprint([ctx?.sessionId, scope]))
+}
+
 /** URL input can advance the domain state before the MCP call resumes. Keep
  * its original completion check so a retry cannot answer a newer checkpoint. */
 export function resumeUrlInput(
@@ -124,6 +132,28 @@ export async function requestUserInput<T>(
   const state = ctx?.mcpReq.requestState?.()
   if (state !== undefined) return applyAnswer(ctx, spec, apply, state)
 
+  return openUserInput(ctx, facts, spec, apply, now)
+}
+
+/** Open the next question while applying an earlier answer. The existing
+ * requestState belongs to the completed round, so it must not be reapplied to
+ * this new spec. */
+export function requestNextUserInput<T>(
+  ctx: ServerContext | undefined,
+  facts: McpClientFacts,
+  spec: InputSpec<T>,
+  apply: (value: T) => Promise<ToolResult>,
+): ToolResult {
+  return openUserInput(ctx, facts, spec, apply, expirePending())
+}
+
+function openUserInput<T>(
+  ctx: ServerContext | undefined,
+  facts: McpClientFacts,
+  spec: InputSpec<T>,
+  apply: (value: T) => Promise<ToolResult>,
+  now: number,
+): ToolResult {
   const scope = inputFingerprint([ctx?.sessionId, spec.scope])
   const revision = inputFingerprint(spec.revision)
   const supported = facts.elicitation?.[spec.mode] === true

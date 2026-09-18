@@ -95,6 +95,27 @@ describe('test review human gate', () => {
     expect((await tools.raw('review_test_changes', args, context(opened.requestState, { action: 'accept', content: { choice: 'Adopt and rerun' } }))).isError).toBe(true)
   })
 
+  it('approves a terminal candidate for a new run without steering back to the ended run', async () => {
+    const { tools, send, review } = fixture()
+    Object.assign(review, {
+      canAdopt: false,
+      reviewState: 'pending-terminal',
+      allowedActions: ['approve-new-run', 'restore', 'leave-pending'],
+      nextAction: 'restore-or-leave',
+    })
+    const read = send.getMockImplementation()!
+    send.mockImplementation(async (request) => request.method === 'GET'
+      ? read(request)
+      : { statusCode: 202, body: { status: 'approved-for-new-run', newRunRequired: true } } as never)
+    expect((await tools.call('get_test_review', args)).next).toContain('new run')
+    const opened = await tools.raw('review_test_changes', args, context()) as InputRequiredResult
+    const result = value(await tools.raw('review_test_changes', args, context(opened.requestState, {
+      action: 'accept', content: { choice: 'Approve for new run' },
+    })))
+    expect(result).toMatchObject({ status: 'approved-for-new-run', nextSteps: ['start_run'] })
+    expect(result).not.toHaveProperty('nextSteps.0', 'wait_for_heal_task')
+  })
+
   it('works without a browser URL and directs unsupported clients to the UI', async () => {
     const { send } = fixture()
     const tools = captureTools(registerTestReviewTools, { testReviewRequest: send })

@@ -23,6 +23,7 @@ import type { RunModelPlan } from './run-model-plan'
 import type { PendingSpecEdit } from '../dirty-specs/detect'
 import type { IntegrityHint } from './run-integrity-hints'
 import type { TestReviewDecision } from '../../../../../../../shared/test-review'
+import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
 export type {
   HealEnd,
   QueueReason,
@@ -213,6 +214,9 @@ export interface RunManifest {
    *  no copy means no boundary to measure against, and `pending: []` would
    *  then read as "no edits" when the truth is "cannot tell". */
   specEdits?: RunSpecEdits
+  /** A terminal run approved this exact suite revision for this new run. The
+   * approval is provenance only; the new run still needs its own verdict. */
+  testReviewApproval?: RunTestReviewApproval
   /** Written together with `specEdits`; same absence rule. */
   integrity?: RunIntegrity
   /** The robustness envelope this run booted under and the shim port fronting

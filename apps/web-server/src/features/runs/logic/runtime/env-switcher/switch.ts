@@ -47,6 +47,19 @@ export function getSlotFilesInSet(envSetsDir: string, setName: string, slots: st
   return slots.filter((slot) => fs.existsSync(path.join(setDir, slot)));
 }
 
+export function resolveSetTargets(
+  featureDir: string,
+  setName: string,
+): Array<{ slot: string; targetPath: string }> {
+  const envSetsDir = getEnvSetsDir(featureDir);
+  if (!fs.existsSync(path.join(envSetsDir, 'envsets.config.json'))) return [];
+  const config = loadConfig(featureDir);
+  return getSlotFilesInSet(envSetsDir, setName, config.feature.slots).map((slot) => ({
+    slot,
+    targetPath: resolveVars(config.slots[slot].target, config.appRoots),
+  }));
+}
+
 export function backup(
   targets: Array<{ slot: string; targetPath: string }>,
   timestamp: number,

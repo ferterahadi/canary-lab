@@ -152,7 +152,9 @@ export function buildRunsRouteDeps(
       // construction + kickoff. Deferred and reused by the queue when the run
       // can't start immediately.
       const launch = async (): Promise<OrchestratorLike> => {
-        if (!isBoot && !isCell) assertNoPendingRunReview(runStore, feature.name, feature.featureDir, runId)
+        const testReviewApproval = !isBoot && !isCell
+          ? assertNoPendingRunReview(runStore, feature.name, feature.featureDir, runId)
+          : undefined
         const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
         runnerLog.info(
           `Run started: feature=${feature.name}${env ? ` env=${env}` : ''} runId=${runId}`,
@@ -312,6 +314,7 @@ export function buildRunsRouteDeps(
 	          ptyFactory,
           runnerLog,
           executionType,
+          testReviewApproval,
           // A boot-only session never runs tests, so it never heals, and a
           // robustness cell must not — force all heal modes off regardless of
           // project config.

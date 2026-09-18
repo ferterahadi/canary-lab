@@ -1,10 +1,17 @@
 ---
 name: canary-lab
-description: Use when the user wants Canary Lab to take a product repo end to end — "test this app", "onboard this repo", "run a flight", "evaluate what I just built" — through the flight pipeline (start_flight / get_flight / respond_flight_checkpoint over MCP). One conducted pipeline goes from bare repo(s) to a green, covered, healed run and publishes a downloadable Report; final Parallel setup continues as Canary-owned background work. For a single capability use the focused skills instead — canary-lab-run (run + heal), canary-lab-verify (deployed-env verification), canary-lab-author (create feature + specs), canary-lab-coverage (PRD summary + coverage ledger), canary-lab-portify (concurrency-readiness), canary-lab-export (evaluation export).
+description: Use when the user wants Canary Lab to take a product repo end to end — "test this app", "onboard this repo", "run a flight", "evaluate what I just built" — through the flight pipeline (start_flight / get_flight / respond_flight_checkpoint over MCP). One conducted pipeline continues a configured suite or takes bare repo(s) to a green, covered, healed run and publishes a downloadable Report; final Parallel setup continues as Canary-owned background work. Use a focused skill only when the user asks for that single capability without asking for a Flight or /canary-lab.
 type: skill
 ---
 
 # Canary Lab — Flight
+
+An explicit request for a Flight or `/canary-lab` always means this pipeline. Do
+not reinterpret its desired outcome (for example, "drive coverage to 100%") as
+permission to substitute focused author, run, or coverage workflows. For an
+existing configured suite, call `start_flight(feature, coverage_target)`; Canary
+reads durable stage evidence and continues non-destructively from the first
+stage that does not meet the requested target.
 
 ## User input through MCP 2.0
 
@@ -235,6 +242,6 @@ unconfirmed cell is never a pass.
 - **On `from_stage` / resume: OMIT `repoPaths` and `description`** — frozen against mid-pipeline re-entry. On `redo: true` you MAY pass new ones: a full restart replaces the stored inputs. Both `redo` and `from_stage` wipe the re-entered steps' on-disk artifacts (user-added docs included) — resume never does.
 - `start_flight` accepts `session_id`, `conversation_name`, and `external_session_url` for Activity provenance. Keep the same values on resume/redo/jump. The other Flight tools do not take them.
 - The flight conducts run/heal/coverage/portify itself. While a flight is active, do not drive those stages with the focused skills — answer the flight's checkpoints instead.
-- For one capability on its own (a run, a coverage pass, an export), use the matching focused skill: `canary-lab-run`, `canary-lab-verify`, `canary-lab-author`, `canary-lab-coverage`, `canary-lab-portify`, `canary-lab-export`.
+- Only when the user asks for one capability on its own, without asking for a Flight or `/canary-lab`, use the matching focused skill: `canary-lab-run`, `canary-lab-verify`, `canary-lab-author`, `canary-lab-coverage`, `canary-lab-portify`, `canary-lab-export`.
 
 Broken document links are repaired before source discovery: the owning command elicits the moved file's new path on the Canary server. On `document-relinked`, retry that command with the same arguments. Keep the symlink and existing baseline; never omit the missing source or create recovery copies. Cancel/decline leaves work pending. Unsupported clients use Relink in the returned Canary UI.

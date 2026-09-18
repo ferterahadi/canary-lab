@@ -9,6 +9,7 @@ import { trimRunArtifacts } from './run-artifacts'
 import { AbortAllResult, AbortResult, CleanupListing, DeleteResult, TrimResult, listCleanupEntries, reapStaleRuns, removeRunFromHistory } from './run-cleanup'
 import { RunDetail, getRunDetail } from './run-detail'
 import type { OrchestratorRegistry } from './run-registry'
+import { cleanupSuiteRuntimeInputsForRun } from './runtime/suite-runtime-inputs'
 
 export { dirSizeBytes, indexPlaywrightArtifacts, runArtifactBytes, trimRunArtifacts } from './run-artifacts'
 export type { PlaywrightArtifact, PlaywrightArtifactGroup, PlaywrightArtifactKind } from './run-artifacts'
@@ -374,6 +375,7 @@ export class RunStore extends EventEmitter implements RunStateSink {
     const detail = this.get(runId)
     if (detail) {
       if (!isUnsettledRunStatus(detail.manifest.status)) return false
+      try { cleanupSuiteRuntimeInputsForRun(runDirFor(this.logsDir, runId)) } catch { /* malformed metadata stays inspectable for manual cleanup */ }
       this.finalize(runId, 'aborted', new Date().toISOString(), detail.manifest.healCycles)
       return true
     }

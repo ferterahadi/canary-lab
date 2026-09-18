@@ -16,7 +16,7 @@ let rows: WorkspaceNotification[]
 const target = { kind: 'test-review' as const, feature: 'shop', runId: 'run-1' }
 beforeEach(() => {
   vi.clearAllMocks()
-  rows = [{ id: 'n1', title: 'shop awaits review', body: '1 changed file', target, createdAt: '2026-09-08T10:00:00Z' }]
+  rows = [{ id: 'n1', title: 'shop awaits review', body: '1 changed file', target, toast: true, createdAt: '2026-09-08T10:00:00Z' }]
   api.getNotifications.mockImplementation(async () => [...rows])
   api.deleteNotification.mockImplementation(async (id) => { rows = rows.filter((row) => row.id !== id) })
   api.readNotification.mockImplementation(async (id) => { rows = rows.map((row) => row.id === id ? { ...row, readAt: 'now' } : row) })
@@ -26,8 +26,8 @@ afterEach(() => { act(() => root.unmount()); container.remove() })
 const button = (text: string) => [...document.querySelectorAll('button')].find((b) => b.textContent === text)!
 const labelled = (label: string) => document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!
 
-it('keeps test changes and outdated coverage separate in an already-open inbox', async () => {
-  const coverage = { kind: 'coverage' as const, feature: 'shop', flightId: 'f1', stage: 'specs-coverage' as const }
+it('keeps a test review and Flight blocker separate in an already-open inbox', async () => {
+  const flight = { kind: 'flight' as const, flightId: 'f1' }
   const navigate = vi.fn()
   let invalidate!: ReturnType<typeof useInvalidation>['invalidate']
   function View() {
@@ -35,14 +35,14 @@ it('keeps test changes and outdated coverage separate in an already-open inbox',
     return <NotificationCenter open onOpenChange={vi.fn()} onNavigate={navigate} />
   }
   await act(async () => root.render(<InvalidationProvider><View /></InvalidationProvider>))
-  rows.push({ id: 'coverage', title: 'shop: coverage out of date', body: 'Mapping inputs changed.', severity: 'warning', target: coverage, createdAt: '2026-09-08T10:00:00Z' })
+  rows.push({ id: 'flight', title: 'shop: Test run failed', body: 'Open Flight to recover and continue.', severity: 'warning', target: flight, toast: true, createdAt: '2026-09-08T10:00:00Z' })
   await act(async () => { invalidate('notifications') })
   expect(labelled('Notifications, 2 need attention')).not.toBeNull()
   await act(async () => labelled('Review test changes').click())
   expect(navigate).toHaveBeenLastCalledWith(target)
   await act(async () => labelled('Open flight').click())
-  expect(navigate).toHaveBeenLastCalledWith(coverage)
-  rows = rows.map((row) => row.id === 'coverage' ? { ...row, resolvedAt: 'now' } : row)
+  expect(navigate).toHaveBeenLastCalledWith(flight)
+  rows = rows.map((row) => row.id === 'flight' ? { ...row, resolvedAt: 'now' } : row)
   await act(async () => { invalidate('notifications') })
   expect(labelled('Notifications, 1 need attention')).not.toBeNull()
   expect(labelled('Review test changes')).not.toBeNull()
@@ -61,14 +61,14 @@ it.each([
   expect(api.deleteNotification).not.toHaveBeenCalled()
 })
 
-it('opens the affected Flight stage from a coverage warning without running recovery', async () => {
-  const coverage = { kind: 'coverage' as const, feature: 'shop', flightId: 'fl-shop', stage: 'prd-summary' as const }
-  rows = [{ ...rows[0], title: 'shop: coverage freshness needs attention', body: 'Source requirements changed.', severity: 'warning', target: coverage }]
+it('opens the blocked Flight without trying to resolve it from the notification', async () => {
+  const flight = { kind: 'flight' as const, flightId: 'fl-shop' }
+  rows = [{ ...rows[0], title: 'shop: Test run failed', body: 'Open Flight to recover and continue.', severity: 'warning', target: flight }]
   const navigate = vi.fn()
   const close = vi.fn()
   await act(async () => root.render(<NotificationCenter open onOpenChange={close} onNavigate={navigate} />))
   await act(async () => labelled('Open flight').click())
-  expect(navigate).toHaveBeenCalledExactlyOnceWith(coverage)
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(flight)
   expect(close).toHaveBeenCalledWith(false)
   expect(api.readNotification).toHaveBeenCalledWith('n1')
   expect(api.deleteNotification).not.toHaveBeenCalled()
@@ -192,6 +192,14 @@ it('opens a toast without deleting its message; the close button permanently del
   expect(api.deleteNotification).toHaveBeenCalledWith('n1')
 })
 
+it('keeps an advisory inbox item out of the sticky toast surface', async () => {
+  rows = [{ ...rows[0], title: 'shop: possible test weakening', severity: 'danger', toast: false }]
+  await act(async () => root.render(<NotificationCenter open={false} onOpenChange={vi.fn()} onNavigate={vi.fn()} />))
+  expect(labelled('Notifications, 1 need attention')).not.toBeNull()
+  expect(button('Review test changes')).toBeUndefined()
+  expect(labelled('Delete notification permanently')).toBeNull()
+})
+
 it('ignores an older fetch arriving after a read mutation', async () => {
   let state!: ReturnType<typeof useNotifications>
   function Probe() { state = useNotifications(); return null }
@@ -228,7 +236,7 @@ it('opens the run instead of asking for another review after a notification reso
 })
 
 it('has no manual note creation and opens a feature-level weakening hint without inventing a run', async () => {
-  rows = [{ id: 'weak', title: 'shop: tests may have been weakened', body: 'A hint, not a verdict.', target: { kind: 'test-review', feature: 'shop' }, severity: 'danger', createdAt: '2026-09-09T10:00:00Z' }]
+  rows = [{ id: 'weak', title: 'shop: tests may have been weakened', body: 'A hint, not a verdict.', target: { kind: 'test-review', feature: 'shop' }, severity: 'danger', toast: false, createdAt: '2026-09-09T10:00:00Z' }]
   const navigate = vi.fn()
   await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={navigate} />))
   expect([...document.querySelectorAll('button')].some((element) => /\+ Add/.test(element.textContent ?? ''))).toBe(false)

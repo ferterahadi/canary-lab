@@ -13,6 +13,7 @@ import { writeManifest, type RunManifest } from './manifest'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { RunnerLog } from './runner-log'
+import { materializeSuiteRuntimeInputs, removeSuiteRuntimeInputs, suiteRuntimeInputTargets, suiteRuntimeInputTargetsForSnapshot } from './suite-runtime-inputs'
 
 let tmpDir: string
 
@@ -45,6 +46,18 @@ function fakeRunnerLog(): RunnerLog & { warnings: string[] } {
     info: () => {},
     error: () => {},
   } as unknown as RunnerLog & { warnings: string[] }
+}
+
+function configureSuiteEnvTarget(ctx: RunContext, target = '.env', body = 'SECRET=selected\n'): string {
+  const live = ctx.feature.featureDir
+  write(live, 'envsets/local/app.env', body)
+  write(live, 'envsets/envsets.config.json', JSON.stringify({
+    appRoots: {},
+    slots: { 'app.env': { description: 'test env', target: path.join(live, target) } },
+    feature: { slots: ['app.env'], testCommand: 'npx playwright test', testCwd: live },
+  }))
+  write(live, target, body)
+  return path.join(live, target)
 }
 
 const SPEC_A = "test('a', async () => { expect(1).toBe(1) })\n"
@@ -161,6 +174,110 @@ describe('snapshotSuite', () => {
     snapshotSuite(ctx)
 
     expect(fs.readdirSync(ctx.suiteDir).sort()).toEqual(['.canary-suite-tests.json', 'e2e'])
+  })
+
+  it('copies authored docs but leaves engine-owned coverage state out of the run snapshot', () => {
+    const { ctx } = ctxFor()
+    const live = ctx.feature.featureDir
+    write(live, 'e2e/a.spec.ts', SPEC_A)
+    write(live, 'docs/requirements.md', '# Requirements\n')
+    write(live, 'docs/_coverage-state.json', '{"requirementsHash":"generated"}\n')
+
+    snapshotSuite(ctx)
+
+    expect(fs.readFileSync(path.join(ctx.suiteDir, 'docs/requirements.md'), 'utf8')).toBe('# Requirements\n')
+    expect(fs.existsSync(path.join(ctx.suiteDir, 'docs/_coverage-state.json'))).toBe(false)
+  })
+
+  it('materializes a selected .env only while the suite snapshot is executable', () => {
+    const { ctx } = ctxFor({}, { env: 'local' })
+    const live = ctx.feature.featureDir
+    write(live, 'e2e/a.spec.ts', SPEC_A)
+    configureSuiteEnvTarget(ctx)
+
+    snapshotSuite(ctx)
+
+    const runtimeEnv = path.join(ctx.suiteDir, '.env')
+    expect(fs.readFileSync(runtimeEnv, 'utf8')).toBe('SECRET=selected\n')
+    expect(fs.statSync(runtimeEnv).mode & 0o777).toBe(0o600)
+    removeSuiteRuntimeInputs(ctx)
+    expect(fs.existsSync(runtimeEnv)).toBe(false)
+    expect(fs.existsSync(ctx.paths.suiteRuntimeInputsDir)).toBe(false)
+    const retainedInventory = fs.readFileSync(ctx.paths.suiteRuntimeInputsInventoryPath, 'utf8')
+    expect(retainedInventory).not.toContain('SECRET=selected')
+    expect(retainedInventory).not.toContain('sha256')
+    expect(JSON.parse(retainedInventory)).toMatchObject({ state: 'cleaned', entries: [{ relativeTarget: '.env' }] })
+  })
+
+  it('reuses run-owned resolved bytes when a crashed run resumes after the shared target changed', () => {
+    const { ctx } = ctxFor({}, { env: 'local' })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    const sharedTarget = configureSuiteEnvTarget(ctx)
+    snapshotSuite(ctx)
+    fs.writeFileSync(sharedTarget, 'SECRET=mutated-after-capture\n')
+    fs.rmSync(path.join(ctx.suiteDir, '.env'))
+
+    expect(materializeSuiteRuntimeInputs(ctx)).toEqual(['.env'])
+    expect(fs.readFileSync(path.join(ctx.suiteDir, '.env'), 'utf8')).toBe('SECRET=selected\n')
+  })
+
+  it('fails setup before tests when a selected suite-local target vanished', () => {
+    const { ctx } = ctxFor({}, { env: 'local' })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    const target = configureSuiteEnvTarget(ctx)
+    fs.rmSync(target)
+
+    expect(() => snapshotSuite(ctx)).toThrow(/Selected envset target app\.env vanished before run setup/)
+    expect(ctx.suiteDir).toBe(ctx.feature.featureDir)
+    expect(fs.existsSync(ctx.paths.suiteSnapshotDir)).toBe(false)
+  })
+
+  it('keeps non-dotenv runtime targets out of retained snapshots and review bytes', async () => {
+    const { ctx } = ctxFor({}, { env: 'local' })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    configureSuiteEnvTarget(ctx, 'runtime/private.json', '{"token":"do-not-retain"}\n')
+    snapshotSuite(ctx)
+
+    expect(fs.readFileSync(path.join(ctx.suiteDir, 'runtime/private.json'), 'utf8')).toContain('do-not-retain')
+    expect(suiteRuntimeInputTargets(ctx)).toEqual(['runtime/private.json'])
+    removeSuiteRuntimeInputs(ctx)
+    expect(fs.existsSync(path.join(ctx.suiteDir, 'runtime/private.json'))).toBe(false)
+    const excluded = suiteRuntimeInputTargetsForSnapshot(ctx.suiteDir)
+    expect(excluded).toEqual(['runtime/private.json'])
+    const review = await import('./suite-review').then(({ buildSuiteReview }) => buildSuiteReview(ctx.suiteDir, ctx.feature.featureDir, excluded))
+    expect(review.files).toEqual([])
+    expect(review.patch).not.toContain('do-not-retain')
+  })
+
+  it('adopts edited tests while rematerializing the originally captured runtime bytes', async () => {
+    const { ctx } = ctxFor({}, { env: 'local' })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    const sharedTarget = configureSuiteEnvTarget(ctx)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', `${SPEC_A}// reviewed edit\n`)
+    fs.writeFileSync(sharedTarget, 'SECRET=newer-shared-value\n')
+    const revision = suiteReviewRevision(ctx.suiteDir, ctx.feature.featureDir, suiteRuntimeInputTargets(ctx))
+
+    expect(await adoptSpecEdits(ctx, revision)).toMatchObject({ ok: true, adopted: ['e2e/a.spec.ts'] })
+    expect(fs.readFileSync(path.join(ctx.suiteDir, '.env'), 'utf8')).toBe('SECRET=selected\n')
+  })
+
+  it('captures only the exact terminal-approved revision into a new run', () => {
+    const { ctx } = ctxFor({}, { testReviewApproval: { sourceRunId: 'old-run', revision: '', approvedAt: 'now' } })
+    const source = path.join(path.dirname(ctx.runDir), 'old-run', 'suite')
+    write(source, 'e2e/a.spec.ts', SPEC_A)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', `${SPEC_A}// approved\n`)
+    const revision = suiteReviewRevision(source, ctx.feature.featureDir)
+    ;(ctx.testReviewApproval as { revision: string }).revision = revision
+
+    snapshotSuite(ctx)
+    expect(fs.readFileSync(path.join(ctx.suiteDir, 'e2e/a.spec.ts'), 'utf8')).toContain('// approved')
+
+    fs.appendFileSync(path.join(ctx.feature.featureDir, 'e2e/a.spec.ts'), '// stale after approval\n')
+    fs.rmSync(ctx.paths.suiteSnapshotDir, { recursive: true, force: true })
+    ctx.suiteDir = ctx.feature.featureDir
+    expect(() => snapshotSuite(ctx)).toThrow(/Approved test review changed before snapshot capture/)
+    expect(fs.existsSync(ctx.paths.suiteSnapshotDir)).toBe(false)
   })
 
   it('a mid-run edit to the live spec leaves the copy untouched', () => {

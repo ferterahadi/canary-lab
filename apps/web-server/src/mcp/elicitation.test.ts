@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { ServerContext, InputRequiredResult } from '@modelcontextprotocol/server'
-import { requestUserInput } from './elicitation'
+import { matchesUserInput, requestNextUserInput, requestUserInput } from './elicitation'
 import { asJsonResult } from './tool-support'
 
 const facts = { surface: 'other' as const, canFanOut: false, sampling: false, elicitation: { form: true, url: true } }
@@ -96,6 +96,27 @@ describe('MCP 2.0 elicitation', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('routes an echoed handle only to the question that opened it', async () => {
+    const opened = await requestUserInput(context(), facts, form('coverage'), async () => asJsonResult({ applied: true })) as InputRequiredResult
+    const resumed = context(opened.requestState, { action: 'accept', content: { isolation: 'queue' } })
+
+    expect(matchesUserInput(resumed, 'coverage')).toBe(true)
+    expect(matchesUserInput(resumed, 'repository-isolation')).toBe(false)
+  })
+
+  it('opens a second question while the first answer is being applied', async () => {
+    const first = form('coverage')
+    const second = form('repository-isolation')
+    const opened = await requestUserInput(context(), facts, first, async () => asJsonResult({ unreachable: true })) as InputRequiredResult
+    const resumed = context(opened.requestState, { action: 'accept', content: { isolation: 'queue' } })
+
+    const next = requestNextUserInput(resumed, facts, second, async () => asJsonResult({ applied: true })) as InputRequiredResult
+
+    expect(next).toMatchObject({ resultType: 'input_required' })
+    expect(next.requestState).not.toBe(opened.requestState)
+    expect(matchesUserInput(context(next.requestState), 'repository-isolation')).toBe(true)
   })
 
   // Open questions live in a process-wide map that only expiry and answers

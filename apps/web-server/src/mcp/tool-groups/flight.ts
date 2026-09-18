@@ -14,7 +14,7 @@ import {
   hasPolled,
   noteHandOffContact,
 } from '../handoff-idle'
-import type { ExternalWorkCheckpointData, FlightManifest, FlightCheckpointResponse } from '../../../../../shared/flights/types'
+import type { ExternalWorkCheckpointData, FlightManifest, FlightCheckpointResponse, FlightEntryOptions } from '../../../../../shared/flights/types'
 import { deriveFeatureSlug } from '../../../../../shared/flights/types'
 import { fanOutAdviceFor } from '../client-surface'
 import { type ToolGroupContext, asJsonResult, errorResult } from '../tool-support'
@@ -188,11 +188,11 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
   const flightsUnavailable = () => errorResult('flightsRequest dependency is not configured')
 
   registerTool('start_flight', {
-    description: 'Start (or resume) a Flight: one background pipeline that takes bare product repo(s) to a green, covered, healed run, publishes a downloadable Report, then completes final Parallel setup (similarity → scout → scaffold → env alongside docs/PRD → Tests & coverage → Test run → Auto-repair → Report → Parallel setup). Report completion ends the foreground user journey: surface links.evaluationZip immediately and release the conversation while final Parallel setup continues as Canary-owned persistent background work. The server conducts every stage and computes every verdict; you approve checkpoints via respond_flight_checkpoint and can feed docs via write_feature_doc (content or link_path). Autopilot is ON by default: checkpoints with a safe default answer themselves — config-approval→approve (the scaffolded on-disk config), prd-source→continue when requirement docs exist and collect-repo-docs when they do not, coverage-stuck→accept-partial, portify-gate→run, portify-apply→apply, run-failed→export-as-is, export-mode→raw (localized when stage_producer is external — the rewrite then arrives as an external-work hand-off) — each decision logged [autopilot] on its stage. The flight still parks on similarity-choice and missing-env (no safe default) and on any RE-parked checkpoint (e.g. a config parse error after an auto-approve, or a prd-source whose collector came back empty). A stage you explicitly RE-ENTER (from_stage / redo) always parks its FIRST checkpoint even under autopilot — choosing to re-run a step IS the intent to answer it differently. Pass autopilot:false to be asked at every checkpoint — do that when you plan to distill THIS conversation into requirement docs at the prd-source stop. ONE flight record per feature: a paused flight is resumed, an ACTIVE one returns its id to follow, and a settled one requires redo:true (restart from stage 1) or from_stage (jump to a chosen stage; prerequisites checked, rejected with the missing one named). A restart normally WIPES the entry step and every later record step back to zero on disk — requirement docs (user-added files/links included), authored specs, captured envsets, portify overlay, run record, evaluation export — as if never run. The exception is from_stage:"portify": Parallel setup resets only itself and preserves the completed run, verdict, and Report. Plain resume never wipes, so warn the user before any other redo/from_stage on artifacts they still want. A flight\'s repos and intent are FROZEN against MID-PIPELINE re-entry: on from_stage (and on resume) OMIT repoPaths/description and the stored values are reused — passing DIFFERENT ones is rejected with type:"flight_frozen". A full restart (redo:true) accepts new repoPaths/description and replaces the stored ones (omit to reuse); deleting the flight (web UI only, no tool) removes the record itself. A queued flight (status:"paused", pauseReason:"queued") is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees — re-calling start_flight resumes it early. `agent` picks which CLI (claude|codex) conducts the flight\'s stage agents — sticky per record (jump/continue reuse it; only redo may change it); the run stage\'s auto-heal follows the workspace heal setting instead.',
+    description: 'Start (or resume) a Flight: one background pipeline that takes a configured feature or bare product repo(s) to a green, covered, healed run, publishes a downloadable Report, then completes final Parallel setup (similarity → scout → scaffold → env alongside docs/PRD → Tests & coverage → Test run → Auto-repair → Report → Parallel setup). When only `feature` is supplied and no Flight record exists, Canary reads that suite\'s durable workspace evidence, reuses completed stages, and starts from the first stage that does not meet the requested coverage target; this continuation is non-destructive. Report completion ends the foreground user journey: surface links.evaluationZip immediately and release the conversation while final Parallel setup continues as Canary-owned persistent background work. The server conducts every stage and computes every verdict; you approve checkpoints via respond_flight_checkpoint and can feed docs via write_feature_doc (content or link_path). Autopilot is ON by default: checkpoints with a safe default answer themselves — config-approval→approve (the scaffolded on-disk config), prd-source→continue when requirement docs exist and collect-repo-docs when they do not, coverage-stuck→accept-partial, portify-gate→run, portify-apply→apply, run-failed→export-as-is, export-mode→raw (localized when stage_producer is external — the rewrite then arrives as an external-work hand-off) — each decision logged [autopilot] on its stage. The flight still parks on similarity-choice and missing-env (no safe default) and on any RE-parked checkpoint (e.g. a config parse error after an auto-approve, or a prd-source whose collector came back empty). A stage you explicitly RE-ENTER (from_stage / redo) always parks its FIRST checkpoint even under autopilot — choosing to re-run a step IS the intent to answer it differently. Pass autopilot:false to be asked at every checkpoint — do that when you plan to distill THIS conversation into requirement docs at the prd-source stop. ONE flight record per feature: a paused flight is resumed, an ACTIVE one returns its id to follow, and a settled one requires redo:true (restart from stage 1) or from_stage (jump to a chosen stage; prerequisites checked, rejected with the missing one named). A restart normally WIPES the entry step and every later record step back to zero on disk — requirement docs (user-added files/links included), authored specs, captured envsets, portify overlay, run record, evaluation export — as if never run. The exception is from_stage:"portify": Parallel setup resets only itself and preserves the completed run, verdict, and Report. Plain resume and automatic feature-only continuation never wipe, so warn the user before any other redo/from_stage on artifacts they still want. A flight\'s repos and intent are FROZEN against MID-PIPELINE re-entry: on from_stage (and on resume) OMIT repoPaths/description and the stored values are reused — passing DIFFERENT ones is rejected with type:"flight_frozen". A full restart (redo:true) accepts new repoPaths/description and replaces the stored ones (omit to reuse); deleting the flight (web UI only, no tool) removes the record itself. A queued flight (status:"paused", pauseReason:"queued") is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees — re-calling start_flight resumes it early. `agent` picks which CLI (claude|codex) conducts the flight\'s stage agents — sticky per record (jump/continue reuse it; only redo may change it); the run stage\'s auto-heal follows the workspace heal setting instead.',
     inputSchema: {
       repoPaths: z.array(z.string()).min(1).optional().describe('Absolute path(s) of the product repo(s); several paths become ONE feature spanning them. REQUIRED for a fresh start; OMIT on redo / from_stage / resume — the flight\'s repos are frozen and the stored set is reused (a different set is rejected with flight_frozen).'),
       description: z.string().optional().describe('What to test, e.g. "checkout flow". REQUIRED for a fresh start; OMIT on redo / from_stage / resume — the flight\'s intent is frozen and the stored value is reused (a different one is rejected with flight_frozen).'),
-      feature: z.string().optional().describe('Feature name; defaults to a slug of the first repo basename.'),
+      feature: z.string().optional().describe('Existing configured feature name, or the new feature name for repoPaths. A feature-only call detects durable prior work and continues from the first stage that does not meet coverage_target.'),
       env: z.string().optional().describe('Envset name (default "local").'),
       coverage_target: z.number().min(0).max(100).optional().describe('Coverage % the specs↔coverage loop must reach (default 100).'),
       base: z.string().optional().describe('Base branch for diff-inferred requirements (auto-detected when omitted).'),
@@ -223,7 +223,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     } else if (repoPaths !== undefined && repoPaths.length > 0) {
       featureName = deriveFeatureSlug(repoPaths[0])
     } else {
-      return errorResult('start_flight needs repoPaths for a fresh start, or `feature` to redo / jump / resume an existing flight (its frozen repos + intent are reused).')
+      return errorResult('start_flight needs repoPaths for a fresh start, or `feature` to continue a configured suite / locate its existing Flight.')
     }
     const list = await deps.flightsRequest({ method: 'GET', url: '/api/flights' })
     const flights = ((list.body as { flights?: Array<{ flightId: string; feature?: string; status: string; repoPaths?: string[] }> }).flights ?? [])
@@ -231,8 +231,36 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     const latest = flights.find((f) =>
       targets.size > 0
         ? (f.repoPaths ?? []).some((p) => targets.has(path.resolve(p)))
-        : f.feature === feature,
+        : f.feature === featureName,
     )
+    let entry: FlightEntryOptions | undefined
+    if (
+      !latest
+      && feature !== undefined
+      && (repoPaths === undefined || repoPaths.length === 0)
+      && !redo
+      && !from_stage
+      && !fresh
+    ) {
+      const query = new URLSearchParams({ feature: featureName })
+      if (env) query.set('env', env)
+      if (coverage_target !== undefined) query.set('coverageTarget', String(coverage_target))
+      const resolved = await deps.flightsRequest({ method: 'GET', url: `/api/flights/entry?${query.toString()}` })
+      const resolvedBody = resolved.body as FlightEntryOptions & { error?: string }
+      if (resolved.statusCode !== 200) {
+        return errorResult(`cannot continue feature "${featureName}" (${resolved.statusCode}): ${String(resolvedBody.error ?? 'entry evidence is unavailable')}`)
+      }
+      entry = resolvedBody
+      if (!entry.continuation) {
+        return asJsonResult({
+          type: 'flight_already_complete',
+          feature: featureName,
+          coverageTarget: entry.prefill.coverageTarget,
+          note: 'the configured feature already satisfies every Flight stage for this target; no work was restarted',
+          next: 'Report the existing evidence. Use redo:true or an explicit from_stage only if the user asks to repeat work.',
+        })
+      }
+    }
     const stageProducer = stage_producer ?? 'external'
     const externalAgentSession = stageProducer === 'external'
       ? {
@@ -268,7 +296,14 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       const view = flightView(resumed.body)
       return asJsonResult({ ...view, note: 'resumed the paused flight from its first open stage', next: flightNext(view) })
     }
-    const hasRepos = repoPaths !== undefined && repoPaths.length > 0
+    const inferredContinuation = !redo && !from_stage && !fresh ? entry?.continuation ?? undefined : undefined
+    const effectiveRepoPaths = repoPaths ?? entry?.prefill.repoPaths
+    const effectiveDescription = description ?? (entry
+      ? entry.prefill.description.trim() || `Continue the existing ${featureName} suite to its requested Flight outcome.`
+      : undefined)
+    const effectiveEnv = env ?? entry?.prefill.env
+    const effectiveCoverageTarget = coverage_target ?? entry?.prefill.coverageTarget
+    const hasRepos = effectiveRepoPaths !== undefined && effectiveRepoPaths.length > 0
     const started = await deps.flightsRequest({
       method: 'POST',
       url: '/api/flights',
@@ -277,11 +312,11 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
         // caller actually provided them (a fresh start, or an explicit —
         // matching — reuse). Omitting them on redo / jump lets the server
         // reuse the stored values; a DIFFERENT value would 409 flight_frozen.
-        ...(hasRepos ? { repoPaths } : {}),
-        ...(description !== undefined ? { description } : {}),
+        ...(hasRepos ? { repoPaths: effectiveRepoPaths } : {}),
+        ...(effectiveDescription !== undefined ? { description: effectiveDescription } : {}),
         feature: featureName,
-        ...(env ? { env } : {}),
-        ...(coverage_target !== undefined ? { coverageTarget: coverage_target } : {}),
+        ...(effectiveEnv ? { env: effectiveEnv } : {}),
+        ...(effectiveCoverageTarget !== undefined ? { coverageTarget: effectiveCoverageTarget } : {}),
         ...(base ? { base } : {}),
         ...(yolo ? { yolo } : {}),
         ...(autopilot === false ? { autopilot: false } : {}),
@@ -303,7 +338,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
         stageProducer,
         ...(externalAgentSession ? { externalAgentSession } : {}),
         ...(redo ? { mode: 'redo' } : from_stage ? { mode: 'jump' } : {}),
-        ...(from_stage ? { fromStage: from_stage } : {}),
+        ...(from_stage ? { fromStage: from_stage } : inferredContinuation ? { fromStage: inferredContinuation.fromStage } : {}),
         ...(feedback && (redo || from_stage) ? { feedback } : {}),
       },
     })
@@ -333,7 +368,13 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       return errorResult(`start_flight failed (${started.statusCode}): ${String(startedBody.error ?? '')}`)
     }
     const view = flightView(started.body)
-    return asJsonResult({ ...view, next: flightNext(view) })
+    return asJsonResult({
+      ...view,
+      ...(inferredContinuation
+        ? { note: `continued the configured feature from ${inferredContinuation.fromStage}: ${inferredContinuation.reason}` }
+        : {}),
+      next: flightNext(view),
+    })
   })
 
   // The current stage's agent record, when there is one. Two fields, so it is

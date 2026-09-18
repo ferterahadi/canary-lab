@@ -41,8 +41,8 @@ vi.mock('@/shared/ui/AgentSessionView', () => ({
 }))
 
 import { ApiError } from '@/shared/api/client'
-import { FlightStartDialog } from './FlightStartDialog'
-import { STAGE_BLURB } from './stage-meta'
+import { FlightStartDialog, START_FRESH_LABEL } from './FlightStartDialog'
+import { STAGE_BLURB, STAGE_LABEL } from './stage-meta'
 
 ;
 
@@ -170,6 +170,38 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     }
     // The uniform first-flight lock is stated once, on the section header.
     expect(byTestId('flight-steps-toggle')?.textContent).toContain('start from any step after the first flight')
+  })
+
+  // R84: the form used to number its own sections 1/2/3 on the SAME `.cl-bead`
+  // the stage list numbers its steps with, so the dialog showed two sequences
+  // in one mark with nothing to tell them apart. The bead now means exactly one
+  // thing — a position in the pipeline — so every one of them belongs to a row.
+  it('R84: the bead marks a pipeline step and nothing else', async () => {
+    await render({ feature: null })
+    const beads = Array.from(container.querySelectorAll('.cl-bead'))
+    expect(beads.length).toBeGreaterThan(0)
+    for (const bead of beads) {
+      expect(bead.closest('[data-testid^="flight-start-stage-"]')).not.toBeNull()
+    }
+  })
+
+  // The header's count and the rows' numbers read off ONE list, so the preview
+  // can't advertise ten steps over a list that counts to eleven.
+  it('R84: the advertised step count is the number the last row carries', async () => {
+    await render({ feature: null })
+    const rows = Array.from(container.querySelectorAll('[data-testid^="flight-start-stage-"]'))
+    expect(byTestId('flight-steps-toggle')?.textContent).toContain(`${rows.length} steps`)
+    expect(rows[rows.length - 1]!.textContent).toContain(String(rows.length))
+  })
+
+  // A first flight has no prior attempt, so the lead row is simply the
+  // pipeline's first stage — calling it "Start fresh" would name an act that
+  // isn't on offer. (The restart name returns once a record exists.)
+  it('R84: names the lead row for its stage when there is nothing to restart', async () => {
+    await render({ feature: null })
+    const lead = byTestId('flight-start-stage-similarity')!
+    expect(lead.textContent).toContain(STAGE_LABEL['similarity'])
+    expect(lead.textContent).not.toContain(START_FRESH_LABEL)
   })
 
   it('R54: submit plans first — the breakdown agent owns the dialog; closing keeps it in the background', async () => {

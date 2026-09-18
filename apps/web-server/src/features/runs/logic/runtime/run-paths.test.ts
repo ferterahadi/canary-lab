@@ -30,6 +30,8 @@ describe('buildRunPaths', () => {
 
   it('places the run-start suite copy under suite/', () => {
     expect(p.suiteSnapshotDir).toBe(path.join(runDir, 'suite'))
+    expect(p.suiteRuntimeInputsDir).toBe(path.join(runDir, '.suite-runtime-inputs'))
+    expect(p.suiteRuntimeInputsInventoryPath).toBe(path.join(runDir, 'suite-runtime-inputs.json'))
   })
 
   it('places signals under signals/', () => {

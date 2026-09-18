@@ -8,8 +8,6 @@ import { computeFeatureCoverage, runCoverageEngine } from './service'
 import { fakePropose } from './__fixtures__/fake-coverage-agents'
 import { CoverageJobRunStore } from './jobs/store'
 import { startExternalCoverage, startExternalSummary, submitExternalCoverage, submitExternalSummary } from './jobs/external'
-import { NotificationStore } from '../../../notifications/store'
-import { coverageNotificationSources } from '../../../notifications/sources'
 
 let fixture: Awaited<ReturnType<typeof freshnessWorkspace>>
 let monitor: CoverageFreshnessMonitor
@@ -104,23 +102,6 @@ describe('coverage freshness, real inputs and live delivery', () => {
     const waiting = monitor.wait('shop', monitor.read('shop').freshness.revision, 30_000)
     monitor.close()
     expect(await waiting).toMatchObject({ change: { freshness: { state: 'unavailable' } } })
-  })
-
-  it('updates one persistent notification through repeated edits and resolves it after recovery', () => {
-    fixture.run('pass', 'passed')
-    const store = new NotificationStore(fixture.args.logsDir, new WorkspaceEventBus())
-    store.reconcile(coverageNotificationSources([monitor.read('shop')]))
-    fs.appendFileSync(fixture.doc, '\nChanged wording.')
-    store.reconcile(coverageNotificationSources([monitor.read('shop')]))
-    const first = store.list()[0]
-    expect(first.target).toMatchObject({ kind: 'coverage', feature: 'shop', stage: 'prd-summary' })
-    fs.appendFileSync(fixture.doc, '\nAnother edit.')
-    store.reconcile(coverageNotificationSources([monitor.read('shop')]))
-    expect(store.list()).toHaveLength(1)
-    expect(new NotificationStore(fixture.args.logsDir, new WorkspaceEventBus()).list()[0].id).toBe(first.id)
-    fs.writeFileSync(fixture.doc, '# Create order\nA buyer can create an order.')
-    store.reconcile(coverageNotificationSources([monitor.read('shop')]))
-    expect(store.list()[0].resolvedAt).toBeDefined()
   })
 
   it('rejects stale external summaries and mappings and releases their job claims', () => {

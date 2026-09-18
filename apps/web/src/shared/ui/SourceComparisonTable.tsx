@@ -20,6 +20,10 @@ export function SourceComparisonTable({ review, rows, mode, change, emptySide, s
   const before = useCodeHighlight(review.before.source)
   const after = useCodeHighlight(review.after.source)
   const english = useMemo(() => ({ before: englishLines(review.before), after: englishLines(review.after) }), [review])
+  const meaningful = useMemo(() => review.meaningfulChanges ? {
+    before: new Set(review.meaningfulChanges.before),
+    after: new Set(review.meaningfulChanges.after),
+  } : undefined, [review.meaningfulChanges])
   const edits = useMemo(() => {
     const result = { before: new Map<number, number>(), after: new Map<number, number>() }
     for (const row of rows) if (row.change != null) {
@@ -33,9 +37,10 @@ export function SourceComparisonTable({ review, rows, mode, change, emptySide, s
     const continued = mode === 'english' && line != null && english[side].get(line) === null
     const range = line == null ? undefined : mode === 'english' ? englishSourceRange(english[side], line) : { line, endLine: line }
     const changes = new Set<number>()
+    const insideTest = range != null && review[side].tests.some((test) => range.line >= test.line && range.line <= test.endLine)
     if (range && !continued) for (let index = range.line; index <= range.endLine; index++) {
       const edit = edits[side].get(index)
-      if (edit != null) changes.add(edit)
+      if (edit != null && (mode !== 'english' || !insideTest || !meaningful || meaningful[side].has(index))) changes.add(edit)
     }
     return { line, endLine: range?.endLine, continued, changes,
       label: continued || !range ? undefined : range.endLine > range.line ? `${range.line}–${range.endLine}` : range.line }

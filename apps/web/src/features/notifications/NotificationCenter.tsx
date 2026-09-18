@@ -40,7 +40,7 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
   const attention = items.filter(needsAttention)
   const history = items.filter((item) => !needsAttention(item))
   const visible = showHistory ? history : attention
-  const latest = attention.find((item) => !item.readAt && item.target)
+  const latest = attention.find((item) => !item.readAt && item.toast === true && item.target)
   const hasWeakerHint = attention.some((item) => item.severity === 'danger')
   const openItem = (item: WorkspaceNotification): void => {
     void inbox.read(item.id)

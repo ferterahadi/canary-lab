@@ -550,25 +550,24 @@ describe('useWorkspaceData — workspace events', () => {
     expect(harness.invalidated).toEqual([['project-config', undefined], ['onboarding', undefined]])
   })
 
-  it('ignores an event it does not handle', async () => {
+  it('resyncs authoritative state on the server handshake', async () => {
     await mount()
-    const before = api.listFeatures.mock.calls.length
+    expect(socket.opts?.onReconnect).toBeUndefined()
 
     await fire({ type: 'connected' })
 
-    expect(harness.invalidated).toEqual([])
-    expect(api.listFeatures.mock.calls.length).toBe(before)
+    expect(harness.invalidated).toContainEqual(['coverage', undefined])
   })
 })
 
-describe('useWorkspaceData — reconnect resync', () => {
-  it('refetches everything and re-invalidates every topic', async () => {
+describe('useWorkspaceData — server reconnect resync', () => {
+  it('refetches everything and re-invalidates every topic from the connected frame', async () => {
     await mount()
     harness.featureRef.current = 'checkout'
     harness.runIdRef.current = 'r1'
     api.listFeatures.mockResolvedValue([feature('checkout')])
 
-    await act(async () => { socket.opts?.onReconnect?.() })
+    await fire({ type: 'connected' })
 
     expect(harness.invalidated).toEqual([
       ['repos', undefined], ['tests', undefined], ['coverage', undefined], ['robustness', undefined],
@@ -582,7 +581,7 @@ describe('useWorkspaceData — reconnect resync', () => {
   it('skips the journal topic when no run is selected', async () => {
     await mount()
 
-    await act(async () => { socket.opts?.onReconnect?.() })
+    await fire({ type: 'connected' })
 
     expect(harness.invalidated.map(([topic]) => topic)).not.toContain('journal')
   })

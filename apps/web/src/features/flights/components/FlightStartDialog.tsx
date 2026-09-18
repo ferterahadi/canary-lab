@@ -52,48 +52,51 @@ export const START_FRESH_LABEL = 'Start fresh — from the beginning'
 
 export const START_FRESH_BLURB = 'Change what it tests or which repos. Every finished step is redone.'
 
-function rowLabel(key: FlightStageKey): string {
-  return key === 'similarity' ? START_FRESH_LABEL : STAGE_LABEL[key]
+/** The lead row is two things at once: the pipeline's first stage, and the
+ *  "from the beginning" entry. Which name it wears depends on whether there is
+ *  anything to restart — a first flight has no prior attempt, so "Start fresh"
+ *  would name an act that isn't on offer. */
+function rowLabel(key: FlightStageKey, hasRecord: boolean): string {
+  return key === 'similarity' && hasRecord ? START_FRESH_LABEL : STAGE_LABEL[key]
 }
 
 /** The new-flight side of the dialog moves through three views (one per
  *  lifecycle state): the intent+repos form, the live planning agent, and the
  *  multi-feature proposal awaiting confirmation. */
 
-/** R69 (concept C): one numbered step in the launch form — a bead + connector
- *  rail on the left, the section's title + content on the right, so the setup
- *  reads as an ordered sequence (intent → repos → launch). The mark is the
- *  shared `.cl-bead` (hollow, mono, quiet) and the title is the shared title
- *  step, so the form reads in the coverage ledger's voice: the accent is spent
- *  only on the primary action, and nothing in the sequence competes with the
- *  status hues on the stage rows below. The last step drops its connector. */
-function Step({
-  n,
+/** R69 → R84: one band of the launch form — the section's name, then its
+ *  content. The form used to number its sections 1/2/3 on a bead + connector
+ *  rail, but the pipeline list inside the last one numbers its stages 1…N on
+ *  the SAME `.cl-bead`, so the dialog nested two sequences in one mark and
+ *  neither said which it belonged to. Only the pipeline's numbers are
+ *  load-bearing (execution order, and the slot a re-fly's status glyph lands
+ *  in), so the outer rail is gone: a hairline and a title part the bands
+ *  instead, in the same ledger voice.
+ *
+ *  `sep` is how a band parts from the one above it — a rule, a gap alone (for
+ *  content that draws its own top hairline, so the two never stack into a
+ *  double line), or nothing for the first band, whose line above is the modal
+ *  header. */
+function Band({
   title,
-  last,
+  sep = 'rule',
   children,
 }: {
-  n: number
   title?: string
-  last?: boolean
+  sep?: 'none' | 'space' | 'rule'
   children: ReactNode
 }) {
   return (
-    <div className="flex gap-3">
-      <div className="flex flex-col items-center pt-0.5">
-        <span aria-hidden="true" className="cl-bead">
-          {n}
-        </span>
-        {!last && <span className="mt-1 w-px flex-1" style={{ background: 'var(--border-default)', minHeight: 14 }} />}
-      </div>
-      <div className={`min-w-0 flex-1 ${last ? '' : 'pb-4'}`}>
-        {title && (
-          <div className="cl-type-title mb-1.5 text-primary">
-            {title}
-          </div>
-        )}
-        {children}
-      </div>
+    <div
+      className={sep === 'none' ? '' : sep === 'space' ? 'mt-3' : 'mt-3 border-t pt-3'}
+      style={sep === 'rule' ? { borderColor: 'var(--border-default)' } : undefined}
+    >
+      {title && (
+        <div className="cl-type-title mb-1.5 text-primary">
+          {title}
+        </div>
+      )}
+      {children}
     </div>
   )
 }
@@ -177,9 +180,11 @@ export function FlightStartDialog({
     confirmLaunchModels,
   } = useFlightStartDialog({ feature, intent, fromStage, resumePlanTaskId, newFlightPrefill, onOpenFlight, onClose })
 
-  // The number of automated steps behind a full flight (every pickable stage
-  // except the "from the beginning" entry itself) — drives the preview count.
-  const stepCount = PICKABLE.filter((k) => k !== 'similarity').length
+  // The steps behind a full flight — the SAME list the rows number 1…N below,
+  // so the header's count can't disagree with the last row's number. The lead
+  // stage counts: it really runs (it checks whether the flight can start), it
+  // just doubles as the "from the beginning" entry.
+  const stepCount = PICKABLE.length
 
   const stageMenu = (
     <div
@@ -260,7 +265,7 @@ export function FlightStartDialog({
                   onPick={() => setPicked(key)}
                   icon={status ? STAGE_ICON[status] : '·'}
                   iconTone={stageStatusTone(status)}
-                  label={rowLabel(key)}
+                  label={rowLabel(key, hasRecord)}
                   sub={sub}
                   step={index + 1}
                   divider
@@ -430,11 +435,12 @@ export function FlightStartDialog({
           />
         ) : (
           <>
-            {/* R69 (concept C): the launch form as a numbered sequence —
-                intent → repos → the pipeline — so each section is unmistakably
-                its own step. Repos folds out when a record already froze them. */}
+            {/* R69 → R84: the launch form as named bands — intent → repos →
+                the pipeline — parted by hairlines rather than by a numbered
+                rail that read as a second copy of the pipeline's own
+                numbering. Repos folds out when a record already froze them. */}
             <div className="flex flex-col">
-              <Step n={1} title="What should this flight test?">
+              <Band title="What should this flight test?" sep="none">
                 {hasRecord && !editableInputs ? (
                   // Frozen intent (R57/R75): locked while re-entering
                   // mid-pipeline — the surviving artifacts were built from it.
@@ -464,26 +470,26 @@ export function FlightStartDialog({
                     Prefilled from the last flight.
                   </div>
                 )}
-              </Step>
+              </Band>
 
               {/* Repos show whenever they can be sent: a record-less feature,
                   or a full restart (R75) — hidden only while frozen. */}
               {inputsRequired && (
-                <Step n={2} title="Repos">
+                <Band title="Repos">
                   <RepoMultiPicker
                     selected={repoPaths}
                     onChange={setRepoPaths}
                   />
-                </Step>
+                </Band>
               )}
 
               {/* R76 follow-up: fresh mode shows the same journey, read-only —
                   it can't offer re-entry (a changed intent invalidates every
                   partial result), but hiding the list left the user guessing
                   what "re-flies from the beginning" actually runs. */}
-              <Step n={inputsRequired ? 3 : 2} last>
+              <Band sep="space">
                 {stageMenu}
-              </Step>
+              </Band>
             </div>
 
             {/* R71/W4: autopilot — on by default; the flight asks only where a
@@ -493,7 +499,7 @@ export function FlightStartDialog({
                 form and the toggle stays the one accent. */}
             <div
               data-testid="flight-autopilot-toggle"
-              className="mt-1 flex items-center gap-3 border-t pt-3"
+              className="flex items-center gap-3 border-t pt-3"
               style={{ borderColor: 'var(--border-default)' }}
             >
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">

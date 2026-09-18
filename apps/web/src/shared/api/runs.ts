@@ -317,7 +317,10 @@ type TestReviewDecisionOptions = ClientOptions & { expectedRevision?: string }
 export function adoptSpecEdits(
   runId: string,
   opts?: TestReviewDecisionOptions,
-): Promise<{ status: 'adopted'; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }> {
+): Promise<
+  | { status: 'adopted'; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
+  | { status: 'approved-for-new-run'; review_revision: string; newRunRequired: true }
+> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/adopt-spec-edits`, {
     method: 'POST',

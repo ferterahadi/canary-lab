@@ -1,5 +1,6 @@
 import { isTerminalRunStatus } from '../../../../shared/run-state'
 import { suiteReviewRevision } from '../features/runs/logic/runtime/suite-review'
+import { suiteRuntimeInputTargetsForSnapshot } from '../features/runs/logic/runtime/suite-runtime-inputs'
 import type { RunStore, RunStoreEvent } from '../features/runs/logic/run-store'
 
 export const TEST_REVIEW_WAIT_MS = 30_000
@@ -14,10 +15,19 @@ export function testReviewOutcome(store: RunStore, runId: string, revision: stri
     status: decision.decision, runId, review_revision: revision,
     next: decision.decision === 'adopted'
       ? 'The human accepted these test changes. Continue with wait_for_heal_task for the runner result; acceptance is not a pass.'
+      : decision.decision === 'approved-for-new-run'
+        ? 'The human approved these exact candidate bytes for a new run. Call start_run without run_ref; the approval is not a pass and the old result stays immutable.'
       : 'The human restored the recorded tests. Continue with wait_for_heal_task and fix the app against those tests. Do not reapply the rejected test edits.',
-    nextSteps: ['wait_for_heal_task'],
+    nextSteps: decision.decision === 'approved-for-new-run' ? ['start_run'] : ['wait_for_heal_task'],
   }
-  if (isTerminalRunStatus(detail.manifest.status)) return { status: 'run-ended', runId, next: 'The run ended without a recorded decision for this review. Read its result; do not infer approval.' }
+  if (isTerminalRunStatus(detail.manifest.status)) {
+    const snapshot = detail.manifest.suiteSnapshot
+    try {
+      if (snapshot?.kind === 'taken' && detail.manifest.featureDir
+        && suiteReviewRevision(snapshot.dir, detail.manifest.featureDir, suiteRuntimeInputTargetsForSnapshot(snapshot.dir)) === revision) return null
+    } catch { /* Missing source cannot remain reviewable. */ }
+    return { status: 'run-ended', runId, next: 'The run ended and these are no longer the current reviewed bytes. Fetch the current review; do not infer approval.' }
+  }
   return null
 }
 
@@ -51,7 +61,7 @@ export async function waitForTestReview(store: RunStore, runId: string, revision
       let unchanged = false
       try {
         unchanged = manifest.suiteSnapshot?.kind === 'taken' && !!manifest.featureDir
-          && suiteReviewRevision(manifest.suiteSnapshot.dir, manifest.featureDir) === revision
+          && suiteReviewRevision(manifest.suiteSnapshot.dir, manifest.featureDir, suiteRuntimeInputTargetsForSnapshot(manifest.suiteSnapshot.dir)) === revision
       } catch { /* Missing source cannot be accepted as the reviewed revision. */ }
       finish({ status: unchanged ? 'still_waiting' : 'review-changed', runId, review_revision: revision,
         next: unchanged

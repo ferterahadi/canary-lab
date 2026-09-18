@@ -1,12 +1,14 @@
-Canary Lab — flight profile. One pipeline takes repos to a green, covered, healed run and downloadable Report; Parallel setup follows in the background. The server owns verdicts.
+Canary Lab — flight profile. One pipeline reaches a green, covered, healed run and downloadable Report; Parallel setup follows in the background. The server owns verdicts.
 
-YOU drive a flight you start; the web UI is READ-ONLY for it, except the checkpoint opened by its signed elicitation URL. You retain ownership, including pause and resume. If get_flight carries checkpoint.data.takeoverRequestedAt, STOP (subagents too) and respond_flight_checkpoint(choice:"run-internally"). Pass a stable session_id and conversation_name; external_session_url only when it opens this exact conversation; never client_kind.
+An explicit Flight or `/canary-lab` request always uses this loop. Never substitute focused author/run/coverage tools because the outcome mentions coverage. Focused skills apply only to a single capability requested without a Flight.
 
-Loop: start_flight(repoPaths, description), then get_flight and do what its next: field says. On an unanswered human checkpoint call respond_flight_checkpoint(flightId) without a choice for MCP 2.0 elicitation. For an already-authorized answer, pass choice or data; missing secrets go through the returned URL. Autopilot is ON by default: safe-default checkpoints answer themselves; the flight still parks on similarity-choice, missing-env, any re-parked checkpoint, and every checkpoint of a stage you re-entered. autopilot:false parks at every stop.
+Start bare repos with start_flight(repoPaths, description). Start a configured suite with start_flight(feature, coverage_target): Canary reads durable evidence and continues non-destructively at the first target-invalid stage. Then call get_flight and obey next. For an unanswered human checkpoint call respond_flight_checkpoint(flightId) without a choice; otherwise pass the authorized choice/data. Autopilot is on unless false; similarity-choice, missing-env, re-parks, and explicitly re-entered stages still park.
 
-When get_flight returns links.evaluationZip, tell the user where the Report is and END YOUR TURN; do not keep polling — Parallel setup is Canary-owned.
+YOU drive a flight you start; its web UI is read-only except signed elicitation. Keep ownership of pause/resume. On checkpoint.data.takeoverRequestedAt, STOP (subagents too) and respond choice:"run-internally". Pass stable session_id/conversation_name; external_session_url only for this exact conversation; never client_kind.
 
-ONE flight record per feature: re-calling start_flight follows an active one and resumes a paused one; a settled one needs redo:true or from_stage:"<stage>". A restart WIPES the entry stage and every later artifact (docs, specs, envsets, overlay, run, export) — warn the user first; plain resume never wipes. On resume/from_stage OMIT repoPaths/description (frozen; different ones fail with type:"flight_frozen"). Re-entering after a bad attempt? Pass feedback:"<what went wrong>". pauseReason:"queued" means waiting for the repo, not stuck.
+When links.evaluationZip appears, report it and END YOUR TURN; Canary owns background Parallel setup.
+
+ONE record per feature: start_flight follows active, resumes paused, and requires redo:true or from_stage for settled. Those explicit restarts wipe the entry and later artifacts (except portify-only); warn first. Automatic feature-only continuation and plain resume never wipe. On resume/from_stage omit frozen repoPaths/description. Pass feedback after a bad attempt. queued means waiting, not stuck.
 
 Full guide (checkpoint kinds and choices, forks, remedy, yolo, agent): get_workflow_guide(workflow:"flight").
 

@@ -27,6 +27,9 @@ export interface RunTestReview {
   review_revision: string
   files: Array<{ file: string; change: 'added' | 'deleted' | 'modified' }>
   canAdopt: boolean
+  reviewState: 'pending-active' | 'pending-terminal' | 'settled' | 'locked'
+  allowedActions: Array<'adopt-and-rerun' | 'approve-new-run' | 'restore' | 'leave-pending'>
+  nextAction: 'rerun-current' | 'start-new-run' | 'restore-or-leave' | 'none'
   patchPath?: string
   patch?: string
 }
@@ -35,7 +38,14 @@ export interface RunTestReview {
 export interface TestReviewDecision {
   at: string
   revision: string
-  decision: 'adopted' | 'restored'
+  decision: 'adopted' | 'approved-for-new-run' | 'restored'
+}
+
+/** Exact terminal-run approval carried into the new run that executes it. */
+export interface RunTestReviewApproval {
+  sourceRunId: string
+  revision: string
+  approvedAt: string
 }
 
 export interface ReviewTestSource {

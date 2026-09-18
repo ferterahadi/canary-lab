@@ -24,9 +24,12 @@ afterEach(() => {
   container.remove()
 })
 
-function render(ledger: CoverageLedger): void {
+function render(
+  ledger: CoverageLedger,
+  freshness: Partial<NonNullable<CoverageLedger['freshness']>> = {},
+): void {
   act(() => {
-    root.render(<CoverageHeader ledger={{ ...ledger, freshness: { ...LEDGER.freshness!, state: 'current', reasons: [] } }} gapFilter={null} onToggleGap={() => {}} strengthFilter={null} onToggleStrength={() => {}} />)
+    root.render(<CoverageHeader ledger={{ ...ledger, freshness: { ...LEDGER.freshness!, state: 'current', reasons: [], ...freshness } }} gapFilter={null} onToggleGap={() => {}} strengthFilter={null} onToggleStrength={() => {}} />)
   })
 }
 
@@ -41,9 +44,20 @@ describe('CoverageHeader — proven in run', () => {
 
   it('a feature with no run yet says so rather than inventing a run', () => {
     const led = structuredClone(LEDGER)
-    led.enforcement = { provenUnchanged: 0, total: 3, states: { 'proven-unchanged': 0, 'tests-weakened': 0, 'wording-ahead': 3, 'proof-stale': 0 } }
+    // A historical count without a current proof run must not leak into the card.
+    led.enforcement = { provenUnchanged: 3, total: 3, states: { 'proven-unchanged': 3, 'tests-weakened': 0, 'wording-ahead': 0, 'proof-stale': 0 } }
     render(led)
     expect(container.querySelector('[data-testid="proven-stat"]')?.textContent).toContain('0/3 proven · no run yet')
+  })
+
+  it('an in-progress run uses the same pending proof count and status everywhere', () => {
+    const led = structuredClone(LEDGER)
+    led.enforcement = { provenUnchanged: 3, total: 3, states: { 'proven-unchanged': 3, 'tests-weakened': 0, 'wording-ahead': 0, 'proof-stale': 0 } }
+    render(led, { proofNeedsRun: true, latestRunId: 'run-10', latestRunStatus: 'running' })
+
+    expect(container.querySelector('[data-testid="coverage-proof"]')?.textContent).toBe('run in progress — nothing proven yet')
+    expect(container.querySelector('[data-testid="proven-stat"]')?.textContent).toContain('0/3 proven · run in progress')
+    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('33.3% covered, 0% proven')
   })
 
   it('an older server without the axis shows no proven stat', () => {

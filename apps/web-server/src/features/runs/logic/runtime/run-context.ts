@@ -42,6 +42,7 @@ import type { RunModelPlan } from './run-model-plan'
 import type { PlaywrightRerunSelection } from './rerun-targets'
 import type { RunPerturbation } from './perturbation/client-ports'
 import type { ProxyShim } from './perturbation/proxy-shim'
+import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
 
 /** The orchestrator's own `emit`, handed to the modules so they can report
  *  progress without holding a reference back to the class. */
@@ -106,6 +107,7 @@ export interface RunContext {
   readonly verification?: VerificationRunMetadata
   readonly playwrightEnv: Record<string, string>
   readonly initialSelection?: PlaywrightRerunSelection
+  readonly testReviewApproval?: RunTestReviewApproval
 
   // ── run state ─────────────────────────────────────────────────────────────
   /** The directory Playwright runs from and every verdict reader lists specs
@@ -145,8 +147,8 @@ export interface RunContext {
   /** Set by waitForHealth (via pollUntilReady) when a service fails to come up on
    *  a normal run: the suite can't run, so runFullCycle / the heal loops treat
    *  the run as `failed` and route it into heal instead of aborting. Cleared at
-   *  the top of every ensureServicesRunning so a stale failure from a prior
-   *  cycle doesn't survive a successful reboot. */
+   *  the start of every service boot/restart attempt so a stale failure from a
+   *  prior cycle doesn't survive a successful reboot. */
   bootFailure: RunBootFailure | undefined
   /** The shims fronting each slot while a perturbed run is live; empty for an
    *  unperturbed run and after teardown. */
@@ -252,6 +254,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     verification: opts.verification,
     playwrightEnv: opts.playwrightEnv ?? {},
     initialSelection: opts.initialSelection,
+    testReviewApproval: opts.testReviewApproval,
 
     // A restart builds a fresh context over the SAME run dir without calling
     // start(); picking the existing copy up here is what keeps a restart from

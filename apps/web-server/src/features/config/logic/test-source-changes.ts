@@ -2,7 +2,8 @@ import path from 'path'
 import { sourceRows, rowsForTest, testSelections } from '../../../../../../shared/test-source-diff'
 import { extractTestMetadataFromSource, type ExtractedTest } from '../../../shared/ast-extractor'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
-import { diffSourceText } from '../../runs/logic/dirty-specs/text-diff'
+import { diffChangedLines, diffSourceText } from '../../runs/logic/dirty-specs/text-diff'
+import { pairTestDeclarations } from './test-declaration-changes'
 
 /** The current source and its markers travel together. Before-side English and
  * assessments are only needed when the reader actually opens Review. */
@@ -23,11 +24,16 @@ export async function attachSourceChanges(featureDir: string, file: string, sour
   }
   const rows = sourceRows(review)
   const selections = testSelections(review, rows)
+  const pairs = pairTestDeclarations(before.tests, extractTestMetadataFromSource(file, source).tests)
   for (const test of tests) {
     const selected = selections.find((item) => item.side === 'after' && item.test.line === test.line)
     const changes = rowsForTest(rows, selected, review).filter((row) => row.change != null)
+    const pair = pairs.find((item) => item.after?.line === test.line)
+    const changedLines = pair?.after && test.bodyLine !== undefined
+      ? [...await diffChangedLines(pair.before?.bodySource ?? '', test.bodySource)].map((line) => test.bodyLine! + line - 1)
+      : changes.flatMap((row) => row.afterLine == null ? [] : [row.afterLine])
     test.sourceChanges = {
-      changedLines: changes.flatMap((row) => row.afterLine == null ? [] : [row.afterLine]),
+      changedLines,
       count: new Set(changes.map((row) => row.change)).size,
     }
   }

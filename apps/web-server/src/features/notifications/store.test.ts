@@ -6,29 +6,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationStore } from './store'
 import { notificationRoutes } from './index'
 import type { NotificationSource } from '../../../../../shared/notifications/types'
-import type { FeatureCoverageChange } from '../../../../../shared/coverage/freshness'
 
 let dir: string
 const events = { publish: vi.fn() }
-const source: NotificationSource = { key: 'flight:f1', signature: 'failed:run', message: { title: 'checkout paused', body: 'Test run failed', target: { kind: 'flight', flightId: 'f1' } } }
+const source: NotificationSource = { key: 'flight:f1', signature: 'failed:run', message: { title: 'checkout paused', body: 'Test run failed', target: { kind: 'flight', flightId: 'f1' }, toast: true } }
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'notifications-')); events.publish.mockClear() })
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
 
-it('creates and resolves test-change and coverage topics independently through their owning events', async () => {
+it('keeps passive coverage state out of the inbox and resolves test review through its owning event', async () => {
   const { register } = await import('./index')
   const dirtyListeners = new Set<() => void>()
-  let onWorkspaceEvent!: (event: { type: string }) => void
   let dirty = true
-  const coverage: FeatureCoverageChange = {
-    feature: 'shop', delivery: 'tool-response-and-wait',
-    freshness: { revision: 'v1', checkedAt: 'now', state: 'stale', reasons: ['Mapping inputs changed.'], changedTests: ['checkout'], latestRunFailed: false, proofNeedsRun: false },
-  }
   const app = Fastify()
   await register(app, {
-    logsDir: dir, workspaceEvents: { ...events, subscribe: (fn: typeof onWorkspaceEvent) => { onWorkspaceEvent = fn; return vi.fn() } },
-    coverageMonitor: { reconcile: vi.fn(), list: () => [coverage] },
+    logsDir: dir, workspaceEvents: events,
+    coverageMonitor: { reconcile: vi.fn(), list: () => [{ feature: 'shop', freshness: { state: 'stale' } }] },
     dirtySpecStore: {
-      list: () => [{ featureId: 'shop', status: dirty ? 'dirty' : 'clean', dirtySpecs: dirty ? [{}] : [] }],
+      list: () => [{ featureId: 'shop', status: dirty ? 'dirty' : 'clean', dirtySpecs: dirty ? [{ strength: { verdict: 'weaker' } }] : [] }],
       onEvent: (fn: () => void) => dirtyListeners.add(fn), offEvent: (fn: () => void) => dirtyListeners.delete(fn),
     },
     runStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
@@ -36,32 +30,14 @@ it('creates and resolves test-change and coverage topics independently through t
   } as unknown as import('../../server-context').ServerContext)
   try {
     const initial = (await app.inject('/api/notifications')).json()
-    expect(initial).toHaveLength(2)
-    const review = initial.find((item: { target: { kind: string } }) => item.target.kind === 'test-review')
-    const mapping = initial.find((item: { target: { kind: string } }) => item.target.kind === 'coverage')
-    expect(review.title).toBe('shop: tests changed')
-    expect(mapping.target).toEqual({ kind: 'coverage', feature: 'shop', flightId: 'f1', stage: 'specs-coverage' })
-    events.publish.mockClear()
-    for (const fn of dirtyListeners) fn()
-    onWorkspaceEvent({ type: 'coverage-changed' })
-    expect(events.publish).not.toHaveBeenCalled()
-
-    coverage.freshness.state = 'current'
-    onWorkspaceEvent({ type: 'coverage-changed' })
-    let current = (await app.inject('/api/notifications')).json()
-    expect(current.find((item: { id: string }) => item.id === mapping.id).resolvedAt).toBeTruthy()
-    expect(current.find((item: { id: string }) => item.id === review.id).resolvedAt).toBeUndefined()
-    expect(events.publish).toHaveBeenCalledWith({ type: 'notifications-changed' })
-
-    coverage.freshness.state = 'stale'
-    onWorkspaceEvent({ type: 'coverage-changed' })
+    expect(initial).toHaveLength(1)
+    const [review] = initial
+    expect(review.title).toBe('shop: possible test weakening')
+    expect(review).toMatchObject({ toast: false, target: { kind: 'test-review', feature: 'shop' } })
     dirty = false
     for (const fn of dirtyListeners) fn()
-    current = (await app.inject('/api/notifications')).json()
-    expect(current.find((item: { id: string }) => item.id === review.id).resolvedAt).toBeTruthy()
-    expect(current.filter((item: { resolvedAt?: string }) => !item.resolvedAt)).toEqual([
-      expect.objectContaining({ target: { kind: 'coverage', feature: 'shop', flightId: 'f1', stage: 'specs-coverage' } }),
-    ])
+    const current = (await app.inject('/api/notifications')).json()
+    expect(current).toEqual([expect.objectContaining({ id: review.id, resolvedAt: expect.any(String) })])
   } finally { await app.close() }
   expect(dirtyListeners.size).toBe(0)
 })
@@ -124,6 +100,16 @@ describe('durable notifications', () => {
       body: 'Possible integrity weakening',
     })
     expect(escalated).not.toHaveProperty('readAt')
+  })
+
+  it('re-arms a retained inbox item when it becomes eligible for a blocking toast', () => {
+    const store = new NotificationStore(dir, events)
+    store.reconcile([{ ...source, message: { ...source.message!, toast: false } }])
+    const original = store.list()[0]
+    store.markRead(original.id)
+    store.reconcile([source])
+    expect(store.list()[0]).toMatchObject({ id: original.id, toast: true })
+    expect(store.list()[0]).not.toHaveProperty('readAt')
   })
 
   it('creates a new notification when a recovered flight fails again, without restoring its old message', () => {
@@ -231,12 +217,12 @@ it('keeps one alert when a weakening moves from an active run back to its featur
     for (const fn of runListeners) fn()
     const after = (await app.inject('/api/notifications')).json()
     expect(after).toHaveLength(1)
-    expect(after[0]).toMatchObject({ id: active.id, severity: 'danger', target: { kind: 'test-review', feature: 'shop' } })
+    expect(after[0]).toMatchObject({ id: active.id, severity: 'danger', toast: false, target: { kind: 'test-review', feature: 'shop' } })
     expect(after[0].resolvedAt).toBeUndefined()
   } finally { await app.close() }
 })
 
-it('keeps ordinary test changes actionable after the active run ends', async () => {
+it('resolves ordinary test changes when they no longer block an active run', async () => {
   const { register } = await import('./index')
   const runListeners = new Set<() => void>()
   let runs = [{ runId: 'r1', feature: 'shop', status: 'healing', pendingSpecEdits: 1 }]
@@ -254,8 +240,7 @@ it('keeps ordinary test changes actionable after the active run ends', async () 
     for (const fn of runListeners) fn()
     const after = (await app.inject('/api/notifications')).json()
     expect(after).toHaveLength(1)
-    expect(after[0]).toMatchObject({ id: active.id, target: { kind: 'test-review', feature: 'shop' } })
-    expect(after[0].resolvedAt).toBeUndefined()
+    expect(after[0]).toMatchObject({ id: active.id, resolvedAt: expect.any(String) })
   } finally { await app.close() }
 })
 
@@ -272,7 +257,7 @@ it('persists test-change alerts from dirty-store events, preserves deletion, and
   } as unknown as import('../../server-context').ServerContext)
   try {
     const [initial] = (await app.inject('/api/notifications')).json()
-    expect(initial).toMatchObject({ severity: 'danger', target: { kind: 'test-review', feature: 'shop' } })
+    expect(initial).toMatchObject({ severity: 'danger', toast: false, target: { kind: 'test-review', feature: 'shop' } })
     await app.inject({ method: 'DELETE', url: `/api/notifications/${initial.id}` })
     for (const fn of dirtyListeners) fn()
     expect((await app.inject('/api/notifications')).json()).toEqual([])

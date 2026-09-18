@@ -19,6 +19,7 @@ import { detectHealMode } from './auto-heal'
 import { buildSuiteReview, skipSuiteSnapshotPath, suiteReviewRevision, suiteReviewFiles } from './suite-review'
 import { saveSuiteTestRoster } from '../suite-test-roster'
 import type { TestReviewDecision } from '../../../../../../../shared/test-review'
+import { materializeSuiteRuntimeInputs, prepareSuiteRuntimeInputs, suiteRuntimeInputTargets, suiteRuntimeInputTargetsForSnapshot } from './suite-runtime-inputs'
 
 export type AdoptSpecEditsResult =
   | { ok: true; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
@@ -27,6 +28,51 @@ export type AdoptSpecEditsResult =
 export type RestoreSpecEditsResult =
   | { ok: true; restored: string[] }
   | { ok: false; reason: 'tests-running' | 'nothing-to-restore' | 'restore-failed' | 'review-changed' }
+
+export type RestoreReviewedSuiteResult =
+  | { ok: true; restored: string[]; revision: string }
+  | { ok: false; reason: 'nothing-to-restore' | 'restore-failed' | 'review-changed' }
+
+/** Exact-revision restoration shared by active and terminal runs. It refuses
+ * every path before writing when either side traverses a symlink. */
+export function restoreReviewedSuiteFiles(
+  snapshotDir: string,
+  liveDir: string,
+  expectedRevision: string,
+  excludedPaths: Iterable<string> = [],
+): RestoreReviewedSuiteResult {
+  const review = suiteReviewFiles(snapshotDir, liveDir, excludedPaths)
+  if (review.revision !== expectedRevision) return { ok: false, reason: 'review-changed' }
+  if (review.files.length === 0) return { ok: false, reason: 'nothing-to-restore' }
+  const restored: string[] = []
+  try {
+    for (const edit of review.files) {
+      for (const root of [liveDir, snapshotDir]) {
+        let target = root
+        for (const segment of edit.file.split('/')) {
+          target = path.join(target, segment)
+          try {
+            if (fs.lstatSync(target).isSymbolicLink()) throw new Error('Restore path contains a symlink')
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          }
+        }
+      }
+    }
+    for (const edit of review.files) {
+      const liveFile = path.join(liveDir, edit.file)
+      if (edit.change === 'added') fs.rmSync(liveFile)
+      else {
+        fs.mkdirSync(path.dirname(liveFile), { recursive: true })
+        fs.copyFileSync(path.join(snapshotDir, edit.file), liveFile)
+      }
+      restored.push(edit.file)
+    }
+    return { ok: true, restored, revision: review.revision }
+  } catch {
+    return { ok: false, reason: 'restore-failed' }
+  }
+}
 
 /** One digest over every spec's content, independent of listing order. Lets a
  *  reader check that the copy still holds what it held at run start. */
@@ -90,7 +136,8 @@ function readLive(featureDir: string, rel: string): string | undefined {
  *  running process would corrupt the very run it is meant to inform. */
 export async function adoptSpecEdits(ctx: RunContext, expectedRevision?: string): Promise<AdoptSpecEditsResult> {
   if (ctx.playwrightPty) return { ok: false, reason: 'tests-running' }
-  const revision = expectedRevision ?? (ctx.suiteDir !== ctx.feature.featureDir ? suiteReviewRevision(ctx.suiteDir, ctx.feature.featureDir) : undefined)
+  const runtimeInputs = suiteRuntimeInputTargets(ctx)
+  const revision = expectedRevision ?? (ctx.suiteDir !== ctx.feature.featureDir ? suiteReviewRevision(ctx.suiteDir, ctx.feature.featureDir, runtimeInputs) : undefined)
   const adopted = await adoptPendingSpecEdits(ctx, 'human', revision)
   if (!adopted.ok) return adopted
   const signal = ctx.signalGate.observe('rerun', {
@@ -114,11 +161,17 @@ export function restoreSpecEdits(ctx: RunContext, expectedRevision?: string): Re
   if (ctx.playwrightPty) return { ok: false, reason: 'tests-running' }
   const live = ctx.feature.featureDir
   if (ctx.suiteDir === live) return { ok: false, reason: 'nothing-to-restore' }
-  const review = suiteReviewFiles(ctx.suiteDir, live)
-  if (expectedRevision && review.revision !== expectedRevision) return { ok: false, reason: 'review-changed' }
+  const runtimeInputs = suiteRuntimeInputTargets(ctx)
+  if (expectedRevision) {
+    const exact = restoreReviewedSuiteFiles(ctx.suiteDir, live, expectedRevision, runtimeInputs)
+    if (!exact.ok) return exact
+    recordSpecEdits(ctx, { at: new Date().toISOString(), revision: exact.revision, decision: 'restored' })
+    return { ok: true, restored: exact.restored }
+  }
+  const review = suiteReviewFiles(ctx.suiteDir, live, runtimeInputs)
   // Preserve the browser's legacy spec-only action. The agent form explicitly
   // reviews and restores all changed suite files, including helpers and config.
-  const pending = expectedRevision ? review.files : computePendingEdits(live, ctx.suiteDir)
+  const pending = computePendingEdits(live, ctx.suiteDir)
   if (pending.length === 0) return { ok: false, reason: 'nothing-to-restore' }
   const revision = review.revision
   const restored: string[] = []
@@ -187,7 +240,7 @@ async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, ex
   const hadSnapshot = ctx.suiteDir !== live
   const pending = hadSnapshot ? computePendingEdits(live, ctx.suiteDir) : []
   const reviewed = hadSnapshot && by === 'human' && expectedRevision !== undefined
-    ? await buildSuiteReview(ctx.suiteDir, live) : undefined
+    ? await buildSuiteReview(ctx.suiteDir, live, suiteRuntimeInputTargets(ctx)) : undefined
   if (reviewed && reviewed.revision !== expectedRevision) return { ok: false, reason: 'review-changed' }
   if (hadSnapshot && pending.length === 0 && !reviewed?.files.length) return { ok: false, reason: 'nothing-to-adopt' }
   // With no copy yet (the boundary was unavailable at boot) adopting means
@@ -215,29 +268,62 @@ async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, ex
 
 /** Copy the live feature dir to `paths.suiteSnapshotDir`, point the run at the
  *  copy and record it on the manifest. Replaces an existing copy, so adopting a
- *  mid-run edit is simply taking the snapshot again. Best-effort at boot: on a
- *  failure the run keeps executing the live dir and the manifest says so — a
- *  silent fallback would let the UI and MCP results claim a boundary that was
- *  never there. */
+ *  mid-run edit is simply taking the snapshot again. An ordinary copy failure
+ *  retains the legacy live-dir fallback and records that missing boundary. A
+ *  reviewed fresh run fails closed instead: its exact approval is meaningful
+ *  only when the approved bytes become the immutable run snapshot. */
 export function snapshotSuite(ctx: RunContext): void {
   const live = ctx.feature.featureDir
   const target = ctx.paths.suiteSnapshotDir
+  let approvalSource: string | undefined
+  let approvalExclusions: string[] = []
+  if (ctx.testReviewApproval) {
+    approvalSource = path.join(path.dirname(ctx.runDir), ctx.testReviewApproval.sourceRunId, 'suite')
+    approvalExclusions = suiteRuntimeInputTargetsForSnapshot(approvalSource)
+    if (!fs.existsSync(approvalSource)
+      || suiteReviewRevision(approvalSource, live, approvalExclusions) !== ctx.testReviewApproval.revision) {
+      throw new Error('Approved test review changed before snapshot capture; fetch and approve the current revision.')
+    }
+  }
+  prepareSuiteRuntimeInputs(ctx)
+  const runtimeInputs = new Set(suiteRuntimeInputTargets(ctx))
   try {
     fs.rmSync(target, { recursive: true, force: true })
-    copyDirRecursive(live, target, undefined, skipSuiteSnapshotPath)
+    copyDirRecursive(live, target, undefined, (relative) => skipSuiteSnapshotPath(relative) || runtimeInputs.has(relative))
+    if (approvalSource && suiteReviewRevision(approvalSource, target, new Set([...approvalExclusions, ...runtimeInputs])) !== ctx.testReviewApproval!.revision) {
+      throw new Error('Approved test review changed during snapshot capture; fetch and approve the current revision.')
+    }
     saveSuiteTestRoster(target)
     ctx.suiteDir = target
-    ctx.stateSink.patchManifest(ctx.runId, {
-      suiteSnapshot: { kind: 'taken', dir: target, takenAt: new Date().toISOString(), digest: suiteDigest(live) },
-    })
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err)
+    // A runtime env target may have been the last copied file. Never retain a
+    // partial snapshot that can contain that secret after falling back live.
+    try { fs.rmSync(target, { recursive: true, force: true }) } catch { /* best-effort cleanup */ }
     ctx.suiteDir = live
     ctx.runnerLog?.warn(`suite snapshot failed; running the live suite dir: ${reason}`)
     ctx.stateSink.patchManifest(ctx.runId, {
       suiteSnapshot: { kind: 'unavailable', at: new Date().toISOString(), reason },
     })
+    if (ctx.testReviewApproval) {
+      throw new Error(`Approved test review snapshot capture failed before tests started: ${reason}`)
+    }
+    return
   }
+  try {
+    materializeSuiteRuntimeInputs(ctx)
+  } catch (error) {
+    fs.rmSync(target, { recursive: true, force: true })
+    ctx.suiteDir = live
+    const reason = error instanceof Error ? error.message : String(error)
+    ctx.stateSink.patchManifest(ctx.runId, {
+      suiteSnapshot: { kind: 'unavailable', at: new Date().toISOString(), reason },
+    })
+    throw new Error(`Suite runtime input setup failed before tests started: ${reason}`)
+  }
+  ctx.stateSink.patchManifest(ctx.runId, {
+    suiteSnapshot: { kind: 'taken', dir: target, takenAt: new Date().toISOString(), digest: suiteDigest(live) },
+  })
 }
 
 /** Stage and validate the copied bytes before replacing evidence. A late file
@@ -248,19 +334,23 @@ function snapshotReviewedSuite(ctx: RunContext, expectedRevision: string): { ok:
   let originalMoved = false
   let installed = false
   try {
-    if (ctx.suiteDir === ctx.feature.featureDir || suiteReviewRevision(target, ctx.feature.featureDir) !== expectedRevision) {
+    prepareSuiteRuntimeInputs(ctx)
+    const runtimeInputs = new Set(suiteRuntimeInputTargets(ctx))
+    if (ctx.suiteDir === ctx.feature.featureDir || suiteReviewRevision(target, ctx.feature.featureDir, runtimeInputs) !== expectedRevision) {
       return { ok: false, reason: 'review-changed' }
     }
     scratch = fs.mkdtempSync(`${target}.review-`)
     const staging = path.join(scratch, 'candidate')
     const backup = path.join(scratch, 'original')
-    copyDirRecursive(ctx.feature.featureDir, staging, undefined, skipSuiteSnapshotPath)
-    if (suiteReviewRevision(target, staging) !== expectedRevision) return { ok: false, reason: 'review-changed' }
+    copyDirRecursive(ctx.feature.featureDir, staging, undefined, (relative) => skipSuiteSnapshotPath(relative) || runtimeInputs.has(relative))
+    if (suiteReviewRevision(target, staging, runtimeInputs) !== expectedRevision) return { ok: false, reason: 'review-changed' }
     saveSuiteTestRoster(staging)
     fs.renameSync(target, backup)
     originalMoved = true
     fs.renameSync(staging, target)
     installed = true
+    ctx.suiteDir = target
+    materializeSuiteRuntimeInputs(ctx)
     ctx.stateSink.patchManifest(ctx.runId, {
       suiteSnapshot: { kind: 'taken', dir: target, takenAt: new Date().toISOString(), digest: suiteDigest(target) },
     })

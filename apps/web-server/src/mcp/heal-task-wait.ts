@@ -11,14 +11,14 @@ import { ensureExternalClaimForMcpCall } from './tool-support'
 // agent immediately re-calls. This keeps every request well under any client
 // JSON-RPC request timeout (the cause of the -32001 the long-poll used to hit),
 // while the logical wait stays unbounded across re-calls.
-export const WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS = 90 * 1000
+export const WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS = 45 * 1000
 
 export const WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS = 60 * 60 * 1000
 
 // Hard cap on a single block regardless of the requested timeout_ms. Large
 // requested values are clamped to this (not rejected) so older clients keep
 // working — they just get a `still_waiting` to loop on sooner.
-export const WAIT_FOR_HEAL_TASK_WINDOW_MS = 120 * 1000
+export const WAIT_FOR_HEAL_TASK_WINDOW_MS = 45 * 1000
 
 // ─── result helpers ─────────────────────────────────────────────────────
 

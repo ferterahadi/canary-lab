@@ -152,9 +152,33 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   // restart) resync everything, since the bus has no replay.
   useEffect(() => {
     let conn: { close(): void } | null = null
+    const resyncWorkspace = (): void => {
+      refreshFeatures(selectedFeatureRef.current)
+      invalidate('repos')
+      invalidate('tests')
+      invalidate('coverage')
+      invalidate('robustness')
+      invalidate('verification')
+      const currentRunId = selectedRunIdRef.current
+      if (currentRunId) invalidate('journal', currentRunId)
+      refreshVersion()
+      refreshFlights()
+      invalidate('flights')
+      refreshPreFlights()
+      invalidate('project-config')
+      invalidate('onboarding')
+      invalidate('notifications')
+    }
     try {
       conn = connectWorkspaceEvents({
         onEvent: (event) => {
+          // The server handshake is the authoritative recovery point. Keep the
+          // resync on that frame so canary-apply recovery does not depend on a
+          // client-local "has this socket opened before?" classification.
+          if (event.type === 'connected') {
+            resyncWorkspace()
+            return
+          }
           if (event.type === 'feature-renamed') {
             // The suite kept its identity but changed its name. Follow it —
             // otherwise the selected feature (and any surface keyed by the old
@@ -208,23 +232,6 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
           // appears/disappears live instead of on the next reload.
           if (event.type === 'project-config-changed') invalidate('project-config')
           if (event.type === 'getting-started-changed') invalidate('onboarding')
-        },
-        onReconnect: () => {
-          refreshFeatures(selectedFeatureRef.current)
-          invalidate('repos')
-          invalidate('tests')
-          invalidate('coverage')
-          invalidate('robustness')
-          invalidate('verification')
-          const currentRunId = selectedRunIdRef.current
-          if (currentRunId) invalidate('journal', currentRunId)
-          refreshVersion()
-          refreshFlights()
-          invalidate('flights')
-          refreshPreFlights()
-          invalidate('project-config')
-          invalidate('onboarding')
-          invalidate('notifications')
         },
       })
     } catch {

@@ -28,12 +28,13 @@ it('does not paint an unchanged statement because the opposite side has a meanin
 })
 it.each(['added test', 'changed tags'])('collapses registration syntax for %s and opens the complete header in Code mode', async (variant) => {
   const review = testFileReview()
+  const readable = review.before.tests[0].readable
   const source = ["test('concurrent binding remains durable', {", "  tag: ['@req-R18', '@req-R19'],", '}, async () => {',
     '  const value = 1;', '  expect(value).toBe(1);', '});']
   for (const side of ['before', 'after'] as const) {
     const lines = [...source]
     if (side === 'before') lines[1] = "  tag: ['@req-R18'],"
-    review[side] = { source: lines.join('\n'), tests: [], story: { steps: [{
+    review[side] = { source: lines.join('\n'), tests: [{ name: 'concurrent binding remains durable', line: 1, endLine: 6, readable }], story: { steps: [{
       id: 'test', kind: 'flow', flowKind: 'scope', role: 'test', text: 'Test: "concurrent binding remains durable"',
       spans: [{ text: 'Test: "concurrent binding remains durable"' }], fidelity: 'derived', headerEndLine: 3,
       source: { file: review.file, startLine: 1, endLine: 6, snippet: lines.join('\n') }, children: [
@@ -49,19 +50,29 @@ it.each(['added test', 'changed tags'])('collapses registration syntax for %s an
     review.patch = '@@ -0,0 +1,6 @@\n' + source.map((line) => '+' + line).join('\n')
   } else review.patch = '@@ -1,6 +1,6 @@\n' + source.flatMap((line, i) => i === 1
     ? ["-  tag: ['@req-R18'],", '+' + line] : [' ' + line]).join('\n')
+  review.meaningfulChanges = variant === 'added test'
+    ? { before: [], after: source.map((_, index) => index + 1) }
+    : { before: [], after: [] }
   const select = vi.fn()
   await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="english" change={1} onSelectSource={select} />))
   expect(container.textContent).toContain('TEST"concurrent binding remains durable"')
   expect(container.textContent).not.toMatch(/tag:|async|=>/)
   expect(container.textContent).toContain('SETUPSet constant value to 1')
   expect(container.textContent).toContain('CHECKvalue equals 1')
-  expect(container.querySelector('[data-side="after"][data-source-line="1"] ins')).not.toBeNull()
+  const englishTestHighlight = container.querySelector('[data-side="after"][data-source-line="1"] ins')
+  if (variant === 'added test') expect(englishTestHighlight).not.toBeNull()
+  else {
+    expect(englishTestHighlight).toBeNull()
+    expect(container.querySelector('[data-side="before"][data-source-line="1"] del')).toBeNull()
+    expect(container.querySelector('[data-selected="true"]')).toBeNull()
+  }
   expect(container.querySelector('[data-side="after"][data-source-line="2"]')).toBeNull()
   expect(container.querySelector('[data-side="after"][data-source-line="3"]')).toBeNull()
   await act(async () => container.querySelector<HTMLButtonElement>('[data-side="after"][data-source-line="1"] button')!.click())
   expect(select).toHaveBeenLastCalledWith({ side: 'after', line: 1, endLine: 3 })
   await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="code" selection={select.mock.lastCall![0]} />))
   expect(container.querySelector('[data-side="after"][data-source-line="2"]')?.textContent).toContain(source[1])
+  expect(container.querySelector('[data-side="after"][data-source-line="2"] ins')).not.toBeNull()
   expect(container.querySelector('[data-side="after"][data-source-line="3"]')?.textContent).toContain(source[2])
   expect(container.querySelectorAll('[data-source-selected]')).toHaveLength(3)
 })
@@ -81,6 +92,7 @@ it('compacts a multiline import into its source range and preserves all code lin
 })
 it('marks and navigates each edit inside a compacted range even when its English wording is identical', async () => {
   const review = multilineImportReview()
+  review.meaningfulChanges = { before: [], after: [] }
   const rows = sourceRows(review)
   for (const [index, change] of [[2, 1], [8, 2]]) {
     rows[index].change = change

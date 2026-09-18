@@ -4,11 +4,37 @@
 // profile arrays in ../tool-support.ts (see the cl_add-mcp-tool skill).
 import { z } from 'zod'
 import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/server'
-import { applyUserInput, completedUserInput, inputPending, requestUserInput } from '../elicitation'
+import { applyUserInput, completedUserInput, inputPending, matchesUserInput, requestNextUserInput, requestUserInput } from '../elicitation'
 import { normalizeRunCounts } from '../../features/runs/logic/heal/external-heal-surface'
 import { isHealClaimAllowed } from '../../features/runs/logic/heal/heal-claim-policy'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
 import { type ToolGroupContext, CLAIM_SUPPRESSED_MESSAGE, asJsonResult, bootSessionValue, claimRun, errorResult, failureResult, findContinuingRunForFeature, healWaitNext, isActiveBootRun, resolveRunRef, runCandidate } from '../tool-support'
+import { readCoverageUpdate } from '../coverage-catchup'
+
+const coverageChangeResponse = z.object({
+  change: z.object({
+    feature: z.string(),
+    freshness: z.object({
+      revision: z.string(),
+      state: z.enum(['current', 'stale', 'unavailable', 'updating', 'not-measured']),
+      reasons: z.array(z.string()),
+      changedTests: z.array(z.string()),
+      nextAction: z.object({
+        stage: z.enum(['prd-summary', 'specs-coverage', 'run']),
+        label: z.string(),
+        command: z.enum(['start_external_summary', 'start_external_coverage', 'start_run']),
+        arguments: z.object({ feature: z.string() }),
+      }).optional(),
+    }),
+    activeJobId: z.string().optional(),
+    activeJobOwner: z.string().optional(),
+    flightId: z.string().optional(),
+    flightStatus: z.string().optional(),
+  }),
+})
+
+type CoverageChange = z.infer<typeof coverageChangeResponse>['change']
+type CoverageDecision = { revision: string; allowStale: boolean; change?: CoverageChange }
 
 export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -17,7 +43,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
 
   registerTool('start_run', {
     description:
-      'Start or continue a run. A matching active run is reused even with force_new:true; an intentional concurrent run of the same feature must be started from the Run panel. Pass run_ref to resume a failed/aborted run with its recorded suite and journal, retesting failed, skipped and pending tests. Fresh starts cannot adopt unreviewed suite changes from an unfinished run. After a code fix use signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run. Ordinary skips remain incomplete; only reporter-observed, predeclared environment exclusions settle as not applicable and never count as passes.',
+      'Start or continue a run. Before a fresh run, stale test-to-requirement coverage asks the user whether to update coverage first or run now with the historical percentage explicitly qualified; no run starts while that choice is pending. A matching active run is reused even with force_new:true, and run_ref resumes an ordinary failed/aborted run with its recorded suite and journal, so neither path is blocked by current coverage freshness. An intentional concurrent run of the same feature must be started from the Run panel. Fresh starts reject pending suite changes unless a human durably approved the exact terminal-run revision; after that approval start without run_ref, and only the new run can produce a verdict. After a code fix use signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run. Ordinary skips remain incomplete; only reporter-observed, predeclared environment exclusions settle as not applicable and never count as passes.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       env: z.string().optional().describe('Envset name. Defaults to the feature\'s first declared env.'),
@@ -28,20 +54,100 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       client_kind: clientKindInput,
       conversation_name: z.string().optional().describe('Human label shown in the Canary Lab UI (e.g. "fix checkout").'),
       guidance: z.string().optional().describe('Optional user guidance when restarting a failed/aborted run by runId or run_ref.'),
-      force_new: z.boolean().default(false).describe('Request a fresh run only when no matching run is active and no pending test review would be bypassed. An active run is reused even when true; use the Run panel for an intentional separate concurrent run.'),
+      force_new: z.boolean().default(false).describe('Request a fresh run only when no matching run is active and no pending test review would be bypassed. A terminal review must first carry durable human approval for its exact revision. An active run is reused even when true; use the Run panel for an intentional separate concurrent run.'),
       isolation: z.enum(['worktree', 'queue']).optional().describe('Only needed after start_run returns repo_collision_requires_choice: "worktree" isolates this run in a per-run git worktree and starts it now (concurrent); "queue" waits until the conflicting run finishes.'),
       update_repos: z.boolean().optional().describe('Fast-forward each declared repo checkout to its upstream tip (git fetch + ff-only) before booting, so the run tests the branch\'s latest commit rather than whatever was checked out. Omitted = only repos with `track: \'upstream\'` in feature.config.cjs; true = every repo; false = none. Refused (type:"repo_update_refused", nothing started) when a checkout is dirty, has diverged, or an in-place run is booted from it — local work is never discarded; get_feature_repo_status shows behindUpstream first. Fresh starts only.'),
       perturbation: z.record(z.string(), z.unknown()).optional().describe('Robustness envelope (the `envelope` object from a get_robustness finding, or the suite\'s robustness/envelope.json) to boot the services under: latency, duplicated writes and slot restarts through a per-slot proxy. Use it to repair a Robustness Lab finding — the failing test fails again under the same environment, and the heal context carries `perturbation` (with a one-line `repro`) so the fix targets the app\'s tolerance, not the test. Applies to fresh starts only; omitted = unperturbed.'),
     },
   }, async (args, request) => {
     const { feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new, perturbation, update_repos } = args
-    const isolationQuestion = { scope: ['run-isolation', deps.projectRoot, args], mode: 'form' as const, schema: z.object({ isolation: z.enum(['worktree', 'queue']) }) }
-    // One `chosen` for both entries: the fresh ask never runs it (it returns the
-    // question), and the answering call reaches it through `applyUserInput`.
-    const chosen = async (answer: { isolation: 'worktree' | 'queue' }) => begin(answer.isolation)
-    const ask = (fallback: () => CallToolResult, message = 'Another run uses these repositories. Run now in an isolated worktree, or queue until they are free?') =>
-      requestUserInput(request, ctx.clientFacts(), { ...isolationQuestion, message, fallback }, chosen)
-    const begin = async (isolation = args.isolation): Promise<CallToolResult | InputRequiredResult> => {
+    const coverageScope = ['run-coverage-preflight', deps.projectRoot, args]
+    const coverageChoiceSchema = z.object({ choice: z.enum(['Update coverage first', 'Run now with stale coverage']) })
+    const isolationSchema = z.object({ isolation: z.enum(['worktree', 'queue']) })
+    const coverageRevision = (change: CoverageChange | undefined): string => change?.freshness.revision ?? 'coverage-check-unavailable'
+    const requiresCoverageChoice = (change: CoverageChange | undefined): change is CoverageChange =>
+      change?.freshness.state === 'stale' && change.freshness.nextAction?.stage === 'specs-coverage'
+    const readCoverage = async (): Promise<CoverageChange | undefined> => {
+      const parsed = coverageChangeResponse.safeParse(await readCoverageUpdate(feature, deps))
+      return parsed.success ? parsed.data.change : undefined
+    }
+    const coverageRecovery = (change: CoverageChange): CallToolResult => {
+      const owner = change.activeJobId
+        ? `Coverage job ${change.activeJobId}${change.activeJobOwner ? ` (${change.activeJobOwner})` : ''} already owns this update; follow it instead of starting another.`
+        : change.flightId
+          ? `Flight ${change.flightId}${change.flightStatus ? ` is ${change.flightStatus}` : ''} owns this update; resume it instead of starting duplicate coverage work.`
+          : 'Call start_external_coverage, submit the mapping, confirm freshness, then retry start_run.'
+      return asJsonResult({
+        type: 'coverage_update_required',
+        runStarted: false,
+        feature,
+        freshness: change.freshness,
+        ...(change.activeJobId ? { activeJobId: change.activeJobId, activeJobOwner: change.activeJobOwner } : {}),
+        ...(change.flightId ? { flightId: change.flightId, flightStatus: change.flightStatus } : {}),
+        message: `Run not started. ${owner}`,
+        nextSteps: change.activeJobId || change.flightId
+          ? ['follow the existing coverage owner', 'confirm coverage freshness', 'retry start_run']
+          : ['start_external_coverage', 'submit_external_coverage', 'get_feature_coverage', 'start_run'],
+      })
+    }
+    const coverageQuestion = (change: CoverageChange | undefined) => ({
+      scope: coverageScope,
+      revision: coverageRevision(change),
+      mode: 'form' as const,
+      schema: coverageChoiceSchema,
+    })
+    const isolationScope = (decision: CoverageDecision) => [
+      decision.allowStale ? 'run-isolation-after-stale-coverage' : 'run-isolation-after-coverage-check',
+      deps.projectRoot,
+      args,
+    ]
+    const isolationQuestion = (decision: CoverageDecision) => ({
+      scope: isolationScope(decision),
+      revision: decision.revision,
+      mode: 'form' as const,
+      schema: isolationSchema,
+    })
+    const askCoverage = (
+      change: CoverageChange,
+      nextRound: boolean,
+    ): Promise<CallToolResult | InputRequiredResult> => {
+      const spec = {
+        ...coverageQuestion(change),
+        message: `${change.freshness.reasons.join(' ')} Previous coverage percentages do not describe the current tests. Update coverage before running, or run now for diagnostics with coverage still marked stale?`,
+        fallback: () => asJsonResult({
+          type: 'coverage_update_requires_choice',
+          runStarted: false,
+          feature,
+          freshness: change.freshness,
+          options: ['Update coverage first', 'Run now with stale coverage'],
+          message: 'Ask the user whether to update coverage first or run now with stale coverage. Do not start a run until they choose.',
+          nextSteps: ['ask_user_update_coverage_or_run_now'],
+        }),
+      }
+      const chosen = async (answer: z.infer<typeof coverageChoiceSchema>) => answer.choice === 'Update coverage first'
+        ? coverageRecovery(change)
+        : begin(args.isolation, { revision: change.freshness.revision, allowStale: true, change }, true)
+      return nextRound
+        ? Promise.resolve(requestNextUserInput(request, ctx.clientFacts(), spec, chosen))
+        : requestUserInput(request, ctx.clientFacts(), spec, chosen)
+    }
+    const askIsolation = (
+      decision: CoverageDecision,
+      fallback: () => CallToolResult,
+      message: string,
+      nextRound: boolean,
+    ): Promise<CallToolResult | InputRequiredResult> => {
+      const spec = { ...isolationQuestion(decision), message, fallback }
+      const chosen = async (answer: z.infer<typeof isolationSchema>) => begin(answer.isolation, decision, true)
+      return nextRound
+        ? Promise.resolve(requestNextUserInput(request, ctx.clientFacts(), spec, chosen))
+        : requestUserInput(request, ctx.clientFacts(), spec, chosen)
+    }
+    const begin = async (
+      isolation = args.isolation,
+      approvedCoverage?: CoverageDecision,
+      answeringQuestion = false,
+    ): Promise<CallToolResult | InputRequiredResult> => {
       try {
         const requestedRef = runId ?? run_ref
         // Heal-claim policy (see heal-claim-policy.ts): claiming is open to every
@@ -145,6 +251,22 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
             ...(claimAllowed ? healWaitNext() : {}),
           })
         }
+        const coverage = await readCoverage()
+        const revision = coverageRevision(coverage)
+        if (approvedCoverage && approvedCoverage.revision !== revision) {
+          return inputPending('Coverage changed while the question was open. Nothing was applied; review current coverage before resuming.')
+        }
+        if (requiresCoverageChoice(coverage) && !approvedCoverage?.allowStale) {
+          return askCoverage(coverage, answeringQuestion)
+        }
+        const coverageDecision: CoverageDecision = approvedCoverage ?? { revision, allowStale: false, change: coverage }
+        const coverageQualification = coverageDecision.allowStale ? {
+          coverageStale: true,
+          coverageRevision: coverageDecision.revision,
+          coverageReasons: coverageDecision.change?.freshness.reasons ?? [],
+          coverageMessage: 'This diagnostic run does not update or validate the stale coverage mapping.',
+        } : {}
+
         // Any MCP-triggered run is external-origin: it must use External-client
         // heal regardless of the project's Heal Agent setting (which only governs
         // UI-triggered runs). `claimable` is what splits a Desktop client that
@@ -192,7 +314,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         if (outcome.kind === 'collision') {
           // Same-repo collision and the client didn't choose. Nothing started —
           // ask the user, then re-call start_run with isolation:"worktree"|"queue".
-          return ask(() => asJsonResult({
+          return askIsolation(coverageDecision, () => asJsonResult({
             type: 'repo_collision_requires_choice',
             conflictingRunId: outcome.conflictingRunId,
             conflictingFeature: outcome.conflictingFeature,
@@ -200,7 +322,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
             options: outcome.options,
             message: outcome.message,
             nextSteps: ['ask_user_worktree_or_queue'],
-          }), outcome.message)
+          }), outcome.message, answeringQuestion)
         }
         if (outcome.kind === 'queued') {
           return asJsonResult({
@@ -210,6 +332,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
             queueReason: outcome.reason,
             claimed: claimAllowed,
             ...suppressionFields,
+            ...coverageQualification,
             ...(claimAllowed ? healWaitNext() : {}),
           })
         }
@@ -218,16 +341,35 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
           reused: false,
           claimed: claimAllowed,
           ...suppressionFields,
+          ...coverageQualification,
           ...(claimAllowed ? healWaitNext() : {}),
         })
       } catch (err) {
         return failureResult(err)
       }
     }
-    // A call carrying requestState is ANSWERING the isolation question, not asking
-    // to start again: matching it to the open question is what turns the user's
-    // choice into the run. It needs no capability fallback — the answer is here.
-    return request?.mcpReq.requestState?.() !== undefined ? applyUserInput(request, isolationQuestion, chosen) : begin()
+    const state = request?.mcpReq.requestState?.()
+    if (state === undefined) return begin()
+
+    // start_run can ask coverage first and repository isolation second. Route
+    // the opaque handle to its exact question; never interpret one answer as
+    // the other or let a stale approval authorize a changed coverage revision.
+    const coverage = await readCoverage()
+    if (matchesUserInput(request, coverageScope)) {
+      const spec = coverageQuestion(coverage)
+      return applyUserInput(request, spec, async (answer) => {
+        if (!requiresCoverageChoice(coverage)) return inputPending('Coverage changed while the question was open. Nothing was applied; review current coverage before resuming.')
+        return answer.choice === 'Update coverage first'
+          ? coverageRecovery(coverage)
+          : begin(args.isolation, { revision: coverage.freshness.revision, allowStale: true, change: coverage }, true)
+      })
+    }
+    for (const allowStale of [false, true]) {
+      const decision: CoverageDecision = { revision: coverageRevision(coverage), allowStale, change: coverage }
+      if (!matchesUserInput(request, isolationScope(decision))) continue
+      return applyUserInput(request, isolationQuestion(decision), async (answer) => begin(answer.isolation, decision, true))
+    }
+    return applyUserInput(request, coverageQuestion(coverage), async () => inputPending('The input request belongs to a different operation. Nothing was applied.'))
   })
 
   registerTool('boot_services', {

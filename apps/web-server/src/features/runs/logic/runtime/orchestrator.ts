@@ -25,6 +25,7 @@ import { killTree, scheduleSigkillFallback } from './run-spawn'
 import type { PlaywrightSpawner } from './run-spawn'
 import { ensureServicesRunning, spawnService, waitForHealth } from './run-service-boot'
 import { adoptSpecEdits, refreshSpecEdits, restoreSpecEdits, snapshotSuite } from './run-suite-snapshot'
+import { materializeSuiteRuntimeInputs, prepareSuiteRuntimeInputs, removeSuiteRuntimeInputs } from './suite-runtime-inputs'
 import { captureDirtySpecBaseline, markStoppedEarly, noteHealCycle, prepareRun, recordLifecycle, setStatus, stopHeartbeat } from './run-manifest-writer'
 import type { InterjectResult, OrchestratorEventMap, OrchestratorOptions, ServiceSpec } from './run-orchestrator-types'
 
@@ -177,7 +178,11 @@ export class RunOrchestrator extends EventEmitter {
     // tracking must never block a run from booting, and a failed copy is
     // recorded on the manifest rather than hidden.
     if (!resume || !fs.existsSync(this.ctx.paths.suiteSnapshotDir)) snapshotSuite(this.ctx)
-    else refreshSpecEdits(this.ctx, this.ctx.feature.name)
+    else {
+      prepareSuiteRuntimeInputs(this.ctx)
+      materializeSuiteRuntimeInputs(this.ctx)
+      refreshSpecEdits(this.ctx, this.ctx.feature.name)
+    }
     await captureDirtySpecBaseline(this.ctx)
     // Apply the ephemeral port overlay BEFORE any service spawns. A failure
     // here throws out of start() so the caller's `.catch` runs stop('aborted')
@@ -230,14 +235,6 @@ export class RunOrchestrator extends EventEmitter {
       },
     })
 
-    if (plan.noMatch) {
-      // Non-empty filesChanged but nothing matched: keep all services warm.
-      for (const svc of this.ctx.services) {
-        this.emit('service-restart-skipped', { service: svc, reason: 'no-files-changed-here' })
-      }
-      return { restarted: [], kept: plan.toKeep, startedBecauseMissing }
-    }
-
     const filesProvided = (filesChanged ?? []).length > 0
     const restartSet = new Set(plan.toRestart)
     const targets: ServiceSpec[] = []
@@ -247,6 +244,17 @@ export class RunOrchestrator extends EventEmitter {
       } else {
         this.emit('service-restart-skipped', { service: svc, reason: 'no-files-changed-here' })
       }
+    }
+
+    const targetNames = new Set(targets.map((svc) => svc.safeName))
+    const missingKept = this.ctx.services.filter((svc) =>
+      startedBecauseMissing.includes(svc.safeName) && !targetNames.has(svc.safeName),
+    )
+    if (targets.length > 0 || missingKept.length > 0) {
+      // One restart owns one readiness phase. Clearing here makes a successful
+      // probe supersede the prior cycle's failure without forcing the heal loop
+      // through a second full health deadline.
+      this.ctx.bootFailure = undefined
     }
 
     for (const svc of targets) {
@@ -263,7 +271,11 @@ export class RunOrchestrator extends EventEmitter {
       this.ctx.stateSink.setServiceStatus(this.ctx.runId, svc.safeName, 'starting')
       spawnService(this.ctx, svc)
     }
-    if (targets.length > 0) await waitForHealth(this.ctx)
+    for (const svc of missingKept) {
+      this.ctx.stateSink.setServiceStatus(this.ctx.runId, svc.safeName, 'starting')
+      spawnService(this.ctx, svc)
+    }
+    if (targets.length > 0 || missingKept.length > 0) await waitForHealth(this.ctx)
     return { restarted: plan.toRestart, kept: plan.toKeep, startedBecauseMissing }
   }
 
@@ -471,6 +483,14 @@ export class RunOrchestrator extends EventEmitter {
       this.ctx.servicePtys.delete(name)
     }
     this.ctx.logFiles.clear()
+    // Runtime env targets are copied into the otherwise immutable suite only
+    // while Playwright can execute it. Remove them before the retained run
+    // artifact becomes historical evidence.
+    try {
+      removeSuiteRuntimeInputs(this.ctx)
+    } catch (err) {
+      this.ctx.runnerLog?.warn(`Suite runtime input cleanup failed: ${(err as Error).message}`)
+    }
     // Capture the heal agent's fix diff from each worktree BEFORE the overlay is
     // reversed or the worktree is removed — the baseline was taken after overlay
     // + envset + WIP, so this diff is exactly the repair (R80). Best-effort:

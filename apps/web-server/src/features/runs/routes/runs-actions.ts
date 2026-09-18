@@ -16,6 +16,10 @@ import { GettingStartedBusyError, type GettingStartedOwner } from '../../config/
 import type { GettingStartedRunWorkflow } from '../../config/routes/onboarding'
 import { parseRobustnessEnvelope } from '../../../../../../shared/robustness/envelope'
 import type { RobustnessEnvelope } from '../../../../../../shared/robustness/types'
+import { isTerminalRunStatus } from '../../../../../../shared/run-state'
+import { restoreReviewedSuiteFiles } from '../logic/runtime/run-suite-snapshot'
+import { suiteReviewFiles } from '../logic/runtime/suite-review'
+import { suiteRuntimeInputTargetsForSnapshot } from '../logic/runtime/suite-runtime-inputs'
 
 export { compareActiveRuns } from './runs-route-support'
 export type { ExternalHealAgentRequest } from './runs-route-support'
@@ -332,8 +336,34 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
   app.post<{ Params: { runId: string }; Body?: { expectedRevision?: string } }>('/api/runs/:runId/adopt-spec-edits', async (req, reply) => {
     const orch = deps.store.registry.get(req.params.runId)
     if (!orch?.adoptSpecEdits) {
-      reply.code(404)
-      return { error: 'run not active; start a new run to test the edited suite' }
+      const terminal = deps.store.get(req.params.runId)
+      const revision = req.body?.expectedRevision
+      if (!terminal) return reply.code(404).send({ error: 'run not active; start a new run to test the edited suite' })
+      if (!isTerminalRunStatus(terminal.manifest.status)) return reply.code(409).send({ error: 'run is not available for terminal review' })
+      if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) return reply.code(400).send({ error: 'An exact review revision is required' })
+      const existing = terminal.manifest.specEdits?.reviewDecisions?.find((item) => item.revision === revision)
+      if (existing) {
+        if (existing.decision !== 'approved-for-new-run') return reply.code(409).send({ reason: 'review-decision-conflict' })
+        return { status: 'approved-for-new-run', review_revision: revision, newRunRequired: true }
+      }
+      const snapshot = terminal.manifest.suiteSnapshot
+      if (snapshot?.kind !== 'taken' || !terminal.manifest.featureDir) return reply.code(409).send({ error: 'Run snapshot unavailable' })
+      const runtimeInputs = suiteRuntimeInputTargetsForSnapshot(snapshot.dir)
+      const review = suiteReviewFiles(snapshot.dir, terminal.manifest.featureDir, runtimeInputs)
+      if (review.revision !== revision) return reply.code(409).send({ reason: 'review-changed' })
+      if (review.files.length === 0) return reply.code(409).send({ reason: 'nothing-to-adopt' })
+      const at = new Date().toISOString()
+      const previous = terminal.manifest.specEdits
+      deps.store.patchManifest(req.params.runId, {
+        specEdits: {
+          checkedAt: at,
+          pending: previous?.pending ?? [],
+          adopted: previous?.adopted ?? [],
+          reviewDecisions: [...(previous?.reviewDecisions ?? []), { at, revision, decision: 'approved-for-new-run' }],
+        },
+      })
+      reply.code(202)
+      return { status: 'approved-for-new-run', review_revision: revision, newRunRequired: true }
     }
     const revision = req.body?.expectedRevision
     if (revision !== undefined && (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision))) {
@@ -355,8 +385,32 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
   app.post<{ Params: { runId: string }; Body?: { expectedRevision?: string } }>('/api/runs/:runId/restore-spec-edits', async (req, reply) => {
     const orch = deps.store.registry.get(req.params.runId)
     if (!orch?.restoreSpecEdits) {
-      reply.code(404)
-      return { error: 'run not active; restore the spec files from git instead' }
+      const terminal = deps.store.get(req.params.runId)
+      const revision = req.body?.expectedRevision
+      if (!terminal) return reply.code(404).send({ error: 'run not active; restore the spec files from git instead' })
+      if (!isTerminalRunStatus(terminal.manifest.status)) return reply.code(409).send({ error: 'run is not available for terminal review' })
+      if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) return reply.code(400).send({ error: 'An exact review revision is required' })
+      const existing = terminal.manifest.specEdits?.reviewDecisions?.find((item) => item.revision === revision)
+      if (existing) {
+        if (existing.decision !== 'restored') return reply.code(409).send({ reason: 'review-decision-conflict' })
+        return { status: 'restored', restored: [] as string[], review_revision: revision, idempotent: true }
+      }
+      const snapshot = terminal.manifest.suiteSnapshot
+      if (snapshot?.kind !== 'taken' || !terminal.manifest.featureDir) return reply.code(409).send({ error: 'Run snapshot unavailable' })
+      const runtimeInputs = suiteRuntimeInputTargetsForSnapshot(snapshot.dir)
+      const result = restoreReviewedSuiteFiles(snapshot.dir, terminal.manifest.featureDir, revision, runtimeInputs)
+      if (!result.ok) return reply.code(409).send({ reason: result.reason })
+      const at = new Date().toISOString()
+      const previous = terminal.manifest.specEdits
+      deps.store.patchManifest(req.params.runId, {
+        specEdits: {
+          checkedAt: at,
+          pending: [],
+          adopted: previous?.adopted ?? [],
+          reviewDecisions: [...(previous?.reviewDecisions ?? []), { at, revision, decision: 'restored' }],
+        },
+      })
+      return { status: 'restored', restored: result.restored, review_revision: revision }
     }
     const revision = req.body?.expectedRevision
     if (revision !== undefined && (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision))) {

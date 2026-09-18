@@ -665,6 +665,10 @@ export interface FlightEntryOptions {
    *  block to the matching stage of its client-only pseudo-manifest. Absent keys
    *  simply have no artifact to report. Never persisted. */
   evidence?: Partial<Record<FlightStageKey, Record<string, unknown>>>
+  /** First evidence-invalid stage for a feature-only Flight invocation. The
+   *  server computes this from live workspace artifacts and the requested
+   *  coverage target; null means the complete Flight outcome already exists. */
+  continuation?: { fromStage: FlightStageKey; reason: string } | null
 }
 
 /** Flight statuses that hold the single-flight lock for their repo set. */

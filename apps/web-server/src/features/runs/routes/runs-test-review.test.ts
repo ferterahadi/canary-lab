@@ -11,7 +11,7 @@ import Fastify from 'fastify'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { runsRoutes } from './runs'
 import { createRegistry, RunStore } from '../logic/run-store'
-import { writeManifest } from '../logic/runtime/manifest'
+import { updateManifest, writeManifest } from '../logic/runtime/manifest'
 import { runDirFor } from '../logic/runtime/run-paths'
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
@@ -94,6 +94,23 @@ describe('GET /api/runs/:runId/test-review', () => {
     expect(res.json()).not.toHaveProperty('patch')
     expect(res.json()).not.toHaveProperty('patchPath')
     expect(fs.existsSync(path.join(runDirFor(path.join(tmpDir, 'logs'), 'r1'), 'test-reviews'))).toBe(false)
+  })
+
+  it('reports terminal review capabilities without pretending the old run can rerun', async () => {
+    const app = await build()
+    const manifestPath = path.join(runDirFor(path.join(tmpDir, 'logs'), 'r1'), 'manifest.json')
+    updateManifest(manifestPath, {
+      status: 'passed', endedAt: 'later',
+      specEdits: { checkedAt: 'later', pending: [{ file: 'e2e/a.spec.ts', change: 'modified', affectedTests: [] }], adopted: [] },
+    })
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/test-review?summary=true' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({
+      canAdopt: false,
+      reviewState: 'pending-terminal',
+      allowedActions: ['approve-new-run', 'restore', 'leave-pending'],
+      nextAction: 'restore-or-leave',
+    })
   })
 
   // A revision the human never saw must not be offered for approval: the patch in

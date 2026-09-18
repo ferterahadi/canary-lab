@@ -14,6 +14,9 @@ export interface WorkspaceNotification {
   resolvedAt?: string
   severity?: 'neutral' | 'warning' | 'danger'
   target?: NotificationTarget
+  /** Whether this unresolved unread item may interrupt with a sticky toast.
+   * Absent legacy records remain inbox-only. */
+  toast?: boolean
 }
 
 /** An observation of one source, including quiet states. Persisting the quiet
@@ -21,5 +24,5 @@ export interface WorkspaceNotification {
 export interface NotificationSource {
   key: string
   signature: string
-  message?: Pick<WorkspaceNotification, 'title' | 'body' | 'target' | 'severity'>
+  message?: Pick<WorkspaceNotification, 'title' | 'body' | 'target' | 'severity' | 'toast'>
 }

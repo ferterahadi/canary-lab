@@ -232,6 +232,18 @@ describe('runManualExternalHealLoop', () => {
     expect(h.runPlaywright).not.toHaveBeenCalled()
   })
 
+  it('uses the restart readiness result without probing every service again', async () => {
+    const { ctx } = ctxFor()
+    h.waitForHealSignal.mockResolvedValue({ signal: { kind: 'restart', body: {} } })
+    h.decideRunStatus.mockReturnValue('passed')
+    const host = makeLoopHost({
+      restart: vi.fn(async () => ({ restarted: ['api'], kept: [], startedBecauseMissing: [] })),
+    })
+
+    expect(await runManualExternalHealLoop(ctx, host, 'failed')).toBe('passed')
+    expect(h.ensureServicesRunning).not.toHaveBeenCalled()
+  })
+
   it('records a lifecycle note when services had to be started before the rerun', async () => {
     const { ctx } = ctxFor()
     h.waitForHealSignal.mockResolvedValue({ signal: rerunSignal() })

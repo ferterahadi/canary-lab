@@ -155,21 +155,9 @@ export function StageStatusChip({ status: recordedStatus, waiting }: { status: F
 // mirroring the STAGE_LABEL pattern. An unmapped kind/option falls back to its
 // raw key, so new server checkpoints degrade readable, never blank.
 
-const CHECKPOINT_TITLE: Record<string, string> = {
-  'similarity-choice': 'Existing suite found — what should this flight do?',
-  'config-approval': 'Does this setup look right?',
-  'missing-env': 'Some settings are missing',
-  'prd-source': 'Where should requirements come from?',
-  'coverage-stuck': 'Coverage stopped short of the target',
-  'portify-gate': 'Make this suite safe to run twice at once?',
-  'portify-apply': 'Save these port changes?',
-  'run-failed': 'The test run did not pass',
-  'export-mode': 'How should the evaluation report be built?',
-  // StageDetail presents this protocol checkpoint as running Activity, not a
-  // decision card. Keep the wire vocabulary labelled for any consumer that
-  // still asks for a generic checkpoint title.
-  'external-work': 'External agent work',
-}
+// Shared with the durable notification producer so a Flight decision has the
+// same name in the page, inbox and toast.
+export { flightCheckpointTitle as checkpointTitle } from '@shared/flights/checkpoint-labels'
 
 const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
   'similarity-choice': {
@@ -229,10 +217,6 @@ const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
     'raw': 'Straight from the numbers (fast)',
     'localized': 'Written up by an agent (slower)',
   },
-}
-
-export function checkpointTitle(kind: string): string {
-  return CHECKPOINT_TITLE[kind] ?? kind
 }
 
 export function checkpointOptionLabel(kind: string, option: string): string {

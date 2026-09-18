@@ -278,6 +278,17 @@ it('re-fetches changed source rather than retaining cached line highlights', asy
   await render({ features: [next] })
   expect(api.getTestFileReview).toHaveBeenCalledTimes(2)
 })
+it('refreshes an open run review when its pushed manifest records a decision', async () => {
+  const props = { pendingRuns: [run], focusRunId: 'run-1', focusFeature: 'alpha' }
+  await render({ ...props, focusRunDetail: detail })
+  expect(api.getRunTestReview).toHaveBeenCalledTimes(1)
+  const decided = { manifest: { ...detail.manifest, specEdits: {
+    ...detail.manifest.specEdits,
+    reviewDecisions: [{ at: '2026-09-19T00:00:00.000Z', revision: reviewRevision, decision: 'adopted' as const }],
+  } } } as RunDetail
+  await render({ ...props, focusRunDetail: decided })
+  expect(api.getRunTestReview).toHaveBeenCalledTimes(2)
+})
 it('commits every changed file in the selected suite and retains a saved receipt when dirty state clears', async () => {
   const onClose = vi.fn()
   await render({ features: [feature('alpha', ['e2e/a.spec.ts', 'e2e/b.spec.ts']), feature('beta')], onClose })
@@ -394,6 +405,22 @@ it.each([
   expect(button('Restore recorded files')).toBeUndefined()
   await click('Commit suite · 1 file')
   expect(api.adoptSpecEdits).not.toHaveBeenCalled()
+})
+it('offers exact-revision approval for a terminal run without claiming the old run will rerun', async () => {
+  const terminal = { ...run, status: 'passed' as const }
+  vi.mocked(api.getRunTestReview).mockResolvedValue({
+    runId: terminal.runId, feature: 'alpha', baseline: 'run-start', review_revision: reviewRevision,
+    files: [{ file: 'e2e/a.spec.ts', change: 'modified' }], canAdopt: false,
+    reviewState: 'pending-terminal', allowedActions: ['approve-new-run', 'restore', 'leave-pending'], nextAction: 'restore-or-leave',
+  })
+  vi.mocked(api.adoptSpecEdits).mockResolvedValue({ status: 'approved-for-new-run', review_revision: reviewRevision, newRunRequired: true })
+  const onClose = vi.fn()
+  await render({ pendingRuns: [terminal], focusRunDetail: detail, onClose })
+  expect(document.body.textContent).toContain('Approval preserves the old verdict')
+  expect(button('Adopt & rerun')).toBeUndefined()
+  await click('Approve for new run')
+  expect(api.adoptSpecEdits).toHaveBeenCalledExactlyOnceWith('run-1', { expectedRevision: reviewRevision })
+  expect(onClose).toHaveBeenCalledExactlyOnceWith()
 })
 it('offers Adopt for an active supporting-only review even when no test declarations changed', async () => {
   const fixture = 'e2e/fixture.ts'

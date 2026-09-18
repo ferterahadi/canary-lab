@@ -5,7 +5,7 @@ import path from 'path'
 import { createRegistry, listRuns, dirSizeBytes } from './run-store'
 import { listCleanupEntries, reapStaleRuns, removeRunFromHistory } from './run-cleanup'
 import { readManifest, writeManifest, writeRunsIndex } from './runtime/manifest'
-import { runDirFor } from './runtime/run-paths'
+import { buildRunPaths, runDirFor } from './runtime/run-paths'
 import { HEARTBEAT_STALE_MS } from '../../../../../../shared/run-state'
 
 let tmpDir: string
@@ -111,6 +111,40 @@ describe('reapStaleRuns', () => {
     const indexed = listRuns(tmpDir)
     expect(indexed[0].status).toBe('aborted')
     expect(indexed[0].endedAt).toBeDefined()
+  })
+
+  it('scrubs run-owned suite env bytes when recovering a crashed stale run', async () => {
+    const dir = runDirFor(tmpDir, 'stale-secret')
+    const paths = buildRunPaths(dir)
+    fs.mkdirSync(paths.suiteRuntimeInputsDir, { recursive: true })
+    fs.mkdirSync(paths.suiteSnapshotDir, { recursive: true })
+    fs.writeFileSync(path.join(paths.suiteRuntimeInputsDir, '000.input'), 'SECRET=do-not-retain\n')
+    fs.writeFileSync(path.join(paths.suiteSnapshotDir, '.env'), 'SECRET=do-not-retain\n')
+    fs.writeFileSync(paths.suiteRuntimeInputsInventoryPath, JSON.stringify({
+      version: 1,
+      state: 'active',
+      runId: 'stale-secret',
+      env: 'local',
+      capturedAt: '2026-01-01T00:00:00Z',
+      entries: [{ relativeTarget: '.env', storedAs: '000.input', sha256: 'not-needed-for-cleanup' }],
+    }))
+    writeManifest(paths.manifestPath, {
+      runId: 'stale-secret', feature: 'foo', startedAt: '2026-01-01T00:00:00Z',
+      status: 'running', healCycles: 0, services: [],
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1).toISOString(),
+    })
+    writeRunsIndex(tmpDir, [
+      { runId: 'stale-secret', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+    ])
+
+    await reapStaleRuns(tmpDir)
+
+    expect(fs.existsSync(paths.suiteRuntimeInputsDir)).toBe(false)
+    expect(fs.existsSync(path.join(paths.suiteSnapshotDir, '.env'))).toBe(false)
+    const inventory = fs.readFileSync(paths.suiteRuntimeInputsInventoryPath, 'utf8')
+    expect(inventory).not.toContain('sha256')
+    expect(inventory).not.toContain('do-not-retain')
+    expect(JSON.parse(inventory)).toMatchObject({ state: 'cleaned', entries: [{ relativeTarget: '.env' }] })
   })
 
   it('marks a stale QUEUED entry as aborted — the admission queue died with its process', async () => {

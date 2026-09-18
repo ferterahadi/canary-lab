@@ -860,7 +860,7 @@ export const FACT_HELP: Record<string, string> = {
   'Requirements': 'One thing the app must do, small enough to test. Everything later is scored against these.',
   'Distilled to': 'The short summary agents read instead of the full files. Tokens are a rough estimate.',
   // Test authoring
-  'Mapped coverage': 'Counted from requirement labels in the test files. Nothing was run, so every test could still be failing.',
+  'Mapped coverage': 'Counted from requirement labels in the test files. This shows declared coverage, not whether those tests passed.',
   'Tests written': 'All test cases found in the suite’s test files. They can exist before coverage mapping links them to requirements.',
   // Parallel readiness
   'Parallel': 'Can two runs of this suite start at once without fighting over a port? Checked once.',
@@ -876,7 +876,7 @@ export const FACT_HELP: Record<string, string> = {
   'Succeeded': 'Runs where every test passed. A stopped run counts as neither a pass nor a fail.',
   'Avg duration': 'Average time a finished run took, startup included. Runs still going are left out.',
   // Evaluation report
-  'Requirements with tests': 'Counted from labels in the test files. Nothing was run to check they work.',
+  'Requirements with tests': 'Counted from labels in the test files. Run results are shown separately under tests passed and requirements proven.',
   // All four tiers defined where the words are shown — the same definitions the
   // Composition card's hover titles carry (STRENGTH_TIER_HELP). The strong tier
   // needs a non-local URL, so a local-only suite genuinely tops out at solid;
@@ -911,7 +911,7 @@ export const FACT_GLOSS: Record<string, string> = {
   'Distilled to': 'the short version agents read',
   'Test depth': 'how much each test checks',
   'Requirements': 'what the documents asked for',
-  'Mapped coverage': 'linked to a test — nothing has run yet',
+  'Mapped coverage': 'requirements linked to tests',
   'Tests written': 'found in the suite',
   'Services injectable': 'each gets its port from the run',
   'Files edited': 'fixed ports swapped out',

@@ -27,6 +27,7 @@ beforeEach(() => {
 /** `start_flight` reads the index first, then acts. Routes both legs. */
 function startRoutes(opts: {
   flights?: Array<Record<string, unknown>>
+  entry?: FlightReply
   detail?: FlightReply
   resume?: FlightReply
   create?: FlightReply
@@ -34,6 +35,9 @@ function startRoutes(opts: {
   return (req: { method: string; url: string }): FlightReply => {
     if (req.method === 'GET' && req.url === '/api/flights') {
       return { statusCode: 200, body: { flights: opts.flights ?? [] } }
+    }
+    if (req.method === 'GET' && req.url.startsWith('/api/flights/entry?')) {
+      return opts.entry ?? { statusCode: 404, body: { error: 'feature not found' } }
     }
     if (req.url.endsWith('/resume')) return opts.resume ?? { statusCode: 200, body: plainFlight('running') }
     if (req.method === 'GET') return opts.detail ?? { statusCode: 200, body: plainFlight('running') }
@@ -107,6 +111,77 @@ describe('start_flight — locating the record before starting one', () => {
         sessionUrl: 'https://claude.ai/chat/resume',
       },
     })
+  })
+
+  it('continues a recordless configured feature from the first target-invalid stage', async () => {
+    const { call, requests } = flightHarness({
+      reply: startRoutes({
+        entry: {
+          statusCode: 200,
+          body: {
+            feature: 'cns-wa-bot-signup',
+            flight: null,
+            active: false,
+            canContinue: false,
+            prefill: {
+              repoPaths: ['/repo/mighty-cns'],
+              description: 'WhatsApp bot signup',
+              env: 'local',
+              coverageTarget: 100,
+            },
+            stages: [],
+            evidence: {
+              'specs-coverage': { mappingState: 'fresh', coveragePct: 83.3, testsWritten: 6 },
+              run: { runId: 'run-green', status: 'passed' },
+            },
+            continuation: {
+              fromStage: 'specs-coverage',
+              reason: 'semantic coverage is 83.3%; the requested target is 100%',
+            },
+          },
+        },
+        create: { statusCode: 201, body: plainFlight('running', { feature: 'cns-wa-bot-signup' }) },
+      }),
+    })
+
+    const out = await call('start_flight', { feature: 'cns-wa-bot-signup', coverage_target: 100 })
+
+    expect(requests.map((r) => `${r.method} ${r.url}`)).toEqual([
+      'GET /api/flights',
+      'GET /api/flights/entry?feature=cns-wa-bot-signup&coverageTarget=100',
+      'POST /api/flights',
+    ])
+    expect(requests.at(-1)?.payload).toMatchObject({
+      feature: 'cns-wa-bot-signup',
+      repoPaths: ['/repo/mighty-cns'],
+      description: 'WhatsApp bot signup',
+      env: 'local',
+      coverageTarget: 100,
+      fromStage: 'specs-coverage',
+      stageProducer: 'external',
+    })
+    expect(requests.at(-1)?.payload).not.toHaveProperty('mode')
+    expect(out.note).toContain('continued the configured feature from specs-coverage')
+  })
+
+  it('does not restart a recordless feature whose full Flight outcome already exists', async () => {
+    const { call, requests } = flightHarness({
+      reply: startRoutes({
+        entry: {
+          statusCode: 200,
+          body: {
+            feature: 'checkout', flight: null, active: false, canContinue: false,
+            prefill: { repoPaths: ['/repo/shop'], description: 'checkout', env: 'local', coverageTarget: 100 },
+            stages: [], evidence: {}, continuation: null,
+          },
+        },
+      }),
+    })
+
+    const out = await call('start_flight', { feature: 'checkout' })
+
+    expect(out.type).toBe('flight_already_complete')
+    expect(requests.some((r) => r.method === 'POST')).toBe(false)
   })
 
   it('maps a resume refused by an active Getting Started demo to the typed busy result', async () => {

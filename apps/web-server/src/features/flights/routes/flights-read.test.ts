@@ -86,9 +86,11 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     canContinue: boolean
     prefill: { repoPaths: string[]; description: string; env: string; coverageTarget: number }
     stages: Array<{ key: string; allowed: boolean; reason?: string }>
+    continuation?: { fromStage: string; reason: string } | null
   }
-  const entryFor = async (feature: string) => {
-    const resp = await app.inject({ method: 'GET', url: `/api/flights/entry?feature=${feature}` })
+  const entryFor = async (feature: string, coverageTarget?: number) => {
+    const target = coverageTarget === undefined ? '' : `&coverageTarget=${coverageTarget}`
+    const resp = await app.inject({ method: 'GET', url: `/api/flights/entry?feature=${feature}${target}` })
     return { status: resp.statusCode, body: resp.json() as EntryBody }
   }
   const stageOf = (body: EntryBody, key: string) => body.stages.find((s) => s.key === key)!
@@ -170,6 +172,8 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     expect(body.canContinue).toBe(false)
     expect(body.prefill.repoPaths).toEqual([repoDir])
     expect(body.prefill.description).toBe('')
+    expect(body.prefill.coverageTarget).toBe(100)
+    expect(body.continuation).toMatchObject({ fromStage: 'env-capture' })
     // Config on disk → every stage whose only dependency is the suite existing is
     // enterable with no flight record at all. `docs` and `prd-summary` belong here:
     // they gather and distil requirement files and boot nothing, so an envset is

@@ -1,25 +1,17 @@
 import type { FastifyInstance } from 'fastify'
 import type { ServerContext } from '../../server-context'
 import { NotificationStore } from './store'
-import { coverageNotificationSources, flightNotificationSources, testReviewNotificationSources, verificationNotificationSources } from './sources'
+import { flightNotificationSources, testReviewNotificationSources } from './sources'
 
 export async function register(app: FastifyInstance, ctx: ServerContext): Promise<void> {
-  // Reconcile before the first inbox write: an empty startup cache is not
-  // recovery, and must not resolve/recreate persistent coverage notices.
-  await ctx.coverageMonitor?.reconcile()
   const store = new NotificationStore(ctx.logsDir, ctx.workspaceEvents)
   let changes = ctx.dirtySpecStore.list()
   const sync = (): void => {
     try {
       const runs = ctx.runStore.list()
-      const coverage = (ctx.coverageMonitor?.list() ?? []).map((change) => ({
-        ...change, flightId: ctx.flightStore.latestForFeature(change.feature)?.flightId,
-      }))
       store.reconcile([
         ...flightNotificationSources(ctx.flightStore.list()),
         ...testReviewNotificationSources(runs, changes),
-        ...coverageNotificationSources(coverage),
-        ...verificationNotificationSources(coverage),
       ])
     } catch (error) {
       // Inbox persistence must not interrupt the run whose event triggered it.
@@ -32,14 +24,10 @@ export async function register(app: FastifyInstance, ctx: ServerContext): Promis
   ctx.flightStore.onEvent(sync)
   ctx.runStore.onEvent(sync)
   ctx.dirtySpecStore.onEvent(syncChanges)
-  const unsubscribe = ctx.coverageMonitor ? ctx.workspaceEvents.subscribe((event) => {
-    if (event.type === 'coverage-changed') sync()
-  }) : undefined
   app.addHook('onClose', async () => {
     ctx.flightStore.offEvent(sync)
     ctx.runStore.offEvent(sync)
     ctx.dirtySpecStore.offEvent(syncChanges)
-    unsubscribe?.()
   })
   await app.register(notificationRoutes, { store })
 }

@@ -12,7 +12,7 @@ import {
 } from '../../../../../../shared/run-state'
 import { dirSizeBytes, runArtifactBytes } from './run-artifacts'
 import type { OrchestratorRegistry } from './run-registry'
-import { RunStore } from './run-store'
+import { cleanupSuiteRuntimeInputsForRun } from './runtime/suite-runtime-inputs'
 
 /**
  * One-shot cleanup for runs left unsettled — `queued`, `running` or `healing` —
@@ -62,6 +62,10 @@ export async function reapStaleRuns(
       await orch.stop('aborted').catch(() => {})
       registry!.delete(entry.runId)
     }
+
+    // A dead process cannot run orchestrator teardown. Scrub selected env bytes
+    // before the stale row becomes retained terminal history.
+    try { cleanupSuiteRuntimeInputsForRun(runDirFor(logsDir, entry.runId)) } catch { /* malformed metadata stays inspectable for manual cleanup */ }
 
     const endedAt = manifest.heartbeatAt
     updateManifest(manifestPath, { status: 'aborted', endedAt })

@@ -186,6 +186,21 @@ it('includes a fixture-only change in the comparison and exposes its complete re
   fs.writeFileSync(path.join(suite, 'envsets/secret.env'), 'PRIVATE')
   expect((await get('file=envsets/secret.env&runId=run-1')).statusCode).toBe(400)
 })
+it('leaves generated coverage integrity state out of the human comparison', async () => {
+  const dir = saveSnapshot()
+  const file = 'docs/_coverage-state.json'
+  const recorded = JSON.stringify({ verificationRequiredAfter: '2026-09-18T06:48:09.623Z', requirementsHash: 'same', mappingInference: { tests: { checkout: { fingerprint: 'old' } } } }, null, 2) + '\n'
+  const current = JSON.stringify({ verificationRequiredAfter: '2026-09-18T09:14:42.594Z', requirementsHash: 'same', mappingInference: { tests: { checkout: { fingerprint: 'new' } } } }, null, 2) + '\n'
+  fs.mkdirSync(path.join(dir, 'suite/docs'), { recursive: true })
+  fs.mkdirSync(path.join(suite, 'docs'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'suite', file), recorded)
+  fs.writeFileSync(path.join(suite, file), current)
+
+  const comparison = (await app.inject('/api/features/alpha/test-source-comparison?runId=run-1')).json()
+  expect(comparison.files).not.toContain(file)
+  expect(comparison.differences).not.toContainEqual(expect.objectContaining({ file }))
+  expect((await get(`file=${file}&runId=run-1`)).statusCode).toBe(400)
+})
 it('compares retained checks across a rename and reports only the real assertion addition', async () => {
   saveSnapshot()
   fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), before.replace('reads own scope', 'reads local scope').replace('  const body = await response.json()', '  const body = await response.json()\n  expect(body.ready).toBe(true)'))

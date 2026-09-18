@@ -35,6 +35,49 @@ function hash(value: unknown): string {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
+function record(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+/** A local Canary tarball is rebuilt on every `canary-apply`, so its lockfile
+ * integrity is packaging noise. Hash the feature-support runtime instead;
+ * changes that can affect the specs still invalidate mapping evidence. */
+function canaryFeatureSupportContext(lockFile: string, reads: CoverageInputReads): string | undefined {
+  const packageDir = path.join(path.dirname(lockFile), 'node_modules', 'canary-lab')
+  const files: Array<[string, string]> = []
+  for (const relDir of ['dist/shared/configs', 'dist/shared/e2e-runner']) {
+    const dir = path.join(packageDir, relDir)
+    if (!reads.exists(dir)) continue
+    for (const entry of reads.directory(dir)) {
+      if (!entry.isFile() || !entry.name.endsWith('.js')) continue
+      const file = path.join(dir, entry.name)
+      files.push([path.relative(packageDir, file), reads.read(file).toString('base64')])
+    }
+  }
+  return files.length ? hash(files.sort(([a], [b]) => a.localeCompare(b))) : undefined
+}
+
+function packageLockContext(file: string, source: string, reads: CoverageInputReads): string {
+  const support = canaryFeatureSupportContext(file, reads)
+  if (!support) return source
+  let lock: Record<string, unknown>
+  try {
+    const parsed = record(JSON.parse(source))
+    if (!parsed) return source
+    lock = parsed
+  } catch { return source /* Malformed metadata must remain freshness-sensitive. */ }
+
+  const packages = record(lock.packages)
+  const installed = packages ? record(packages['node_modules/canary-lab']) : undefined
+  if (!installed) return source
+  delete installed.resolved
+  delete installed.integrity
+  installed.featureSupportFingerprint = support
+  return JSON.stringify(lock)
+}
+
 /** Read dependency content rather than mtimes: an imported helper can change
  * while its test body stays identical. Package/config inputs also invalidate
  * reuse, and unresolved local imports stay in the hash until they resolve. */
@@ -111,7 +154,10 @@ export function mappingInferenceSnapshot(
     for (let dir = featureDir; ; dir = path.dirname(dir)) {
       for (const name of ['feature.config.cjs', 'playwright.config.ts', 'playwright.config.js', 'tsconfig.json', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock']) {
         const target = path.join(dir, name)
-        if (reads.exists(target)) environment.push([target, reads.text(target)])
+        if (reads.exists(target)) {
+          const source = reads.text(target)
+          environment.push([target, name === 'package-lock.json' ? packageLockContext(target, source, reads) : source])
+        }
       }
       if (path.dirname(dir) === dir) break
     }

@@ -50,6 +50,17 @@ it('clears markers after the exact edit is committed', async () => {
 it('retains a review count for removed lines without highlighting an unchanged neighbor', async () => {
   expect((await markers(original.replace('  expect(1).toBe(1)\n', '')))[0]).toEqual({ changedLines: [], count: 1 })
 })
+it('does not mark Playwright registration tags as changed executable source', async () => {
+  const tagged = original.replace("test('first', () => {", `test(
+  'first',
+  { tag: ['@path-happy'] },
+  () => {`)
+  fs.writeFileSync(file, tagged)
+  git('add', '.'); git('commit', '-qm', 'add test tags')
+
+  const edited = tagged.replace("['@path-happy']", "['@path-happy', '@req-R1']")
+  expect((await markers(edited))[0]).toEqual({ changedLines: [], count: 1 })
+})
 it('leaves an uncommitted spec unmarked — there is no HEAD side to compare it against', async () => {
   const fresh = path.join(root, 'new.spec.ts')
   const { tests } = extractTestsFromSource(fresh, original)

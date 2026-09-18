@@ -230,13 +230,35 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
   const warning = coverageWarning(ledger.freshness, confirmed)
   const latestFailed = ledger.tests.filter((test) => test.lastRun?.passed === false).length
   const latestPassed = ledger.tests.filter((test) => test.lastRun?.passed === true).length
-  // The ring's third slice. `provenUnchanged` can only land on a `covered`
-  // requirement — enforcement.ts withholds the proof from a partial one — so
-  // proven + claimed-only + not-covered partitions the requirement set exactly,
-  // which is the whole reason one ring can carry both axes.
+  // The ring and both text readouts share one CURRENT proof view. Enforcement can
+  // still carry proof from an earlier run while a newer run has no results yet;
+  // showing that historical count beside "no run yet" was the source of three
+  // contradictory labels for the same state.
   const enf = total > 0 ? ledger.enforcement : undefined
-  const proven = ledger.freshness?.proofNeedsRun ? 0 : enf?.provenUnchanged
+  const proofRunId = ledger.provenRunId ?? enf?.runId
+  const proofNeedsRun = ledger.freshness?.proofNeedsRun === true
+  const hasCurrentProof = Boolean(proofRunId) && !proofNeedsRun
+  const proven = enf === undefined ? undefined : hasCurrentProof ? enf.provenUnchanged : 0
   const claimedOnly = proven === undefined ? 0 : covered - proven
+  const latestRunId = ledger.freshness?.latestRunId
+  const latestRunStatus = ledger.freshness?.latestRunStatus
+  const runInProgress = latestRunStatus === 'queued' || latestRunStatus === 'running' || latestRunStatus === 'healing'
+  const pendingProofCopy = runInProgress
+    ? 'run in progress — nothing proven yet'
+    : proofNeedsRun && proofRunId
+      ? 'current tests need verification — nothing proven'
+      : latestRunId
+        ? `latest run ${latestRunStatus ?? 'has no readable results'} — nothing proven`
+        : 'no run yet — nothing proven'
+  const proofCardSuffix = hasCurrentProof && proofRunId
+    ? <> proven in run <code className="clcov-sub-run">{proofRunId}</code></>
+    : runInProgress
+      ? ' proven · run in progress'
+      : proofNeedsRun && proofRunId
+        ? ' proven · current tests need verification'
+        : latestRunId
+          ? ` proven · latest run ${latestRunStatus ?? 'has no readable results'}`
+          : ' proven · no run yet'
   // The wrapper is a size container so the bar's breakpoints follow the width the
   // main column actually has (the Docs rail can take a third of the viewport).
   return (
@@ -246,7 +268,7 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
           roll-up sit in the same hover card the strips use; a stale-tag warning keeps an
           amber dot at rest so it is never fully hidden (status = dot + tooltip). */}
       <div className="clcov-hero clcov-strip" tabIndex={0} data-testid="coverage-hero">
-        <CoverageRing pct={ledger.coveragePct} provenPct={latestFailed ? 0 : proven === undefined ? undefined : (proven / total) * 100} />
+        <CoverageRing pct={ledger.coveragePct} provenPct={proven === undefined ? undefined : (proven / total) * 100} />
         <div className="clcov-hero-text">
           <div className="flex items-center gap-2">
             <div className="clcov-pct" data-testid="coverage-pct">{Math.round(ledger.coveragePct)}%</div>
@@ -275,12 +297,16 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
             <div
               className="clcov-proof"
               data-testid="coverage-proof"
-              title={enf?.runId
+              title={hasCurrentProof
                 ? 'Proven — a run passed every test mapped to the requirement, and neither the tests nor the wording have changed since. Unproven — a test covers it, but nothing has proved it yet.'
-                : 'No run has been recorded for this suite, so nothing is proven yet — every covered requirement is a claim.'}
+                : runInProgress
+                  ? 'The latest run is still in progress. Its results do not count as proof until the run reports them.'
+                  : proofNeedsRun
+                    ? 'The current tests need verification, so earlier results do not count as proof of the current inputs.'
+                    : 'No run has been recorded for this suite, so nothing is proven yet — every covered requirement is a claim.'}
             >
-              {latestFailed ? `${latestFailed} failed in latest run` : !enf?.runId
-                ? 'no run yet — nothing proven'
+              {latestFailed ? `${latestFailed} failed in latest run` : !hasCurrentProof
+                ? pendingProofCopy
                 : claimedOnly > 0
                   ? `${proven} proven · ${claimedOnly} unproven`
                   : `${proven} proven`}
@@ -296,8 +322,8 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
             <>
               <span className="clcov-sub-sep" aria-hidden="true">·</span>
               <span data-testid="proven-stat" title="Requirements whose proof — a green run over every mapped test — is newer than both their tests' and their wording's last change">
-                {ledger.enforcement.provenUnchanged}/{ledger.enforcement.total}
-                {ledger.enforcement.runId ? <> proven in run <code className="clcov-sub-run">{ledger.enforcement.runId}</code></> : ' proven · no run yet'}
+                {proven}/{ledger.enforcement.total}
+                {proofCardSuffix}
               </span>
             </>
           )}

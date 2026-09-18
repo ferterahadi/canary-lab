@@ -5,7 +5,7 @@ import { waitForTestReview } from './test-review-wait'
 // What the wait branches on is the manifest it re-reads and whether a store event
 // arrives, so the store is a fake that scripts those reads: a real RunStore would
 // add a logs directory and a run lifecycle per case and prove nothing extra.
-type Decision = { revision: string; decision: 'adopted' | 'restored' }
+type Decision = { revision: string; decision: 'adopted' | 'approved-for-new-run' | 'restored' }
 
 function fakeStore(reads: Decision[][]) {
   const listeners: Array<(event: unknown) => void> = []
@@ -54,5 +54,13 @@ describe('waitForTestReview', () => {
     expect(get.mock.calls.length).toBe(reads)
     listeners[0]({ runId: 'run1' })
     await expect(pending).resolves.toMatchObject({ status: 'restored', runId: 'run1', review_revision: revision })
+  })
+
+  it('steers a durable terminal approval to a new run, never to the old wait loop', async () => {
+    const revision = 'c'.repeat(64)
+    const { store } = fakeStore([[{ revision, decision: 'approved-for-new-run' }]])
+    await expect(waitForTestReview(store, 'run1', revision)).resolves.toMatchObject({
+      status: 'approved-for-new-run', nextSteps: ['start_run'], next: expect.stringContaining('old result stays immutable'),
+    })
   })
 })

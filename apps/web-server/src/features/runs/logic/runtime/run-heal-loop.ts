@@ -91,13 +91,15 @@ export async function runManualExternalHealLoop(ctx: RunContext, host: RunLoopHo
     // agent's signal adopts its edits into the copy the rerun executes. Every
     // other run keeps its run-start copy — a spec edit there stays inert.
     await adoptTestHealSpecEdits(ctx)
+    let startedBecauseMissing: string[] = []
     if (signal.kind === 'restart') {
-      await host.restart(filesChanged)
+      const restart = await host.restart(filesChanged)
+      startedBecauseMissing = restart.startedBecauseMissing
     } else {
       await host.rerun()
+      startedBecauseMissing = await ensureServicesRunning(ctx)
     }
     if (ctx.stopped) return ctx.status
-    const startedBecauseMissing = await ensureServicesRunning(ctx)
     if (startedBecauseMissing.length > 0) {
       recordLifecycle(ctx, 'restarting-services', 'Started missing services', {
         detail: `Started ${startedBecauseMissing.join(', ')} before rerun.`,
@@ -429,8 +431,11 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
       await adoptTestHealSpecEdits(ctx)
 
       const action = heal.actionForSignal(effectiveSignal.kind === 'heal' ? 'rerun' : effectiveSignal.kind)
+      let startedBecauseMissing: string[] = []
       if (action.kind === 'restart-and-rerun') {
-        const { restarted, kept, startedBecauseMissing } = await host.restart(filesChanged)
+        const restart = await host.restart(filesChanged)
+        const { restarted, kept } = restart
+        startedBecauseMissing = restart.startedBecauseMissing
         if (ctx.stopped) return ctx.status
         ctx.healCycleHistory.push({ cycle: cycleNum, restarted, kept })
         ctx.stateSink.patchManifest(ctx.runId, {
@@ -444,9 +449,9 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
         }
       } else {
         await host.rerun()
+        startedBecauseMissing = await ensureServicesRunning(ctx)
       }
       if (ctx.stopped) return ctx.status
-      const startedBecauseMissing = await ensureServicesRunning(ctx)
       if (startedBecauseMissing.length > 0) {
         recordLifecycle(ctx, 'restarting-services', 'Started missing services', {
           detail: `Started ${startedBecauseMissing.join(', ')} before rerun.`,
