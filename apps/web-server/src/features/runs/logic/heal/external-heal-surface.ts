@@ -63,6 +63,8 @@ export interface ExternalHealContext {
   // so an agent that patched only that path spent a whole heal cycle watching an
   // identical failure and concluding its correct fix had not worked.
   worktrees?: RunDetail['manifest']['worktrees']
+  /** Framework-recorded dependency ownership/coherence for each repo. */
+  dependencyProvenance?: RunDetail['manifest']['dependencyProvenance']
   lifecycle: RunDetail['manifest']['lifecycle'] | null
   externalHealSession: RunDetail['manifest']['externalHealSession'] | null
   counts: CompactRunCounts
@@ -152,6 +154,7 @@ export interface ExternalRunSnapshot {
   repoBranches: RunDetail['manifest']['repoBranches']
   /** See ExternalHealContext.worktrees — the tree this run boots, when isolated. */
   worktrees?: RunDetail['manifest']['worktrees']
+  dependencyProvenance?: RunDetail['manifest']['dependencyProvenance']
   /** See ExternalHealContext.perturbation. */
   perturbation?: RunPerturbationContext
   lifecycle: RunDetail['manifest']['lifecycle'] | null
@@ -254,8 +257,13 @@ function worktreeEditRule(worktrees: Record<string, string>): string {
 // context.bootFailure is set. Must stay in sync with the boot-failure steps in
 // the shipped SKILL.md files.
 function bootFailureNextSteps(bf: RunBootFailure): readonly string[] {
+  // The evidence itself is NOT restated here: it already ships as structured
+  // fields on context.bootFailure in the same payload, and this packet is
+  // deliberately slim. `nextAction` is rendered verbatim because run-service-boot
+  // is its single author — a second wording here would drift from the UI's.
   return [
-    `No tests ran — service "${bf.service}" failed to start (${bf.detail}). Read its log at ${bf.logPath} (page large files with offset/limit) to find why it won't serve.`,
+    `No tests ran — service "${bf.service}" failed to start (${bf.detail}). Read context.bootFailure for the structured evidence: reason, classification, command, cwd, exit/signal, and a bounded redacted excerpt.`,
+    `${bf.nextAction ?? 'Use the structured evidence and bounded redacted excerpt first; open the full log when the excerpt is insufficient.'} Full log: ${bf.logPath} (page large files with offset/limit).`,
     'This is an app/service problem, not a test failure — fix the service/app code so it boots and passes its readiness probe. Do NOT edit tests.',
     'Then signal_run ONCE with kind:"restart" (the services must restart), plus hypothesis + fixDescription.',
     RUNNER_VERIFICATION_RULE,
@@ -279,7 +287,9 @@ const REPEAT_HEAL_GUIDANCE = [
 // run is stuck, the escalation block (already on the context) is the louder, more
 // specific steer — it supersedes the generic breadcrumb.
 export function slimRepeatHealContext(context: ExternalHealContext): ExternalHealContext {
-  const { healPrompt: _healPrompt, nextSteps: _nextSteps, ...rest } = context
+  // dependencyProvenance is captured once at run start and never changes, so
+  // re-sending it every cycle is static weight in the agent's context.
+  const { healPrompt: _healPrompt, nextSteps: _nextSteps, dependencyProvenance: _provenance, ...rest } = context
   if (rest.escalation) return rest
   return { ...rest, guidance: REPEAT_HEAL_GUIDANCE }
 }
@@ -348,6 +358,11 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     healCycles: snapshot.healCycles,
     repoBranches: snapshot.repoBranches,
     ...(snapshot.worktrees ? { worktrees: snapshot.worktrees } : {}),
+    // Only the records an agent can act on: a `compatible` verdict says the
+    // preflight found nothing, which is not a repair lead.
+    ...(snapshot.dependencyProvenance?.some((item) => item.verdict !== 'compatible')
+      ? { dependencyProvenance: snapshot.dependencyProvenance }
+      : {}),
     ...(snapshot.perturbation ? { perturbation: snapshot.perturbation } : {}),
     lifecycle: snapshot.lifecycle,
     externalHealSession: snapshot.externalHealSession,
@@ -418,6 +433,7 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
     ...(detail.manifest.worktrees && Object.keys(detail.manifest.worktrees).length > 0
       ? { worktrees: detail.manifest.worktrees }
       : {}),
+    ...(detail.manifest.dependencyProvenance ? { dependencyProvenance: detail.manifest.dependencyProvenance } : {}),
     ...(detail.manifest.perturbation ? { perturbation: perturbationContext(detail.manifest.perturbation.envelope) } : {}),
     lifecycle: detail.manifest.lifecycle ?? null,
     externalHealSession: detail.manifest.externalHealSession ?? null,

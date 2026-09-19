@@ -53,19 +53,64 @@ export interface RunLifecycleAbortReason {
  *  the run is declared `failed` and — if a heal mode is configured — routed into
  *  the heal loop with the service log as the failure context, instead of being
  *  silently aborted. Cleared on a successful (re)boot. */
+export type RunBootReason = 'health-timeout' | 'process-exited' | 'spawn-failed' | 'dependency-incompatible'
+
+export type RunBootPhase = 'spawn' | 'process-exit' | 'readiness' | 'configuration'
+
+/** One phase per reason, so the phase is a restatement of the reason rather
+ *  than a second field four producers must keep in lockstep. Derived on read,
+ *  which also gives historical records (written before the phase existed) the
+ *  right answer instead of a "legacy" placeholder. */
+const BOOT_PHASE = {
+  'spawn-failed': 'spawn',
+  'process-exited': 'process-exit',
+  'health-timeout': 'readiness',
+  'dependency-incompatible': 'configuration',
+} as const satisfies Record<RunBootReason, RunBootPhase>
+
+export function runBootPhase(reason: RunBootReason): RunBootPhase {
+  return BOOT_PHASE[reason]
+}
+
+/** What the preserved evidence adds ON TOP OF `reason`. Every value here names
+ *  something the reason alone does not say, so a record whose evidence only
+ *  confirms its reason carries no classification at all. */
+export type RunBootEvidence =
+  | 'rejected-startup'
+  | 'compiler-failure'
+  | 'seed-failure'
+  | 'empty-output'
+  | 'abrupt-signal'
+  | 'underlying-cause-not-preserved'
+
 export interface RunBootFailure {
   /** Service display name (matches ServiceSpec.name). */
   service: string
   /** On-disk safe name (matches ServiceManifestEntry.safeName). */
   safeName: string
-  /** `health-timeout` = never answered its readiness probe within the deadline;
-   *  `process-exited` = the service process died before it became healthy. */
-  reason: 'health-timeout' | 'process-exited'
+  /** Stable machine classification. Historical records contain only
+   *  `health-timeout` and `process-exited`. */
+  reason: RunBootReason
+  /** Evidence classification, kept separate from the inferred root cause.
+   *  Absent when the evidence says nothing beyond `reason`. */
+  classification?: RunBootEvidence
   /** Human-readable one-liner (transport + probe target / exit info). */
   detail: string
   /** Path to the service's log file — the heal agent reads this to diagnose
    *  why the service won't serve. */
   logPath: string
+  /** The exact service/preflight command and directory Canary invoked. */
+  command?: string
+  cwd?: string
+  exitCode?: number | null
+  /** Signal NAME (`SIGTERM`), never the raw number — producers normalize so
+   *  one record never reads "signal 15" where another reads "signal SIGTERM". */
+  signal?: string | null
+  /** Sanitized, bounded evidence copied from the full log. */
+  excerpt?: string
+  excerptTruncated?: boolean
+  /** Evidence-bounded next action; never an inferred root cause. */
+  nextAction?: string
 }
 
 /**

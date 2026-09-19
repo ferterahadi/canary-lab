@@ -13,6 +13,7 @@ import type { PlaywrightSpawner } from './run-spawn'
 import type { RunModelPlan } from './run-model-plan'
 import type { PlaywrightRerunSelection } from './rerun-targets'
 import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
+import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 
 export interface ServiceSpec {
   repoName: string
@@ -126,6 +127,7 @@ export interface OrchestratorOptions {
   // drive the WS push channel.
   runStateSink?: RunStateSink
   repoBranchSnapshots?: RepoBranchSnapshot[]
+  dependencyProvenance?: RunDependencyProvenance[]
   initialHealCycles?: number
   executionType?: ExecutionType
   verification?: VerificationRunMetadata

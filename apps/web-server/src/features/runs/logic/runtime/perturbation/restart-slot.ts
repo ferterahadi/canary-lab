@@ -1,4 +1,4 @@
-import { spawnService, waitForServiceReady } from '../run-service-boot'
+import { clearBootFailure, spawnService, waitForServiceReady } from '../run-service-boot'
 import type { RunContext } from '../run-context'
 import { killTree, scheduleSigkillFallback } from '../run-spawn'
 
@@ -32,7 +32,9 @@ export async function restartSlotService(ctx: RunContext, slot: string, opts: Re
 
   // Same fresh-attempt reset as `ensureServicesRunning`: a failure recorded
   // below is THIS restart's, so the caller can tell the shim what happened.
-  ctx.bootFailure = undefined
+  // Through the shared helper so the manifest is cleared too — clearing only
+  // the in-memory field left a stale boot failure in every open view.
+  clearBootFailure(ctx)
   ctx.stateSink.setServiceStatus(ctx.runId, svc.safeName, 'starting')
   spawnService(ctx, svc)
   await waitForServiceReady(ctx, svc)

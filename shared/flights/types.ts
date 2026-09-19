@@ -13,6 +13,7 @@
 // (Flights pill + flight detail view), so they live in `shared/`.
 
 import type { ClientKind } from '../run-mode'
+import type { RunBootFailure } from '../run-state'
 import type { AgentStagePlans } from '../agent-models'
 
 /** Canonical stage-record order. This stays stable for persisted manifests and
@@ -240,11 +241,11 @@ export interface FlightCheckpointResponse {
  *  failed — the verdict distinguishes a crash from an unhealthy service, and
  *  the log tail puts the actual cause on the stage instead of a bare verdict
  *  line the user has to go digging for. */
-export interface FlightStageErrorDetail {
-  service: string
-  /** From the run's bootFailure: `process-exited` = crashed before healthy;
-   *  `health-timeout` = up but never answered its readiness probe. */
-  reason: 'process-exited' | 'health-timeout'
+export interface FlightStageErrorDetail
+  extends Pick<
+    RunBootFailure,
+    'service' | 'reason' | 'classification' | 'command' | 'cwd' | 'exitCode' | 'signal' | 'nextAction'
+  > {
   logPath: string
   /** Last lines of the service log at failure time. */
   logTail: string

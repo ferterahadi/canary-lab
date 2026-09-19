@@ -1,4 +1,7 @@
 import type { RepoBranchSnapshot, ServiceManifestEntry, ServiceStatus } from '@/shared/api/types'
+import { runBootPhase, type RunBootFailure } from '@shared/run-state'
+import { bootEvidenceLabel, UNPRESERVED_CAUSE } from '@/shared/ui/BootEvidence'
+import { alertClass } from './RunDiagnosticsPanels'
 import { branchTooltip } from '../utils/run-detail-playback'
 import { servicePrimaryLabel, serviceTabLabelParts } from './RunOverviewTabs'
 
@@ -70,11 +73,13 @@ export function ServiceCard({
   service,
   branch,
   siblings = 1,
+  bootFailure,
 }: {
   service: ServiceManifestEntry
   branch: RepoBranchSnapshot | null
   /** Services sharing this one's repo, including itself. */
   siblings?: number
+  bootFailure?: RunBootFailure
 }) {
   const primaryLabel = servicePrimaryLabel(service, branch?.name, siblings)
   return (
@@ -99,6 +104,13 @@ export function ServiceCard({
         <BranchRow branch={branch} />
         <ServiceField label="url" value={service.healthUrl ?? ''} href={service.healthUrl ?? undefined} />
       </div>
+      {bootFailure && (
+        <div className={`mt-2.5 rounded border px-2 py-1.5 text-[11px] ${alertClass('error')}`}>
+          <div>{bootEvidenceLabel(bootFailure)} · {runBootPhase(bootFailure.reason)}</div>
+          <div className="mt-0.5 text-secondary">{bootFailure.detail}</div>
+          {bootFailure.classification === 'underlying-cause-not-preserved' && <div className="mt-0.5 text-secondary">{UNPRESERVED_CAUSE}.</div>}
+        </div>
+      )}
     </li>
   )
 }

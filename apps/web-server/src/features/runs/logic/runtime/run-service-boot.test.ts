@@ -14,7 +14,7 @@ vi.mock('./run-manifest-writer', async (importOriginal) => ({
   recordLifecycle: h.recordLifecycle,
 }))
 
-const { pollUntilReady, testPortEnv, testPortEnvKey, waitForHealth, waitForServiceReady } = await import('./run-service-boot')
+const { ensureServicesRunning, pollUntilReady, spawnService, testPortEnv, testPortEnvKey, waitForHealth, waitForServiceReady } = await import('./run-service-boot')
 const { makeHealLoopContext } = await import('./__fixtures__/heal-loop-context')
 
 let tmpDir: string
@@ -55,6 +55,100 @@ describe('waitForHealth', () => {
 
     await expect(waitForHealth(ctx)).resolves.toBeUndefined()
     expect(h.recordLifecycle).not.toHaveBeenCalled()
+  })
+})
+
+describe('dependency preflight', () => {
+  it('persists a confirmed incompatibility and starts no service process', async () => {
+    const logPath = path.join(tmpDir, 'dependency-api.log')
+    fs.writeFileSync(logPath, 'TOKEN=private\nvalidator rejected generated client\n')
+    const { ctx } = ctxFor({
+      services: [svcSpec()],
+      dependencyProvenance: [{
+        repoName: 'api',
+        sourceRevision: 'abc123',
+        sourcePath: '/source',
+        worktreePath: '/worktree',
+        dependencyPath: '/worktree/node_modules',
+        dependencyRealPath: '/source/node_modules',
+        lockfile: null,
+        dependencyLockfile: null,
+        generatorInputs: [],
+        dependencyGeneratorInputs: [],
+        runtime: { node: process.version, packageManager: 'npm' },
+        mode: 'shared',
+        verdict: 'incompatible',
+        validation: { command: 'npm run validate-deps', cwd: '/worktree', exitCode: 1, signal: null, logPath },
+        remediation: 'Use isolated mode.',
+      }],
+      ptyFactory: vi.fn(),
+    })
+
+    await expect(ensureServicesRunning(ctx)).resolves.toEqual([])
+
+    expect(ctx.ptyFactory).not.toHaveBeenCalled()
+    expect(ctx.bootFailure).toMatchObject({
+      reason: 'dependency-incompatible',
+      command: 'npm run validate-deps',
+      exitCode: 1,
+      excerpt: expect.stringContaining('TOKEN=[REDACTED]'),
+      nextAction: 'Use isolated mode.',
+    })
+    expect(ctx.bootFailure?.excerpt).not.toContain('private')
+    expect(ctx.stateSink.patchManifest).toHaveBeenCalledWith(ctx.runId, { bootFailure: ctx.bootFailure })
+  })
+})
+
+describe('service process evidence', () => {
+  it('persists a redacted spawn failure with command and cwd', () => {
+    const { ctx } = ctxFor({
+      ptyFactory: () => { throw new Error('TOKEN=private spawn denied') },
+    })
+
+    spawnService(ctx, svcSpec({ command: 'node server.js --token private' }))
+
+    expect(ctx.bootFailure).toMatchObject({
+      reason: 'spawn-failed',
+      command: 'node server.js --token [REDACTED]',
+      cwd: tmpDir,
+      exitCode: null,
+      signal: null,
+    })
+    expect(ctx.bootFailure?.classification).toBeUndefined()
+    expect(ctx.bootFailure?.excerpt).toContain('TOKEN=[REDACTED]')
+    expect(ctx.bootFailure?.excerpt).not.toContain('private')
+  })
+
+  it('retains the process exit code, signal and typed compiler evidence', async () => {
+    let onData: ((chunk: string) => void) | undefined
+    let onExit: ((event: { exitCode: number; signal?: number }) => void) | undefined
+    const { ctx } = ctxFor({
+      ptyFactory: () => ({
+        pid: 42,
+        onData: (cb) => { onData = cb; return { dispose() {} } },
+        onExit: (cb) => { onExit = cb; return { dispose() {} } },
+        write() {},
+        resize() {},
+        kill() {},
+      }),
+    })
+    const svc = svcSpec({ command: 'npm run dev' })
+    spawnService(ctx, svc)
+    onData?.('compiler failed\nTS2322: wrong type\n')
+    onExit?.({ exitCode: 2, signal: 15 })
+
+    await pollUntilReady(ctx, svc, 'tcp', async () => false)
+
+    expect(ctx.bootFailure).toMatchObject({
+      reason: 'process-exited',
+      classification: 'abrupt-signal',
+      command: 'npm run dev',
+      cwd: tmpDir,
+      exitCode: 2,
+      // Normalized to the NAME at the producer; node-pty reports 15.
+      signal: 'SIGTERM',
+    })
+    expect(ctx.bootFailure?.excerpt).toContain('TS2322')
   })
 })
 
@@ -122,6 +216,8 @@ describe('pollUntilReady', () => {
     expect(ctx.bootFailure).toMatchObject({ service: 'api', reason: 'health-timeout' })
     expect(ctx.bootFailure?.detail).toContain('port=5999')
     expect(ctx.bootFailure?.detail).not.toContain('url=')
+    expect(ctx.bootFailure?.nextAction).toContain('process remained alive')
+    expect(ctx.bootFailure?.nextAction).not.toContain('outer startup wrapper')
   })
 
   it('names the URL when an HTTP probe times out', async () => {

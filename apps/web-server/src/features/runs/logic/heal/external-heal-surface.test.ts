@@ -161,8 +161,15 @@ describe('buildExternalHealContext', () => {
       service: 'app',
       safeName: 'app',
       reason: 'process-exited' as const,
+      classification: 'underlying-cause-not-preserved' as const,
       detail: 'Service process exited before HTTP readiness (url=http://localhost:3000/health).',
       logPath: paths.serviceLog('app'),
+      command: 'node scripts/start-stack.cjs',
+      cwd: '/worktree/app',
+      exitCode: 1,
+      signal: null,
+      excerpt: 'API failed to start',
+      nextAction: 'Canary did not observe the underlying cause, so do not guess a root cause. Update that product-repo wrapper to log and rethrow the original error, then restart.',
     }
     const detail: RunDetail = {
       runId,
@@ -189,12 +196,20 @@ describe('buildExternalHealContext', () => {
 
     const context = buildExternalHealContext({ detail, logsDir, projectRoot: tmpDir })
 
+    // The evidence reaches the agent as STRUCTURED fields, not as prose: the
+    // whole record rides the same payload, so restating it in nextSteps would
+    // spend the packet's budget twice on one fact.
     expect(context.bootFailure).toEqual(bootFailure)
     expect(context.failedTests).toEqual([])
     // nextSteps must steer the agent to the service log + a restart signal,
     // not the test-triage procedure.
     const nextSteps = (context.nextSteps ?? []).join('\n')
     expect(nextSteps).toContain(bootFailure.logPath)
+    // run-service-boot is the single author of the remediation sentence; this
+    // surface renders it verbatim rather than writing a second wording.
+    expect(nextSteps).toContain(bootFailure.nextAction)
+    expect(nextSteps).toContain('context.bootFailure')
+    expect(nextSteps).not.toContain(bootFailure.excerpt)
     expect(nextSteps).toContain('restart')
     expect(nextSteps).toContain('Do not start services or run Playwright')
     expect(nextSteps).not.toContain('failedTests[]')

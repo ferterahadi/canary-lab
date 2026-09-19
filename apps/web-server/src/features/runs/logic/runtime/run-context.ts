@@ -43,6 +43,7 @@ import type { PlaywrightRerunSelection } from './rerun-targets'
 import type { RunPerturbation } from './perturbation/client-ports'
 import type { ProxyShim } from './perturbation/proxy-shim'
 import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
+import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 
 /** The orchestrator's own `emit`, handed to the modules so they can report
  *  progress without holding a reference back to the class. */
@@ -70,6 +71,7 @@ export interface RunContext {
   readonly perturbation?: RunPerturbation
   readonly worktreeHandles: WorktreeHandle[]
   readonly repoPathOverrides: Record<string, string>
+  readonly dependencyProvenance: RunDependencyProvenance[]
   /** Ephemeral port overlay: when the feature has a saved overlay, its captured
    *  patch is `git apply`-ed into each per-run worktree before boot and
    *  reverse-applied at teardown — the target repo is never permanently changed. */
@@ -122,6 +124,9 @@ export interface RunContext {
   startedAt: string
   stopped: boolean
   servicePtys: Map<string, PtyHandle>
+  /** Exit facts of the last service process, kept for the boot-failure
+   *  record. `signal` is the NAME, normalized by the producer. */
+  serviceExitEvidence: Map<string, { exitCode: number; signal: string | null }>
   logFiles: Set<string>
   signalWatcher: NodeJS.Timeout | null
   heartbeatTimer: NodeJS.Timeout | null
@@ -212,6 +217,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     perturbation: opts.perturbation,
     worktreeHandles,
     repoPathOverrides,
+    dependencyProvenance: opts.dependencyProvenance ?? [],
     portified: overlayExists(opts.feature.featureDir),
     services: buildServiceSpecs(opts.feature, opts.runDir, opts.env, {
       portMap: opts.portMap,
@@ -265,6 +271,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     startedAt: '',
     stopped: false,
     servicePtys: new Map(),
+    serviceExitEvidence: new Map(),
     logFiles: new Set(),
     signalWatcher: null,
     heartbeatTimer: null,

@@ -190,12 +190,21 @@ describe('RunsProvider', () => {
         data: JSON.stringify({
           type: 'snapshot',
           runs: [entry({ runId: 'r1', status: 'running' })],
-          details: { r1: detail({ runId: 'r1', status: 'running' }) },
+          details: { r1: detail({
+            runId: 'r1',
+            status: 'running',
+            bootFailure: {
+              service: 'api', safeName: 'api', reason: 'health-timeout',
+              classification: 'empty-output', detail: 'Old readiness evidence.',
+              logPath: '/runs/r1/svc-api.log', excerpt: 'retrying',
+            },
+          }) },
         }),
       })
     })
     expect(captured.runs?.runs.map((run) => run.runId)).toEqual(['r1'])
     expect(captured.run?.status).toBe('running')
+    expect(captured.run?.detail?.manifest.bootFailure?.classification).toBe('empty-output')
     expect(captured.active?.runId).toBe('r1')
 
     act(() => {
@@ -205,12 +214,27 @@ describe('RunsProvider', () => {
         data: JSON.stringify({
           type: 'update',
           runId: 'r1',
-          detail: detail({ runId: 'r1', status: 'passed' }),
+          detail: detail({
+            runId: 'r1',
+            status: 'failed',
+            bootFailure: {
+              service: 'api', safeName: 'api', reason: 'process-exited', classification: 'compiler-failure',
+              detail: 'Service exited before readiness.', logPath: '/runs/r1/svc-api.log',
+              command: 'npm run dev', cwd: '/worktree/api', exitCode: 1,
+              excerpt: 'TS2322: wrong type',
+            },
+          }),
         }),
       })
       socket.onmessage?.({ data: JSON.stringify({ type: 'unknown' }) })
     })
-    expect(captured.run?.status).toBe('passed')
+    expect(captured.run?.status).toBe('failed')
+    expect(captured.run?.detail?.manifest.bootFailure).toMatchObject({
+      classification: 'compiler-failure',
+      command: 'npm run dev',
+      exitCode: 1,
+      excerpt: 'TS2322: wrong type',
+    })
     expect(captured.active?.runId).toBeNull()
 
     act(() => {

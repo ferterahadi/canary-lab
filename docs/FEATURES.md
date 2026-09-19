@@ -127,6 +127,12 @@ const config = {
     branch: 'main',
     track: 'upstream',
     envs: ['local'],
+    dependencyPreparation: {
+      // Backward-compatible shared mode links this checkout's dependencies.
+      mode: 'shared',
+      validateCommand: 'npm run validate:canary-deps',
+      generatorInputs: ['prisma/schema.prisma'],
+    },
     startCommands: [{
       name: 'api',
       command: 'npm run dev',
@@ -147,6 +153,20 @@ source itself ignores the injected value.
 
 Use repository- or command-level `envs: ['local']` to skip local services when
 the selected envset points Playwright at a deployed URL.
+
+`dependencyPreparation` makes dependency ownership explicit. `shared` links the
+source checkout's existing `node_modules`; Canary fingerprints its lockfile and
+the declared `generatorInputs`, runs an optional read-only `validateCommand`, and
+blocks boot only when it can confirm incompatibility. Legacy shared state that
+cannot be proven stays `unknown` with a warning—it is never called compatible.
+Do not put a mutating `prepareCommand` in shared mode because it would mutate the
+source checkout's dependencies.
+
+Use `mode: 'isolated'` when generated clients or build artifacts must match the
+run worktree exactly. In that mode Canary does not link shared dependencies; a
+target-owned `prepareCommand` may prepare worktree-local dependencies, followed
+by `validateCommand`. Canary never invents an install command, downloads a
+dependency, or advances a checkout. The commands are owned by the target repo.
 
 A run boots the commit the repository checkout is sitting on: the per-run
 worktree is cut from `HEAD`, so a checkout nobody has pulled boots a stale

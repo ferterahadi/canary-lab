@@ -9,6 +9,7 @@ import type { ClientKind } from '@shared/run-mode'
 import type { SpecDiff } from '@shared/verification-strength/types'
 import type { RobustnessEnvelope } from '@shared/robustness/types'
 import type { TestReviewDecision } from '@shared/test-review'
+import type { RunDependencyProvenance } from '@shared/dependency-provenance'
 
 export interface RunIndexEntry {
   runId: string
@@ -160,6 +161,7 @@ export interface RunManifest {
   services: ServiceManifestEntry[]
   repoPaths?: string[]
   repoBranches?: RepoBranchSnapshot[]
+  dependencyProvenance?: RunDependencyProvenance[]
   /** Per-run git worktrees (repo name → worktree path) when isolated. */
   worktrees?: Record<string, string>
   /** Why a queued run is waiting. Present only while status === 'queued'. */

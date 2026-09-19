@@ -24,6 +24,7 @@ import type { PendingSpecEdit } from '../dirty-specs/detect'
 import type { IntegrityHint } from './run-integrity-hints'
 import type { TestReviewDecision } from '../../../../../../../shared/test-review'
 import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
+import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 export type {
   HealEnd,
   QueueReason,
@@ -197,6 +198,8 @@ export interface RunManifest {
   services: ServiceManifestEntry[]
   repoPaths?: string[]
   repoBranches?: RepoBranchSnapshot[]
+  /** Dependency paths and compatibility evidence captured before service boot. */
+  dependencyProvenance?: RunDependencyProvenance[]
   /** When this run isolated one or more repos in a per-run git worktree
    *  (opted in after a same-repo collision), maps repo name → worktree path.
    *  Omitted/empty when the run uses repos in place. */

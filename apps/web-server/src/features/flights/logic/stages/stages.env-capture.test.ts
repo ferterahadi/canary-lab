@@ -254,7 +254,7 @@ describe('env-capture stage', () => {
     })
   })
 
-  it('a crashed service reads as a crash — and the stage error carries the service-log tail', async () => {
+  it('an exited service stays evidence-bounded and carries the service-log tail', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
     const logPath = path.join(tmpDir, 'svc-app.log')
     fs.writeFileSync(logPath, "Starting daemon\nUnrecognized VM option 'MaxPermSize=512m'\nError: Could not create the Java Virtual Machine.\n")
@@ -267,7 +267,11 @@ describe('env-capture stage', () => {
             manifest: {
               status: 'failed',
               services: [{ name: 'app', status: 'timeout' }],
-              bootFailure: { service: 'app', safeName: 'app', reason: 'process-exited', detail: 'x', logPath },
+              bootFailure: {
+                service: 'app', safeName: 'app', reason: 'process-exited',
+                classification: 'compiler-failure', detail: 'x', logPath, command: 'npm run dev',
+                cwd: '/worktree/app', exitCode: 1, signal: null,
+              },
             },
           },
         }
@@ -277,10 +281,14 @@ describe('env-capture stage', () => {
     const outcome = await envCaptureStage(deps({ inject })).run(ctxFor(withScout(manifest(), [])).ctx)
     expect(outcome).toMatchObject({
       kind: 'failed',
-      error: expect.stringContaining('crashed during boot'),
+      error: expect.stringContaining('exited during boot'),
       errorDetail: {
         service: 'app',
         reason: 'process-exited',
+        classification: 'compiler-failure',
+        command: 'npm run dev',
+        cwd: '/worktree/app',
+        exitCode: 1,
         logPath,
         logTail: expect.stringContaining("Unrecognized VM option 'MaxPermSize=512m'"),
       },

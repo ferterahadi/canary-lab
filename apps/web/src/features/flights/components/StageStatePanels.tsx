@@ -6,6 +6,7 @@ import { stageLabel, STAGE_COLUMN, stageStateLine } from './stage-meta'
 import { CheckpointControls } from './CheckpointControls'
 import { truncate } from './StageDetail'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { BootEvidenceRows } from '@/shared/ui/BootEvidence'
 import { currentStageForPair } from './stage-metrics'
 
 /** R73: the one failure card every stage renders when it fails — a danger-toned
@@ -73,6 +74,11 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
       >
         {detail}
       </pre>
+      {errorDetail && (
+        <div className="cl-type-meta">
+          <BootEvidenceRows failure={errorDetail} />
+        </div>
+      )}
       {errorDetail?.logTail && (
         <>
           <div className="cl-rubric">
@@ -101,6 +107,7 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
           </span>
         </div>
       )}
+      {errorDetail?.nextAction && <p className="cl-type-body text-secondary">{errorDetail.nextAction}</p>}
       {remedy && (
         <div data-testid="stage-remedy" className="flex flex-col gap-2 border-t pt-2.5 border-line">
           <div className="cl-rubric">

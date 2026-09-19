@@ -14,6 +14,12 @@ export interface RepoPrerequisite {
    * commit is checked out; a run can still opt in once with `updateRepos`.
    */
   track?: 'upstream'
+  /**
+   * How a per-run worktree obtains and checks dependencies that Git does not
+   * copy into the checkout. Omit for the legacy shared-node_modules path; that
+   * path remains runnable but is recorded as unknown rather than compatible.
+   */
+  dependencyPreparation?: DependencyPreparation
   // Each entry opens one iTerm tab in this repo's directory.
   // Use multiple entries when one repo needs multiple running processes.
   startCommands?: Array<string | StartCommand>
@@ -21,6 +27,21 @@ export interface RepoPrerequisite {
   // boot in every env. Use this to skip local services when running tests
   // against a remote URL (e.g. envs: ['local']).
   envs?: string[]
+}
+
+export interface DependencyPreparation {
+  /**
+   * `shared` links the source checkout's node_modules (cheap, mutable).
+   * `isolated` never links it; the target-owned prepare command must create
+   * the worktree-local dependencies/generated outputs it needs.
+   */
+  mode?: 'shared' | 'isolated'
+  /** Target-owned preparation command, run only in isolated mode. */
+  prepareCommand?: string
+  /** Target-owned coherence check. Exit 0 means the check passed now. */
+  validateCommand?: string
+  /** Paths relative to repo.localPath whose bytes define generated outputs. */
+  generatorInputs?: string[]
 }
 
 /** HTTP/HTTPS readiness probe — should point at the LOCAL service. */

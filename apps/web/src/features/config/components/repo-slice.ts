@@ -67,7 +67,15 @@ export interface RepoSlice {
   branch?: string
   envs?: string[]
   startCommands: CommandSlice[]
+  /** Repo keys this form does not edit (`dependencyPreparation`, `track`, and
+   *  anything added later), carried through verbatim. Without this, saving the
+   *  Service tab silently DROPPED them — the serializer rebuilds each repo from
+   *  a fixed key list, so an unknown key had no way back into the document. */
+  passthrough?: { [k: string]: ConfigValue }
 }
+
+// Keys this form owns; everything else in a repo object is passthrough.
+const EDITED_REPO_KEYS = new Set(['name', 'localPath', 'cloneUrl', 'branch', 'envs', 'startCommands'])
 
 // ─── parsers ──────────────────────────────────────────────────────────────
 
@@ -170,6 +178,7 @@ export function parseRepo(v: ConfigValue): RepoSlice | null {
     startCommands: Array.isArray(obj.startCommands)
       ? obj.startCommands.map(parseCommand).filter((c): c is CommandSlice => c != null)
       : [],
+    passthrough: Object.fromEntries(Object.entries(obj).filter(([k]) => !EDITED_REPO_KEYS.has(k))),
   }
 }
 
@@ -221,7 +230,9 @@ export function serializeCommand(c: CommandSlice): ConfigValue {
 }
 
 export function serializeRepo(r: RepoSlice): ConfigValue {
+  // Passthrough first so an edited key always wins over its stale copy.
   const out: { [k: string]: ConfigValue } = {
+    ...r.passthrough,
     name: r.name,
     localPath: r.localPath as ConfigValue,
   }

@@ -19,7 +19,9 @@ import { RunOrchestrator, buildServiceSpecs, type AutoHealConfig } from './logic
 import { estimateRunCost } from './logic/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from './logic/runtime/repo-collision'
 import { describeRepoUpdates, updateReposToUpstream, updatedFromUpstreamByRepo } from './logic/runtime/repo-upstream-update'
-import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from './logic/runtime/repo-worktree'
+import { addWorktree, hydrateWorkingTreeDiff, type WorktreeHandle } from './logic/runtime/repo-worktree'
+import { prepareWorktreeDependencies } from './logic/runtime/dependency-provenance'
+import type { RunDependencyProvenance } from '../../../../../shared/dependency-provenance'
 import { overlayExists as portifyOverlayExists } from '../portify/logic/runtime/overlay'
 import { buildOrchestratorHealPrompt, makeAgentSpawnCommandBuilder, resolveAgentBinary } from './logic/runtime/auto-heal'
 import { resolveRunModelPlan, reuseRunModelPlan, type RunModelPlan } from './logic/runtime/run-model-plan'
@@ -262,6 +264,7 @@ export function buildRunsRouteDeps(
       }
 
       const worktrees: WorktreeHandle[] = []
+      const dependencyProvenance: RunDependencyProvenance[] = []
       // Iterating the repos themselves rather than their names: the previous
       // shape collected the names off `feature.repos` and then looked each one
       // back up in the same list, so its `if (!repo) continue` could not fire.
@@ -269,13 +272,6 @@ export function buildRunsRouteDeps(
         const repoName = repo.name
         try {
           const handle = await addWorktree({ repoName, localPath: repo.localPath, worktreesDir: path.join(runDir, 'worktrees') })
-          // Git worktrees skip gitignored deps, so a fresh worktree has no
-          // node_modules — the service boot command (`yarn start`, `npx tsx …`)
-          // can't resolve its bins/deps and dies (e.g. `concurrently: command
-          // not found`, exit 127), which then reads as a health-check timeout.
-          // Symlink the source repo's node_modules in, exactly like the
-          // benchmark and portify worktree paths already do.
-          linkNodeModules(handle)
           // R80: reproduce the user's uncommitted edits in the worktree so an
           // always-worktree run tests their WIP, not just HEAD. A portified run's
           // intended tree state is its overlay (applied at boot), so skip it
@@ -287,6 +283,19 @@ export function buildRunsRouteDeps(
             } else if (h.trackedApplied || h.untrackedCopied > 0) {
               runnerLog.info(`Hydrated uncommitted changes into "${repoName}" worktree (${h.untrackedCopied} untracked file(s)).`)
             }
+          }
+          const provenance = await prepareWorktreeDependencies({
+            handle,
+            config: repo.dependencyPreparation,
+            runDir,
+          })
+          dependencyProvenance.push(provenance)
+          if (provenance.verdict === 'unknown') {
+            runnerLog.warn(`Dependency provenance for "${repoName}" is unknown: ${provenance.warning}`)
+          } else if (provenance.verdict === 'incompatible') {
+            runnerLog.error(`Dependency preflight rejected "${repoName}": ${provenance.remediation}`)
+          } else {
+            runnerLog.info(`Dependency provenance for "${repoName}" is compatible (${provenance.mode}).`)
           }
           worktrees.push(handle)
           runnerLog.info(`Isolated repo "${repoName}" in a per-run worktree.`)
@@ -311,7 +320,7 @@ export function buildRunsRouteDeps(
           portMap,
           perturbation,
           worktrees,
-	          ptyFactory,
+          ptyFactory,
           runnerLog,
           executionType,
           testReviewApproval,
@@ -328,6 +337,7 @@ export function buildRunsRouteDeps(
           ...(cellSelection ? { initialSelection: cellSelection } : {}),
           externalHealSession,
           repoBranchSnapshots,
+          dependencyProvenance,
           // Route every manifest/index write through RunStore so its event
           // emitter sees the mutation. Phase 2 attaches the WS endpoint to
           // these events.

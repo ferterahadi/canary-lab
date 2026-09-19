@@ -2,6 +2,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { RepoBranchSnapshot, ServiceManifestEntry } from '@/shared/api/types'
+import { UNPRESERVED_CAUSE } from '@/shared/ui/BootEvidence'
 import { ServiceCard } from './RunServicePanels'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -82,6 +83,20 @@ describe('ServiceCard', () => {
 
     const title = container.querySelector('li > div > div.truncate')?.textContent
     expect(title).toBe('merchant-pass')
+  })
+
+  it('shows the current structured boot failure on the affected service card', () => {
+    render(<ServiceCard
+      service={service}
+      branch={branch}
+      bootFailure={{
+        service: 'merchant-pass', safeName: 'merchant-pass', reason: 'process-exited', classification: 'underlying-cause-not-preserved',
+        detail: 'Service exited before readiness.', logPath: '/logs/service.log',
+      }}
+    />)
+
+    expect(container.textContent).toContain('underlying-cause-not-preserved · process-exit')
+    expect(container.textContent).toContain(UNPRESERVED_CAUSE)
   })
 
   it('holds the ref and url rows open with a placeholder when there is nothing to show', () => {

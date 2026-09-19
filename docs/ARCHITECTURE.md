@@ -538,9 +538,20 @@ switching path passes no resolver, so it stays a verbatim copy.
 
 Every regular `executionType: 'run'` **attempts** to isolate each configured repo
 in a per-run Git worktree under `<runDir>/worktrees/`. Each worktree starts from
-`HEAD`, links the source repo's `node_modules`, and replays the user's tracked and
-untracked work in progress through `hydrateWorkingTreeDiff`, so the run normally
-tests the checkout's current state rather than committed state alone.
+`HEAD` and replays the user's tracked and untracked work in progress through
+`hydrateWorkingTreeDiff`, so the run normally tests the checkout's current state
+rather than committed state alone.
+
+Before boot, `prepareWorktreeDependencies` applies the repo's
+`dependencyPreparation` configuration and writes `manifest.dependencyProvenance[]`:
+source revision, dependency owner, lockfile and generator-input fingerprints,
+runtime/package-manager metadata, validation command result, and a
+`compatible | incompatible | unknown` verdict. Shared mode links the source
+repo's existing `node_modules`; legacy/unprovable state remains `unknown` and
+boots with a warning, while a confirmed fingerprint or validation mismatch is a
+pre-boot failure. Isolated mode never links the source dependency tree and may
+run only the target-owned prepare/validate commands declared in the feature.
+Canary does not choose an install command or rewrite either checkout.
 
 `HEAD` is whatever commit the checkout was left on, so a pinned branch nobody has
 pulled boots stale. Before anything is allocated, `startRun` runs

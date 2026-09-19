@@ -90,6 +90,7 @@ export function writeInitialManifest(ctx: RunContext, serviceStatus: ServiceMani
       .filter((p) => fs.existsSync(p)),
     ...(Object.keys(worktreeMap).length > 0 ? { worktrees: worktreeMap } : {}),
     repoBranches: ctx.repoBranchSnapshots,
+    ...(ctx.dependencyProvenance.length > 0 ? { dependencyProvenance: ctx.dependencyProvenance } : {}),
     ...(ctx.perturbation ? { perturbation: { envelope: ctx.perturbation.envelope, shimPorts: Object.fromEntries(ctx.perturbation.shimPorts) } } : {}),
     playwrightArtifacts: readPlaywrightArtifactPolicy(ctx.feature.featureDir),
     signalPaths: {
