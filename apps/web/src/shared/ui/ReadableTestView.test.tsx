@@ -69,6 +69,15 @@ let container: HTMLDivElement
 let root: Root
 let rootMounted: boolean
 
+it('marks fallback wording as incomplete while keeping its source selectable', async () => {
+  const test = { ...STORY, story: { steps: STORY.story!.steps.map((step) => ({ ...step, presentation: 'syntax-fallback' as const })) } }
+  const select = vi.fn()
+  await act(async () => root.render(<ReadableTestView test={test} onSourceSelect={select} />))
+  expect(container.textContent).toContain('English incomplete ·')
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="readable-story-item-action-submit"]')!.click())
+  expect(select).toHaveBeenCalledWith({ id: 'action-submit', source: STORY.story!.steps[1].source })
+})
+
 beforeEach(() => {
   localStorage.setItem('canary-lab.theme', 'dark')
   document.documentElement.classList.add('dark')

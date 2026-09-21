@@ -83,6 +83,7 @@
     "check:cycles": "node tools/check-import-cycles.mjs",
     "lint": "eslint . && npm run check:test-readability",
     "check:test-readability": "node --import tsx apps/cli/test-readability.ts --rules-only apps shared",
+    "check:english": "node --import tsx tools/check-english.ts",
     "fix:test-readability": "node --import tsx apps/cli/test-readability.ts --rules-only --fix apps shared",
     "test": "vitest run",
     "test:watch": "vitest",

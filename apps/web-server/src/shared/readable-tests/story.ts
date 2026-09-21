@@ -1,8 +1,9 @@
 import ts from 'typescript'
 import { UnsupportedSyntaxKindError, statementEnglish } from '../controlled-english/ast-to-ir'
 import { renderEnglish } from '../controlled-english/english-renderer'
+import { sourceSyntaxFallback } from './source-representation'
 import type { SemanticContext } from '../controlled-english/semantic-context'
-import { hasStructuralCallback, sourceAssertionText, sourceCallbackCall, sourceCallbackExpressionCall, sourceCallbackHeaderText, sourceConditionText, sourceDeclarationText, sourceExpressionText, sourceFunctionBinding, sourceFunctionText, sourceLoopText, sourceStatementText, testRegistration } from './source-language'
+import { sourceAssertionText, sourceCallbackCall, sourceCallbackExpressionCall, sourceCallbackHeaderText, sourceCatchText, sourceConditionText, sourceDeclarationText, sourceExpressionText, sourceFunctionBinding, sourceFunctionText, sourceLoopText, sourceStatementText, testRegistration } from './source-language'
 import type {
   ReadableStoryFlowKind,
   ReadableStoryItem,
@@ -1066,9 +1067,8 @@ function collectionMutationDescription(
   return undefined
 }
 
-/** Build the reader-first story from syntax already parsed for the exhaustive
- * translator. Unknown constructs are intentionally omitted here instead of
- * leaking raw code; the `nodes` tree remains the complete audit surface. */
+/** Complete review uses the source grammar. Without a semantic context this
+ * returns a compact summary, which is never counted as complete English. */
 export function storyCandidates(
   statements: readonly ts.Statement[],
   sourceFile: ts.SourceFile,
@@ -1077,8 +1077,9 @@ export function storyCandidates(
   const aliases = new Map<string, string>()
   const fullText = sourceFile.getFullText()
 
-  const commentCandidates = (node: ts.Node, position: number, path: number[]): StoryStepCandidate[] => {
-    const ranges = ts.getLeadingCommentRanges(fullText, position) ?? []
+  const commentCandidates = (node: ts.Node, position: number, path: number[], trailing = false): StoryStepCandidate[] => {
+    const ranges = [...new Map([...(ts.getLeadingCommentRanges(fullText, position) ?? []),
+      ...(trailing ? ts.getTrailingCommentRanges(fullText, position) ?? [] : [])].map((range) => [range.pos, range])).values()].sort((a, b) => a.pos - b.pos)
     return adjacentCommentGroups(fullText, ranges).flatMap((group, index) => {
       const text = group.map((range) => readableCommentText(fullText.slice(range.pos, range.end))).filter(Boolean).join(' ')
       const first = group[0]
@@ -1141,7 +1142,7 @@ export function storyCandidates(
     flowKind: ReadableStoryFlowKind,
     candidate: StoryDescription,
     children: StoryCandidate[],
-  ): StoryFlowCandidate | undefined => children.length
+  ): StoryFlowCandidate | undefined => children.length || completeContext
     ? populatedFlowCandidate(node, path, flowKind, candidate, children)
     : undefined
 
@@ -1150,7 +1151,7 @@ export function storyCandidates(
     basePath: number[],
     options: WalkOptions,
   ): StoryCandidate[] {
-    return nested.flatMap((statement, index) => {
+    const candidates = nested.flatMap((statement, index) => {
       const path = [...basePath, index]
       const candidates = walkStatement(statement, path, options)
       const comments = completeContext && typeof statement.getFullStart === 'function'
@@ -1158,9 +1159,10 @@ export function storyCandidates(
         : []
       if (candidates.length || !completeContext) return [...comments, ...candidates]
       try {
-        const text = renderEnglish(statementEnglish(statement))
-        const role: StoryRole = renderAssertionStatement(statement, sourceFile) ? 'check' : ts.isExpressionStatement(statement) ? 'action' : 'setup'
-        return [...comments, { kind: 'step' as const, node: statement, path, role,
+        const text = sourceSyntaxFallback(statement, renderEnglish(statementEnglish(statement)))
+        // Executable expressions and assertions already use sourceStatementText.
+        // Remaining syntax consists of declarations the source grammar lacks.
+        return [...comments, { kind: 'step' as const, node: statement, path, role: 'setup' as const,
           text, spans: storySpans(text, variablePhrases(statement, text, aliases), true), fidelity: 'derived' as const }]
       } catch (error) {
         if (!(error instanceof UnsupportedSyntaxKindError)) throw error
@@ -1168,6 +1170,9 @@ export function storyCandidates(
         return comments
       }
     })
+    const end = (nested as ts.NodeArray<ts.Statement>).end
+    if (completeContext && end !== undefined) candidates.push(...commentCandidates(sourceFile, end, [...basePath, nested.length], true))
+    return candidates
   }
 
   function callbackCandidates(
@@ -1176,12 +1181,22 @@ export function storyCandidates(
     options: WalkOptions,
   ): StoryCandidate[] {
     if (ts.isBlock(callback.body)) return walkStatements(callback.body.statements, path, options)
+    if (completeContext) {
+      const text = `Return ${sourceExpressionText(callback.body)}`
+      return [...commentCandidates(callback.body, callback.body.getFullStart(), path), { kind: 'step', node: callback.body, path, role: 'action', text,
+        spans: storySpans(text, variablePhrases(callback.body, text, aliases), true), fidelity: 'derived' }]
+    }
     let expression = callback.body
     while (ts.isAwaitExpression(expression) || ts.isParenthesizedExpression(expression)) expression = expression.expression
     if (!ts.isCallExpression(expression)) return []
     const description = genericCallDescription(expression, sourceFile, expression.getText(sourceFile), undefined)
     const candidate = description ? stepCandidate(expression, path, description, options) : undefined
     return candidate ? [candidate] : []
+  }
+
+  function callbackHeaderEndPosition(callback: StoryCallback): number {
+    return ts.isArrowFunction(callback) && !ts.isBlock(callback.body)
+      ? callback.equalsGreaterThanToken.getEnd() - 1 : callback.body.getStart(sourceFile)
   }
 
   function sourceCallbackCandidate(
@@ -1212,8 +1227,7 @@ export function storyCandidates(
         : [sourceCandidate(argument.body, [...argumentPath, 0], `Return ${sourceExpressionText(argument.body)}`)]
       if (block && !argument.body.statements.length) children.push(sourceCandidate(argument.body, [...argumentPath, 0], 'Do nothing.'))
       return { ...sourceCandidate(argument, argumentPath, text), kind: 'flow', flowKind: 'scope', children,
-        headerEndPosition: ts.isArrowFunction(argument) && !block
-          ? argument.equalsGreaterThanToken.getEnd() - 1 : argument.body.getStart(sourceFile) }
+        headerEndPosition: callbackHeaderEndPosition(argument) }
     })
     // A sole callback needs one boundary, not separate call and argument rows.
     // Multiple arguments keep their own rows so their order and source ranges survive.
@@ -1511,50 +1525,57 @@ export function storyCandidates(
         const text = sourceFunctionText(statement)
         return [{ kind: 'flow', flowKind: 'scope', node: statement, path, role: 'setup', text,
           spans: storySpans(text, variablePhrases(statement, text, aliases), true), fidelity: 'derived',
+          headerEndPosition: statement.body?.getStart(sourceFile) ?? statement.getEnd() - 1,
           children: statement.body ? walkStatements(statement.body.statements, [...path, 0], options) : [] }]
       }
       const functionBinding = sourceFunctionBinding(statement)
       if (functionBinding) {
-        const children = ts.isBlock(functionBinding.callback.body)
-          ? walkStatements(functionBinding.callback.body.statements, [...path, 0], options)
-          : [{ kind: 'step' as const, ...decorate(functionBinding.callback.body, [...path, 0], {
-              role: 'action',
-              text: `Return ${sourceExpressionText(functionBinding.callback.body)}`,
-              fidelity: 'derived',
-            }) }]
+        const children = callbackCandidates(functionBinding.callback, [...path, 0], options)
         return [{ kind: 'flow', flowKind: 'scope', node: statement, path, role: 'setup',
           text: functionBinding.text,
           spans: storySpans(functionBinding.text, variablePhrases(statement, functionBinding.text, aliases), true),
-          fidelity: 'derived', children }]
+          fidelity: 'derived', headerEndPosition: callbackHeaderEndPosition(functionBinding.callback), children }]
       }
       const assertion = sourceAssertionText(statement)
       if (assertion) return [{ kind: 'step', node: statement, path, role: 'check', text: assertion,
         spans: storySpans(assertion, variablePhrases(statement, assertion, aliases), true), fidelity: 'derived' }]
-      if (renderAssertionStatement(statement, sourceFile)) return []
+      if (renderAssertionStatement(statement, sourceFile)) {
+        // Assertion recognition requires an expression or return containing a
+        // call. Both have a complete literal statement description.
+        const text = sourceStatementText(statement)!
+        return [{ kind: 'step', node: statement, path, role: 'check', text,
+          spans: storySpans(text, variablePhrases(statement, text, aliases), true), fidelity: 'derived' }]
+      }
       const registration = testRegistration(statement, completeContext)
       if (registration) {
         const children = callbackCandidates(registration.callback, [...path, 0], options)
         return [{ kind: 'flow', flowKind: 'scope', node: statement, path, role: registration.role,
-          ...(registration.role === 'test' ? { headerEndPosition: registration.callback.body.getStart(sourceFile) } : {}),
+          headerEndPosition: callbackHeaderEndPosition(registration.callback),
           text: registration.text, spans: storySpans(registration.text, variablePhrases(statement, registration.text, aliases), true), fidelity: 'derived', children }]
       }
-      if (!authoredStep(statement)) {
-        const callback = sourceCallbackCall(statement)
-        if (callback) return [sourceCallbackCandidate(statement, callback, path, options)]
+      const callback = sourceCallbackCall(statement)
+      if (callback) {
+        const flow = sourceCallbackCandidate(statement, callback, path, options)
+        const authored = authoredStep(statement)
+        if (authored) {
+          flow.text = `${authored.label}. ${flow.text}`
+          flow.spans = storySpans(flow.text, variablePhrases(statement, flow.text, aliases), true)
+        }
+        return [flow]
       }
       const declaration = sourceDeclarationText(statement)
       if (declaration) return [{ kind: 'step', node: statement, path, role: 'setup',
         text: declaration, spans: storySpans(declaration, variablePhrases(statement, declaration, aliases), true), fidelity: 'derived' }]
-      const call = callFromStatement(statement)
-      // Unknown callback APIs retain their entire signature and body. Promoting
-      // only their children would hide the condition under which they execute.
-      if (call && hasStructuralCallback(call) && !authoredStep(statement)) return []
+      // Calls that cannot be split retain their complete inline callback text.
     }
     if (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) return []
     if (ts.isBlock(statement)) {
       return walkStatements(statement.statements, path, options)
     }
     if (ts.isLabeledStatement(statement)) {
+      if (completeContext) return [populatedFlowCandidate(statement, path, 'scope', {
+        role: 'action', text: `Label ${exactIdentifierText(statement.label.text)}`, fidelity: 'derived',
+      }, walkStatement(statement.statement, [...path, 0], options))]
       return walkStatement(statement.statement, [...path, 0], options)
     }
     if (ts.isWithStatement(statement)) {
@@ -1562,7 +1583,7 @@ export function storyCandidates(
       const children = walkStatement(statement.statement, [...path, 0], options)
       const flow = flowCandidate(statement, path, 'scope', {
         role: 'action',
-        text: scope.fidelity === 'unresolved'
+        text: completeContext ? `Run these steps with ${exactIdentifierText(sourceExpressionText(statement.expression))} as the active scope` : scope.fidelity === 'unresolved'
           ? 'Run these steps with the authored object as the active scope'
           : `Run these steps with ${scope.text} as the active scope`,
         fidelity: 'derived',
@@ -1598,7 +1619,7 @@ export function storyCandidates(
         const value = ts.isDefaultClause(clause)
           ? undefined
           : renderExpression(clause.expression, sourceFile)
-        const text = !value || value.fidelity === 'unresolved'
+        const text = completeContext && ts.isCaseClause(clause) ? `When ${exactIdentifierText(sourceExpressionText(clause.expression))} matches` : !value || value.fidelity === 'unresolved'
           ? 'When no earlier value matches'
           : `When ${value.text} matches`
         const flow = flowCandidate(clause, [...path, index], ts.isDefaultClause(clause) ? 'otherwise' : 'case', {
@@ -1611,7 +1632,7 @@ export function storyCandidates(
       const subject = renderExpression(statement.expression, sourceFile)
       const flow = flowCandidate(statement, path, 'switch', {
         role: 'action',
-        text: subject.fidelity === 'unresolved'
+        text: completeContext ? `Choose a path based on ${exactIdentifierText(sourceExpressionText(statement.expression))}` : subject.fidelity === 'unresolved'
           ? 'Choose the first matching path'
           : `Choose a path based on ${subject.text}`,
         fidelity: 'derived',
@@ -1625,7 +1646,7 @@ export function storyCandidates(
         const error = errorName && ts.isIdentifier(errorName) ? exactIdentifierText(errorName.text) : undefined
         const caught = flowCandidate(statement.catchClause, [...path, 1], 'catch', {
           role: 'action',
-          text: `If the attempt fails${error ? `, save the error as ${error}` : ''}`,
+          text: completeContext ? exactIdentifierText(sourceCatchText(statement.catchClause)) : `If the attempt fails${error ? `, save the error as ${error}` : ''}`,
           fidelity: 'derived',
         }, walkStatements(statement.catchClause.block.statements, [...path, 1], options))
         if (caught) children.push(caught)

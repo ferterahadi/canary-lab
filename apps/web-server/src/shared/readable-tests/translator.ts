@@ -37,6 +37,7 @@ import {
   composeTryHeader,
 } from '../controlled-english/structured-english'
 import { storyCandidates } from './story'
+import { sourceRepresentationGaps } from './source-representation'
 
 export interface ReadableHelperInput {
   name: string
@@ -593,15 +594,20 @@ function translateStory(
     const source = candidate.sourceRange
       ? sourceForRange(candidate.sourceRange, context.sourceFile, context.file, context.lineOffset)
       : sourceFor(candidate.node, context.sourceFile, context.file, context.lineOffset)
-    const headerEndPosition = candidate.kind === 'flow' ? candidate.headerEndPosition
-      ?? ((ts.isForOfStatement(candidate.node) || ts.isForInStatement(candidate.node) || ts.isForStatement(candidate.node))
-        && ts.isBlock(candidate.node.statement) ? candidate.node.statement.getStart(context.sourceFile) : undefined) : undefined
+    const node = candidate.node
+    const headerBody = ts.isIfStatement(node) ? node.thenStatement
+      : ts.isForOfStatement(node) || ts.isForInStatement(node) || ts.isForStatement(node) || ts.isWhileStatement(node) || ts.isDoStatement(node) || ts.isWithStatement(node) ? node.statement
+      : ts.isSwitchStatement(node) ? node.caseBlock
+      : ts.isCatchClause(node) ? node.block
+      : ts.isTryStatement(node) ? node.tryBlock : undefined
+    const headerEndPosition = candidate.kind === 'flow' ? candidate.headerEndPosition ?? headerBody?.getStart(context.sourceFile) : undefined
     const base = {
       id: stableNodeId(source, [-1, ...candidate.path]),
       role: candidate.role,
       text: candidate.kind === 'flow' && candidate.flowKind === 'otherwise' ? 'Else' : candidate.text,
       spans: candidate.kind === 'flow' && candidate.flowKind === 'otherwise' ? [{ text: 'Else', kind: 'keyword' as const }] : candidate.spans,
       fidelity: candidate.fidelity,
+      ...(sourceRepresentationGaps(candidate.node).length ? { presentation: 'syntax-fallback' as const } : {}),
       source,
     }
     return candidate.kind === 'flow'
@@ -612,6 +618,9 @@ function translateStory(
           ...(headerEndPosition !== undefined ? {
               headerEndLine: context.lineOffset + context.sourceFile.getLineAndCharacterOfPosition(headerEndPosition).line,
             } : {}),
+          ...(ts.isDoStatement(node) ? {
+            footerStartLine: context.lineOffset + context.sourceFile.getLineAndCharacterOfPosition(node.statement.getEnd()).line,
+          } : {}),
           children: translateCandidates(candidate.kind === 'flow' && candidate.flowKind === 'condition'
             ? candidate.children.flatMap((child) => child.kind === 'flow' && child.flowKind === 'then'
               ? child.children
@@ -633,21 +642,34 @@ export function translateReadableSource(file: string, source: string, semanticRu
     file, lineOffset: 1, sourceFile: semanticContext.sourceFile, semanticContext,
     helpers: new Map(), activeHelpers: new Set(),
   }
-  return translateStory(context.sourceFile.statements, context, true) ?? { steps: [] }
+  const story = translateStory(context.sourceFile.statements, context, true) ?? { steps: [] }
+  if (source.startsWith('#!')) {
+    const interpreter = source.split('\n', 1)[0].slice(2).trim()
+    const text = `Use interpreter ${interpreter}`
+    story.steps.unshift({ id: 'interpreter', role: 'setup', text, spans: [{ text }], fidelity: 'exact',
+      source: { file, startLine: 1, endLine: 1, snippet: source.split('\n', 1)[0] } })
+  }
+  return story
 }
 
 function translatedTest(
   title: string,
   nodes: ReadableNode[],
   story: ReadableTestStory | undefined,
+  summary: ReadableTestStory | undefined,
 ): ReadableTest {
   return {
     version: READABLE_TEST_VERSION,
     title,
-    completeness: nodes.some(containsIncomplete) ? 'partial' : 'complete',
+    completeness: nodes.some(containsIncomplete) || story?.steps.some(containsStoryFallback) ? 'partial' : 'complete',
     ...(story ? { story } : {}),
+    ...(summary ? { summary } : {}),
     nodes,
   }
+}
+
+function containsStoryFallback(item: ReadableStoryItem): boolean {
+  return item.presentation === 'syntax-fallback' || item.kind === 'flow' && item.children.some(containsStoryFallback)
 }
 
 export function translateReadableTest(input: ReadableTestInput): ReadableTest {
@@ -662,7 +684,7 @@ export function translateReadableTest(input: ReadableTestInput): ReadableTest {
     activeHelpers: new Set(),
   }
   const nodes = body.statements.map((statement, index) => translateStatement(statement, [index], context))
-  return translatedTest(input.title, nodes, translateStory(body.statements, context))
+  return translatedTest(input.title, nodes, translateStory(body.statements, context, true), translateStory(body.statements, context))
 }
 
 /** One extraction owns one helper compilation. Each test still receives fresh
@@ -712,7 +734,7 @@ export function translateReadableTestFromAst(input: ReadableTestAstInput, prepar
     activeHelpers: new Set(),
   }
   const nodes = body.statements.map((statement, index) => translateStatement(statement, [index], context))
-  return translatedTest(input.title, nodes, translateStory(body.statements, context))
+  return translatedTest(input.title, nodes, translateStory(body.statements, context, true), translateStory(body.statements, context))
 }
 
 function findMatchingBlock(sourceFile: ts.SourceFile, target: ts.Block): ts.Block {

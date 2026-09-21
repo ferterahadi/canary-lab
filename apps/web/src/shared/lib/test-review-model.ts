@@ -1,5 +1,4 @@
-import type { ReviewSource, TestFileReview, VersionTest, TestChangeKind } from '@shared/test-review'
-import type { ReadableStoryItem } from '@shared/readable-tests/types'
+import type { TestFileReview, VersionTest, TestChangeKind } from '@shared/test-review'
 import type { ContextRow } from '@shared/test-source-diff'
 import { compareText } from './comparison-diff'
 export { sourceRows, rowsForTest, testSelections, type ContextRow } from '@shared/test-source-diff'
@@ -65,41 +64,7 @@ export function comparedTestRows(review: TestFileReview, test: VersionTest, kind
   })
 }
 
-export const storyEndLine = (step: ReadableStoryItem): number => step.kind === 'flow' ? step.headerEndLine ?? step.source.startLine : step.source.endLine
-
-/** Continuation lines navigate to their English statement; flow bodies retain
- * their own rows rather than inheriting the enclosing function's full range. */
-export function englishSourceRange(lines: ReturnType<typeof englishLines>, line: number): { line: number; endLine: number } {
-  const endAt = (start: number): number => Math.max(start, ...(lines.get(start) ?? []).map(({ step }) => storyEndLine(step)))
-  if (lines.get(line) === null) {
-    for (let start = line - 1; start > 0; start--) if (endAt(start) >= line) return { line: start, endLine: endAt(start) }
-  }
-  return { line, endLine: endAt(line) }
-}
-
-/** English uses the same translator as test cards. Untranslated source stays
- * visible; navigation stays keyed to source rows even when wording is equal. */
-export function englishLines(source: ReviewSource): Map<number, Array<{ step: ReadableStoryItem; depth: number }> | null> {
-  const lines = new Map<number, Array<{ step: ReadableStoryItem; depth: number }> | null>()
-  const visit = (items: ReadableStoryItem[], depth: number): void => {
-    for (const item of items) {
-      if (!source.story && item.source.file && !source.tests.some((test) => contains(test, item.source.startLine))) continue
-      if (item.kind === 'flow' && item.flowKind === 'then') {
-        visit(item.children, depth)
-        continue
-      }
-      lines.set(item.source.startLine, [...(lines.get(item.source.startLine) ?? []), { step: item, depth }])
-      if (item.kind === 'flow') {
-        visit(item.children, depth + 1)
-        for (let line = item.source.startLine + 1; line <= (item.headerEndLine ?? item.source.startLine); line++) if (!lines.has(line)) lines.set(line, null)
-      }
-      else for (let line = item.source.startLine + 1; line <= item.source.endLine; line++) if (!lines.has(line)) lines.set(line, null)
-    }
-  }
-  if (source.story) visit(source.story.steps, 0)
-  else for (const test of source.tests) visit(test.readable.story?.steps ?? [], 0)
-  return lines
-}
+export { storyEndLine, englishSourceRange, englishLines } from '@shared/readable-tests/source-lines'
 
 function predicateContains(source: string, predicate: { line: number; source: string }, line?: number): boolean {
   if (line == null || line < predicate.line) return false

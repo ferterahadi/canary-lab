@@ -72,7 +72,7 @@ describe('source-linked callback review', () => {
       { text: 'Argument 4: each item from extra as a separate argument', source: { startLine: 8 } },
     ] })
     const text = flatten([call]).map((item) => item.text).join('\n')
-    for (const contract of ['Result', 'asynchronous', 'value', 'with default number 1', 'Promise', 'number']) expect(text).toContain(contract)
+    for (const contract of ['Result', 'asynchronous', 'value', 'defaulting to 1', 'Promise', 'number']) expect(text).toContain(contract)
   })
 
   it.each(['', 'await '])('separates a callback returning %sa nested callback call', (awaited) => {
@@ -108,9 +108,9 @@ describe('source-linked callback review', () => {
   })
 
   it.each([
-    ['run(function named(value: number) { return value })', ['function expression', 'named', 'number']],
-    ['run(async function* named<T extends Item = Item>(...values: T[]) { yield values })', ['async', 'generator', 'named', 'constrained to', 'with default', 'rest parameter', 'When the returned generator is advanced']],
-    ['run(<const T extends Item = Item>(value: T): T => value)', ['arrow function', 'const type parameter', 'constrained to', 'with default', 'return type']],
+    ['run(function named(value: number) { return value })', ['function named', 'named', 'number']],
+    ['run(async function* named<T extends Item = Item>(...values: T[]) { yield values })', ['async', 'generator', 'named', 'extending', 'defaulting to', 'remaining arguments collected in', 'When the returned generator is advanced']],
+    ['run(<const T extends Item = Item>(value: T): T => value)', ['arrow function', 'type parameters const T', 'extending', 'defaulting to', 'return type']],
   ])('retains full callback signatures without flattening the body: %s', (source, contract) => {
     const [call] = translateReadableSource('callbacks.ts', source).steps
     expect(call.kind).toBe('flow')
@@ -145,8 +145,8 @@ describe('source-linked callback review', () => {
     'preserves callbacks inside collections without treating the collection as a callback: %s', (callback) => {
       const [item] = translateReadableSource('callbacks.ts', `run([${callback}])`).steps
       expect(item.kind).not.toBe('flow')
-      expect(item.text).toContain('array literal')
-      expect(item.text).toContain(callback.startsWith('function') ? 'function expression' : 'type parameter')
+      expect(item.text).toContain('a list containing')
+      expect(item.text).toContain(callback.startsWith('function') ? 'a function with no parameters' : 'type parameter')
     },
   )
 
@@ -172,7 +172,10 @@ describe('source-linked callback review', () => {
 
   it('keeps an authored step label when its callback is a function expression', () => {
     const [step] = translateReadableSource('callbacks.ts', `await test.step('Check state', function () { expect(ready).toBe(true) })`).steps
-    expect(step).toMatchObject({ kind: 'flow', text: 'Check state', children: [{ role: 'check', text: 'Check that ready equals true' }] })
+    expect(step).toMatchObject({ kind: 'flow', text: 'Check state. Call test.step and wait for it to finish. Pass these arguments in order:', children: [
+      { text: 'Argument 1: "Check state"' },
+      { text: 'Argument 2: a function with no parameters. When called, run these statements:', children: [{ role: 'check', text: 'Check that ready equals true' }] },
+    ] })
   })
 
   it('keeps typed parameterized group callbacks on their registration path', () => {

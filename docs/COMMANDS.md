@@ -62,6 +62,46 @@ In this repository, `npm run check:test-readability` enforces syntax style acros
 the test files; `npm run fix:test-readability` applies the safe declaration fixes.
 The check also runs in `npm run lint` and the package smoke test.
 
+### Contributor English audit
+
+Run this from the Canary Lab **source repository**:
+
+```bash
+npm run check:english
+npm run check:english -- --workspace /path/to/canary-workspace
+npm run check:english -- --json
+```
+
+The command selects `--workspace`, then `CANARY_LAB_PROJECT_ROOT`, then the
+current workspace (including parent directories), then the unique valid entry
+in the local workspace registry. Missing or ambiguous selection fails with an
+explicit `--workspace` instruction. It never substitutes package sample tests.
+
+It reads JavaScript and TypeScript under the selected workspace's features,
+including helpers, fixtures and suite configuration. Dependencies, envsets,
+runtime output and historical run directories are excluded; symbolic links fail
+with their path so linked inputs cannot silently disappear. The report names its
+workspace, source files, static test declarations, represented constructs and
+gaps. Parameterized declarations can generate multiple executed cases; these
+counts describe source representation, not runner coverage or test results.
+
+Every statement, callback, class member and expression-bodied arrow function
+must have a displayed explanation. Enclosing scopes cannot cover missing bodies.
+The check audits full-file review and each recognized test body, and rejects
+syntax-only fallbacks, parse errors and translation failures. It exits with code
+1 when any gap remains, grouped by syntax family with exact file locations.
+It also uses the comparison view's shared line mapping to detect source lines
+that would appear as unavailable even when a translated sentence exists.
+`--json` emits the same report for other development tooling. This is an
+accounting guarantee for the inspected source; wording accuracy also has
+regression tests and is not proved by the percentage alone.
+
+This is a local, read-only development command. It does not execute tests, load
+suite configuration, call AI, start a server, or watch files. It is deliberately
+separate from `npm run build`, package installation and normal Canary startup.
+Ordinary English rendering still happens locally when a source view is opened
+or its source changes. Regression fixtures run with the regular Vitest suite.
+
 ### Other commands
 
 - `init` creates the workspace, installs dependencies and Chromium, and registers agent skills plus the compact MCP profile. Use `--no-install` for CI or offline setup.

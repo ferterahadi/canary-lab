@@ -1065,15 +1065,29 @@ The active pipeline is:
    wording plus conservative semantic classifications. Semantic categories come from compiler
    symbols, known fixtures, or explicit `feature.config.cjs` semantic rules — never
    from an identifier guess or an LLM.
-3. `apps/web-server/src/shared/readable-tests/` builds the source-ordered story,
+3. `apps/web-server/src/shared/readable-tests/` builds the complete source-ordered story,
    preserves branches, loops, retries, helpers, and evaluation order, and keeps an
    exact file, line range, and snippet on every story item. Unsupported or unresolved
    syntax remains visible and makes the test `partial` instead of disappearing.
+   The optional `summary` preserves the compact description but is never used as
+   evidence of complete representation. Cards and file comparison both render
+   the complete `story`. Syntax-only wording is explicitly marked incomplete;
+   missing English links to code instead of silently displaying code as English.
 4. `shared/readable-tests/types.ts` is the single server/web contract. The
    `/api/features/:name/tests` route sends `ExtractedTest.readable`; `TestPresentation` and
    `ReadableTestView` provide English-by-default and exact-source navigation in both
    ledgers. Evaluation flowcharts reuse the same translator rather than inventing a
-   second parser.
+   second parser. Exports also include the full English explanation, without the
+   diagram's step limit.
+
+The development-only `tools/check-english.ts` selects the local workspace and
+audits its current source without executing it. `tools/english-audit.ts` builds
+an independent syntax inventory and checks both candidate ownership and the
+actual translated story; a parent range never counts for its missing children.
+The audit and comparison view share `shared/readable-tests/source-lines.ts`, so
+missing header or continuation mappings also fail the check.
+It rejects syntax-only fallback wording as well as missing output. Neither the
+build nor the runtime starts this audit. See the [command contract](COMMANDS.md#contributor-english-audit).
 
 Nothing is persisted as a translated sidecar: the server derives the view from the
 selected source when it extracts tests. For a selected run, `GET /api/features/:name/tests?runId=...` lists the full saved suite independently of envset selection, then merges reporter identities and results without executing historical spec modules. New snapshots save a syntax inventory in `.canary-suite-tests.json`; older snapshots recover that inventory from their own source. Literal parameterised cases are expanded; unresolved generated titles are enriched from the reporter. Tests without execution evidence remain visible as “not run”, distinct from an explicit skip. Older runs without a snapshot still show recorded tests and verdicts, with an explicit source-unavailable notice; they never read current source as historical evidence. A run without reporter results still lists its saved suite. If neither source nor a recorded roster exists, it shows an empty or waiting state, not a discovery failure. The Tests column defaults to current workspace source, independently of run selection. The Tests header keeps Source and Run tabs together with the current count and recorded pass/total count. The Run tab opens historical tests explicitly (`tests=recorded`, URL-only and restored on refresh; older `tests=current` links remain supported). Current-source cards say “Not verified” or “Changed since run” and never inherit historical result badges; the file comparison is not proof that the entire executed suite matches. Recorded-source browsing is scoped to its suite and run, so selecting another run returns to current source. Compact new, changed, and removed indicators compare test identities across both lists, never the difference between totals or pass counts. Each indicator opens the existing comparison dialog at an affected file and line; the compare icon opens it directly even when source matches. Missing or incomplete source keeps change counts unknown. The dialog lists files from both versions, including committed and removed files. Current workspace changes also remain available through test review. Unmatched workspace tests say “no matching result” instead of “pending”. TypeScript is pinned to 5.9.3 because its AST

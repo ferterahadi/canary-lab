@@ -98,6 +98,8 @@ interface ReadableStoryItemBase {
   text: string
   spans: ReadableStorySpan[]
   fidelity: 'exact' | 'derived'
+  /** A syntax dump is retained for inspection but is not a complete English explanation. */
+  presentation?: 'english' | 'syntax-fallback'
   source: ReadableSource
 }
 
@@ -116,6 +118,8 @@ export interface ReadableStoryFlow extends ReadableStoryItemBase {
   flowKind: ReadableStoryFlowKind
   /** Last source line described by the header; the body has its own rows. */
   headerEndLine?: number
+  /** A do/while condition follows its body but is described by the loop row. */
+  footerStartLine?: number
   children: ReadableStoryItem[]
 }
 
@@ -182,5 +186,7 @@ export interface ReadableTest {
   completeness: ReadableCompleteness
   /** Optional so version-2 payloads cached by an older server still render. */
   story?: ReadableTestStory
+  /** Optional compact summary; may omit details and is never the complete review. */
+  summary?: ReadableTestStory
   nodes: ReadableNode[]
 }

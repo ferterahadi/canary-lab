@@ -19,7 +19,7 @@ function storyItems(items: ReadableStoryItem[] | undefined): ReadableStoryItem[]
   ])
 }
 
-describe('readable test story flow edge cases', () => {
+describe('optional compact test summary flow edge cases', () => {
   it('keeps a bare Promise sleep as a numbered action at its authored source line', () => {
     const translated = translate(`{
   const before = readBefore()
@@ -27,7 +27,7 @@ describe('readable test story flow edge cases', () => {
   const after = readAfter()
 }`)
 
-    const delay = storyItems(translated.story?.steps).find((item) => item.text === 'Delay for 10000 ms')
+    const delay = storyItems(translated.summary?.steps).find((item) => item.text === 'Delay for 10000 ms')
     expect(delay).toMatchObject({
       role: 'action',
       source: { startLine: 12, endLine: 12 },
@@ -68,7 +68,7 @@ describe('readable test story flow edge cases', () => {
   })
 }`)
 
-    const items = storyItems(translated.story?.steps)
+    const items = storyItems(translated.summary?.steps)
     expect(items.filter((item) => item.kind === 'flow').map((item) => `${item.flowKind}: ${item.text}`))
       .toEqual(expect.arrayContaining([
         'scope: Create mapped by transforming each value in values',
@@ -121,7 +121,7 @@ describe('readable test story flow edge cases', () => {
   await sendBatch(page[method]())
 }`)
 
-    const items = storyItems(translated.story?.steps)
+    const items = storyItems(translated.summary?.steps)
     const retries = items.filter((item) => item.kind === 'flow' && item.flowKind === 'retry')
     expect(retries.map((item) => item.text)).toEqual([
       'For up to 1 second, until the result ready equals true when available, retrying every 250 milliseconds, saving the matching result as first',
@@ -170,7 +170,7 @@ describe('readable test story flow edge cases', () => {
   outer: while (ready) { if (done) break outer; continue outer }
 }`)
 
-    const items = storyItems(translated.story?.steps)
+    const items = storyItems(translated.summary?.steps)
     const flows = items.filter((item) => item.kind === 'flow')
     expect(flows.map((item) => `${item.flowKind}: ${item.text}`)).toEqual(expect.arrayContaining([
       'condition: If enabled is true',
@@ -215,7 +215,7 @@ describe('readable test story flow edge cases', () => {
   return
 }`)
 
-    const items = storyItems(translated.story?.steps)
+    const items = storyItems(translated.summary?.steps)
     expect(items.map((item) => item.text)).toEqual([
       'Run these steps with account as the active scope',
       'Send the request using account',
@@ -258,7 +258,7 @@ describe('readable test story flow edge cases', () => {
   expect(total).toBe()
 }`)
 
-    expect(storyItems(translated.story?.steps).map((item) => item.text)).toEqual([
+    expect(storyItems(translated.summary?.steps).map((item) => item.text)).toEqual([
       'Send the request using a list containing compute value result, all items of extraValues',
       'Send the request',
       'Send the request using an object with regular set to compute value result and property named by field set to compute value result',
@@ -293,7 +293,7 @@ describe('readable test story flow edge cases', () => {
   const unresolved = page[method]() ? value : other
 }`)
 
-    const texts = storyItems(translated.story?.steps).map((item) => item.text)
+    const texts = storyItems(translated.summary?.steps).map((item) => item.text)
     expect(texts).toEqual(expect.arrayContaining([
       'Remove the last item from rows, saving the removed item as tail',
       'Remove the last item from rows',
@@ -336,7 +336,7 @@ describe('readable test story flow edge cases', () => {
   ready ? withContext(async () => submitInside()) : submitOutside()
 }`)
 
-    const texts = storyItems(translated.story?.steps).map((item) => item.text)
+    const texts = storyItems(translated.summary?.steps).map((item) => item.text)
     expect(texts).toEqual(expect.arrayContaining([
       'Start 1 operation together and combine their completion',
       'Start 0 operations together and combine their completion',

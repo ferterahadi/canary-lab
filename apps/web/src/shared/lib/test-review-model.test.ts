@@ -9,6 +9,19 @@ it('isolates a real removal from the surviving or added test occupying its old l
   expect(rows.map((row) => row.beforeLine)).toEqual([3, 4, 5, 6, 7, 8])
   expect(rows.every((row) => row.after === null && row.afterLine === undefined && row.change === 1)).toBe(true)
 })
+it('keeps a changed declaration without a matching baseline separate from unrelated tests', () => {
+  const review = testFileReview()
+  const rows = comparedTestRows(review, { file: review.file, ...review.after.tests[0], name: 'unmatched' }, 'changed')
+  expect(rows).toHaveLength(6)
+  expect(rows.every((row) => row.before === null && row.beforeLine === undefined)).toBe(true)
+  expect(rows.map((row) => row.afterLine)).toEqual([3, 4, 5, 6, 7, 8])
+})
+it('does not attach an old declaration with the same title to an explicitly added test', () => {
+  const review = testFileReview()
+  const rows = comparedTestRows(review, { file: review.file, ...review.after.tests[0] }, 'added')
+  expect(rows).toHaveLength(6)
+  expect(rows.every((row) => row.before === null && row.beforeLine === undefined && row.change === 1)).toBe(true)
+})
 it('uses semantic source ranges instead of colouring formatting-only line edits', () => {
   const review = testFileReview()
   review.meaningfulChanges = { before: [7], after: [7] }
@@ -86,6 +99,24 @@ it('maps every import continuation back to its full English range and leaves fol
   for (let line = 2; line <= 18; line++) expect(englishSourceRange(lines, line)).toEqual({ line: 2, endLine: 18 })
   expect(englishSourceRange(lines, 19)).toEqual({ line: 19, endLine: 19 })
 })
+it('links a do/while footer to its loop explanation without hiding an omitted body statement', () => {
+  const review = testFileReview()
+  review.after.source = 'do {\n  work()\n  omitted()\n} while (\n  ready\n)'
+  review.after.story = { steps: [{ id: 'loop', kind: 'flow', flowKind: 'loop', role: 'action', text: 'Run once, then repeat while ready is truthy', spans: [], fidelity: 'derived',
+    source: { file: review.file, startLine: 1, endLine: 6, snippet: review.after.source }, headerEndLine: 1, footerStartLine: 4,
+    children: [{ id: 'work', role: 'action', text: 'Call work with no arguments', spans: [], fidelity: 'derived', source: { file: review.file, startLine: 2, endLine: 2, snippet: 'work()' } }] }] }
+  const lines = englishLines(review.after)
+  expect(lines.has(3)).toBe(false)
+  expect(lines.get(4)).toBeNull()
+  expect(lines.get(5)).toBeNull()
+  expect(englishSourceRange(lines, 5)).toEqual({ line: 1, endLine: 6 })
+  const loop = review.after.story.steps[0]
+  if (loop.kind !== 'flow') throw new Error('Expected a loop flow')
+  review.after.source = 'do {\n  work(); } while (\n  ready\n)'
+  loop.footerStartLine = 2
+  loop.source.endLine = 4
+  expect(englishLines(review.after).get(2)?.[0].step.id).toBe('work')
+})
 it('keeps unchanged context, source line numbers and contiguous change groups', () => {
   const review = testFileReview(); const rows = sourceRows(review)
   expect(rows).toHaveLength(8)
@@ -152,6 +183,20 @@ it('uses whole-file English outside test bodies without duplicating callback sto
   expect(englishLines(review.after).get(1)).toMatchObject([{ step: { id: 'import' }, depth: 0 }])
   expect(englishLines(review.after).get(2)).toBeNull()
   expect(englishLines(review.after).has(5)).toBe(false)
+})
+it('collapses closing delimiters only inside translated flows while keeping actual missing statements', () => {
+  const review = testFileReview()
+  review.after.source = 'function helper() {\n  if (ready) {\n    missing()\n  }\n}\n}\n'
+  review.after.story = { steps: [{ id: 'helper', kind: 'flow', flowKind: 'scope', role: 'setup', text: 'Define function helper', spans: [], fidelity: 'derived',
+    source: { file: review.file, startLine: 1, endLine: 5, snippet: '' }, children: [{ id: 'branch', kind: 'flow', flowKind: 'condition', role: 'action', text: 'If ready', spans: [], fidelity: 'derived',
+      source: { file: review.file, startLine: 2, endLine: 4, snippet: '' }, children: [] }] }] }
+  const lines = englishLines(review.after)
+  expect(lines.get(4)).toBeNull()
+  expect(lines.get(5)).toBeNull()
+  expect(lines.has(3)).toBe(false)
+  expect(lines.has(6)).toBe(false)
+  review.after.story.steps[0].source.endLine = 9
+  expect(englishLines(review.after).has(9)).toBe(false)
 })
 it('suppresses translated multiline loop headers without suppressing body statements on the last header line', () => {
   const review = testFileReview()

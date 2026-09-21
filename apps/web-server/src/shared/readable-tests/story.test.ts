@@ -20,10 +20,10 @@ function storyItems(translated: ReturnType<typeof translateReadableTest>): Reada
     item,
     ...(item.kind === 'flow' ? descend(item.children) : []),
   ])
-  return descend(translated.story?.steps ?? [])
+  return descend(translated.summary?.steps ?? [])
 }
 
-describe('readable test story', () => {
+describe('optional compact test summary', () => {
   it('summarizes a CNS scenario as setup, actions, and checks without source-code fallbacks', () => {
     const translated = translateReadableTest({
       ...INPUT,
@@ -111,7 +111,7 @@ describe('readable test story', () => {
       bodySource: '{ await page[method](targetFromEnvironment()) }',
     })
 
-    expect(translated.story).toBeUndefined()
+    expect(translated.summary).toBeUndefined()
     expect(translated.nodes).toHaveLength(1)
   })
 
@@ -499,11 +499,11 @@ describe('readable test story', () => {
 }`,
     })
 
-    expect(translated.story?.steps[0]).toEqual(expect.objectContaining({
+    expect(translated.summary?.steps[0]).toEqual(expect.objectContaining({
       role: 'setup',
       text: 'Create attempts as a list containing “a”, “b” transformed so each item becomes an object with message identifier set to that item, transaction identifier set to sharedTxn',
     }))
-    const scope = translated.story?.steps[1]
+    const scope = translated.summary?.steps[1]
     expect(scope).toEqual(expect.objectContaining({
       kind: 'flow',
       flowKind: 'scope',
@@ -734,7 +734,7 @@ describe('readable test story', () => {
       'Read replica',
       'Include every operation in extraReads',
     ]))
-    expect(translated.story?.steps.map((step) => step.kind === 'flow' ? step.flowKind : 'step'))
+    expect(translated.summary?.steps.map((step) => step.kind === 'flow' ? step.flowKind : 'step'))
       .toEqual(['scope', 'step', 'scope', 'scope'])
   })
 
@@ -781,7 +781,7 @@ describe('readable test story', () => {
       'Remove the property at key from payload',
     ])
 
-    const topLevel = translated.story?.steps ?? []
+    const topLevel = translated.summary?.steps ?? []
     const primaryIfIndex = topLevel.findIndex((step) => step.text === 'If primary is true')
     const primaryIf = topLevel[primaryIfIndex]
     const primaryElse = topLevel[primaryIfIndex + 1]

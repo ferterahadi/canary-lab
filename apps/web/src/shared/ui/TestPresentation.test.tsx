@@ -145,7 +145,7 @@ describe('TestPresentation', () => {
 
     expect(container.querySelector('[data-testid="test-presentation-english"]')).not.toBeNull()
     expect(container.textContent).toContain('Open “/checkout”')
-    expect(container.textContent).toContain('Some syntax could not be translated')
+    expect(container.textContent).toContain('English representation is incomplete')
     // The header names the same file:range in both modes, so switching feels
     // like changing the representation, not the component.
     expect(container.textContent).toContain('e2e/checkout.spec.ts:L10–12')

@@ -26,6 +26,24 @@ it('does not paint an unchanged statement because the opposite side has a meanin
   expect(container.querySelector('del')).toBeNull()
   expect([...container.querySelectorAll('ins')].map((item) => item.textContent)).toEqual(['  expect(x).toBe(2)'])
 })
+it('keeps an edited do/while condition visible and includes it when opening source', async () => {
+  const review = testFileReview()
+  for (const side of ['before', 'after'] as const) {
+    const condition = side === 'before' ? 'firstReady' : 'secondReady'
+    const source = `do {\n  work()\n} while (${condition})`
+    const text = `Run once, then repeat while ${condition} is truthy`
+    review[side] = { source, tests: [], story: { steps: [{ id: 'loop', kind: 'flow', flowKind: 'loop', role: 'action', text, spans: [{ text }], fidelity: 'derived',
+      source: { file: review.file, startLine: 1, endLine: 3, snippet: source }, headerEndLine: 1, footerStartLine: 3,
+      children: [{ id: 'work', role: 'action', text: 'Call work', spans: [{ text: 'Call work' }], fidelity: 'derived', source: { file: review.file, startLine: 2, endLine: 2, snippet: 'work()' } }] }] } }
+  }
+  review.patch = '@@ -1,3 +1,3 @@\n do {\n   work()\n-} while (firstReady)\n+} while (secondReady)'
+  const select = vi.fn()
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="english" onSelectSource={select} />))
+  expect(container.querySelector('[data-side="after"][data-source-line="1"] ins')?.textContent).toContain('secondReady')
+  expect(container.querySelector('[data-side="after"][data-source-line="2"]')?.textContent).toContain('Call work')
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-side="after"][data-source-line="1"] button')!.click())
+  expect(select).toHaveBeenLastCalledWith({ side: 'after', line: 1, endLine: 3 })
+})
 it.each(['added test', 'changed tags'])('collapses registration syntax for %s and opens the complete header in Code mode', async (variant) => {
   const review = testFileReview()
   const readable = review.before.tests[0].readable
@@ -113,8 +131,11 @@ it.each(['before', 'after'] as const)('retains independent %s content opposite a
   await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="english" />))
   expect(container.querySelectorAll('tbody tr')).toHaveLength(19)
   const opposite = side === 'before' ? 'after' : 'before'
-  expect(container.querySelector(`[data-side="${side}"][data-source-line="3"]`)?.textContent).toContain('api,')
+  expect(container.querySelector(`[data-side="${side}"][data-source-line="3"]`)?.textContent).toContain('English unavailable · View code')
+  expect(container.querySelector(`[data-side="${side}"][data-source-line="3"]`)?.textContent).not.toContain('api,')
   expect(container.querySelector(`[data-side="${opposite}"][data-source-line="3"]`)?.closest('td')?.querySelector('.cl-context-line')).toBeNull()
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="code" />))
+  expect(container.querySelector(`[data-side="${side}"][data-source-line="3"]`)?.textContent).toContain('api,')
 })
 it.each(['insert', 'remove'] as const)('keeps unequal ranges aligned when an import member is %s', async (operation) => {
   const review = multilineImportReview()
@@ -153,14 +174,15 @@ it('uses the same compact two-character gutter as the standalone code viewer', a
   await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="code" />))
   expect(container.querySelector<HTMLElement>('.cl-review-source-canvas')?.style.getPropertyValue('--review-gutter-width')).toBe('2ch')
 })
-it('shares the existing English semantic labels and token colors, retaining untranslated source', async () => {
+it('shares English labels and colors while explicitly marking untranslated source', async () => {
   const review = testFileReview()
   review.after.tests[0].readable.story = { steps: [{ id: 'check', role: 'check', text: 'Check that x equals 2', spans: [{ text: 'Check', kind: 'verb' }, { text: ' that x equals ' }, { text: '2', kind: 'number' }], fidelity: 'exact', source: { file: review.file, startLine: 5, endLine: 5, snippet: 'expect(x).toBe(2)' } }] }
   await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="english" />))
   expect(container.querySelector('[data-testid="readable-story-role-check"]')?.textContent).toBe('CHECK')
   expect(container.querySelector('[data-story-span="number"]')?.textContent).toBe('2')
   expect(container.textContent).toContain('CHECKx equals 2')
-  expect(container.textContent).toContain('import { test, expect }')
+  expect(container.textContent).toContain('English unavailable · View code')
+  expect(container.textContent).not.toContain('import { test, expect }')
 })
 it('uses the Code mode comment colour for English notes', async () => {
   const review = testFileReview()

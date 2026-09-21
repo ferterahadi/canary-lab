@@ -364,6 +364,7 @@ export function ReadableStoryText({ step, children }: { step: ReadableStoryItem;
       {storyKeyword(step)}
     </span>
     <span className="min-w-0 whitespace-pre-wrap break-words" style={{ color: noteColor }}>
+      {step.presentation === 'syntax-fallback' && <span style={{ color: 'var(--semantic-attention)' }}>English incomplete · </span>}
       {storyDisplaySpans(step).map((span, index) => <StorySpan key={index} span={span} color={noteColor} />)}
       {children}
     </span>

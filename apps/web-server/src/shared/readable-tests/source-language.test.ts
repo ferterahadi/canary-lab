@@ -17,14 +17,14 @@ const english = (source: string, file?: string): string => rows(source, file).ma
 
 describe('whole-file English', () => {
   it.each([
-    `test('case', { tag: ['@req-R11'] }, async () => { const id = 1; expect(id).toBe(1) })`,
-    `test.only('case', () => { const id = 1; expect(id).toBe(1) })`,
-    `it.skip('case', () => { const id = 1; expect(id).toBe(1) })`,
-    `import { test as check } from '@playwright/test'; check('case', () => { const id = 1; expect(id).toBe(1) })`,
-    `import * as spec from 'vitest'; spec.test.each([1])('case', () => { const id = 1; expect(id).toBe(1) })`,
-  ])('distinguishes test declarations from their setup and checks: %s', (source) => {
+    [`test('case', { tag: ['@req-R11'] }, async () => { const id = 1; expect(id).toBe(1) })`, 'Test: "case"; an object with tag set to (a list containing "@req-R11"); with an asynchronous callback'],
+    [`test.only('case', () => { const id = 1; expect(id).toBe(1) })`, 'Test: "case"; (only)'],
+    [`it.skip('case', () => { const id = 1; expect(id).toBe(1) })`, 'Test: "case"; (skipped)'],
+    [`import { test as check } from '@playwright/test'; check('case', () => { const id = 1; expect(id).toBe(1) })`, 'Test: "case"'],
+    [`import * as spec from 'vitest'; spec.test.each([1])('case', () => { const id = 1; expect(id).toBe(1) })`, 'Test: "case"; for each case in a list containing 1'],
+  ])('distinguishes test declarations from their setup and checks: %s', (source, heading) => {
     const test = rows(source).find((item) => item.text.startsWith('Test:'))
-    expect(test).toMatchObject({ kind: 'flow', role: 'test', text: 'Test: "case"', children: [
+    expect(test).toMatchObject({ kind: 'flow', role: 'test', text: heading, children: [
       { role: 'setup' }, { role: 'check' },
     ] })
   })
@@ -44,7 +44,7 @@ describe('whole-file English', () => {
   expect(value).toBe(1);
 });`
     const item = translateReadableSource('review.spec.ts', source).steps[0]
-    expect(item).toMatchObject({ kind: 'flow', role: 'test', text: 'Test: "concurrent binding remains durable"',
+    expect(item).toMatchObject({ kind: 'flow', role: 'test', text: 'Test: "concurrent binding remains durable"; an object with tag set to (a list containing "@req-R18", "@req-R19", "@path-happy"); with an asynchronous callback',
       headerEndLine: 3, source: { startLine: 1, endLine: 6, snippet: source },
       children: [
         { role: 'setup', source: { startLine: 4, endLine: 4 } },
@@ -80,9 +80,12 @@ describe('whole-file English', () => {
     expect(english(source)).toBe(expected)
   })
 
-  it.each(['expect(response).toHaveProperty()', 'expect(response).toHaveProperty("token", value, extra)'])(
-    'retains the full grammar for unsupported property argument counts: %s', (source) => {
-      expect(english(source)).toContain('call:')
+  it.each([
+    ['expect(response).toHaveProperty()', 'Call toHaveProperty on (the result of expect with response) with no arguments'],
+    ['expect(response).toHaveProperty("token", value, extra)', 'Call toHaveProperty on (the result of expect with response) with "token", value, extra'],
+  ])(
+    'retains every argument for unrecognized property matcher signatures: %s', (source, text) => {
+      expect(english(source)).toBe(text)
       expect(rows(source)[0].source.snippet).toBe(source)
     },
   )
@@ -218,7 +221,7 @@ describe('whole-file English', () => {
     ['export default function () { return 1 }', 'default function'],
     ['declare function load(value: string): number;', 'with no body'],
     ['function load(): void;', 'Define function load with no parameters, with return type void, with no body'],
-    ['function outer() { function inner({x}, ...rest) { return x }; return inner }', 'Define function inner, taking an object with properties x; rest parameter'],
+    ['function outer() { function inner({x}, ...rest) { return x }; return inner }', 'Define function inner, taking an object with properties x; remaining arguments collected in rest'],
   ])('keeps function contracts while separating their bodies: %s', (source, expected) => {
     const items = rows(source)
     expect(items[0].kind).toBe('flow')
@@ -250,7 +253,7 @@ const workspaceScript = (name) => {
       source: { startLine: 1, endLine: 4 },
     })
     const definition = story.steps[1]
-    expect(definition).toMatchObject({ kind: 'flow', role: 'setup', text: 'Define arrow function workspaceScript, taking name' })
+    expect(definition).toMatchObject({ kind: 'flow', role: 'setup', text: 'Define arrow function workspaceScript, taking name, stored as a constant' })
     if (definition.kind !== 'flow') throw new Error('Expected a structured arrow-function definition')
     const outerLoop = definition.children[0]
     expect(outerLoop).toMatchObject({
@@ -364,7 +367,7 @@ for (const variant of ['missing template', 'empty template']) {
     ['const { value = 2, ...rest } = data', 'object pattern'], ['const values = [1, 2]', 'a list containing 1, 2'],
     ['const empty = []', 'an empty list'], ['const sum = a + b * c', '(b multiplied by c)'],
     ['const data = await load(1)', 'awaited result'], ['let value!: number', 'definitely assigned'],
-    ['using resource = acquire()', 'disposable constant'], ['export const value = 1', 'export'],
+    ['using resource = acquire()', 'automatically disposed resource'], ['export const value = 1', 'export'],
     ['const fn = (value: number) => value * 2', 'arrow function'],
     ['class Example { value = 1; get current() { return this.value } }', 'class'],
     ['interface Item { value: string }', 'interface'], ['type Item<T> = T | null', 'type'],
@@ -426,8 +429,8 @@ const nested = { a: { value }, list: [1, 2] };
 import {} from './setup';`)
     expect(text).toContain('an empty object')
     expect(text).toContain('Define asynchronous arrow function a, taking value of type number, with return type')
-    expect(text).toContain('rest parameter')
-    expect(text).toContain('with default number 1')
+    expect(text).toContain('remaining arguments collected in rest')
+    expect(text).toContain('defaulting to 1')
     expect(text).toContain('not (ready)')
     expect(text).toContain('Import no bindings from "./setup"')
     expect(text).toContain('shorthand property value')
@@ -465,8 +468,8 @@ test.beforeAll(() => { throw new Error('setup failed') });`)
     expect(english(source)).not.toBe('')
   })
 
-  it('keeps test headings focused on the title and retains optional call syntax', () => {
-    expect(rows(`test('case', (done): void => { done() })`).find((item) => item.role === 'test')?.text).toBe('Test: "case"')
+  it('keeps callback contracts in test headings and retains optional call syntax', () => {
+    expect(rows(`test('case', (done): void => { done() })`).find((item) => item.role === 'test')?.text).toBe('Test: "case"; receiving done; returning type void')
     const context = compileSemanticSource('example.ts', `handler?.();`)
     expect(sourceStatementText(context.sourceFile.statements[0])).toContain('optional')
     const defaults = parseSource('defaults.js', '({ value = 1 } = data)').sourceFile.statements[0] as ts.ExpressionStatement
@@ -484,8 +487,8 @@ for (const [key, value] of entries) { consume(key, value) }`)
     expect(text).toContain('Return 1')
     expect(text).toContain('array pattern')
     expect(text).toContain('(a plus b) plus c')
-    expect(text).toContain('assign `value` the value number 2')
-    expect(text).toContain('for each')
+    expect(text).toContain('the value assigned by setting value to 2')
+    expect(text).toContain('For each')
   })
 
   it('retains every action inside an authored step when reviewing the whole file', () => {
@@ -513,9 +516,9 @@ for (const [key, value] of entries) { consume(key, value) }`)
     ['expect(value).toBeTruthy()', 'value is truthy'],
     ['expect(value).toBe()', 'with no arguments'],
     ['expect(value).customMatcher(2)', 'custom'],
-    ['expect(value).toBe<Type>(2)', 'with type argument:'],
+    ['expect(value).toBe<Type>(2)', 'with type argument `Type`'],
     ['expect(value).toBe?.(2)', 'optional'],
-    ['return expect(value).toBe(2)', 'return'],
+    ['return expect(value).toBe(2)', 'Return'],
   ])('preserves assertion subjects, modifiers and options: %s', (source, expected) => {
     expect(english(source)).toContain(expected)
     expect(rows(source)[0].role).toBe('check')
@@ -523,12 +526,12 @@ for (const [key, value] of entries) { consume(key, value) }`)
 
   it('preserves dynamic it titles and initialized for-in bindings', () => {
     expect(english('it(`case ${id}`, () => {})')).toContain('Test: text formed by joining "case ", id')
-    expect(english('for (var key = 0 in values) { consume(key) }')).toContain('initialize it to number 0')
-    expect(english('for (const item: Item of items) { consume(item) }')).toContain('with type `Item`')
+    expect(english('for (var key = 0 in values) { consume(key) }')).toContain('function-scoped variable key set to 0')
+    expect(english('for (const item: Item of items) { consume(item) }')).toContain('of type `Item`')
   })
 
   it('retains source fallback for synthetic unsupported syntax and propagates translator defects', () => {
-    const context = compileSemanticSource('example.ts', ';')
+    const context = compileSemanticSource('example.ts', 'namespace Scope {}')
     const unsupported = { kind: ts.SyntaxKind.Bundle } as ts.Statement
     expect(storyCandidates([unsupported], context.sourceFile, context)).toEqual([])
     const failure = new Error('translation failed')

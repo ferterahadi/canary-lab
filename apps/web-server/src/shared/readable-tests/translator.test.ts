@@ -30,7 +30,11 @@ describe('translateReadableTest structure', () => {
       version: READABLE_TEST_VERSION,
       title: 'submits checkout',
       completeness: 'complete',
-      story: {
+      story: { steps: [
+        expect.objectContaining({ text: 'Call page.goto with "/checkout" and wait for it to finish', source: expect.objectContaining({ startLine: 21, endLine: 21, snippet: "await page.goto('/checkout')" }) }),
+        expect.objectContaining({ text: 'Call runSelectedAction with page and wait for it to finish', source: expect.objectContaining({ startLine: 22, endLine: 22, snippet: 'await runSelectedAction(page)' }) }),
+      ] },
+      summary: {
         steps: [
           {
             id: expect.stringMatching(/^rt_[a-f0-9]{12}$/),

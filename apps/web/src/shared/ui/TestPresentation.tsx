@@ -87,7 +87,7 @@ export function TestPresentation({
         <TestLanguageSwitch mode={mode} onChange={setMode} />
         {mode === 'english' && test.readable.completeness === 'partial' && (
           <span className="min-w-0 truncate text-[10px]" style={{ color: 'var(--text-muted)' }}>
-            Some syntax could not be translated
+            English representation is incomplete
           </span>
         )}
         <span

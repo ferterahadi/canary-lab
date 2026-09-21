@@ -271,8 +271,8 @@ describe('TypeScript syntax coverage', () => {
     }
 
     for (const [bodySource, text] of [
-      ['{ delete account.secret }', /Remove “secret” from account/],
-      ['{ count++ }', /Increase count by 1/],
+      ['{ delete account.secret }', /deleting account.secret/],
+      ['{ count++ }', /previous value before increasing count by 1/],
     ] as const) {
       const translated = translateReadableTest({ file: 'syntax-probe.ts', title: bodySource, startLine: 1, bodySource })
       expect(storyItems(translated.story?.steps).map((item) => item.text).join('\n')).toMatch(text)
@@ -288,14 +288,14 @@ describe('TypeScript syntax coverage', () => {
 
   it('numbers every executable statement family while leaving definitions classified', () => {
     const probes: Array<[kind: keyof typeof STATEMENT_SYNTAX, bodySource: string, text: RegExp]> = [
-      ['Block', '{ { submit() } }', /Send the request/],
-      ['VariableStatement', '{ const value = 1 }', /Set value to 1/],
-      ['ExpressionStatement', '{ submit() }', /Send the request/],
-      ['IfStatement', '{ if (ready) submit() }', /If ready is true/],
+      ['Block', '{ { submit() } }', /Call submit with no arguments/],
+      ['VariableStatement', '{ const value = 1 }', /Set constant value to 1/],
+      ['ExpressionStatement', '{ submit() }', /Call submit with no arguments/],
+      ['IfStatement', '{ if (ready) submit() }', /If ready is truthy/],
       ['DoStatement', '{ do { submit() } while (ready) }', /Run once/],
-      ['WhileStatement', '{ while (ready) { submit() } }', /While ready is true/],
+      ['WhileStatement', '{ while (ready) { submit() } }', /While ready is truthy/],
       ['ForStatement', '{ for (let index = 0; index < 1; index += 1) submit(index) }', /Repeat/],
-      ['ForInStatement', '{ for (const key in record) submit(key) }', /for each property key in record/i],
+      ['ForInStatement', '{ for (const key in record) submit(key) }', /For each enumerable property key in record/],
       ['ForOfStatement', '{ for (const value of values) submit(value) }', /for each value in values/i],
       ['ContinueStatement', '{ while (ready) { continue } }', /Skip to the next iteration/],
       ['BreakStatement', '{ while (ready) { break } }', /Stop this loop/],
@@ -303,9 +303,9 @@ describe('TypeScript syntax coverage', () => {
       ['WithStatement', '{ with (record) { submit() } }', /active scope/],
       ['SwitchStatement', "{ switch (mode) { case 'a': submit(); break } }", /Choose a path/],
       ['LabeledStatement', '{ outer: while (ready) { break outer } }', /Leave outer/],
-      ['ThrowStatement', "{ throw new Error('failed') }", /Fail with/],
+      ['ThrowStatement', "{ throw new Error('failed') }", /Throw a new Error with "failed"/],
       ['TryStatement', '{ try { submit() } catch { recover() } }', /Attempt these steps/],
-      ['DebuggerStatement', '{ debugger }', /Pause at the debugger statement/],
+      ['DebuggerStatement', '{ debugger }', /Pause here if a debugger is attached/],
     ]
 
     const covered = new Set<keyof typeof STATEMENT_SYNTAX>()

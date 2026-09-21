@@ -63,7 +63,9 @@ export function SourceComparisonTable({ review, rows, mode, change, emptySide, s
         </button>
         : <span key={step.id} className="cl-review-story-line" style={{ paddingLeft: `${depth * 12}px` }}><ReadableStoryText step={step} /></span>)}</span>
       : presentation.continued ? <span aria-label="Continued above">{'\u00a0'}</span>
-        : <ShikiSourceLine source={source} html={highlighted?.lines[line - 1]} />
+        : mode === 'english' && source.trim()
+          ? <span style={{ color: 'var(--semantic-attention)' }}>English unavailable · View code</span>
+          : <ShikiSourceLine source={source} html={highlighted?.lines[line - 1]} />
     const Tag = presentation.changes.size === 0 ? 'span' : side === 'before' ? 'del' : 'ins'
     const sourceContent = mode === 'english' && onSelectSource && !story && !presentation.continued && source.trim()
       ? <button type="button" className="cl-review-story-link" title={`Show ${side === 'before' ? 'Before' : 'After'} code at line ${line}`}
