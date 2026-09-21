@@ -9,6 +9,7 @@ const COMPARISON_OPERATORS = new Set([ts.SyntaxKind.EqualsEqualsToken, ts.Syntax
   ts.SyntaxKind.ExclamationEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.LessThanToken,
   ts.SyntaxKind.LessThanEqualsToken, ts.SyntaxKind.GreaterThanToken, ts.SyntaxKind.GreaterThanEqualsToken,
   ts.SyntaxKind.InKeyword, ts.SyntaxKind.InstanceOfKeyword])
+const SUPPORTED_FUNCTION_MODIFIERS = new Set([ts.SyntaxKind.AsyncKeyword, ts.SyntaxKind.ExportKeyword, ts.SyntaxKind.DefaultKeyword])
 
 export function sourceExpressionText(node: ts.Expression): string {
   if (ts.isStringLiteral(node)) return JSON.stringify(node.text)
@@ -33,6 +34,13 @@ export function sourceExpressionText(node: ts.Expression): string {
       ? `all items from ${sourceArgumentText(item.expression)}` : ts.isOmittedExpression(item) ? 'an empty slot' : sourceArgumentText(item)).join(', ')}` : 'an empty list'
   }
   if (ts.isSpreadElement(node)) return `each item from ${sourceArgumentText(node.expression)} as a separate argument`
+  if (ts.isNewExpression(node)) {
+    const typeArguments = node.typeArguments?.length
+      ? ` with type ${node.typeArguments.length === 1 ? 'argument' : 'arguments'} ${node.typeArguments.map((type) => renderEnglish(typeEnglish(type))).join(', ')}`
+      : ''
+    const arguments_ = node.arguments ?? []
+    return `a new ${sourceArgumentText(node.expression)}${typeArguments}${arguments_.length ? ` with ${arguments_.map(sourceArgumentText).join(', ')}` : ''}`
+  }
   if (ts.isCallExpression(node) && !node.questionDotToken) {
     return `the result of ${callTargetText(node.expression)}${callTypeArgumentsText(node)}${node.arguments.length ? ` with ${node.arguments.map(sourceArgumentText).join(', ')}` : '()'}`
   }
@@ -167,14 +175,40 @@ function sourceParameterText(node: ts.ParameterDeclaration): string {
 }
 
 export function sourceFunctionText(node: ts.FunctionDeclaration): string {
-  if (!node.name || node.typeParameters?.length || node.modifiers?.some((modifier) => modifier.kind !== ts.SyntaxKind.AsyncKeyword)) {
+  if (!node.name || node.typeParameters?.length || node.modifiers?.some((modifier) => !SUPPORTED_FUNCTION_MODIFIERS.has(modifier.kind))) {
     return renderEnglish(statementHeaderEnglish(node))
   }
   const asynchronous = node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)
-  return `Define ${asynchronous ? 'asynchronous ' : ''}${node.asteriskToken ? 'generator ' : ''}function ${node.name.text}`
+  const exported = node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+  const defaultExport = node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword)
+  return `Define ${exported ? 'exported ' : ''}${defaultExport ? 'default ' : ''}${asynchronous ? 'asynchronous ' : ''}${node.asteriskToken ? 'generator ' : ''}function ${node.name.text}`
     + (node.parameters.length ? `, taking ${node.parameters.map(sourceParameterText).join('; ')}` : ' with no parameters')
     + (node.type ? `, with return type ${renderEnglish(typeEnglish(node.type))}` : '')
     + (node.body ? '' : ', with no body')
+}
+
+export function sourceFunctionBinding(node: ts.Statement): {
+  callback: ts.ArrowFunction | ts.FunctionExpression
+  text: string
+} | undefined {
+  if (!ts.isVariableStatement(node) || node.modifiers?.length
+    || node.declarationList.flags & ts.NodeFlags.Using
+    || node.declarationList.declarations.length !== 1) return undefined
+  const binding = node.declarationList.declarations[0]
+  if (!ts.isIdentifier(binding.name) || binding.exclamationToken || !binding.initializer
+    || (!ts.isArrowFunction(binding.initializer) && !ts.isFunctionExpression(binding.initializer))) return undefined
+  const callback = binding.initializer
+  const conciseArrow = ts.isArrowFunction(callback) && !callback.typeParameters?.length
+  const parameters = callback.parameters.length
+    ? `, taking ${callback.parameters.map(sourceParameterText).join('; ')}`
+    : ' with no parameters'
+  const callbackType = callback.type ? `, with return type ${renderEnglish(typeEnglish(callback.type))}` : ''
+  return {
+    callback,
+    text: conciseArrow
+      ? `Define ${callback.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ? 'asynchronous ' : ''}arrow function ${binding.name.text}${parameters}${callbackType}${binding.type ? `, with variable type ${renderEnglish(typeEnglish(binding.type))}` : ''}`
+      : `Define ${binding.name.text} as ${sourceCallbackHeaderText(callback)}${binding.type ? `, with variable type ${renderEnglish(typeEnglish(binding.type))}` : ''}`,
+  }
 }
 
 export function sourceConditionText(node: ts.Expression): string {
@@ -186,6 +220,27 @@ export function sourceConditionText(node: ts.Expression): string {
 export function sourceLoopText(node: ts.ForStatement | ts.ForInStatement | ts.ForOfStatement | ts.WhileStatement | ts.DoStatement): string {
   if (ts.isWhileStatement(node)) return `While ${sourceConditionText(node.expression)}; this may run zero times`
   if (ts.isDoStatement(node)) return `Run once, then repeat while ${sourceConditionText(node.expression)}`
+  if (ts.isForStatement(node)) {
+    const initializerNode = node.initializer
+    const declaration = initializerNode && ts.isVariableDeclarationList(initializerNode)
+      && initializerNode.declarations.length === 1 ? initializerNode.declarations[0] : undefined
+    if (initializerNode && ts.isVariableDeclarationList(initializerNode)
+      && (!declaration || !ts.isIdentifier(declaration.name) || declaration.exclamationToken || !declaration.initializer)) {
+      return renderEnglish(statementHeaderEnglish(node))
+    }
+    const initializer = declaration?.initializer && initializerNode && ts.isVariableDeclarationList(initializerNode)
+      ? `${initializerNode.flags & ts.NodeFlags.Const ? 'constant' : initializerNode.flags & ts.NodeFlags.Let ? 'variable' : 'function-scoped variable'} ${declaration.name.getText()} set to ${sourceExpressionText(declaration.initializer)}`
+      : initializerNode && !ts.isVariableDeclarationList(initializerNode) ? sourceExpressionText(initializerNode) : undefined
+    const update = node.incrementor && (ts.isBinaryExpression(node.incrementor)
+      && node.incrementor.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      ? `set ${sourceExpressionText(node.incrementor.left)} to ${sourceExpressionText(node.incrementor.right)}`
+      : sourceExpressionText(node.incrementor))
+    return [
+      node.condition ? `Repeat while ${sourceConditionText(node.condition)}` : 'Repeat until stopped',
+      initializer ? `starting with ${initializer}` : undefined,
+      update ? `after each pass, ${update}` : undefined,
+    ].filter((part): part is string => Boolean(part)).join('; ')
+  }
   if ((ts.isForOfStatement(node) || ts.isForInStatement(node)) && ts.isVariableDeclarationList(node.initializer)) {
     const bindings = node.initializer.declarations
     if (bindings.length === 1 && ts.isIdentifier(bindings[0].name) && !bindings[0].type && !bindings[0].initializer && !(node.initializer.flags & ts.NodeFlags.Using)) {

@@ -1,5 +1,6 @@
 import type { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
 import type { PlaywrightListSpawner } from '../../runs/logic/playwright-list'
+import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 // The dependency contract for the features routes, in its own module so the
 // sub-route files (`test-review.ts`) can type their `deps` without importing
@@ -19,4 +20,5 @@ export interface FeaturesRouteDeps {
   // commit routes are live. Mutations emit store change events which the server
   // bridges to a `tests-dirty-changed` WorkspaceEvent (no direct publish here).
   dirtySpecStore?: DirtySpecStore
+  workspaceEvents?: WorkspaceEventPublisher
 }

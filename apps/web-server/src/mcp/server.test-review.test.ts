@@ -1,6 +1,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { execFileSync } from 'child_process'
 import Fastify from 'fastify'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
@@ -23,6 +24,12 @@ async function harness(answer: (live: string) => { action: 'accept' | 'cancel' |
   const { ctx } = makeHealLoopContext({ root, opts: { runStateSink: store } })
   fs.mkdirSync(path.join(ctx.feature.featureDir, 'e2e'), { recursive: true })
   fs.writeFileSync(path.join(ctx.feature.featureDir, 'e2e/a.spec.ts'), "test('a', () => expect(1).toBe(1))\n")
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: ctx.feature.featureDir, stdio: 'pipe' })
+  git('init', '-q')
+  git('config', 'user.email', 'test@example.com')
+  git('config', 'user.name', 'Canary Test')
+  git('add', '.')
+  git('commit', '-qm', 'initial')
   fs.mkdirSync(ctx.paths.runDir, { recursive: true })
   writeManifest(ctx.paths.manifestPath, { runId: ctx.runId, feature: 'demo', featureDir: ctx.feature.featureDir, startedAt: 'now', status: 'healing', services: [], healCycles: 1, repoPaths: ['/editable-app'] })
   snapshotSuite(ctx)
@@ -35,7 +42,7 @@ async function harness(answer: (live: string) => { action: 'accept' | 'cancel' |
     runId: ctx.runId, stop: async () => {},
     pauseAndHeal: async () => ({ ok: false, reason: 'already-healing' }),
     cancelHeal: async () => ({ ok: false, reason: 'no-agent-running' }),
-    adoptSpecEdits: (revision) => adoptSpecEdits(ctx, revision), restoreSpecEdits: (revision) => restoreSpecEdits(ctx, revision),
+    adoptSpecEdits: (revision, gitReceipt) => adoptSpecEdits(ctx, revision, gitReceipt), restoreSpecEdits: (revision) => restoreSpecEdits(ctx, revision),
   })
   const events: string[] = []
   store.on('event', (event) => events.push(event.kind))
@@ -68,6 +75,18 @@ async function harness(answer: (live: string) => { action: 'accept' | 'cancel' |
 }
 
 describe('human test review through the real MCP and REST path', () => {
+  it('lets a form-capable client observe a browser decision without opening another question', async () => {
+    const { call, ctx, app, store, reply } = await harness(() => ({ action: 'cancel' }), true, true)
+    const review = await call('get_test_review', { runId: ctx.runId })
+    const before = store.listenerCount('event')
+    const waiting = call('review_test_changes', { runId: ctx.runId, review_revision: review.review_revision, browser_wait_token: review.browser_wait_token, wait_for_decision: true })
+    await vi.waitFor(() => expect(store.listenerCount('event')).toBeGreaterThan(before))
+    const accepted = await app.inject({ method: 'POST', url: `/api/runs/${ctx.runId}/accept-test-review`, payload: { expectedRevision: review.review_revision } })
+    expect(accepted.statusCode).toBe(202)
+    expect(await waiting).toMatchObject({ status: 'adopted', decision: 'accepted', git: { status: 'committed' } })
+    expect(reply).not.toHaveBeenCalled()
+  })
+
   it.each(['adopted', 'restored'] as const)('resumes a non-eliciting agent when the human chooses %s in the browser', async (decision) => {
     const { call, ctx, app, store, reply } = await harness(() => ({ action: 'cancel' }), false, false)
     const review = await call('get_test_review', { runId: ctx.runId })
@@ -78,8 +97,8 @@ describe('human test review through the real MCP and REST path', () => {
     const listeners = store.listenerCount('event')
     const pending = call('review_test_changes', { ...args, browser_wait_token: fallback.browser_wait_token, wait_for_decision: true })
     await vi.waitFor(() => expect(store.listenerCount('event')).toBeGreaterThan(listeners))
-    const action = decision === 'adopted' ? 'adopt-spec-edits' : 'restore-spec-edits'
-    expect((await app.inject({ method: 'POST', url: `/api/runs/${ctx.runId}/${action}` })).statusCode).toBe(decision === 'adopted' ? 202 : 200)
+    const action = decision === 'adopted' ? 'accept-test-review' : 'restore-spec-edits'
+    expect((await app.inject({ method: 'POST', url: `/api/runs/${ctx.runId}/${action}`, payload: { expectedRevision: review.review_revision } })).statusCode).toBe(decision === 'adopted' ? 202 : 200)
     expect(await pending).toMatchObject({ status: decision, nextSteps: ['wait_for_heal_task'] })
     expect(reply).not.toHaveBeenCalled()
     expect(store.listenerCount('event')).toBe(listeners)
@@ -112,14 +131,18 @@ describe('human test review through the real MCP and REST path', () => {
   })
 
   it.each([false, true])('adopts the reviewed bytes and emits run updates after acceptance (legacy=%s)', async (legacy) => {
-    const { call, ctx, changed, store, events, requests, reply } = await harness(() => ({ action: 'accept', content: { choice: 'Adopt and rerun' } }), legacy)
+    const { call, ctx, changed, store, events, requests, reply } = await harness(() => ({ action: 'accept', content: { choice: 'Accept & commit' } }), legacy)
     const review = await call('get_test_review', { runId: ctx.runId })
     expect(review.patch).toContain('+test')
     expect(fs.readFileSync(review.patchPath, 'utf8')).toBe(review.patch)
     expect(requests).toEqual(['GET'])
     // The exact regression: an agent's first wait must still ask the human.
     const result = await call('review_test_changes', { runId: ctx.runId, review_revision: review.review_revision, wait_for_decision: true })
-    expect(result).toMatchObject({ status: 'adopted', rerun: 'signalled' })
+    expect(result).toMatchObject({
+      status: 'adopted', decision: 'accepted', review_revision: review.review_revision,
+      git: { status: 'committed', commit: expect.stringMatching(/^[a-f0-9]{40}$/) },
+      execution: { status: 'rerun-requested', runId: ctx.runId },
+    })
     expect(reply).toHaveBeenCalledTimes(1)
     expect(fs.readFileSync(path.join(ctx.suiteDir, 'e2e/a.spec.ts'), 'utf8')).toBe(changed)
     expect(store.get(ctx.runId)?.manifest.specEdits?.adopted).toMatchObject([{ by: 'human', reviewRevision: review.review_revision }])
@@ -131,7 +154,7 @@ describe('human test review through the real MCP and REST path', () => {
     expect(requests.filter((method) => method === 'POST')).toHaveLength(1)
   })
 
-  it.each(['Adopt and rerun', 'Restore recorded files'])('elicits a fixture-only change and records %s without browser interaction', async (choice) => {
+  it.each(['Accept & commit', 'Restore recorded files'])('elicits a fixture-only change and records %s without browser interaction', async (choice) => {
     const { call, ctx, store, reply } = await harness(() => ({ action: 'accept', content: { choice } }))
     fs.copyFileSync(path.join(ctx.suiteDir, 'e2e/a.spec.ts'), path.join(ctx.feature.featureDir, 'e2e/a.spec.ts'))
     fs.writeFileSync(path.join(ctx.suiteDir, 'e2e/fixture.ts'), 'export const ready = false\n')
@@ -139,7 +162,7 @@ describe('human test review through the real MCP and REST path', () => {
     const review = await call('get_test_review', { runId: ctx.runId })
     expect(review.files).toEqual([{ file: 'e2e/fixture.ts', change: 'modified' }])
     const result = await call('review_test_changes', { runId: ctx.runId, review_revision: review.review_revision, wait_for_decision: true })
-    const decision = choice === 'Adopt and rerun' ? 'adopted' : 'restored'
+    const decision = choice === 'Accept & commit' ? 'adopted' : 'restored'
     expect(result).toMatchObject({ status: decision, nextSteps: ['wait_for_heal_task'] })
     expect(reply).toHaveBeenCalledTimes(1)
     expect(store.get(ctx.runId)?.manifest.specEdits?.reviewDecisions).toContainEqual(expect.objectContaining({ revision: review.review_revision, decision }))
@@ -159,7 +182,7 @@ describe('human test review through the real MCP and REST path', () => {
   it('refuses stale acceptance after the user edits the file while reviewing', async () => {
     const { call, ctx, requests } = await harness((live) => {
       fs.appendFileSync(live, '// changed after review\n')
-      return { action: 'accept', content: { choice: 'Adopt and rerun' } }
+      return { action: 'accept', content: { choice: 'Accept & commit' } }
     })
     const review = await call('get_test_review', { runId: ctx.runId })
     expect(await call('review_test_changes', { runId: ctx.runId, review_revision: review.review_revision })).toMatchObject({ status: 'needs-input', reason: expect.stringContaining('changed') })

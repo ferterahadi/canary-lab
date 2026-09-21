@@ -219,8 +219,14 @@ state. The server owns writes; client tabs subscribe to `notifications-changed` 
 refetch on reconnect, with a bounded reconciliation for a dropped event that does
 not disconnect the socket. The dialog is addressable as `?dialog=notifications`.
 
-Flight attention transitions and test changes that block an active run create
-messages even when the browser is closed. A possible test weakening also stays
+Flight attention transitions and test changes that block an active run or a fresh
+start after an ended run create messages even when the browser is closed. Terminal
+blockers use the same byte-level review gate as run start, including exact-revision
+approval and restoration, rather than relying on a pending-file count in the run
+index. Each inbox read also reconciles these sources; the open client's ten-second
+reconciliation repairs missed events. An unavailable suite or historical snapshot
+preserves its existing review alert without preventing other features from updating.
+A possible test weakening also stays
 in the inbox as an advisory integrity review after the run ends. Ordinary edits,
 coverage freshness, verification readiness, and failed-run evidence remain on
 their owning suite, Coverage, Flight, and run surfaces instead of creating inbox
@@ -237,8 +243,8 @@ severity updates do not create a second active message. Manual note creation is 
 Notification actions navigate to the relevant flight or test
 review; they never change the run verdict or adopt test edits themselves.
 
-Inbox eligibility and toast eligibility are separate. A blocked Flight or active
-run review can raise the sticky toast; an advisory weakening hint remains in the
+Inbox eligibility and toast eligibility are separate. A blocked Flight or pending
+run review, including a terminal review that gates a fresh start, can raise the sticky toast; an advisory weakening hint remains in the
 durable inbox without interrupting the user. A retained item becomes toast-eligible
 again when the same issue starts blocking work, which re-arms it as unread. Every
 toast therefore represents work that cannot continue without the user.
@@ -294,13 +300,18 @@ and requirement labels also read syntax metadata, without translating test bodie
 The English viewer compiles shared helpers once per source extraction and rebuilds
 them on the next edit. Possible weakening also uses
 an amber advisory cue.
-Commit names the selected suite and counts all its changed test files.
-A successful commit leaves a saved receipt; the uncommitted review cue clears on
-live refresh. Differences from a selected run remain independently inspectable:
-saving in Git never validates new tests or changes an existing run verdict.
-An active run with pending edits asks whether to adopt the exact revision and rerun or restore it. A terminal passed, failed, or aborted run instead offers exact-revision approval for a new run or restoration; approval preserves the old snapshot and verdict, and the new run must execute before those bytes have test evidence. A failed step stays visible for recovery. MCP clients can call
+The footer has two human decisions only: **Restore recorded files** and
+**Accept & commit**. It adds no lifecycle explanation, tooltip, or confirmation.
+Both the browser and MCP call the same revision-bound server operation. Acceptance
+commits exactly the disclosed files and stores a durable receipt containing the
+review revision, file scope, commit, and execution consequence. For an active run
+it also adopts the revision and requests a rerun; for a terminal passed, failed,
+or aborted run it authorizes those bytes for a new run without changing the old
+snapshot or verdict. Suite-only acceptance records no run action. A failed step
+stays visible for recovery. An arbitrary Git commit can clear file dirtiness but
+never creates this human approval receipt. MCP clients can call
 `get_test_review` to display the exact snapshot comparison, then
-`review_test_changes` to request adoption or restoration through human elicitation
+`review_test_changes` to request either decision through human elicitation
 inside the agent session. The UI is optional inspection, not a required control
 surface. The comparison includes fixtures and supporting files without counting
 them as changed test declarations. The review
@@ -309,18 +320,20 @@ excluded exactly as in the snapshot. Engine-owned coverage state is excluded as
 runtime metadata. Approval is bound to both trees by SHA-256.
 A staged copy is checked before replacing the snapshot, so stale answers and
 copy failures cannot silently adopt a different revision. Cancellation leaves
-work pending. A first call with `wait_for_decision:true` still elicits instead of
-silently waiting for a question that was never presented. Unsupported clients
-receive an explicit capability limitation and a session/run/revision-bound
-`browser_wait_token`; only a human-chosen browser fallback uses that token with
-`wait_for_decision:true`. This read-only, bounded wait
+work pending. A call with `wait_for_decision:true` but no valid wait token still
+elicits instead of silently waiting for a question that was never presented.
+`get_test_review` supplies a session/run/revision-bound `browser_wait_token` to
+every client, including clients that support forms. When the human decides in
+the browser, the original client can observe that decision with the token and
+`wait_for_decision:true`. Unsupported clients receive an explicit capability
+limitation rather than a claim that a question was presented. This read-only, bounded wait
 subscribes to run-store events and returns the persisted human decision for the
 review revision. Clients repeat `still_waiting` until the browser decision arrives;
 a reconnect reads the same receipt. The normal elicited path returns that receipt
 without any browser click; retries do not apply the decision twice. Restoration
 checks the reviewed revision before changing files and rejects symlink paths.
 A clean Git tree is never treated as approval.
-Active adoption signals a rerun. Terminal approval is carried into fresh-run
+Active acceptance signals a rerun. Terminal acceptance is carried into fresh-run
 snapshot capture, rechecked before and during the copy, and recorded as provenance
 on the new run. Neither decision changes a verdict into a pass. Editing opens the existing
 editor; validation uses the existing Run flow. Closing Services leaves sessions
@@ -861,6 +874,19 @@ link, or the per-repo reason there is none.
   `start_run` reuses a matching active run even with `force_new`. Terminal resumes
   preserve the original suite snapshot and review history; fresh starts cannot
   bypass outstanding test review.
+- A blocked fresh start returns structured `test_review_required` metadata and a
+  durable request under `logs/run-requests/`, separate from the revision-bound
+  review receipt on the source run. The request preserves launch arguments and
+  internal/external ownership. Acceptance or restoration makes it ready; Canary
+  dispatches internal requests, while `start_run(request_id, session_id)` resumes
+  an external request only through its original client. The review surface never
+  chooses execution ownership. Repeated consumption returns the same run, and a
+  reserved run ID supports crash readback without speculative duplicate starts.
+  Run events provide the fast path; bounded reconciliation recovers missed
+  receipt events. Every client can obtain a read-only review wait token, including
+  clients with elicitation forms; a reconnect refreshes that token against the
+  persisted decision. Closing the viewer leaves the request pending; cancelling
+  the request prevents continuation without undoing the shared review decision.
 - **Steering skill-less clients**: external clients act on the initialize/discovery
   instructions + tool *results*, not the Canary Lab skill. The source text lives in
   `apps/web-server/prompts/mcp-*-instructions.md`; `mcp/instructions.ts` loads it into

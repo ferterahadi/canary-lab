@@ -10,12 +10,16 @@ import type { ExternalHealBroker } from '../logic/heal/external-heal-broker'
 import { type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { ExternalHealAgentRequest } from './runs-route-support'
 import type { GettingStartedSessionStore } from '../../config/logic/getting-started-session'
+import type { DirtySpecStore } from '../logic/dirty-specs/store'
+import type { RunStartRequests } from '../logic/run-start-requests'
 
 export { compareActiveRuns } from './runs-route-support'
 export type { ExternalHealAgentRequest } from './runs-route-support'
 
 /** Per-start switches that are neither a heal nor an isolation choice. */
 export interface StartRunOptions {
+  /** Reserved by a durable request before dispatch, enabling crash readback. */
+  runId?: string
   /** Fast-forward the feature's repo checkouts to their upstream tips before
    *  booting. `true` = every repo, `false` = none; unset defers to each repo's
    *  `track: 'upstream'` config. A dirty, diverged or in-use checkout refuses
@@ -25,6 +29,7 @@ export interface StartRunOptions {
 }
 
 export interface RunsRouteDeps {
+  runRequests?: RunStartRequests
   featuresDir: string
   projectRoot?: string
   /** Single source of truth for run state. Routes read + mutate exclusively
@@ -64,6 +69,7 @@ export interface RunsRouteDeps {
   isWorktreeOwnerActive?(kind: 'run' | 'benchmark', id: string): boolean
   broker?: Pick<ExternalHealBroker, 'claim'>
   workspaceEvents?: WorkspaceEventPublisher
+  dirtySpecStore?: DirtySpecStore
   gettingStarted?: GettingStartedSessionStore
   restartHeal?(runId: string, text: string): Promise<RestartHealResult>
   restartRun?(runId: string): Promise<RestartRunResult>

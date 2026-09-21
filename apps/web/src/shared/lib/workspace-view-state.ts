@@ -227,7 +227,7 @@ export function readPersistedView(): PersistedView {
     // view itself, dropped there.
     const returnFlight = v === 'flights' ? null : params.get('from') || null
     const change = params.get('reviewChange')
-    const reviewFocus: ReviewFocus | undefined = dialog === 'tests-review' && params.get('reviewFile') ? { ...(params.get('reviewBase') === 'run' ? { baseline: 'run' as const, ...(change === 'added' || change === 'changed' || change === 'removed' ? { change, ...(params.get('reviewTest') ? { test: params.get('reviewTest')! } : {}) } : {}) } : {}), file: params.get('reviewFile')!, line: /^[1-9]\d*$/.test(params.get('reviewLine') ?? '') ? Number(params.get('reviewLine')) : undefined, mode: params.get('reviewMode') === 'code' ? 'code' as const : 'english' as const } : undefined
+    const reviewFocus: ReviewFocus | undefined = dialog === 'tests-review' && (params.get('reviewFile') || params.get('reviewBase') === 'run' || params.get('reviewMode')) ? { ...(params.get('reviewBase') === 'run' ? { baseline: 'run' as const, ...(change === 'added' || change === 'changed' || change === 'removed' ? { change, ...(params.get('reviewTest') ? { test: params.get('reviewTest')! } : {}) } : {}) } : {}), ...(params.get('reviewFile') ? { file: params.get('reviewFile')! } : {}), line: /^[1-9]\d*$/.test(params.get('reviewLine') ?? '') ? Number(params.get('reviewLine')) : undefined, mode: params.get('reviewMode') === 'code' ? 'code' as const : 'english' as const } : undefined
     const review = reviewFocus ? { reviewFocus } : {}
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.

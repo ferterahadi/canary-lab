@@ -10,6 +10,7 @@ import {
   type DirtySpec,
   type SpecHashes,
 } from './detect'
+import type { TestReviewReceipt } from '../../../../../../../shared/test-review'
 
 // Feature-scoped, file-backed store of test-file integrity ("dirty") state. One
 // record per feature, the single source of truth both the UI and the MCP run
@@ -39,6 +40,8 @@ export interface DirtySpecRecord {
   message: string
   /** When the current status was entered (ISO). */
   since: string
+  /** Suite-only human decisions. A Git commit by itself never creates one. */
+  reviewReceipts?: TestReviewReceipt[]
 }
 
 export interface DirtySpecStoreEvent {
@@ -196,6 +199,19 @@ export class DirtySpecStore {
     const withApproved: DirtySpecRecord = { ...rec, approvedHashes, approvedTestHashes }
     const { status, dirtySpecs } = await computeDirty(featureDir, withApproved)
     return this.saveWithDirty(withApproved, status, dirtySpecs)
+  }
+
+  reviewReceipt(featureId: string, revision: string): TestReviewReceipt | undefined {
+    return this.get(featureId)?.reviewReceipts?.find((receipt) => receipt.review_revision === revision)
+  }
+
+  recordReviewReceipt(featureId: string, receipt: TestReviewReceipt): DirtySpecRecord {
+    const rec = this.load(featureId)
+    const previous = rec.reviewReceipts ?? []
+    const reviewReceipts = [...previous.filter((item) => item.review_revision !== receipt.review_revision), receipt]
+    const next = { ...rec, reviewReceipts }
+    this.store.save(next)
+    return next
   }
 
   remove(featureId: string): void {

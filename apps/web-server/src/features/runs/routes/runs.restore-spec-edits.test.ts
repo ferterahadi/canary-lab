@@ -71,6 +71,6 @@ describe('POST /api/runs/:runId/restore-spec-edits', () => {
     registry.set('r1', stub(() => ({ ok: false, reason })))
     const res = await app.inject({ method: 'POST', url: '/api/runs/r1/restore-spec-edits' })
     expect(res.statusCode).toBe(409)
-    expect(res.json()).toEqual({ reason })
+    expect(res.json()).toEqual({ reason, error: `The recorded files could not be restored: ${reason}. Review the latest version and try again.` })
   })
 })

@@ -2,6 +2,7 @@ import { type RunManifest } from './runtime/manifest'
 import { reapStaleRuns, removeRunFromHistory } from './run-cleanup'
 import { getRunDetail, readRunSummary } from './run-detail'
 import { RunStore, listRuns } from './run-store'
+import type { TestReviewGitReceipt } from '../../../../../../shared/test-review'
 
 // `RunStore` is the single mutator for everything the runs feature persists:
 // `logs/runs/<runId>/manifest.json`, `logs/runs/index.json`, and the per-run
@@ -55,7 +56,7 @@ export interface OrchestratorLike {
   cancelHeal(): Promise<OrchestratorCancelHealResult>
   /** A human adopts the live spec edits into the run: re-snapshot, re-baseline,
    *  rerun. Human-only by construction — reached from the HTTP route alone. */
-  adoptSpecEdits?(expectedRevision?: string): Promise<OrchestratorAdoptSpecEditsResult>
+  adoptSpecEdits?(expectedRevision?: string, git?: TestReviewGitReceipt): Promise<OrchestratorAdoptSpecEditsResult>
   /** Includes in-memory approval signals, not just files awaiting the watcher. */
   isWaitingForHealSignal?(): boolean
   /** A human puts the live specs back to what the run executed. Human-only by

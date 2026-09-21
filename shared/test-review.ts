@@ -1,6 +1,43 @@
 import type { ReadableTest, ReadableTestStory } from './readable-tests/types'
 import type { SpecDiff } from './verification-strength/types'
 
+export type RunRequestOwner = { kind: 'internal' } | {
+  kind: 'external'
+  sessionId: string
+  clientKind: string
+  conversationName?: string
+}
+
+/** Approval belongs to the reviewed bytes; continuation belongs to the client
+ * that requested execution. Opening a review never transfers that ownership. */
+export interface RunStartRequest {
+  requestId: string
+  feature: string
+  owner: RunRequestOwner
+  status: 'awaiting-review' | 'ready' | 'starting' | 'started' | 'queued' | 'cancelled' | 'failed'
+  version: number
+  createdAt: string
+  updatedAt: string
+  review: { runId: string; revision: string }
+  runId?: string
+  error?: string
+}
+
+export interface TestReviewRequiredInfo {
+  type: 'test_review_required'
+  error: string
+  feature: string
+  runId: string
+  review_revision: string
+  changedFileCount: number
+  reviewUrl: string
+  request?: RunStartRequest
+}
+
+export function testReviewUrl(feature: string, runId: string): string {
+  return `/?${new URLSearchParams({ feature, run: runId, dialog: 'tests-review', reviewBase: 'run', reviewMode: 'code' })}`
+}
+
 export interface VersionTest {
   file: string
   name: string
@@ -32,6 +69,28 @@ export interface RunTestReview {
   nextAction: 'rerun-current' | 'start-new-run' | 'restore-or-leave' | 'none'
   patchPath?: string
   patch?: string
+  receipt?: TestReviewReceipt
+}
+
+export interface TestReviewGitReceipt {
+  status: 'committed' | 'already-committed' | 'not-requested'
+  commit?: string
+}
+
+export type TestReviewExecutionReceipt =
+  | { status: 'rerun-requested'; runId: string }
+  | { status: 'new-run-required'; runId: string }
+  | { status: 'none' }
+
+/** Durable result of one explicit human decision for one exact review. Git
+ * state alone never creates this receipt; only the review decision routes do. */
+export interface TestReviewReceipt {
+  decision: 'accepted' | 'restored'
+  review_revision: string
+  files: string[]
+  at: string
+  git: TestReviewGitReceipt
+  execution: TestReviewExecutionReceipt
 }
 
 /** A human decision about one exact run-snapshot versus live-suite revision. */
@@ -39,6 +98,15 @@ export interface TestReviewDecision {
   at: string
   revision: string
   decision: 'adopted' | 'approved-for-new-run' | 'restored'
+  receipt?: TestReviewReceipt
+}
+
+export interface FeatureTestReview {
+  feature: string
+  baseline: 'head'
+  review_revision: string
+  files: Array<{ file: string; change: 'added' | 'deleted' | 'modified' }>
+  receipt?: TestReviewReceipt
 }
 
 /** Exact terminal-run approval carried into the new run that executes it. */

@@ -5,6 +5,7 @@ import { flightStageLabel } from '../../../../../shared/flights/stage-labels'
 import type { NotificationSource } from '../../../../../shared/notifications/types'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
 import type { StrengthVerdict } from '../../../../../shared/verification-strength/types'
+import type { TestReviewRequiredInfo } from '../../../../../shared/test-review'
 
 interface TestChangeRecord {
   featureId: string
@@ -52,11 +53,18 @@ export function flightNotificationSources(flights: FlightIndexEntry[]): Notifica
 
 /** One test-change topic per suite, independent of coverage freshness. A blocked
  * run supplies the review target; resolving coverage must never dismiss edits. */
-export function testReviewNotificationSources(runs: ReviewRun[], changes: TestChangeRecord[] = []): NotificationSource[] {
+export function testReviewNotificationSources(runs: ReviewRun[], changes: TestChangeRecord[] = [], reviews: TestReviewRequiredInfo[] = []): NotificationSource[] {
   const changesByFeature = new Map(changes.map((record) => [record.featureId, record]))
   const pendingRunByFeature = new Map<string, ReviewRun>()
   for (const run of runs) {
     if (awaitsTestReview(run) && !pendingRunByFeature.has(run.feature)) pendingRunByFeature.set(run.feature, run)
+  }
+  for (const review of reviews) {
+    if (!pendingRunByFeature.has(review.feature)) pendingRunByFeature.set(review.feature, {
+      runId: review.runId, feature: review.feature,
+      status: runs.find((run) => run.runId === review.runId)?.status ?? 'aborted',
+      pendingSpecEdits: review.changedFileCount,
+    })
   }
   const features = new Set([...changesByFeature.keys(), ...pendingRunByFeature.keys()])
 
@@ -76,7 +84,7 @@ export function testReviewNotificationSources(runs: ReviewRun[], changes: TestCh
       ...(attention ? { message: {
         title: weaker ? `${feature}: possible test weakening` : `${feature}: tests changed`,
         body: run
-          ? `${pending} test file${pending === 1 ? '' : 's'} changed after this run started. ${weaker ? 'A check found a possible weakening. This hint does not change the run result. ' : ''}Review the changes to continue the run.`
+          ? `${pending} test file${pending === 1 ? '' : 's'} changed after this run started. ${weaker ? 'A check found a possible weakening. This hint does not change the run result. ' : ''}${isActiveRunStatus(run.status) ? 'Review the changes to continue the run.' : 'Review the changes before starting another run.'}`
           : `${pending} test file${pending === 1 ? '' : 's'} changed. ${weaker ? 'A check found a possible weakening. This hint does not change the run result. ' : ''}Compare the test versions and review the changes.`,
         severity: weaker ? 'danger' as const : 'warning' as const,
         toast: blocking,

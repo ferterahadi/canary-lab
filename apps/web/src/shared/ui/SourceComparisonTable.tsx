@@ -92,7 +92,11 @@ export function SourceComparisonTable({ review, rows, mode, change, emptySide, s
   // Match the two-character source-number gutter used by `TestCodeBlock`.
   // Wider source locations still grow the gutter instead of shifting code over it.
   const gutterWidth = Math.max(2, ...displayRows.flatMap((row) => [String(row.beforeLine ?? '').length, String(row.afterLine ?? '').length]))
-  return <div className="cl-review-source-canvas" style={{ background: after?.canvas.bg ?? before?.canvas.bg, '--review-gutter-width': `${gutterWidth}ch` } as CSSProperties}>
+  return <div className="cl-review-source-canvas" style={{
+    background: after?.canvas.bg ?? before?.canvas.bg,
+    '--code-comment': after?.canvas.comment ?? before?.canvas.comment ?? 'var(--text-muted)',
+    '--review-gutter-width': `${gutterWidth}ch`,
+  } as CSSProperties}>
     <ComparisonTable rows={displayRows} beforeLabel={review.baseline === 'run-start' ? 'Recorded tests' : 'Committed tests · Git HEAD'}
       afterLabel="Current source" ariaLabel="Full test comparison" scrollRef={scrollRef} />
   </div>

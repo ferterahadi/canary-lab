@@ -186,6 +186,15 @@ it('includes a fixture-only change in the comparison and exposes its complete re
   fs.writeFileSync(path.join(suite, 'envsets/secret.env'), 'PRIVATE')
   expect((await get('file=envsets/secret.env&runId=run-1')).statusCode).toBe(400)
 })
+it('marks a spec whose reviewed bytes changed even when its test declaration did not', async () => {
+  saveSnapshot()
+  fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), before.replace("test('reads own scope'", "// reviewed setup note\ntest('reads own scope'"))
+  const comparison = (await app.inject('/api/features/alpha/test-source-comparison?runId=run-1')).json()
+  expect(comparison).toMatchObject({
+    differences: [{ file: 'e2e/a.spec.ts', affectedTests: [] }],
+    changes: { added: [], changed: [], removed: [] },
+  })
+})
 it('leaves generated coverage integrity state out of the human comparison', async () => {
   const dir = saveSnapshot()
   const file = 'docs/_coverage-state.json'

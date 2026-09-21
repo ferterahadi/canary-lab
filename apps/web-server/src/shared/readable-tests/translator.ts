@@ -100,6 +100,23 @@ function sourceFor(node: ts.Node, sourceFile: ts.SourceFile, file: string, lineO
   }
 }
 
+function sourceForRange(
+  range: { start: number; end: number },
+  sourceFile: ts.SourceFile,
+  file: string,
+  lineOffset: number,
+): ReadableSource {
+  const end = Math.max(range.start, range.end - 1)
+  const startPosition = sourceFile.getLineAndCharacterOfPosition(range.start)
+  const endPosition = sourceFile.getLineAndCharacterOfPosition(end)
+  return {
+    file,
+    startLine: lineOffset + startPosition.line,
+    endLine: lineOffset + endPosition.line,
+    snippet: formatSourceSnippetForDisplay(sourceFile.text.slice(range.start, range.end)),
+  }
+}
+
 function stableNodeId(source: ReadableSource, path: number[]): string {
   // The id changes with source or translator structure, but never with render time.
   // UI consumers treat it as opaque; exact source positions remain the durable link.
@@ -573,7 +590,9 @@ function translateStory(
   }
 
   function translateCandidate(candidate: Candidate): ReadableStoryItem {
-    const source = sourceFor(candidate.node, context.sourceFile, context.file, context.lineOffset)
+    const source = candidate.sourceRange
+      ? sourceForRange(candidate.sourceRange, context.sourceFile, context.file, context.lineOffset)
+      : sourceFor(candidate.node, context.sourceFile, context.file, context.lineOffset)
     const headerEndPosition = candidate.kind === 'flow' ? candidate.headerEndPosition
       ?? ((ts.isForOfStatement(candidate.node) || ts.isForInStatement(candidate.node) || ts.isForStatement(candidate.node))
         && ts.isBlock(candidate.node.statement) ? candidate.node.statement.getStart(context.sourceFile) : undefined) : undefined

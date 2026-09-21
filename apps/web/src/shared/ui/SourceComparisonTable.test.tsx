@@ -15,7 +15,7 @@ let container: HTMLDivElement
 beforeEach(() => {
   highlighter.load.mockReset(); highlighter.html.mockReset()
   highlighter.html.mockImplementation((source: string) => `<pre><code>${source.split('\n').map((line) => `<span class="line"><span style="color:var(--code-keyword)">${line.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</span></span>`).join('\n')}</code></pre>`)
-  highlighter.load.mockResolvedValue({ codeToHtml: highlighter.html, themeColors: () => ({ bg: 'var(--bg-input)', fg: 'var(--text-primary)' }) })
+  highlighter.load.mockResolvedValue({ codeToHtml: highlighter.html, themeColors: () => ({ bg: 'var(--bg-input)', fg: 'var(--text-primary)', comment: '#7f848e' }) })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(() => { act(() => root.unmount()); container.remove() })
@@ -161,6 +161,21 @@ it('shares the existing English semantic labels and token colors, retaining untr
   expect(container.querySelector('[data-story-span="number"]')?.textContent).toBe('2')
   expect(container.textContent).toContain('CHECKx equals 2')
   expect(container.textContent).toContain('import { test, expect }')
+})
+it('uses the Code mode comment colour for English notes', async () => {
+  const review = testFileReview()
+  review.after.story = { steps: [{
+    id: 'note', role: 'note', text: 'This helper reads only the current run log.',
+    spans: [{ text: 'This helper reads only the current run log.' }], fidelity: 'exact',
+    source: { file: review.file, startLine: 3, endLine: 3, snippet: '// This helper reads only the current run log.' },
+  }] }
+  await act(async () => root.render(<SourceComparisonTable review={review} rows={sourceRows(review)} mode="english" />))
+  const canvas = container.querySelector<HTMLElement>('.cl-review-source-canvas')
+  const role = container.querySelector<HTMLElement>('[data-testid="readable-story-role-note"]')
+  const text = container.querySelector<HTMLElement>('[data-story-span="text"]')
+  expect(canvas?.style.getPropertyValue('--code-comment')).toBe('#7f848e')
+  expect(role?.style.color).toBe('var(--code-comment)')
+  expect(text?.style.color).toBe('var(--code-comment)')
 })
 it('links function headings to their declaration and keeps untranslated lines clickable', async () => {
   const review = testFileReview()

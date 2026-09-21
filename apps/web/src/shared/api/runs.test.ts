@@ -19,14 +19,38 @@ import {
   proposeRunPr,
   stopRun,
   getRunTestReview,
+  asTestReviewRequired,
+  getRunStartRequest,
+  cancelRunStartRequest,
+  acceptRunTestReview,
   adoptSpecEdits,
   restoreSpecEdits,
   deleteRun,
   listJournal,
 } from './runs'
 import { ok, fail } from './__fixtures__/response'
+import { ApiError } from './internal'
 
 describe('runs api', () => {
+  it('recognizes a structured review gate without classifying unrelated conflicts or incomplete payloads', () => {
+    const review = { type: 'test_review_required', feature: 'checkout', runId: 'source-run', review_revision: 'rev', changedFileCount: 2, reviewUrl: '/?dialog=tests-review' }
+    expect(asTestReviewRequired(new ApiError(409, review))).toEqual(review)
+    for (const error of [new Error('test_review_required'), new ApiError(500, review), new ApiError(409, null), new ApiError(409, 'text'), new ApiError(409, { type: 'test_review_required' }), new ApiError(409, { ...review, type: 'repo_collision_requires_choice' })]) {
+      expect(asTestReviewRequired(error)).toBeNull()
+    }
+  })
+
+  it('observes and cancels durable requests by encoded id without issuing a fresh run start', async () => {
+    const record = { requestId: 'request 1', status: 'cancelled' }
+    const fetchImpl = vi.fn().mockImplementation(async () => ok(record))
+    await expect(getRunStartRequest('request 1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(record)
+    await expect(cancelRunStartRequest('request 1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(record)
+    expect(fetchImpl.mock.calls).toEqual([
+      ['http://x/api/run-requests/request%201', { method: 'GET' }],
+      ['http://x/api/run-requests/request%201/cancel', { method: 'POST' }],
+    ])
+  })
+
   it('listRuns sends ?feature= when filter provided', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok([]))
     await listRuns({ feature: 'feat-a' }, { baseUrl: '', fetchImpl })
@@ -172,6 +196,15 @@ describe('runs api', () => {
     )
     await expect(adoptSpecEdits('r4', { baseUrl: '', fetchImpl })).resolves.toEqual({ status: 'adopted', adopted: ['e2e/a.spec.ts'], rerun: 'signalled' })
     expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r4/adopt-spec-edits', { method: 'POST' })
+  })
+
+  it('acceptRunTestReview posts the exact revision to the shared acceptance workflow', async () => {
+    const receipt = { decision: 'accepted', review_revision: 'a'.repeat(64), files: ['e2e/a.spec.ts'], at: 'now', git: { status: 'committed', commit: 'abc' }, execution: { status: 'rerun-requested', runId: 'r4' } }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(receipt, 202))
+    await expect(acceptRunTestReview('r4', receipt.review_revision, { baseUrl: '', fetchImpl })).resolves.toEqual(receipt)
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs/r4/accept-test-review', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision: receipt.review_revision }),
+    })
   })
 
   it('restoreSpecEdits POSTs to /restore-spec-edits and returns the restored files', async () => {

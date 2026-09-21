@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { execFileSync } from 'child_process'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
 import { createRegistry, RunStore, type OrchestratorLike } from '../logic/run-store'
@@ -40,8 +41,16 @@ function terminalReview(status: 'passed' | 'failed' | 'aborted' = 'passed') {
   const featureDir = path.join(tmpDir, 'features', 'demo')
   const runDir = runDirFor(path.join(tmpDir, 'logs'), 'terminal')
   const snapshot = path.join(runDir, 'suite')
+  fs.rmSync(featureDir, { recursive: true, force: true })
   for (const dir of [featureDir, snapshot]) fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
   fs.writeFileSync(path.join(snapshot, 'e2e/a.spec.ts'), 'recorded\n')
+  fs.writeFileSync(path.join(featureDir, 'e2e/a.spec.ts'), 'recorded\n')
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: featureDir, stdio: 'pipe' })
+  git('init', '-q')
+  git('config', 'user.email', 'test@example.com')
+  git('config', 'user.name', 'Canary Test')
+  git('add', '.')
+  git('commit', '-qm', 'initial')
   fs.writeFileSync(path.join(featureDir, 'e2e/a.spec.ts'), 'candidate\n')
   const revision = suiteReviewRevision(snapshot, featureDir)
   writeManifest(path.join(runDir, 'manifest.json'), {
@@ -132,5 +141,27 @@ describe('POST /api/runs/:runId/adopt-spec-edits', () => {
     expect(codes.filter((code) => code === 409)).toHaveLength(1)
     expect(codes.some((code) => code === 200 || code === 202)).toBe(true)
     expect(readManifest(path.join(current.runDir, 'manifest.json'))?.specEdits?.reviewDecisions).toHaveLength(1)
+  })
+})
+
+describe('POST /api/runs/:runId/accept-test-review', () => {
+  it('commits and records a terminal review receipt without changing the old verdict', async () => {
+    const { app } = await build()
+    const seeded = terminalReview('passed')
+    const payload = { expectedRevision: seeded.revision }
+
+    const first = await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload })
+    expect(first.statusCode).toBe(202)
+    expect(first.json()).toMatchObject({
+      decision: 'accepted', review_revision: seeded.revision, files: ['e2e/a.spec.ts'],
+      git: { status: 'committed', commit: expect.stringMatching(/^[a-f0-9]{40}$/) },
+      execution: { status: 'new-run-required', runId: 'terminal' },
+    })
+    expect(readManifest(path.join(seeded.runDir, 'manifest.json'))).toMatchObject({
+      status: 'passed',
+      specEdits: { reviewDecisions: [{ revision: seeded.revision, decision: 'approved-for-new-run', receipt: first.json() }] },
+    })
+    const replay = await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload })
+    expect(replay.json()).toEqual(first.json())
   })
 })

@@ -8,8 +8,9 @@
 type Highlighter = {
   codeToHtml: (code: string, opts: { lang: string; theme: string }) => string
   /** The theme's own canvas colours — what Shiki paints as the <pre> background
-   *  and default token colour — so non-code surfaces can share the exact canvas. */
-  themeColors: (theme: string) => { bg?: string; fg?: string }
+   *  and default/comment token colours — so non-code surfaces can share the
+   *  exact Code mode palette. */
+  themeColors: (theme: string) => { bg?: string; fg?: string; comment?: string }
 }
 
 let highlighterPromise: Promise<Highlighter> | null = null
@@ -34,7 +35,8 @@ export function getCodeHighlighter(): Promise<Highlighter> {
         codeToHtml: (code, opts) => hl.codeToHtml(code, opts),
         themeColors: (theme) => {
           const registration = hl.getTheme(theme)
-          return { bg: registration.bg, fg: registration.fg }
+          const comment = hl.codeToTokens('// comment', { lang: 'typescript', theme }).tokens[0]?.[0]?.color
+          return { bg: registration.bg, fg: registration.fg, comment }
         },
       }
     })()

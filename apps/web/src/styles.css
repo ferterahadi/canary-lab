@@ -1829,10 +1829,9 @@ body {
 .cl-comparison-review .cl-comparison { min-width: 780px; }
 .cl-comparison-review .cl-comparison .cl-comparison-label { width: auto; }
 .cl-comparison-review thead th { position: sticky; top: 0; z-index: 1; box-shadow: inset 0 -1px var(--border-default); }
-.cl-review-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 48px 20px; align-items: center; column-gap: 20px; width: 100%; }
-.cl-review-commit-context { min-width: 0; font-size: 11px; color: var(--text-secondary); }
-.cl-review-commit-context > p + p { max-height: 32px; overflow: auto; }
-.cl-review-commit-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.cl-review-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; gap: 4px 20px; width: 100%; }
+.cl-review-footer-navigation { grid-column: 1; grid-row: 1; justify-self: start; }
+.cl-review-commit-buttons { display: flex; grid-column: 2; grid-row: 1; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .cl-review-action-message { grid-column: 1 / -1; height: 20px; overflow: auto; font-size: 11px; }
 
 @media (max-width: 760px) {
@@ -2060,13 +2059,12 @@ body {
 .cl-context-assessment { flex: 0 0 auto; max-height: 72px; overflow: auto; padding: 8px 12px; border-top: 1px solid var(--border-default); font-size: 11px; line-height: 1.6; }
 .cl-review-footer { grid-template-rows: auto; min-height: 36px; row-gap: 4px; }
 .cl-review-action-message { height: auto; }
-.cl-review-footer-navigation { grid-column: 2; justify-self: end; }
-.cl-review-commit-context:empty, .cl-review-commit-buttons:empty { display: none; }
+.cl-review-commit-buttons:empty { display: none; }
 @media (max-width: 760px) {
   .cl-review-panes { grid-template-columns: minmax(0, 1fr); grid-template-rows: 96px minmax(0, 1fr); }
   .cl-review-panes > .cl-dialog-rail { height: 96px; max-height: 96px; }
   .cl-review-baseline { width: 100%; }
   .cl-review-footer { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; }
-  .cl-review-commit-buttons { justify-content: flex-start; }
-  .cl-review-footer-navigation { grid-column: 1; }
+  .cl-review-footer-navigation { grid-column: 1; grid-row: 1; }
+  .cl-review-commit-buttons { grid-column: 1; grid-row: 2; justify-content: flex-start; }
 }

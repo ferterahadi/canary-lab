@@ -376,7 +376,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       return { statusCode: response.statusCode, body: response.json() }
     },
     testReviewRequest: async (request) => {
-      const response = await app.inject({ method: request.method, url: request.url, payload: request.payload as Record<string, unknown> | undefined })
+      const response = await app.inject({ method: request.method, url: request.url, payload: request.payload as Record<string, unknown> | undefined, headers: { [MCP_ORIGIN_HEADER]: 'mcp' } })
       return { statusCode: response.statusCode, body: response.json() }
     },
     discoveryRepairRequest: async (request) => {
@@ -476,6 +476,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           }
         }
 	      const message = body && 'error' in body ? String(body.error) : String(resp.payload)
+	      if (body.type === 'test_review_required') throw Object.assign(new Error(message), { testReviewRequired: body })
 	      throw new Error(`start_run failed (${resp.statusCode}): ${message}`)
 	    },
     restartExternalRun: async (runId, healAgent, guidance) => {

@@ -60,7 +60,8 @@ const inbox = async (): Promise<unknown[]> => (await app.inject('/api/notificati
 
 describe('notifications feature registrar', () => {
   it('keeps serving the inbox it already built when a store read fails, rather than throwing into the event that triggered the rebuild', async () => {
-    expect(await inbox()).toHaveLength(1)
+    const previous = await inbox()
+    expect(previous).toHaveLength(1)
     const logged = vi.spyOn(app.log, 'error')
     runStore.list.mockImplementation(() => { throw new Error('runs index unreadable') })
 
@@ -71,7 +72,19 @@ describe('notifications feature registrar', () => {
     expect(logged).toHaveBeenCalledWith({ err: expect.any(Error) }, 'Could not update notifications')
     // And the last good inbox is still served — a failed rebuild must not read
     // to the user as "you have no notifications".
-    expect(await inbox()).toHaveLength(1)
+    expect(await inbox()).toEqual(previous)
+
+    // A later successful read still projects authoritative resolution, without
+    // needing another source event or restarting the server.
+    runStore.list.mockReturnValue([])
+    flightStore.list.mockReturnValue([])
+    expect(await inbox()).toEqual([expect.objectContaining({ resolvedAt: expect.any(String) })])
+  })
+
+  it('does not replace a corrupt inbox with an empty success when refresh fails', async () => {
+    fs.writeFileSync(path.join(dir, 'notifications', 'state.json'), '{invalid')
+
+    expect((await app.inject('/api/notifications')).statusCode).toBe(500)
   })
 
   it('releases all three store subscriptions when the server closes', async () => {

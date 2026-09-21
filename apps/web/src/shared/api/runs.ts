@@ -4,7 +4,7 @@
 import type { RunQueueDiagnostics } from '@shared/run-queue'
 import type { StageModelChoice } from '@shared/agent-models'
 import type { RobustnessEnvelope } from '@shared/robustness/types'
-import type { RunTestReview } from '@shared/test-review'
+import type { RunStartRequest, RunTestReview, TestReviewReceipt, TestReviewRequiredInfo } from '@shared/test-review'
 import type { AuditList, RunIndexEntry, RunDetail, JournalEntry, RunProposedPr } from './types'
 import { ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
 
@@ -87,6 +87,25 @@ export function asBranchMismatch(err: unknown): RepoBranchMismatch | null {
     return err.body as RepoBranchMismatch
   }
   return null
+}
+
+export type TestReviewRequired = TestReviewRequiredInfo
+
+export function asTestReviewRequired(err: unknown): TestReviewRequired | null {
+  if (!(err instanceof ApiError) || err.status !== 409 || !err.body || typeof err.body !== 'object') return null
+  const body = err.body as Partial<TestReviewRequired>
+  return body.type === 'test_review_required' && typeof body.feature === 'string' && typeof body.runId === 'string'
+    && typeof body.review_revision === 'string' && typeof body.changedFileCount === 'number' && typeof body.reviewUrl === 'string'
+    ? body as TestReviewRequired : null
+}
+
+export function getRunStartRequest(requestId: string, opts?: ClientOptions): Promise<RunStartRequest> {
+  return requestSnapshot(`/api/run-requests/${encodeURIComponent(requestId)}`, opts)
+}
+
+export function cancelRunStartRequest(requestId: string, opts?: ClientOptions): Promise<RunStartRequest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/run-requests/${encodeURIComponent(requestId)}/cancel`, { method: 'POST' }, fetchImpl)
 }
 
 // Re-pin every repo's configured branch to whatever it's currently checked out
@@ -328,10 +347,17 @@ export function adoptSpecEdits(
   }, fetchImpl)
 }
 
+export function acceptRunTestReview(runId: string, expectedRevision: string, opts?: ClientOptions): Promise<TestReviewReceipt> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/accept-test-review`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision }),
+  }, fetchImpl)
+}
+
 export function restoreSpecEdits(
   runId: string,
   opts?: TestReviewDecisionOptions,
-): Promise<{ status: 'restored'; restored: string[] }> {
+): Promise<{ status: 'restored'; restored: string[] } | TestReviewReceipt> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/restore-spec-edits`, {
     method: 'POST',

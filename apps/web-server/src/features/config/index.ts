@@ -15,6 +15,7 @@ import { loadBundledSabotageSkills, sabotageSkillsForFeature } from '../benchmar
 import { removeFlightRecordsForFeature } from '../flights/logic/conductor'
 import { isActiveFlightStatus } from '../../../../../shared/flights/types'
 import { renameFeatureRecords } from './logic/feature-rename'
+import { runStartRequestStore } from '../runs/logic/run-start-requests'
 import { agentJobStore as sharedAgentJobStore } from '../agent-sessions/logic/agent-jobs/store'
 import {
   buildAgentSessionResponse,
@@ -75,7 +76,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     workspaceEvents,
   } = ctx
 
-  await app.register(featuresRoutes, { featuresDir, logsDir, dirtySpecStore })
+  await app.register(featuresRoutes, { featuresDir, logsDir, dirtySpecStore, workspaceEvents })
   await app.register(discoveryRepairRoutes, { projectRoot, featuresDir, logsDir, workspaceEvents })
   // A suite's `name` IS its identity — renaming it must carry every record that
   // stamped the old name along, or the history orphans behind a name nothing
@@ -87,6 +88,9 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
   const featureRenameBlockedBy = (featureName: string): string | null => {
     const repair = activeDiscoveryRepair(featureName)
     if (repair) return `discovery repair ${repair.id} is active — finish it before renaming the suite`
+    const request = runStartRequestStore(logsDir).list().find((entry) => entry.feature === featureName
+      && typeof entry.status === 'string' && ['awaiting-review', 'ready', 'starting'].includes(entry.status))
+    if (request) return `run request ${request.id} is pending — cancel it or let it finish before renaming the suite`
     const run = runStore.list({ feature: featureName }).find((r) => isActiveRunStatus(r.status))
     if (run) return `run ${run.runId} is ${run.status} — stop it before renaming the suite`
     const flight = flightStore
@@ -107,7 +111,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
       blockedBy: featureRenameBlockedBy,
       apply: (from, to) => renameFeatureRecords(from, to, {
         logsDir,
-        stores: [flightStore, coverageJobStore, robustnessJobStore, portifyStore, benchmarkStore, dirtySpecStore, sharedAgentJobStore(logsDir), discoveryRepairStore(logsDir)],
+        stores: [flightStore, coverageJobStore, robustnessJobStore, portifyStore, benchmarkStore, dirtySpecStore, sharedAgentJobStore(logsDir), discoveryRepairStore(logsDir), runStartRequestStore(logsDir)],
         activeWork: featureRenameBlockedBy,
       }).moved,
     },

@@ -6,6 +6,9 @@ import {
   listFeatures,
   approveDirtySpecs,
   commitDirtySpecs,
+  getFeatureTestReview,
+  acceptFeatureTestReview,
+  restoreFeatureTestReview,
   getFeatureDirtyDiff,
 } from './features'
 import { ok, fail } from './__fixtures__/response'
@@ -50,6 +53,22 @@ describe('features api', () => {
   it('commitDirtySpecs throws ApiError on failure', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(500, { error: 'git commit failed' }))
     await expect(commitDirtySpecs('feat/a', { fetchImpl })).rejects.toMatchObject({ status: 500 })
+  })
+
+  it('reads and settles a suite review with the exact revision', async () => {
+    const review = { feature: 'feat/a', baseline: 'head', review_revision: 'a'.repeat(64), files: [{ file: 'e2e/a.spec.ts', change: 'modified' }] }
+    const receipt = { decision: 'accepted', review_revision: review.review_revision, files: ['e2e/a.spec.ts'], at: 'now', git: { status: 'committed', commit: 'abc' }, execution: { status: 'none' } }
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(ok(review))
+      .mockResolvedValueOnce(ok(receipt))
+      .mockResolvedValueOnce(ok({ ...receipt, decision: 'restored', git: { status: 'not-requested' } }))
+    await expect(getFeatureTestReview('feat/a', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(review)
+    await acceptFeatureTestReview('feat/a', review.review_revision, { baseUrl: 'http://x', fetchImpl })
+    await restoreFeatureTestReview('feat/a', review.review_revision, { baseUrl: 'http://x', fetchImpl })
+    const decision = { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision: review.review_revision }) }
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, 'http://x/api/features/feat%2Fa/test-review-plan', { method: 'GET' })
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, 'http://x/api/features/feat%2Fa/accept-test-review', decision)
+    expect(fetchImpl).toHaveBeenNthCalledWith(3, 'http://x/api/features/feat%2Fa/restore-test-review', decision)
   })
 
   it('getFeatureDirtyDiff GETs the dirty-diff endpoint with encoded feature and file', async () => {

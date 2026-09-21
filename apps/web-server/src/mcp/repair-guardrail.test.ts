@@ -85,14 +85,14 @@ describe('repair guardrail — MCP instructions', () => {
     expect(INSTRUCTIONS_BY_PROFILE.repair).toMatch(/never edit the test files/i)
   })
 
-  it('repair instructions read specEdits as untested edits: restore, or ask the human to adopt', () => {
+  it('repair instructions read specEdits as untested edits with an explicit human decision', () => {
     // The lead is what a skill-less client gets; the rule must be there, not
     // only in the guide.
     const lead = INSTRUCTIONS_BY_PROFILE.repair
     expect(lead).toMatch(/specEdits/)
     expect(lead).toMatch(/not tested/i)
     expect(lead).toMatch(/restore/i)
-    expect(lead).toMatch(/ask the human to adopt/i)
+    expect(lead).toMatch(/human chooses Accept & commit/i)
     expect(lead).toMatch(/no (MCP )?tool can self-approve/i)
   })
 
@@ -107,7 +107,7 @@ describe('repair guardrail — MCP instructions', () => {
   it('compact instructions carry the specEdits rule too', () => {
     const text = INSTRUCTIONS_BY_PROFILE.compact
     expect(text).toMatch(/specEdits/)
-    expect(text).toMatch(/ask the human to adopt/i)
+    expect(text).toMatch(/human chooses Accept & commit/i)
   })
 
   it('repair instructions keep the honest pass-count rule', () => {
@@ -200,13 +200,13 @@ describe('repair guardrail — shipped agent skills', () => {
   )
 
   it.each(runLoopSkills.map((f) => [path.relative(REPO_ROOT, f), f]))(
-    '%s reads specEdits as untested edits: restore, or ask the human to adopt',
+    '%s reads specEdits as untested edits with an explicit human decision',
     (_label, file) => {
       const text = fs.readFileSync(file, 'utf8')
       expect(text).toMatch(/specEdits/)
       expect(text).toMatch(/not tested/i)
       expect(text).toMatch(/restore/i)
-      expect(text).toMatch(/ask the human to adopt/i)
+      expect(text).toMatch(/human chooses `?Accept & commit`?/i)
       expect(text).toMatch(/no (MCP )?tool can self-approve/i)
       expect(text).toMatch(/weaker/i)
     },

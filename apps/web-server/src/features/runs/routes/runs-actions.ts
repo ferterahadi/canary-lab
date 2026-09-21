@@ -20,6 +20,10 @@ import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 import { restoreReviewedSuiteFiles } from '../logic/runtime/run-suite-snapshot'
 import { suiteReviewFiles } from '../logic/runtime/suite-review'
 import { suiteRuntimeInputTargetsForSnapshot } from '../logic/runtime/suite-runtime-inputs'
+import { commitReviewedFiles } from '../logic/test-review-acceptance'
+import type { TestReviewDecision, TestReviewReceipt, TestReviewRequiredInfo } from '../../../../../../shared/test-review'
+import { publishWorkspaceEvent } from '../../../shared/workspace-events'
+import { withRunReviewLock } from '../logic/test-review-lock'
 
 export { compareActiveRuns } from './runs-route-support'
 export type { ExternalHealAgentRequest } from './runs-route-support'
@@ -28,6 +32,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
   app.post<{
     Body: {
       feature?: string
+      resumeRequestId?: string
       env?: string
       healAgent?: ExternalHealAgentRequest | { kind?: string }
       forceNew?: boolean
@@ -160,10 +165,11 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       : undefined
     const executionType: ExecutionType = req.body?.mode === 'boot' ? 'boot' : 'run'
     const updateRepos = typeof req.body?.updateRepos === 'boolean' ? req.body.updateRepos : undefined
+    const reservedRunId = deps.runRequests?.allocatedRunId(req.body?.resumeRequestId)
     try {
       const outcome = await deps.startRun(
         feature, env, externalRunReq, isolation, executionType, req.body?.models, perturbation, undefined,
-        updateRepos === undefined ? undefined : { updateRepos },
+        updateRepos === undefined && !reservedRunId ? undefined : { updateRepos, ...(reservedRunId ? { runId: reservedRunId } : {}) },
       )
       if (outcome.kind === 'collision') {
         if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
@@ -214,6 +220,13 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
         : 500
       reply.code(code)
       const message = err instanceof Error ? err.message : String(err)
+      const review = (err as { testReviewRequired?: TestReviewRequiredInfo }).testReviewRequired
+      if (review) {
+        const request = reservedRunId ? undefined : deps.runRequests?.remember(review, {
+          ...req.body, feature, env, ...(externalRunReq ? { healAgent: externalRunReq } : {}),
+        })
+        return { ...review, ...(request ? { request } : {}) }
+      }
       // A configured-branch mismatch carries structured rows — surface them as a
       // typed 409 (like repo_collision_requires_choice) so the UI can offer to
       // switch the repos onto the pinned branch, or re-pin the feature.
@@ -328,12 +341,79 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
     return { reason }
   })
 
+  // The browser and MCP share this one human acceptance operation. The exact
+  // run review supplies the Git path set; committing other staged work or
+  // observing a clean tree can never create the persisted approval receipt.
+  app.post<{ Params: { runId: string }; Body?: { expectedRevision?: string } }>('/api/runs/:runId/accept-test-review', async (req, reply) => withRunReviewLock(deps.store, req.params.runId, async () => {
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) return reply.code(404).send({ error: 'run not found' })
+    const revision = req.body?.expectedRevision
+    if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) return reply.code(400).send({ error: 'An exact review revision is required' })
+    const existing = detail.manifest.specEdits?.reviewDecisions?.find((item) => item.revision === revision)
+    if (existing?.receipt) return existing.receipt.decision === 'accepted' ? existing.receipt
+      : reply.code(409).send({ reason: 'review-decision-conflict', error: 'This review already has a different recorded decision.' })
+    if (existing) return reply.code(409).send({ reason: 'review-already-settled', error: 'This review already has a different recorded decision.' })
+
+    const snapshot = detail.manifest.suiteSnapshot
+    const featureDir = detail.manifest.featureDir
+    if (snapshot?.kind !== 'taken' || !featureDir) return reply.code(409).send({ error: 'Run snapshot unavailable' })
+    const runtimeInputs = suiteRuntimeInputTargetsForSnapshot(snapshot.dir)
+    const review = suiteReviewFiles(snapshot.dir, featureDir, runtimeInputs)
+    if (review.revision !== revision) return reply.code(409).send({ reason: 'review-changed', error: 'The files changed while this review was open. Review the latest version and try again.' })
+    if (review.files.length === 0) return reply.code(409).send({ reason: 'nothing-to-accept', error: 'No reviewed file changes remain to accept.' })
+
+    let git
+    try {
+      git = await commitReviewedFiles(detail.manifest.feature, featureDir, review.files.map((file) => file.file))
+    } catch (error) {
+      const statusCode = (error as { statusCode?: number }).statusCode ?? 500
+      return reply.code(statusCode).send({ error: error instanceof Error ? error.message : 'Git could not commit the reviewed files.' })
+    }
+    await deps.dirtySpecStore?.recompute(detail.manifest.feature, featureDir)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: detail.manifest.feature })
+
+    const orch = deps.store.registry.get(req.params.runId)
+    if (orch?.adoptSpecEdits) {
+      const adopted = await orch.adoptSpecEdits(revision, git)
+      if (!adopted.ok) return reply.code(409).send({ reason: adopted.reason, git, error: `The reviewed files were committed, but the run could not accept them: ${adopted.reason}. Try again.` })
+      const receipt: TestReviewReceipt = deps.store.get(req.params.runId)?.manifest.specEdits?.reviewDecisions?.find((item) => item.revision === revision)?.receipt ?? {
+        decision: 'accepted', review_revision: revision, files: adopted.adopted,
+        at: new Date().toISOString(), git,
+        execution: { status: 'rerun-requested', runId: req.params.runId },
+      }
+      reply.code(202)
+      return receipt
+    }
+
+    if (!isTerminalRunStatus(detail.manifest.status)) return reply.code(409).send({ error: 'The run is not ready to accept reviewed files. Wait for its current action to finish, then try again.' })
+    if (suiteReviewFiles(snapshot.dir, featureDir, runtimeInputs).revision !== revision) {
+      return reply.code(409).send({ reason: 'review-changed', git, error: 'The files changed while acceptance was being applied. Review the latest version; no run was authorized.' })
+    }
+    const at = new Date().toISOString()
+    const receipt: TestReviewReceipt = {
+      decision: 'accepted', review_revision: revision, files: review.files.map((file) => file.file), at, git,
+      execution: { status: 'new-run-required', runId: req.params.runId },
+    }
+    const previous = detail.manifest.specEdits
+    const decision: TestReviewDecision = { at, revision, decision: 'approved-for-new-run', receipt }
+    deps.store.patchManifest(req.params.runId, {
+      specEdits: {
+        checkedAt: at,
+        pending: previous?.pending ?? [],
+        adopted: previous?.adopted ?? [],
+        reviewDecisions: [...(previous?.reviewDecisions ?? []), decision],
+      },
+    })
+    reply.code(202)
+    return receipt
+  }))
+
   // POST /api/runs/:runId/adopt-spec-edits — a human lets the live spec edits
   // into an active run: the run-start copy is re-taken and a rerun signalled
   // (D9). Sits beside /approve-dirty as the second human-only integrity lever;
   // MCP reaches it only after human elicitation with an exact revision. A terminal
   // run has nothing to adopt into — a new run snapshots the live suite itself.
-  app.post<{ Params: { runId: string }; Body?: { expectedRevision?: string } }>('/api/runs/:runId/adopt-spec-edits', async (req, reply) => {
+  app.post<{ Params: { runId: string }; Body?: { expectedRevision?: string } }>('/api/runs/:runId/adopt-spec-edits', async (req, reply) => withRunReviewLock(deps.store, req.params.runId, async () => {
     const orch = deps.store.registry.get(req.params.runId)
     if (!orch?.adoptSpecEdits) {
       const terminal = deps.store.get(req.params.runId)
@@ -354,12 +434,16 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       if (review.files.length === 0) return reply.code(409).send({ reason: 'nothing-to-adopt' })
       const at = new Date().toISOString()
       const previous = terminal.manifest.specEdits
+      const receipt: TestReviewReceipt = {
+        decision: 'accepted', review_revision: revision, files: review.files.map((file) => file.file), at,
+        git: { status: 'not-requested' }, execution: { status: 'new-run-required', runId: req.params.runId },
+      }
       deps.store.patchManifest(req.params.runId, {
         specEdits: {
           checkedAt: at,
           pending: previous?.pending ?? [],
           adopted: previous?.adopted ?? [],
-          reviewDecisions: [...(previous?.reviewDecisions ?? []), { at, revision, decision: 'approved-for-new-run' }],
+          reviewDecisions: [...(previous?.reviewDecisions ?? []), { at, revision, decision: 'approved-for-new-run', receipt }],
         },
       })
       reply.code(202)
@@ -376,13 +460,16 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
     }
     reply.code(202)
     return { status: 'adopted', adopted: result.adopted, rerun: result.rerun }
-  })
+  }))
 
   // POST /api/runs/:runId/restore-spec-edits — a human puts the live specs back
   // to what the run executed (the run-start copy), so the pending edits and
   // their hints clear without moving the boundary. The other human-only lever
   // beside adopt; MCP reaches it only through revision-bound human elicitation.
-  app.post<{ Params: { runId: string }; Body?: { expectedRevision?: string } }>('/api/runs/:runId/restore-spec-edits', async (req, reply) => {
+  app.post<{ Params: { runId: string }; Body?: { expectedRevision?: string } }>('/api/runs/:runId/restore-spec-edits', async (req, reply) => withRunReviewLock(deps.store, req.params.runId, async () => {
+    const settled = deps.store.get(req.params.runId)?.manifest.specEdits?.reviewDecisions?.find((item) => item.revision === req.body?.expectedRevision)?.receipt
+    if (settled) return settled.decision === 'restored' ? settled
+      : reply.code(409).send({ reason: 'review-decision-conflict', error: 'This review already has a different recorded decision.' })
     const orch = deps.store.registry.get(req.params.runId)
     if (!orch?.restoreSpecEdits) {
       const terminal = deps.store.get(req.params.runId)
@@ -392,25 +479,30 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) return reply.code(400).send({ error: 'An exact review revision is required' })
       const existing = terminal.manifest.specEdits?.reviewDecisions?.find((item) => item.revision === revision)
       if (existing) {
-        if (existing.decision !== 'restored') return reply.code(409).send({ reason: 'review-decision-conflict' })
-        return { status: 'restored', restored: [] as string[], review_revision: revision, idempotent: true }
+        if (existing.decision !== 'restored') return reply.code(409).send({ reason: 'review-decision-conflict', error: 'This review already has a different recorded decision.' })
+        return existing.receipt ?? { status: 'restored', restored: [] as string[], review_revision: revision, idempotent: true }
       }
       const snapshot = terminal.manifest.suiteSnapshot
       if (snapshot?.kind !== 'taken' || !terminal.manifest.featureDir) return reply.code(409).send({ error: 'Run snapshot unavailable' })
       const runtimeInputs = suiteRuntimeInputTargetsForSnapshot(snapshot.dir)
       const result = restoreReviewedSuiteFiles(snapshot.dir, terminal.manifest.featureDir, revision, runtimeInputs)
-      if (!result.ok) return reply.code(409).send({ reason: result.reason })
+      if (!result.ok) return reply.code(409).send({ reason: result.reason, error: `The recorded files could not be restored: ${result.reason}. Review the latest version and try again.` })
       const at = new Date().toISOString()
       const previous = terminal.manifest.specEdits
+      const receipt: TestReviewReceipt = {
+        decision: 'restored', review_revision: revision, files: result.restored, at,
+        git: { status: 'not-requested' }, execution: { status: 'none' },
+      }
       deps.store.patchManifest(req.params.runId, {
         specEdits: {
           checkedAt: at,
           pending: [],
           adopted: previous?.adopted ?? [],
-          reviewDecisions: [...(previous?.reviewDecisions ?? []), { at, revision, decision: 'restored' }],
+          reviewDecisions: [...(previous?.reviewDecisions ?? []), { at, revision, decision: 'restored', receipt }],
         },
       })
-      return { status: 'restored', restored: result.restored, review_revision: revision }
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: terminal.manifest.feature })
+      return receipt
     }
     const revision = req.body?.expectedRevision
     if (revision !== undefined && (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision))) {
@@ -419,10 +511,18 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
     const result = orch.restoreSpecEdits(revision)
     if (!result.ok) {
       reply.code(409)
-      return { reason: result.reason }
+      return { reason: result.reason, error: `The recorded files could not be restored: ${result.reason}. Review the latest version and try again.` }
     }
-    return { status: 'restored', restored: result.restored }
-  })
+    if (!revision) return { status: 'restored', restored: result.restored }
+    const detail = deps.store.get(req.params.runId)
+    const at = new Date().toISOString()
+    const receipt: TestReviewReceipt = detail?.manifest.specEdits?.reviewDecisions?.find((item) => item.revision === revision)?.receipt ?? {
+      decision: 'restored', review_revision: revision, files: result.restored, at,
+      git: { status: 'not-requested' }, execution: { status: 'none' },
+    }
+    if (detail) publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: detail.manifest.feature })
+    return receipt
+  }))
 
   // POST /api/runs/:runId/abort — explicit abort of an active run. Stops
   // the orchestrator (kills Playwright + heal agent + service ptys) and

@@ -9,6 +9,7 @@ import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import type { TestReviewGitReceipt } from '../../../../../../../shared/test-review'
 import { type RunPaths } from './run-paths'
 import { readManifest, type RunManifest } from './manifest'
 import type { RunnerLog } from './runner-log'
@@ -102,8 +103,8 @@ export class RunOrchestrator extends EventEmitter {
     return cancelHeal(this.ctx, this)
   }
 
-  async adoptSpecEdits(expectedRevision?: string): ReturnType<typeof adoptSpecEdits> {
-    return adoptSpecEdits(this.ctx, expectedRevision)
+  async adoptSpecEdits(expectedRevision?: string, git?: TestReviewGitReceipt): ReturnType<typeof adoptSpecEdits> {
+    return adoptSpecEdits(this.ctx, expectedRevision, git)
   }
 
   isWaitingForHealSignal(): boolean {

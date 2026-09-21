@@ -226,6 +226,74 @@ describe('whole-file English', () => {
     expect(items[0].text).not.toContain('body:')
   })
 
+  it('renders authored notes and arrow-function declarations as a structured readable story', () => {
+    const source = `/**
+ * Find a shared script by walking upward from the suite.
+ * Keep the lookup independent of a fixed checkout depth.
+ */
+const workspaceScript = (name) => {
+  for (const start of [__dirname, process.cwd()]) {
+    for (let dir = start; ; dir = path.dirname(dir)) {
+      const candidate = path.join(dir, 'scripts', name)
+      if (fs.existsSync(candidate)) return candidate
+      if (path.dirname(dir) === dir) break
+    }
+  }
+  throw new Error('script not found')
+}`
+    const story = translateReadableSource('start-local.cjs', source)
+
+    expect(story.steps[0]).toMatchObject({
+      role: 'note',
+      text: 'Find a shared script by walking upward from the suite. Keep the lookup independent of a fixed checkout depth.',
+      fidelity: 'exact',
+      source: { startLine: 1, endLine: 4 },
+    })
+    const definition = story.steps[1]
+    expect(definition).toMatchObject({ kind: 'flow', role: 'setup', text: 'Define arrow function workspaceScript, taking name' })
+    if (definition.kind !== 'flow') throw new Error('Expected a structured arrow-function definition')
+    const outerLoop = definition.children[0]
+    expect(outerLoop).toMatchObject({
+      kind: 'flow',
+      text: 'For each value in a list containing __dirname, (the result of process.cwd()), bind constant start',
+    })
+    if (outerLoop.kind !== 'flow') throw new Error('Expected the outer search loop')
+    expect(outerLoop.children[0]).toMatchObject({
+      kind: 'flow',
+      text: 'Repeat until stopped; starting with variable dir set to start; after each pass, set dir to the result of path.dirname with dir',
+    })
+    expect(story.steps[0].spans.map((span) => span.text).join('')).toBe(story.steps[0].text)
+  })
+
+  it('keeps a trailing source comment as a note instead of falling back to code', () => {
+    const story = translateReadableSource('helper.ts', 'const value = 1\n// Explain why this value is fixed.')
+    expect(story.steps.at(-1)).toMatchObject({
+      role: 'note',
+      text: 'Explain why this value is fixed.',
+      fidelity: 'exact',
+      source: { startLine: 2, endLine: 2, snippet: '// Explain why this value is fixed.' },
+    })
+  })
+
+  it('combines adjacent line comments into one source-linked note', () => {
+    const story = translateReadableSource('helper.ts', '// First reason.\n// Second reason.\nconst value = 1')
+    expect(story.steps[0]).toMatchObject({
+      role: 'note',
+      text: 'First reason. Second reason.',
+      source: { startLine: 1, endLine: 2 },
+    })
+  })
+
+  it('uses a concise heading for an exported function declaration', () => {
+    expect(translateReadableSource('helper.ts', 'export function read(mark: { path: string; offset: number }) { return mark.path }').steps[0].text)
+      .toContain('Define exported function read, taking mark of type')
+  })
+
+  it('describes a thrown constructed error as a readable value', () => {
+    expect(english('throw new Error(`scripts/${name} not found`)'))
+      .toBe('Throw a new Error with (text formed by joining "scripts/", name, " not found")')
+  })
+
   it('translates the reported imports, declarations, hook, generated tests and conditional actions', () => {
     const source = `import { test, expect } from '@playwright/test'
 import fs from 'node:fs'
@@ -310,7 +378,7 @@ for (const variant of ['missing template', 'empty template']) {
 
   it.each([
     ['if (a === b) { act() }', 'strictly equal'], ['if (a == b) { act() }', 'loosely equal'],
-    ['for (;;) { break }', 'for loop'], ['for (const key in record) { use(key) }', 'For each enumerable property key'],
+    ['for (;;) { break }', 'Repeat until stopped'], ['for (const key in record) { use(key) }', 'For each enumerable property key'],
     ['while (ready) { act() }', 'While'], ['do { act() } while (ready)', 'Run once'],
     ['try { act() } catch (error) { recover(error) } finally { cleanup() }', 'Whether the attempt'],
     ['switch (mode) { case 1: act(); break; default: stop() }', 'Choose a path'],
@@ -357,7 +425,7 @@ const result = (a + b) * (c + d);
 const nested = { a: { value }, list: [1, 2] };
 import {} from './setup';`)
     expect(text).toContain('an empty object')
-    expect(text).toContain('an asynchronous arrow function receiving value of type number with return type')
+    expect(text).toContain('Define asynchronous arrow function a, taking value of type number, with return type')
     expect(text).toContain('rest parameter')
     expect(text).toContain('with default number 1')
     expect(text).toContain('not (ready)')
@@ -378,7 +446,7 @@ test.beforeAll(() => { throw new Error('setup failed') });`)
     expect(text).toContain('If ready is truthy')
     expect(text).toContain('Return without a value')
     expect(text).toContain('Return the result of load()')
-    expect(text).toContain('Throw construct')
+    expect(text).toContain('Throw a new Error with "setup failed"')
     expect(translateReadableSource('empty.ts', '')).toEqual({ steps: [] })
   })
 
@@ -412,7 +480,8 @@ const destructure = ([first, second]) => first;
 const ordered = a + b + c;
 const assigned = (value = 2);
 for (const [key, value] of entries) { consume(key, value) }`)
-    expect(text).toContain('arrow function with no parameters that returns 1')
+    expect(text).toContain('Define arrow function getValue with no parameters')
+    expect(text).toContain('Return 1')
     expect(text).toContain('array pattern')
     expect(text).toContain('(a plus b) plus c')
     expect(text).toContain('assign `value` the value number 2')

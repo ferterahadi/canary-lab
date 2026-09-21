@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
 import { formatCodeForDisplayWithLineMap } from '../../../../../../shared/code-display-format'
@@ -24,9 +24,16 @@ import { recordedTestList } from '../logic/recorded-test-list'
 import { mergeSuiteTestRoster, sourceTestRoster } from '../../runs/logic/suite-test-roster'
 import { testReviewRoutes } from './test-review'
 import type { FeaturesRouteDeps } from './features-route-deps'
+import type { FeatureTestReview, TestReviewReceipt } from '../../../../../../shared/test-review'
+import { buildGitReview, commitReviewedFiles, restoreGitReview } from '../../runs/logic/test-review-acceptance'
+import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 
 export type { FeaturesRouteDeps } from './features-route-deps'
 
+function reviewFailure(reply: FastifyReply, error: unknown, fallback: string) {
+  const statusCode = (error as { statusCode?: number }).statusCode ?? 500
+  return reply.code(statusCode).send({ error: error instanceof Error ? error.message : fallback })
+}
 
 export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {
   await testReviewRoutes(app, deps)
@@ -72,6 +79,79 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     return { status: rec.status, dirtySpecs: rec.dirtySpecs }
   })
 
+  app.get<{ Params: { name: string } }>('/api/features/:name/test-review-plan', async (req, reply) => {
+    const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
+    if (!feature?.featureDir) return reply.code(404).send({ error: 'feature not found' })
+    if (!deps.dirtySpecStore) return reply.code(503).send({ error: 'test-file integrity tracking is not available' })
+    try {
+      const record = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
+      const review = await buildGitReview(feature.featureDir, record.dirtySpecs.map((spec) => spec.file))
+      return {
+        feature: feature.name,
+        baseline: 'head',
+        review_revision: review.revision,
+        files: review.files,
+        receipt: deps.dirtySpecStore.reviewReceipt(feature.name, review.revision),
+      } satisfies FeatureTestReview
+    } catch (error) {
+      return reviewFailure(reply, error, 'Could not prepare the reviewed files.')
+    }
+  })
+
+  app.post<{ Params: { name: string }; Body: { expectedRevision?: string } }>('/api/features/:name/accept-test-review', async (req, reply) => {
+    const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
+    if (!feature?.featureDir) return reply.code(404).send({ error: 'feature not found' })
+    if (!deps.dirtySpecStore) return reply.code(503).send({ error: 'test-file integrity tracking is not available' })
+    const revision = req.body?.expectedRevision
+    if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) return reply.code(400).send({ error: 'An exact review revision is required' })
+    const prior = deps.dirtySpecStore.reviewReceipt(feature.name, revision)
+    if (prior) return prior
+    try {
+      const record = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
+      const review = await buildGitReview(feature.featureDir, record.dirtySpecs.map((spec) => spec.file))
+      if (review.revision !== revision) return reply.code(409).send({ reason: 'review-changed', error: 'The files changed while this review was open. Review the latest version and try again.' })
+      if (review.files.length === 0) return reply.code(409).send({ reason: 'nothing-to-accept', error: 'No reviewed file changes remain to accept.' })
+      const git = await commitReviewedFiles(feature.name, feature.featureDir, review.files.map((file) => file.file))
+      await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
+      const receipt: TestReviewReceipt = {
+        decision: 'accepted', review_revision: revision, files: review.files.map((file) => file.file),
+        at: new Date().toISOString(), git, execution: { status: 'none' },
+      }
+      deps.dirtySpecStore.recordReviewReceipt(feature.name, receipt)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: feature.name })
+      return receipt
+    } catch (error) {
+      return reviewFailure(reply, error, 'Could not accept and commit the reviewed files.')
+    }
+  })
+
+  app.post<{ Params: { name: string }; Body: { expectedRevision?: string } }>('/api/features/:name/restore-test-review', async (req, reply) => {
+    const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
+    if (!feature?.featureDir) return reply.code(404).send({ error: 'feature not found' })
+    if (!deps.dirtySpecStore) return reply.code(503).send({ error: 'test-file integrity tracking is not available' })
+    const revision = req.body?.expectedRevision
+    if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) return reply.code(400).send({ error: 'An exact review revision is required' })
+    const prior = deps.dirtySpecStore.reviewReceipt(feature.name, revision)
+    if (prior) return prior
+    try {
+      const record = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
+      const review = await buildGitReview(feature.featureDir, record.dirtySpecs.map((spec) => spec.file))
+      if (review.revision !== revision) return reply.code(409).send({ reason: 'review-changed', error: 'The files changed while this review was open. Review the latest version and try again.' })
+      if (review.files.length === 0) return reply.code(409).send({ reason: 'nothing-to-restore', error: 'No reviewed file changes remain to restore.' })
+      const restored = await restoreGitReview(feature.featureDir, review)
+      await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
+      const receipt: TestReviewReceipt = {
+        decision: 'restored', review_revision: revision, files: restored,
+        at: new Date().toISOString(), git: { status: 'not-requested' }, execution: { status: 'none' },
+      }
+      deps.dirtySpecStore.recordReviewReceipt(feature.name, receipt)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: feature.name })
+      return receipt
+    } catch (error) {
+      return reviewFailure(reply, error, 'Could not restore the reviewed files.')
+    }
+  })
+
   // Commit the modified specs to git — the durable, reviewable acknowledgment.
   // Stages + commits exactly the dirty spec files (not the whole working tree),
   // then recomputes; HEAD now matches the working tree so the cue clears. An
@@ -92,34 +172,21 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       return { committed: false, reason: 'no modified specs', status: rec.status }
     }
     const root = await getGitRoot(feature.featureDir)
-    if (!root) {
-      reply.code(409)
-      return { error: 'feature is not inside a git repository' }
-    }
+    if (!root) return reply.code(409).send({ error: 'feature is not inside a git repository' })
     const realDir = fs.realpathSync(feature.featureDir)
-    const repoRelPaths = specs.map((s) => path.relative(root, path.join(realDir, s.file)))
-    const add = await runGit(root, ['add', '--', ...repoRelPaths])
-    if (add.code !== 0) {
-      reply.code(500)
-      return { error: (add.stderr || add.stdout).trim() || 'git add failed' }
-    }
-    // The review can outlive an external commit. Check the selected paths after
-    // staging so new files count too, without including unrelated staged work.
-    const diff = await runGit(root, ['diff', '--cached', '--quiet', '--', ...repoRelPaths])
-    if (diff.code === 0) {
+    const paths = specs.map((spec) => path.relative(root, path.join(realDir, spec.file)))
+    const staged = await runGit(root, ['add', '--', ...paths])
+    if (staged.code !== 0) return reply.code(500).send({ error: staged.stderr.trim() || 'git add failed' })
+    const changed = await runGit(root, ['diff', '--cached', '--quiet', '--', ...paths])
+    if (changed.code === 0) {
       const rec = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
       return { committed: false, reason: 'no modified specs', status: rec.status }
     }
-    if (diff.code !== 1) {
-      reply.code(500)
-      return { error: (diff.stderr || diff.stdout).trim() || 'git diff failed' }
-    }
-    const message = `test: accept modified specs for "${feature.name}" via Canary Lab`
-    const commit = await runGit(root, ['commit', '-m', message, '--', ...repoRelPaths])
-    if (commit.code !== 0) {
-      reply.code(500)
-      return { error: (commit.stderr || commit.stdout).trim() || 'git commit failed' }
-    }
+    if (changed.code !== 1) return reply.code(500).send({ error: changed.stderr.trim() || 'git diff failed' })
+    const committed = await runGit(root, [
+      'commit', '--only', '-m', `test: accept modified specs for "${feature.name}" via Canary Lab`, '--', ...paths,
+    ])
+    if (committed.code !== 0) return reply.code(500).send({ error: committed.stderr.trim() || 'git commit failed' })
     const rec = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
     return { committed: true, status: rec.status }
   })

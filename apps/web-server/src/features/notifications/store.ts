@@ -62,7 +62,7 @@ export class NotificationStore {
     this.save(data)
   }
 
-  reconcile(sources: NotificationSource[]): void {
+  reconcile(sources: NotificationSource[], unavailableSourceKeys: ReadonlySet<string> = new Set()): void {
     const data = this.read()
     const now = new Date().toISOString()
     let changed = false
@@ -72,6 +72,7 @@ export class NotificationStore {
       if (item && !item.resolvedAt) { item.resolvedAt = now; changed = true }
     }
     for (const source of sources) {
+      if (unavailableSourceKeys.has(source.key)) continue
       const previous = data.sources[source.key]
       if (previous?.signature === source.signature) {
         const item = data.items.find((item) => item.id === previous.notificationId)
@@ -98,7 +99,7 @@ export class NotificationStore {
       changed = true
     }
     for (const [key, previous] of Object.entries(data.sources)) {
-      if (!seen.has(key) && previous.signature !== 'absent') {
+      if (!seen.has(key) && !unavailableSourceKeys.has(key) && previous.signature !== 'absent') {
         settle(previous.notificationId)
         data.sources[key] = { signature: 'absent' }
         changed = true

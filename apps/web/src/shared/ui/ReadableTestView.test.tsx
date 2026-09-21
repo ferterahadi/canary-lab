@@ -80,8 +80,8 @@ beforeEach(() => {
   highlighter.load.mockResolvedValue({
     themeColors: (theme: string) => (
       theme === 'one-dark-pro'
-        ? { bg: '#282c34', fg: '#abb2bf' }
-        : { bg: '#fafafa', fg: '#383a42' }
+        ? { bg: '#282c34', fg: '#abb2bf', comment: '#7f848e' }
+        : { bg: '#fafafa', fg: '#383a42', comment: '#a0a1a7' }
     ),
   })
 })
@@ -99,6 +99,25 @@ async function flushHighlighter(): Promise<void> {
 }
 
 describe('ReadableTestView', () => {
+  it('labels source comments as non-executable notes using the Code mode comment colour', async () => {
+    const test: ReadableTest = { ...STORY, story: { steps: [{
+      id: 'note-context', role: 'note',
+      text: 'This helper reads only the current run log.', spans: [{ text: 'This helper reads only the current run log.' }],
+      fidelity: 'exact', source: source(4, '/** This helper reads only the current run log. */'),
+    }] } }
+    act(() => root.render(<ReadableTestView test={test} />))
+    await flushHighlighter()
+
+    const role = container.querySelector('[data-testid="readable-story-role-note-context"]') as HTMLElement
+    const text = container.querySelector('[data-story-span="text"]') as HTMLElement
+    expect(role.textContent).toBe('NOTE')
+    expect(role.style.color).toBe('var(--code-comment)')
+    expect(text.style.color).toBe('var(--code-comment)')
+    expect((container.querySelector('.cl-readable-body') as HTMLElement).style.getPropertyValue('--code-comment'))
+      .toBe('#7f848e')
+    expect(container.textContent).toContain('This helper reads only the current run log.')
+  })
+
   it('labels a test block as TEST while preserving its nested setup, actions and checks', () => {
     const test: ReadableTest = { ...STORY, story: { steps: [{
       id: 'test-declaration', kind: 'flow', flowKind: 'scope', role: 'test',

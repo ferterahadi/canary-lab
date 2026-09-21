@@ -531,6 +531,16 @@ it('round-trips a test review source, language and baseline without leaking them
   expect(window.location.search).not.toContain('review')
 })
 
+it('preserves the exact run-review destination before any file is selected', () => {
+  window.history.replaceState(null, '', '/?feature=shop&run=run-1&dialog=tests-review&reviewBase=run&reviewMode=code')
+  expect(readPersistedView().reviewFocus).toEqual({ baseline: 'run', mode: 'code', line: undefined })
+  persistView(readPersistedView())
+  expect(window.location.search).toContain('reviewBase=run')
+  expect(window.location.search).toContain('reviewMode=code')
+  expect(window.location.search).not.toContain('reviewFile')
+  expect(JSON.parse(localStorage.getItem(KEY)!)).not.toHaveProperty('reviewFocus')
+})
+
 // A URL-mode elicitation invite is scoped to one flight's checkpoint. Navigating
 // inside that flight has to keep it — the human is mid-answer — while leaving the
 // flight or the view drops both params so the invite cannot be replayed elsewhere.

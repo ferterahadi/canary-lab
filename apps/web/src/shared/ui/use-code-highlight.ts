@@ -7,7 +7,7 @@ interface HighlightedCode {
   theme: string
   html: string
   lines: string[]
-  canvas: { bg?: string; fg?: string }
+  canvas: { bg?: string; fg?: string; comment?: string }
 }
 
 /** Highlight complete source once, so diff rows retain multiline token context.

@@ -65,6 +65,20 @@ describe('exact suite review', () => {
 })
 
 describe('adoption bound to reviewed bytes', () => {
+  it('persists snapshot metadata and the complete receipt together before asynchronous baseline work', async () => {
+    const captureRunStart = vi.fn(async () => ({}))
+    const { ctx, sink, before, live } = fixture({ dirtySpecHooks: { captureRunStart, finalizeRun: vi.fn() } })
+    const revision = suiteReviewRevision(before, live)
+    captureRunStart.mockImplementation(async () => {
+      expect(sink.patches.at(-1)).toMatchObject({
+        suiteSnapshot: { kind: 'taken' },
+        specEdits: { reviewDecisions: [{ revision, receipt: { decision: 'accepted', review_revision: revision, git: { status: 'committed', commit: 'review-commit' } } }] },
+      })
+      return {}
+    })
+    expect(await adoptSpecEdits(ctx, revision, { status: 'committed', commit: 'review-commit' })).toMatchObject({ ok: true })
+    expect(captureRunStart).toHaveBeenCalledOnce()
+  })
   it('adopts the reviewed files, records human authorship, and signals once', async () => {
     const { ctx, sink, before, live } = fixture()
     write(live, 'helper.ts', 'export const value = 2\n')

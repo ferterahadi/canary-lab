@@ -12,13 +12,13 @@ import path from 'path'
 import type { RunContext } from './run-context'
 import { copyDirRecursive } from '../../../../../../../shared/lib/copy-dir'
 import { computePendingEdits, hashFeatureSpecs } from '../dirty-specs/detect'
-import { readManifest, type SpecEditsAdoptedBy } from './manifest'
+import { readManifest, type RunManifest, type SpecEditsAdoptedBy } from './manifest'
 import { captureDirtySpecBaseline } from './run-manifest-writer'
 import { INTEGRITY_HINT_DISCLOSURE, deriveIntegrityHints } from './run-integrity-hints'
 import { detectHealMode } from './auto-heal'
 import { buildSuiteReview, skipSuiteSnapshotPath, suiteReviewRevision, suiteReviewFiles } from './suite-review'
 import { saveSuiteTestRoster } from '../suite-test-roster'
-import type { TestReviewDecision } from '../../../../../../../shared/test-review'
+import type { TestReviewDecision, TestReviewGitReceipt } from '../../../../../../../shared/test-review'
 import { materializeSuiteRuntimeInputs, prepareSuiteRuntimeInputs, suiteRuntimeInputTargets, suiteRuntimeInputTargetsForSnapshot } from './suite-runtime-inputs'
 
 export type AdoptSpecEditsResult =
@@ -134,11 +134,11 @@ function readLive(featureDir: string, rel: string): string | undefined {
  *  after elicitation accepts the exact reviewed revision. Refused
  *  while Playwright is executing the current copy: replacing files under a
  *  running process would corrupt the very run it is meant to inform. */
-export async function adoptSpecEdits(ctx: RunContext, expectedRevision?: string): Promise<AdoptSpecEditsResult> {
+export async function adoptSpecEdits(ctx: RunContext, expectedRevision?: string, git?: TestReviewGitReceipt): Promise<AdoptSpecEditsResult> {
   if (ctx.playwrightPty) return { ok: false, reason: 'tests-running' }
   const runtimeInputs = suiteRuntimeInputTargets(ctx)
   const revision = expectedRevision ?? (ctx.suiteDir !== ctx.feature.featureDir ? suiteReviewRevision(ctx.suiteDir, ctx.feature.featureDir, runtimeInputs) : undefined)
-  const adopted = await adoptPendingSpecEdits(ctx, 'human', revision)
+  const adopted = await adoptPendingSpecEdits(ctx, 'human', revision, git)
   if (!adopted.ok) return adopted
   const signal = ctx.signalGate.observe('rerun', {
     hypothesis: 'A human adopted the edited spec(s) into this run.',
@@ -165,7 +165,11 @@ export function restoreSpecEdits(ctx: RunContext, expectedRevision?: string): Re
   if (expectedRevision) {
     const exact = restoreReviewedSuiteFiles(ctx.suiteDir, live, expectedRevision, runtimeInputs)
     if (!exact.ok) return exact
-    recordSpecEdits(ctx, { at: new Date().toISOString(), revision: exact.revision, decision: 'restored' })
+    const at = new Date().toISOString()
+    recordSpecEdits(ctx, { at, revision: exact.revision, decision: 'restored', receipt: {
+      decision: 'restored', review_revision: exact.revision, files: exact.restored, at,
+      git: { status: 'not-requested' }, execution: { status: 'none' },
+    } })
     return { ok: true, restored: exact.restored }
   }
   const review = suiteReviewFiles(ctx.suiteDir, live, runtimeInputs)
@@ -235,7 +239,7 @@ type AdoptCoreResult =
 
 /** Re-take the snapshot over the live suite, re-baseline the dirty record and
  *  record the adoption. No signal: who reruns, and how, is the caller's. */
-async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, expectedRevision?: string): Promise<AdoptCoreResult> {
+async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, expectedRevision?: string, git?: TestReviewGitReceipt): Promise<AdoptCoreResult> {
   const live = ctx.feature.featureDir
   const hadSnapshot = ctx.suiteDir !== live
   const pending = hadSnapshot ? computePendingEdits(live, ctx.suiteDir) : []
@@ -248,21 +252,43 @@ async function adoptPendingSpecEdits(ctx: RunContext, by: SpecEditsAdoptedBy, ex
   const adopted = reviewed ? reviewed.files.map((edit) => edit.file)
     : hadSnapshot ? pending.map((edit) => edit.file) : Object.keys(hashFeatureSpecs(live)).sort()
 
+  let installedSpecEdits: RunManifest['specEdits']
+  const adoptionPatch = (): Partial<RunManifest> => {
+    const previous = readManifest(ctx.paths.manifestPath)?.specEdits
+    const at = new Date().toISOString()
+    const remaining = computePendingEdits(live, ctx.suiteDir)
+    const decision: TestReviewDecision | undefined = by === 'human' && expectedRevision ? {
+      at, revision: expectedRevision, decision: 'adopted', receipt: {
+        decision: 'accepted', review_revision: expectedRevision, files: adopted, at,
+        git: git ?? { status: 'not-requested' }, execution: { status: 'rerun-requested', runId: ctx.runId },
+      },
+    } : undefined
+    const reviewDecisions = [...(previous?.reviewDecisions ?? []), ...(decision ? [decision] : [])]
+    installedSpecEdits = { checkedAt: at, pending: remaining, adopted: [...(previous?.adopted ?? []), { at, by, files: adopted, ...(expectedRevision ? { reviewRevision: expectedRevision } : {}) }], ...(reviewDecisions.length ? { reviewDecisions } : {}) }
+    return {
+      specEdits: installedSpecEdits,
+      integrity: { hints: deriveIntegrityHints(remaining, (rel) => readLive(live, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
+    }
+  }
   if (expectedRevision !== undefined) {
-    const result = snapshotReviewedSuite(ctx, expectedRevision)
+    // Snapshot metadata and the complete human receipt share one persistence
+    // boundary. A failed write rolls back the staged snapshot before returning.
+    const result = snapshotReviewedSuite(ctx, expectedRevision, adoptionPatch)
     if (!result.ok) return result
   } else snapshotSuite(ctx)
   if (ctx.suiteDir === live) return { ok: false, reason: 'snapshot-failed' }
+  if (expectedRevision === undefined) ctx.stateSink.patchManifest(ctx.runId, adoptionPatch())
   await captureDirtySpecBaseline(ctx)
-
-  const previous = readManifest(ctx.paths.manifestPath)?.specEdits
-  const at = new Date().toISOString()
+  // Re-baselining awaits external hooks. Any edits made in that window remain
+  // pending against the installed copy; the completed receipt is preserved.
   const remaining = computePendingEdits(live, ctx.suiteDir)
-  const reviewDecisions: TestReviewDecision[] = [...(previous?.reviewDecisions ?? []), ...(by === 'human' && expectedRevision ? [{ at, revision: expectedRevision, decision: 'adopted' as const }] : [])]
-  ctx.stateSink.patchManifest(ctx.runId, {
-    specEdits: { checkedAt: at, pending: remaining, adopted: [...(previous?.adopted ?? []), { at, by, files: adopted, ...(expectedRevision ? { reviewRevision: expectedRevision } : {}) }], ...(reviewDecisions.length ? { reviewDecisions } : {}) },
-    integrity: { hints: deriveIntegrityHints(remaining, (rel) => readLive(live, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
-  })
+  if (JSON.stringify(remaining) !== JSON.stringify(installedSpecEdits?.pending)) {
+    const latest = readManifest(ctx.paths.manifestPath)?.specEdits ?? installedSpecEdits!
+    ctx.stateSink.patchManifest(ctx.runId, {
+      specEdits: { ...latest, checkedAt: new Date().toISOString(), pending: remaining },
+      integrity: { hints: deriveIntegrityHints(remaining, (rel) => readLive(live, rel)), disclosure: INTEGRITY_HINT_DISCLOSURE },
+    })
+  }
   return { ok: true, adopted }
 }
 
@@ -328,7 +354,7 @@ export function snapshotSuite(ctx: RunContext): void {
 
 /** Stage and validate the copied bytes before replacing evidence. A late file
  * edit or failed copy must leave the old snapshot and verdict intact. */
-function snapshotReviewedSuite(ctx: RunContext, expectedRevision: string): { ok: true } | { ok: false; reason: 'review-changed' | 'snapshot-failed' } {
+function snapshotReviewedSuite(ctx: RunContext, expectedRevision: string, adoptionPatch: () => Partial<RunManifest>): { ok: true } | { ok: false; reason: 'review-changed' | 'snapshot-failed' } {
   const target = ctx.paths.suiteSnapshotDir
   let scratch: string | undefined
   let originalMoved = false
@@ -353,6 +379,7 @@ function snapshotReviewedSuite(ctx: RunContext, expectedRevision: string): { ok:
     materializeSuiteRuntimeInputs(ctx)
     ctx.stateSink.patchManifest(ctx.runId, {
       suiteSnapshot: { kind: 'taken', dir: target, takenAt: new Date().toISOString(), digest: suiteDigest(target) },
+      ...adoptionPatch(),
     })
     originalMoved = false
     return { ok: true }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { flightNotificationSources, testReviewNotificationSources } from './sources'
 import type { FlightIndexEntry } from '../../../../../shared/flights/types'
+import type { TestReviewRequiredInfo } from '../../../../../shared/test-review'
 
 const flight = (over: Partial<FlightIndexEntry> = {}): FlightIndexEntry => ({ flightId: 'f1', feature: 'shop', status: 'paused', pauseReason: 'stage-failed', currentStage: 'run', ...over } as FlightIndexEntry)
 
@@ -35,6 +36,17 @@ describe('notification sources', () => {
 })
 
 describe('test changes in the shared inbox', () => {
+  it('keeps a terminal review actionable until the authoritative byte-level blocker settles', () => {
+    const run = { runId: 'ended-run', feature: 'shop', status: 'aborted' }
+    const review: TestReviewRequiredInfo = { type: 'test_review_required', feature: 'shop', runId: run.runId, review_revision: 'rev-1', changedFileCount: 3, reviewUrl: '/?dialog=tests-review', error: 'Review required' }
+    expect(testReviewNotificationSources([run], [], [review])[0]).toMatchObject({
+      key: 'test-review:shop', message: { severity: 'warning', toast: true,
+        body: expect.stringContaining('Review the changes before starting another run'),
+        target: { kind: 'test-review', feature: 'shop', runId: 'ended-run' } },
+    })
+    expect(testReviewNotificationSources([{ ...run, pendingSpecEdits: 3 }], [], [])).toEqual([])
+  })
+
   const changes = (verdict: 'weaker' | 'equivalent' | 'stronger' | 'unclassifiable' = 'weaker') => [{ featureId: 'shop', status: 'dirty' as const, dirtySpecs: [{ strength: { verdict } }] }]
 
   it('reports weakening outside an active run as an advisory review notification', () => {

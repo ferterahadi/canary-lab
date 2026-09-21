@@ -73,7 +73,7 @@ export interface ReadableSource {
   snippet: string
 }
 
-export type ReadableStoryRole = 'test' | 'setup' | 'action' | 'check'
+export type ReadableStoryRole = 'test' | 'setup' | 'action' | 'check' | 'note'
 
 export type ReadableStoryFlowKind =
   | 'scope'

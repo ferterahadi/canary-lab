@@ -55,9 +55,14 @@ export async function testReviewRoutes(app: FastifyInstance, deps: FeaturesRoute
         before: readSource(confinedFile(snapshot.dir, file)),
         after: readSource(confinedFile(feature.featureDir, file)),
       })))
-      const supporting = suiteReviewFiles(snapshot.dir, feature.featureDir).files.filter(({ file }) => !files.includes(file))
-      return { ...comparison, files: [...comparison.files, ...supporting.map(({ file }) => file)].sort(),
-        differences: [...comparison.differences, ...supporting.map(({ file }) => ({ file, affectedTests: [] }))] }
+      // Declaration changes drive the test counters, but the rail must mark
+      // every byte-level file change the revision-bound decision will settle.
+      // This includes comment/setup-only spec edits as well as support files.
+      const reviewed = suiteReviewFiles(snapshot.dir, feature.featureDir).files
+      const differences = new Map(comparison.differences.map((item) => [item.file, item]))
+      for (const { file } of reviewed) if (!differences.has(file)) differences.set(file, { file, affectedTests: [] })
+      return { ...comparison, files: [...new Set([...comparison.files, ...reviewed.map(({ file }) => file)])].sort(),
+        differences: [...differences.values()].sort((a, b) => a.file.localeCompare(b.file)) }
     } catch (error) {
       if (error instanceof Error && error.message === 'Test file is outside the suite') return reply.code(400).send({ error: error.message })
       throw error

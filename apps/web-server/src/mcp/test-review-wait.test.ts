@@ -11,7 +11,10 @@ function fakeStore(reads: Decision[][]) {
   const listeners: Array<(event: unknown) => void> = []
   let read = 0
   const get = vi.fn(() => ({
-    manifest: { status: 'healing', specEdits: { reviewDecisions: reads[Math.min(read++, reads.length - 1)] } },
+    manifest: { status: 'healing', specEdits: { reviewDecisions: reads[Math.min(read++, reads.length - 1)].map((decision) => ({ ...decision,
+      receipt: { decision: decision.decision === 'restored' ? 'restored' : 'accepted', review_revision: decision.revision,
+        files: ['test.spec.ts'], at: 'now', git: { status: 'not-requested' }, execution: { status: 'none' } },
+    })) } },
   }))
   const store = {
     get,

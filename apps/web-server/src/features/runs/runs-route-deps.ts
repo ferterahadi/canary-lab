@@ -74,6 +74,7 @@ export function buildRunsRouteDeps(
 	    featuresDir,
 	    projectRoot: projectRoot,
 	    store: runStore,
+	    dirtySpecStore,
 	    broker: externalHealBroker,
       workspaceEvents,
       gettingStarted,
@@ -120,7 +121,7 @@ export function buildRunsRouteDeps(
       const repoUpdates = await updateReposToUpstream(feature, options?.updateRepos, {
         inUseBy: (repoPath) => detectRepoCollision([repoPath], activeRuns)?.conflictingRunId ?? null,
       })
-      const runId = generateRunId()
+      const runId = options?.runId ?? generateRunId()
       const runDir = runDirFor(logsDir, runId)
       const sourceRepoPaths = normalizeRepoPaths((feature.repos ?? []).map((r) => r.localPath))
       const cost = estimateRunCost(buildServiceSpecs(feature, runDir, env).length)

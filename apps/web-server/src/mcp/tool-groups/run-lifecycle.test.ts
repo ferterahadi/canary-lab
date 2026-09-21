@@ -140,6 +140,21 @@ describe.each([
 })
 
 describe('start_run: continuing the run that is already healing', () => {
+  it('resumes a durable request only through the original session route and does not create a new start', async () => {
+    const startRun = vi.fn()
+    const testReviewRequest = vi.fn(async () => ({ statusCode: 200, body: { runId: 'continued', request: { status: 'started' } } }))
+    const { call } = harness({ startRun, testReviewRequest })
+    expect(await call('start_run', { ...START, request_id: 'request-1' })).toMatchObject({ runId: 'continued', nextSteps: ['get_run'] })
+    expect(testReviewRequest).toHaveBeenCalledWith({ method: 'POST', url: '/api/run-requests/request-1/resume', payload: { sessionId: START.session_id } })
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('preserves a structured review blocker and its original request identity', async () => {
+    const review = { type: 'test_review_required', runId: 'source', review_revision: 'a'.repeat(64), request: { requestId: 'request-1' } }
+    const { call } = harness({ startRun: async () => { throw Object.assign(new Error('review needed'), { testReviewRequired: review }) } })
+    expect(await call('start_run', START)).toMatchObject({ ...review, runStarted: false, request_id: 'request-1' })
+  })
+
   it('does not gate reuse on current coverage freshness', async () => {
     const read = coverageRequest()
     const { call } = harness({ store: storeOf([runDetail({ status: 'healing' })]), coverageRequest: read })

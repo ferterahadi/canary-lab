@@ -10,6 +10,7 @@ import { isHealClaimAllowed } from '../../features/runs/logic/heal/heal-claim-po
 import { isActiveRunStatus } from '../../../../../shared/run-state'
 import { type ToolGroupContext, CLAIM_SUPPRESSED_MESSAGE, asJsonResult, bootSessionValue, claimRun, errorResult, failureResult, findContinuingRunForFeature, healWaitNext, isActiveBootRun, resolveRunRef, runCandidate } from '../tool-support'
 import { readCoverageUpdate } from '../coverage-catchup'
+import type { TestReviewRequiredInfo } from '../../../../../shared/test-review'
 
 const coverageChangeResponse = z.object({
   change: z.object({
@@ -46,6 +47,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       'Start or continue a run. Before a fresh run, stale test-to-requirement coverage asks the user whether to update coverage first or run now with the historical percentage explicitly qualified; no run starts while that choice is pending. A matching active run is reused even with force_new:true, and run_ref resumes an ordinary failed/aborted run with its recorded suite and journal, so neither path is blocked by current coverage freshness. An intentional concurrent run of the same feature must be started from the Run panel. Fresh starts reject pending suite changes unless a human durably approved the exact terminal-run revision; after that approval start without run_ref, and only the new run can produce a verdict. After a code fix use signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run. Ordinary skips remain incomplete; only reporter-observed, predeclared environment exclusions settle as not applicable and never count as passes.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
+      request_id: z.string().optional().describe('Resume the exact blocked request returned by test_review_required. Reuse its original session_id; approval in another surface never transfers this request to that client.'),
       env: z.string().optional().describe('Envset name. Defaults to the feature\'s first declared env.'),
       runId: z.string().optional().describe('Exact run id to resume/restart. A different run currently healing blocks this.'),
       run_ref: z.string().optional().describe('Exact run id or unique suffix (e.g. "7cvh") to resume/restart. A different run currently healing blocks this.'),
@@ -61,6 +63,15 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
     },
   }, async (args, request) => {
     const { feature, env, runId, run_ref, claim_heal, session_id, client_kind, conversation_name, guidance, force_new, perturbation, update_repos } = args
+    if (args.request_id) {
+      if (!deps.testReviewRequest) return errorResult('Run-request continuation is unavailable on this server.')
+      const result = await deps.testReviewRequest({ method: 'POST', url: `/api/run-requests/${encodeURIComponent(args.request_id)}/resume`, payload: { sessionId: session_id } })
+      const body = result.body as Record<string, unknown>
+      return asJsonResult({ ...body, ...(result.statusCode < 300 ? {
+        next: 'The original request has continued. Read get_run for this run and follow its recorded owner/claim state; do not start another run.',
+        nextSteps: ['get_run'],
+      } : {}) })
+    }
     const coverageScope = ['run-coverage-preflight', deps.projectRoot, args]
     const coverageChoiceSchema = z.object({ choice: z.enum(['Update coverage first', 'Run now with stale coverage']) })
     const isolationSchema = z.object({ isolation: z.enum(['worktree', 'queue']) })
@@ -345,6 +356,11 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
           ...(claimAllowed ? healWaitNext() : {}),
         })
       } catch (err) {
+        const review = (err as { testReviewRequired?: TestReviewRequiredInfo }).testReviewRequired
+        if (review) return asJsonResult({ ...review, runStarted: false,
+          next: 'Show get_test_review for this run and request the human decision with review_test_changes. Carry request_id into both tools. Wait for the persisted decision, then resume with start_run using request_id and the SAME session_id. Approval in the browser does not transfer execution to Canary.',
+          ...(review.request ? { request_id: review.request.requestId } : {}),
+        })
         return failureResult(err)
       }
     }

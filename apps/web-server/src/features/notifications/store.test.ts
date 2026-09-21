@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationStore } from './store'
 import { notificationRoutes } from './index'
 import type { NotificationSource } from '../../../../../shared/notifications/types'
+import type { RunManifest } from '../runs/logic/runtime/manifest'
+import { suiteReviewRevision } from '../runs/logic/runtime/suite-review'
 
 let dir: string
 const events = { publish: vi.fn() }
@@ -19,13 +21,13 @@ it('keeps passive coverage state out of the inbox and resolves test review throu
   let dirty = true
   const app = Fastify()
   await register(app, {
-    logsDir: dir, workspaceEvents: events,
+    logsDir: dir, featuresDir: dir, workspaceEvents: events,
     coverageMonitor: { reconcile: vi.fn(), list: () => [{ feature: 'shop', freshness: { state: 'stale' } }] },
     dirtySpecStore: {
       list: () => [{ featureId: 'shop', status: dirty ? 'dirty' : 'clean', dirtySpecs: dirty ? [{ strength: { verdict: 'weaker' } }] : [] }],
       onEvent: (fn: () => void) => dirtyListeners.add(fn), offEvent: (fn: () => void) => dirtyListeners.delete(fn),
     },
-    runStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
+    runStore: { list: () => [], get: () => null, onEvent: vi.fn(), offEvent: vi.fn() },
     flightStore: { list: () => [], latestForFeature: () => ({ flightId: 'f1' }), onEvent: vi.fn(), offEvent: vi.fn() },
   } as unknown as import('../../server-context').ServerContext)
   try {
@@ -183,9 +185,9 @@ it('records source transitions without a browser and detaches subscriptions on s
   let runs = [{ runId: 'r1', feature: 'shop', status: 'healing', pendingSpecEdits: 1 }]
   const app = Fastify()
   await register(app, {
-    logsDir: dir, workspaceEvents: events,
+    logsDir: dir, featuresDir: dir, workspaceEvents: events,
     dirtySpecStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
-    runStore: { list: () => runs, onEvent: (fn: () => void) => runListeners.add(fn), offEvent: (fn: () => void) => runListeners.delete(fn) },
+    runStore: { list: () => runs, get: () => null, onEvent: (fn: () => void) => runListeners.add(fn), offEvent: (fn: () => void) => runListeners.delete(fn) },
     flightStore: { list: () => [], onEvent: (fn: () => void) => flightListeners.add(fn), offEvent: (fn: () => void) => flightListeners.delete(fn) },
   } as unknown as import('../../server-context').ServerContext)
   try {
@@ -205,9 +207,9 @@ it('keeps one alert when a weakening moves from an active run back to its featur
   const changes = [{ featureId: 'shop', status: 'dirty' as const, dirtySpecs: [{ strength: { verdict: 'weaker' as const } }] }]
   const app = Fastify()
   await register(app, {
-    logsDir: dir, workspaceEvents: events,
+    logsDir: dir, featuresDir: dir, workspaceEvents: events,
     dirtySpecStore: { list: () => changes, onEvent: vi.fn(), offEvent: vi.fn() },
-    runStore: { list: () => runs, onEvent: (fn: () => void) => runListeners.add(fn), offEvent: (fn: () => void) => runListeners.delete(fn) },
+    runStore: { list: () => runs, get: () => null, onEvent: (fn: () => void) => runListeners.add(fn), offEvent: (fn: () => void) => runListeners.delete(fn) },
     flightStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
   } as unknown as import('../../server-context').ServerContext)
   try {
@@ -229,9 +231,9 @@ it('resolves ordinary test changes when they no longer block an active run', asy
   const changes = [{ featureId: 'shop', status: 'dirty' as const, dirtySpecs: [{ strength: { verdict: 'equivalent' as const } }] }]
   const app = Fastify()
   await register(app, {
-    logsDir: dir, workspaceEvents: events,
+    logsDir: dir, featuresDir: dir, workspaceEvents: events,
     dirtySpecStore: { list: () => changes, onEvent: vi.fn(), offEvent: vi.fn() },
-    runStore: { list: () => runs, onEvent: (fn: () => void) => runListeners.add(fn), offEvent: (fn: () => void) => runListeners.delete(fn) },
+    runStore: { list: () => runs, get: () => null, onEvent: (fn: () => void) => runListeners.add(fn), offEvent: (fn: () => void) => runListeners.delete(fn) },
     flightStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
   } as unknown as import('../../server-context').ServerContext)
   try {
@@ -250,8 +252,8 @@ it('persists test-change alerts from dirty-store events, preserves deletion, and
   let changes = [{ featureId: 'shop', status: 'dirty' as 'dirty' | 'clean', dirtySpecs: [{ strength: { verdict: 'weaker' } }] }]
   const app = Fastify()
   await register(app, {
-    logsDir: dir, workspaceEvents: events,
-    runStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
+    logsDir: dir, featuresDir: dir, workspaceEvents: events,
+    runStore: { list: () => [], get: () => null, onEvent: vi.fn(), offEvent: vi.fn() },
     flightStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
     dirtySpecStore: { list: () => changes, onEvent: (fn: () => void) => dirtyListeners.add(fn), offEvent: (fn: () => void) => dirtyListeners.delete(fn) },
   } as unknown as import('../../server-context').ServerContext)
@@ -272,4 +274,93 @@ it('persists test-change alerts from dirty-store events, preserves deletion, and
     expect((await app.inject('/api/notifications')).json()[0].resolvedAt).toBeTruthy()
   } finally { await app.close() }
   expect(dirtyListeners.size).toBe(0)
+})
+
+it('persists terminal blockers before a start attempt and resolves exact approval with recovery for missed events', async () => {
+  const { register } = await import('./index')
+  const featuresDir = path.join(dir, 'features')
+  const live = path.join(featuresDir, 'shop')
+  const snapshot = path.join(dir, 'recorded-suite')
+  for (const root of [live, snapshot]) {
+    fs.mkdirSync(path.join(root, 'e2e'), { recursive: true })
+    fs.writeFileSync(path.join(root, 'e2e', 'checkout.spec.ts'), "test('checkout', () => expect(1).toBe(1))")
+  }
+  fs.writeFileSync(path.join(live, 'e2e', 'checkout.spec.ts'), "test('checkout', () => expect(2).toBe(2))")
+  // No pendingSpecEdits: abort won the race with the dirty-file watcher.
+  const manifest = { runId: 'ended-run', feature: 'shop', status: 'aborted', featureDir: live, suiteSnapshot: { kind: 'taken', dir: snapshot } } as RunManifest
+  const listeners = new Set<() => void>()
+  const app = Fastify()
+  await register(app, {
+    logsDir: dir, featuresDir, workspaceEvents: events,
+    dirtySpecStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
+    runStore: { list: () => [{ runId: manifest.runId, feature: manifest.feature, status: manifest.status }], get: () => ({ manifest }), onEvent: (fn: () => void) => listeners.add(fn), offEvent: (fn: () => void) => listeners.delete(fn) },
+    flightStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
+  } as unknown as import('../../server-context').ServerContext)
+  try {
+    const [note] = (await app.inject('/api/notifications')).json()
+    expect(note).toMatchObject({ severity: 'warning', toast: true, target: { kind: 'test-review', feature: 'shop', runId: 'ended-run' } })
+    await app.inject({ method: 'POST', url: `/api/notifications/${note.id}/read` })
+    expect((await app.inject('/api/notifications')).json()[0].resolvedAt).toBeUndefined()
+    const revision = suiteReviewRevision(snapshot, live)
+    manifest.specEdits = { checkedAt: 'now', pending: [], adopted: [], reviewDecisions: [{ revision, at: 'now', decision: 'approved-for-new-run', receipt: { decision: 'accepted', review_revision: revision, files: ['e2e/checkout.spec.ts'], at: 'now', git: { status: 'not-requested' }, execution: { status: 'new-run-required', runId: 'ended-run' } } }] }
+    // No event: the already-open inbox's automatic read must reconcile truth.
+    expect((await app.inject('/api/notifications')).json()).toEqual([expect.objectContaining({ id: note.id, resolvedAt: expect.any(String) })])
+    fs.appendFileSync(path.join(live, 'e2e', 'checkout.spec.ts'), '\n// another revision')
+    for (const fn of listeners) fn()
+    const fresh = (await app.inject('/api/notifications')).json().find((item: { resolvedAt?: string }) => !item.resolvedAt)
+    expect(fresh.id).not.toBe(note.id)
+    fs.copyFileSync(path.join(snapshot, 'e2e', 'checkout.spec.ts'), path.join(live, 'e2e', 'checkout.spec.ts'))
+    for (const fn of listeners) fn()
+    expect((await app.inject('/api/notifications')).json().every((item: { resolvedAt?: string }) => !!item.resolvedAt)).toBe(true)
+  } finally { await app.close() }
+})
+
+it.each(['snapshot', 'live'] as const)('keeps an unavailable %s review pending while a valid terminal blocker updates and resolves', async (missing) => {
+  const { register } = await import('./index')
+  const featuresDir = path.join(dir, 'features')
+  const manifests = ['missing-suite', 'valid-suite'].map((feature) => {
+    const live = path.join(featuresDir, feature)
+    const snapshot = path.join(dir, `${feature}-snapshot`)
+    for (const root of [live, snapshot]) {
+      fs.mkdirSync(path.join(root, 'e2e'), { recursive: true })
+      fs.writeFileSync(path.join(root, 'e2e', 'contract.spec.ts'), "test('contract', () => expect(1).toBe(1))")
+    }
+    fs.writeFileSync(path.join(live, 'e2e', 'contract.spec.ts'), "test('contract', () => expect(2).toBe(2))")
+    return { runId: `${feature}-run`, feature, featureDir: live, status: 'aborted', suiteSnapshot: { kind: 'taken', dir: snapshot } } as RunManifest
+  })
+  const app = Fastify()
+  await register(app, {
+    logsDir: dir, featuresDir, workspaceEvents: events,
+    // The unavailable suite also has a quiet source. It must not overwrite
+    // the last confirmed review merely because its comparison cannot be read.
+    dirtySpecStore: { list: () => [{ featureId: 'missing-suite', status: 'clean', dirtySpecs: [] }], onEvent: vi.fn(), offEvent: vi.fn() },
+    runStore: {
+      list: (options: { feature?: string } = {}) => manifests.filter((item) => !options.feature || item.feature === options.feature),
+      get: (runId: string) => ({ manifest: manifests.find((item) => item.runId === runId) }),
+      onEvent: vi.fn(), offEvent: vi.fn(),
+    },
+    flightStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
+  } as unknown as import('../../server-context').ServerContext)
+  try {
+    const initial = (await app.inject('/api/notifications')).json()
+    expect(initial).toHaveLength(2)
+    const missingNote = initial.find((item: { target: { feature: string } }) => item.target.feature === 'missing-suite')
+    const unavailableDir = missing === 'snapshot' ? path.join(dir, 'missing-suite-snapshot') : path.join(featuresDir, 'missing-suite')
+    fs.rmSync(unavailableDir, { recursive: true })
+    fs.writeFileSync(path.join(featuresDir, 'valid-suite', 'e2e', 'fixture.ts'), 'export const fixture = 1')
+    const response = await app.inject('/api/notifications')
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: missingNote.id, target: missingNote.target }),
+      expect.objectContaining({ body: expect.stringContaining('2 test files changed'), target: { kind: 'test-review', feature: 'valid-suite', runId: 'valid-suite-run' } }),
+    ]))
+    expect(response.json().find((item: { id: string }) => item.id === missingNote.id).resolvedAt).toBeUndefined()
+    fs.copyFileSync(path.join(dir, 'valid-suite-snapshot', 'e2e', 'contract.spec.ts'), path.join(featuresDir, 'valid-suite', 'e2e', 'contract.spec.ts'))
+    fs.unlinkSync(path.join(featuresDir, 'valid-suite', 'e2e', 'fixture.ts'))
+    const settled = (await app.inject('/api/notifications')).json()
+    expect(settled.find((item: { target: { feature: string } }) => item.target.feature === 'valid-suite').resolvedAt).toBeTruthy()
+    expect(settled.find((item: { id: string }) => item.id === missingNote.id).resolvedAt).toBeUndefined()
+    await app.inject({ method: 'DELETE', url: `/api/notifications/${missingNote.id}` })
+    expect((await app.inject('/api/notifications')).json().some((item: { id: string }) => item.id === missingNote.id)).toBe(false)
+  } finally { await app.close() }
 })

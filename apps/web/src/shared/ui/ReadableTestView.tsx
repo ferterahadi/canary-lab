@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import type {
   ReadableSource,
   ReadableStoryFlowKind,
@@ -49,7 +49,10 @@ export function ReadableTestView({
       data-testid="readable-test-story"
       className="shiki-block cl-code-shell overflow-hidden rounded-md text-[11px]"
     >
-      <div className="cl-readable-body" style={{ backgroundColor: canvas.bg, color: canvas.fg }}>
+      <div
+        className="cl-readable-body"
+        style={{ backgroundColor: canvas.bg, color: canvas.fg, '--code-comment': canvas.comment } as CSSProperties}
+      >
         {steps.length ? (
           <StorySequence
             steps={steps}
@@ -225,11 +228,11 @@ function StoryRow({
   )
 }
 
-function StorySpan({ span }: { span: ReadableStorySpan }) {
+function StorySpan({ span, color }: { span: ReadableStorySpan; color?: string }) {
   return (
     <span
       data-story-span={span.kind ?? 'text'}
-      style={{ color: storySpanColor(span.kind) }}
+      style={{ color: color ?? storySpanColor(span.kind) }}
     >
       {span.text}
     </span>
@@ -250,6 +253,7 @@ function storySpanColor(kind: ReadableStorySpan['kind']): string | undefined {
 }
 
 function roleColor(role: ReadableStoryRole): string {
+  if (role === 'note') return 'var(--code-comment)'
   if (role === 'setup') return 'var(--code-cyan)'
   if (role === 'action' || role === 'test') return 'var(--code-keyword)'
   return 'var(--semantic-attention)'
@@ -279,7 +283,8 @@ function storyKeyword(step: ReadableStoryItem): string {
   return keywords[step.flowKind]
 }
 
-function roleLabel(role: ReadableStoryRole): 'TEST' | 'SETUP' | 'ACTION' | 'CHECK' {
+function roleLabel(role: ReadableStoryRole): 'TEST' | 'SETUP' | 'ACTION' | 'CHECK' | 'NOTE' {
+  if (role === 'note') return 'NOTE'
   if (role === 'test') return 'TEST'
   if (role === 'setup') return 'SETUP'
   if (role === 'action') return 'ACTION'
@@ -314,21 +319,25 @@ function storyDisplaySpans(step: ReadableStoryItem): ReadableStorySpan[] {
 
 /** The Shiki theme's canvas colours, shared with Code mode. Until Shiki is
  * ready, the same shell tokens provide the initial background and foreground. */
-function useCodeThemeColors(): { bg: string; fg: string } {
+function useCodeThemeColors(): { bg: string; fg: string; comment: string } {
   const { resolved } = useTheme()
-  const [canvas, setCanvas] = useState<{ bg: string; fg: string } | null>(null)
+  const [canvas, setCanvas] = useState<{ bg: string; fg: string; comment: string } | null>(null)
   useEffect(() => {
     let cancelled = false
     getCodeHighlighter()
       .then((highlighter) => {
         if (cancelled) return
         const colors = highlighter.themeColors(codeThemeFor(resolved))
-        setCanvas({ bg: colors.bg ?? 'var(--bg-input)', fg: colors.fg ?? 'var(--text-primary)' })
+        setCanvas({
+          bg: colors.bg ?? 'var(--bg-input)',
+          fg: colors.fg ?? 'var(--text-primary)',
+          comment: colors.comment ?? 'var(--text-muted)',
+        })
       })
       .catch(() => { if (!cancelled) setCanvas(null) })
     return () => { cancelled = true }
   }, [resolved])
-  return canvas ?? { bg: 'var(--bg-input)', fg: 'var(--text-primary)' }
+  return canvas ?? { bg: 'var(--bg-input)', fg: 'var(--text-primary)', comment: 'var(--text-muted)' }
 }
 
 function fidelityTitle(fidelity: ReadableStoryItem['fidelity']): string {
@@ -349,12 +358,13 @@ function sourceLabel(source: ReadableSource): string {
 
 /** The semantic row shared by test stories and source-aligned English diffs. */
 export function ReadableStoryText({ step, children }: { step: ReadableStoryItem; children?: ReactNode }) {
+  const noteColor = step.role === 'note' ? roleColor(step.role) : undefined
   return <>
     <span data-testid={`readable-story-role-${step.id}`} style={{ color: storyKeywordColor(step), fontWeight: 600 }}>
       {storyKeyword(step)}
     </span>
-    <span className="min-w-0 whitespace-pre-wrap break-words">
-      {storyDisplaySpans(step).map((span, index) => <StorySpan key={index} span={span} />)}
+    <span className="min-w-0 whitespace-pre-wrap break-words" style={{ color: noteColor }}>
+      {storyDisplaySpans(step).map((span, index) => <StorySpan key={index} span={span} color={noteColor} />)}
       {children}
     </span>
   </>

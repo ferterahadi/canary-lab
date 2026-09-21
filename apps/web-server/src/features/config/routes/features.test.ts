@@ -598,3 +598,43 @@ describe('POST /api/features/:name/commit-dirty', () => {
     expect(execFileSync('git', ['show', 'HEAD:e2e/new.spec.ts'], { cwd: dir }).toString()).toBe(fs.readFileSync(file, 'utf8'))
   })
 })
+
+describe('feature test review decisions', () => {
+  it('commits the exact reviewed revision and returns the same durable receipt on retry', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+    const app = await build({ dirtySpecStore: store })
+    const plan = (await app.inject({ method: 'GET', url: '/api/features/alpha/test-review-plan' })).json() as { review_revision: string }
+
+    const first = await app.inject({ method: 'POST', url: '/api/features/alpha/accept-test-review', payload: { expectedRevision: plan.review_revision } })
+    expect(first.statusCode).toBe(200)
+    expect(first.json()).toMatchObject({
+      decision: 'accepted', review_revision: plan.review_revision, files: ['e2e/a.spec.ts'],
+      git: { status: 'committed', commit: expect.stringMatching(/^[a-f0-9]{40}$/) }, execution: { status: 'none' },
+    })
+    expect(store.reviewReceipt('alpha', plan.review_revision)).toEqual(first.json())
+    const retry = await app.inject({ method: 'POST', url: '/api/features/alpha/accept-test-review', payload: { expectedRevision: plan.review_revision } })
+    expect(retry.json()).toEqual(first.json())
+  })
+
+  it('refuses a stale revision and restores the current reviewed files', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+    const app = await build({ dirtySpecStore: store })
+    const plan = (await app.inject({ method: 'GET', url: '/api/features/alpha/test-review-plan' })).json() as { review_revision: string }
+    fs.appendFileSync(path.join(dir, 'e2e', 'a.spec.ts'), '// later\n')
+    const stale = await app.inject({ method: 'POST', url: '/api/features/alpha/restore-test-review', payload: { expectedRevision: plan.review_revision } })
+    expect(stale.statusCode).toBe(409)
+    expect(stale.json()).toMatchObject({ reason: 'review-changed', error: expect.stringContaining('changed') })
+    const latest = (await app.inject({ method: 'GET', url: '/api/features/alpha/test-review-plan' })).json() as { review_revision: string }
+    const restored = await app.inject({ method: 'POST', url: '/api/features/alpha/restore-test-review', payload: { expectedRevision: latest.review_revision } })
+    expect(restored.json()).toMatchObject({ decision: 'restored', review_revision: latest.review_revision, files: ['e2e/a.spec.ts'] })
+    expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf8')).toBe("test('one', async () => { expect(1).toBe(1) })\n")
+  })
+})

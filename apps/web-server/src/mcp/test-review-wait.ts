@@ -11,7 +11,8 @@ export function testReviewOutcome(store: RunStore, runId: string, revision: stri
   const detail = store.get(runId)
   if (!detail) return { status: 'run-unavailable', runId }
   const decision = [...(detail.manifest.specEdits?.reviewDecisions ?? [])].reverse().find((item) => item.revision === revision)
-  if (decision) return {
+  if (decision?.receipt) return {
+    ...(decision.receipt ?? {}),
     status: decision.decision, runId, review_revision: revision,
     next: decision.decision === 'adopted'
       ? 'The human accepted these test changes. Continue with wait_for_heal_task for the runner result; acceptance is not a pass.'
@@ -20,6 +21,7 @@ export function testReviewOutcome(store: RunStore, runId: string, revision: stri
       : 'The human restored the recorded tests. Continue with wait_for_heal_task and fix the app against those tests. Do not reapply the rejected test edits.',
     nextSteps: decision.decision === 'approved-for-new-run' ? ['start_run'] : ['wait_for_heal_task'],
   }
+  if (decision) return null
   if (isTerminalRunStatus(detail.manifest.status)) {
     const snapshot = detail.manifest.suiteSnapshot
     try {

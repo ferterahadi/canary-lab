@@ -6,12 +6,14 @@ import { buildSuiteReview, suiteReviewFiles, suiteReviewRevision } from '../logi
 import { runDirFor } from '../logic/runtime/run-paths'
 import { suiteRuntimeInputTargetsForSnapshot } from '../logic/runtime/suite-runtime-inputs'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
+import type { TestReviewDecision } from '../../../../../../shared/test-review'
 
-function reviewCapabilities(active: boolean, terminal: boolean, decision: string | undefined, hasFiles: boolean) {
+function reviewCapabilities(active: boolean, terminal: boolean, decision: TestReviewDecision | undefined, hasFiles: boolean) {
   if (decision) return {
     reviewState: 'settled' as const,
     allowedActions: [],
-    nextAction: decision === 'approved-for-new-run' ? 'start-new-run' as const : 'none' as const,
+    nextAction: decision.decision === 'approved-for-new-run' ? 'start-new-run' as const : 'none' as const,
+    ...(decision.receipt ? { receipt: decision.receipt } : {}),
   }
   if (!hasFiles) return { reviewState: 'settled' as const, allowedActions: [], nextAction: 'none' as const }
   if (active) return {
@@ -44,7 +46,7 @@ export async function registerRunTestReviewRoutes(app: FastifyInstance, deps: Ru
     const terminal = isTerminalRunStatus(manifest.status)
     if (req.query.summary === 'true') {
       const review = suiteReviewFiles(snapshot.dir, manifest.featureDir, runtimeInputs)
-      const decision = [...(manifest.specEdits?.reviewDecisions ?? [])].reverse().find((item) => item.revision === review.revision)?.decision
+      const decision = [...(manifest.specEdits?.reviewDecisions ?? [])].reverse().find((item) => item.revision === review.revision)
       return {
         runId: manifest.runId, feature: manifest.feature, baseline: 'run-start',
         review_revision: review.revision, files: review.files,
@@ -60,7 +62,7 @@ export async function registerRunTestReviewRoutes(app: FastifyInstance, deps: Ru
     fs.mkdirSync(dir, { recursive: true })
     const patchPath = path.join(dir, `${review.revision}.patch`)
     fs.writeFileSync(patchPath, review.patch)
-    const decision = [...(manifest.specEdits?.reviewDecisions ?? [])].reverse().find((item) => item.revision === review.revision)?.decision
+    const decision = [...(manifest.specEdits?.reviewDecisions ?? [])].reverse().find((item) => item.revision === review.revision)
     return {
       runId: manifest.runId, feature: manifest.feature, baseline: 'run-start',
       review_revision: review.revision, files: review.files, patchPath,

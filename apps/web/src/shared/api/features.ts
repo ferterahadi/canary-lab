@@ -2,7 +2,7 @@
 // Split out of client.ts; see that barrel for the shared surface.
 
 import type { Feature } from './types'
-import type { TestFileReview, TestSourceComparison } from '@shared/test-review'
+import type { FeatureTestReview, TestFileReview, TestReviewReceipt, TestSourceComparison } from '@shared/test-review'
 import type { StrengthVerdict } from '@shared/verification-strength/types'
 import { defaultOpts, request, type ClientOptions } from './internal'
 
@@ -27,6 +27,26 @@ export function getTestFileDifference(feature: string, file: string, runId: stri
 export function listFeatures(opts?: ClientOptions): Promise<Feature[]> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<Feature[]>(`${baseUrl}/api/features`, { method: 'GET' }, fetchImpl)
+}
+
+export function getFeatureTestReview(feature: string, opts?: ClientOptions): Promise<FeatureTestReview> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/features/${encodeURIComponent(feature)}/test-review-plan`, { method: 'GET' }, fetchImpl)
+}
+
+function featureReviewDecision(feature: string, action: 'accept' | 'restore', expectedRevision: string, opts?: ClientOptions): Promise<TestReviewReceipt> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/features/${encodeURIComponent(feature)}/${action}-test-review`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision }),
+  }, fetchImpl)
+}
+
+export function acceptFeatureTestReview(feature: string, expectedRevision: string, opts?: ClientOptions): Promise<TestReviewReceipt> {
+  return featureReviewDecision(feature, 'accept', expectedRevision, opts)
+}
+
+export function restoreFeatureTestReview(feature: string, expectedRevision: string, opts?: ClientOptions): Promise<TestReviewReceipt> {
+  return featureReviewDecision(feature, 'restore', expectedRevision, opts)
 }
 
 // Test-file integrity: accept the current spec content (Canary-local) so the

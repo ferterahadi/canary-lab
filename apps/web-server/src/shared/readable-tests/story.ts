@@ -2,7 +2,7 @@ import ts from 'typescript'
 import { UnsupportedSyntaxKindError, statementEnglish } from '../controlled-english/ast-to-ir'
 import { renderEnglish } from '../controlled-english/english-renderer'
 import type { SemanticContext } from '../controlled-english/semantic-context'
-import { hasStructuralCallback, sourceAssertionText, sourceCallbackCall, sourceCallbackExpressionCall, sourceCallbackHeaderText, sourceConditionText, sourceDeclarationText, sourceExpressionText, sourceFunctionText, sourceLoopText, sourceStatementText, testRegistration } from './source-language'
+import { hasStructuralCallback, sourceAssertionText, sourceCallbackCall, sourceCallbackExpressionCall, sourceCallbackHeaderText, sourceConditionText, sourceDeclarationText, sourceExpressionText, sourceFunctionBinding, sourceFunctionText, sourceLoopText, sourceStatementText, testRegistration } from './source-language'
 import type {
   ReadableStoryFlowKind,
   ReadableStoryItem,
@@ -31,6 +31,7 @@ export type StoryRole = ReadableStoryRole
 
 interface StoryCandidateBase {
   node: ts.Node
+  sourceRange?: { start: number; end: number }
   role: StoryRole
   text: string
   spans: ReadableStorySpan[]
@@ -56,6 +57,36 @@ type StoryDescription = Pick<StoryCandidateBase, 'role' | 'text' | 'fidelity'>
 interface WalkOptions {
   includeActions: boolean
   breakTarget?: 'loop' | 'switch'
+}
+
+function readableCommentText(text: string): string {
+  const body = text.startsWith('//') ? text.slice(2) : text.slice(2, -2)
+  const lines = body.split(/\r?\n/).map((line) => line.replace(/^\s*\* ?/, '').trim())
+  const paragraphs: string[] = []
+  let current: string[] = []
+  for (const line of lines) {
+    if (line) current.push(line)
+    else if (current.length) {
+      paragraphs.push(current.join(' '))
+      current = []
+    }
+  }
+  if (current.length) paragraphs.push(current.join(' '))
+  return paragraphs.join('\n\n')
+}
+
+function adjacentCommentGroups(fullText: string, ranges: readonly ts.CommentRange[]): ts.CommentRange[][] {
+  const groups: ts.CommentRange[][] = []
+  for (const range of ranges) {
+    const group = groups.at(-1)
+    const previous = group?.at(-1)
+    const adjacentLineComments = previous?.kind === ts.SyntaxKind.SingleLineCommentTrivia
+      && range.kind === ts.SyntaxKind.SingleLineCommentTrivia
+      && /^\s*\r?\n\s*$/.test(fullText.slice(previous.end, range.pos))
+    if (group && adjacentLineComments) group.push(range)
+    else groups.push([range])
+  }
+  return groups
 }
 
 const SETUP_CALL_VERBS = new Set(['build', 'configure', 'create', 'generate', 'make', 'mock', 'prepare', 'seed', 'setup'])
@@ -1044,6 +1075,26 @@ export function storyCandidates(
   completeContext?: SemanticContext,
 ): StoryCandidate[] {
   const aliases = new Map<string, string>()
+  const fullText = sourceFile.getFullText()
+
+  const commentCandidates = (node: ts.Node, position: number, path: number[]): StoryStepCandidate[] => {
+    const ranges = ts.getLeadingCommentRanges(fullText, position) ?? []
+    return adjacentCommentGroups(fullText, ranges).flatMap((group, index) => {
+      const text = group.map((range) => readableCommentText(fullText.slice(range.pos, range.end))).filter(Boolean).join(' ')
+      const first = group[0]
+      const last = group[group.length - 1]
+      return text ? [{
+        kind: 'step' as const,
+        node,
+        sourceRange: { start: first.pos, end: last.end },
+        path: [...path, -1, index],
+        role: 'note' as const,
+        text,
+        spans: [{ text }],
+        fidelity: 'exact' as const,
+      }] : []
+    })
+  }
 
   const decorate = (
     node: ts.Node,
@@ -1102,16 +1153,19 @@ export function storyCandidates(
     return nested.flatMap((statement, index) => {
       const path = [...basePath, index]
       const candidates = walkStatement(statement, path, options)
-      if (candidates.length || !completeContext) return candidates
+      const comments = completeContext && typeof statement.getFullStart === 'function'
+        ? commentCandidates(statement, statement.getFullStart(), path)
+        : []
+      if (candidates.length || !completeContext) return [...comments, ...candidates]
       try {
         const text = renderEnglish(statementEnglish(statement))
         const role: StoryRole = renderAssertionStatement(statement, sourceFile) ? 'check' : ts.isExpressionStatement(statement) ? 'action' : 'setup'
-        return [{ kind: 'step' as const, node: statement, path, role,
+        return [...comments, { kind: 'step' as const, node: statement, path, role,
           text, spans: storySpans(text, variablePhrases(statement, text, aliases), true), fidelity: 'derived' as const }]
       } catch (error) {
         if (!(error instanceof UnsupportedSyntaxKindError)) throw error
         // Unrecognized or malformed syntax retains its exact source in review.
-        return []
+        return comments
       }
     })
   }
@@ -1459,6 +1513,20 @@ export function storyCandidates(
           spans: storySpans(text, variablePhrases(statement, text, aliases), true), fidelity: 'derived',
           children: statement.body ? walkStatements(statement.body.statements, [...path, 0], options) : [] }]
       }
+      const functionBinding = sourceFunctionBinding(statement)
+      if (functionBinding) {
+        const children = ts.isBlock(functionBinding.callback.body)
+          ? walkStatements(functionBinding.callback.body.statements, [...path, 0], options)
+          : [{ kind: 'step' as const, ...decorate(functionBinding.callback.body, [...path, 0], {
+              role: 'action',
+              text: `Return ${sourceExpressionText(functionBinding.callback.body)}`,
+              fidelity: 'derived',
+            }) }]
+        return [{ kind: 'flow', flowKind: 'scope', node: statement, path, role: 'setup',
+          text: functionBinding.text,
+          spans: storySpans(functionBinding.text, variablePhrases(statement, functionBinding.text, aliases), true),
+          fidelity: 'derived', children }]
+      }
       const assertion = sourceAssertionText(statement)
       if (assertion) return [{ kind: 'step', node: statement, path, role: 'check', text: assertion,
         spans: storySpans(assertion, variablePhrases(statement, assertion, aliases), true), fidelity: 'derived' }]
@@ -1724,5 +1792,13 @@ export function storyCandidates(
     return candidate ? [candidate] : []
   }
 
-  return walkStatements(statements, [], { includeActions: true })
+  const candidates = walkStatements(statements, [], { includeActions: true })
+  if (completeContext) {
+    candidates.push(...commentCandidates(
+      sourceFile.endOfFileToken,
+      sourceFile.endOfFileToken.getFullStart(),
+      [statements.length],
+    ))
+  }
+  return candidates
 }
