@@ -150,13 +150,12 @@ describe('coverage routes', () => {
   it('uses the live monitor for change waits and maps every live coverage state into a headline', async () => {
     writeFeature('checkout', SPEC)
     const freshness = (state: string, over: Record<string, unknown> = {}) => ({
-      revision: `revision-${state}`, state, latestRunFailed: false, proofNeedsRun: false, ...over,
+      revision: `revision-${state}`, state, latestRunFailed: false, ...over,
     })
     const coverageMonitor = {
       wait: vi.fn(async () => ({ changed: false, change: { feature: 'checkout', freshness: freshness('current'), delivery: 'tool-response-and-wait' } })),
       readAll: () => [
         { feature: 'failed', freshness: freshness('current', { latestRunFailed: true }), measurement: { coveragePct: 25 } },
-        { feature: 'needs-proof', freshness: freshness('current', { proofNeedsRun: true }), measurement: { coveragePct: 50 } },
         { feature: 'covered', freshness: freshness('current'), measurement: { coveragePct: 99.6 } },
         { feature: 'updating', freshness: freshness('updating'), measurement: undefined },
         { feature: 'unavailable', freshness: freshness('unavailable'), measurement: undefined },
@@ -174,9 +173,8 @@ describe('coverage routes', () => {
       expect(coverageMonitor.wait).toHaveBeenCalledWith('checkout', 'revision-current', 0)
       const states = (await monitored.inject('/api/coverage/states')).json() as Array<{ feature: string; headline: string; summary: string; coverage: string; coveragePct: number | null }>
       expect(states).toEqual(expect.arrayContaining([
-        expect.objectContaining({ feature: 'failed', headline: 'Latest run failed', coveragePct: 25 }),
-        expect.objectContaining({ feature: 'needs-proof', headline: 'Mapped · needs verification' }),
-        expect.objectContaining({ feature: 'covered', headline: 'Covered 100%', coverage: 'fresh' }),
+        expect.objectContaining({ feature: 'failed', headline: 'Mapped 25%', coveragePct: 25 }),
+        expect.objectContaining({ feature: 'covered', headline: 'Mapped 100%', coverage: 'fresh' }),
         expect.objectContaining({ feature: 'updating', headline: 'Generating', coverage: 'generating' }),
         expect.objectContaining({ feature: 'unavailable', headline: 'Freshness unconfirmed' }),
         expect.objectContaining({ feature: 'absent', headline: 'No coverage', summary: 'absent', coverage: 'absent' }),

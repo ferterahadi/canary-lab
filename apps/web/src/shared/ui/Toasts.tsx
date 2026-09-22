@@ -12,17 +12,16 @@ import { useEffect } from 'react'
 import { CloseIcon } from './Icons'
 
 // ─── Toast (R51) ────────────────────────────────────────────────────────────
-// Minimal in-app notification for "a background thing needs you" moments —
-// today: a flight parking on a checkpoint or pausing on a stage failure.
-// Token-styled card stack, bottom-right, amber accent, auto-dismiss; clicking
-// navigates (the caller supplies onClick) and dismisses. Deliberately NOT
-// routed — transient by definition (cl_route-every-surface's cold-load test).
+// Minimal in-app notification for transient attention and completion moments.
+// The caller chooses a status tone and either makes the whole toast actionable
+// or requires its explicit action button. Deliberately NOT routed — transient
+// by definition (cl_route-every-surface's cold-load test).
 
 export interface ToastItem {
   id: string
   title: string
   body?: string
-  /** Navigate to the thing that needs attention (also dismisses). */
+  /** Open or perform the toast's action (also dismisses by default). */
   onClick?: () => void
   /** R68: a toast that demands input — it NEVER auto-dismisses (no timer) and
    *  reads slightly stronger (warning-tinted border + a "needs input" eyebrow).
@@ -32,6 +31,10 @@ export interface ToastItem {
   dismissOnOpen?: boolean
   actionLabel?: string
   dismissLabel?: string
+  /** Status hue; warning remains the default for existing attention toasts. */
+  tone?: 'warning' | 'success'
+  /** Keep the card inert so only its labelled action can invoke `onClick`. */
+  actionOnly?: boolean
 }
 
 export const TOAST_MS = 8000
@@ -60,16 +63,17 @@ export function ToastHost({ toasts, onDismiss }: { toasts: ToastItem[]; onDismis
           role="status"
           data-testid={`toast-${t.id}`}
           data-sticky={t.sticky ? 'true' : undefined}
-          className="flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 shadow-lg transition-opacity"
+          className={`flex ${t.actionOnly ? '' : 'cursor-pointer'} items-start gap-2.5 rounded-lg border px-3 py-2.5 shadow-lg transition-opacity`}
           style={{
             background: 'var(--bg-surface)',
             // Sticky toasts wear a fuller warning border; informational toasts
             // keep the subtler blend.
-            borderColor: t.sticky
+            borderColor: t.tone === 'success' ? 'var(--success)' : t.sticky
               ? 'var(--warning)'
               : 'color-mix(in srgb, var(--warning) 45%, var(--border-default))',
           }}
           onClick={() => {
+            if (t.actionOnly) return
             t.onClick?.()
             if (t.dismissOnOpen !== false) onDismiss(t.id)
           }}
@@ -77,7 +81,7 @@ export function ToastHost({ toasts, onDismiss }: { toasts: ToastItem[]; onDismis
           <span
             aria-hidden="true"
             className="mt-0.5 h-2 w-2 shrink-0 rounded-full"
-            style={{ background: 'var(--warning)' }}
+            style={{ background: t.tone === 'success' ? 'var(--success)' : 'var(--warning)' }}
           />
           <div className="min-w-0 flex-1">
             {t.sticky && (
@@ -89,8 +93,13 @@ export function ToastHost({ toasts, onDismiss }: { toasts: ToastItem[]; onDismis
               </div>
             )}
             <div className="truncate text-[12px] font-medium" style={{ color: 'var(--text-primary)' }}>{t.title}</div>
-            {t.actionLabel && <button type="button" className="cl-button mt-1 px-2 py-1 text-xs">{t.actionLabel}</button>}
             {t.body && <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{t.body}</div>}
+            {t.actionLabel && <button type="button" className={`${t.tone === 'success' ? 'cl-button-primary' : 'cl-button'} mt-1 px-2 py-1 text-xs`} onClick={(event) => {
+              if (!t.actionOnly) return
+              event.stopPropagation()
+              if (t.dismissOnOpen !== false) onDismiss(t.id)
+              t.onClick?.()
+            }}>{t.actionLabel}</button>}
           </div>
           <button
             type="button"

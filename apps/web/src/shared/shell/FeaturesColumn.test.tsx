@@ -342,7 +342,7 @@ describe('FeaturesColumn coverage action (R8)', () => {
       }])
       .mockResolvedValueOnce([{
         feature: 'alpha',
-        headline: 'Covered 80%',
+        headline: 'Mapped 80%',
         summary: 'fresh',
         coverage: 'fresh',
         coveragePct: 80,

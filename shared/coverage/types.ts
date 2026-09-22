@@ -170,7 +170,7 @@ export interface CoverageStateView {
   summary: SummaryState
   coverage: CoverageState
   /** One-line derived headline: Generating / Setup needed / Stale / No coverage
-   *  / Covered N%. */
+   *  / Mapped N%. */
   headline: string
   drift: DriftDetail
 }

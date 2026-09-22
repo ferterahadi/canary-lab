@@ -81,7 +81,10 @@ export function RunLaunchControl({
   onStartEnv: (env: string, mode: 'test' | 'boot') => void
   onVerify: () => void
 }) {
-  const POPOVER_WIDTH = 240
+  // 260 rather than 240: the mode notes are read at 11px now (the console's
+  // supporting-text step), and the longest of them wraps to a third line below
+  // this width, which would make the reserved note box taller than the rows.
+  const POPOVER_WIDTH = 260
   const buttonRef = useRef<HTMLButtonElement>(null)
   const pos = useAnchoredPosition(buttonRef, open, POPOVER_WIDTH)
   const title = runDisabled && disabledReason ? disabledReason : 'Run'
@@ -122,7 +125,7 @@ export function RunLaunchControl({
           data-run-launch-menu
           data-mode={mode}
           onClick={(e) => e.stopPropagation()}
-          className="cl-popover cl-run-launch-menu p-1.5 text-xs"
+          className="cl-popover cl-run-launch-menu"
           style={{ position: 'fixed', top: pos.top, left: pos.left, width: POPOVER_WIDTH, zIndex: 1000 }}
         >
           <div className="cl-mode-toggle" role="group" aria-label="Run mode">
@@ -142,7 +145,7 @@ export function RunLaunchControl({
           </div>
 
           <p className="cl-run-launch-note">{active.note}</p>
-          <div className="cl-run-launch-label">{sectionLabel}</div>
+          <div className="cl-run-launch-label cl-rubric">{sectionLabel}</div>
 
           {mode === 'verify' ? (
             <button
@@ -155,7 +158,7 @@ export function RunLaunchControl({
               <span className="cl-run-env-option-icon" aria-hidden="true">{active.icon}</span>
               {/* Trailing ellipsis is the standard "opens further UI" cue — the
                   only row here that leads to a dialog instead of starting. */}
-              <span className="min-w-0 flex-1">Set up &amp; run verify…</span>
+              <span className="cl-type-data min-w-0 flex-1">Set up &amp; run verify…</span>
             </button>
           ) : envs.length > 0 ? (
             envs.map((env) => (
@@ -168,7 +171,7 @@ export function RunLaunchControl({
                 className="cl-run-env-option disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <span className="cl-run-env-option-icon" aria-hidden="true">{active.icon}</span>
-                <span className="min-w-0 flex-1 truncate font-mono">{env}</span>
+                <span className="cl-type-data min-w-0 flex-1 truncate font-mono">{env}</span>
               </button>
             ))
           ) : (
@@ -180,12 +183,12 @@ export function RunLaunchControl({
               className="cl-run-env-option disabled:cursor-not-allowed disabled:opacity-45"
             >
               <span className="cl-run-env-option-icon" aria-hidden="true">{active.icon}</span>
-              <span className="min-w-0 flex-1">{mode === 'boot' ? 'Boot services' : 'Run tests'}</span>
+              <span className="cl-type-data min-w-0 flex-1">{mode === 'boot' ? 'Boot services' : 'Run tests'}</span>
             </button>
           )}
 
           {runDisabled && disabledReason && (
-            <p className="mx-2 mt-1 border-t border-line pt-2 text-[10px] text-muted">
+            <p className="cl-type-meta mt-1 border-t border-line px-3 pt-2 text-muted">
               {disabledReason}
             </p>
           )}

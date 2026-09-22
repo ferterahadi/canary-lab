@@ -310,17 +310,21 @@ it('shows only the two review decisions for a suite and accepts the exact revisi
 })
 it('restores the exact suite review revision', async () => {
   const onClose = vi.fn()
-  await render({ onClose })
+  const onAccepted = vi.fn()
+  await render({ onClose, onAccepted })
   await click('Restore recorded files')
   expect(api.restoreFeatureTestReview).toHaveBeenCalledExactlyOnceWith('alpha', reviewRevision)
   expect(api.acceptFeatureTestReview).not.toHaveBeenCalled()
   expect(onClose).toHaveBeenCalledExactlyOnceWith()
+  expect(onAccepted).not.toHaveBeenCalled()
 })
 it('surfaces a failed suite acceptance and allows retry', async () => {
+  const onAccepted = vi.fn()
   vi.mocked(api.acceptFeatureTestReview).mockRejectedValue(new Error('Git rejected the commit'))
-  await render(); await click('Accept & commit')
+  await render({ onAccepted }); await click('Accept & commit')
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Git rejected the commit')
   expect(button('Accept & commit').disabled).toBe(false)
+  expect(onAccepted).not.toHaveBeenCalled()
 })
 it('uses the same two decisions for an active run and accepts through one server workflow', async () => {
   const onClose = vi.fn()
@@ -369,6 +373,9 @@ it.each([
   expect(api.acceptRunTestReview).not.toHaveBeenCalled()
 })
 it('uses the same exact-revision acceptance label for a terminal run', async () => {
+  const onAccepted = vi.fn()
+  const receipt = { decision: 'accepted' as const, review_revision: reviewRevision, files: ['e2e/a.spec.ts'], at: 'now', git: { status: 'committed' as const }, execution: { status: 'new-run-required' as const, runId: 'run-1' } }
+  vi.mocked(api.acceptRunTestReview).mockResolvedValue(receipt)
   const terminal = { ...run, status: 'passed' as const }
   vi.mocked(api.getRunTestReview).mockResolvedValue({
     runId: terminal.runId, feature: 'alpha', baseline: 'run-start', review_revision: reviewRevision,
@@ -376,11 +383,13 @@ it('uses the same exact-revision acceptance label for a terminal run', async () 
     reviewState: 'pending-terminal', allowedActions: ['approve-new-run', 'restore', 'leave-pending'], nextAction: 'restore-or-leave',
   })
   const onClose = vi.fn()
-  await render({ pendingRuns: [terminal], focusRunDetail: detail, onClose })
+  await render({ pendingRuns: [terminal], focusRunDetail: detail, onClose, onAccepted })
+  expect(onAccepted).not.toHaveBeenCalled()
   expect([...document.querySelectorAll('.cl-review-commit-buttons button')].map((item) => item.textContent)).toEqual(['Restore recorded files', 'Accept & commit'])
   await click('Accept & commit')
   expect(api.acceptRunTestReview).toHaveBeenCalledExactlyOnceWith('run-1', reviewRevision)
   expect(onClose).toHaveBeenCalledExactlyOnceWith()
+  expect(onAccepted).toHaveBeenCalledExactlyOnceWith('alpha', receipt, detail)
 })
 it('offers acceptance for an active supporting-only review even when no test declarations changed', async () => {
   const fixture = 'e2e/fixture.ts'

@@ -20,20 +20,10 @@ export interface CoverageRunState {
   mappingInference?: MappingInferenceCache
   /** Last exact ledger percentage computed by a coverage pass. The suite-list
    *  status endpoint reads this small manifest instead of reparsing every spec.
-   *  Absent on older manifests; those truthfully report "Covered" without a
+   *  Absent on older manifests; those truthfully report "Mapped" without a
    *  number until the next real coverage computation refreshes the record. */
   coveragePct?: number
   ranAt: string
-  /** Conservative proof boundary: changed mapping inputs need a later run.
-   * Re-mapping cannot launder an older pass into proof of new helper/config bytes. */
-  verificationRequiredAfter?: string
-}
-
-export function verificationBoundary(prior: CoverageRunState | null, tests: Record<string, string>, now: string): string | undefined {
-  const previous = prior?.mappingInference?.tests
-  const changed = !previous || Object.keys(previous).length !== Object.keys(tests).length
-    || Object.entries(tests).some(([name, fingerprint]) => previous[name]?.fingerprint !== fingerprint)
-  return changed ? now : prior?.verificationRequiredAfter
 }
 
 function statePath(featureDir: string): string {

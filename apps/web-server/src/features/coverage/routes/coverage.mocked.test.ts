@@ -195,7 +195,7 @@ describe('coverage/states manifest scan', () => {
     const entry = states.find((s) => s.feature === 'checkout')
     expect(entry).toEqual({
       feature: 'checkout',
-      headline: 'Covered 75%',
+      headline: 'Mapped 75%',
       summary: 'fresh',
       coverage: 'fresh',
       coveragePct: 75,
@@ -228,7 +228,7 @@ describe('coverage/states manifest scan', () => {
       coveragePct: number | null
     }>
     expect(states.find((state) => state.feature === 'legacy')).toMatchObject({
-      headline: 'Covered',
+      headline: 'Mapped',
       coveragePct: null,
     })
     expect(computeFeatureCoverage).not.toHaveBeenCalled()

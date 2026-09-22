@@ -5,6 +5,8 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../api/client'
 import { GlobalStatusBar } from './GlobalStatusBar'
+import type { TestReviewReceipt } from '@shared/test-review'
+import type { RunDetail } from '../api/types'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -13,6 +15,7 @@ vi.mock('../api/client', async () => {
   return {
     ...actual,
     getMcpHealth: vi.fn(),
+    getFeatureTests: vi.fn().mockResolvedValue([{ file: 'test.ts', tests: [{}, {}, {}] }]),
   }
 })
 
@@ -20,6 +23,21 @@ const mockActiveRuns = vi.hoisted(() => ({ value: { runs: [] as unknown[], count
 const mockRuns = vi.hoisted(() => ({ value: [] as unknown[] }))
 const mockBootSessions = vi.hoisted(() => ({ value: { sessions: [] as unknown[], count: 0 } }))
 const mockVerifyRuns = vi.hoisted(() => ({ value: { runs: [] as unknown[], count: 0 } }))
+const acceptance = vi.hoisted(() => ({ enabled: false, status: 'new-run-required' as TestReviewReceipt['execution']['status'] }))
+vi.mock('@/features/runs/components/DirtyReviewDialog', async (original) => {
+  const actual = await original<typeof import('@/features/runs/components/DirtyReviewDialog')>()
+  return { DirtyReviewDialog: (props: Parameters<typeof actual.DirtyReviewDialog>[0]) => !acceptance.enabled ? <actual.DirtyReviewDialog {...props} /> : <button onClick={() => {
+    const { onAccepted, onClose } = props
+    onClose()
+    const receipt: TestReviewReceipt = {
+      decision: 'accepted', review_revision: 'a'.repeat(64), files: ['e2e/test.spec.ts'],
+      at: '2026-09-22T15:28:47.000Z', git: { status: 'committed', commit: 'b'.repeat(40) },
+      execution: acceptance.status === 'none' ? { status: 'none' } : { status: acceptance.status, runId: 'old' },
+    }
+    onAccepted?.('alpha', receipt, { summary: { passed: 7, total: 8 } } as RunDetail)
+  }}>Accept fixture</button>,
+  }
+})
 
 vi.mock('@/features/runs/state/RunsContext', () => ({
   useRuns: () => ({ connection: 'live', runs: mockRuns.value, abort: vi.fn() }),
@@ -50,6 +68,8 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
+  acceptance.status = 'new-run-required'
+  acceptance.enabled = false
   mockActiveRuns.value = { runs: [], count: 0 }
   mockRuns.value = []
   mockBootSessions.value = { sessions: [], count: 0 }
@@ -87,6 +107,71 @@ function runsButton(): HTMLButtonElement | undefined {
   return [...container.querySelectorAll('button')]
     .find((button) => button.getAttribute('aria-label')?.startsWith('Show all runs')) as HTMLButtonElement | undefined
 }
+
+it('shows dynamic committed-source feedback, dismisses before normal run action, and emits no follow-up toast', async () => {
+  acceptance.enabled = true
+  const onRunLatestTests = vi.fn()
+  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} specReviewOpen onRunLatestTests={onRunLatestTests} />))
+  expect(document.querySelector('[data-testid="toast-host"]')).toBeNull()
+  await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
+  const toast = document.querySelector('[data-testid="toast-test-review-accepted"]')!
+  expect(toast.textContent).toContain('Current source: 3 tests. The selected 7/8 run is historical.')
+  expect(toast.textContent).toContain('Run latest 3 tests')
+  await act(async () => (toast.querySelector('button') as HTMLButtonElement).click())
+  expect(onRunLatestTests).toHaveBeenCalledExactlyOnceWith('alpha')
+  expect(document.querySelector('[data-testid="toast-host"]')).toBeNull()
+  expect(document.body.textContent).not.toContain('Run started')
+})
+
+it('dismisses acceptance feedback without starting a run', async () => {
+  acceptance.enabled = true
+  const onRunLatestTests = vi.fn()
+  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} specReviewOpen onRunLatestTests={onRunLatestTests} />))
+  await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
+  await act(async () => (document.querySelector('[data-testid="toast-test-review-accepted"] [aria-label="Dismiss"]') as HTMLButtonElement).click())
+  expect(onRunLatestTests).not.toHaveBeenCalled()
+  expect(document.querySelector('[data-testid="toast-host"]')).toBeNull()
+})
+
+it.each(['running', 'healing', 'queued'])('suppresses the recommendation when another run is %s', async (status) => {
+  acceptance.enabled = true
+  mockRuns.value = [{ runId: 'other', feature: 'other', status }]
+  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} specReviewOpen />))
+  await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
+  expect(document.querySelector('[data-testid="toast-host"]')).toBeNull()
+})
+
+it.each(['rerun-requested', 'none'] as const)('suppresses feedback when acceptance execution is %s', async (status) => {
+  acceptance.enabled = true
+  acceptance.status = status
+  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} specReviewOpen />))
+  await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
+  expect(document.querySelector('[data-testid="toast-host"]')).toBeNull()
+})
+
+it.each(['running', 'healing', 'queued'] as const)('suppresses the recommendation when the run detail is %s before the index hydrates', async (status) => {
+  acceptance.enabled = true
+  const activeRunDetail = { manifest: { runId: 'active', feature: 'other', status } } as RunDetail
+  await act(async () => root.render(<GlobalStatusBar activeRunDetail={activeRunDetail} specReviewOpen />))
+  await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
+  expect(document.querySelector('[data-testid="toast-host"]')).toBeNull()
+})
+
+it('suppresses the recommendation while an existing run request is continuing', async () => {
+  acceptance.enabled = true
+  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} specReviewOpen runStartPending />))
+  await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
+  expect(document.querySelector('[data-testid="toast-host"]')).toBeNull()
+})
+
+it('uses honest generic wording when current source cannot be read', async () => {
+  acceptance.enabled = true
+  vi.mocked(api.getFeatureTests).mockRejectedValueOnce(new Error('Unavailable'))
+  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} specReviewOpen onRunLatestTests={vi.fn()} />))
+  await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
+  expect(document.querySelector('[data-testid="toast-test-review-accepted"]')?.textContent).toContain('Current source changes are committed.')
+  expect(document.querySelector('[data-testid="toast-test-review-accepted"]')?.textContent).toContain('Run latest tests')
+})
 
 function servicesButton(): HTMLButtonElement | undefined {
   return [...container.querySelectorAll('button')]

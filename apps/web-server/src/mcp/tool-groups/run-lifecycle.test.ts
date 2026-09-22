@@ -99,10 +99,9 @@ function coverageChange(
         reasons: state === 'stale' ? ['2 test inputs changed since coverage was mapped.'] : [],
         changedTests: state === 'stale' ? ['checkout.spec.ts', 'refund.spec.ts'] : [],
         latestRunFailed: false,
-        proofNeedsRun: state === 'current',
         nextAction: state === 'stale'
           ? { stage: 'specs-coverage', label: 'Update coverage mappings', command: 'start_external_coverage', arguments: { feature: 'checkout' } }
-          : { stage: 'run', label: 'Verify current tests', command: 'start_run', arguments: { feature: 'checkout' } },
+          : undefined,
       },
       delivery: 'tool-response-and-wait',
       ...over,
@@ -660,7 +659,7 @@ describe('start_run: starting fresh', () => {
     expect(startRun).toHaveBeenCalledOnce()
   })
 
-  it('starts normally when coverage is current but still needs a proving run', async () => {
+  it('starts normally when coverage is current', async () => {
     const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
     const { call } = harness({ startRun, coverageRequest: coverageRequest(coverageChange('current')) })
 

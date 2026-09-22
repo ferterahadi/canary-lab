@@ -109,8 +109,9 @@ catch up after reconnecting. This reaches the agent through a tool response; it
 does not promise to wake an idle Claude/Codex host.
 
 Follow `nextAction` only within the user's task and existing launch permissions.
-Documents invalidate requirements then mapping; test/helper/config changes
-invalidate mapping and may require a later verification run. Reuse valid earlier
+Documents invalidate requirements then mapping; semantic test changes, including
+referenced helpers and hooks, invalidate mapping. Suite configuration does not,
+and remapping does not require a later verification run. Reuse valid earlier
 Flight stages. Respect `activeJobId`, its owner and any active Flight: continue
 owned work, never create a competing recovery. A rejected stale-input submission
 releases its job; obtain new context instead of resubmitting an obsolete answer.
@@ -240,9 +241,10 @@ PRD summary exists:
 the final ledger. The ledger reports per
 requirement → covering tests → `gapType` (`untested` / `path-incomplete` /
 `variant-incomplete` / `covered`) + coarse `coverageStatus`
-(covered/partial/uncovered), a coverage % (`covered ÷ total` — every
-declared path claimed by a mapped test) and a mapped % (requirements with ≥1
-test), per-test `strength` (`strong` / `solid` / `basic` / `shallow`, graded
+(covered/partial/uncovered), a `Mapped N%` headline from `coveragePct` (fully
+mapped requirements ÷ total — every declared path and variant claimed) and a
+linked breadth in `mappedPct` (requirements with ≥1 test), per-test `strength`
+(`strong` / `solid` / `basic` / `shallow`, graded
 from each test's assertion tiers — independent of runs), `orphanTestNames`
 (tests with no requirement), and the derived `state` (summary × coverage
 axes + headline).

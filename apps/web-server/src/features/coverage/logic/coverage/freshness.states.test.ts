@@ -41,12 +41,16 @@ describe('freshness state boundaries', () => {
     expect(deriveCoverageFreshness({ ...input, snapshot }).reasons[0]).toContain('1 test input changed')
   })
 
-  it('treats missing evidence and changed inputs independently of whether requirements are fully mapped', () => {
-    const noBoundary = { ...input.runState!, verificationRequiredAfter: undefined }
-    const uncovered = { ...input.ledger, requirements: input.ledger.requirements.map((row) => ({ ...row, gapType: 'untested' as const })) }
-    expect(deriveCoverageFreshness({ ...input, ledger: uncovered, runState: noBoundary }).proofNeedsRun).toBe(false)
+  it('migrates broad legacy fingerprints once without turning missing proof into stale mapping', () => {
+    const legacy = { ...input.runState!, mappingInference: { version: 1, tests: input.runState!.mappingInference!.tests } }
+    expect(deriveCoverageFreshness({ ...input, runState: legacy as never })).toMatchObject({
+      state: 'stale', changedTests: [], reasons: ['Coverage mapping fingerprint format changed; update mappings once.'],
+      nextAction: { stage: 'specs-coverage' },
+    })
     const unproven = { ...input.ledger, requirements: input.ledger.requirements.map((row) => ({ ...row, enforcement: undefined })) }
-    expect(deriveCoverageFreshness({ ...input, ledger: unproven, runState: noBoundary }).proofNeedsRun).toBe(true)
+    const current = deriveCoverageFreshness({ ...input, ledger: unproven })
+    expect(current.state).toBe('current')
+    expect(current.nextAction).toBeUndefined()
   })
 
   it('ignores generated documents and directories, but never hides unreadable source files', () => {

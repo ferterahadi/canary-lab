@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { CoverageFreshness } from '@shared/coverage/freshness'
 import { CoverageFreshnessIndicator, coverageWarning } from './CoverageFreshnessIndicator'
 
-const fresh: CoverageFreshness = { state: 'current', revision: 'a', checkedAt: '2026-09-17', reasons: [], changedTests: [], latestRunFailed: false, proofNeedsRun: false }
+const fresh: CoverageFreshness = { state: 'current', revision: 'a', checkedAt: '2026-09-17', reasons: [], changedTests: [], latestRunFailed: false }
 describe('compact coverage freshness', () => {
   it.each([
     [{ ...fresh, state: 'stale' as const }, 'Coverage out of date'],
@@ -13,7 +13,6 @@ describe('compact coverage freshness', () => {
     [{ ...fresh, state: 'updating' as const }, 'Coverage update in progress'],
     [{ ...fresh, state: 'not-measured' as const }, 'Coverage not measured'],
     [{ ...fresh, latestRunFailed: true }, 'Latest run has failures'],
-    [{ ...fresh, proofNeedsRun: true }, 'Current tests need verification'],
   ])('explains %s without claiming a new calculation', (snapshot, label) => {
     expect(coverageWarning(snapshot, true)).toContain(label)
   })

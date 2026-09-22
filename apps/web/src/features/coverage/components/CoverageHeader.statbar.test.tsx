@@ -8,7 +8,7 @@ import { CoverageHeader } from './CoverageHeader'
 import { LEDGER } from './__fixtures__/CoverageLedgerPage.part2-fixtures'
 
 // The stat bar reads as a sentence, then two labelled groups. Headline block:
-// a small ring, the big percentage, "n of N covered"; the ratio line waits in
+// a small ring, the big mapped percentage, and the requirement count; the ratio line waits in
 // the headline's hover card. Groups: Requirements and Test depth, each a thin stacked bar
 // with number-first figures (the filters) spread across the strip.
 
@@ -46,9 +46,9 @@ const q = (id: string) => container.querySelector<HTMLElement>(`[data-testid="${
 describe('CoverageHeader — headline block', () => {
   it('states the percentage and the plain sentence beside a small ring', () => {
     render(LEDGER)
-    expect(q('coverage-pct')?.textContent).toBe('33%')
-    expect(q('coverage-sentence')?.textContent).toBe('1 of 3 covered')
-    expect(q('coverage-ring')?.getAttribute('aria-label')).toBe('33.3% covered')
+    expect(q('coverage-pct')?.textContent).toBe('Mapped 33%')
+    expect(q('coverage-sentence')?.textContent).toBe('1 of 3 requirements')
+    expect(q('coverage-ring')?.getAttribute('aria-label')).toBe('33.3% mapped')
     // The ring no longer carries a label of its own — the sentence does.
     expect(q('coverage-ring')?.textContent).toBe('')
   })
@@ -59,7 +59,7 @@ describe('CoverageHeader — headline block', () => {
     led.orphanRequirementIds = ['R9']
     render(led)
     const sub = q('coverage-sub')
-    expect(sub?.textContent).toContain('2/3 mapped')
+    expect(sub?.textContent).toContain('2/3 linked')
     expect(sub?.textContent).toContain('1/3 proven in run run-9')
     expect(sub?.querySelector('[data-testid="orphan-note"]')?.textContent).toContain('1 stale tag')
     expect(sub?.classList.contains('clcov-card')).toBe(true)
@@ -96,8 +96,8 @@ describe('CoverageHeader — headline block', () => {
     led.totals = { total: 0, covered: 0, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 }
     led.coveragePct = 0
     render(led)
-    expect(q('coverage-pct')?.textContent).toBe('0%')
-    expect(q('coverage-sentence')?.textContent).toBe('0 of 0 covered')
+    expect(q('coverage-pct')?.textContent).toBe('Mapped 0%')
+    expect(q('coverage-sentence')?.textContent).toBe('0 of 0 requirements')
     expect(q('coverage-breakdown')).toBeTruthy()
   })
 })

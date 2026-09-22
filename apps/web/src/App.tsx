@@ -524,6 +524,8 @@ export function App() {
         activeRunDetail={activeRunDetail}
         features={features}
         onFeaturesChanged={refreshFeatures}
+        onRunLatestTests={(feature) => { void handleStartRun(undefined, 'test', feature) }}
+        runStartPending={pendingStarts.length > 0 || !!modelsPrompt || !!collisionPrompt}
         onOpenCleanup={() => setView('cleanup')}
         flights={flights}
         preFlights={preFlights}

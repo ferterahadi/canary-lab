@@ -112,11 +112,11 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
   })
 
-  it('surfaces a Mapped breadth ratio (concrete, no redundant %)', async () => {
+  it('surfaces a linked-requirements ratio without conflating it with mapped coverage', async () => {
     await mount()
     const mapped = container.querySelector('[data-testid="mapped-stat"]')
-    // LEDGER: 3 reqs, 1 untested → 2 mapped. Ratio only — the % restated it.
-    expect(mapped?.textContent).toContain('2/3 mapped')
+    // LEDGER: 3 reqs, 1 untested → 2 linked. The headline owns the fully-mapped %.
+    expect(mapped?.textContent).toContain('2/3 linked')
     expect(mapped?.textContent).not.toContain('%')
   })
 
@@ -131,19 +131,19 @@ describe('CoverageLedgerPage', () => {
     expect(ring).toBeTruthy()
     expect(container.querySelector('[data-testid="coverage-freshness-warning"]')?.getAttribute('aria-label')).toContain('Coverage out of date')
     // The headline block carries the big % beside the ring; the ring itself stays label-free.
-    expect(container.querySelector('[data-testid="coverage-hero"] [data-testid="coverage-pct"]')?.textContent).toBe('33%')
+    expect(container.querySelector('[data-testid="coverage-hero"] [data-testid="coverage-pct"]')?.textContent).toBe('Mapped 33%')
     expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
   })
 
-  it('suppresses the state pill in the covered state (the ring owns the %)', async () => {
+  it('suppresses the state pill in the mapped state (the ring owns the %)', async () => {
     const led = structuredClone(LEDGER)
-    led.state = { ...led.state!, summary: 'fresh', headline: 'Covered 36.7%' }
+    led.state = { ...led.state!, summary: 'fresh', headline: 'Mapped 36.7%' }
     led.freshness = { ...led.freshness!, state: 'current', reasons: [] }
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
     await mount()
-    // Covered → no redundant pill; the ring carries it.
+    // Mapped → no redundant pill; the ring carries it.
     expect(container.querySelector('[data-testid="coverage-state-headline"]')).toBeNull()
-    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('33.3% covered')
+    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('33.3% mapped')
   })
 
   it('places the strength filter in the stat header, above the tests column (not in the tests pane)', async () => {

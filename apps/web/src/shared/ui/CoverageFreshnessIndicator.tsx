@@ -5,9 +5,9 @@ import { Tooltip } from './Tooltip'
 /** One explanation for the rail, metric tiles and ledger; freshness never changes
  * the saved measurement, but must qualify it wherever that measurement appears. */
 export function coverageWarning(freshness: CoverageFreshness | undefined, confirmed: boolean, error?: string | null): string | undefined {
-  if (confirmed && freshness?.state === 'current' && !freshness.latestRunFailed && !freshness.proofNeedsRun) return undefined
+  if (confirmed && freshness?.state === 'current' && !freshness.latestRunFailed) return undefined
   const title = !confirmed || !freshness ? 'Coverage freshness unconfirmed.'
-    : freshness.state === 'current' ? freshness.latestRunFailed ? 'Latest run has failures.' : 'Current tests need verification.'
+    : freshness.state === 'current' ? 'Latest run has failures.'
       : freshness.state === 'updating' ? 'Coverage update in progress.'
         : freshness.state === 'not-measured' ? 'Coverage not measured.'
           : freshness.state === 'unavailable' ? 'Coverage inputs unavailable.' : 'Coverage out of date.'

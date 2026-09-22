@@ -52,7 +52,7 @@ describe('deriveCoverageStateView — coverage axis (summary fresh)', () => {
   it('a completed mapping with no links is fresh 0%, not absent', () => {
     const s = view({ hasAnnotatedTests: false, hasCoverageRun: true, coveragePct: 0 })
     expect(s.coverage).toBe('fresh')
-    expect(s.headline).toBe('Covered 0%')
+    expect(s.headline).toBe('Mapped 0%')
   })
 
   it('requirements set moved → coverage Stale, only coverage artifact affected', () => {
@@ -63,7 +63,7 @@ describe('deriveCoverageStateView — coverage axis (summary fresh)', () => {
     expect(s.drift.drifted).toBe(false)
   })
 
-  it('fresh both axes → Covered N%', () => {
-    expect(view({ coveragePct: 73.5 }).headline).toBe('Covered 73.5%')
+  it('fresh both axes → Mapped N%', () => {
+    expect(view({ coveragePct: 73.5 }).headline).toBe('Mapped 73.5%')
   })
 })

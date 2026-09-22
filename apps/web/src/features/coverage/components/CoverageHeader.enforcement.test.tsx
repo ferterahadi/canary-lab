@@ -53,11 +53,11 @@ describe('CoverageHeader — proven in run', () => {
   it('an in-progress run uses the same pending proof count and status everywhere', () => {
     const led = structuredClone(LEDGER)
     led.enforcement = { provenUnchanged: 3, total: 3, states: { 'proven-unchanged': 3, 'tests-weakened': 0, 'wording-ahead': 0, 'proof-stale': 0 } }
-    render(led, { proofNeedsRun: true, latestRunId: 'run-10', latestRunStatus: 'running' })
+    render(led, { latestRunId: 'run-10', latestRunStatus: 'running' })
 
     expect(container.querySelector('[data-testid="coverage-proof"]')?.textContent).toBe('run in progress — nothing proven yet')
     expect(container.querySelector('[data-testid="proven-stat"]')?.textContent).toContain('0/3 proven · run in progress')
-    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('33.3% covered, 0% proven')
+    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('33.3% mapped, 0% proven')
   })
 
   it('an older server without the axis shows no proven stat', () => {
@@ -101,7 +101,7 @@ describe('CoverageRing — one ring, three slices', () => {
   it('names both shares in the label, so the dial never has to be decoded', () => {
     render(partitioned(1, 2, 'run-9'))
     const ring = container.querySelector('[data-testid="coverage-ring"]')
-    expect(ring?.getAttribute('aria-label')).toBe('66.66666666666666% covered, 33.3% proven')
+    expect(ring?.getAttribute('aria-label')).toBe('66.66666666666666% mapped, 33.3% proven')
   })
 
   it('a fully proven suite is one solid ring, with no dimmed remainder', () => {
@@ -122,7 +122,7 @@ describe('CoverageRing — one ring, three slices', () => {
     render(led)
     expect(arcs().length).toBe(1)
     expect(arcs()[0].getAttribute('stroke-opacity')).toBe('1')
-    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('33.3% covered')
+    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('33.3% mapped')
   })
 
   it('a proof share can never outrun the covered sweep it sits inside', () => {
@@ -131,7 +131,7 @@ describe('CoverageRing — one ring, three slices', () => {
     // Clamped to the sweep: one solid arc at 40%, no dimmed remainder to draw.
     expect(container.querySelectorAll('circle').length).toBe(2)
     expect(claimed.getAttribute('stroke-opacity')).toBe('1')
-    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('40% covered, 40% proven')
+    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('40% mapped, 40% proven')
   })
 })
 
@@ -186,6 +186,6 @@ describe('CoverageHeader — the proof readout at rest', () => {
     led.enforcement = { provenUnchanged: 0, total: 0, states: { 'proven-unchanged': 0, 'tests-weakened': 0, 'wording-ahead': 0, 'proof-stale': 0 } }
     render(led)
     expect(line()).toBeNull()
-    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('0% covered')
+    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('0% mapped')
   })
 })

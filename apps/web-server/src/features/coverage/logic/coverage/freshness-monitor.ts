@@ -43,7 +43,7 @@ export class CoverageFreshnessMonitor {
       change = { feature, delivery: 'tool-response-and-wait', freshness: {
         revision: coverageRevision(String(error)), checkedAt: new Date().toISOString(),
         state: 'unavailable', reasons: ['Cannot confirm coverage freshness: ' + (error instanceof Error ? error.message : String(error))],
-        changedTests: [], latestRunFailed: false, proofNeedsRun: false,
+        changedTests: [], latestRunFailed: false,
       } }
       this.accept(change)
     }

@@ -12,7 +12,7 @@ import {
 } from './annotate-engine'
 import { writeCoversTag } from './tag-writer'
 import { changedRequirementIds, requirementFingerprintMap, requirementsSetHash } from './fingerprints'
-import { readCoverageRunState, verificationBoundary, writeCoverageRunState } from './run-state'
+import { readCoverageRunState, writeCoverageRunState } from './run-state'
 import { mappingInferenceSnapshot, rememberMappingInference, unexaminedMappingTests, type MappingInferenceSnapshot, type MappingTestInput } from './mapping-cache'
 import { readPrdSummary } from './prd-summary'
 import { clearPrdSummary } from './feature-docs'
@@ -222,7 +222,6 @@ export async function runCoverageEngine(
   // Record the requirements set the engine just ran against — coverage drops to
   // STALE when the set later moves (R3 signal; R10 turns it into a delta re-infer).
   const runState = {
-    verificationRequiredAfter: verificationBoundary(prior, snapshot.tests, args.now ?? new Date().toISOString()),
     requirementsHash: summary?.requirementsHash ?? requirementsSetHash(requirements),
     requirementFingerprints: requirementFingerprintMap(requirements),
     mappingInference: rememberMappingInference(
@@ -339,7 +338,6 @@ export function applyExternalCoverageMappings(args: ApplyExternalCoverageArgs): 
     }
   }
   const prior = readCoverageRunState(featureDir)
-  const beforeTests = mappingInferenceSnapshot(featureDir, mappingInputs(featureDir), requirements, summary?.variantDimension).tests
   const knownIds = new Set(inferredRequirements.filter((r) => !r.deprecated).map((r) => r.id))
 
   const { collected } = collectTests(featureDir)
@@ -372,7 +370,6 @@ export function applyExternalCoverageMappings(args: ApplyExternalCoverageArgs): 
   // Mirror runCoverageEngine: record the requirements set this pass ran against,
   // so coverage drops to STALE when the set later moves.
   const runState = {
-    verificationRequiredAfter: verificationBoundary(prior, beforeTests, args.now ?? new Date().toISOString()),
     requirementsHash: summary?.requirementsHash ?? requirementsSetHash(requirements),
     requirementFingerprints: requirementFingerprintMap(requirements),
     ...(args.inference ? {

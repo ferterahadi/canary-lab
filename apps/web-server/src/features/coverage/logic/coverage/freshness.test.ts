@@ -36,18 +36,24 @@ describe('coverage freshness, real inputs and live delivery', () => {
     expect(events).toContainEqual(expect.objectContaining({ type: 'coverage-changed', feature: 'shop', revision: changed.change.freshness.revision }))
   })
 
-  it('reconciles additions, deletions, helpers and configuration after dropped events', async () => {
+  it('reconciles additions, deletions and referenced helpers while ignoring configuration', async () => {
     const initial = monitor.read('shop')
     fs.appendFileSync(fixture.spec, "test('cancel order', async () => { expect(2).toBe(2) })\n")
     await monitor.reconcile()
     expect(monitor.list()[0]).toMatchObject({ measurement: { tests: 2 }, freshness: { state: 'stale', nextAction: { stage: 'specs-coverage' } } })
     expect(monitor.list()[0].freshness.revision).not.toBe(initial.freshness.revision)
     await runCoverageEngine(fixture.args, { propose: fakePropose })
+    fs.writeFileSync(path.join(fixture.featureDir, 'e2e', 'helper.ts'), 'export const value = 1')
+    fs.writeFileSync(fixture.spec, `import { value } from './helper'\n${fs.readFileSync(fixture.spec, 'utf8')}`)
+    expect(monitor.read('shop').freshness.state).toBe('stale')
+    await runCoverageEngine(fixture.args, { propose: fakePropose })
     fs.writeFileSync(path.join(fixture.featureDir, 'e2e', 'helper.ts'), 'export const value = 2')
     expect(monitor.read('shop').freshness.state).toBe('stale')
     await runCoverageEngine(fixture.args, { propose: fakePropose })
+    const current = monitor.read('shop').freshness.revision
     fs.writeFileSync(path.join(fixture.root, 'package-lock.json'), '{"lockfileVersion":3}')
-    expect(monitor.read('shop').freshness.state).toBe('stale')
+    fs.writeFileSync(path.join(fixture.featureDir, 'feature.config.cjs'), `module.exports = { config: { name: 'shop', description: 'shop', envs: ['local'], featureDir: __dirname, branch: 'release', track: 'upstream' } }`)
+    expect(monitor.read('shop').freshness).toMatchObject({ state: 'current', revision: current })
     fs.unlinkSync(fixture.spec)
     expect(monitor.read('shop')).toMatchObject({ measurement: { tests: 0 }, freshness: { state: 'stale' } })
   })
@@ -55,7 +61,7 @@ describe('coverage freshness, real inputs and live delivery', () => {
   it('does not hide a newer failure, or fall back to an older pass while a newer run has no result', () => {
     fixture.run('pass', 'passed')
     const passed = computeFeatureCoverage(fixture.args)
-    expect(passed.freshness).toMatchObject({ state: 'current', latestRunId: 'pass', latestRunFailed: false, proofNeedsRun: false })
+    expect(passed.freshness).toMatchObject({ state: 'current', latestRunId: 'pass', latestRunFailed: false })
     fixture.run('fail', 'failed')
     const failed = computeFeatureCoverage(fixture.args)
     expect(failed.coveragePct).toBe(passed.coveragePct)
@@ -66,14 +72,20 @@ describe('coverage freshness, real inputs and live delivery', () => {
     const starting = computeFeatureCoverage(fixture.args)
     expect(starting.provenRunId).toBeUndefined()
     expect(starting.tests[0].lastRun).toBeUndefined()
-    expect(starting.freshness).toMatchObject({ latestRunId: 'starting', latestRunStatus: 'running', proofNeedsRun: true })
+    expect(starting.freshness).toMatchObject({ latestRunId: 'starting', latestRunStatus: 'running' })
+    expect(starting.freshness?.nextAction).toBeUndefined()
   })
 
-  it('keeps old run proof historical after changed helper inputs are remapped', async () => {
+  it('does not require another run after referenced helper inputs are remapped', async () => {
     fixture.run('pass', 'passed')
+    fs.writeFileSync(path.join(fixture.featureDir, 'e2e', 'helper.ts'), 'export const value = 1')
+    fs.writeFileSync(fixture.spec, `import { value } from './helper'\n${fs.readFileSync(fixture.spec, 'utf8')}`)
     fs.writeFileSync(path.join(fixture.featureDir, 'e2e', 'helper.ts'), 'export const value = 2')
     await runCoverageEngine({ ...fixture.args, now: '2026-09-18T00:00:00Z' }, { propose: fakePropose })
-    expect(computeFeatureCoverage(fixture.args).freshness).toMatchObject({ state: 'current', proofNeedsRun: true, nextAction: { stage: 'run' } })
+    const freshness = computeFeatureCoverage(fixture.args).freshness!
+    expect(freshness).toMatchObject({ state: 'current', latestRunId: 'pass' })
+    expect(freshness.nextAction).toBeUndefined()
+    expect(freshness.reasons.join(' ')).not.toContain('predates')
   })
 
   it('reports broken linked sources as unavailable and recovers when restored', () => {

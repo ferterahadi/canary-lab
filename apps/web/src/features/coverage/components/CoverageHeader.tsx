@@ -123,7 +123,7 @@ export function CoverageRing({ pct, provenPct }: { pct: number; provenPct?: numb
       transform={`rotate(${Math.round((-90 + (from * 360) / 100) * 1000) / 1000} ${mid} ${mid})`}
     />
   )
-  const label = proven === undefined ? `${pct}% covered` : `${pct}% covered, ${Math.round(proven * 10) / 10}% proven`
+  const label = proven === undefined ? `${pct}% mapped` : `${pct}% mapped, ${Math.round(proven * 10) / 10}% proven`
   return (
     <div style={{ width: RING_SIZE, height: RING_SIZE, flexShrink: 0 }} data-testid="coverage-ring" role="img" aria-label={label}>
       {/* `overflow:visible` because the stroke now ends exactly on the viewBox edge — the
@@ -141,15 +141,15 @@ export function CoverageRing({ pct, provenPct }: { pct: number; provenPct?: numb
   )
 }
 
-// One-line headline pill (Generating / Setup needed / Stale / No coverage / Covered N%).
+// One-line headline pill (Generating / Setup needed / Stale / No coverage / Mapped N%).
 // A coloured dot carries the state; the dot pulses while generating.
 export function HeadlinePill({ headline }: { headline: string }) {
-  // The coverage ring now carries the "Covered N%" headline, so the pill would just
-  // repeat it — suppress it in that state. Non-covered states (Stale / Generating /
+  // The coverage ring now carries the "Mapped N%" headline, so the pill would just
+  // repeat it — suppress it in that state. Non-mapped states (Stale / Generating /
   // Setup needed / No coverage) still need the badge as the only signal of that state.
-  if (headline.startsWith('Covered')) return null
+  if (headline.startsWith('Mapped') || headline.startsWith('Covered')) return null
   const generating = headline === 'Generating'
-  const tone = headline.startsWith('Covered')
+  const tone = headline.startsWith('Mapped') || headline.startsWith('Covered')
     ? 'var(--success)'
     : generating
       ? 'var(--running)'
@@ -207,7 +207,7 @@ export function gapWord(g: GapType, n: number): string {
 }
 
 // The stat bar reads as a sentence, then two strips. Headline block: the small ring,
-// the percentage at reading size, and "n of N covered" — the breadth ratios and the
+// the percentage at reading size, and "n of N requirements" — the breadth ratios and the
 // proof roll-up wait in its hover card, like the strips' figures do. Strips: Requirements and Test depth, each resting as ONE eyebrow line (name ·
 // total) over its stacked bar — that is all the resting bar shows, which is what keeps
 // it ~90px tall. The detail is one hover away: resting on (or focusing) a strip drops a
@@ -224,7 +224,7 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
 }) {
   const { total, untested } = ledger.totals
   const covered = countFor(ledger, 'covered')
-  const mapped = total - untested
+  const linked = total - untested
   const orphans = ledger.orphanRequirementIds.length
   const current = confirmed && ledger.freshness?.state === 'current'
   const warning = coverageWarning(ledger.freshness, confirmed)
@@ -236,8 +236,7 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
   // contradictory labels for the same state.
   const enf = total > 0 ? ledger.enforcement : undefined
   const proofRunId = ledger.provenRunId ?? enf?.runId
-  const proofNeedsRun = ledger.freshness?.proofNeedsRun === true
-  const hasCurrentProof = Boolean(proofRunId) && !proofNeedsRun
+  const hasCurrentProof = Boolean(proofRunId)
   const proven = enf === undefined ? undefined : hasCurrentProof ? enf.provenUnchanged : 0
   const claimedOnly = proven === undefined ? 0 : covered - proven
   const latestRunId = ledger.freshness?.latestRunId
@@ -245,39 +244,35 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
   const runInProgress = latestRunStatus === 'queued' || latestRunStatus === 'running' || latestRunStatus === 'healing'
   const pendingProofCopy = runInProgress
     ? 'run in progress — nothing proven yet'
-    : proofNeedsRun && proofRunId
-      ? 'current tests need verification — nothing proven'
-      : latestRunId
-        ? `latest run ${latestRunStatus ?? 'has no readable results'} — nothing proven`
-        : 'no run yet — nothing proven'
+    : latestRunId
+      ? `latest run ${latestRunStatus ?? 'has no readable results'} — nothing proven`
+      : 'no run yet — nothing proven'
   const proofCardSuffix = hasCurrentProof && proofRunId
     ? <> proven in run <code className="clcov-sub-run">{proofRunId}</code></>
     : runInProgress
       ? ' proven · run in progress'
-      : proofNeedsRun && proofRunId
-        ? ' proven · current tests need verification'
-        : latestRunId
-          ? ` proven · latest run ${latestRunStatus ?? 'has no readable results'}`
-          : ' proven · no run yet'
+      : latestRunId
+        ? ` proven · latest run ${latestRunStatus ?? 'has no readable results'}`
+        : ' proven · no run yet'
   // The wrapper is a size container so the bar's breakpoints follow the width the
   // main column actually has (the Docs rail can take a third of the viewport).
   return (
     <div className="clcov-statwrap shrink-0">
     <div className="clcov-statbar">
-      {/* Headline at rest: ring · % · "n of N covered". The breadth ratios and the proof
+      {/* Headline at rest: ring · Mapped % · "n of N requirements". The breadth ratios and the proof
           roll-up sit in the same hover card the strips use; a stale-tag warning keeps an
           amber dot at rest so it is never fully hidden (status = dot + tooltip). */}
       <div className="clcov-hero clcov-strip" tabIndex={0} data-testid="coverage-hero">
         <CoverageRing pct={ledger.coveragePct} provenPct={proven === undefined ? undefined : (proven / total) * 100} />
         <div className="clcov-hero-text">
           <div className="flex items-center gap-2">
-            <div className="clcov-pct" data-testid="coverage-pct">{Math.round(ledger.coveragePct)}%</div>
+            <div className="clcov-pct" data-testid="coverage-pct">Mapped {Math.round(ledger.coveragePct)}%</div>
             <CoverageFreshnessIndicator message={warning ? [warning,
               ledger.provenRunId ? `Last run: ${latestPassed} passed · ${latestFailed} failed · ${ledger.tests.length - latestPassed - latestFailed} not run.` : undefined,
             ].filter(Boolean).join(' ') : undefined} />
           </div>
           <div className="clcov-sentence" data-testid="coverage-sentence">
-            {covered} of {total} covered
+            {covered} of {total} requirements
             {orphans > 0 && (
               <span
                 className="clcov-alert clcov-hero-alert"
@@ -301,9 +296,7 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
                 ? 'Proven — a run passed every test mapped to the requirement, and neither the tests nor the wording have changed since. Unproven — a test covers it, but nothing has proved it yet.'
                 : runInProgress
                   ? 'The latest run is still in progress. Its results do not count as proof until the run reports them.'
-                  : proofNeedsRun
-                    ? 'The current tests need verification, so earlier results do not count as proof of the current inputs.'
-                    : 'No run has been recorded for this suite, so nothing is proven yet — every covered requirement is a claim.'}
+                  : 'No run has been recorded for this suite, so nothing is proven yet — every covered requirement is a claim.'}
             >
               {latestFailed ? `${latestFailed} failed in latest run` : !hasCurrentProof
                 ? pendingProofCopy
@@ -317,7 +310,7 @@ export function CoverageHeader({ ledger, gapFilter, onToggleGap, strengthFilter,
           </div>}
         </div>
         <div className="clcov-card clcov-sub" data-testid="coverage-sub" role="group" aria-label="Coverage breadth and proof">
-          <span data-testid="mapped-stat" title="Requirements with at least one test mapped to them">{mapped}/{total} mapped</span>
+          <span data-testid="mapped-stat" title="Requirements with at least one test linked to them">{linked}/{total} linked</span>
           {ledger.enforcement && (
             <>
               <span className="clcov-sub-sep" aria-hidden="true">·</span>

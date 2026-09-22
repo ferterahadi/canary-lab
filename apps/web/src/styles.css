@@ -1258,6 +1258,11 @@ body {
 
 .cl-run-launch-menu {
   overflow: hidden;
+  /* Rows run edge to edge, so the popover carries only its vertical inset and
+     every child brings its own 12px. The old `p-1.5` at the call site inset the
+     rows instead, which is what made each one read as a floating chip rather
+     than a menu row. */
+  padding: 6px 0 4px;
 }
 
 /* ── Launch popover: one skeleton every mode fills ──────────────────────────
@@ -1267,36 +1272,43 @@ body {
    the user has not made yet — so the status-hue vocabulary stays out of it and
    mode identity is carried by the mode's own icon (shape), not by colour. */
 
-/* Fixed two-line box so switching modes never resizes the popover. */
+/* Fixed two-line box so switching modes never resizes the popover. The step is
+   `.cl-type-meta` (11px), the one this app uses for supporting text under a row
+   — at 10px it sat below every other caption in the console. */
 .cl-run-launch-note {
-  min-height: 2.7em;
-  padding: 0.25rem 0.5rem 0.5rem;
-  font-size: 10px;
+  min-height: 2.8em;
+  padding: 2px 12px 8px;
+  font-size: 11px;
   line-height: 1.35;
   color: var(--text-muted);
 }
 
 /* Micro-label above the action rows. Present in every mode — its absence in
-   Verify was what made that tab read as a different menu. */
+   Verify was what made that tab read as a different menu. Position only: the
+   type comes from `.cl-rubric`, the app's one kicker register, which this used
+   to restate in sans and 0.08em of its own. */
 .cl-run-launch-label {
-  padding: 0.4rem 0.5rem 0.25rem;
+  padding: 8px 12px 4px;
   border-top: 1px solid var(--border-subtle);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
 }
 
+/* A ledger row, not a chip: full-bleed, transparent, hairline-separated, hover
+   spanning the popover edge to edge — the shape `.cl-ledger` and every other
+   menu in the app use. A rounded, inset row drew a second frame inside a
+   popover that is already a frame. */
 .cl-run-env-option {
   display: flex;
   width: 100%;
   align-items: center;
   gap: 0.5rem;
-  border-radius: var(--radius-md);
   color: var(--text-primary);
-  padding: 0.4rem 0.5rem;
+  padding: 7px 12px;
   text-align: left;
   transition: background 120ms ease, color 120ms ease;
+}
+
+.cl-run-env-option + .cl-run-env-option {
+  border-top: 1px solid var(--border-subtle);
 }
 
 .cl-run-env-option:hover,
@@ -1322,8 +1334,18 @@ body {
   color: var(--text-secondary);
 }
 
-/* Boot | Test | Verify segmented control at the top of the launch popover. */
+/* Boot | Test | Verify segmented control at the top of the launch popover, and
+   the view switch in the cleanup page header.
+
+   The track and the thumb are variables because the control's whole reading —
+   an inset track with one segment raised out of it — depends on what it is
+   sitting ON, and this app puts it on two different grounds. The defaults are
+   the page-header ones. A surface whose own background already equals the track
+   re-points the pair; see the launch popover below. */
 .cl-mode-toggle {
+  --cl-toggle-track: var(--bg-elevated);
+  --cl-toggle-thumb: var(--bg-surface);
+  --cl-toggle-edge: var(--border-subtle);
   display: flex;
   gap: 2px;
   /* Flush with the popover's own padding so the segmented box and the action
@@ -1331,8 +1353,21 @@ body {
   margin: 0 0 4px;
   padding: 2px;
   border-radius: 7px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
+  background: var(--cl-toggle-track);
+  border: 1px solid var(--cl-toggle-edge);
+}
+
+/* In the launch popover the defaults invert in dark mode: `--bg-overlay` and
+   `--bg-elevated` are the SAME grey there, so the track vanished and the thumb
+   (`--bg-surface`, a step darker) read as a recessed well — the selected mode
+   looked like the disabled one. The track drops to the page ground so it is a
+   real inset in both themes, and the thumb wears `--bg-selected`, which is
+   already this app's "this is the picked one" grey on every option row. */
+.cl-run-launch-menu .cl-mode-toggle {
+  --cl-toggle-track: var(--bg-base);
+  --cl-toggle-thumb: var(--bg-selected);
+  --cl-toggle-edge: transparent;
+  margin: 0 12px 6px;
 }
 
 .cl-mode-toggle-btn {
@@ -1358,7 +1393,7 @@ body {
    teal and Verify blue while Test stayed plain — three different bases for the
    same control, and blue-as-identity collides with accent = "clickable". */
 .cl-mode-toggle-btn[data-active="true"] {
-  background: var(--bg-surface);
+  background: var(--cl-toggle-thumb);
   color: var(--text-primary);
   box-shadow: var(--shadow-panel);
 }

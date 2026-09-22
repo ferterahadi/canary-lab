@@ -29,82 +29,56 @@ it('tracks transitive and cyclic imports, including an unresolved helper becomin
   expect(snapshot()).not.toEqual(beforeResolve)
 })
 
-it('tracks support data and dynamic helpers, handles directory cycles, and excludes generated results', () => {
+it('treats a helper declared inside the spec as semantic test content', () => {
+  fs.writeFileSync(path.join(featureDir, 'e2e/test.spec.ts'), "function expected() { return 1 }\ntest('test', () => { expect(expected()).toBe(1) })")
+  const before = snapshot()
+  fs.writeFileSync(path.join(featureDir, 'e2e/test.spec.ts'), "function expected() { return 2 }\ntest('test', () => { expect(expected()).toBe(1) })")
+  expect(snapshot()).not.toEqual(before)
+})
+
+it('ignores unreferenced helpers, data and generated results', () => {
   const dataDir = path.join(featureDir, 'e2e/data')
   fs.mkdirSync(dataDir)
-  fs.writeFileSync(path.join(dataDir, 'a.json'), '{"value":1}')
-  fs.writeFileSync(path.join(dataDir, 'b.json'), '{"value":2}')
-  fs.symlinkSync(dataDir, path.join(dataDir, 'cycle'))
+  fs.writeFileSync(path.join(featureDir, 'e2e/unused.ts'), 'export const value = 1')
+  fs.writeFileSync(path.join(dataDir, 'input.json'), '{"value":1}')
   fs.mkdirSync(path.join(featureDir, 'e2e/test-results'))
   const before = snapshot()
   fs.writeFileSync(path.join(featureDir, 'e2e/test-results/run.json'), 'run 1')
   expect(snapshot()).toEqual(before)
-  fs.writeFileSync(path.join(dataDir, 'a.json'), '{"value":3}')
-  expect(snapshot()).not.toEqual(before)
-})
-
-it('ignores a Canary tarball repack but tracks its feature support and other dependencies', () => {
-  const canaryDir = path.join(featureDir, 'node_modules/canary-lab/dist/shared')
-  fs.mkdirSync(path.join(canaryDir, 'configs'), { recursive: true })
-  fs.mkdirSync(path.join(canaryDir, 'e2e-runner'), { recursive: true })
-  fs.writeFileSync(path.join(canaryDir, 'configs/playwright.base.js'), 'export const baseConfig = {}')
-  fs.writeFileSync(path.join(canaryDir, 'e2e-runner/log-marker-fixture.js'), 'export const test = {}')
-  const lock = (canaryIntegrity: string, appIntegrity: string) => JSON.stringify({
-    lockfileVersion: 3,
-    packages: {
-      'node_modules/canary-lab': { version: '2.3.0', resolved: 'file:canary-lab-2.3.0.tgz', integrity: canaryIntegrity },
-      'node_modules/app-runtime': { version: '1.0.0', integrity: appIntegrity },
-    },
-  })
-  const lockFile = path.join(featureDir, 'package-lock.json')
-  fs.writeFileSync(lockFile, lock('canary-build-1', 'app-build-1'))
-  const before = snapshot()
-
-  fs.writeFileSync(lockFile, lock('canary-build-2', 'app-build-1'))
+  fs.writeFileSync(path.join(featureDir, 'e2e/unused.ts'), 'export const value = 2')
+  fs.writeFileSync(path.join(dataDir, 'input.json'), '{"value":2}')
   expect(snapshot()).toEqual(before)
-
-  fs.writeFileSync(path.join(canaryDir, 'configs/playwright.base.js'), 'export const baseConfig = { retries: 1 }')
-  expect(snapshot()).not.toEqual(before)
-
-  const afterSupportChange = snapshot()
-  fs.writeFileSync(lockFile, lock('canary-build-2', 'app-build-2'))
-  expect(snapshot()).not.toEqual(afterSupportChange)
 })
 
-it('keeps malformed package locks freshness-sensitive', () => {
-  const canaryDir = path.join(featureDir, 'node_modules/canary-lab/dist/shared/configs')
-  fs.mkdirSync(canaryDir, { recursive: true })
-  fs.writeFileSync(path.join(canaryDir, 'playwright.base.js'), 'export const baseConfig = {}')
-  const lockFile = path.join(featureDir, 'package-lock.json')
-  fs.writeFileSync(lockFile, '{broken:1}')
+it('ignores suite configuration, runner metadata and dependency lock changes', () => {
+  const config = path.join(featureDir, 'feature.config.cjs')
+  const playwright = path.join(featureDir, 'playwright.config.ts')
+  const lock = path.join(featureDir, 'package-lock.json')
+  fs.writeFileSync(config, "module.exports = { config: { branch: 'main', track: 'local' } }")
+  fs.writeFileSync(playwright, 'export default { retries: 0, timeout: 10_000 }')
+  fs.writeFileSync(lock, '{"lockfileVersion":3,"packages":{}}')
   const before = snapshot()
-  fs.writeFileSync(lockFile, '{broken:2}')
-  expect(snapshot()).not.toEqual(before)
+  fs.writeFileSync(config, "module.exports = { config: { branch: 'release', track: 'upstream' } }")
+  fs.writeFileSync(playwright, 'export default { retries: 3, timeout: 30_000 }')
+  fs.writeFileSync(lock, '{"lockfileVersion":3,"packages":{"node_modules/runtime":{"version":"2"}}}')
+  expect(snapshot()).toEqual(before)
 })
 
-it('keeps non-object and incomplete package-lock metadata in the input fingerprint', () => {
-  const canaryDir = path.join(featureDir, 'node_modules/canary-lab/dist/shared/configs')
-  fs.mkdirSync(path.join(canaryDir, 'nested'), { recursive: true })
-  // Neither a support directory nor a non-JavaScript file contributes runtime
-  // support bytes, but both are legitimate package contents to walk past.
-  fs.writeFileSync(path.join(canaryDir, 'README.md'), 'not runtime support')
-  fs.writeFileSync(path.join(canaryDir, 'support.js'), 'export const support = true')
-  const lockFile = path.join(featureDir, 'package-lock.json')
-
-  fs.writeFileSync(lockFile, JSON.stringify([]))
-  const arrayLock = snapshot()
-  fs.writeFileSync(lockFile, JSON.stringify({ packages: [] }))
-  const invalidPackages = snapshot()
-  fs.writeFileSync(lockFile, JSON.stringify({ packages: {} }))
-  const missingCanary = snapshot()
-
-  expect(invalidPackages).not.toEqual(arrayLock)
-  expect(missingCanary).not.toEqual(invalidPackages)
-
-  fs.writeFileSync(lockFile, 'null')
-  expect(snapshot().tests.test).toBeDefined()
-  fs.writeFileSync(lockFile, JSON.stringify({ packages: null }))
-  expect(snapshot().tests.test).toBeDefined()
+it('uses portable paths so moving an identical suite keeps the same test identity', () => {
+  fs.mkdirSync(path.join(featureDir, 'support'))
+  fs.writeFileSync(path.join(featureDir, 'support/helper.ts'), 'export const value = 1')
+  fs.writeFileSync(path.join(featureDir, 'e2e/test.spec.ts'), "import '../support/helper'; test('test', () => { expect(value).toBe(1) })")
+  const before = snapshot().tests
+  const moved = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mapping-moved-'))
+  try {
+    fs.mkdirSync(path.join(moved, 'e2e'))
+    fs.mkdirSync(path.join(moved, 'support'))
+    fs.writeFileSync(path.join(moved, 'support/helper.ts'), 'export const value = 1')
+    fs.writeFileSync(path.join(moved, 'e2e/test.spec.ts'), "import '../support/helper'; test('test', () => { expect(value).toBe(1) })")
+    expect(mappingInferenceSnapshot(moved, tests, requirements).tests).toEqual(before)
+  } finally {
+    fs.rmSync(moved, { recursive: true, force: true })
+  }
 })
 
 it('re-examines inputs it cannot read instead of remembering a partial fingerprint', () => {
@@ -115,16 +89,16 @@ it('re-examines inputs it cannot read instead of remembering a partial fingerpri
   expect(snapshot().tests).toEqual({})
 })
 
-it('does not reuse incomplete legacy caches or stale requirements and prunes deleted tests', () => {
+it('migrates legacy caches once, rejects incomplete entries and prunes deleted tests', () => {
   const current = snapshot()
-  for (const prior of [{ version: 0 }, { version: 1 }, { version: 1, tests: { test: { fingerprint: current.tests.test } } }]) {
-    expect(unexaminedMappingTests(tests, current, prior as MappingInferenceCache)).toEqual(tests)
+  for (const prior of [{ version: 0 }, { version: 1 }, { version: 2 }, { version: 2, tests: { test: { fingerprint: current.tests.test } } }]) {
+    expect(unexaminedMappingTests(tests, current, prior as unknown as MappingInferenceCache)).toEqual(tests)
   }
   const remembered = rememberMappingInference(current, ['test'], undefined)
   expect(unexaminedMappingTests(tests, current, remembered)).toEqual([])
   expect(rememberMappingInference({ ...current, tests: {} }, [], remembered).tests).toEqual({})
   expect(rememberMappingInference({ ...current, tests: { test: 'changed' } }, [], remembered).tests).toEqual({})
-  expect(rememberMappingInference(current, ['test'], { version: 0 } as unknown as MappingInferenceCache).tests.test).toBeDefined()
+  expect(rememberMappingInference(current, ['test'], { version: 1 } as unknown as MappingInferenceCache).tests.test).toBeDefined()
 })
 
 it('disables reuse if a compiler config cannot be read', () => {

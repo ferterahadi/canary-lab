@@ -18,7 +18,7 @@ let warn: ReturnType<typeof vi.fn<(error: unknown) => void>>
 let watchers: Map<string, EventEmitter>
 const ledger = (revision = 'v1'): CoverageLedger => ({ feature: 'shop', coveragePct: 0, mappedPct: 0,
   totals: { covered: 0, total: 1, pathIncomplete: 0, variantIncomplete: 0, untested: 1, orphanTests: 0 }, tests: [], requirements: [], orphanRequirementIds: [], orphanTestNames: [],
-  freshness: { revision, checkedAt: 'now', state: 'current', reasons: [], changedTests: [], latestRunFailed: false, proofNeedsRun: false },
+  freshness: { revision, checkedAt: 'now', state: 'current', reasons: [], changedTests: [], latestRunFailed: false },
 })
 
 beforeEach(() => {

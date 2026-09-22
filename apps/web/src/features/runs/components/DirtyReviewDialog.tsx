@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DirtySpecSummary, Feature, RunDetail, RunIndexEntry } from '@/shared/api/types'
-import type { FeatureTestReview, RunTestReview } from '@shared/test-review'
+import type { FeatureTestReview, RunTestReview, TestReviewReceipt } from '@shared/test-review'
 import * as api from '@/shared/api/client'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { useLiveResource } from '@/shared/state/use-live-resource'
@@ -25,6 +25,7 @@ interface Props {
   onFocus?: (focus: ReviewFocus) => void
   onChooseFeature?: (name: string) => void
   onFeaturesChanged?: () => void
+  onAccepted?: (feature: string, receipt: TestReviewReceipt, detail?: RunDetail | null) => void
   onClose: () => void
 }
 
@@ -44,7 +45,7 @@ function specsFor(card: ReviewSuite, detail: RunDetail | null | undefined): Dirt
 
 /** The selected file and its actions share one owner. Live run snapshots take
  * precedence over feature summaries; reading a hint never adopts an edit. */
-export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, focusRunId, focusRunDetail, focus: routedFocus, onFocus, onChooseFeature, onFeaturesChanged, onClose }: Props) {
+export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, focusRunId, focusRunDetail, focus: routedFocus, onFocus, onChooseFeature, onFeaturesChanged, onAccepted, onClose }: Props) {
   const [focus, setFocus] = useState(routedFocus)
   useEffect(() => { setFocus(routedFocus) }, [routedFocus])
   const updateFocus = (next: ReviewFocus): void => { setFocus(next); onFocus?.(next) }
@@ -198,11 +199,12 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
 
   const acceptChanges = async (): Promise<void> => {
     if (!selected) return
-    if (reviewRun && reviewRevision) await api.acceptRunTestReview(reviewRun.runId, reviewRevision)
-    else if (featureReviewRevision) await api.acceptFeatureTestReview(selected.name, featureReviewRevision)
-    else return
+    const receipt = reviewRun && reviewRevision ? await api.acceptRunTestReview(reviewRun.runId, reviewRevision)
+      : featureReviewRevision ? await api.acceptFeatureTestReview(selected.name, featureReviewRevision) : undefined
+    if (!receipt) return
     onFeaturesChanged?.()
     onClose()
+    onAccepted?.(selected.name, receipt, detail)
   }
 
   const restoreChanges = async (): Promise<void> => {

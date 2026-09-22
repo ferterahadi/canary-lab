@@ -18,7 +18,7 @@ export interface MappingTestInput extends AnnotateTestInput {
 }
 
 export interface MappingInferenceCache {
-  version: 1
+  version: 2
   /** Test name -> input fingerprint -> the requirement meanings examined. A
    * negative answer is reusable too; absence means the pair was never read. */
   tests: Record<string, { fingerprint: string; requirements: Record<string, string> }>
@@ -35,90 +35,32 @@ function hash(value: unknown): string {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
-function record(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined
+function portableRelative(featureDir: string, file: string): string {
+  return path.relative(featureDir, file).split(path.sep).join('/')
 }
 
-/** A local Canary tarball is rebuilt on every `canary-apply`, so its lockfile
- * integrity is packaging noise. Hash the feature-support runtime instead;
- * changes that can affect the specs still invalidate mapping evidence. */
-function canaryFeatureSupportContext(lockFile: string, reads: CoverageInputReads): string | undefined {
-  const packageDir = path.join(path.dirname(lockFile), 'node_modules', 'canary-lab')
-  const files: Array<[string, string]> = []
-  for (const relDir of ['dist/shared/configs', 'dist/shared/e2e-runner']) {
-    const dir = path.join(packageDir, relDir)
-    if (!reads.exists(dir)) continue
-    for (const entry of reads.directory(dir)) {
-      if (!entry.isFile() || !entry.name.endsWith('.js')) continue
-      const file = path.join(dir, entry.name)
-      files.push([path.relative(packageDir, file), reads.read(file).toString('base64')])
-    }
-  }
-  return files.length ? hash(files.sort(([a], [b]) => a.localeCompare(b))) : undefined
-}
-
-function packageLockContext(file: string, source: string, reads: CoverageInputReads): string {
-  const support = canaryFeatureSupportContext(file, reads)
-  if (!support) return source
-  let lock: Record<string, unknown>
-  try {
-    const parsed = record(JSON.parse(source))
-    if (!parsed) return source
-    lock = parsed
-  } catch { return source /* Malformed metadata must remain freshness-sensitive. */ }
-
-  const packages = record(lock.packages)
-  const installed = packages ? record(packages['node_modules/canary-lab']) : undefined
-  if (!installed) return source
-  delete installed.resolved
-  delete installed.integrity
-  installed.featureSupportFingerprint = support
-  return JSON.stringify(lock)
-}
-
-/** Read dependency content rather than mtimes: an imported helper can change
- * while its test body stays identical. Package/config inputs also invalidate
- * reuse, and unresolved local imports stay in the hash until they resolve. */
+/** Read semantic dependency content rather than mtimes: an imported helper can
+ * change while its test body stays identical. Compiler configuration is used to
+ * resolve the import graph, but configuration bytes and absolute locations are
+ * not part of the mapping identity. */
 function sourceContext(featureDir: string, file: string, options: ts.CompilerOptions, reads: CoverageInputReads, host: ts.ModuleResolutionHost): string {
   const files = new Map<string, string>()
   const visit = (absolute: string, spec: boolean): void => {
-    if (files.has(absolute)) return
+    const key = portableRelative(featureDir, absolute)
+    if (files.has(key)) return
     const source = reads.text(absolute)
-    files.set(absolute, spec ? extractTestMappingContext(absolute, source) : source)
+    files.set(key, spec ? extractTestMappingContext(absolute, source) : source)
     for (const dependency of ts.preProcessFile(source, true, true).importedFiles) {
       const resolved = ts.resolveModuleName(dependency.fileName, absolute, options, host).resolvedModule
       if (resolved && !resolved.isExternalLibraryImport) visit(resolved.resolvedFileName, false)
-      else if (!resolved && dependency.fileName.startsWith('.')) files.set(path.resolve(path.dirname(absolute), dependency.fileName), 'unresolved')
+      else if (!resolved && dependency.fileName.startsWith('.')) {
+        const unresolved = path.resolve(path.dirname(absolute), dependency.fileName)
+        files.set(portableRelative(featureDir, unresolved), 'unresolved')
+      }
     }
   }
   visit(path.resolve(featureDir, file), true)
   return hash([...files].sort(([a], [b]) => a.localeCompare(b)))
-}
-
-/** Data files and dynamically loaded helpers inside e2e have no static import
- * edge. Include that support tree, excluding top-level specs (hashed per test)
- * and dependency/output directories. An unreadable input disables reuse. */
-function supportContext(featureDir: string, reads: CoverageInputReads): string {
-  const files: Array<[string, string]> = []
-  const visited = new Set<string>()
-  const walk = (dir: string): void => {
-    const real = reads.realpath(dir)
-    if (visited.has(real)) return
-    visited.add(real)
-    for (const entry of reads.directory(dir)) {
-      if (['node_modules', '.git', 'test-results', 'playwright-report'].includes(entry.name)) continue
-      const target = path.join(dir, entry.name)
-      if (reads.isDirectory(target)) walk(target)
-      else if (!(dir === path.join(featureDir, 'e2e') && entry.name.endsWith('.spec.ts'))) {
-        files.push([path.relative(featureDir, target), reads.read(target).toString('base64')])
-      }
-    }
-  }
-  const dir = path.join(featureDir, 'e2e')
-  if (reads.exists(dir)) walk(dir)
-  return hash(files.sort(([a], [b]) => a.localeCompare(b)))
 }
 
 export function mappingInferenceSnapshot(
@@ -150,18 +92,6 @@ export function mappingInferenceSnapshot(
           onUnRecoverableConfigFileDiagnostic: (diagnostic) => { throw new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')) },
         })!.options
       : {}
-    const environment: Array<[string, string]> = []
-    for (let dir = featureDir; ; dir = path.dirname(dir)) {
-      for (const name of ['feature.config.cjs', 'playwright.config.ts', 'playwright.config.js', 'tsconfig.json', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock']) {
-        const target = path.join(dir, name)
-        if (reads.exists(target)) {
-          const source = reads.text(target)
-          environment.push([target, name === 'package-lock.json' ? packageLockContext(target, source, reads) : source])
-        }
-      }
-      if (path.dirname(dir) === dir) break
-    }
-    const support = supportContext(featureDir, reads)
     const contexts = new Map<string, string>()
     const fingerprints: Record<string, string> = {}
     for (const test of tests) {
@@ -170,7 +100,13 @@ export function mappingInferenceSnapshot(
         context = sourceContext(featureDir, test.file, options, reads, host)
         contexts.set(test.file, context)
       }
-      fingerprints[test.name] = hash({ file: test.file, body: test.bodySource, assertions: test.assertions, annotations: test.annotations, context, support, environment, options })
+      fingerprints[test.name] = hash({
+        file: portableRelative(featureDir, path.resolve(featureDir, test.file)),
+        body: test.bodySource,
+        assertions: test.assertions,
+        annotations: test.annotations,
+        context,
+      })
     }
     const summaryPath = path.join(docsDirFor(featureDir), PRD_SUMMARY_JSON)
     const sourceRevision = hash([readDocsCollection(featureDir).docsHash, fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf-8') : null])
@@ -188,7 +124,7 @@ export function unexaminedMappingTests(
   cache: MappingInferenceCache | undefined,
 ): MappingTestInput[] {
   return tests.filter((test) => {
-    const prior = cache?.version === 1 ? cache.tests?.[test.name] : undefined
+    const prior = cache?.version === 2 ? cache.tests?.[test.name] : undefined
     return !snapshot.tests[test.name] || prior?.fingerprint !== snapshot.tests[test.name]
       || Object.entries(snapshot.requirements).some(([id, fingerprint]) => prior.requirements?.[id] !== fingerprint)
   })
@@ -204,7 +140,7 @@ export function rememberMappingInference(
   const tests: MappingInferenceCache['tests'] = {}
   const examined = new Set(roster)
   for (const [name, fingerprint] of Object.entries(snapshot.tests)) {
-    const old = prior?.version === 1 ? prior.tests?.[name] : undefined
+    const old = prior?.version === 2 ? prior.tests?.[name] : undefined
     const unchanged = old?.fingerprint === fingerprint
     if (examined.has(name) || unchanged) {
       tests[name] = {
@@ -216,5 +152,5 @@ export function rememberMappingInference(
       }
     }
   }
-  return { version: 1, tests }
+  return { version: 2, tests }
 }

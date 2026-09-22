@@ -23,7 +23,6 @@ export interface CoverageFreshness {
   latestRunStatus?: string
   evidenceRunId?: string
   latestRunFailed: boolean
-  proofNeedsRun: boolean
 }
 
 export interface FeatureCoverageChange {

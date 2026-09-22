@@ -227,8 +227,8 @@ it('marks a spec whose reviewed bytes changed even when its test declaration did
 it('leaves generated coverage integrity state out of the human comparison', async () => {
   const dir = saveSnapshot()
   const file = 'docs/_coverage-state.json'
-  const recorded = JSON.stringify({ verificationRequiredAfter: '2026-09-18T06:48:09.623Z', requirementsHash: 'same', mappingInference: { tests: { checkout: { fingerprint: 'old' } } } }, null, 2) + '\n'
-  const current = JSON.stringify({ verificationRequiredAfter: '2026-09-18T09:14:42.594Z', requirementsHash: 'same', mappingInference: { tests: { checkout: { fingerprint: 'new' } } } }, null, 2) + '\n'
+  const recorded = JSON.stringify({ ranAt: '2026-09-18T06:48:09.623Z', requirementsHash: 'same', mappingInference: { version: 2, tests: { checkout: { fingerprint: 'old' } } } }, null, 2) + '\n'
+  const current = JSON.stringify({ ranAt: '2026-09-18T09:14:42.594Z', requirementsHash: 'same', mappingInference: { version: 2, tests: { checkout: { fingerprint: 'new' } } } }, null, 2) + '\n'
   fs.mkdirSync(path.join(dir, 'suite/docs'), { recursive: true })
   fs.mkdirSync(path.join(suite, 'docs'), { recursive: true })
   fs.writeFileSync(path.join(dir, 'suite', file), recorded)

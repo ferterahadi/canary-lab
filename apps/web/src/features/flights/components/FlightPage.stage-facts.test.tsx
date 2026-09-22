@@ -1351,7 +1351,7 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     // Passes card below it has not moved.
     await act(async () => {
       landLedger({
-        freshness: { revision: 'current', checkedAt: new Date().toISOString(), state: 'current', reasons: [], changedTests: [], latestRunFailed: false, proofNeedsRun: false },
+        freshness: { revision: 'current', checkedAt: new Date().toISOString(), state: 'current', reasons: [], changedTests: [], latestRunFailed: false },
         feature: 'checkout',
         requirements: [],
         tests: [{ name: 't1', requirements: ['R1'], pathTypes: ['happy'], strength: 'solid', file: 'a.spec.ts' }],

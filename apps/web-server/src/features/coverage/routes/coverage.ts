@@ -288,7 +288,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
       return deps.coverageMonitor.readAll().map(({ feature, freshness: fresh, measurement }) => {
         const measured = fresh.state === 'current' && measurement
         return { feature,
-          headline: measured ? fresh.latestRunFailed ? 'Latest run failed' : fresh.proofNeedsRun ? 'Mapped · needs verification' : `Covered ${Math.round(measurement.coveragePct)}%`
+          headline: measured ? `Mapped ${Math.round(measurement.coveragePct)}%`
             : fresh.state === 'updating' ? 'Generating' : fresh.state === 'unavailable' ? 'Freshness unconfirmed' : fresh.state === 'not-measured' ? 'No coverage' : 'Stale',
           summary: fresh.nextAction?.stage === 'prd-summary' ? fresh.state === 'not-measured' ? 'absent' : 'stale' : 'fresh',
           coverage: measured ? 'fresh' : fresh.state === 'updating' ? 'generating' : fresh.state === 'not-measured' ? 'absent' : 'stale',
@@ -333,7 +333,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
           activeJob: activeJobs.get(f.name) ?? null,
         })
         const headline = state.coverage === 'fresh' && coveragePct === null
-          ? 'Covered'
+          ? 'Mapped'
           : state.headline
         out.push({
           feature: f.name,

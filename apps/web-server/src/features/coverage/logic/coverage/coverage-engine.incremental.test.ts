@@ -71,7 +71,7 @@ describe('incremental mapping with real source inputs', () => {
     expect(propose.mock.calls[1][0].tests.map((test) => test.name)).toEqual(['first'])
   })
 
-  it('invalidates imported helpers, enclosing hooks and dependency lockfiles', async () => {
+  it('invalidates imported helpers and enclosing hooks but ignores suite configuration', async () => {
     const helper = path.join(featureDir, 'e2e', 'helper.ts')
     fs.writeFileSync(helper, 'export const value = 1\n')
     fs.writeFileSync(spec, `import { value } from './helper'\n${source}`)
@@ -85,8 +85,10 @@ describe('incremental mapping with real source inputs', () => {
     expect(propose.mock.calls[2][0].tests).toHaveLength(2)
     fs.writeFileSync(path.join(root, 'package-lock.json'), '{"lockfileVersion":3}')
     await runCoverageEngine(args(), { propose })
-    expect(propose.mock.calls[3][0].tests).toHaveLength(2)
-    // Four engine passes, each re-parsing the spec and its helper through the
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), `module.exports = { config: { name: 'checkout', description: 'checkout', envs: ['local'], featureDir: __dirname, branch: 'release', track: 'upstream' } }`)
+    await runCoverageEngine(args(), { propose })
+    expect(propose).toHaveBeenCalledTimes(3)
+    // Five engine passes, each re-parsing the spec and its helper through the
     // TypeScript compiler. That fits the default 5s budget on an idle machine
     // and does not under v8 coverage with every worker busy.
   }, 30_000)

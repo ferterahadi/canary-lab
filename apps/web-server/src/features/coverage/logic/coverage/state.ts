@@ -71,7 +71,7 @@ function deriveHeadline(
   // summary is fresh past here.
   if (coverageState === 'absent') return 'No coverage'
   if (coverageState === 'stale') return 'Stale'
-  return `Covered ${pct}%`
+  return `Mapped ${pct}%`
 }
 
 function deriveDrift(input: DeriveStateInput): DriftDetail {

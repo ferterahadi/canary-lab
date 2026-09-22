@@ -35,11 +35,14 @@ export function deriveCoverageFreshness(args: {
 }): CoverageFreshness {
   const { ledger, summary, snapshot, runState } = args
   const reasons: string[] = []
+  const inferenceVersion = (runState?.mappingInference as { version?: number } | undefined)?.version
+  const inference = inferenceVersion === 2 ? runState?.mappingInference : undefined
   const changedTests = Object.entries(snapshot.tests).filter(([name, fingerprint]) => {
-    const prior = runState?.mappingInference?.tests[name]
+    if (!inference) return false
+    const prior = inference.tests[name]
     return !prior || prior.fingerprint !== fingerprint || Object.entries(snapshot.requirements).some(([id, hash]) => prior.requirements[id] !== hash)
   }).map(([name]) => name)
-  const removedTests = Object.keys(runState?.mappingInference?.tests ?? {}).filter((name) => !(name in snapshot.tests))
+  const removedTests = Object.keys(inference?.tests ?? {}).filter((name) => !(name in snapshot.tests))
   changedTests.push(...removedTests)
   let state: CoverageFreshness['state'] = 'current'
   let nextAction: CoverageRecoveryAction | undefined
@@ -59,9 +62,10 @@ export function deriveCoverageFreshness(args: {
     state = 'not-measured'
     reasons.push('Coverage mapping has not run.')
     nextAction = action('specs-coverage', 'Map requirement coverage', 'start_external_coverage')
-  } else if (!runState?.mappingInference || changedTests.length || ledger.state?.coverage === 'stale') {
+  } else if (!inference || changedTests.length || ledger.state?.coverage === 'stale') {
     state = 'stale'
     reasons.push(!runState?.mappingInference ? 'Mapping input revisions were not recorded; recheck coverage before relying on it.'
+      : inferenceVersion !== 2 ? 'Coverage mapping fingerprint format changed; update mappings once.'
       : ledger.state?.coverage === 'stale' ? 'Requirements changed since coverage was mapped.'
         : `${changedTests.length} test input${changedTests.length === 1 ? '' : 's'} changed since coverage was mapped.`)
     nextAction = action('specs-coverage', 'Update coverage mappings', 'start_external_coverage')
@@ -71,15 +75,11 @@ export function deriveCoverageFreshness(args: {
     reasons.push('Coverage work is in progress; previous measurements are historical.')
   }
   const latestRunFailed = args.latestRun?.status === 'failed' || ledger.tests.some((test) => test.lastRun?.passed === false)
-  const inputsAheadOfRun = Boolean(runState?.verificationRequiredAfter && (!args.latestRun || args.latestRun.startedAt < runState.verificationRequiredAfter))
-  const proofNeedsRun = Boolean(summary && (inputsAheadOfRun || ledger.requirements.some((req) => req.gapType === 'covered'
-    && (req.enforcement?.state !== 'proven-unchanged' || ledger.tests.some((test) => test.requirements.includes(req.requirement.id) && test.lastRun?.passed !== true)))))
-  if (inputsAheadOfRun) reasons.push('The latest run predates the current mapping inputs; its results are historical.')
   if (args.latestRun && !ledger.provenRunId) reasons.push(`Latest run ${args.latestRun.runId} is ${args.latestRun.status}; no readable test results for this attempt.`)
-  if (state === 'current' && (proofNeedsRun || latestRunFailed)) nextAction = action('run', latestRunFailed ? 'Review failures & verify' : 'Verify current tests', 'start_run')
+  if (state === 'current' && latestRunFailed) nextAction = action('run', 'Review failures', 'start_run')
   return {
     revision: coverageRevision([args.docsHash, summary, snapshot, runState, ledger.state, ledger.tests.map((test) => [test.name, test.lastRun]), ledger.enforcement, args.unreadable, args.latestRun]),
-    checkedAt: new Date().toISOString(), state, reasons, changedTests, latestRunFailed, proofNeedsRun,
+    checkedAt: new Date().toISOString(), state, reasons, changedTests, latestRunFailed,
     ...(nextAction ? { nextAction } : {}),
     ...(args.latestRun ? { latestRunId: args.latestRun.runId, latestRunStatus: args.latestRun.status } : {}),
     ...(ledger.provenRunId ? { evidenceRunId: ledger.provenRunId } : {}),

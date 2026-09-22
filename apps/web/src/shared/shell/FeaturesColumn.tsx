@@ -60,13 +60,12 @@ interface Props {
 
 // Colour the Coverage icon by the derived headline (R8). Neutral (inherit) for
 // setup-needed / no-coverage / unknown so the column stays calm until there's
-// real signal; green when covered, amber when stale. Generating belongs to the
+// real signal; green when mapped, amber when stale. Generating belongs to the
 // Flight shortcut, so the Coverage action is absent in that state.
 function coverageHeadlineColor(headline: string | null | undefined): string | undefined {
   if (!headline) return undefined
-  if (headline.startsWith('Covered')) return 'var(--success)'
-  if (headline === 'Latest run failed') return 'var(--danger)'
-  if (headline === 'Freshness unconfirmed' || headline === 'Mapped · needs verification') return 'var(--warning)'
+  if (headline.startsWith('Mapped') || headline.startsWith('Covered')) return 'var(--success)'
+  if (headline === 'Freshness unconfirmed') return 'var(--warning)'
   if (headline === 'Stale') return 'var(--warning)'
   return undefined
 }

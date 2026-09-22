@@ -79,7 +79,7 @@ describe('coverage api', () => {
   })
 
   it('coalesces simultaneous coverage-state reads from the same page load', async () => {
-    const states = [{ feature: 'checkout', headline: 'Covered 100%', summary: 'fresh', coverage: 'fresh', coveragePct: 100 }]
+    const states = [{ feature: 'checkout', headline: 'Mapped 100%', summary: 'fresh', coverage: 'fresh', coveragePct: 100 }]
     let settle: ((response: Response) => void) | undefined
     const fetchImpl = vi.fn(() => new Promise<Response>((resolve) => { settle = resolve }))
 
@@ -97,7 +97,7 @@ describe('coverage api', () => {
   })
 
   it('does not clear a newer coverage-state request when an older request settles', async () => {
-    const states = [{ feature: 'checkout', headline: 'Covered 100%', summary: 'fresh', coverage: 'fresh', coveragePct: 100 }]
+    const states = [{ feature: 'checkout', headline: 'Mapped 100%', summary: 'fresh', coverage: 'fresh', coveragePct: 100 }]
     let settleFirst: ((response: Response) => void) | undefined
     let settleSecond: ((response: Response) => void) | undefined
     const fetchImpl = vi.fn()
