@@ -11,6 +11,8 @@ const COMPARISON_OPERATORS = new Set([ts.SyntaxKind.EqualsEqualsToken, ts.Syntax
   ts.SyntaxKind.LessThanEqualsToken, ts.SyntaxKind.GreaterThanToken, ts.SyntaxKind.GreaterThanEqualsToken,
   ts.SyntaxKind.InKeyword, ts.SyntaxKind.InstanceOfKeyword])
 const SUPPORTED_FUNCTION_MODIFIERS = new Set([ts.SyntaxKind.AsyncKeyword, ts.SyntaxKind.ExportKeyword, ts.SyntaxKind.DefaultKeyword, ts.SyntaxKind.DeclareKeyword])
+// Console state operations such as clear/time do not print their arguments.
+const CONSOLE_OUTPUT_METHODS = new Set(['log', 'info', 'warn', 'error', 'debug'])
 
 export function sourceExpressionText(node: ts.Expression): string {
   return recordSourceEnglish(node, renderSourceExpressionText(node))
@@ -332,6 +334,21 @@ function listEntryText(node: ts.Expression): string {
     return `If ${sourceConditionText(value.condition)}, include all items from ${sourceArgumentText(value.whenTrue)}; otherwise ${emptyOtherwise ? 'include no items' : `include all items from ${sourceArgumentText(value.whenFalse)}`}.`
   }
   return `Include all items from ${sourceArgumentText(node.expression)}.`
+}
+
+export function sourceConsoleOutputText(node: ts.Statement, context: SemanticContext): string | undefined {
+  if (!ts.isExpressionStatement(node)) return undefined
+  const awaited = ts.isAwaitExpression(node.expression)
+  const call = awaited ? node.expression.expression : node.expression
+  if (!ts.isCallExpression(call) || ts.isOptionalChain(call) || call.typeArguments?.length) return undefined
+  const target = call.expression
+  if (!ts.isPropertyAccessExpression(target) && !ts.isElementAccessExpression(target)) return undefined
+  if (!ts.isIdentifier(target.expression) || target.expression.text !== 'console') return undefined
+  const method = ts.isPropertyAccessExpression(target) ? target.name.text
+    : ts.isStringLiteralLike(target.argumentExpression) ? target.argumentExpression.text : undefined
+  if (!method || !CONSOLE_OUTPUT_METHODS.has(method) || symbolEvidence(target.expression, context).declaredInSource) return undefined
+  const text = call.arguments.length ? call.arguments.map(sourceArgumentText).join(', ') : 'an empty line'
+  return recordSourceEnglish(node, `Output ${text}${awaited ? ' and wait for it to finish' : ''}`)
 }
 
 export function sourceStatementText(node: ts.Statement): string | undefined {

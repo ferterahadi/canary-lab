@@ -1,7 +1,7 @@
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import type { ReadableStoryItem } from '../../../../../shared/readable-tests/types'
-import { translateReadableSource } from './translator'
+import { translateReadableSource, translateReadableTest } from './translator'
 import { VOCABULARY } from '../controlled-english/vocabulary'
 import { parseSource } from '../controlled-english/compiler-context'
 import { compileSemanticSource } from '../controlled-english/semantic-context'
@@ -16,6 +16,44 @@ function rows(source: string, file = 'review.spec.ts'): ReadableStoryItem[] {
 const english = (source: string, file?: string): string => rows(source, file).map((item) => item.text).join('\n')
 
 describe('whole-file English', () => {
+  it.each(['log', 'info', 'warn', 'error', 'debug'])('presents console.%s as output in source and test stories', (method) => {
+    const source = `console.${method}("the text")`
+    const item = rows(source)[0]
+    expect(item).toMatchObject({ role: 'output', text: 'Output "the text"',
+      source: { startLine: 1, endLine: 1, snippet: source } })
+    expect(item.spans.map((span) => span.text).join('')).toBe(item.text)
+    const test = translateReadableTest({ file: 'review.spec.ts', title: 'output', bodySource: `{ ${source} }` })
+    expect(test.story?.steps[0]).toMatchObject({ role: 'output', text: item.text })
+  })
+
+  it.each([
+    ['console.log()', 'Output an empty line'],
+    ['console["warn"]("ready", count)', 'Output "ready", count'],
+    ['console.log(`URL: ${signup.url}`)', 'Output (text formed by joining "URL: ", signup.url)'],
+    ['console.error("failed", computeError(), ...details)', 'Output "failed", (the result of computeError()), each item from details as a separate argument'],
+    ['await console.info("ready")', 'Output "ready" and wait for it to finish'],
+    ['console.log(() => work())', 'Output (an arrow function with no parameters that returns the result of work())'],
+  ])('preserves console output arguments and evaluation: %s', (source, text) => {
+    expect(rows(source)[0]).toMatchObject({ role: 'output', text, source: { snippet: source } })
+  })
+
+  it.each([
+    'logger.log("the text")',
+    'service.console.log("the text")',
+    'console.clear()',
+    'console.time("timer")',
+    'console[method]("the text")',
+    'console?.log("the text")',
+    'console.log?.("the text")',
+    'console.log<string>("the text")',
+    'function work(console) { console.log("the text") }',
+    'const console = logger; console.log("the text")',
+    'const result = console.log("the text")',
+    'return console.log("the text")',
+  ])('keeps other calls and surrounding semantics intact: %s', (source) => {
+    expect(rows(source).some((item) => item.role === 'output')).toBe(false)
+  })
+
   it.each([
     [`test('case', { tag: ['@req-R11'] }, async () => { const id = 1; expect(id).toBe(1) })`, 'Test: "case"; an object with tag set to (a list containing "@req-R11"); with an asynchronous callback'],
     [`test.only('case', () => { const id = 1; expect(id).toBe(1) })`, 'Test: "case"; (only)'],

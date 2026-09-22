@@ -255,7 +255,7 @@ function storySpanColor(kind: ReadableStorySpan['kind']): string | undefined {
 function roleColor(role: ReadableStoryRole): string {
   if (role === 'note') return 'var(--code-comment)'
   if (role === 'setup') return 'var(--code-cyan)'
-  if (role === 'action' || role === 'test') return 'var(--code-keyword)'
+  if (role === 'action' || role === 'output' || role === 'test') return 'var(--code-keyword)'
   return 'var(--semantic-attention)'
 }
 
@@ -283,11 +283,12 @@ function storyKeyword(step: ReadableStoryItem): string {
   return keywords[step.flowKind]
 }
 
-function roleLabel(role: ReadableStoryRole): 'TEST' | 'SETUP' | 'ACTION' | 'CHECK' | 'NOTE' {
+function roleLabel(role: ReadableStoryRole): 'TEST' | 'SETUP' | 'ACTION' | 'OUTPUT' | 'CHECK' | 'NOTE' {
   if (role === 'note') return 'NOTE'
   if (role === 'test') return 'TEST'
   if (role === 'setup') return 'SETUP'
   if (role === 'action') return 'ACTION'
+  if (role === 'output') return 'OUTPUT'
   return 'CHECK'
 }
 
@@ -295,6 +296,7 @@ function redundantStoryPrefix(step: ReadableStoryItem): string {
   const keyword = storyKeyword(step)
   if (keyword === 'TEST' && step.text.startsWith('Test: ')) return 'Test: '
   if (keyword === 'CHECK' && step.text.startsWith('Check that ')) return 'Check that '
+  if (keyword === 'OUTPUT' && step.text.startsWith('Output ')) return 'Output '
   return ''
 }
 

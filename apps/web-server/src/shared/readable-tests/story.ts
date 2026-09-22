@@ -3,7 +3,7 @@ import { UnsupportedSyntaxKindError, statementEnglish } from '../controlled-engl
 import { renderEnglish } from '../controlled-english/english-renderer'
 import { sourceSyntaxFallback } from './source-representation'
 import type { SemanticContext } from '../controlled-english/semantic-context'
-import { sourceAssertionText, sourceCallbackCall, sourceCallbackExpressionCall, sourceCallbackHeaderText, sourceCatchText, sourceConditionText, sourceDeclarationText, sourceExpressionText, sourceFunctionBinding, sourceFunctionText, sourceLoopText, sourceStatementText, testRegistration } from './source-language'
+import { sourceAssertionText, sourceCallbackCall, sourceCallbackExpressionCall, sourceCallbackHeaderText, sourceCatchText, sourceConditionText, sourceConsoleOutputText, sourceDeclarationText, sourceExpressionText, sourceFunctionBinding, sourceFunctionText, sourceLoopText, sourceStatementText, testRegistration } from './source-language'
 import type {
   ReadableStoryFlowKind,
   ReadableStoryItem,
@@ -1521,6 +1521,9 @@ export function storyCandidates(
 
   function walkStatement(statement: ts.Statement, path: number[], options: WalkOptions): StoryCandidate[] {
     if (completeContext) {
+      const output = sourceConsoleOutputText(statement, completeContext)
+      if (output) return [{ kind: 'step', node: statement, path, role: 'output', text: output,
+        spans: storySpans(output, variablePhrases(statement, output, aliases), true), fidelity: 'derived' }]
       if (ts.isFunctionDeclaration(statement)) {
         const text = sourceFunctionText(statement)
         return [{ kind: 'flow', flowKind: 'scope', node: statement, path, role: 'setup', text,

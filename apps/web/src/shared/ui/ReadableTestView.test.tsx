@@ -141,6 +141,24 @@ describe('ReadableTestView', () => {
       .toBe('01TEST"completes checkout"')
   })
 
+  it('shows console text as OUTPUT once and keeps its highlighted text and source selectable', async () => {
+    const output = {
+      id: 'console-output', role: 'output' as const, text: 'Output "the text"',
+      spans: [{ text: 'Output ', kind: 'verb' as const }, { text: '"the text"', kind: 'literal' as const }],
+      fidelity: 'derived' as const, source: source(12, 'console.log("the text")'),
+    }
+    const test: ReadableTest = { ...STORY, story: { steps: [output, STORY.story!.steps[1]] } }
+    const select = vi.fn()
+    await act(async () => root.render(<ReadableTestView test={test} onSourceSelect={select} />))
+    const row = container.querySelector<HTMLButtonElement>('[data-testid="readable-story-item-console-output"]')!
+    expect(row.textContent).toBe('01OUTPUT"the text"')
+    expect(row.getAttribute('aria-label')).toBe('01. OUTPUT: "the text". Show checkout.spec.ts:L12')
+    expect(row.querySelector('[data-story-span="literal"]')?.textContent).toBe('"the text"')
+    expect(container.querySelector('[data-testid="readable-story-role-action-submit"]')?.textContent).toBe('ACTION')
+    await act(async () => row.click())
+    expect(select).toHaveBeenCalledWith({ id: output.id, source: output.source })
+  })
+
   it('keeps authored execution order with highlighted role keywords and variables', async () => {
     act(() => root.render(<ReadableTestView test={STORY} sourceFile="/repo/e2e/checkout.spec.ts" />))
 
