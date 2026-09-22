@@ -600,6 +600,33 @@ describe('POST /api/features/:name/commit-dirty', () => {
 })
 
 describe('feature test review decisions', () => {
+  it('returns specific review-route errors for missing state, Git failures, and non-Error faults', async () => {
+    writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    const revision = 'a'.repeat(64)
+    const tracked = makeDirtySpecStore()
+    const app = await build({ dirtySpecStore: tracked })
+
+    // No Git checkout: the route preserves the actionable 409 from the review
+    // helper instead of replacing it with a generic 500.
+    expect((await app.inject({ method: 'GET', url: '/api/features/alpha/test-review-plan' })).statusCode).toBe(409)
+    expect((await app.inject({ method: 'POST', url: '/api/features/alpha/accept-test-review', payload: { expectedRevision: revision } })).statusCode).toBe(409)
+    expect((await app.inject({ method: 'POST', url: '/api/features/alpha/restore-test-review', payload: { expectedRevision: revision } })).statusCode).toBe(409)
+
+    const withoutTracking = await build()
+    expect((await withoutTracking.inject('/api/features/missing/test-review-plan')).statusCode).toBe(404)
+    expect((await withoutTracking.inject('/api/features/alpha/test-review-plan')).statusCode).toBe(503)
+    expect((await withoutTracking.inject({ method: 'POST', url: '/api/features/missing/accept-test-review', payload: { expectedRevision: revision } })).statusCode).toBe(404)
+    expect((await withoutTracking.inject({ method: 'POST', url: '/api/features/alpha/accept-test-review', payload: {} })).statusCode).toBe(503)
+    expect((await withoutTracking.inject({ method: 'POST', url: '/api/features/missing/restore-test-review', payload: { expectedRevision: revision } })).statusCode).toBe(404)
+    expect((await withoutTracking.inject({ method: 'POST', url: '/api/features/alpha/restore-test-review', payload: {} })).statusCode).toBe(503)
+
+    const faultingStore = { recompute: async () => { throw 'filesystem unavailable' } } as unknown as DirtySpecStore
+    const faulting = await build({ dirtySpecStore: faultingStore })
+    const response = await faulting.inject('/api/features/alpha/test-review-plan')
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({ error: 'Could not prepare the reviewed files.' })
+  })
+
   it('commits the exact reviewed revision and returns the same durable receipt on retry', async () => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
     initGitFeature(dir)
@@ -636,5 +663,24 @@ describe('feature test review decisions', () => {
     const restored = await app.inject({ method: 'POST', url: '/api/features/alpha/restore-test-review', payload: { expectedRevision: latest.review_revision } })
     expect(restored.json()).toMatchObject({ decision: 'restored', review_revision: latest.review_revision, files: ['e2e/a.spec.ts'] })
     expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf8')).toBe("test('one', async () => { expect(1).toBe(1) })\n")
+  })
+
+  it('rejects malformed, stale, and empty review decisions without recording a receipt', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    const store = makeDirtySpecStore()
+    const app = await build({ dirtySpecStore: store })
+
+    for (const action of ['accept-test-review', 'restore-test-review']) {
+      expect((await app.inject({ method: 'POST', url: `/api/features/alpha/${action}`, payload: { expectedRevision: 'invalid' } })).statusCode).toBe(400)
+    }
+    const empty = (await app.inject({ method: 'GET', url: '/api/features/alpha/test-review-plan' })).json() as { review_revision: string }
+    expect((await app.inject({ method: 'POST', url: '/api/features/alpha/accept-test-review', payload: { expectedRevision: empty.review_revision } })).json()).toMatchObject({ reason: 'nothing-to-accept' })
+    expect((await app.inject({ method: 'POST', url: '/api/features/alpha/restore-test-review', payload: { expectedRevision: empty.review_revision } })).json()).toMatchObject({ reason: 'nothing-to-restore' })
+
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+    const changed = (await app.inject({ method: 'GET', url: '/api/features/alpha/test-review-plan' })).json() as { review_revision: string }
+    fs.appendFileSync(path.join(dir, 'e2e', 'a.spec.ts'), '// later\n')
+    expect((await app.inject({ method: 'POST', url: '/api/features/alpha/accept-test-review', payload: { expectedRevision: changed.review_revision } })).json()).toMatchObject({ reason: 'review-changed' })
   })
 })

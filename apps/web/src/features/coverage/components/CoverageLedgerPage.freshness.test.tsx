@@ -43,7 +43,8 @@ describe('an already-open coverage page', () => {
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(stale)
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="change"]')!.click())
     expect(text('coverage-pct')).toBe('33%')
-    expect(warning()).toContain('not confirmed current coverage')
+    expect(warning()).toContain('Coverage out of date')
+    expect(warning()).toContain('Source requirements changed')
     expect(host.querySelector('[data-testid="coverage-freshness-notice"]')).toBeNull()
     expect(host.textContent).toContain('new test')
     const button = host.querySelector<HTMLButtonElement>('[data-testid="recalculate-coverage"]')!

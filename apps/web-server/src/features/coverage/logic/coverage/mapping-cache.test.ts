@@ -82,6 +82,31 @@ it('keeps malformed package locks freshness-sensitive', () => {
   expect(snapshot()).not.toEqual(before)
 })
 
+it('keeps non-object and incomplete package-lock metadata in the input fingerprint', () => {
+  const canaryDir = path.join(featureDir, 'node_modules/canary-lab/dist/shared/configs')
+  fs.mkdirSync(path.join(canaryDir, 'nested'), { recursive: true })
+  // Neither a support directory nor a non-JavaScript file contributes runtime
+  // support bytes, but both are legitimate package contents to walk past.
+  fs.writeFileSync(path.join(canaryDir, 'README.md'), 'not runtime support')
+  fs.writeFileSync(path.join(canaryDir, 'support.js'), 'export const support = true')
+  const lockFile = path.join(featureDir, 'package-lock.json')
+
+  fs.writeFileSync(lockFile, JSON.stringify([]))
+  const arrayLock = snapshot()
+  fs.writeFileSync(lockFile, JSON.stringify({ packages: [] }))
+  const invalidPackages = snapshot()
+  fs.writeFileSync(lockFile, JSON.stringify({ packages: {} }))
+  const missingCanary = snapshot()
+
+  expect(invalidPackages).not.toEqual(arrayLock)
+  expect(missingCanary).not.toEqual(invalidPackages)
+
+  fs.writeFileSync(lockFile, 'null')
+  expect(snapshot().tests.test).toBeDefined()
+  fs.writeFileSync(lockFile, JSON.stringify({ packages: null }))
+  expect(snapshot().tests.test).toBeDefined()
+})
+
 it('re-examines inputs it cannot read instead of remembering a partial fingerprint', () => {
   fs.rmSync(path.join(featureDir, 'e2e/test.spec.ts'))
   expect(snapshot().tests).toEqual({})

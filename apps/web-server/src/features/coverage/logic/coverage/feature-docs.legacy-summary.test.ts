@@ -2,8 +2,9 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { applyExternalSummary } from './feature-docs'
+import { applyExternalSummary, regeneratePrdSummary } from './feature-docs'
 import { readPrdSummary } from './prd-summary'
+import { fakeSummarize } from './__fixtures__/fake-coverage-agents'
 
 let tmp: string
 let featuresDir: string
@@ -34,6 +35,16 @@ afterEach(() => {
 })
 
 describe('legacy requirement confirmation metadata', () => {
+  it('rejects a summary when its source documents change during the agent pass', async () => {
+    const source = path.join(featuresDir, 'checkout', 'docs', 'spec.md')
+    await expect(regeneratePrdSummary({ featuresDir, feature: 'checkout' }, {
+      summarize: async (args) => {
+        fs.appendFileSync(source, '\nA late requirement was added.')
+        return fakeSummarize(args)
+      },
+    })).rejects.toMatchObject({ statusCode: 409 })
+  })
+
   it('reads an old summary without rewriting it and preserves IDs and source attribution on regeneration', () => {
     const featureDir = path.join(featuresDir, 'checkout')
     const file = path.join(featureDir, 'docs', '_prd-summary.json')

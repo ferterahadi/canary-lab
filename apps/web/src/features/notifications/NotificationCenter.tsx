@@ -5,7 +5,7 @@ import { EmptyState } from '@/shared/ui/EmptyState'
 import { CheckIcon, ChevronRightIcon, TrashIcon } from '@/shared/ui/Icons'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { StatusPill } from '@/shared/ui/StatusPill'
-import { IconButton, Modal, StatusDot, ToastHost } from '@/shared/ui/atoms'
+import { IconButton, Modal, StatusDot } from '@/shared/ui/atoms'
 import { useNotifications } from './use-notifications'
 
 function needsAttention(item: WorkspaceNotification): boolean {
@@ -28,9 +28,8 @@ function notificationAction(item: WorkspaceNotification): string {
     : target && 'runId' in target && target.runId ? 'Open run' : 'Open suite'
 }
 
-export function NotificationCenter({ open, suppressToast = false, onOpenChange, onNavigate }: {
+export function NotificationCenter({ open, onOpenChange, onNavigate }: {
   open: boolean
-  suppressToast?: boolean
   onOpenChange: (open: boolean) => void
   onNavigate: (target: NotificationTarget) => void
 }) {
@@ -40,7 +39,6 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
   const attention = items.filter(needsAttention)
   const history = items.filter((item) => !needsAttention(item))
   const visible = showHistory ? history : attention
-  const latest = attention.find((item) => !item.readAt && item.toast === true && item.target)
   const hasWeakerHint = attention.some((item) => item.severity === 'danger')
   const openItem = (item: WorkspaceNotification): void => {
     void inbox.read(item.id)
@@ -120,9 +118,6 @@ export function NotificationCenter({ open, suppressToast = false, onOpenChange, 
         title={inbox.error ?? `${attention.length} need attention. ${history.length} in history.`}
         ariaLabel={inbox.error ? 'Notifications unavailable — open to retry' : `Notifications, ${attention.length} need attention`}
       />
-      {!open && !suppressToast && latest && (
-        <ToastHost toasts={[{ id: latest.id, title: latest.title, body: latest.body, sticky: true, dismissOnOpen: false, dismissLabel: 'Delete notification permanently', actionLabel: notificationAction(latest), onClick: () => openItem(latest) }]} onDismiss={(id) => { void inbox.remove(id) }} />
-      )}
       <Modal
         open={open}
         portal

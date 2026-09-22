@@ -88,12 +88,21 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     stages: Array<{ key: string; allowed: boolean; reason?: string }>
     continuation?: { fromStage: string; reason: string } | null
   }
-  const entryFor = async (feature: string, coverageTarget?: number) => {
+  const entryFor = async (feature: string, coverageTarget?: number | string) => {
     const target = coverageTarget === undefined ? '' : `&coverageTarget=${coverageTarget}`
     const resp = await app.inject({ method: 'GET', url: `/api/flights/entry?feature=${feature}${target}` })
     return { status: resp.statusCode, body: resp.json() as EntryBody }
   }
   const stageOf = (body: EntryBody, key: string) => body.stages.find((s) => s.key === key)!
+
+  it('accepts a finite target in range and falls malformed targets back to the stored default', async () => {
+    writeFeatureConfig('checkout')
+    app = await buildApp(allDone())
+
+    expect((await entryFor('checkout', '75')).body.prefill.coverageTarget).toBe(75)
+    expect((await entryFor('checkout', 'not-a-number')).body.prefill.coverageTarget).toBe(100)
+    expect((await entryFor('checkout', '101')).body.prefill.coverageTarget).toBe(100)
+  })
 
   /** A real feature.config the loader can parse, with declared repos. */
   function writeFeatureConfig(feature: string): string {

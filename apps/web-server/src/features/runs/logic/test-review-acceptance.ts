@@ -71,9 +71,6 @@ function reviewedRepoPaths(root: string, featureDir: string, files: string[]): s
   }
   return [...new Set(files)].sort().map((file) => {
     const absolute = path.resolve(featureDir, file)
-    if (!absolute.startsWith(`${featureDir}${path.sep}`)) {
-      throw Object.assign(new Error('Reviewed file is outside the suite.'), { statusCode: 400 })
-    }
     return path.relative(root, absolute)
   })
 }

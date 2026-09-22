@@ -14,6 +14,7 @@ import { TestPresentation } from './TestPresentation'
 vi.mock('shiki/core', () => ({
   createHighlighterCore: async () => ({
     getTheme: () => ({}),
+    codeToTokens: () => ({ tokens: [[{ color: '#7f848e' }]] }),
     codeToHtml: (code: string, options: { theme: string }) => (
       `<pre class="shiki" data-shiki-theme="${options.theme}"><code>${code.split('\n').map((line) => `<span class="line">${line}</span>`).join('\n')}</code></pre>`
     ),
@@ -623,15 +624,13 @@ describe('TestPresentation', () => {
     act(() => root.render(<TestPresentation test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" />))
     await act(async () => {
       ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
-      await Promise.resolve()
     })
-    expect(container.querySelector('[data-shiki-theme="one-light"]')).not.toBeNull()
+    await vi.waitFor(() => expect(container.querySelector('[data-shiki-theme="one-light"]')).not.toBeNull())
 
     await act(async () => {
       applyTheme('dark')
-      await Promise.resolve()
     })
-    expect(container.querySelector('[data-shiki-theme="one-dark-pro"]')).not.toBeNull()
+    await vi.waitFor(() => expect(container.querySelector('[data-shiki-theme="one-dark-pro"]')).not.toBeNull())
   })
 })
 

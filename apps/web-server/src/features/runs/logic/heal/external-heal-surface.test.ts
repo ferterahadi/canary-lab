@@ -10,6 +10,7 @@ import type { RunDetail } from '../run-store'
 import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 
 import { buildExternalFailureDetail, buildExternalHealContext, buildExternalRunSnapshot, buildExternalRunSnapshotSlim, normalizeRunCounts, slimRepeatHealContext, writeHealSignal } from './external-heal-surface'
+import { compactCounts } from './external-heal-counts'
 
 import { buildRunPaths, runDirFor } from '../runtime/run-paths'
 
@@ -254,6 +255,51 @@ describe('buildExternalHealContext', () => {
     expect(nextSteps).toContain('restart')
     expect(nextSteps).toContain('Do not start services or run Playwright')
     expect(nextSteps).not.toContain('failedTests[]')
+
+    const fallback = buildExternalHealContext({
+      detail: { ...detail, manifest: { ...detail.manifest, bootFailure: { ...bootFailure, nextAction: undefined } } },
+      logsDir,
+      projectRoot: tmpDir,
+    })
+    expect((fallback.nextSteps ?? []).join('\n')).toContain('Use the structured evidence and bounded redacted excerpt first')
+  })
+
+  it('omits a zero not-applicable count from compact agent output', () => {
+    expect(compactCounts({
+      totalKnown: 2,
+      passed: 2,
+      failed: 0,
+      skipped: 0,
+      notRun: 0,
+      notApplicable: 0,
+      passedNames: [],
+      passedIds: [],
+      failedNames: [],
+      failedIds: [],
+      skippedNames: [],
+      skippedIds: [],
+      notRunNames: [],
+      statusLine: '2/2 passed, 0 failed, 0 not run',
+    })).not.toHaveProperty('notApplicable')
+  })
+
+  it('retains a positive not-applicable count in compact agent output', () => {
+    expect(compactCounts({
+      totalKnown: 2,
+      passed: 1,
+      failed: 0,
+      skipped: 1,
+      notRun: 0,
+      notApplicable: 1,
+      passedNames: [],
+      passedIds: [],
+      failedNames: [],
+      failedIds: [],
+      skippedNames: [],
+      skippedIds: [],
+      notRunNames: [],
+      statusLine: '1/2 passed, 0 failed, 1 skipped (1 outside this environment), 0 not run',
+    })).toMatchObject({ notApplicable: 1 })
   })
 
   it('keeps compact counts when normalizing duplicate title names', () => {

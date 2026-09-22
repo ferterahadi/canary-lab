@@ -100,7 +100,8 @@ export function prepareSuiteRuntimeInputs(ctx: RunContext): ActiveRuntimeInputIn
       assertSafeFile(ctx.feature.featureDir, targetPath, `Selected envset target ${slot}`)
       const source = fs.lstatSync(targetPath, { throwIfNoEntry: false })
       if (!source) throw new Error(`Selected envset target ${slot} vanished before run setup: ${targetPath}`)
-      if (!source.isFile() || source.isSymbolicLink()) {
+      // assertSafeFile above already rejects every symlink in the target path.
+      if (!source.isFile()) {
         throw new Error(`Selected envset target ${slot} must be a regular file: ${targetPath}`)
       }
       const bytes = fs.readFileSync(targetPath)

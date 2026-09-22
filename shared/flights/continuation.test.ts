@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { recommendFlightContinuation, type FlightWorkspaceEvidence } from './continuation'
+import type { FlightStageKey } from './types'
 
 const completeEvidence = (): FlightWorkspaceEvidence => ({
   'env-capture': { captured: 2 },
@@ -13,6 +14,25 @@ const completeEvidence = (): FlightWorkspaceEvidence => ({
 })
 
 describe('recommendFlightContinuation', () => {
+  it('names the first missing setup, requirements, coverage, or proof prerequisite', () => {
+    const prerequisites: Array<[FlightWorkspaceEvidence, number, FlightStageKey]> = [
+      [{}, 100, 'env-capture'],
+      [{ 'env-capture': { captured: 1 } }, 100, 'docs'],
+      [{ 'env-capture': { captured: 1 }, docs: { docs: ['requirements.md'] } }, 100, 'prd-summary'],
+      [{ 'env-capture': { captured: 1 }, docs: { docs: ['requirements.md'] }, 'prd-summary': { requirementCount: 1 } }, 100, 'specs-coverage'],
+      [{ ...completeEvidence(), 'specs-coverage': { mappingState: 'fresh', coveragePct: 100, testsWritten: 0 } }, 100, 'specs-coverage'],
+      [{ ...completeEvidence(), 'specs-coverage': { mappingState: 'fresh', coveragePct: Number.NaN, testsWritten: 1 } }, 100, 'specs-coverage'],
+      [{ ...completeEvidence(), 'specs-coverage': { coveragePct: 100, testsWritten: 1 } }, 100, 'specs-coverage'],
+      [{ ...completeEvidence(), run: { status: 'failed' } }, 100, 'run'],
+      [{ ...completeEvidence(), 'evaluation-export': undefined }, 100, 'evaluation-export'],
+      [{ ...completeEvidence(), portify: undefined }, 100, 'portify'],
+    ]
+
+    for (const [evidence, target, stage] of prerequisites) {
+      expect(recommendFlightContinuation(evidence, target)?.fromStage).toBe(stage)
+    }
+  })
+
   it('re-enters Tests and coverage when valid prior mapping is below the requested target', () => {
     const evidence = completeEvidence()
     evidence['specs-coverage'] = { mappingState: 'fresh', coveragePct: 83.3, testsWritten: 7 }

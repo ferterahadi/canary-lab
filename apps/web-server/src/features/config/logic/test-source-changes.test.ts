@@ -75,3 +75,47 @@ it('still marks a test the extractor gave no end line, by treating its declarati
   await attachSourceChanges(root, file, edited, tests)
   expect(tests[0].sourceChanges).toEqual({ changedLines: [3], count: 1 })
 })
+
+it('does not manufacture an after-line for a removed row when no body boundary is available', async () => {
+  const removed = original.replace('  expect(1).toBe(1)\n', '')
+  const { tests } = extractTestsFromSource(file, removed)
+  tests[0].bodyLine = undefined
+
+  await attachSourceChanges(root, file, removed, tests)
+
+  expect(tests[0].sourceChanges).toEqual({ changedLines: [], count: 1 })
+})
+
+it('marks every executable line of a newly added test when no before-side declaration exists', async () => {
+  const added = `${original}test('third', () => {
+  expect(3).toBe(3)
+})
+`
+
+  expect((await markers(added))[2]).toEqual({ changedLines: [8, 9, 10], count: 1 })
+})
+
+it('uses the body diff for a newly added declaration when the caller has its body boundary', async () => {
+  const added = `${original}test('third', () => {
+  expect(3).toBe(3)
+})
+`
+  const { tests } = extractTestsFromSource(file, added)
+  tests[2].bodyLine = 8
+
+  await attachSourceChanges(root, file, added, tests)
+
+  expect(tests[2].sourceChanges).toEqual({ changedLines: [8, 9, 10], count: 1 })
+})
+
+it('leaves source markers untouched when the suite has no committed baseline', async () => {
+  const noGit = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-source-markers-no-git-'))
+  const untracked = path.join(noGit, 'a.spec.ts')
+  try {
+    const { tests } = extractTestsFromSource(untracked, original)
+    await attachSourceChanges(noGit, untracked, original, tests)
+    expect(tests.map((test) => test.sourceChanges)).toEqual([undefined, undefined])
+  } finally {
+    fs.rmSync(noGit, { recursive: true, force: true })
+  }
+})

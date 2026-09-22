@@ -190,4 +190,17 @@ describe('prepareWorktreeDependencies', () => {
     expect(result.dependencyGeneratorInputs).toEqual(result.generatorInputs)
     expect(result.dependencyLockfile).toEqual(result.lockfile)
   })
+
+  it('keeps isolated local dependencies unknown until a target-owned command proves their coherence', async () => {
+    const handle = await addWorktree({ repoName: 'app', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+    fs.mkdirSync(path.join(handle.worktreeRoot, 'node_modules', 'local'), { recursive: true })
+
+    const result = await prepareWorktreeDependencies({
+      handle, runDir: path.join(root, 'run'), config: { mode: 'isolated' },
+    })
+
+    expect(result).toMatchObject({ verdict: 'unknown', mode: 'isolated' })
+    expect(result.warning).toContain('no target-owned prepare or validation command')
+    await removeWorktree(handle)
+  })
 })

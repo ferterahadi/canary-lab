@@ -34,6 +34,7 @@ vi.mock('../logic/dirty-specs/text-diff', async (importOriginal) => {
 
 let tmpDir: string
 let live: string
+let registry: ReturnType<typeof createRegistry>
 
 beforeEach(() => {
   duringDiff.run = () => {}
@@ -46,7 +47,8 @@ beforeEach(() => {
 
 async function build() {
   const logsDir = path.join(tmpDir, 'logs')
-  const store = new RunStore(logsDir, createRegistry())
+  registry = createRegistry()
+  const store = new RunStore(logsDir, registry)
   const runDir = runDirFor(logsDir, 'r1')
   fs.mkdirSync(runDir, { recursive: true })
   writeManifest(path.join(runDir, 'manifest.json'), {
@@ -75,6 +77,19 @@ describe('GET /api/runs/:runId/test-review', () => {
     const res = await (await build()).inject({ method: 'GET', url: '/api/runs/a%2Fb/test-review' })
     expect(res.statusCode).toBe(400)
     expect(res.json().error).toBe('Invalid run')
+  })
+
+  it('distinguishes a missing run, an unavailable snapshot, and a settled empty review', async () => {
+    const app = await build()
+    expect((await app.inject({ method: 'GET', url: '/api/runs/missing/test-review' })).statusCode).toBe(404)
+
+    fs.rmSync(path.join(tmpDir, 'snap'), { recursive: true })
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/test-review' })).statusCode).toBe(409)
+
+    fs.mkdirSync(path.join(tmpDir, 'snap/e2e'), { recursive: true })
+    fs.writeFileSync(path.join(tmpDir, 'snap/e2e/a.spec.ts'), fs.readFileSync(live))
+    const settled = await app.inject({ method: 'GET', url: '/api/runs/r1/test-review?summary=true' })
+    expect(settled.json()).toMatchObject({ reviewState: 'settled', allowedActions: [], nextAction: 'none', files: [] })
   })
 
   it('serves the patch and its revision for a snapshot that held still', async () => {
@@ -111,6 +126,43 @@ describe('GET /api/runs/:runId/test-review', () => {
       allowedActions: ['approve-new-run', 'restore', 'leave-pending'],
       nextAction: 'restore-or-leave',
     })
+  })
+
+  it('reports active and previously settled reviews, retaining a large patch only on disk', async () => {
+    const app = await build()
+    registry.set('r1', {
+      runId: 'r1',
+      stop: async () => {},
+      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true }),
+      adoptSpecEdits: async () => ({ ok: false, reason: 'nothing-to-adopt' }),
+    })
+    const active = await app.inject({ method: 'GET', url: '/api/runs/r1/test-review?summary=true' })
+    expect(active.json()).toMatchObject({ reviewState: 'pending-active', nextAction: 'rerun-current' })
+    const revision = active.json().review_revision as string
+    const manifestPath = path.join(runDirFor(path.join(tmpDir, 'logs'), 'r1'), 'manifest.json')
+    updateManifest(manifestPath, {
+      specEdits: {
+        checkedAt: 'later', pending: [], adopted: [],
+        reviewDecisions: [{ revision, decision: 'approved-for-new-run', receipt: { decision: 'accepted', review_revision: revision, files: [], git: { status: 'not-requested' }, execution: { status: 'none' } } }],
+      },
+    })
+    const settled = await app.inject({ method: 'GET', url: '/api/runs/r1/test-review?summary=true' })
+    expect(settled.json()).toMatchObject({ reviewState: 'settled', nextAction: 'start-new-run', receipt: { decision: 'accepted' } })
+    updateManifest(manifestPath, {
+      specEdits: { checkedAt: 'later', pending: [], adopted: [], reviewDecisions: [{ revision, decision: 'restored' }] },
+    })
+    const receiptless = await app.inject({ method: 'GET', url: '/api/runs/r1/test-review?summary=true' })
+    expect(receiptless.json()).toMatchObject({ reviewState: 'settled', nextAction: 'none' })
+    expect(receiptless.json()).not.toHaveProperty('receipt')
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/test-review' })).statusCode).toBe(200)
+
+    const large = await build()
+    fs.writeFileSync(live, `test('large', () => {\n${'x'.repeat(9000)}\n})\n`)
+    const response = await large.inject({ method: 'GET', url: '/api/runs/r1/test-review' })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).not.toHaveProperty('patch')
+    expect(response.json().patchPath).toEqual(expect.stringContaining('test-reviews'))
   })
 
   // A revision the human never saw must not be offered for approval: the patch in

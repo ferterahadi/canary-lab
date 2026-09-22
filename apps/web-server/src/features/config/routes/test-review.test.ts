@@ -45,7 +45,7 @@ it('returns full source and source-linked English from the same committed/curren
   expect(result.after.story?.steps.slice(0, 3).map((item) => item.text)).toEqual([
     'Import test, expect from "@playwright/test"',
     'Set constant sharedSetup to "keep this context"',
-    'Test: "reads own scope"',
+    'Test: "reads own scope"; with an asynchronous callback; receiving an object with properties request',
   ])
   expect(result.before.story?.steps[0].source).toMatchObject({ file: 'e2e/a.spec.ts', startLine: 1, endLine: 1 })
   expect(result.patch).toContain(" const sharedSetup = 'keep this context'")
@@ -185,6 +185,18 @@ it('includes a fixture-only change in the comparison and exposes its complete re
   fs.mkdirSync(path.join(suite, 'envsets'))
   fs.writeFileSync(path.join(suite, 'envsets/secret.env'), 'PRIVATE')
   expect((await get('file=envsets/secret.env&runId=run-1')).statusCode).toBe(400)
+})
+it('refuses to render binary supporting-file bytes as text', async () => {
+  const dir = saveSnapshot()
+  const file = 'e2e/fixture.bin'
+  const bytes = Buffer.from([0, 255, 1])
+  fs.writeFileSync(path.join(dir, 'suite', file), bytes)
+  fs.writeFileSync(path.join(suite, file), bytes)
+
+  const response = await get(`file=${file}&runId=run-1`)
+
+  expect(response.statusCode).toBe(409)
+  expect(response.json()).toEqual({ error: 'Binary suite changes require a file viewer' })
 })
 it('marks a spec whose reviewed bytes changed even when its test declaration did not', async () => {
   saveSnapshot()

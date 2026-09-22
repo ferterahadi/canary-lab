@@ -225,11 +225,11 @@ export async function runCoverageEngine(
     verificationRequiredAfter: verificationBoundary(prior, snapshot.tests, args.now ?? new Date().toISOString()),
     requirementsHash: summary?.requirementsHash ?? requirementsSetHash(requirements),
     requirementFingerprints: requirementFingerprintMap(requirements),
-    mappingInference: inputsUnchanged ? rememberMappingInference(
+    mappingInference: rememberMappingInference(
       mappingInferenceSnapshot(featureDir, mappingInputs(featureDir), candidateRequirements, summary?.variantDimension),
       engineInputs.map((test) => test.name),
       prior?.mappingInference,
-    ) : undefined,
+    ),
     ranAt: args.now ?? new Date().toISOString(),
   }
   // Write the completion marker before computing so a legitimate zero-link pass

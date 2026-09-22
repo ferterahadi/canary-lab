@@ -545,7 +545,7 @@ export function App() {
         returnFlight={returnFlight}
         returnFlightLabel={returnFlightLabel}
         onReturnToFlight={openFlight}
-        notificationControl={<NotificationCenter open={nav.notificationsOpen} suppressToast={nav.routedDialog !== null} onOpenChange={nav.setNotificationsOpen} onNavigate={(target) => {
+        notificationControl={<NotificationCenter open={nav.notificationsOpen} onOpenChange={nav.setNotificationsOpen} onNavigate={(target) => {
           if (target.kind === 'flight') openFlight(target.flightId)
           else if (target.kind === 'coverage') {
             setSelectedFeature(target.feature)

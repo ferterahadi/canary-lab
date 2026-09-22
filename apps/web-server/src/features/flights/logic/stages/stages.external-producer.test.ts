@@ -519,6 +519,20 @@ describe('prd-summary — external producer', () => {
     expect(summaryOnDisk().requirements[0]).toMatchObject({ title: 'create todo' })
   })
 
+  it('propagates a non-stale filesystem failure while writing a submitted summary', async () => {
+    const dir = writeFeature()
+    const { ctx, setStage } = ctxFor(prdManifest())
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { docsHash: readDocsCollection(dir).docsHash } } } })
+    // A directory at the summary file path is an I/O fault, not a changed source
+    // document. The external client cannot recover it by re-reading the docs.
+    fs.mkdirSync(path.join(dir, 'docs', '_prd-summary.json'))
+
+    await expect(prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      data: { requirements: [REQUIREMENT] },
+    })).rejects.toMatchObject({ code: 'EISDIR' })
+  })
+
   it('parses a submission handed back as a JSON string', async () => {
     writeFeature()
     const { ctx, setStage } = ctxFor(prdManifest())

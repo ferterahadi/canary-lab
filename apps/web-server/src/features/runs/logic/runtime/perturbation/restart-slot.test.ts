@@ -134,4 +134,13 @@ describe('restartSlotService', () => {
     const { ctx } = ctxFor([svc()], () => fakePty())
     await expect(restartSlotService(ctx, 'inventory')).rejects.toThrow('no service in this run declares port slot "inventory"')
   })
+
+  it('stops before respawning when the run was cancelled during dependency preflight', async () => {
+    const factory = vi.fn(() => fakePty())
+    const { ctx } = ctxFor([svc({ healthProbe: undefined })], factory)
+    ctx.stopped = true
+
+    await expect(restartSlotService(ctx, 'api')).rejects.toThrow('Service restart stopped before dependency preflight completed.')
+    expect(factory).not.toHaveBeenCalled()
+  })
 })

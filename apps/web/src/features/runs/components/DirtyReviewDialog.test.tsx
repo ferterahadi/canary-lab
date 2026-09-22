@@ -201,9 +201,10 @@ it('shows a whole test with equal before/after columns, unchanged context and ex
 it('keeps the selected change when switching English and Code and exposes full-file setup', async () => {
   await render()
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Next change"]')!.click())
-  await click('Code'); await click('English')
-  expect(document.body.textContent).toContain('Edit 2 / 2')
+  await click('Code')
   expect(document.querySelector('tbody')?.textContent).toContain('import { test')
+  await click('English')
+  expect(document.body.textContent).toContain('Edit 2 / 2')
 })
 it.each(['before', 'after'] as const)('opens the exact %s source range when an English sentence is clicked', async (side) => {
   const review = testFileReview()

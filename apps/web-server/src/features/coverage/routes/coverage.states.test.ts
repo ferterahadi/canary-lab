@@ -98,6 +98,15 @@ const SPEC = `
 `
 
 describe('coverage routes', () => {
+  it('returns an immediate freshness change when no monitor is installed', async () => {
+    writeFeature('checkout', SPEC)
+
+    const response = await app.inject({ method: 'GET', url: '/api/features/checkout/coverage/changes?afterRevision=older' })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ change: { feature: 'checkout', delivery: 'tool-response-and-wait' } })
+  })
+
   it('404s for an unknown feature', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/features/nope/coverage' })
     expect(res.statusCode).toBe(404)

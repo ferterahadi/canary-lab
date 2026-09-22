@@ -13,7 +13,7 @@ import { writeManifest, type RunManifest } from './manifest'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { RunnerLog } from './runner-log'
-import { materializeSuiteRuntimeInputs, removeSuiteRuntimeInputs, suiteRuntimeInputTargets, suiteRuntimeInputTargetsForSnapshot } from './suite-runtime-inputs'
+import { cleanupSuiteRuntimeInputsForRun, materializeSuiteRuntimeInputs, removeSuiteRuntimeInputs, suiteRuntimeInputTargets, suiteRuntimeInputTargetsForSnapshot } from './suite-runtime-inputs'
 
 let tmpDir: string
 
@@ -230,6 +230,40 @@ describe('snapshotSuite', () => {
     expect(() => snapshotSuite(ctx)).toThrow(/Selected envset target app\.env vanished before run setup/)
     expect(ctx.suiteDir).toBe(ctx.feature.featureDir)
     expect(fs.existsSync(ctx.paths.suiteSnapshotDir)).toBe(false)
+  })
+
+  it('fails setup when a selected target is a directory rather than a file', () => {
+    const { ctx } = ctxFor({}, { env: 'local' })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    write(ctx.feature.featureDir, 'envsets/local/app.env', 'SECRET=selected\n')
+    const target = path.join(ctx.feature.featureDir, 'runtime')
+    fs.mkdirSync(target)
+    write(ctx.feature.featureDir, 'envsets/envsets.config.json', JSON.stringify({
+      appRoots: {},
+      slots: { 'app.env': { description: 'test env', target } },
+      feature: { slots: ['app.env'], testCommand: 'npx playwright test', testCwd: ctx.feature.featureDir },
+    }))
+
+    expect(() => snapshotSuite(ctx)).toThrow(/Selected envset target app\.env must be a regular file/)
+    expect(fs.existsSync(ctx.paths.suiteRuntimeInputsDir)).toBe(false)
+  })
+
+  it('treats malformed retained runtime-input inventories as unavailable to review readers', () => {
+    const { ctx } = ctxFor()
+    fs.mkdirSync(ctx.runDir, { recursive: true })
+    fs.writeFileSync(ctx.paths.suiteRuntimeInputsInventoryPath, JSON.stringify({ version: 2, entries: [] }))
+    expect(suiteRuntimeInputTargetsForSnapshot(ctx.paths.suiteSnapshotDir)).toEqual([])
+    fs.writeFileSync(ctx.paths.suiteRuntimeInputsInventoryPath, JSON.stringify({ version: 1, entries: [{}] }))
+    expect(suiteRuntimeInputTargetsForSnapshot(ctx.paths.suiteSnapshotDir)).toEqual([])
+  })
+
+  it('rejects malformed cleanup inventories before touching the suite snapshot', () => {
+    const { ctx } = ctxFor()
+    fs.mkdirSync(ctx.runDir, { recursive: true })
+    fs.writeFileSync(ctx.paths.suiteRuntimeInputsInventoryPath, JSON.stringify({ version: 2, entries: [] }))
+    expect(() => cleanupSuiteRuntimeInputsForRun(ctx.runDir)).toThrow(/Invalid suite runtime input cleanup inventory/)
+    fs.writeFileSync(ctx.paths.suiteRuntimeInputsInventoryPath, JSON.stringify({ version: 1, entries: [{}] }))
+    expect(() => cleanupSuiteRuntimeInputsForRun(ctx.runDir)).toThrow('Invalid suite runtime input cleanup target')
   })
 
   it('keeps non-dotenv runtime targets out of retained snapshots and review bytes', async () => {

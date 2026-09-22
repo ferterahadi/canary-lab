@@ -28,6 +28,25 @@ function fixture(): string {
 }
 
 describe('revision-bound Git test review', () => {
+  it('rejects an uncommitted suite and does not hide filesystem read failures', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-review-no-git-'))
+    cleanups.push(root)
+    fs.mkdirSync(path.join(root, 'e2e', 'directory.spec.ts'), { recursive: true })
+
+    await expect(buildGitReview(root, ['e2e/a.spec.ts'])).rejects.toMatchObject({ statusCode: 409 })
+    // A directory at a reviewed file path is an I/O fault, not a deleted file.
+    // The review must surface it rather than silently treating it as an addition.
+    const committed = fixture()
+    fs.mkdirSync(path.join(committed, 'e2e', 'directory.spec.ts'))
+    await expect(buildGitReview(committed, ['e2e/directory.spec.ts'])).rejects.toMatchObject({ code: 'EISDIR' })
+  })
+
+  it('rejects a path that was never within the disclosed suite review', async () => {
+    const root = fixture()
+    await expect(buildGitReview(root, ['../outside.spec.ts'])).rejects.toMatchObject({ statusCode: 400 })
+    await expect(commitReviewedFiles('checkout', root, [])).rejects.toMatchObject({ statusCode: 409 })
+  })
+
   it('commits exactly the disclosed specs and supporting files while preserving unrelated staged work', async () => {
     const root = fixture()
     fs.writeFileSync(path.join(root, 'e2e/a.spec.ts'), 'after\n')

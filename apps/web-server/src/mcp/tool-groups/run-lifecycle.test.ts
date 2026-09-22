@@ -149,10 +149,35 @@ describe('start_run: continuing the run that is already healing', () => {
     expect(startRun).not.toHaveBeenCalled()
   })
 
+  it('keeps a failed request continuation as a route result and never starts a replacement', async () => {
+    const startRun = vi.fn()
+    const { call } = harness({ startRun, testReviewRequest: async () => ({ statusCode: 409, body: { reason: 'review-changed' } }) })
+
+    expect(await call('start_run', { ...START, request_id: 'request-1' })).toEqual({ reason: 'review-changed' })
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('reports when a request continuation is unavailable before a replacement can start', async () => {
+    const startRun = vi.fn()
+    const { text } = harness({ startRun })
+
+    expect(await text('start_run', { ...START, request_id: 'request-1' })).toBe('Run-request continuation is unavailable on this server.')
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
   it('preserves a structured review blocker and its original request identity', async () => {
     const review = { type: 'test_review_required', runId: 'source', review_revision: 'a'.repeat(64), request: { requestId: 'request-1' } }
     const { call } = harness({ startRun: async () => { throw Object.assign(new Error('review needed'), { testReviewRequired: review }) } })
     expect(await call('start_run', START)).toMatchObject({ ...review, runStarted: false, request_id: 'request-1' })
+  })
+
+  it('keeps a review blocker actionable even when it has no resumable request', async () => {
+    const review = { type: 'test_review_required', runId: 'source', review_revision: 'a'.repeat(64) }
+    const { call } = harness({ startRun: async () => { throw Object.assign(new Error('review needed'), { testReviewRequired: review }) } })
+
+    const result = await call('start_run', START)
+    expect(result).toMatchObject({ ...review, runStarted: false })
+    expect(result).not.toHaveProperty('request_id')
   })
 
   it('does not gate reuse on current coverage freshness', async () => {
@@ -471,6 +496,23 @@ describe('start_run: starting fresh', () => {
     expect(startRun).not.toHaveBeenCalled()
   })
 
+  it('identifies a flight owner and an ownerless active coverage job without duplicating either', async () => {
+    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    for (const body of [
+      coverageChange('stale', 'coverage-flight', { flightId: 'flight-1', flightStatus: 'running' }),
+      coverageChange('stale', 'coverage-job', { activeJobId: 'coverage-job-1' }),
+    ]) {
+      const { raw } = harness({ startRun, coverageRequest: coverageRequest(body) }, eliciting)
+      const opened = await raw('start_run', START, context()) as InputRequiredResult
+      const answered = await raw('start_run', START, context(opened.requestState, {
+        action: 'accept', content: { choice: 'Update coverage first' },
+      }))
+      const result = JSON.parse((answered.content as Array<{ text: string }>)[0].text)
+      expect(result.nextSteps).toEqual(['follow the existing coverage owner', 'confirm coverage freshness', 'retry start_run'])
+    }
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
   it.each(['decline', 'cancel'])('starts nothing when the user chooses %s on the stale-coverage question', async (action) => {
     const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
@@ -536,6 +578,21 @@ describe('start_run: starting fresh', () => {
     }))
 
     expect(JSON.stringify(answered)).toContain('work changed while the question was open')
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('rejects a stale-coverage answer when the current check no longer requires a choice', async () => {
+    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const read = vi.fn()
+      .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('stale', 'coverage-v1') })
+      .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('current', 'coverage-v1') })
+    const { raw } = harness({ startRun, coverageRequest: read }, eliciting)
+    const opened = await raw('start_run', START, context()) as InputRequiredResult
+
+    const answered = await raw('start_run', START, context(opened.requestState, {
+      action: 'accept', content: { choice: 'Run now with stale coverage' },
+    }))
+    expect(JSON.stringify(answered)).toContain('Coverage changed while the question was open')
     expect(startRun).not.toHaveBeenCalled()
   })
 
@@ -849,6 +906,14 @@ describe('abort_run', () => {
     // Not idempotent: a second abort has nothing left to kill, so a client that
     // retries on the hint alone would be told the run is still abortable.
     expect(configs.get('abort_run')!.annotations).toMatchObject({ destructiveHint: true, idempotentHint: false })
+  })
+
+  it('rejects unknown and terminal runs before asking the human to stop anything', async () => {
+    const missing = harness({ store: storeOf([]) })
+    expect(await missing.text('abort_run', { runId: 'missing', confirm: true })).toBe('run not found: missing')
+
+    const terminal = harness({ store: storeOf([runDetail({ status: 'passed' })]) })
+    expect(await terminal.text('abort_run', { runId: 'run-1', confirm: true })).toBe('run not active: run-1')
   })
 
   it('relays the store\'s refusal verbatim', async () => {

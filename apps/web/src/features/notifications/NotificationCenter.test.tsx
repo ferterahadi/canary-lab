@@ -52,11 +52,11 @@ it('keeps a test review and Flight blocker separate in an already-open inbox', a
 it.each([
   { kind: 'coverage' as const, feature: 'shop', stage: 'specs-coverage' as const, label: 'Open flight' },
   { kind: 'run' as const, feature: 'shop', runId: 'r1', label: 'Open run' },
-])('labels the $kind toast with its real destination', async ({ label, ...destination }) => {
+])('labels the $kind notification with its real destination', async ({ label, ...destination }) => {
   rows = [{ ...rows[0], target: destination, severity: 'warning' }]
   const navigate = vi.fn()
-  await act(async () => root.render(<NotificationCenter open={false} onOpenChange={vi.fn()} onNavigate={navigate} />))
-  await act(async () => button(label).click())
+  await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={navigate} />))
+  await act(async () => labelled(label).click())
   expect(navigate).toHaveBeenCalledExactlyOnceWith(destination)
   expect(api.deleteNotification).not.toHaveBeenCalled()
 })
@@ -104,12 +104,11 @@ it('counts only actionable messages and keeps resolved rows in history', async (
   expect(document.querySelector('[data-testid="notification-resolved-unread"]')?.textContent).not.toContain('Unread')
 })
 
-it('keeps resolved unread alerts out of the attention count and toast', async () => {
+it('keeps resolved unread alerts out of the attention count', async () => {
   rows = [{ ...rows[0], resolvedAt: 'now', severity: 'danger' }]
   await act(async () => root.render(<NotificationCenter open={false} onOpenChange={vi.fn()} onNavigate={vi.fn()} />))
   expect(labelled('Notifications, 0 need attention')).not.toBeNull()
   expect(button('Review test changes')).toBeUndefined()
-  expect(labelled('Delete notification permanently')).toBeNull()
 })
 
 it.each(['neutral', 'warning', undefined] as const)('keeps unresolved test reviews amber with a visible action, including %s messages', async (severity) => {
@@ -177,27 +176,19 @@ it('shows a retryable loading failure rather than an empty inbox', async () => {
   expect(document.querySelector('[data-testid="notification-n1"]')).not.toBeNull()
 })
 
-it('opens a toast without deleting its message; the close button permanently deletes it', async () => {
-  const open = vi.fn()
-  const navigate = vi.fn()
-  await act(async () => root.render(<NotificationCenter open={false} onOpenChange={open} onNavigate={navigate} />))
-  await act(async () => button('Review test changes').click())
-  expect(open).toHaveBeenCalledWith(false)
-  expect(navigate).toHaveBeenCalledWith(rows[0].target)
-  expect(api.deleteNotification).not.toHaveBeenCalled()
-  rows = rows.map(({ readAt: _readAt, ...row }) => row)
-  act(() => root.unmount()); root = createRoot(container)
-  await act(async () => root.render(<NotificationCenter open={false} onOpenChange={open} onNavigate={vi.fn()} />))
-  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Delete notification permanently"]')!.click())
-  expect(api.deleteNotification).toHaveBeenCalledWith('n1')
-})
-
-it('keeps an advisory inbox item out of the sticky toast surface', async () => {
-  rows = [{ ...rows[0], title: 'shop: possible test weakening', severity: 'danger', toast: false }]
+it('does not mirror an inbox notification into a bottom-right toast', async () => {
   await act(async () => root.render(<NotificationCenter open={false} onOpenChange={vi.fn()} onNavigate={vi.fn()} />))
   expect(labelled('Notifications, 1 need attention')).not.toBeNull()
-  expect(button('Review test changes')).toBeUndefined()
-  expect(labelled('Delete notification permanently')).toBeNull()
+  expect(document.querySelector('[data-testid="toast-host"]')).toBeNull()
+  expect(api.deleteNotification).not.toHaveBeenCalled()
+})
+
+it('keeps an advisory item in the attention inbox', async () => {
+  rows = [{ ...rows[0], title: 'shop: possible test weakening', severity: 'danger', toast: false }]
+  await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={vi.fn()} />))
+  expect(labelled('Notifications, 1 need attention')).not.toBeNull()
+  expect(document.querySelector('[data-testid="notification-n1"]')).not.toBeNull()
+  expect(labelled('Review test changes')).not.toBeNull()
 })
 
 it('ignores an older fetch arriving after a read mutation', async () => {

@@ -183,6 +183,7 @@ describe('restart', () => {
     const orch = makeOrchestrator()
     const svc = { name: 'api', safeName: 'api', command: 'noop', cwd: tmpDir }
     const ctx = withServices(orch, [svc])
+    h.ensureServicesRunning.mockResolvedValue(['api'])
     // No entry in servicePtys — the process already exited, or a restart-heal
     // is running in a fresh orchestrator that never spawned it.
     expect(ctx.servicePtys.size).toBe(0)
@@ -190,8 +191,7 @@ describe('restart', () => {
     const plan = await orch.restart()
 
     expect(plan.startedBecauseMissing).toEqual(['api'])
-    expect(h.spawnService).toHaveBeenCalledTimes(1)
-    expect(h.waitForHealth).toHaveBeenCalledTimes(1)
+    expect(h.ensureServicesRunning).toHaveBeenCalledWith(ctx)
   })
 
   it('kills the live pty before respawning when one is attached', async () => {
@@ -199,6 +199,7 @@ describe('restart', () => {
     const svc = { name: 'api', safeName: 'api', command: 'noop', cwd: tmpDir }
     const ctx = withServices(orch, [svc])
     const kill = vi.fn()
+    h.ensureServicesRunning.mockResolvedValue(['api'])
     ctx.servicePtys.set('api', { kill } as never)
 
     const plan = await orch.restart()
@@ -207,7 +208,7 @@ describe('restart', () => {
     expect(ctx.servicePtys.has('api')).toBe(false)
     // It had a pty, so it was not "missing" — only the no-pty case reports that.
     expect(plan.startedBecauseMissing).toEqual([])
-    expect(h.spawnService).toHaveBeenCalledTimes(1)
+    expect(h.ensureServicesRunning).toHaveBeenCalledWith(ctx)
   })
 })
 
