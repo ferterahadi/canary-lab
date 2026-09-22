@@ -4,6 +4,8 @@ import { bootEvidenceLabel, UNPRESERVED_CAUSE } from '@/shared/ui/BootEvidence'
 import { alertClass } from './RunDiagnosticsPanels'
 import { branchTooltip } from '../utils/run-detail-playback'
 import { servicePrimaryLabel, serviceTabLabelParts } from './RunOverviewTabs'
+import { dependencyIncompatibilityReason, type RunDependencyProvenance } from '@shared/dependency-provenance'
+import { openEditor } from '@/shared/api/client'
 
 export const STATUS_COLOR: Record<ServiceStatus, string> = {
   queued: 'var(--text-muted)',
@@ -74,14 +76,17 @@ export function ServiceCard({
   branch,
   siblings = 1,
   bootFailure,
+  dependency,
 }: {
   service: ServiceManifestEntry
   branch: RepoBranchSnapshot | null
   /** Services sharing this one's repo, including itself. */
   siblings?: number
   bootFailure?: RunBootFailure
+  dependency?: RunDependencyProvenance
 }) {
   const primaryLabel = servicePrimaryLabel(service, branch?.name, siblings)
+  const dependencyLogPath = dependency?.validation?.logPath
   return (
     <li className="cl-card group/card p-3">
       {/* The title starts on the card's own left edge — flush with the label
@@ -104,7 +109,19 @@ export function ServiceCard({
         <BranchRow branch={branch} />
         <ServiceField label="url" value={service.healthUrl ?? ''} href={service.healthUrl ?? undefined} />
       </div>
-      {bootFailure && (
+      {dependency?.verdict === 'incompatible' && (
+        <div data-testid="service-dependency-blocker" className={`mt-2.5 rounded border px-2 py-1.5 text-[11px] ${alertClass('error')}`}>
+          <div>Startup blocked by dependencies · {dependency.repoName}</div>
+          <p className="mt-0.5 text-secondary">{dependencyIncompatibilityReason(dependency)}</p>
+          <p className="mt-1 text-secondary">{dependency.remediation ?? 'Repair dependencies for this worktree, then request runner verification.'}</p>
+          {dependencyLogPath && (
+            <button type="button" className="cl-button mt-2 min-h-6 px-2 py-0.5" onClick={() => { void openEditor({ file: dependencyLogPath }).catch(() => {}) }}>
+              Open dependency log
+            </button>
+          )}
+        </div>
+      )}
+      {bootFailure && bootFailure.reason !== 'dependency-incompatible' && (
         <div className={`mt-2.5 rounded border px-2 py-1.5 text-[11px] ${alertClass('error')}`}>
           <div>{bootEvidenceLabel(bootFailure)} · {runBootPhase(bootFailure.reason)}</div>
           <div className="mt-0.5 text-secondary">{bootFailure.detail}</div>

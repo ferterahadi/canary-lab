@@ -3,8 +3,7 @@ import type { ServiceSpec } from './run-orchestrator-types'
 // Bringing a run's services up: one pty per service spec, the log tee, and the
 // health poll that decides whether the suite can run at all. A failed probe
 // records a boot failure on the context rather than throwing, because the run
-// loop routes that into heal instead of aborting. Split out of orchestrator.ts;
-// the bodies are unchanged.
+// loop routes that into heal instead of aborting.
 import { type RunContext } from './run-context'
 import fs from 'fs'
 import path from 'path'
@@ -16,6 +15,10 @@ import { clientPortMap } from './perturbation/client-ports'
 import { classifyBootEvidence, diagnosticExcerpt, redactDiagnosticText } from './diagnostic-redaction'
 import type { PtyHandle } from './pty-spawner'
 import os from 'os'
+import { randomUUID } from 'crypto'
+import { prepareWorktreeDependencies } from './dependency-provenance'
+import { dependencyIncompatibilityReason } from '../../../../../../../shared/dependency-provenance'
+import { loadFeatures } from '../../../../shared/feature-loader'
 
 // node-pty reports the raw signal number; spawnSync reports the name. The
 // manifest stores names only, so one record can never read "signal 15" where
@@ -68,19 +71,53 @@ export function clearBootFailure(ctx: RunContext): void {
   ctx.stateSink.patchManifest(ctx.runId, { bootFailure: undefined })
 }
 
-export async function ensureServicesRunning(ctx: RunContext): Promise<string[]> {
-  // Fresh boot attempt — drop any health failure recorded by a prior cycle so
-  // a service that comes up cleanly this time clears the failed state.
+/** Every service-spawning path shares this gate. Persist the newly measured
+ *  evidence before a process can start so UI and reconnected agents never
+ *  act on the previous attempt's verdict. Unknown remains the legacy allow. */
+export async function preflightServiceBoot(ctx: RunContext): Promise<boolean> {
+  if (ctx.worktreeHandles.length > 0) {
+    const provenance = []
+    const evidenceDir = path.join(ctx.runDir, 'dependency-preflight', randomUUID())
+    // Only preparation is live configuration. Service paths, commands and the
+    // recorded test suite remain pinned to this run's original topology.
+    let latest: RunContext['feature'] | undefined
+    try {
+      if (ctx.dependencyConfigPath && fs.existsSync(ctx.dependencyConfigPath)) {
+        latest = loadFeatures(path.dirname(ctx.feature.featureDir)).find((feature) => feature.name === ctx.feature.name)
+      }
+    } catch {
+      // An unreadable configuration becomes a durable blocker below, never a
+      // fallback to stale preparation commands or an unstructured run abort.
+    }
+    for (const handle of ctx.worktreeHandles) {
+      const repo = (ctx.dependencyConfigPath ? latest : ctx.feature)?.repos?.find((candidate) => candidate.name === handle.repoName)
+      const configurationError = ctx.dependencyConfigPath && !repo
+        ? `Restore a valid ${ctx.dependencyConfigPath} with repository "${handle.repoName}" and its dependencyPreparation, then request runner verification.`
+        : undefined
+      const item = await prepareWorktreeDependencies({
+        handle,
+        config: repo?.dependencyPreparation,
+        requiredConfig: ctx.feature.repos?.find((candidate) => candidate.name === handle.repoName)?.dependencyPreparation,
+        configurationError,
+        runDir: evidenceDir,
+      })
+      provenance.push({ ...item, checkedAt: new Date().toISOString() })
+    }
+    if (ctx.stopped) return false
+    ctx.dependencyProvenance = provenance
+    ctx.stateSink.patchManifest(ctx.runId, { dependencyProvenance: provenance })
+  }
   clearBootFailure(ctx)
-  const incompatible = ctx.dependencyProvenance.find((item) => item.verdict === 'incompatible')
-  if (incompatible) {
+  const incompatibleRepos = ctx.dependencyProvenance.filter((item) => item.verdict === 'incompatible')
+  for (const incompatible of incompatibleRepos) {
     const validation = incompatible.validation
-    const service = ctx.services.find((candidate) => candidate.repoName === incompatible.repoName)
+    const services = ctx.services.filter((candidate) => candidate.repoName === incompatible.repoName)
+    const service = services[0]
     recordBootFailure(ctx, {
       service: service?.name ?? incompatible.repoName,
       safeName: service?.safeName ?? incompatible.repoName,
       reason: 'dependency-incompatible',
-      detail: `Dependency preflight rejected repo "${incompatible.repoName}" before services started.`,
+      detail: dependencyIncompatibilityReason(incompatible),
       ...bootEvidence(validation?.logPath ?? ctx.paths.runnerLogPath),
       command: validation?.command,
       cwd: validation?.cwd ?? incompatible.worktreePath,
@@ -88,8 +125,17 @@ export async function ensureServicesRunning(ctx: RunContext): Promise<string[]> 
       signal: validation?.signal,
       nextAction: incompatible.remediation ?? 'Prepare coherent dependencies for this source revision, then restart the run.',
     }, `Dependency preflight failed: ${incompatible.repoName}`)
-    return []
+    for (const affected of services.slice(1)) ctx.stateSink.setServiceStatus(ctx.runId, affected.safeName, 'timeout')
   }
+  return !ctx.stopped && incompatibleRepos.length === 0
+}
+
+export async function ensureServicesRunning(ctx: RunContext, afterPreflight?: () => Promise<void>): Promise<string[]> {
+  const allowed = await preflightServiceBoot(ctx)
+  // Initial fix capture includes target-owned preparation, but precedes every
+  // service/agent edit. Recovery attempts retain that original baseline.
+  if (!ctx.stopped) await afterPreflight?.()
+  if (!allowed || ctx.stopped) return []
   const toStart = ctx.services.filter((svc) => !ctx.servicePtys.has(svc.name))
   for (const svc of toStart) {
     ctx.stateSink.setServiceStatus(ctx.runId, svc.safeName, 'starting')

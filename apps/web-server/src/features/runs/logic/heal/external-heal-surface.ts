@@ -14,6 +14,8 @@ import { reproLine } from '../../../../../../../shared/robustness/shrink'
 import type { RobustnessEnvelope } from '../../../../../../../shared/robustness/types'
 import { INTEGRITY_HINT_DISCLOSURE, type IntegrityHint } from '../runtime/run-integrity-hints'
 import { CompactRunCounts, NormalizedRunCounts, compactCounts, normalizeRunCounts } from './external-heal-counts'
+import { dependencyIncompatibilityReason, type DependencyIncompatibilityCause } from '../../../../../../../shared/dependency-provenance'
+import { loadPromptTemplate, promptPath } from '../../../../shared/prompts'
 
 export { normalizeRunCounts } from './external-heal-counts'
 export type { CompactRunCounts, NormalizedRunCounts } from './external-heal-counts'
@@ -44,6 +46,37 @@ export interface RunPerturbationContext {
   repro: string
 }
 
+export interface DependencyBlocker {
+  repoName: string
+  services: Array<{ name: string; safeName: string }>
+  cause: DependencyIncompatibilityCause | 'unclassified'
+  reason: string
+  requiredAction: string
+  worktreePath: string
+  checkedAt?: string
+  logPath?: string
+}
+
+/** Derived from the durable manifest on every read, including repeat waits
+ *  and reconnects. No pending elicitation handle owns this recovery state. */
+export function buildDependencyBlockers(manifest: RunManifest): DependencyBlocker[] {
+  return (manifest.dependencyProvenance ?? [])
+    .filter((item) => item.verdict === 'incompatible')
+    .map((item) => ({
+      repoName: item.repoName,
+      services: manifest.services.filter((service) => service.repoName === item.repoName)
+        .map(({ name, safeName }) => ({ name, safeName })),
+      cause: item.incompatibilityCause ?? 'unclassified',
+      reason: dependencyIncompatibilityReason(item),
+      requiredAction: item.remediation ?? 'Repair dependencies for this worktree, then request runner verification.',
+      worktreePath: item.worktreePath,
+      ...(item.checkedAt ? { checkedAt: item.checkedAt } : {}),
+      ...(item.validation?.logPath ? { logPath: item.validation.logPath } : {}),
+    }))
+}
+
+const DEPENDENCY_RECOVERY_GUIDANCE = loadPromptTemplate(promptPath('dependency-recovery.md'))
+
 export interface ExternalHealContext {
   runId: string
   feature: string
@@ -65,6 +98,7 @@ export interface ExternalHealContext {
   worktrees?: RunDetail['manifest']['worktrees']
   /** Framework-recorded dependency ownership/coherence for each repo. */
   dependencyProvenance?: RunDetail['manifest']['dependencyProvenance']
+  dependencyBlockers?: DependencyBlocker[]
   lifecycle: RunDetail['manifest']['lifecycle'] | null
   externalHealSession: RunDetail['manifest']['externalHealSession'] | null
   counts: CompactRunCounts
@@ -155,6 +189,7 @@ export interface ExternalRunSnapshot {
   /** See ExternalHealContext.worktrees — the tree this run boots, when isolated. */
   worktrees?: RunDetail['manifest']['worktrees']
   dependencyProvenance?: RunDetail['manifest']['dependencyProvenance']
+  dependencyBlockers?: DependencyBlocker[]
   /** See ExternalHealContext.perturbation. */
   perturbation?: RunPerturbationContext
   lifecycle: RunDetail['manifest']['lifecycle'] | null
@@ -287,9 +322,10 @@ const REPEAT_HEAL_GUIDANCE = [
 // run is stuck, the escalation block (already on the context) is the louder, more
 // specific steer — it supersedes the generic breadcrumb.
 export function slimRepeatHealContext(context: ExternalHealContext): ExternalHealContext {
-  // dependencyProvenance is captured once at run start and never changes, so
-  // re-sending it every cycle is static weight in the agent's context.
+  // Full fingerprints remain available through get_heal_context. The current
+  // compact blockers must survive slimming: recovery preflights replace them.
   const { healPrompt: _healPrompt, nextSteps: _nextSteps, dependencyProvenance: _provenance, ...rest } = context
+  if (rest.dependencyBlockers?.length) return { ...rest, guidance: DEPENDENCY_RECOVERY_GUIDANCE }
   if (rest.escalation) return rest
   return { ...rest, guidance: REPEAT_HEAL_GUIDANCE }
 }
@@ -360,8 +396,8 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     ...(snapshot.worktrees ? { worktrees: snapshot.worktrees } : {}),
     // Only the records an agent can act on: a `compatible` verdict says the
     // preflight found nothing, which is not a repair lead.
-    ...(snapshot.dependencyProvenance?.some((item) => item.verdict !== 'compatible')
-      ? { dependencyProvenance: snapshot.dependencyProvenance }
+    ...(snapshot.dependencyBlockers?.length
+      ? { dependencyBlockers: snapshot.dependencyBlockers, dependencyProvenance: snapshot.dependencyProvenance?.filter((item) => item.verdict === 'incompatible') }
       : {}),
     ...(snapshot.perturbation ? { perturbation: snapshot.perturbation } : {}),
     lifecycle: snapshot.lifecycle,
@@ -381,9 +417,10 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     // reading early has still seen it.
     nextSteps: withPerturbationRule(
       withWorktreeRule(
-        snapshot.bootFailure
-          ? [...bootFailureNextSteps(snapshot.bootFailure)]
-          : [...EXTERNAL_HEAL_NEXT_STEPS],
+        [
+          ...(snapshot.dependencyBlockers?.length ? [DEPENDENCY_RECOVERY_GUIDANCE] : []),
+          ...(snapshot.bootFailure ? bootFailureNextSteps(snapshot.bootFailure) : EXTERNAL_HEAL_NEXT_STEPS),
+        ],
         snapshot.worktrees,
       ),
       snapshot.perturbation,
@@ -423,6 +460,7 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
   const paths = buildRunPaths(runDir)
   const summary = detail.summary
   const specEdits = buildSpecEditsWarning(detail.manifest)
+  const dependencyBlockers = buildDependencyBlockers(detail.manifest)
   const context: ExternalRunSnapshot = {
     runId,
     feature: detail.manifest.feature,
@@ -434,6 +472,7 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
       ? { worktrees: detail.manifest.worktrees }
       : {}),
     ...(detail.manifest.dependencyProvenance ? { dependencyProvenance: detail.manifest.dependencyProvenance } : {}),
+    ...(dependencyBlockers.length > 0 ? { dependencyBlockers } : {}),
     ...(detail.manifest.perturbation ? { perturbation: perturbationContext(detail.manifest.perturbation.envelope) } : {}),
     lifecycle: detail.manifest.lifecycle ?? null,
     externalHealSession: detail.manifest.externalHealSession ?? null,

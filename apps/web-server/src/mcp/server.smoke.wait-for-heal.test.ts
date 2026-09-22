@@ -6,6 +6,7 @@ import { createServer } from '../server'
 import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
 import { runDirFor } from '../features/runs/logic/runtime/run-paths'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import type { RunDependencyProvenance } from '../../../../shared/dependency-provenance'
 
 // Smoke test for the MCP HTTP server. Boots Canary Lab against the
 // templates/project tree, connects a real MCP client over streamable HTTP,
@@ -61,6 +62,58 @@ describe('MCP HTTP server (smoke)', () => {
   afterAll(() => {
     if (prevClaimClients === undefined) delete process.env.CANARY_LAB_HEAL_CLAIM_BLOCKED_CLIENTS
     else process.env.CANARY_LAB_HEAL_CLAIM_BLOCKED_CLIENTS = prevClaimClients
+  })
+
+  it('recovers current dependency blockers after a client reconnect without elicitation state', async () => {
+    const projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-dependency-')))
+    const logsDir = path.join(projectRoot, 'logs')
+    const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
+    let client: Client | null = null
+    const runId = 'dependency-blocked'
+    const evidence: RunDependencyProvenance = {
+      repoName: 'app', sourceRevision: 'abc123', sourcePath: '/source', worktreePath: '/worktree',
+      dependencyPath: null, dependencyRealPath: null, lockfile: null, dependencyLockfile: null,
+      generatorInputs: [], dependencyGeneratorInputs: [], runtime: { node: 'v22', packageManager: 'npm' },
+      mode: 'isolated', verdict: 'incompatible', incompatibilityCause: 'prepare-failed',
+      remediation: 'Fix the target-owned prepare script.', checkedAt: '2026-09-22T00:00:00Z',
+    }
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      runStore.bootstrap({
+        runId, feature: 'demo', startedAt: new Date().toISOString(), status: 'healing', healCycles: 2,
+        services: [{ repoName: 'app', name: 'api', safeName: 'api', command: 'start', cwd: '/worktree', logPath: '/service.log' }],
+        healMode: 'external', dependencyProvenance: [evidence],
+        lifecycle: { phase: 'waiting-for-signal', headline: 'Dependencies blocked', updatedAt: new Date().toISOString(), activeCycle: 2 },
+      })
+      client = await connectClient(address, '/mcp?profile=full')
+      const waitArgs = { runId, session_id: 'dependency-session', timeout_ms: 1000 }
+      const first = JSON.parse(toolText(await client.callTool({ name: 'wait_for_heal_task', arguments: waitArgs })))
+      expect(first).toMatchObject({ type: 'needs_heal', cycle: 2, context: { dependencyBlockers: [{ cause: 'prepare-failed', requiredAction: 'Fix the target-owned prepare script.' }] } })
+      expect(first.context.guidance).toContain('Ask the user only')
+      await client.close()
+      client = null
+
+      // The client misses this change. The next connection must read the
+      // replacement manifest evidence, independent of any transport handle.
+      runStore.patchManifest(runId, { dependencyProvenance: [{ ...evidence, incompatibilityCause: 'validation-failed', remediation: 'Repair the missing generated module.', checkedAt: '2026-09-22T00:01:00Z' }] })
+      client = await connectClient(address, '/mcp?profile=full')
+      const recovered = JSON.parse(toolText(await client.callTool({ name: 'wait_for_heal_task', arguments: waitArgs })))
+      expect(recovered.context.dependencyBlockers).toEqual([expect.objectContaining({
+        repoName: 'app', services: [{ name: 'api', safeName: 'api' }], cause: 'validation-failed',
+        requiredAction: 'Repair the missing generated module.', checkedAt: '2026-09-22T00:01:00Z',
+      })])
+      const context = JSON.parse(toolText(await client.callTool({ name: 'get_heal_context', arguments: { runId, session_id: 'dependency-session' } })))
+      expect(context.dependencyBlockers).toEqual(recovered.context.dependencyBlockers)
+      expect(context.nextSteps.join(' ')).toContain('Repair deterministic problems')
+
+      runStore.patchManifest(runId, { dependencyProvenance: [{ ...evidence, verdict: 'compatible', incompatibilityCause: undefined }] })
+      const repaired = JSON.parse(toolText(await client.callTool({ name: 'wait_for_heal_task', arguments: waitArgs })))
+      expect(repaired.context.dependencyBlockers).toBeUndefined()
+    } finally {
+      if (client) await client.close()
+      await app.close()
+      fs.rmSync(projectRoot, { recursive: true, force: true })
+    }
   })
 
   it('wait_for_heal_task reports needs_heal, terminal states, and still_waiting', async () => {

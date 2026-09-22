@@ -1,4 +1,4 @@
-import { clearBootFailure, spawnService, waitForServiceReady } from '../run-service-boot'
+import { preflightServiceBoot, spawnService, waitForServiceReady } from '../run-service-boot'
 import type { RunContext } from '../run-context'
 import { killTree, scheduleSigkillFallback } from '../run-spawn'
 
@@ -30,11 +30,9 @@ export async function restartSlotService(ctx: RunContext, slot: string, opts: Re
     ctx.servicePtys.delete(svc.name)
   }
 
-  // Same fresh-attempt reset as `ensureServicesRunning`: a failure recorded
-  // below is THIS restart's, so the caller can tell the shim what happened.
-  // Through the shared helper so the manifest is cleared too — clearing only
-  // the in-memory field left a stale boot failure in every open view.
-  clearBootFailure(ctx)
+  if (!await preflightServiceBoot(ctx)) {
+    throw new Error(ctx.bootFailure?.detail ?? 'Service restart stopped before dependency preflight completed.')
+  }
   ctx.stateSink.setServiceStatus(ctx.runId, svc.safeName, 'starting')
   spawnService(ctx, svc)
   await waitForServiceReady(ctx, svc)

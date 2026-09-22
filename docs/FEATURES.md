@@ -158,7 +158,11 @@ the selected envset points Playwright at a deployed URL.
 source checkout's existing `node_modules`; Canary fingerprints its lockfile and
 the declared `generatorInputs`, runs an optional read-only `validateCommand`, and
 blocks boot only when it can confirm incompatibility. Legacy shared state that
-cannot be proven stays `unknown` with a warning—it is never called compatible.
+cannot be proven stays `unknown` in the run evidence; it is never called compatible.
+Overview displays only incompatible dependencies, inside each affected service
+card with the reason, required fix, and a log action when available. Active heal
+restart and rerun both refresh the dependency evidence before services or test
+verification; a failed preflight continues to block startup.
 Do not put a mutating `prepareCommand` in shared mode because it would mutate the
 source checkout's dependencies.
 

@@ -24,7 +24,7 @@ import { removeWorktree } from './repo-worktree'
 import { decideRunStatus, finalLifecyclePhase, readSummary, restartPlanDetail, selectionForPlan, summaryHasPassingEvidence } from './run-verdict'
 import { killTree, scheduleSigkillFallback } from './run-spawn'
 import type { PlaywrightSpawner } from './run-spawn'
-import { ensureServicesRunning, spawnService, waitForHealth } from './run-service-boot'
+import { ensureServicesRunning } from './run-service-boot'
 import { adoptSpecEdits, refreshSpecEdits, restoreSpecEdits, snapshotSuite } from './run-suite-snapshot'
 import { materializeSuiteRuntimeInputs, prepareSuiteRuntimeInputs, removeSuiteRuntimeInputs } from './suite-runtime-inputs'
 import { captureDirtySpecBaseline, markStoppedEarly, noteHealCycle, prepareRun, recordLifecycle, setStatus, stopHeartbeat } from './run-manifest-writer'
@@ -201,8 +201,7 @@ export class RunOrchestrator extends EventEmitter {
     // Snapshot each worktree NOW — after overlay + envset + WIP hydration, before
     // any service (and therefore any heal agent) can touch it. The diff against
     // this baseline at teardown is exactly the heal agent's fix (R80).
-    await captureFixBaseline(this.ctx)
-    await ensureServicesRunning(this.ctx)
+    await ensureServicesRunning(this.ctx, () => captureFixBaseline(this.ctx))
     // Only once every service is up: the shims forward to the real ports, and
     // the first request a test makes must be the first one perturbed.
     await startPerturbationShims(this.ctx)
@@ -247,17 +246,6 @@ export class RunOrchestrator extends EventEmitter {
       }
     }
 
-    const targetNames = new Set(targets.map((svc) => svc.safeName))
-    const missingKept = this.ctx.services.filter((svc) =>
-      startedBecauseMissing.includes(svc.safeName) && !targetNames.has(svc.safeName),
-    )
-    if (targets.length > 0 || missingKept.length > 0) {
-      // One restart owns one readiness phase. Clearing here makes a successful
-      // probe supersede the prior cycle's failure without forcing the heal loop
-      // through a second full health deadline.
-      this.ctx.bootFailure = undefined
-    }
-
     for (const svc of targets) {
       const pty = this.ctx.servicePtys.get(svc.name)
       if (pty) {
@@ -268,16 +256,12 @@ export class RunOrchestrator extends EventEmitter {
       const p = this.ctx.paths.serviceLog(svc.safeName)
       try { fs.writeFileSync(p, '') } catch { /* may not exist yet */ }
     }
-    for (const svc of targets) {
-      this.ctx.stateSink.setServiceStatus(this.ctx.runId, svc.safeName, 'starting')
-      spawnService(this.ctx, svc)
+    const started = new Set(await ensureServicesRunning(this.ctx))
+    return {
+      restarted: plan.toRestart.filter((safeName) => started.has(safeName)),
+      kept: plan.toKeep,
+      startedBecauseMissing: startedBecauseMissing.filter((safeName) => started.has(safeName)),
     }
-    for (const svc of missingKept) {
-      this.ctx.stateSink.setServiceStatus(this.ctx.runId, svc.safeName, 'starting')
-      spawnService(this.ctx, svc)
-    }
-    if (targets.length > 0 || missingKept.length > 0) await waitForHealth(this.ctx)
-    return { restarted: plan.toRestart, kept: plan.toKeep, startedBecauseMissing }
   }
 
   // Re-run is a no-op at the orchestrator level beyond truncating logs — the

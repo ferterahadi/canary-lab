@@ -62,7 +62,7 @@ describe('prepareWorktreeDependencies', () => {
       config: { generatorInputs: ['prisma/schema.prisma'] },
     })
 
-    expect(result).toMatchObject({ verdict: 'incompatible' })
+    expect(result).toMatchObject({ verdict: 'incompatible', incompatibilityCause: 'generator-input-mismatch' })
     expect(result.dependencyRealPath).toBe(fs.realpathSync(path.join(dependencyOwner, 'node_modules')))
     expect(result.generatorInputs[0]?.sha256).not.toBe(result.dependencyGeneratorInputs[0]?.sha256)
     await removeWorktree(handle)
@@ -92,7 +92,7 @@ describe('prepareWorktreeDependencies', () => {
       config: { generatorInputs: ['prisma/schema.prisma'] },
     })
 
-    expect(result).toMatchObject({ verdict: 'incompatible' })
+    expect(result).toMatchObject({ verdict: 'incompatible', incompatibilityCause: 'generator-input-mismatch' })
     expect(result.dependencyGeneratorInputs[0]?.sha256).not.toBe(result.generatorInputs[0]?.sha256)
     await removeWorktree(handle)
   })
@@ -131,8 +131,63 @@ describe('prepareWorktreeDependencies', () => {
       config: { prepareCommand: 'touch node_modules/should-not-exist' },
     })
 
-    expect(result).toMatchObject({ verdict: 'incompatible' })
+    expect(result).toMatchObject({ verdict: 'incompatible', incompatibilityCause: 'shared-prepare-command' })
     expect(fs.existsSync(path.join(source, 'node_modules', 'should-not-exist'))).toBe(false)
     await removeWorktree(handle)
+  })
+
+  it('distinguishes a lockfile mismatch from generator-input evidence', async () => {
+    fs.mkdirSync(path.join(source, 'node_modules'))
+    const handle = await addWorktree({ repoName: 'app', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+    fs.writeFileSync(path.join(handle.worktreeRoot, 'package-lock.json'), '{"lockfileVersion":2}')
+    const result = await prepareWorktreeDependencies({ handle, runDir: path.join(root, 'run') })
+    expect(result).toMatchObject({ verdict: 'incompatible', incompatibilityCause: 'lockfile-mismatch' })
+  })
+
+  it.each([
+    { config: { mode: 'isolated' as const, prepareCommand: 'exit 1' }, cause: 'prepare-failed' },
+    { config: { validateCommand: 'exit 1' }, cause: 'validation-failed' },
+    { config: { mode: 'isolated' as const }, cause: 'isolated-dependencies-required' },
+  ])('records a stable cause for $cause', async ({ config, cause }) => {
+    const handle = await addWorktree({ repoName: 'app', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+    const result = await prepareWorktreeDependencies({ handle, runDir: path.join(root, 'run'), config })
+    expect(result).toMatchObject({ verdict: 'incompatible', incompatibilityCause: cause, remediation: expect.any(String) })
+  })
+
+  it('does not mutate a shared tree when a repair switches its configuration to isolated mode', async () => {
+    fs.mkdirSync(path.join(source, 'node_modules'))
+    const handle = await addWorktree({ repoName: 'app', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+    await prepareWorktreeDependencies({ handle, runDir: path.join(root, 'run') })
+    const result = await prepareWorktreeDependencies({
+      handle, runDir: path.join(root, 'run'),
+      config: { mode: 'isolated', prepareCommand: 'touch node_modules/must-not-change' },
+    })
+    expect(result).toMatchObject({ verdict: 'incompatible', incompatibilityCause: 'isolated-dependencies-required' })
+    expect(fs.existsSync(path.join(source, 'node_modules', 'must-not-change'))).toBe(false)
+    expect(result.validation).toBeUndefined()
+  })
+
+  it.each([
+    null, [], { mode: 'invalid' }, { generatorInputs: 'prisma/schema.prisma' },
+    { generatorInputs: [null] }, { prepareCommand: '' }, { validateCommand: 42 },
+  ])('records malformed preparation as a blocker: %j', async (config) => {
+    const handle = await addWorktree({ repoName: 'app', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+    const result = await prepareWorktreeDependencies({ handle, runDir: path.join(root, 'run'), config: config as never })
+    expect(result).toMatchObject({ verdict: 'incompatible', incompatibilityCause: 'configuration-invalid' })
+    expect(result.validation).toBeUndefined()
+  })
+
+  it('records fingerprints from the prepared tree when preparation writes its generator inputs', async () => {
+    const handle = await addWorktree({ repoName: 'app', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+    const result = await prepareWorktreeDependencies({
+      handle, runDir: path.join(root, 'run'), config: {
+        mode: 'isolated', generatorInputs: ['generated-input.json'],
+        prepareCommand: 'mkdir -p node_modules && printf ready > generated-input.json',
+      },
+    })
+    expect(result.verdict).toBe('compatible')
+    expect(result.generatorInputs[0].sha256).toEqual(expect.any(String))
+    expect(result.dependencyGeneratorInputs).toEqual(result.generatorInputs)
+    expect(result.dependencyLockfile).toEqual(result.lockfile)
   })
 })

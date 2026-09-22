@@ -632,7 +632,7 @@ describe('startRun — resource admission', () => {
 // ─── startRun: worktree isolation ────────────────────────────────────────────
 
 describe('startRun — worktree isolation', () => {
-  it('isolates every repo, links its deps in and reproduces the uncommitted working tree', async () => {
+  it('isolates every repo and reproduces WIP before the orchestrator owns dependency preparation', async () => {
     initRepo(repoDir)
     fs.writeFileSync(path.join(repoDir, 'server.ts'), 'export const port = 4000\n')
     fs.writeFileSync(path.join(repoDir, 'scratch.ts'), 'export const wip = true\n')
@@ -656,12 +656,12 @@ describe('startRun — worktree isolation', () => {
       .toBe('export const port = 4000\n')
     expect(fs.readFileSync(path.join(worktrees[0].localPath, 'scratch.ts'), 'utf-8'))
       .toBe('export const wip = true\n')
-    // A symlink, not a copy: the run must resolve the SOURCE repo's installed
-    // deps, and a per-run copy of node_modules would be unusable on disk.
+    // The mocked orchestrator has not booted. Its shared preflight must own
+    // linking/validation on initial boot AND recovery, after env hydration.
+    // The real boot/link assertion lives in orchestrator.dependency-recovery.
     const linkedDeps = path.join(worktrees[0].worktreeRoot, 'node_modules')
-    expect(fs.lstatSync(linkedDeps).isSymbolicLink()).toBe(true)
-    expect(fs.realpathSync(linkedDeps)).toBe(fs.realpathSync(path.join(repoDir, 'node_modules')))
-    expect(fs.existsSync(path.join(linkedDeps, '.bin', 'concurrently'))).toBe(true)
+    expect(fs.existsSync(linkedDeps)).toBe(false)
+    expect(lastOpts().dependencyProvenance).toBeUndefined()
     const log = runnerLogText(runId)
     expect(log).toContain('Hydrated uncommitted changes into "app" worktree (1 untracked file(s)).')
     expect(log).toContain('Isolated repo "app" in a per-run worktree.')

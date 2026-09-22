@@ -71,7 +71,9 @@ export interface RunContext {
   readonly perturbation?: RunPerturbation
   readonly worktreeHandles: WorktreeHandle[]
   readonly repoPathOverrides: Record<string, string>
-  readonly dependencyProvenance: RunDependencyProvenance[]
+  /** Track a loaded config disappearing during repair; programmatic features
+   *  without a config file continue to use their supplied configuration. */
+  readonly dependencyConfigPath?: string
   /** Ephemeral port overlay: when the feature has a saved overlay, its captured
    *  patch is `git apply`-ed into each per-run worktree before boot and
    *  reverse-applied at teardown — the target repo is never permanently changed. */
@@ -119,6 +121,8 @@ export interface RunContext {
    *  for what means *the feature* — its config, envsets, overlay, the dir the
    *  heal agent reads. */
   suiteDir: string
+  /** Replaced by a fresh dependency preflight before each boot/recovery attempt. */
+  dependencyProvenance: RunDependencyProvenance[]
   status: RunManifest['status']
   healCycles: number
   startedAt: string
@@ -217,6 +221,8 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     perturbation: opts.perturbation,
     worktreeHandles,
     repoPathOverrides,
+    dependencyConfigPath: ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
+      .map((name) => path.join(opts.feature.featureDir, name)).find((candidate) => fs.existsSync(candidate)),
     dependencyProvenance: opts.dependencyProvenance ?? [],
     portified: overlayExists(opts.feature.featureDir),
     services: buildServiceSpecs(opts.feature, opts.runDir, opts.env, {

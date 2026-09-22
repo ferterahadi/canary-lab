@@ -555,16 +555,31 @@ in a per-run Git worktree under `<runDir>/worktrees/`. Each worktree starts from
 `hydrateWorkingTreeDiff`, so the run normally tests the checkout's current state
 rather than committed state alone.
 
-Before boot, `prepareWorktreeDependencies` applies the repo's
+Before every boot and active heal restart/rerun, `preflightServiceBoot` calls
+`prepareWorktreeDependencies` with the repo's
 `dependencyPreparation` configuration and writes `manifest.dependencyProvenance[]`:
 source revision, dependency owner, lockfile and generator-input fingerprints,
-runtime/package-manager metadata, validation command result, and a
+runtime/package-manager metadata, validation command result, check timestamp, and a
 `compatible | incompatible | unknown` verdict. Shared mode links the source
 repo's existing `node_modules`; legacy/unprovable state remains `unknown` and
-boots with a warning, while a confirmed fingerprint or validation mismatch is a
+boots without an Overview warning, while a confirmed fingerprint or validation mismatch is a
 pre-boot failure. Isolated mode never links the source dependency tree and may
 run only the target-owned prepare/validate commands declared in the feature.
 Canary does not choose an install command or rewrite either checkout.
+The shared boot gate replaces the previous manifest evidence before any service
+spawn, even when a rerun keeps every service running. Command logs have a separate
+directory per attempt. Each preflight reloads only dependency preparation for the
+run's existing repositories; missing or malformed configuration blocks recovery.
+The run's original validator, generator inputs, and isolated mode cannot be
+removed or downgraded to bypass that gate; command repairs and stronger proof
+configuration may be adopted.
+Service commands, paths, and recorded tests remain pinned to the run. Switching
+to isolated mode cannot run preparation through an existing external dependency
+link. A generator-input mismatch records differing inputs, not
+proof of differing generated output. Overview shows only incompatible state inside
+the affected service cards. External heal waits and context recovery derive compact
+`dependencyBlockers` from the manifest on every cycle, including after reconnect;
+deterministic in-scope repairs do not require an elicitation choice.
 
 `HEAD` is whatever commit the checkout was left on, so a pinned branch nobody has
 pulled boots stale. Before anything is allocated, `startRun` runs

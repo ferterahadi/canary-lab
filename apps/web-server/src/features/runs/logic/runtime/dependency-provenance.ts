@@ -13,7 +13,26 @@ const LOCKFILES = ['pnpm-lock.yaml', 'yarn.lock', 'package-lock.json', 'bun.lock
 export interface PrepareWorktreeDependenciesInput {
   handle: WorktreeHandle
   config?: DependencyPreparation
+  /** Run-start proof requirements cannot disappear during an active repair. */
+  requiredConfig?: DependencyPreparation
   runDir: string
+  configurationError?: string
+}
+
+function preparationConfigError(config: DependencyPreparation | undefined, required: DependencyPreparation | undefined): string | undefined {
+  if (config !== undefined && (!config || typeof config !== 'object' || Array.isArray(config))) return 'dependencyPreparation must be an object.'
+  if (config?.mode !== undefined && config.mode !== 'shared' && config.mode !== 'isolated') return 'dependencyPreparation.mode must be "shared" or "isolated".'
+  if (config?.generatorInputs !== undefined && (!Array.isArray(config.generatorInputs) || config.generatorInputs.some((item) => typeof item !== 'string' || !item.trim()))) return 'dependencyPreparation.generatorInputs must contain non-empty file paths.'
+  for (const key of ['prepareCommand', 'validateCommand'] as const) {
+    if (config?.[key] !== undefined && (typeof config[key] !== 'string' || !config[key].trim())) return `dependencyPreparation.${key} must be a non-empty command.`
+  }
+  if (required?.mode === 'isolated' && config?.mode !== 'isolated') return 'Restore dependencyPreparation.mode "isolated" for this active run. Repair its worktree-local dependencies; do not downgrade dependency isolation to bypass the gate.'
+  if (required?.validateCommand && !config?.validateCommand) return 'Restore dependencyPreparation.validateCommand for this active run and repair the rejected dependency state. Do not remove the validator to bypass the gate.'
+  const removedInputs = Array.isArray(required?.generatorInputs)
+    ? required.generatorInputs.filter((item) => !config?.generatorInputs?.includes(item))
+    : []
+  if (removedInputs.length > 0) return `Restore dependencyPreparation.generatorInputs for this active run: ${removedInputs.join(', ')}. Repair the input/dependency mismatch; do not remove measured inputs to bypass the gate.`
+  return undefined
 }
 
 function sha256File(filePath: string): string | null {
@@ -124,12 +143,13 @@ export async function prepareWorktreeDependencies(
   input: PrepareWorktreeDependenciesInput,
 ): Promise<RunDependencyProvenance> {
   const { handle, runDir } = input
-  const config = input.config ?? {}
+  const configurationError = input.configurationError ?? preparationConfigError(input.config, input.requiredConfig)
+  const config = configurationError ? {} : input.config ?? {}
   const mode = config.mode ?? 'shared'
   const dependencyPath = path.join(handle.worktreeRoot, 'node_modules')
   const logPath = path.join(runDir, `dependency-${sanitizeRepoFileName(handle.repoName)}.log`)
 
-  const { error: rawLinkError } = mode === 'shared' ? linkNodeModules(handle) : {}
+  const { error: rawLinkError } = mode === 'shared' && !configurationError ? linkNodeModules(handle) : {}
   const linkError = rawLinkError ? redactDiagnosticText(rawLinkError) : undefined
 
   const realDependencyPath = dependencyRealPath(dependencyPath)
@@ -162,17 +182,41 @@ export async function prepareWorktreeDependencies(
     mode,
   } satisfies Omit<RunDependencyProvenance, 'verdict'>
 
-  // Re-probe after a command may have created or replaced node_modules.
-  const currentPaths = () => ({
-    dependencyPath: fs.existsSync(dependencyPath) ? dependencyPath : null,
-    dependencyRealPath: dependencyRealPath(dependencyPath),
-  })
+  if (configurationError) {
+    return { ...base, verdict: 'incompatible', incompatibilityCause: 'configuration-invalid', remediation: redactDiagnosticText(configurationError) }
+  }
+
+  // Commands can replace dependencies and their inputs. Record the resulting
+  // ownership/fingerprints, not a pre-command tree paired with a new verdict.
+  const currentEvidence = () => {
+    const realPath = dependencyRealPath(dependencyPath)
+    const owner = realPath ? path.dirname(realPath) : null
+    const localPath = owner ? path.join(owner, localRel) : null
+    return {
+      dependencyPath: fs.existsSync(dependencyPath) ? dependencyPath : null,
+      dependencyRealPath: realPath,
+      lockfile: nearestLockfile(handle.localPath, handle.worktreeRoot),
+      dependencyLockfile: owner && localPath ? nearestLockfile(localPath, owner) : null,
+      generatorInputs: (config.generatorInputs ?? []).map((item) => fingerprint(handle.localPath, item)),
+      dependencyGeneratorInputs: localPath ? (config.generatorInputs ?? []).map((item) => fingerprint(localPath, item)) : [],
+    }
+  }
 
   if (mode === 'shared' && config.prepareCommand) {
     return {
       ...base,
       verdict: 'incompatible',
+      incompatibilityCause: 'shared-prepare-command',
       remediation: 'A shared dependency tree is mutable. Move dependencyPreparation.prepareCommand to mode "isolated", or remove the command and validate the existing shared tree.',
+    }
+  }
+
+  // A repair can switch a previously shared run to isolated mode. Its old
+  // symlink must never let an isolated prepare command mutate another checkout.
+  if (mode === 'isolated' && realDependencyPath && !realDependencyPath.startsWith(`${realWorktreeRoot}${path.sep}`)) {
+    return {
+      ...base, verdict: 'incompatible', incompatibilityCause: 'isolated-dependencies-required',
+      remediation: 'Replace this worktree\'s external node_modules link with worktree-local dependencies before running isolated preparation. Do not modify the linked checkout.',
     }
   }
 
@@ -206,10 +250,11 @@ export async function prepareWorktreeDependencies(
     if (result.failed) {
       return {
         ...base,
-        ...currentPaths(),
+        ...currentEvidence(),
         verdict: 'incompatible',
+        incompatibilityCause: 'prepare-failed',
         validation,
-        remediation: `The isolated dependency prepare command failed. Read ${validation.logPath}, fix the target-owned command, then start the run again.`,
+        remediation: 'Fix the target-owned prepare command or its inputs in this worktree, then request runner verification.',
       }
     }
     preparationPassed = true
@@ -221,14 +266,16 @@ export async function prepareWorktreeDependencies(
     if (result.failed) {
       return {
         ...base,
-        ...currentPaths(),
+        ...currentEvidence(),
         verdict: 'incompatible',
+        incompatibilityCause: 'validation-failed',
         validation,
-        remediation: `The target-owned dependency validation command rejected this checkout. Read ${validation.logPath}; prepare coherent dependencies or use isolated mode, then start the run again.`,
+        remediation: 'Fix the dependency state rejected by the target-owned validator in this worktree, then request runner verification.',
       }
     }
   }
 
+  Object.assign(base, currentEvidence())
   if (mode === 'isolated') {
     const isolatedRealPath = dependencyRealPath(dependencyPath)
     if (!isolatedRealPath || !(isolatedRealPath === realWorktreeRoot || isolatedRealPath.startsWith(`${realWorktreeRoot}${path.sep}`))) {
@@ -237,6 +284,7 @@ export async function prepareWorktreeDependencies(
         dependencyPath: fs.existsSync(dependencyPath) ? dependencyPath : null,
         dependencyRealPath: isolatedRealPath,
         verdict: 'incompatible',
+        incompatibilityCause: 'isolated-dependencies-required',
         ...(validation ? { validation } : {}),
         remediation: 'Isolated mode requires worktree-local dependencies. Add a target-owned prepareCommand that creates them without linking another checkout.',
       }
@@ -254,10 +302,12 @@ export async function prepareWorktreeDependencies(
     }
   }
 
-  if (mismatch(lockfile, dependencyLockfile) || generatorMismatch(generatorInputs, dependencyGeneratorInputs)) {
+  const lockfileMismatch = mismatch(base.lockfile, base.dependencyLockfile)
+  if (lockfileMismatch || generatorMismatch(base.generatorInputs, base.dependencyGeneratorInputs)) {
     return {
       ...base,
       verdict: 'incompatible',
+      incompatibilityCause: lockfileMismatch ? 'lockfile-mismatch' : 'generator-input-mismatch',
       ...(validation ? { validation } : {}),
       remediation: 'The shared dependency checkout does not match this worktree. Prepare dependencies for this revision or use dependencyPreparation.mode "isolated".',
     }

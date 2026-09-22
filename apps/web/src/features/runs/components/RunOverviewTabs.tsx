@@ -142,10 +142,7 @@ export function RunOverviewTab({
           {view.primaryAlert.message}
         </div>
       )}
-      {manifest.bootFailure && <BootFailureEvidence failure={manifest.bootFailure} />}
-      {manifest.dependencyProvenance && manifest.dependencyProvenance.length > 0 && (
-        <DependencyEvidence provenance={manifest.dependencyProvenance} />
-      )}
+      {manifest.bootFailure && manifest.bootFailure.reason !== 'dependency-incompatible' && <BootFailureEvidence failure={manifest.bootFailure} />}
       <div className="mt-4">
         {/* No `Services` heading: a stack of named service cards is self-evident,
             and the label was one more line of chrome between the run's facts and
@@ -164,6 +161,7 @@ export function RunOverviewTab({
                 branch={branchForService(s, repoBranches)}
                 siblings={repoServiceCount(s, services)}
                 bootFailure={manifest.bootFailure?.safeName === s.safeName ? manifest.bootFailure : undefined}
+                dependency={manifest.dependencyProvenance?.find((item) => item.repoName === s.repoName && item.verdict === 'incompatible')}
               />
             ))}
           </ul>
@@ -196,33 +194,6 @@ export function BootFailureEvidence({ failure }: { failure: NonNullable<RunManif
         </button>
         <span className="min-w-0 truncate text-muted font-mono" title={failure.logPath}>{failure.logPath}</span>
       </div>
-    </section>
-  )
-}
-
-const VERDICT_TONE = {
-  incompatible: 'text-danger',
-  unknown: 'text-warning',
-  compatible: 'text-success',
-} as const
-
-export function DependencyEvidence({ provenance }: { provenance: NonNullable<RunManifest['dependencyProvenance']> }) {
-  return (
-    <section data-testid="dependency-evidence" className="mt-4 rounded-md border border-line p-3 text-xs">
-      <SectionHeader>Dependency evidence</SectionHeader>
-      <ul className="mt-1 space-y-2">
-        {provenance.map((item) => (
-          <li key={item.repoName} className="rounded border border-line bg-canvas px-2.5 py-2">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-primary">{item.repoName}</span>
-              <span className={`font-mono ${VERDICT_TONE[item.verdict]}`}>{item.verdict}</span>
-            </div>
-            <div className="mt-1 text-muted font-mono">{item.mode} · {item.sourceRevision ?? 'revision unavailable'}</div>
-            {item.warning && <p className="mt-1 text-secondary">{item.warning}</p>}
-            {item.remediation && <p className="mt-1 text-secondary">{item.remediation}</p>}
-          </li>
-        ))}
-      </ul>
     </section>
   )
 }

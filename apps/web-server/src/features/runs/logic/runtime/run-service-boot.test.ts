@@ -59,6 +59,35 @@ describe('waitForHealth', () => {
 })
 
 describe('dependency preflight', () => {
+  it('rechecks and replaces evidence even when rerun keeps every service process warm', async () => {
+    fs.mkdirSync(path.join(tmpDir, 'node_modules'))
+    fs.writeFileSync(path.join(tmpDir, 'dependencies-ready'), 'ready')
+    const { ctx } = ctxFor({
+      feature: {
+        name: 'demo', description: 'demo', envs: [], featureDir: tmpDir,
+        repos: [{ name: 'api', localPath: tmpDir, dependencyPreparation: { mode: 'isolated', validateCommand: 'test -f dependencies-ready' } }],
+      },
+      worktreeHandles: [{ repoName: 'api', sourceRoot: tmpDir, worktreeRoot: tmpDir, localPath: tmpDir }],
+      services: [svcSpec({ repoName: 'api', healthProbe: undefined })],
+      ptyFactory: vi.fn(),
+    })
+    const warm = { pid: 0 } as ReturnType<RunContext['ptyFactory']>
+    ctx.servicePtys.set('api', warm)
+    await expect(ensureServicesRunning(ctx)).resolves.toEqual([])
+    const first = ctx.dependencyProvenance
+    expect(first[0].verdict).toBe('compatible')
+
+    fs.unlinkSync(path.join(tmpDir, 'dependencies-ready'))
+    await expect(ensureServicesRunning(ctx)).resolves.toEqual([])
+    expect(ctx.dependencyProvenance).not.toBe(first)
+    expect(ctx.dependencyProvenance).toHaveLength(1)
+    expect(ctx.dependencyProvenance[0]).toMatchObject({ verdict: 'incompatible', incompatibilityCause: 'validation-failed' })
+    expect(ctx.stateSink.patchManifest).toHaveBeenCalledWith(ctx.runId, { dependencyProvenance: ctx.dependencyProvenance })
+    expect(ctx.bootFailure?.reason).toBe('dependency-incompatible')
+    expect(ctx.ptyFactory).not.toHaveBeenCalled()
+    expect(ctx.servicePtys.get('api')).toBe(warm)
+  })
+
   it('persists a confirmed incompatibility and starts no service process', async () => {
     const logPath = path.join(tmpDir, 'dependency-api.log')
     fs.writeFileSync(logPath, 'TOKEN=private\nvalidator rejected generated client\n')

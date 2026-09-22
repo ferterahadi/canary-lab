@@ -83,7 +83,7 @@ export function registerHealFlowTools(ctx: ToolGroupContext): void {
 
   registerTool('signal_run', {
     description:
-      'Write a heal-cycle signal. The orchestrator picks it up via its existing poll loop and writes the diagnosis journal from this signal plus runner-observed git diff. Use `rerun` for test-only fixes (no service restart) and `restart` when services need to be restarted.',
+      'Write a heal-cycle signal. The orchestrator picks it up via its existing poll loop and writes the diagnosis journal from this signal plus runner-observed git diff. Use `rerun` for test-only fixes (no service restart) and `restart` when services need to be restarted. Both paths recheck dependencies and persist fresh evidence before service spawn or test verification. A dependency block remains in context.dependencyBlockers on repeat waits and get_heal_context; repair its requiredAction, asking only for a genuine user choice or missing authority.',
     inputSchema: {
       runId: z.string(),
       kind: SIGNAL_KIND,
