@@ -22,6 +22,7 @@ import { readPersistedCoverageState, computeFeatureCoverage, runCoverageEngine a
 import { extractCoverageTestsFromSource } from '../../../../shared/ast-extractor'
 
 import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
+import { CoverageInputReads } from './input-reads'
 
 function readable(title: string) {
   return { version: 2 as const, title, completeness: 'complete' as const, nodes: [] }
@@ -395,6 +396,19 @@ describe('runCoverageEngine — engineInputs null-guard fallbacks (service.ts li
     const result = await runCoverageEngine({ featuresDir, feature: 'checkout', logsDir, now: '2026-01-01T00:00:00Z' })
     // No throw despite the missing fields — the ?? [] / ?? '' fallbacks kicked in.
     expect(result.feature).toBe('checkout')
+  })
+})
+
+describe('computeFeatureCoverage — source-read freshness', () => {
+  it('marks cache inputs unreadable when mapping source reads fail', () => {
+    const dir = writeFeature('checkout')
+    class BrokenReads extends CoverageInputReads {
+      override read(_file: string): Buffer { throw new Error('source read failed') }
+    }
+
+    const ledger = computeFeatureCoverage({ featuresDir, logsDir, feature: 'checkout', inputReads: new BrokenReads() })
+
+    expect(ledger.freshness?.reasons?.some((reason) => reason.toLowerCase().includes('dependencies'))).toBe(true)
   })
 })
 

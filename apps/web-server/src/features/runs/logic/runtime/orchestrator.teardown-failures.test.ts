@@ -24,6 +24,7 @@ const h = vi.hoisted(() => ({
   reversePortifyOverlay: vi.fn(),
   removeWorktree: vi.fn(),
   autoProposeFixes: vi.fn(),
+  removeSuiteRuntimeInputs: vi.fn(),
 }))
 
 vi.mock('./run-service-boot', async (importOriginal) => ({
@@ -46,6 +47,10 @@ vi.mock('./repo-worktree', async (importOriginal) => ({
   removeWorktree: h.removeWorktree,
 }))
 vi.mock('../pr/auto-propose', () => ({ autoProposeFixes: h.autoProposeFixes }))
+vi.mock('./suite-runtime-inputs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./suite-runtime-inputs')>()),
+  removeSuiteRuntimeInputs: h.removeSuiteRuntimeInputs,
+}))
 
 const { RunOrchestrator } = await import('./orchestrator')
 
@@ -62,6 +67,7 @@ beforeEach(() => {
   h.reversePortifyOverlay.mockResolvedValue(undefined)
   h.removeWorktree.mockResolvedValue(undefined)
   h.autoProposeFixes.mockResolvedValue(undefined)
+  h.removeSuiteRuntimeInputs.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -251,6 +257,17 @@ describe('stop() teardown is best-effort', () => {
 
     expect(h.reversePortifyOverlay).toHaveBeenCalledTimes(1)
     expect(h.removeWorktree).not.toHaveBeenCalled()
+  })
+
+  it('keeps finalization best-effort when runtime-input cleanup fails', async () => {
+    const { log, warnings } = spyRunnerLog()
+    const orch = makeOrchestrator({ runnerLog: log })
+    await orch.start()
+    h.removeSuiteRuntimeInputs.mockImplementation(() => { throw new Error('inventory unreadable') })
+
+    await expect(orch.stop('passed')).resolves.toBeUndefined()
+
+    expect(warnings).toContain('Suite runtime input cleanup failed: inventory unreadable')
   })
 
   it('is idempotent — a second stop returns immediately', async () => {

@@ -182,6 +182,54 @@ describe('start_flight — locating the record before starting one', () => {
 
     expect(out.type).toBe('flight_already_complete')
     expect(requests.some((r) => r.method === 'POST')).toBe(false)
+    expect(requests).toContainEqual(expect.objectContaining({
+      url: '/api/flights/entry?feature=checkout',
+    }))
+  })
+
+  it('retains an explicitly chosen environment when resolving recordless entry evidence', async () => {
+    const { call, requests } = flightHarness({
+      reply: startRoutes({
+        entry: {
+          statusCode: 200,
+          body: {
+            feature: 'checkout', flight: null, active: false, canContinue: false,
+            prefill: { repoPaths: ['/repo/shop'], description: 'checkout', env: 'staging', coverageTarget: 100 },
+            stages: [], evidence: {}, continuation: null,
+          },
+        },
+      }),
+    })
+
+    await call('start_flight', { feature: 'checkout', env: 'staging' })
+
+    expect(requests).toContainEqual(expect.objectContaining({
+      url: '/api/flights/entry?feature=checkout&env=staging',
+    }))
+  })
+
+  it('explains missing entry evidence and supplies a usable intent when saved description is blank', async () => {
+    const missing = flightHarness({
+      reply: startRoutes({ entry: { statusCode: 503, body: {} } }),
+    })
+    expect(await missing.text('start_flight', { feature: 'checkout' })).toContain('entry evidence is unavailable')
+
+    const { call, requests } = flightHarness({
+      reply: startRoutes({
+        entry: {
+          statusCode: 200,
+          body: {
+            feature: 'checkout', flight: null, active: false, canContinue: false,
+            prefill: { repoPaths: ['/repo/shop'], description: '   ', env: 'local', coverageTarget: 100 },
+            stages: [], evidence: {}, continuation: { fromStage: 'run', reason: 'run needs refresh' },
+          },
+        },
+      }),
+    })
+    await call('start_flight', { feature: 'checkout' })
+    expect(requests.at(-1)?.payload).toMatchObject({
+      description: 'Continue the existing checkout suite to its requested Flight outcome.',
+    })
   })
 
   it('maps a resume refused by an active Getting Started demo to the typed busy result', async () => {

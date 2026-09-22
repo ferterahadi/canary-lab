@@ -147,11 +147,22 @@ export function requestNextUserInput<T>(
   return openUserInput(ctx, facts, spec, apply, expirePending())
 }
 
+/** Open a form whose owning tool routes the echoed handle itself. The question
+ * is still fingerprinted and expires normally; only the domain callback lives
+ * beside that tool's multi-question state machine rather than in this map. */
+export function openFormUserInput<T>(
+  ctx: ServerContext | undefined,
+  facts: McpClientFacts,
+  spec: InputSpec<T> & { mode: 'form' },
+): ToolResult {
+  return openUserInput(ctx, facts, spec, undefined, expirePending())
+}
+
 function openUserInput<T>(
   ctx: ServerContext | undefined,
   facts: McpClientFacts,
   spec: InputSpec<T>,
-  apply: (value: T) => Promise<ToolResult>,
+  apply: ((value: T) => Promise<ToolResult>) | undefined,
   now: number,
 ): ToolResult {
   const scope = inputFingerprint([ctx?.sessionId, spec.scope])
@@ -162,7 +173,7 @@ function openUserInput<T>(
   const id = randomUUID()
   pending.set(id, {
     scope, revision, expiresAt: now + INPUT_TTL_MS,
-    ...(spec.mode === 'url' ? { url: { spec, complete: () => apply(undefined as T) } } : {}),
+    ...(spec.mode === 'url' ? { url: { spec, complete: () => apply!(undefined as T) } } : {}),
   })
   return inputRequired({
     requestState: id,

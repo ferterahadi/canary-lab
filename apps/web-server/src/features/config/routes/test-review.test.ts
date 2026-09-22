@@ -198,6 +198,23 @@ it('refuses to render binary supporting-file bytes as text', async () => {
   expect(response.statusCode).toBe(409)
   expect(response.json()).toEqual({ error: 'Binary suite changes require a file viewer' })
 })
+it('renders added, deleted, data, parse-error, and summary supporting-file review states', async () => {
+  const dir = saveSnapshot()
+  fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), before)
+  fs.writeFileSync(path.join(suite, 'e2e/added.ts'), 'export const added = true\n')
+  fs.writeFileSync(path.join(dir, 'suite/e2e/deleted.ts'), 'export const deleted = true\n')
+  fs.writeFileSync(path.join(dir, 'suite/e2e/data.json'), '{"recorded":true}\n')
+  fs.writeFileSync(path.join(suite, 'e2e/data.json'), '{"current":true}\n')
+  const deep = `test('deep', async () => { const a = ${'('.repeat(2000)}x${')'.repeat(2000)} })\n`
+  fs.writeFileSync(path.join(dir, 'suite/e2e/bad.ts'), deep)
+  fs.writeFileSync(path.join(suite, 'e2e/bad.ts'), deep)
+
+  expect((await get('file=e2e/added.ts&runId=run-1')).json()).toMatchObject({ before: { source: '' }, after: { source: 'export const added = true\n' } })
+  expect((await get('file=e2e/deleted.ts&runId=run-1')).json()).toMatchObject({ before: { source: 'export const deleted = true\n' }, after: { source: '' } })
+  expect((await get('file=e2e/data.json&runId=run-1')).json()).toMatchObject({ before: { tests: [] }, after: { tests: [] } })
+  expect((await get('file=e2e/bad.ts&runId=run-1')).json()).toMatchObject({ before: { parseError: expect.any(String) }, after: { parseError: expect.any(String) } })
+  expect((await get('file=e2e/added.ts&runId=run-1&summary=true')).json()).toEqual({ changed: true, affectedTests: [], verdict: 'unclassifiable' })
+})
 it('marks a spec whose reviewed bytes changed even when its test declaration did not', async () => {
   saveSnapshot()
   fs.writeFileSync(path.join(suite, 'e2e/a.spec.ts'), before.replace("test('reads own scope'", "// reviewed setup note\ntest('reads own scope'"))

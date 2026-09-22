@@ -104,6 +104,8 @@ describe('MCP 2.0 elicitation', () => {
 
     expect(matchesUserInput(resumed, 'coverage')).toBe(true)
     expect(matchesUserInput(resumed, 'repository-isolation')).toBe(false)
+    expect(matchesUserInput(context('unknown-handle'), 'coverage')).toBe(false)
+    expect(matchesUserInput(context(42), 'coverage')).toBe(false)
   })
 
   it('opens a second question while the first answer is being applied', async () => {

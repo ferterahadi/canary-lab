@@ -68,6 +68,17 @@ async function fixture() {
 }
 
 describe('blocked run request ownership', () => {
+  it('does not create a second request while resuming an already reserved run id', async () => {
+    const { app } = await fixture()
+    vi.spyOn(RunStartRequests.prototype, 'allocatedRunId').mockReturnValue('reserved-run')
+
+    const response = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'checkout', env: 'dev', resumeRequestId: 'request-1' } })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json()).toMatchObject({ type: 'test_review_required' })
+    expect(response.json()).not.toHaveProperty('request')
+  })
+
   it('reports missing request reads and actions without creating a run', async () => {
     const { app, starts } = await fixture()
     expect((await app.inject('/api/run-requests/missing')).statusCode).toBe(404)

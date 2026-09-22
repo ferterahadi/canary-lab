@@ -4,6 +4,9 @@ import os from 'os'
 import path from 'path'
 import ts from 'typescript'
 import { buildTestReviewPacket, createAssertionExport, createAssertionHtml, createEvaluationHtml } from './test-review-export'
+import { createFlowcharts } from './test-review/flowchart'
+import { renderHtml } from './test-review/html'
+import { resolveRewrite } from './test-review/rewrite'
 import { THEME_SWITCH_HTML } from './test-review/report-theme'
 import { coverageLedgerFor, detail, lineOf, testEndEvent } from './__fixtures__/test-review-fixtures'
 
@@ -265,6 +268,24 @@ test('<script>alert("checkout")</script>', async ({ page }) => {
         rationale: 'No source match was available for this test.',
       }),
     ])
+  })
+
+  it('keeps both source drawers honest when an exported test has no retained body', async () => {
+    const missing = detail({ featureDir: path.join(tmpDir, 'missing-feature'), title: 'missing source' })
+    missing.summary = undefined
+
+    const packet = buildTestReviewPacket(missing)
+    packet.tests[0]!.testBody = "test('retained body', () => {})"
+    packet.tests[0]!.location = 'e2e/retained.spec.ts'
+    const rewrite = resolveRewrite(missing, packet, {})
+    const retained = await renderHtml(packet, {}, rewrite, createFlowcharts(packet, rewrite))
+    expect(retained).toContain('retained body')
+    packet.tests[0]!.location = undefined
+    await renderHtml(packet, {}, rewrite, createFlowcharts(packet, rewrite))
+    packet.tests[0]!.testBody = ''
+    const html = await renderHtml(packet, {}, rewrite, createFlowcharts(packet, rewrite))
+
+    expect(html.match(/Source unavailable\./g)).toHaveLength(2)
   })
 
   it('adds summary-only passed tests that are not present in playback', () => {

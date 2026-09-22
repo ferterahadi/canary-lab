@@ -14,7 +14,7 @@ vi.mock('./run-manifest-writer', async (importOriginal) => ({
   recordLifecycle: h.recordLifecycle,
 }))
 
-const { ensureServicesRunning, pollUntilReady, spawnService, testPortEnv, testPortEnvKey, waitForHealth, waitForServiceReady } = await import('./run-service-boot')
+const { ensureServicesRunning, pollUntilReady, preflightServiceBoot, spawnService, testPortEnv, testPortEnvKey, waitForHealth, waitForServiceReady } = await import('./run-service-boot')
 const { makeHealLoopContext } = await import('./__fixtures__/heal-loop-context')
 
 let tmpDir: string
@@ -126,6 +126,21 @@ describe('dependency preflight', () => {
     expect(ctx.bootFailure?.excerpt).not.toContain('private')
     expect(ctx.stateSink.patchManifest).toHaveBeenCalledWith(ctx.runId, { bootFailure: ctx.bootFailure })
   })
+
+  it('stops after dependency measurement when cancellation arrives before evidence is published', async () => {
+    const { ctx } = ctxFor({
+      stopped: true,
+      feature: {
+        name: 'demo', description: 'demo', envs: [], featureDir: tmpDir,
+        repos: [{ name: 'api', localPath: tmpDir }],
+      },
+      worktreeHandles: [{ repoName: 'api', sourceRoot: tmpDir, worktreeRoot: tmpDir, localPath: tmpDir }],
+    })
+
+    await expect(preflightServiceBoot(ctx)).resolves.toBe(false)
+    expect(ctx.dependencyProvenance).toEqual([])
+    expect(ctx.stateSink.patchManifest).not.toHaveBeenCalledWith(ctx.runId, expect.objectContaining({ dependencyProvenance: expect.anything() }))
+  })
 })
 
 describe('service process evidence', () => {
@@ -178,6 +193,24 @@ describe('service process evidence', () => {
       signal: 'SIGTERM',
     })
     expect(ctx.bootFailure?.excerpt).toContain('TS2322')
+  })
+
+  it('preserves a non-standard raw signal number instead of discarding exit evidence', async () => {
+    let onExit: ((event: { exitCode: number; signal?: number }) => void) | undefined
+    const { ctx } = ctxFor({
+      ptyFactory: () => ({ pid: 42, onData: () => ({ dispose() {} }), onExit: (cb) => { onExit = cb; return { dispose() {} } }, write() {}, resize() {}, kill() {} }),
+    })
+    const svc = svcSpec()
+    spawnService(ctx, svc)
+    onExit?.({ exitCode: 1, signal: 999 })
+    await pollUntilReady(ctx, svc, 'tcp', async () => false)
+    expect(ctx.bootFailure?.signal).toBe('999')
+  })
+
+  it('records a non-Error process factory failure without losing its message', () => {
+    const { ctx } = ctxFor({ ptyFactory: () => { throw 'shell unavailable' } })
+    spawnService(ctx, svcSpec())
+    expect(ctx.bootFailure).toMatchObject({ reason: 'spawn-failed', detail: expect.stringContaining('shell unavailable') })
   })
 })
 
@@ -268,6 +301,28 @@ describe('pollUntilReady', () => {
     expect(ctx.bootFailure).toMatchObject({ reason: 'process-exited' })
     expect(ctx.bootFailure?.detail).toContain('exited before TCP readiness')
   })
+
+  it('stops polling immediately when the run was cancelled', async () => {
+    const attempt = vi.fn(async () => false)
+    const { ctx } = ctxFor({ stopped: true, servicePtys: new Map([['api', {} as never]]) })
+    await pollUntilReady(ctx, svcSpec(), 'tcp', attempt)
+    expect(attempt).not.toHaveBeenCalled()
+    expect(ctx.bootFailure).toBeUndefined()
+  })
+
+  it('explains an unpreserved rejected startup and leaves unclassified evidence unlabelled', async () => {
+    const rejected = ctxFor({ servicePtys: new Map(), serviceExitEvidence: new Map([['api', { exitCode: 0, signal: null }]]) })
+    fs.mkdirSync(path.dirname(rejected.ctx.paths.serviceLog('api')), { recursive: true })
+    fs.writeFileSync(rejected.ctx.paths.serviceLog('api'), 'failed to start')
+    await pollUntilReady(rejected.ctx, svcSpec(), 'tcp', async () => false)
+    expect(rejected.ctx.bootFailure?.nextAction).toContain('outer startup wrapper')
+
+    const unclassified = ctxFor({ servicePtys: new Map([['api', {} as never]]) })
+    fs.mkdirSync(path.dirname(unclassified.ctx.paths.serviceLog('api')), { recursive: true })
+    fs.writeFileSync(unclassified.ctx.paths.serviceLog('api'), 'first line\nsecond line')
+    await pollUntilReady(unclassified.ctx, svcSpec(), 'tcp', async () => false)
+    expect(unclassified.ctx.bootFailure?.classification).toBeUndefined()
+  })
 })
 
 describe('waitForServiceReady', () => {
@@ -278,5 +333,21 @@ describe('waitForServiceReady', () => {
     await waitForServiceReady(ctx, svc)
 
     expect(events).toContainEqual({ event: 'health-check', payload: { service: svc, healthy: true } })
+  })
+
+  it('does not spawn remaining services after a factory failure', async () => {
+    const ptyFactory = vi.fn(() => { throw new Error('cannot start') })
+    const { ctx } = ctxFor({ services: [svcSpec(), svcSpec({ name: 'web', safeName: 'web' })], ptyFactory })
+    await expect(ensureServicesRunning(ctx)).resolves.toEqual([])
+    expect(ptyFactory).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the dependency remediation fallback when incompatible evidence has none', async () => {
+    const { ctx } = ctxFor({
+      services: [svcSpec()],
+      dependencyProvenance: [{ repoName: 'api', sourceRevision: null, sourcePath: tmpDir, worktreePath: tmpDir, dependencyPath: null, dependencyRealPath: null, lockfile: null, dependencyLockfile: null, generatorInputs: [], dependencyGeneratorInputs: [], runtime: { node: process.version, packageManager: null }, mode: 'shared', verdict: 'incompatible', incompatibilityCause: 'lockfile-mismatch' }],
+    })
+    await ensureServicesRunning(ctx)
+    expect(ctx.bootFailure?.nextAction).toContain('Prepare coherent dependencies')
   })
 })

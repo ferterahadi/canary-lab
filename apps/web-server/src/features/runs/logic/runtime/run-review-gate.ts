@@ -20,7 +20,6 @@ function runReviewGate(store: Pick<RunStore, 'list' | 'get'>, feature: string, l
     item.revision === revision && item.decision === 'approved-for-new-run',
   )
   if (approval) return { sourceRunId: manifest.runId, revision, approvedAt: approval.at }
-  if (manifest.status === 'passed' && !manifest.specEdits?.pending.length) return undefined
   return {
     type: 'test_review_required', feature, runId: manifest.runId, review_revision: revision,
     changedFileCount: suiteReviewFiles(snapshot, liveDir, runtimeInputs).files.length,

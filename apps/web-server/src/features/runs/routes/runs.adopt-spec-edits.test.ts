@@ -145,6 +145,62 @@ describe('POST /api/runs/:runId/adopt-spec-edits', () => {
 })
 
 describe('POST /api/runs/:runId/accept-test-review', () => {
+  it('keeps historical decision records distinct from the accepted receipt they do not carry', async () => {
+    const { app } = await build()
+    const seeded = terminalReview('passed')
+    const manifestPath = path.join(seeded.runDir, 'manifest.json')
+    const manifest = readManifest(manifestPath)!
+
+    writeManifest(manifestPath, {
+      ...manifest,
+      specEdits: { ...manifest.specEdits!, reviewDecisions: [{ at: 'now', revision: seeded.revision, decision: 'approved-for-new-run' }] },
+    })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: seeded.revision } })).json()).toMatchObject({
+      reason: 'review-already-settled',
+    })
+
+    writeManifest(manifestPath, {
+      ...manifest,
+      specEdits: { ...manifest.specEdits!, reviewDecisions: [{
+        at: 'now', revision: seeded.revision, decision: 'restored', receipt: {
+          decision: 'restored', review_revision: seeded.revision, files: [], at: 'now',
+          git: { status: 'not-requested' }, execution: { status: 'none' },
+        },
+      }] },
+    })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: seeded.revision } })).json()).toMatchObject({
+      reason: 'review-decision-conflict',
+    })
+  })
+
+  it('commits an active review only when its orchestrator accepts the copied bytes', async () => {
+    const { app, registry } = await build()
+    const rejected = terminalReview('passed')
+    registry.set('terminal', stub(async () => ({ ok: false, reason: 'review-changed' })))
+
+    const rejectedResponse = await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: rejected.revision } })
+    expect(rejectedResponse.statusCode).toBe(409)
+    expect(rejectedResponse.json()).toMatchObject({ reason: 'review-changed', git: { status: 'committed' } })
+
+    fs.rmSync(rejected.runDir, { recursive: true, force: true })
+    const accepted = terminalReview('passed')
+    registry.set('terminal', stub(async () => ({ ok: true, adopted: ['e2e/a.spec.ts'], rerun: 'signalled' })))
+    const acceptedResponse = await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: accepted.revision } })
+    expect(acceptedResponse.statusCode).toBe(202)
+    expect(acceptedResponse.json()).toMatchObject({ decision: 'accepted', execution: { status: 'rerun-requested' } })
+  })
+
+  it('writes a terminal approval even when an older run never recorded dirty-spec state', async () => {
+    const { app } = await build()
+    const seeded = terminalReview('passed')
+    const manifestPath = path.join(seeded.runDir, 'manifest.json')
+    const manifest = readManifest(manifestPath)!
+    writeManifest(manifestPath, { ...manifest, specEdits: undefined })
+
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: seeded.revision } })).statusCode).toBe(202)
+    expect(readManifest(manifestPath)?.specEdits).toMatchObject({ pending: [], adopted: [] })
+  })
+
   it('commits and records a terminal review receipt without changing the old verdict', async () => {
     const { app } = await build()
     const seeded = terminalReview('passed')
@@ -163,5 +219,154 @@ describe('POST /api/runs/:runId/accept-test-review', () => {
     })
     const replay = await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload })
     expect(replay.json()).toEqual(first.json())
+  })
+
+  it('requires a live terminal snapshot, the exact current revision, and remaining reviewed files', async () => {
+    const { app } = await build()
+    const seeded = terminalReview('passed')
+    const pathToManifest = path.join(seeded.runDir, 'manifest.json')
+
+    expect((await app.inject({ method: 'POST', url: '/api/runs/ghost/accept-test-review', payload: { expectedRevision: seeded.revision } })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: 'invalid' } })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: 'b'.repeat(64) } })).json()).toMatchObject({ reason: 'review-changed' })
+
+    fs.writeFileSync(path.join(seeded.featureDir, 'e2e/a.spec.ts'), 'recorded\n')
+    const empty = suiteReviewRevision(seeded.snapshot, seeded.featureDir)
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: empty } })).json()).toMatchObject({ reason: 'nothing-to-accept' })
+
+    fs.writeFileSync(path.join(seeded.featureDir, 'e2e/a.spec.ts'), 'candidate\n')
+    const current = suiteReviewRevision(seeded.snapshot, seeded.featureDir)
+    const manifest = readManifest(pathToManifest)!
+    writeManifest(pathToManifest, { ...manifest, status: 'healing' })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: current } })).json()).toMatchObject({ error: expect.stringContaining('not ready') })
+
+    writeManifest(pathToManifest, {
+      ...manifest,
+      suiteSnapshot: { kind: 'unavailable', at: 'now', reason: 'copy failed' },
+    })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: current } })).json()).toMatchObject({ error: 'Run snapshot unavailable' })
+  })
+
+  it('surfaces a Git commit rejection and refuses a source change made during commit', async () => {
+    const { app } = await build()
+    const rejected = terminalReview('passed')
+    const hook = path.join(rejected.featureDir, '.git', 'hooks', 'pre-commit')
+    fs.writeFileSync(hook, '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+    const failed = await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: rejected.revision } })
+    expect(failed.statusCode).toBe(500)
+    expect(failed.json()).toMatchObject({ error: expect.stringContaining('Git could not commit') })
+
+    fs.rmSync(rejected.runDir, { recursive: true, force: true })
+    const changed = terminalReview('passed')
+    fs.writeFileSync(path.join(changed.featureDir, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nprintf "// late edit\\n" >> e2e/a.spec.ts\n', { mode: 0o755 })
+    const result = await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: changed.revision } })
+    expect(result.statusCode).toBe(409)
+    expect(result.json()).toMatchObject({ reason: 'review-changed', git: { status: 'committed' } })
+  })
+})
+
+describe('terminal review idempotency and validation', () => {
+  it('handles historical terminal manifests with absent review fields and every unavailable review state', async () => {
+    const { app } = await build()
+    const seeded = terminalReview('passed')
+    const manifestPath = path.join(seeded.runDir, 'manifest.json')
+    const manifest = readManifest(manifestPath)!
+
+    writeManifest(manifestPath, { ...manifest, specEdits: undefined })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/adopt-spec-edits', payload: { expectedRevision: seeded.revision } })).statusCode).toBe(202)
+
+    fs.rmSync(seeded.runDir, { recursive: true, force: true })
+    const empty = terminalReview('passed')
+    fs.writeFileSync(path.join(empty.featureDir, 'e2e/a.spec.ts'), 'recorded\n')
+    const emptyRevision = suiteReviewRevision(empty.snapshot, empty.featureDir)
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/adopt-spec-edits', payload: { expectedRevision: emptyRevision } })).json()).toMatchObject({ reason: 'nothing-to-adopt' })
+
+    const emptyManifest = readManifest(path.join(empty.runDir, 'manifest.json'))!
+    writeManifest(path.join(empty.runDir, 'manifest.json'), { ...emptyManifest, featureDir: undefined })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/adopt-spec-edits', payload: { expectedRevision: emptyRevision } })).json()).toMatchObject({ error: 'Run snapshot unavailable' })
+  })
+
+  it('restores historical terminal records and rejects terminal states that cannot be reviewed', async () => {
+    const { app } = await build()
+    const seeded = terminalReview('passed')
+    const manifestPath = path.join(seeded.runDir, 'manifest.json')
+    const manifest = readManifest(manifestPath)!
+    writeManifest(manifestPath, { ...manifest, specEdits: undefined })
+
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/restore-spec-edits', payload: { expectedRevision: seeded.revision } })).statusCode).toBe(200)
+    expect(readManifest(manifestPath)?.specEdits).toMatchObject({ adopted: [] })
+
+    fs.rmSync(seeded.runDir, { recursive: true, force: true })
+    const healing = terminalReview('passed')
+    const healingManifest = readManifest(path.join(healing.runDir, 'manifest.json'))!
+    writeManifest(path.join(healing.runDir, 'manifest.json'), { ...healingManifest, status: 'healing' })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/restore-spec-edits', payload: { expectedRevision: healing.revision } })).json()).toMatchObject({ error: expect.stringContaining('not available') })
+    writeManifest(path.join(healing.runDir, 'manifest.json'), { ...healingManifest, featureDir: undefined })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/restore-spec-edits', payload: { expectedRevision: healing.revision } })).json()).toMatchObject({ error: 'Run snapshot unavailable' })
+
+    writeManifest(path.join(healing.runDir, 'manifest.json'), { ...healingManifest })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/restore-spec-edits', payload: { expectedRevision: 'invalid' } })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/restore-spec-edits', payload: { expectedRevision: 'b'.repeat(64) } })).json()).toMatchObject({ reason: 'review-changed' })
+  })
+
+  it('returns a persisted restored receipt and refuses a different settled receipt', async () => {
+    const { app } = await build()
+    const seeded = terminalReview('passed')
+    const manifestPath = path.join(seeded.runDir, 'manifest.json')
+    const manifest = readManifest(manifestPath)!
+    const restored = {
+      decision: 'restored' as const, review_revision: seeded.revision, files: [], at: 'now',
+      git: { status: 'not-requested' as const }, execution: { status: 'none' as const },
+    }
+    writeManifest(manifestPath, {
+      ...manifest,
+      specEdits: { ...manifest.specEdits!, reviewDecisions: [{ at: 'now', revision: seeded.revision, decision: 'restored', receipt: restored }] },
+    })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/restore-spec-edits', payload: { expectedRevision: seeded.revision } })).json()).toEqual(restored)
+
+    writeManifest(manifestPath, {
+      ...manifest,
+      specEdits: { ...manifest.specEdits!, reviewDecisions: [{ at: 'now', revision: seeded.revision, decision: 'approved-for-new-run', receipt: { ...restored, decision: 'accepted' } }] },
+    })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/restore-spec-edits', payload: { expectedRevision: seeded.revision } })).json()).toMatchObject({ reason: 'review-decision-conflict' })
+  })
+
+  it('keeps incompatible pre-existing terminal decisions distinct from the matching decision', async () => {
+    const { app } = await build()
+    const seeded = terminalReview('passed')
+    const pathToManifest = path.join(seeded.runDir, 'manifest.json')
+    const manifest = readManifest(pathToManifest)!
+
+    writeManifest(pathToManifest, {
+      ...manifest,
+      specEdits: { ...manifest.specEdits!, reviewDecisions: [{ at: 'now', revision: seeded.revision, decision: 'restored' }] },
+    })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/adopt-spec-edits', payload: { expectedRevision: seeded.revision } })).json()).toMatchObject({ reason: 'review-decision-conflict' })
+
+    writeManifest(pathToManifest, {
+      ...manifest,
+      specEdits: { ...manifest.specEdits!, reviewDecisions: [{ at: 'now', revision: seeded.revision, decision: 'adopted' }] },
+    })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/restore-spec-edits', payload: { expectedRevision: seeded.revision } })).json()).toMatchObject({ reason: 'review-decision-conflict' })
+
+    writeManifest(pathToManifest, {
+      ...manifest,
+      specEdits: { ...manifest.specEdits!, reviewDecisions: [{ at: 'now', revision: seeded.revision, decision: 'restored' }] },
+    })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/restore-spec-edits', payload: { expectedRevision: seeded.revision } })).json()).toMatchObject({
+      status: 'restored', restored: [], review_revision: seeded.revision, idempotent: true,
+    })
+  })
+
+  it('does not permit terminal adoption while still running or without exact approval input', async () => {
+    const { app } = await build()
+    const seeded = terminalReview('passed')
+    const manifestPath = path.join(seeded.runDir, 'manifest.json')
+    const manifest = readManifest(manifestPath)!
+
+    writeManifest(manifestPath, { ...manifest, status: 'healing' })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/adopt-spec-edits', payload: { expectedRevision: seeded.revision } })).json()).toMatchObject({ error: expect.stringContaining('not available') })
+    writeManifest(manifestPath, { ...manifest })
+    expect((await app.inject({ method: 'POST', url: '/api/runs/terminal/adopt-spec-edits', payload: { expectedRevision: 'invalid' } })).statusCode).toBe(400)
   })
 })

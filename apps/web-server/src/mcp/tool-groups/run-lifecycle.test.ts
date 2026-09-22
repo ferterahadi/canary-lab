@@ -513,6 +513,21 @@ describe('start_run: starting fresh', () => {
     expect(startRun).not.toHaveBeenCalled()
   })
 
+  it('tells the caller to follow a Flight even when its status is not currently reported', async () => {
+    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const { raw } = harness({
+      startRun,
+      coverageRequest: coverageRequest(coverageChange('stale', 'coverage-flight-no-status', { flightId: 'flight-1' })),
+    }, eliciting)
+    const opened = await raw('start_run', START, context()) as InputRequiredResult
+    const answered = await raw('start_run', START, context(opened.requestState, {
+      action: 'accept', content: { choice: 'Update coverage first' },
+    }))
+
+    expect(JSON.stringify(answered)).toContain('Flight flight-1 owns this update')
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
   it.each(['decline', 'cancel'])('starts nothing when the user chooses %s on the stale-coverage question', async (action) => {
     const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)

@@ -663,6 +663,8 @@ describe('feature test review decisions', () => {
     const restored = await app.inject({ method: 'POST', url: '/api/features/alpha/restore-test-review', payload: { expectedRevision: latest.review_revision } })
     expect(restored.json()).toMatchObject({ decision: 'restored', review_revision: latest.review_revision, files: ['e2e/a.spec.ts'] })
     expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf8')).toBe("test('one', async () => { expect(1).toBe(1) })\n")
+    // A retry is a durable receipt lookup, not a second Git restore.
+    expect((await app.inject({ method: 'POST', url: '/api/features/alpha/restore-test-review', payload: { expectedRevision: latest.review_revision } })).json()).toEqual(restored.json())
   })
 
   it('rejects malformed, stale, and empty review decisions without recording a receipt', async () => {

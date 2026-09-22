@@ -6,7 +6,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { createHash } from 'crypto'
-import { adoptSpecEdits, adoptTestHealSpecEdits, digestOfSpecHashes, recordSpecEdits, refreshSpecEdits, restoreSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
+import { adoptSpecEdits, adoptTestHealSpecEdits, digestOfSpecHashes, recordSpecEdits, refreshSpecEdits, restoreReviewedSuiteFiles, restoreSpecEdits, snapshotSuite, suiteDigest } from './run-suite-snapshot'
 import { hashFeatureSpecs } from '../dirty-specs/detect'
 import { suiteReviewRevision } from './suite-review'
 import { writeManifest, type RunManifest } from './manifest'
@@ -74,6 +74,13 @@ describe('snapshotSuite', () => {
     expect(sink.patches.at(-1)?.specEdits?.reviewDecisions).toBeUndefined()
     expect(fs.readFileSync(path.join(ctx.feature.featureDir, 'e2e/fixture.ts'), 'utf8')).toBe('edited helper')
   })
+  it('reports when an exact restore has no reviewed files', () => {
+    const { ctx } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    const revision = suiteReviewRevision(ctx.suiteDir, ctx.feature.featureDir)
+    expect(restoreReviewedSuiteFiles(ctx.suiteDir, ctx.feature.featureDir, revision)).toEqual({ ok: false, reason: 'nothing-to-restore' })
+  })
   it('restores exactly reviewed supporting-file additions, deletions and changes', () => {
     const { ctx, sink } = ctxFor()
     write(ctx.feature.featureDir, 'e2e/fixture.ts', 'old fixture')
@@ -110,6 +117,22 @@ describe('snapshotSuite', () => {
     const revision = suiteReviewRevision(ctx.suiteDir, ctx.feature.featureDir)
     expect(restoreSpecEdits(ctx, revision)).toEqual({ ok: false, reason: 'restore-failed' })
     expect(fs.readFileSync(path.join(outside, 'fixture.ts'), 'utf8')).toBe('private')
+  })
+  it('also rejects symlinks and missing snapshot paths through the legacy restore action', () => {
+    const { ctx } = ctxFor()
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', `${SPEC_A}// changed`)
+    const outside = path.join(tmpDir, 'legacy-outside')
+    fs.mkdirSync(outside)
+    fs.rmSync(path.join(ctx.feature.featureDir, 'e2e'), { recursive: true })
+    fs.symlinkSync(outside, path.join(ctx.feature.featureDir, 'e2e'))
+    expect(restoreSpecEdits(ctx)).toEqual({ ok: false, reason: 'restore-failed' })
+
+    fs.rmSync(ctx.feature.featureDir, { recursive: true, force: true })
+    fs.mkdirSync(path.join(ctx.feature.featureDir, 'e2e'), { recursive: true })
+    write(ctx.feature.featureDir, 'e2e/added.spec.ts', SPEC_A)
+    expect(restoreSpecEdits(ctx)).toMatchObject({ ok: true, restored: expect.arrayContaining(['e2e/added.spec.ts']) })
   })
   it('adopts a reviewed helper-only correction without requiring an unrelated spec edit', async () => {
     const { ctx } = ctxFor()
@@ -248,6 +271,36 @@ describe('snapshotSuite', () => {
     expect(fs.existsSync(ctx.paths.suiteRuntimeInputsDir)).toBe(false)
   })
 
+  it('refuses a selected target that traverses a symlink inside the feature', () => {
+    const { ctx } = ctxFor({}, { env: 'local' })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    const target = configureSuiteEnvTarget(ctx)
+    const outside = path.join(tmpDir, 'runtime-input-outside')
+    fs.writeFileSync(outside, 'SECRET=outside\n')
+    fs.rmSync(target)
+    fs.symlinkSync(outside, target)
+
+    expect(() => snapshotSuite(ctx)).toThrow(/Selected envset target app\.env traverses a symlink/)
+  })
+
+  it('leaves an envset target outside the copied feature to its owning workspace', () => {
+    const { ctx } = ctxFor({}, { env: 'local' })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    write(ctx.feature.featureDir, 'envsets/local/app.env', 'SECRET=selected\n')
+    const externalTarget = path.join(tmpDir, 'workspace-owned.env')
+    fs.writeFileSync(externalTarget, 'SECRET=workspace\n')
+    write(ctx.feature.featureDir, 'envsets/envsets.config.json', JSON.stringify({
+      appRoots: {},
+      slots: { 'app.env': { description: 'workspace target', target: externalTarget } },
+      feature: { slots: ['app.env'], testCommand: 'npx playwright test', testCwd: ctx.feature.featureDir },
+    }))
+
+    snapshotSuite(ctx)
+
+    expect(suiteRuntimeInputTargets(ctx)).toEqual([])
+    expect(fs.existsSync(path.join(ctx.suiteDir, path.basename(externalTarget)))).toBe(false)
+  })
+
   it('treats malformed retained runtime-input inventories as unavailable to review readers', () => {
     const { ctx } = ctxFor()
     fs.mkdirSync(ctx.runDir, { recursive: true })
@@ -257,6 +310,53 @@ describe('snapshotSuite', () => {
     expect(suiteRuntimeInputTargetsForSnapshot(ctx.paths.suiteSnapshotDir)).toEqual([])
   })
 
+  it('fails closed on a broken retained input and skips runtime materialization when no copy is active', () => {
+    const { ctx } = ctxFor({}, { env: 'local' })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    configureSuiteEnvTarget(ctx)
+    snapshotSuite(ctx)
+    fs.rmSync(path.join(ctx.paths.suiteRuntimeInputsDir, '000.input'))
+
+    expect(() => materializeSuiteRuntimeInputs(ctx)).toThrow(/runtime inputs are unavailable/)
+    const noEnv = ctxFor().ctx
+    noEnv.env = undefined
+    expect(materializeSuiteRuntimeInputs(noEnv)).toEqual([])
+    const liveEnv = ctxFor({}, { env: 'local' }).ctx
+    liveEnv.suiteDir = liveEnv.feature.featureDir
+    expect(materializeSuiteRuntimeInputs(liveEnv)).toEqual([])
+
+    fs.writeFileSync(ctx.paths.suiteRuntimeInputsInventoryPath, JSON.stringify({ version: 2, entries: [] }))
+    expect(suiteRuntimeInputTargets(ctx)).toEqual([])
+  })
+
+  it('fails closed when retained runtime input storage is replaced with a directory', () => {
+    const { ctx } = ctxFor({}, { env: 'local' })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    configureSuiteEnvTarget(ctx)
+    snapshotSuite(ctx)
+    const stored = path.join(ctx.paths.suiteRuntimeInputsDir, '000.input')
+    fs.rmSync(stored)
+    fs.mkdirSync(stored)
+
+    expect(() => materializeSuiteRuntimeInputs(ctx)).toThrow(/runtime inputs are unavailable/)
+  })
+
+  it('does not retain a partial snapshot when materializing the private runtime input fails', () => {
+    const { ctx, sink } = ctxFor({}, { env: 'local' })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    configureSuiteEnvTarget(ctx)
+    const realCopy = fs.copyFileSync
+    vi.spyOn(fs, 'copyFileSync').mockImplementation(((source: fs.PathLike, destination: fs.PathLike, mode?: number) => {
+      if (String(source).endsWith('000.input')) throw 'private input copy failed'
+      return realCopy(source, destination, mode)
+    }) as typeof fs.copyFileSync)
+
+    expect(() => snapshotSuite(ctx)).toThrow(/Suite runtime input setup failed.*private input copy failed/)
+    expect(ctx.suiteDir).toBe(ctx.feature.featureDir)
+    expect(fs.existsSync(ctx.paths.suiteSnapshotDir)).toBe(false)
+    expect(sink.patches.at(-1)).toMatchObject({ suiteSnapshot: { kind: 'unavailable', reason: 'private input copy failed' } })
+  })
+
   it('rejects malformed cleanup inventories before touching the suite snapshot', () => {
     const { ctx } = ctxFor()
     fs.mkdirSync(ctx.runDir, { recursive: true })
@@ -264,6 +364,22 @@ describe('snapshotSuite', () => {
     expect(() => cleanupSuiteRuntimeInputsForRun(ctx.runDir)).toThrow(/Invalid suite runtime input cleanup inventory/)
     fs.writeFileSync(ctx.paths.suiteRuntimeInputsInventoryPath, JSON.stringify({ version: 1, entries: [{}] }))
     expect(() => cleanupSuiteRuntimeInputsForRun(ctx.runDir)).toThrow('Invalid suite runtime input cleanup target')
+    fs.writeFileSync(ctx.paths.suiteRuntimeInputsInventoryPath, JSON.stringify({
+      version: 1, state: 'active', runId: ctx.runId, env: ctx.env, capturedAt: 'now',
+      entries: [{ relativeTarget: '../escape', storedAs: '000.input', sha256: 'ignored' }],
+    }))
+    expect(() => cleanupSuiteRuntimeInputsForRun(ctx.runDir)).toThrow(/escapes its owned directory/)
+  })
+
+  it('does not rewrite an inventory that was already scrubbed', () => {
+    const { ctx } = ctxFor({}, { env: 'local' })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    configureSuiteEnvTarget(ctx)
+    snapshotSuite(ctx)
+    removeSuiteRuntimeInputs(ctx)
+    const before = fs.readFileSync(ctx.paths.suiteRuntimeInputsInventoryPath, 'utf8')
+    cleanupSuiteRuntimeInputsForRun(ctx.runDir)
+    expect(fs.readFileSync(ctx.paths.suiteRuntimeInputsInventoryPath, 'utf8')).toBe(before)
   })
 
   it('keeps non-dotenv runtime targets out of retained snapshots and review bytes', async () => {
@@ -314,6 +430,23 @@ describe('snapshotSuite', () => {
     expect(fs.existsSync(ctx.paths.suiteSnapshotDir)).toBe(false)
   })
 
+  it('fails closed if an approved byte changes while the snapshot is copied', () => {
+    const { ctx, sink } = ctxFor({}, { testReviewApproval: { sourceRunId: 'old-run', revision: '', approvedAt: 'now' } })
+    const source = path.join(path.dirname(ctx.runDir), 'old-run', 'suite')
+    write(source, 'e2e/a.spec.ts', SPEC_A)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', `${SPEC_A}// approved\n`)
+    ;(ctx.testReviewApproval as { revision: string }).revision = suiteReviewRevision(source, ctx.feature.featureDir)
+    const realCopy = fs.copyFileSync
+    vi.spyOn(fs, 'copyFileSync').mockImplementation(((from: fs.PathLike, to: fs.PathLike, mode?: number) => {
+      const copied = realCopy(from, to, mode)
+      if (String(to) === path.join(ctx.paths.suiteSnapshotDir, 'e2e/a.spec.ts')) fs.appendFileSync(to, '// changed during copy\n')
+      return copied
+    }) as typeof fs.copyFileSync)
+
+    expect(() => snapshotSuite(ctx)).toThrow(/Approved test review snapshot capture failed/)
+    expect(sink.patches.at(-1)).toMatchObject({ suiteSnapshot: { kind: 'unavailable' } })
+  })
+
   it('a mid-run edit to the live spec leaves the copy untouched', () => {
     const { ctx } = ctxFor()
     write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
@@ -361,6 +494,20 @@ describe('snapshotSuite', () => {
     snapshotSuite(ctx)
 
     expect(sink.patches[0]).toMatchObject({ suiteSnapshot: { kind: 'unavailable', reason: 'disk full' } })
+  })
+
+  it('retains an Error message when runtime input setup cannot copy the retained bytes', () => {
+    const { ctx, sink } = ctxFor({}, { env: 'local' })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    configureSuiteEnvTarget(ctx)
+    const copy = fs.copyFileSync
+    vi.spyOn(fs, 'copyFileSync').mockImplementation(((source: fs.PathLike, target: fs.PathLike, mode?: number) => {
+      if (String(source).endsWith('000.input')) throw new Error('retained input denied')
+      return copy(source, target, mode)
+    }) as typeof fs.copyFileSync)
+
+    expect(() => snapshotSuite(ctx)).toThrow(/retained input denied/)
+    expect(sink.patches.at(-1)).toMatchObject({ suiteSnapshot: { kind: 'unavailable', reason: 'retained input denied' } })
   })
 })
 
@@ -480,6 +627,65 @@ describe('adoptSpecEdits', () => {
     expect(last.integrity).toMatchObject({ hints: [] })
     // The rerun signal carries the human's authorship so the journal reads right.
     expect(ctx.signalGate.consume()).toMatchObject({ kind: 'rerun', body: { adoptedSpecEdits: ['e2e/a.spec.ts'] } })
+  })
+
+  it('keeps edits that arrive while adoption re-baselines as pending integrity evidence', async () => {
+    const { ctx, sink } = ctxFor({}, {
+      dirtySpecHooks: {
+        captureRunStart: async () => { fs.appendFileSync(path.join(ctx.feature.featureDir, 'e2e/a.spec.ts'), '// edited while baselining\n') },
+        finalizeRun: vi.fn(),
+      },
+    })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', WEAKER)
+
+    await expect(adoptSpecEdits(ctx)).resolves.toMatchObject({ ok: true, adopted: ['e2e/a.spec.ts'] })
+    const last = sink.patches.at(-1) as { specEdits: RunManifest['specEdits']; integrity: RunManifest['integrity'] }
+    expect(last.specEdits?.pending).toEqual([expect.objectContaining({ file: 'e2e/a.spec.ts' })])
+    expect(last.integrity).toBeDefined()
+  })
+
+  it('recomputes integrity hints from the live bytes that change during adoption', async () => {
+    const { ctx, sink } = ctxFor({}, {
+      dirtySpecHooks: {
+        captureRunStart: async () => {
+          write(ctx.feature.featureDir, 'e2e/a.spec.ts', "test('a', { tag: ['@req-cart-1'] }, async () => { expect(1).toBe(1) })\n")
+        },
+        finalizeRun: vi.fn(),
+      },
+    })
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', "test('a', { tag: ['@req-cart-1'] }, async () => { expect(1).toBe(1); expect(2).toBe(2) })\n")
+    snapshotSuite(ctx)
+    fs.appendFileSync(path.join(ctx.feature.featureDir, 'e2e/a.spec.ts'), '// approved edit\n')
+
+    await expect(adoptSpecEdits(ctx)).resolves.toMatchObject({ ok: true })
+    expect((sink.patches.at(-1) as { integrity: RunManifest['integrity'] }).integrity?.hints).toEqual([
+      expect.objectContaining({ kind: 'weaker', file: 'e2e/a.spec.ts', test: 'a', requirements: ['cart-1'] }),
+    ])
+  })
+
+  it('records integrity hints when a further live edit lands during the reviewed snapshot swap', async () => {
+    const { ctx, sink } = ctxFor()
+    const original = "test('a', { tag: ['@req-cart-1'] }, async () => { expect(1).toBe(1); expect(2).toBe(2) })\n"
+    const reviewed = "test('a', { tag: ['@req-cart-1'] }, async () => { expect(1).toBe(1) })\n"
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', original)
+    snapshotSuite(ctx)
+    write(ctx.feature.featureDir, 'e2e/a.spec.ts', reviewed)
+    const revision = suiteReviewRevision(ctx.suiteDir, ctx.feature.featureDir)
+    const copy = fs.copyFileSync
+    vi.spyOn(fs, 'copyFileSync').mockImplementation(((source: fs.PathLike, target: fs.PathLike, mode?: number) => {
+      const copied = copy(source, target, mode)
+      if (String(target).includes(`${path.sep}candidate${path.sep}e2e${path.sep}a.spec.ts`)) {
+        write(ctx.feature.featureDir, 'e2e/a.spec.ts', "test('a', { tag: ['@req-cart-1'] }, async () => {})\n")
+      }
+      return copied
+    }) as typeof fs.copyFileSync)
+
+    await expect(adoptSpecEdits(ctx, revision)).resolves.toMatchObject({ ok: true })
+    expect((sink.patches.at(-1) as { integrity: RunManifest['integrity'] }).integrity?.hints).toEqual([
+      expect.objectContaining({ kind: 'weaker', file: 'e2e/a.spec.ts', test: 'a', requirements: ['cart-1'] }),
+    ])
   })
 
   it('reports when no rerun could be signalled because the loop is not waiting for one', async () => {

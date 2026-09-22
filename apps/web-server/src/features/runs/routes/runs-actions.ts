@@ -366,8 +366,11 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
     try {
       git = await commitReviewedFiles(detail.manifest.feature, featureDir, review.files.map((file) => file.file))
     } catch (error) {
-      const statusCode = (error as { statusCode?: number }).statusCode ?? 500
-      return reply.code(statusCode).send({ error: error instanceof Error ? error.message : 'Git could not commit the reviewed files.' })
+      // commitReviewedFiles only rejects with an Error carrying a route status.
+      // Its contract is deliberate: callers must not turn a Git failure into a
+      // successful review receipt by treating an unknown rejection as benign.
+      const failure = error as Error & { statusCode: number }
+      return reply.code(failure.statusCode).send({ error: failure.message })
     }
     await deps.dirtySpecStore?.recompute(detail.manifest.feature, featureDir)
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: detail.manifest.feature })

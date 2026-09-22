@@ -12,7 +12,7 @@ export function testReviewOutcome(store: RunStore, runId: string, revision: stri
   if (!detail) return { status: 'run-unavailable', runId }
   const decision = [...(detail.manifest.specEdits?.reviewDecisions ?? [])].reverse().find((item) => item.revision === revision)
   if (decision?.receipt) return {
-    ...(decision.receipt ?? {}),
+    ...decision.receipt,
     status: decision.decision, runId, review_revision: revision,
     next: decision.decision === 'adopted'
       ? 'The human accepted these test changes. Continue with wait_for_heal_task for the runner result; acceptance is not a pass.'

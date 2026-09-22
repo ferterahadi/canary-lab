@@ -5,6 +5,7 @@ import {
   parseBodyFields,
   classifyOutcome,
   outcomeBadgeClass,
+  outcomeLabel,
   formatJournalFieldKey,
   presentJournalFields,
 } from './journal-utils'
@@ -132,6 +133,13 @@ describe('outcomeBadgeClass', () => {
       seen.add(cls)
     }
     expect(seen.size).toBe(outcomes.length)
+  })
+})
+
+describe('outcomeLabel', () => {
+  it('uses a reader-friendly label for applicable passes and expands ordinary outcome keys', () => {
+    expect(outcomeLabel('applicable_passed')).toBe('applicable tests passed')
+    expect(outcomeLabel('all_tests_passed')).toBe('all tests passed')
   })
 })
 

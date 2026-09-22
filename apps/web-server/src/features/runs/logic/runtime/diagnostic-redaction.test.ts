@@ -38,6 +38,15 @@ describe('diagnostic evidence', () => {
       'postgres://user:[REDACTED]@db --api-key [REDACTED]\nAuthorization: [REDACTED]\nCookie: [REDACTED]',
     )
   })
+
+  it('trims every replacement character when a byte limit begins inside a multi-byte character', () => {
+    const logPath = path.join(tmpDir, 'emoji.log')
+    fs.writeFileSync(logPath, '😀')
+
+    const evidence = diagnosticExcerpt(logPath, 2)
+
+    expect(evidence).toEqual({ excerpt: '', truncated: true })
+  })
 })
 
 describe('classifyBootEvidence', () => {

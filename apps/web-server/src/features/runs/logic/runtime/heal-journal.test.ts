@@ -238,6 +238,27 @@ describe('classifyJournalOutcome', () => {
     )).toBe('all_tests_passed')
   })
 
+  it('uses legacy skipped names when a summary has no numeric skipped count', () => {
+    expect(classifyJournalOutcome(
+      { failed: [{ name: 'a' }] },
+      {
+        failed: [],
+        total: 3,
+        passed: 2,
+        environment: 'staging',
+        skippedNames: ['environment-only'],
+        skippedIds: ['environment-only-id'],
+        knownTests: [{ id: 'environment-only-id', name: 'environment-only' }],
+        environmentExclusions: [{
+          id: 'environment-only-id',
+          name: 'environment-only',
+          environment: 'staging',
+          environments: ['production'],
+        }],
+      },
+    )).toBe('applicable_passed')
+  })
+
   it('distinguishes partial, no_change, and regression outcomes', () => {
     expect(classifyJournalOutcome(
       { failed: [{ name: 'a' }, { name: 'b' }], passedNames: [] },

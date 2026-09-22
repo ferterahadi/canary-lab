@@ -93,4 +93,12 @@ describe('waitForTestReview', () => {
       fs.rmSync(root, { recursive: true, force: true })
     }
   })
+
+  it('waits when a decision exists without its durable receipt', () => {
+    const revision = 'd'.repeat(64)
+    const store = {
+      get: () => ({ manifest: { status: 'healing', specEdits: { reviewDecisions: [{ revision, decision: 'adopted' }] } } }),
+    } as unknown as RunStore
+    expect(testReviewOutcome(store, 'run1', revision)).toBeNull()
+  })
 })

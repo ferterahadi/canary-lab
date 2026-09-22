@@ -54,7 +54,7 @@ function nearestLockfile(start: string, boundary: string): DependencyFingerprint
   while (dir === stop || dir.startsWith(`${stop}${path.sep}`)) {
     for (const name of LOCKFILES) {
       const candidate = path.join(dir, name)
-      if (fs.existsSync(candidate)) return { path: path.relative(stop, candidate) || name, sha256: sha256File(candidate) }
+      if (fs.existsSync(candidate)) return { path: path.relative(stop, candidate), sha256: sha256File(candidate) }
     }
     if (dir === stop) break
     dir = path.dirname(dir)
@@ -106,7 +106,7 @@ function runTargetCommand(
         ? (error as { code: number }).code
         : error ? null : 0
       const signal = (error as { signal?: string } | null)?.signal ?? null
-      const output = redactDiagnosticText(`${stdout ?? ''}${stderr ?? ''}${spawnError ? `\n${spawnError}` : ''}`)
+      const output = redactDiagnosticText(`${stdout}${stderr}${spawnError ? `\n${spawnError}` : ''}`)
       fs.mkdirSync(path.dirname(logPath), { recursive: true })
       fs.writeFileSync(logPath, output)
       resolve({ exitCode, signal, failed: Boolean(error) })
@@ -290,7 +290,7 @@ export async function prepareWorktreeDependencies(
       }
     }
     if (preparationPassed || config.validateCommand) {
-      return { ...base, dependencyPath, dependencyRealPath: isolatedRealPath, verdict: 'compatible', ...(validation ? { validation } : {}) }
+      return { ...base, dependencyPath, dependencyRealPath: isolatedRealPath, verdict: 'compatible', validation: validation! }
     }
     return {
       ...base,

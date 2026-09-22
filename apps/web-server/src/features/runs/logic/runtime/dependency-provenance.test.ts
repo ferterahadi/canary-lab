@@ -2,9 +2,10 @@ import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addWorktree, removeWorktree } from './repo-worktree'
 import { prepareWorktreeDependencies } from './dependency-provenance'
+import * as gitRepo from '../../../../shared/git-repo'
 
 let root: string
 let source: string
@@ -33,6 +34,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
   fs.rmSync(root, { recursive: true, force: true })
 })
 
@@ -201,6 +203,124 @@ describe('prepareWorktreeDependencies', () => {
 
     expect(result).toMatchObject({ verdict: 'unknown', mode: 'isolated' })
     expect(result.warning).toContain('no target-owned prepare or validation command')
+    await removeWorktree(handle)
+  })
+
+  it.each([
+    ['pnpm-lock.yaml', 'pnpm'],
+    ['yarn.lock', 'yarn'],
+    ['bun.lock', 'bun'],
+  ])('infers %s when package.json does not name a manager', async (lockfile, manager) => {
+    fs.mkdirSync(path.join(source, 'node_modules'), { recursive: true })
+    const handle = await addWorktree({ repoName: 'app', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+    fs.writeFileSync(path.join(handle.worktreeRoot, 'package.json'), '{}')
+    fs.rmSync(path.join(handle.worktreeRoot, 'package-lock.json'))
+    fs.writeFileSync(path.join(handle.worktreeRoot, lockfile), 'lock')
+
+    const result = await prepareWorktreeDependencies({ handle, runDir: path.join(root, 'run') })
+
+    expect(result.runtime.packageManager).toBe(manager)
+    await removeWorktree(handle)
+  })
+
+  it('records a signal from a target-owned preparation command', async () => {
+    const handle = await addWorktree({ repoName: 'app', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+
+    const result = await prepareWorktreeDependencies({
+      handle, runDir: path.join(root, 'run'), config: { mode: 'isolated', prepareCommand: 'kill -TERM $$' },
+    })
+
+    expect(result).toMatchObject({ verdict: 'incompatible', incompatibilityCause: 'prepare-failed', validation: { exitCode: null, signal: expect.any(String) } })
+    await removeWorktree(handle)
+  })
+
+  it('keeps a shared run unknown but records a failed best-effort dependency link', async () => {
+    fs.mkdirSync(path.join(source, 'node_modules'), { recursive: true })
+    const handle = await addWorktree({ repoName: 'app', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+    vi.spyOn(fs, 'symlinkSync').mockImplementation(() => { throw new Error('link denied') })
+
+    const result = await prepareWorktreeDependencies({ handle, runDir: path.join(root, 'run') })
+
+    expect(result).toMatchObject({ verdict: 'unknown', warning: expect.stringContaining('link denied') })
+    await removeWorktree(handle)
+  })
+
+  it('retains passing validation evidence when it rejects mismatched shared lockfiles', async () => {
+    fs.mkdirSync(path.join(source, 'node_modules'), { recursive: true })
+    const handle = await addWorktree({ repoName: 'app', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+    fs.writeFileSync(path.join(handle.worktreeRoot, 'package-lock.json'), '{"lockfileVersion":2}')
+
+    const result = await prepareWorktreeDependencies({ handle, runDir: path.join(root, 'run'), config: { validateCommand: 'true' } })
+
+    expect(result).toMatchObject({ verdict: 'incompatible', incompatibilityCause: 'lockfile-mismatch', validation: { exitCode: 0 } })
+    await removeWorktree(handle)
+  })
+
+  it('detects missing and unreadable generator-input peers without inventing a match', async () => {
+    const missingHandle = await addWorktree({ repoName: 'missing', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+    const missing = await prepareWorktreeDependencies({
+      handle: missingHandle, runDir: path.join(root, 'run'), config: { generatorInputs: ['generated/client.ts'] },
+    })
+    expect(missing).toMatchObject({ verdict: 'incompatible', incompatibilityCause: 'generator-input-mismatch' })
+    await removeWorktree(missingHandle)
+
+    fs.mkdirSync(path.join(source, 'node_modules'), { recursive: true })
+    const unreadableHandle = await addWorktree({ repoName: 'unreadable', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+    const unreadable = await prepareWorktreeDependencies({
+      handle: unreadableHandle, runDir: path.join(root, 'run'), config: { generatorInputs: ['generated/client.ts'] },
+    })
+    expect(unreadable).toMatchObject({ verdict: 'unknown' })
+    await removeWorktree(unreadableHandle)
+  })
+
+  it('uses the default shell when the caller did not supply one', async () => {
+    const priorShell = process.env.SHELL
+    delete process.env.SHELL
+    try {
+      const handle = await addWorktree({ repoName: 'shell', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+      const result = await prepareWorktreeDependencies({
+        handle, runDir: path.join(root, 'run'), config: { mode: 'isolated', prepareCommand: 'mkdir node_modules' },
+      })
+      expect(result).toMatchObject({ verdict: 'compatible' })
+      await removeWorktree(handle)
+    } finally {
+      if (priorShell === undefined) delete process.env.SHELL
+      else process.env.SHELL = priorShell
+    }
+  })
+
+  it('records an empty successful revision as unavailable rather than inventing a commit id', async () => {
+    const handle = await addWorktree({ repoName: 'revision', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+    vi.spyOn(gitRepo, 'runGit').mockResolvedValue({ code: 0, stdout: '', stderr: '' })
+
+    const result = await prepareWorktreeDependencies({ handle, runDir: path.join(root, 'run') })
+
+    expect(result.sourceRevision).toBeNull()
+    await removeWorktree(handle)
+  })
+
+  it('retains a visible dependency path and validation evidence when canonicalization fails', async () => {
+    fs.mkdirSync(path.join(source, 'node_modules'))
+    const handle = await addWorktree({ repoName: 'unresolved', localPath: source, worktreesDir: path.join(root, 'run', 'worktrees') })
+    const dependencyPath = path.join(handle.worktreeRoot, 'node_modules')
+    fs.mkdirSync(dependencyPath)
+    const realpath = fs.realpathSync
+    vi.spyOn(fs, 'realpathSync').mockImplementation(((target: fs.PathLike, options?: fs.RealPathOptions) => {
+      if (String(target) === dependencyPath) throw Object.assign(new Error('canonicalization denied'), { code: 'EACCES' })
+      return realpath(target, options)
+    }) as typeof fs.realpathSync)
+
+    const result = await prepareWorktreeDependencies({
+      handle, runDir: path.join(root, 'run'), config: { mode: 'isolated', validateCommand: 'true' },
+    })
+
+    expect(result).toMatchObject({
+      verdict: 'incompatible',
+      incompatibilityCause: 'isolated-dependencies-required',
+      dependencyPath,
+      dependencyRealPath: null,
+      validation: { exitCode: 0 },
+    })
     await removeWorktree(handle)
   })
 })

@@ -257,6 +257,31 @@ describe('DirtySpecStore', () => {
     expect(events).toEqual([])
   })
 
+  it('contains a listener failure so persistence and healthy listeners continue', async () => {
+    writeSpec(PASS)
+    const store = new DirtySpecStore(logsDir)
+    const events: string[] = []
+    store.onEvent(() => { throw new Error('subscriber disconnected') })
+    store.onEvent((event) => events.push(event.kind))
+
+    await expect(store.captureRunStart('checkout', featureDir)).resolves.toMatchObject({ status: 'clean' })
+    expect(events).toContain('changed')
+  })
+
+  it('replaces a prior receipt for the same review revision', async () => {
+    writeSpec(PASS)
+    const store = new DirtySpecStore(logsDir)
+    await store.captureRunStart('checkout', featureDir)
+    const receipt = (decision: 'accepted' | 'restored') => ({
+      decision, review_revision: 'a'.repeat(64), files: ['e2e/voucher.spec.ts'], at: 'now',
+      git: { status: 'not-requested' as const }, execution: { status: 'none' as const },
+    })
+
+    store.recordReviewReceipt('checkout', receipt('accepted'))
+    const next = store.recordReviewReceipt('checkout', receipt('restored'))
+    expect(next.reviewReceipts).toEqual([receipt('restored')])
+  })
+
   it('renameFeature() moves the record to the new feature id', async () => {
     // Here the feature name IS the record id, so a rename re-homes the record
     // directory as well as the field — the dirty cue has to follow the suite.

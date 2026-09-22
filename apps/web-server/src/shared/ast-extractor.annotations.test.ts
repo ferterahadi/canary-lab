@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { extractTestsFromSource, parseTestAnnotations, parseTestTagList } from './ast-extractor'
+import { extractCoverageTestsFromSource, extractTestsFromSource, parseTestAnnotations, parseTestTagList } from './ast-extractor'
 
 describe('extractTestsFromSource — coverage annotations', () => {
   it('attaches requirements + pathTypes from a // block above the test', () => {
@@ -42,6 +42,21 @@ describe('extractTestsFromSource — coverage annotations', () => {
     expect(r.tests[0].requirements).toBeUndefined()
     expect(r.tests[0].pathTypes).toBeUndefined()
     expect(r.tests[0].assertions).toBeUndefined()
+  })
+
+  it('retains a declared test with no callback as an empty, non-asserting candidate', () => {
+    const r = extractTestsFromSource('a.spec.ts', "test('declared only')")
+    expect(r.tests).toEqual([expect.objectContaining({ name: 'declared only', bodySource: '' })])
+    expect(r.tests[0].assertions).toBeUndefined()
+  })
+
+  it('keeps declared coverage candidates and reports invalid runtime source safely', () => {
+    expect(extractCoverageTestsFromSource('a.spec.ts', "test('declared only')").tests).toEqual([
+      expect.objectContaining({ name: 'declared only', assertions: [] }),
+    ])
+    expect(extractCoverageTestsFromSource('a.spec.ts', null as never)).toMatchObject({
+      tests: [], parseError: expect.any(String),
+    })
   })
 
   it('collects expect() matcher chains and navigation/network/db/file calls', () => {

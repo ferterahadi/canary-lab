@@ -80,6 +80,18 @@ describe('writeInitialManifest', () => {
     const written = (sink.bootstrap as unknown as { mock: { calls: [{ repoPaths: string[] }][] } }).mock.calls[0][0]
     expect(written.repoPaths).toEqual([real])
   })
+
+  it('persists dependency provenance and an exact test-review approval when the run carries them', () => {
+    const approval = { sourceRunId: 'source-run', revision: 'a'.repeat(64), approvedAt: 'now' }
+    const provenance = [{ repoName: 'app', verdict: 'unknown', mode: 'shared' }]
+    const { ctx, sink } = ctxFor({ dependencyProvenance: provenance as never, testReviewApproval: approval })
+
+    writeInitialManifest(ctx)
+
+    const written = (sink.bootstrap as unknown as { mock: { calls: [RunManifest][] } }).mock.calls[0][0]
+    expect(written.dependencyProvenance).toEqual(provenance)
+    expect(written.testReviewApproval).toEqual(approval)
+  })
 })
 
 describe('captureDirtySpecBaseline', () => {

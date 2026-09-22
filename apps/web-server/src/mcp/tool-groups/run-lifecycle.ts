@@ -4,7 +4,7 @@
 // profile arrays in ../tool-support.ts (see the cl_add-mcp-tool skill).
 import { z } from 'zod'
 import type { CallToolResult, InputRequiredResult } from '@modelcontextprotocol/server'
-import { applyUserInput, completedUserInput, inputPending, matchesUserInput, requestNextUserInput, requestUserInput } from '../elicitation'
+import { applyUserInput, completedUserInput, inputPending, matchesUserInput, openFormUserInput, requestUserInput } from '../elicitation'
 import { normalizeRunCounts } from '../../features/runs/logic/heal/external-heal-surface'
 import { isHealClaimAllowed } from '../../features/runs/logic/heal/heal-claim-policy'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
@@ -35,7 +35,9 @@ const coverageChangeResponse = z.object({
 })
 
 type CoverageChange = z.infer<typeof coverageChangeResponse>['change']
-type CoverageDecision = { revision: string; allowStale: boolean; change?: CoverageChange }
+type CoverageDecision =
+  | { revision: string; allowStale: false; change?: CoverageChange }
+  | { revision: string; allowStale: true; change: CoverageChange }
 
 export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -118,10 +120,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       mode: 'form' as const,
       schema: isolationSchema,
     })
-    const askCoverage = (
-      change: CoverageChange,
-      nextRound: boolean,
-    ): Promise<CallToolResult | InputRequiredResult> => {
+    const askCoverage = (change: CoverageChange): CallToolResult | InputRequiredResult => {
       const spec = {
         ...coverageQuestion(change),
         message: `${change.freshness.reasons.join(' ')} Previous coverage percentages do not describe the current tests. Update coverage before running, or run now for diagnostics with coverage still marked stale?`,
@@ -135,29 +134,19 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
           nextSteps: ['ask_user_update_coverage_or_run_now'],
         }),
       }
-      const chosen = async (answer: z.infer<typeof coverageChoiceSchema>) => answer.choice === 'Update coverage first'
-        ? coverageRecovery(change)
-        : begin(args.isolation, { revision: change.freshness.revision, allowStale: true, change }, true)
-      return nextRound
-        ? Promise.resolve(requestNextUserInput(request, ctx.clientFacts(), spec, chosen))
-        : requestUserInput(request, ctx.clientFacts(), spec, chosen)
+      return openFormUserInput(request, ctx.clientFacts(), spec)
     }
     const askIsolation = (
       decision: CoverageDecision,
       fallback: () => CallToolResult,
       message: string,
-      nextRound: boolean,
-    ): Promise<CallToolResult | InputRequiredResult> => {
+    ): CallToolResult | InputRequiredResult => {
       const spec = { ...isolationQuestion(decision), message, fallback }
-      const chosen = async (answer: z.infer<typeof isolationSchema>) => begin(answer.isolation, decision, true)
-      return nextRound
-        ? Promise.resolve(requestNextUserInput(request, ctx.clientFacts(), spec, chosen))
-        : requestUserInput(request, ctx.clientFacts(), spec, chosen)
+      return openFormUserInput(request, ctx.clientFacts(), spec)
     }
     const begin = async (
       isolation = args.isolation,
       approvedCoverage?: CoverageDecision,
-      answeringQuestion = false,
     ): Promise<CallToolResult | InputRequiredResult> => {
       try {
         const requestedRef = runId ?? run_ref
@@ -264,17 +253,14 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         }
         const coverage = await readCoverage()
         const revision = coverageRevision(coverage)
-        if (approvedCoverage && approvedCoverage.revision !== revision) {
-          return inputPending('Coverage changed while the question was open. Nothing was applied; review current coverage before resuming.')
-        }
         if (requiresCoverageChoice(coverage) && !approvedCoverage?.allowStale) {
-          return askCoverage(coverage, answeringQuestion)
+          return askCoverage(coverage)
         }
         const coverageDecision: CoverageDecision = approvedCoverage ?? { revision, allowStale: false, change: coverage }
         const coverageQualification = coverageDecision.allowStale ? {
           coverageStale: true,
           coverageRevision: coverageDecision.revision,
-          coverageReasons: coverageDecision.change?.freshness.reasons ?? [],
+          coverageReasons: coverageDecision.change.freshness.reasons,
           coverageMessage: 'This diagnostic run does not update or validate the stale coverage mapping.',
         } : {}
 
@@ -333,7 +319,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
             options: outcome.options,
             message: outcome.message,
             nextSteps: ['ask_user_worktree_or_queue'],
-          }), outcome.message, answeringQuestion)
+          }), outcome.message)
         }
         if (outcome.kind === 'queued') {
           return asJsonResult({
@@ -377,15 +363,15 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         if (!requiresCoverageChoice(coverage)) return inputPending('Coverage changed while the question was open. Nothing was applied; review current coverage before resuming.')
         return answer.choice === 'Update coverage first'
           ? coverageRecovery(coverage)
-          : begin(args.isolation, { revision: coverage.freshness.revision, allowStale: true, change: coverage }, true)
+          : begin(args.isolation, { revision: coverage.freshness.revision, allowStale: true, change: coverage })
       })
     }
     for (const allowStale of [false, true]) {
       const decision: CoverageDecision = { revision: coverageRevision(coverage), allowStale, change: coverage }
       if (!matchesUserInput(request, isolationScope(decision))) continue
-      return applyUserInput(request, isolationQuestion(decision), async (answer) => begin(answer.isolation, decision, true))
+      return applyUserInput(request, isolationQuestion(decision), async (answer) => begin(answer.isolation, decision))
     }
-    return applyUserInput(request, coverageQuestion(coverage), async () => inputPending('The input request belongs to a different operation. Nothing was applied.'))
+    return inputPending('The input request belongs to a different operation. Nothing was applied.')
   })
 
   registerTool('boot_services', {

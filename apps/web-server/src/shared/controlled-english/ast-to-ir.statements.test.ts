@@ -1,6 +1,7 @@
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import {
+  callbackHeaderEnglish,
   catchHeaderEnglish,
   finallyHeaderEnglish,
   ifPathHeaderEnglish,
@@ -95,6 +96,11 @@ describe('loops', () => {
       source: 'async function f() { for await (const chunk of stream) { write(chunk); } }',
       english:
         'declare asynchronous function `f`\nwith no parameters\nbody:\n    for await each constant `chunk`\n    from iterable `stream`\n    body:\n        call `write`\n        with argument `chunk`',
+    },
+    {
+      name: 'for-of declaration with type and initializer recovery',
+      source: 'for (let item: string = "seed" of items) { use(item); }',
+      english: 'for each variable `item`\nwith type string\nand initialize it to string "seed"\nfrom iterable `items`\nbody:\n    call `use`\n    with argument `item`',
     },
     { name: 'for-in', source: 'for (const key in bag) { log(key); }', english: 'for each constant `key`\nfrom the enumerable keys of `bag`\nbody:\n    call `log`\n    with argument `key`' },
     { name: 'while', source: 'while (busy) { wait(); }', english: 'while `busy` is truthy\nbody:\n    call `wait` with no arguments' },
@@ -355,5 +361,24 @@ try { run(); } catch { recover(); }
     expect(renderEnglish(catchHeaderEnglish(withBinding))).toBe('on error caught as `error`')
     expect(renderEnglish(finallyHeaderEnglish(withBinding))).toBe('finally')
     expect(renderEnglish(catchHeaderEnglish(withoutBinding))).toBe('catch')
+  })
+
+  it('projects arrow and function-expression callback headers without their bodies', () => {
+    const { sourceFile } = parseSource('example.ts', 'run(async (value: string) => { use(value); }, function named() { return 1; });')
+    const statement = sourceFile.statements[0]
+    if (!ts.isExpressionStatement(statement) || !ts.isCallExpression(statement.expression)) throw new Error('Expected call')
+    const [arrow, functionExpression] = statement.expression.arguments
+    if (!arrow || !functionExpression || !ts.isArrowFunction(arrow) || !ts.isFunctionExpression(functionExpression)) throw new Error('Expected callbacks')
+
+    expect(renderEnglish(callbackHeaderEnglish(arrow))).toContain('asynchronous arrow function')
+    expect(renderEnglish(callbackHeaderEnglish(functionExpression))).toContain('function expression')
+  })
+
+  it('keeps a declaration-only function header when no body exists', () => {
+    const { sourceFile } = parseSource('example.ts', 'declare function declared(value: string): void;')
+    const declaration = sourceFile.statements[0]
+    if (!ts.isFunctionDeclaration(declaration)) throw new Error('Expected function declaration')
+
+    expect(renderEnglish(statementHeaderEnglish(declaration))).toContain('declare ambient function `declared`')
   })
 })
