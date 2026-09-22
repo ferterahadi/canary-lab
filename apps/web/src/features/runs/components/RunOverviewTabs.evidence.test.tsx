@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BootFailureEvidence, RunOverviewTab } from './RunOverviewTabs'
 import type { RunManifest, ServiceManifestEntry } from '@/shared/api/types'
+import type { RunBootFailure } from '@shared/run-state'
 import type { RunDependencyProvenance } from '@shared/dependency-provenance'
 import { deriveRunViewModel } from '../utils/run-view-model'
 import { openEditor } from '@/shared/api/client'
@@ -50,6 +51,18 @@ function renderOverview(provenance?: RunDependencyProvenance[]) {
   act(() => root.render(<RunOverviewTab manifest={manifest} services={services} repoBranches={[]} view={deriveRunViewModel(undefined)} />))
 }
 
+function renderBootOverview(bootFailure?: RunBootFailure, names = ['api']) {
+  const services: ServiceManifestEntry[] = names.map((name) => ({
+    repoName: name, name, safeName: name, command: `npm run ${name}`, cwd: `/worktree/${name}`,
+    healthUrl: `http://localhost/${name}/health`, logPath: `/run/svc-${name}.log`, status: bootFailure?.safeName === name ? 'timeout' : 'ready',
+  }))
+  const manifest: RunManifest = {
+    runId: 'run-boot', feature: 'demo', status: 'healing', startedAt: '2026-09-22T00:00:00Z', healCycles: 1,
+    services, ...(bootFailure ? { bootFailure } : {}),
+  }
+  act(() => root.render(<RunOverviewTab manifest={manifest} services={services} repoBranches={[]} view={deriveRunViewModel(undefined)} />))
+}
+
 afterEach(() => {
   act(() => root.unmount())
   container.remove()
@@ -76,7 +89,46 @@ describe('run overview evidence', () => {
     expect(container.textContent).toContain('process-exit')
     expect(container.textContent).toContain('Underlying cause not preserved')
     expect(container.textContent).toContain('npm run dev')
-    expect(container.textContent).toContain('/runs/1/svc-api.log')
+    expect(container.textContent).not.toContain('/runs/1/svc-api.log')
+    act(() => (container.querySelector('button') as HTMLButtonElement).click())
+    expect(openEditor).toHaveBeenCalledWith({ file: '/runs/1/svc-api.log' })
+  })
+
+  it('moves a matched boot failure into the affected service card and orders that service first', () => {
+    renderBootOverview({
+      service: 'api', safeName: 'api', reason: 'process-exited', detail: 'Exited.', logPath: '/run/svc-api.log',
+      excerpt: 'Error: unavailable',
+    }, ['healthy', 'api'])
+
+    expect(container.querySelector('[data-testid="boot-failure-evidence"]')).toBeNull()
+    expect(container.querySelectorAll('[data-testid="service-boot-failure"]')).toHaveLength(1)
+    expect(container.querySelector('li')?.textContent).toContain('api')
+  })
+
+  it('keeps a run-level fallback when historical boot evidence matches no service', () => {
+    renderBootOverview({
+      service: 'removed-api', safeName: 'removed-api', reason: 'process-exited', detail: 'Exited.', logPath: '/run/removed.log',
+      excerpt: 'Error: unavailable',
+    })
+
+    expect(container.querySelector('[data-testid="boot-failure-evidence"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="service-boot-failure"]')).toBeNull()
+    expect(container.textContent).not.toContain('Evidence preserved')
+  })
+
+  it('updates an already mounted service card when live boot evidence appears and clears', () => {
+    renderBootOverview()
+    const card = container.querySelector('li')
+    expect(container.querySelector('[data-testid="service-boot-failure"]')).toBeNull()
+    renderBootOverview({
+      service: 'api', safeName: 'api', reason: 'health-timeout', detail: 'Timed out.', logPath: '/run/svc-api.log',
+      nextAction: 'Verify readiness, then restart.',
+    })
+    expect(container.querySelector('li')).toBe(card)
+    expect(container.textContent).toContain('Service did not become ready before the timeout.')
+    renderBootOverview()
+    expect(container.querySelector('li')).toBe(card)
+    expect(container.querySelector('[data-testid="service-boot-failure"]')).toBeNull()
   })
 
   it.each([

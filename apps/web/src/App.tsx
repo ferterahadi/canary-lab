@@ -96,6 +96,7 @@ export function App() {
   })
 
   const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
+  const activeRunWaiting = runWaitingState(activeRunDetail ?? globalActiveRunEntry)
   // R26: per-feature live activity (runs / portify / authoring) — the one
   // instance behind the Flights pill and the flights landing list. Clicking an
   // activity-only row opens the activity's REAL surface.
@@ -420,7 +421,7 @@ export function App() {
           selectedFeature={selectedFeature}
           activeRunFeature={globalActiveRunEntry?.feature ?? null}
           activeRunStatus={globalActiveRunEntry?.status ?? null}
-          activeRunWaitingLabel={runWaitingState(activeRunDetail ?? globalActiveRunEntry)?.label}
+          activeRunWaiting={activeRunWaiting}
           activeRunExecutionType={globalActiveRunEntry?.executionType ?? null}
           onSelectFeature={(name) => {
             pendingRunSelectionRef.current = null

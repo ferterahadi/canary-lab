@@ -4,8 +4,9 @@ import type { ExecutionType, Feature, RunStatus, VersionStatus } from '../api/ty
 import { useMcpPromo } from './McpPromoContext'
 import { FeatureConfigEditor, SettingsModal } from '@/features/config'
 import { FeatureChipBadge, FlightStatusChip, flightAwaitsUser, readGroupOpen, writeGroupOpen, type FeatureFlightAction } from '@/features/flights'
-import { SPEC_TONE, featureTone } from '@/features/runs'
+import { SPEC_TONE, featureTone, type RunWaitingState } from '@/features/runs'
 import { ThemeToggle } from '../ui/ThemeToggle'
+import { Chip } from '../ui/StatusChip'
 import { VersionUpdateButton } from './VersionUpdateButton'
 import { ChevronRightIcon } from '@/shared/ui/atoms'
 import { Tooltip } from '../ui/Tooltip'
@@ -23,7 +24,7 @@ interface Props {
   /** Execution type of that active run — a `boot` run gets the teal
    *  "services up" treatment instead of the running/healing tint. */
   activeRunExecutionType?: ExecutionType | null
-  activeRunWaitingLabel?: string
+  activeRunWaiting?: RunWaitingState
   onReviewFeature?: (name: string) => void
   onSelectFeature: (name: string) => void
   onFeaturesChanged?: (preferredFeature?: string | null) => void
@@ -133,7 +134,7 @@ export function FeaturesColumn({
   activeRunFeature,
   activeRunStatus,
   activeRunExecutionType,
-  activeRunWaitingLabel,
+  activeRunWaiting,
   onSelectFeature,
   onReviewFeature,
   onFeaturesChanged,
@@ -208,7 +209,7 @@ export function FeaturesColumn({
                     activeRunFeature={activeRunFeature}
                     activeRunStatus={activeRunStatus}
                     activeRunExecutionType={activeRunExecutionType}
-                    activeRunWaitingLabel={activeRunWaitingLabel}
+                    activeRunWaiting={activeRunWaiting}
                     coverageHeadline={coverageHeadlines[f.name]}
                     onSelectFeature={onSelectFeature} onReviewFeature={onReviewFeature}
                     onOpenCoverage={onOpenCoverage}
@@ -227,7 +228,7 @@ export function FeaturesColumn({
                 activeRunFeature={activeRunFeature}
                 activeRunStatus={activeRunStatus}
                 activeRunExecutionType={activeRunExecutionType}
-                activeRunWaitingLabel={activeRunWaitingLabel}
+                activeRunWaiting={activeRunWaiting}
                 coverageHeadlines={coverageHeadlines}
                 onSelectFeature={onSelectFeature} onReviewFeature={onReviewFeature}
                 onOpenCoverage={onOpenCoverage}
@@ -294,7 +295,7 @@ function FeatureRow({
   activeRunFeature,
   activeRunStatus,
   activeRunExecutionType,
-  activeRunWaitingLabel,
+  activeRunWaiting,
   coverageHeadline,
   onSelectFeature,
   onReviewFeature,
@@ -308,7 +309,7 @@ function FeatureRow({
   activeRunFeature?: string | null
   activeRunStatus?: RunStatus | null
   activeRunExecutionType?: ExecutionType | null
-  activeRunWaitingLabel?: string
+  activeRunWaiting?: RunWaitingState
   coverageHeadline?: string | null
   onReviewFeature?: (name: string) => void
   onSelectFeature: (name: string) => void
@@ -322,16 +323,22 @@ function FeatureRow({
   // clicking the row resumes the flight.
   if (f.pending) return <PendingFeatureRow feature={f} onOpenFlight={onOpenFlight} />
   const isSelected = f.name === selectedFeature
-  // Dirty state never overrides execution colour. The review button carries
-  // advisory attention separately, so pending tests cannot read as failures.
   const tone = featureTone(f)
-  const rowCue = tone ? ' cl-list-row-changed' : ''
   const isActive = Boolean(activeRunFeature) && f.name === activeRunFeature
   const runState = isActive
     ? (activeRunStatus === 'queued' ? 'queued' : activeRunExecutionType === 'boot'
         ? 'booted'
         : activeRunStatus === 'healing' ? 'healing' : 'running')
     : null
+  const runCue = !runState || runState === 'queued'
+    ? ''
+    : activeRunWaiting
+      ? ' cl-list-row-waiting'
+      : runState ? ` cl-list-row-${runState}` : ''
+  // The Review action carries modified-test attention while an execution cue
+  // owns the row colour. Without this guard the later neutral CSS wash masks a
+  // live or waiting run and makes the suite read as idle.
+  const rowCue = tone && !runCue ? ' cl-list-row-changed' : ''
   // The hover shortcut to this suite's flight — absent for a suite nothing has
   // touched yet (starting stays with "+ New" / the picker, per R40), and absent
   // without a destination handler. Resolved once so the reserved width below
@@ -344,6 +351,7 @@ function FeatureRow({
   // permanent tint would make the column noise again.
   const inFlight = Boolean(flight?.live || flight?.attention)
   const showFlightChip = inFlight || flight?.queued === true
+  const showRunWaitingChip = isActive && activeRunWaiting != null
   // The Coverage shortcut is for the resting ledger. While its job runs, Flight
   // owns the live work and is already the adjacent shortcut. Hiding this action
   // avoids two icons that describe the same work but open different surfaces.
@@ -355,25 +363,25 @@ function FeatureRow({
   // nothing ever moves: the ellipsis just lands earlier. Width is computed from
   // the visible count so a 1-action row doesn't reserve space for three.
   const actionCount = 1 + (coverageAction ? 1 : 0) + (flight ? 1 : 0)
-  // The at-rest flight chip already sits in flow at that same right edge, so it
+  // The at-rest status chip already sits in flow at that same right edge, so it
   // has ALREADY cost the name its width — reserving the full cluster on top of it
   // left an in-flight row with ~18px of readable name on hover (204px row − 72px
   // chip − 100px reservation). Subtract what the chip yields; the cluster floats
   // over the chip's box as it fades, so the icons still land clear of the text.
-  const chipWidth = showFlightChip ? 72 + 6 : 0
+  const chipWidth = showRunWaitingChip || showFlightChip ? 72 + 6 : 0
   const actionsWidth = Math.max(0, actionCount * 28 + (actionCount - 1) * 2 + 12 - chipWidth)
   return (
     <li
-      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${inFlight ? (flight?.attention ? ' cl-list-row-inflight-attention' : ' cl-list-row-inflight') : ''}${runState && runState !== 'queued' && !activeRunWaitingLabel ? ` cl-list-row-${runState}` : ''}${rowCue}`}
+      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${inFlight ? (flight?.attention ? ' cl-list-row-inflight-attention' : ' cl-list-row-inflight') : ''}${runCue}${rowCue}`}
       style={{
         // An in-flight suite reads at full text contrast like a selected one: at 6%
         // the wash alone is nearly invisible on the dark theme, so the brighter
         // name does as much of the work as the tint.
-        color: isSelected || inFlight ? 'var(--text-primary)' : 'var(--text-secondary)',
+        color: isSelected || inFlight || Boolean(runCue) ? 'var(--text-primary)' : 'var(--text-secondary)',
         fontWeight: isSelected ? 500 : 400,
         ['--feature-row-actions' as string]: `${actionsWidth}px`,
       }}
-      title={isActive && activeRunWaitingLabel ? activeRunWaitingLabel : runState ? (runState === 'queued' ? 'Queued' : runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : inFlight ? flight?.title : undefined}
+      title={isActive && activeRunWaiting ? activeRunWaiting.label : runState ? (runState === 'queued' ? 'Queued' : runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : inFlight ? flight?.title : undefined}
     >
       {tone && (
         <Tooltip label={`${SPEC_TONE[tone].title} Click to review.`}>
@@ -417,13 +425,26 @@ function FeatureRow({
       >
         {f.name}
       </button>
-      {runState && (
-        <span className="sr-only">{activeRunWaitingLabel ?? (runState === 'queued' ? 'Queued' : runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running')}</span>
+      {runState && !showRunWaitingChip && (
+        <span className="sr-only">{runState === 'queued' ? 'Queued' : runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
       )}
-      {showFlightChip && flight && (
+      {showRunWaitingChip && activeRunWaiting && (
+        <span className="feature-row__status-chip mr-1.5 shrink-0 self-center" aria-label={activeRunWaiting.label}>
+          <Chip
+            tone={activeRunWaiting.kind === 'queued' ? 'var(--text-muted)' : 'var(--warning)'}
+            background={activeRunWaiting.kind === 'queued' ? 'var(--bg-elevated)' : undefined}
+            chrome="fill"
+            label={activeRunWaiting.shortLabel}
+            uppercase
+            fontSize={10}
+            testId={`run-waiting-${f.name}`}
+          />
+        </span>
+      )}
+      {!showRunWaitingChip && showFlightChip && flight && (
         /* In flow, not floating — it keeps its box while fading under the hover
            action cluster, so the row can't reflow as the pointer arrives. */
-        <span className="feature-row__flight-chip mr-1.5 shrink-0 self-center" data-testid={`flight-chip-${f.name}`}>
+        <span className="feature-row__status-chip mr-1.5 shrink-0 self-center" data-testid={`flight-chip-${f.name}`}>
           <FeatureChipBadge chip={flight} />
         </span>
       )}
@@ -499,7 +520,7 @@ function FeatureGroupAccordion({
   activeRunFeature,
   activeRunStatus,
   activeRunExecutionType,
-  activeRunWaitingLabel,
+  activeRunWaiting,
   coverageHeadlines,
   onSelectFeature,
   onReviewFeature,
@@ -513,7 +534,7 @@ function FeatureGroupAccordion({
   activeRunFeature?: string | null
   activeRunStatus?: RunStatus | null
   activeRunExecutionType?: ExecutionType | null
-  activeRunWaitingLabel?: string
+  activeRunWaiting?: RunWaitingState
   coverageHeadlines: Record<string, string | null>
   onReviewFeature?: (name: string) => void
   onSelectFeature: (name: string) => void
@@ -556,7 +577,7 @@ function FeatureGroupAccordion({
               activeRunFeature={activeRunFeature}
               activeRunStatus={activeRunStatus}
               activeRunExecutionType={activeRunExecutionType}
-              activeRunWaitingLabel={activeRunWaitingLabel}
+              activeRunWaiting={activeRunWaiting}
               coverageHeadline={coverageHeadlines[f.name]}
               onSelectFeature={onSelectFeature} onReviewFeature={onReviewFeature}
               onOpenCoverage={onOpenCoverage}

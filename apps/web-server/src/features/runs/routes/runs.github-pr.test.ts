@@ -16,10 +16,15 @@ vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => '
 // depth next door, so here they're stubbed to prove the wiring, the 409 gate,
 // and the manifest merge.
 const prMocks = vi.hoisted(() => ({ buildPrPreflight: vi.fn(), proposeFixesForRun: vi.fn() }))
+const ghMocks = vi.hoisted(() => ({
+  detectGhStatus: vi.fn(async () => ({ installed: true, authenticated: false })),
+}))
 
 vi.mock('../logic/pr/pr-preflight', () => ({ buildPrPreflight: prMocks.buildPrPreflight }))
 
 vi.mock('../logic/pr/propose-fixes', () => ({ proposeFixesForRun: prMocks.proposeFixesForRun }))
+
+vi.mock('../../../shared/gh-cli', () => ({ detectGhStatus: ghMocks.detectGhStatus }))
 
 let tmpDir: string
 
@@ -28,6 +33,7 @@ let logsDir: string
 let featuresDir: string
 
 beforeEach(() => {
+  ghMocks.detectGhStatus.mockClear()
   tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rroutes-')))
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
@@ -115,6 +121,7 @@ describe('GitHub / PR routes (R80)', () => {
     expect(res.statusCode).toBe(200)
     expect(res.json()).toHaveProperty('installed')
     expect(res.json()).toHaveProperty('authenticated')
+    expect(ghMocks.detectGhStatus).toHaveBeenCalledOnce()
   })
 
   it('pr-preflight + propose-pr 404 for an unknown run, 409 with no captured fixes', async () => {

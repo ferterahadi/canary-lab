@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { createHmac, randomBytes } from 'crypto'
+import { elicitationAdviceFor } from '../client-surface'
 import { completedUserInput, inputPending, requestUserInput } from '../elicitation'
 import { asJsonResult, errorResult, healWaitNext, type ToolGroupContext } from '../tool-support'
 import { TEST_REVIEW_WAIT_MS, testReviewOutcome, waitForTestReview } from '../test-review-wait'
@@ -117,7 +118,10 @@ export function registerTestReviewTools(ctx: ToolGroupContext): void {
       message: `Review ${review.files.length} changed suite files for ${review.feature} (${runId}). ${reviewUrl(review) ? `Optional comparison: ${reviewUrl(review)}. ` : ''}Patch: ${review.patchPath}. Revision ${review_revision}. Choose Accept & commit or Restore recorded files. Cancel leaves the review pending. Acceptance is not a passing test result.`,
       fallback: () => asJsonResult({ status: 'needs-input', reason: 'elicitation-unavailable', runId, reviewUrl: reviewUrl(review), patchPath: review.patchPath,
         review_revision, browser_wait_token: waitToken,
-        next: 'This client does not advertise form elicitation; no approval question was presented. Report that limitation, not that the human has not decided. Use an elicitation-capable session for approval here. If the human chooses the optional browser fallback, open reviewUrl and wait with the returned browser_wait_token and wait_for_decision:true. Do not click approval controls yourself. Never infer approval from a Git commit or restart.' }),
+        // The client sentence comes from one helper; everything after it is this
+        // gate's own rule and stays verbatim — it is what keeps a browser click, a
+        // commit, or a restart from ever reading as approval.
+        next: `${elicitationAdviceFor(facts, 'form')} Use an elicitation-capable session for approval here. If the human chooses the optional browser fallback, open reviewUrl and wait with the returned browser_wait_token and wait_for_decision:true. Do not click approval controls yourself. Never infer approval from a Git commit or restart.` }),
     }, async (answer) => {
       // The human response is the only entry to this mutation; the route rechecks
       // the revision again while copying, including edits after this form resumed.

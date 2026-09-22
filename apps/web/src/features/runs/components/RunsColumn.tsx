@@ -5,6 +5,7 @@ import { deriveRunViewModel } from '../utils/run-view-model'
 import { useRunDetails } from '../state/RunsContext'
 import { useRunsColumn } from './use-runs-column'
 import { RunStatusIndicator } from './RunStatusIndicator'
+import { EmptyState } from '@/shared/ui/EmptyState'
 import { VerificationDialog } from '@/features/coverage'
 import { ActionButton, ConfirmDialog, DeleteIconButton, ExecutionTypeBadge, RetestIconButton, RunActionsKebab } from './RunActionsKebab'
 import { ICON_PAUSE, ICON_STOP, RunLaunchControl } from './RunLaunchControl'
@@ -109,9 +110,13 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
       </div>
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         {!feature ? (
-          <div className="px-4 py-6 text-xs" style={{ color: 'var(--text-muted)' }}>Select a suite.</div>
+          // Compact for both, and for the same reason the Tests column beside
+          // this one is: the title is the whole message, and the control that
+          // resolves it is never inside this scroller — it is the Suites column
+          // to the left, or the Run button in this column's own header.
+          <EmptyState compact reason="not-yet" title="No suite selected" testId="runs-no-suite" />
         ) : runs.length === 0 ? (
-          <div className="px-4 py-6 text-xs" style={{ color: 'var(--text-muted)' }}>No runs yet for this suite.</div>
+          <EmptyState compact reason="not-yet" title="No runs yet for this suite" testId="runs-none" />
         ) : (
           <ul className="flex flex-col gap-1 px-2 py-2">
             {runs.map((r) => {

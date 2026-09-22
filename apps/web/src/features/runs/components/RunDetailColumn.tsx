@@ -7,6 +7,7 @@ import { useInvalidationKey } from '@/shared/state/invalidation'
 import { deriveRunViewModel } from '../utils/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
+import { EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY, healNoTranscriptCopy, type EmptyCopy } from '@/shared/ui/empty-state-copy'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { ExternalHealPanel } from './ExternalHealPanel'
@@ -134,20 +135,10 @@ export function RunDetailColumn({
     if (isBootRun && tab !== 'overview' && tab !== 'run-logs' && tab !== 'services') setTab('overview')
   }, [isVerifyRun, isBootRun, tab])
 
-  if (!runId) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
-        Select a run
-      </div>
-    )
-  }
-  if (!detail) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
-        Loading...
-      </div>
-    )
-  }
+  // Compact for both: the run list that fills this pane sits directly above
+  // it, so a three-line body here would spend all three saying "pick one".
+  if (!runId) return <EmptyState compact reason="not-yet" title="No run selected" testId="run-detail-none" />
+  if (!detail) return <EmptyState compact reason="not-yet" title="Loading this run…" testId="run-detail-loading" />
 
   const m = detail.manifest
   const isVerify = isVerifyRun

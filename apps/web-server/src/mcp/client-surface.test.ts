@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyMcpClient, clientKindFromFacts, fanOutAdviceFor, type McpClientSurface } from './client-surface'
+import { classifyMcpClient, clientKindFromFacts, elicitationAdviceFor, fanOutAdviceFor, type McpClientFacts, type McpClientSurface } from './client-surface'
 
 // The `name` values below are the ones real clients send, not invented examples:
 // the Claude Code CLI and Desktop's local-agent mode both identify as
@@ -110,6 +110,60 @@ describe('fanOutAdviceFor', () => {
     const advice = fanOutAdviceFor(classifyMcpClient({ name: 'mcp-inspector' }))
     expect(advice).toMatch(/read serially/i)
     expect(advice).toMatch(/advisory/i)
+  })
+})
+
+describe('elicitationAdviceFor — what a needs-input fallback says about the client', () => {
+  // Facts as the shipped clients really send them (compare /mcp/health on a live
+  // server): Desktop's Code tab declares no elicitation at all, the CLI declares a
+  // bare `elicitation: {}`, Codex names both modes.
+  const desktopCodeTab = classifyMcpClient({ name: 'local-agent-mode-Canary_Lab', version: '1.0.0' }, {})
+  const cli = classifyMcpClient({ name: 'claude-code', version: '2.1.251' }, { elicitation: {} })
+  const codex = classifyMcpClient({ name: 'codex-mcp-client' }, { elicitation: { form: {}, url: {} } })
+  const unknown = classifyMcpClient({ name: 'mcp-inspector' }, {})
+
+  it('names Desktop\'s Code tab as the client that shows no form, and where forms work', () => {
+    const advice = elicitationAdviceFor(desktopCodeTab, 'form')
+    expect(advice).toMatch(/^Claude Desktop's local agent mode \(Code tab\) presents no MCP forms/)
+    expect(advice).toMatch(/declares no elicitation capability/)
+    expect(advice).toMatch(/Report that limitation, not that the human declined or has not decided/)
+    expect(advice).toMatch(/Claude Code CLI and Codex declare form elicitation/)
+  })
+
+  it('says the same about URL prompts, naming only the client that declares them', () => {
+    const advice = elicitationAdviceFor(desktopCodeTab, 'url')
+    expect(advice).toMatch(/presents no MCP URL prompts/)
+    expect(advice).toMatch(/Codex declares URL elicitation/)
+    expect(advice).not.toMatch(/Claude Code CLI/)
+  })
+
+  it('stays neutral when the client declared the mode — the question simply was not opened', () => {
+    // No request context, a structural fallback, and a client that can show the
+    // form all land here; none of them is a client defect.
+    expect(elicitationAdviceFor(cli, 'form')).toBe('Your client declares MCP forms, but none was presented in this call.')
+    expect(elicitationAdviceFor(codex, 'url')).toBe('Your client declares MCP URL prompts, but none was presented in this call.')
+  })
+
+  it('distinguishes a client that declares elicitation but not this mode', () => {
+    const advice = elicitationAdviceFor(cli, 'url')
+    expect(advice).toMatch(/declares elicitation but not MCP URL prompts/)
+    expect(advice).not.toMatch(/Desktop|Codex/)
+  })
+
+  it('describes an unknown client without naming Desktop', () => {
+    const advice = elicitationAdviceFor(unknown, 'form')
+    expect(advice).toMatch(/declares no MCP elicitation/)
+    expect(advice).not.toMatch(/Desktop/)
+  })
+
+  it('never tells the agent what to do — the owning tool appends that', () => {
+    // The repair rule depends on this: test-review's "never infer approval" prose
+    // follows this sentence verbatim, and a shared "ask the user" here would turn
+    // an approval into a chat answer on every site at once.
+    const clients: McpClientFacts[] = [desktopCodeTab, cli, codex, unknown]
+    for (const facts of clients) for (const mode of ['form', 'url'] as const) {
+      expect(elicitationAdviceFor(facts, mode)).not.toMatch(/ask the user|in chat|approv|open the/i)
+    }
   })
 })
 

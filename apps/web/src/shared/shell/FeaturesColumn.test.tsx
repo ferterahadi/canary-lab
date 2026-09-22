@@ -154,6 +154,111 @@ describe('FeaturesColumn active-run highlight', () => {
     expect(row.classList.contains('cl-list-row-running')).toBe(true)
     expect(row.querySelector('.sr-only')?.textContent).toBe('Running')
   })
+
+  it('keeps a waiting heal visible with a steady row cue and compact label', () => {
+    const waiting = {
+      kind: 'agent' as const,
+      label: 'Waiting for agent',
+      shortLabel: 'waiting',
+      detail: 'Resume the external repair session.',
+    }
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[feature('alpha'), feature('beta')]}
+          selectedFeature="alpha"
+          activeRunFeature="beta"
+          activeRunStatus="healing"
+          activeRunWaiting={waiting}
+          onSelectFeature={() => {}}
+        />,
+      )
+    })
+
+    const beta = featureRow('beta')
+    expect(beta.classList.contains('cl-list-row-waiting')).toBe(true)
+    expect(beta.classList.contains('cl-list-row-healing')).toBe(false)
+    expect(beta.style.color).toBe('var(--text-primary)')
+    expect(featureRow('alpha').classList.contains('cl-list-row-waiting')).toBe(false)
+    expect(beta.querySelector('[data-testid="run-waiting-beta"]')?.textContent).toBe('waiting')
+    expect(beta.querySelector('[aria-label="Waiting for agent"]')).toBeTruthy()
+
+    // The run detail stream updates this prop in place. The open Suites column
+    // must return to the animated healing cue without a remount or refresh.
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[feature('alpha'), feature('beta')]}
+          selectedFeature="alpha"
+          activeRunFeature="beta"
+          activeRunStatus="healing"
+          onSelectFeature={() => {}}
+        />,
+      )
+    })
+    expect(featureRow('beta').classList.contains('cl-list-row-waiting')).toBe(false)
+    expect(featureRow('beta').classList.contains('cl-list-row-healing')).toBe(true)
+    expect(featureRow('beta').querySelector('[data-testid="run-waiting-beta"]')).toBeNull()
+  })
+
+  it('keeps execution as the row cue when modified tests also need review', () => {
+    const changed = {
+      name: 'alpha', repos: [], envs: [],
+      dirty: {
+        status: 'dirty' as const,
+        specs: [{ file: 'e2e/a.spec.ts', affectedTests: ['a'] }],
+      },
+    }
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[changed]}
+          selectedFeature={null}
+          activeRunFeature="alpha"
+          activeRunStatus="healing"
+          activeRunWaiting={{
+            kind: 'test-review',
+            label: 'Awaiting test review',
+            shortLabel: 'to review',
+            detail: 'Review the unexecuted test edits.',
+          }}
+          onSelectFeature={() => {}}
+        />,
+      )
+    })
+
+    const row = featureRow('alpha')
+    expect(row.classList.contains('cl-list-row-waiting')).toBe(true)
+    expect(row.classList.contains('cl-list-row-changed')).toBe(false)
+    expect(row.querySelector('[data-testid="dirty-badge-alpha"]')?.textContent).toBe('Review')
+    expect(row.querySelector('[data-testid="run-waiting-alpha"]')?.textContent).toBe('to review')
+  })
+
+  it('labels a queued run without applying the amber waiting wash', () => {
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[feature('alpha')]}
+          selectedFeature={null}
+          activeRunFeature="alpha"
+          activeRunStatus="queued"
+          activeRunWaiting={{
+            kind: 'queued',
+            label: 'Queued',
+            shortLabel: 'queued',
+            detail: 'Services and tests have not started.',
+          }}
+          onSelectFeature={() => {}}
+        />,
+      )
+    })
+
+    const row = featureRow('alpha')
+    expect(row.classList.contains('cl-list-row-waiting')).toBe(false)
+    expect(row.classList.contains('cl-list-row-running')).toBe(false)
+    expect(row.querySelector('[data-testid="run-waiting-alpha"]')?.textContent).toBe('queued')
+    expect(row.querySelector<HTMLElement>('[data-testid="run-waiting-alpha"]')?.style.color).toBe('var(--text-muted)')
+  })
 })
 
 describe('FeaturesColumn coverage action (R8)', () => {

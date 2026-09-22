@@ -26,9 +26,18 @@ describe('MCP 2.0 elicitation', () => {
     const apply = vi.fn(async () => asJsonResult({ applied: true }))
     const opened = await requestUserInput(context(), facts, spec, apply) as InputRequiredResult
     const result = await requestUserInput(context(opened.requestState, { action }), facts, spec, apply)
-    expect(JSON.stringify(result)).toContain('Do not repeat the question')
+    const text = JSON.stringify(result)
+    expect(text).toContain('Do not repeat the question')
     expect(result).not.toHaveProperty('inputRequests')
     expect(apply).not.toHaveBeenCalled()
+    // A client that declares elicitation but wires no handler declines by itself
+    // (Claude Desktop's Code tab does exactly this). Canary sees the same payload
+    // either way, so it must report the CLIENT's answer and never bank a decision
+    // as the human's — for a test-review approval that would be a fabricated one.
+    const { reason } = JSON.parse((result as { content: [{ text: string }] }).content[0].text)
+    expect(reason).toContain(`The client answered "${action}"`)
+    expect(reason).toMatch(/cannot tell whether a human saw this request/)
+    expect(reason).not.toMatch(/the user chose|user declined|user cancelled|user canceled/i)
   })
 
   it('rejects malformed, forged, cross-operation, and stale responses before mutation', async () => {

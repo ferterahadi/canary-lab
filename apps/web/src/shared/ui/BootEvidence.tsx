@@ -22,15 +22,24 @@ export function bootProcessLabel(failure: BootEvidenceFacts): string {
   return failure.exitCode != null ? `exit ${failure.exitCode}` : 'not captured'
 }
 
-function causeLabel(failure: BootEvidenceFacts): string {
+/** The first-reading sentence. Raw reason/classification stays in diagnostics. */
+export function bootFailureSummary(failure: Pick<RunBootFailure, 'reason'>): string {
+  if (failure.reason === 'spawn-failed') return 'Service could not be started.'
+  if (failure.reason === 'process-exited') return 'Service exited before becoming ready.'
+  if (failure.reason === 'health-timeout') return 'Service did not become ready before the timeout.'
+  return 'Startup was blocked by incompatible dependencies.'
+}
+
+function causeLabel(failure: BootEvidenceFacts): string | null {
   if (failure.classification === 'underlying-cause-not-preserved') return UNPRESERVED_CAUSE
-  return failure.classification === 'empty-output' ? 'No underlying cause observed' : 'Evidence preserved'
+  return failure.classification === 'empty-output' ? 'No underlying cause observed' : null
 }
 
 /** The shared evidence grid behind the run overview's boot-failure card and the
  *  flight stage's error panel. `phase` is derived from `reason` rather than read
  *  off the record, so a historical record renders the same as a fresh one. */
 export function BootEvidenceRows({ failure }: { failure: BootEvidenceFacts }) {
+  const cause = causeLabel(failure)
   return (
     <dl className="grid grid-cols-[92px_minmax(0,1fr)] gap-x-3 gap-y-1 text-secondary">
       <dt className="cl-rubric">Phase</dt><dd>{runBootPhase(failure.reason)}</dd>
@@ -38,7 +47,7 @@ export function BootEvidenceRows({ failure }: { failure: BootEvidenceFacts }) {
       <dt className="cl-rubric">Process</dt><dd>{bootProcessLabel(failure)}</dd>
       {failure.command && <><dt className="cl-rubric">Command</dt><dd className="break-all font-mono">{failure.command}</dd></>}
       {failure.cwd && <><dt className="cl-rubric">Directory</dt><dd className="break-all font-mono">{failure.cwd}</dd></>}
-      <dt className="cl-rubric">Cause</dt><dd>{causeLabel(failure)}</dd>
+      {cause && <><dt className="cl-rubric">Cause</dt><dd>{cause}</dd></>}
     </dl>
   )
 }

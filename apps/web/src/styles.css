@@ -655,8 +655,8 @@ body {
   padding-right: var(--feature-row-actions, 100px);
 }
 
-/* Active-run state is shown by highlighting the whole feature row, not a
-   chip — see .cl-list-row-running / .cl-list-row-healing below. */
+/* Active work is shown by highlighting the whole feature row. Held/queued work
+   also carries a compact label because motion no longer names the state. */
 
 .numeric-input::-webkit-outer-spin-button,
 .numeric-input::-webkit-inner-spin-button {
@@ -1470,18 +1470,18 @@ body {
   background: color-mix(in srgb, var(--warning) 16%, transparent);
 }
 
-/* The at-rest flight chip yields to the hover action cluster that floats over
+/* The at-rest status chip yields to the hover action cluster that floats over
    the same right edge. It keeps its box in flow while fading, so the row never
    reflows — the actions simply take over the space the chip was occupying. */
-.feature-row__flight-chip {
+.feature-row__status-chip {
   transition: opacity 150ms ease;
 }
-.feature-row:hover .feature-row__flight-chip,
-.feature-row:focus-within .feature-row__flight-chip {
+.feature-row:hover .feature-row__status-chip,
+.feature-row:focus-within .feature-row__status-chip {
   opacity: 0;
 }
 
-/* Active-run highlight on the whole row — blue while running, yellow while
+/* Active-run highlight on the whole row — sky while running, amber while
    healing. Declared after the selected/hover rules so an in-flight run wins
    over the grey selected background at equal specificity. The interior tint is
    constant; the row's edge "breathes" — a brand-coloured hairline ring plus a
@@ -1490,10 +1490,10 @@ body {
    gaps. It keeps animating under prefers-reduced-motion by deliberate product
    decision — no reduced-motion gate. */
 .cl-list-row-running {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  background: color-mix(in srgb, var(--running) 16%, transparent);
 }
 .cl-list-row-running:hover {
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, var(--running) 22%, transparent);
 }
 .cl-list-row-healing {
   background: color-mix(in srgb, var(--warning) 18%, transparent);
@@ -1512,8 +1512,8 @@ body {
 }
 .cl-list-row-running::after {
   box-shadow:
-    inset 0 0 0 1px var(--accent),
-    inset 0 0 12px -4px var(--accent);
+    inset 0 0 0 1px var(--running),
+    inset 0 0 12px -4px var(--running);
 }
 .cl-list-row-healing::after {
   box-shadow:
@@ -1523,6 +1523,28 @@ body {
 @keyframes cl-edge-breathe {
   0%, 100% { opacity: 0.55; }
   50% { opacity: 0.95; }
+}
+
+/* A healing run can be resumable without work moving — for example while an
+   external agent is disconnected or test edits await review. Keep the suite
+   locatable with a lighter amber wash and steady inset edge, but never reuse the
+   breathing edge that means active work. The visible row label names the wait. */
+.cl-list-row-waiting {
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+.cl-list-row-waiting:hover {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+}
+.cl-list-row-waiting::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0.7;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--warning) 72%, transparent),
+    inset 0 0 10px -6px var(--warning);
 }
 
 /* Calm "alive but idle" breathe for the boot-only status dot — slower and
@@ -1570,11 +1592,9 @@ body {
     inset 0 0 12px -5px var(--boot);
 }
 
-/* Dirty (test files modified) row: danger tint with a SLOW breathing red edge
-   ring. Declared after the run/heal/boot rows so its ::after wins when a row is
-   both active and dirty — an integrity warning takes visual priority. The cue is
-   held until the user approves or commits, so the breathe is slower (4s) than a
-   running test's to avoid nagging over a long session. */
+/* Legacy integrity-risk treatment retained for callers outside the suite list.
+   Current suite rows keep execution as their row cue and expose modified tests
+   through the Review action instead. */
 .cl-list-row-dirty {
   background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
@@ -1593,9 +1613,9 @@ body {
     inset 0 0 12px -4px var(--danger);
 }
 
-/* Changed (test files edited, nothing reads weaker) row: a quiet neutral wash
-   and no ring — the suite still needs a human's commit, but a changed test is
-   not an alarm (D13). The danger wash above is reserved for a weaker hint. */
+/* Changed test files at rest: a quiet neutral wash and no ring. During a run,
+   FeatureRow omits this class so execution remains the unambiguous row cue; the
+   Review action stays visible in both cases. */
 .cl-list-row-changed {
   background: color-mix(in srgb, var(--text-muted) 10%, transparent);
 }

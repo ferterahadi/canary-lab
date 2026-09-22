@@ -8,6 +8,7 @@ import { documentHash, documentResolutionInput, readDocumentSelection, writeDocu
 import { resolveRepoPath } from '../shared/git-repo'
 import { renderPrompt } from '../shared/prompts'
 import { publishWorkspaceEvent } from '../shared/workspace-events'
+import { elicitationAdviceFor } from './client-surface'
 import { requestDocuments } from './document-input'
 import { requestBrokenDocumentPath } from './document-relink'
 import { inputFingerprint, inputPending, requestUserInput, resumeUrlInput } from './elicitation'
@@ -124,7 +125,7 @@ export async function resolveDocuments(options: ResolveDocumentsOptions): Promis
   }
   const askForDocs = () => requestDocuments(ctx, request, feature, scope, options.documentSource === 'upload',
     () => asJsonResult({ status: 'needs-docs', feature, reason: resolution?.status === 'missing' ? resolution.reason : 'Requirements needed',
-      next: `Elicitation is unavailable. ASK THE USER for the missing requirements, then write_feature_doc and retry ${command}. Never invent a document.` }), supplied,
+      next: `${elicitationAdviceFor(ctx.clientFacts(), 'form')} ASK THE USER for the missing requirements, then write_feature_doc and retry ${command}. Never invent a document.` }), supplied,
     { revision: [options.revision, collection.docsHash, selection, resolution], beforeWrite: options.beforeWrite,
       message: resolution?.status === 'missing' ? `Requirements for ${feature} are missing: ${resolution.reason}` : undefined,
       command })
@@ -144,10 +145,11 @@ export async function resolveDocuments(options: ResolveDocumentsOptions): Promis
   const choices = resolution.candidates.map((candidate, i) => `${i + 1}: ${candidate.label}`)
   const schema = z.object({ choice: z.enum([choices[0], ...choices.slice(1), 'Provide requirements', 'Upload documents']) })
   const message = `${resolution.question}\n${resolution.candidates.map((candidate, i) => `${choices[i]}\n${candidate.sources.map((source) => `${source.path}: ${source.reason}`).join('\n')}`).join('\n')}`
-  return requestUserInput(request, ctx.clientFacts(), {
+  const facts = ctx.clientFacts()
+  return requestUserInput(request, facts, {
     scope, revision: [options.revision, collection.docsHash, selection, resolution], mode: 'form', schema, message,
     fallback: () => asJsonResult({ status: 'needs-input', reason: 'elicitation-unavailable', feature, question: message,
-      next: `ASK THE USER this source question. Return their selected sources as document_resolution.status:"resolved" on ${command}; do not choose for them.` }),
+      next: `${elicitationAdviceFor(facts, 'form')} ASK THE USER this source question. Return their selected sources as document_resolution.status:"resolved" on ${command}; do not choose for them.` }),
   }, async (answer) => {
     const index = choices.indexOf(answer.choice)
     if (index >= 0) return use(resolution.candidates[index].sources)

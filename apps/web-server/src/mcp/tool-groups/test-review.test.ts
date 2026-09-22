@@ -175,6 +175,22 @@ describe('test review human gate', () => {
     expect(send.mock.calls.some(([r]) => r.method === 'POST')).toBe(false)
   })
 
+  it('tells Desktop\'s Code tab that nothing was shown, then keeps the approval rule verbatim', async () => {
+    // The client observed live behind Desktop's Code tab: `local-agent-mode-<server>`,
+    // no elicitation declared at all. The fallback must name that limitation AND
+    // still carry every sentence of the approval rule — a browser click, a Git
+    // commit, or a restart is never approval, whichever client asked.
+    const { send } = fixture()
+    const desktop = { surface: 'claude-code' as const, name: 'local-agent-mode-Canary_Lab', canFanOut: true, sampling: false }
+    const desktopTools = captureTools(registerTestReviewTools, { projectRoot: '/project', testReviewRequest: send, getUiUrl: () => 'http://localhost:1234' }, desktop)
+    const result = value(await desktopTools.raw('review_test_changes', args, context()))
+    expect(result).toMatchObject({ status: 'needs-input', reason: 'elicitation-unavailable', browser_wait_token: expect.any(String) })
+    expect(result.next).toMatch(/^Claude Desktop's local agent mode \(Code tab\) presents no MCP forms/)
+    expect(result.next).toContain('Report that limitation, not that the human declined or has not decided.')
+    expect(result.next).toContain('Do not click approval controls yourself. Never infer approval from a Git commit or restart.')
+    expect(send.mock.calls.some(([r]) => r.method === 'POST')).toBe(false)
+  })
+
   it('reports inactive runs and empty reviews without an adoption prompt', async () => {
     const { tools, review } = fixture()
     review.canAdopt = false

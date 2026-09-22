@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import type { ExternalWorkCheckpointData, FlightManifest, FlightCheckpointResponse } from '../../../../shared/flights/types'
 import { readDocsCollection } from '../features/coverage/logic/coverage/docs-collection'
+import { elicitationAdviceFor } from './client-surface'
 import { resolveDocuments } from './document-resolution'
 import { issueCheckpointInput } from '../features/flights/logic/checkpoint-input'
 import { featureInputUrl } from './document-input'
@@ -17,7 +18,8 @@ export async function requestFlightCheckpoint(
   respond: (response: FlightCheckpointResponse) => Promise<CallToolResult>,
 ): Promise<CallToolResult | InputRequiredResult> {
   const scope = ['flight-checkpoint', ctx.deps.projectRoot, flightId, documentSource, resolution]
-  const resumed = resumeUrlInput(request, ctx.clientFacts(), scope)
+  const facts = ctx.clientFacts()
+  const resumed = resumeUrlInput(request, facts, scope)
   if (resumed) return resumed
   const read = async () => {
     const result = await ctx.deps.flightsRequest!({ method: 'GET', url: `/api/flights/${encodeURIComponent(flightId)}` })
@@ -35,10 +37,14 @@ export async function requestFlightCheckpoint(
   })
   const docs = cp.kind === 'prd-source' || external
   const secret = cp.kind === 'missing-env'
-  const fallback = () => asJsonResult({ status: 'needs-input', reason: 'elicitation-unavailable', flightId,
-    next: secret
+  // `advice` is set only when the CLIENT is why no question opened. The two
+  // structural callers below (no UI URL, no options) pass nothing, so a missing
+  // URL is never reported to the agent as a client limitation.
+  const fallback = (advice?: string) => asJsonResult({ status: 'needs-input', reason: 'elicitation-unavailable', flightId,
+    next: [advice, secret
       ? 'Open the Canary Lab input URL and enter missing environment values there. Never request secrets in chat or a form elicitation.'
       : 'ASK THE USER for the checkpoint choice or requirements in chat, then call respond_flight_checkpoint with their response. Never invent requirements.',
+    ].filter(Boolean).join(' '),
   })
   const unchanged = async (): Promise<CallToolResult | undefined> => {
     const current = await read()
@@ -76,11 +82,11 @@ export async function requestFlightCheckpoint(
     if (!inputUrl) return fallback()
     const url = new URL(inputUrl)
     url.searchParams.set('inputToken', issueCheckpointInput(flight))
-    return requestUserInput(request, ctx.clientFacts(), {
+    return requestUserInput(request, facts, {
       scope, mode: 'url', url: url.toString(),
       message: secret ? 'Enter the missing environment values directly in Canary Lab. Secrets stay outside this conversation.' : 'Review this checkpoint or import the requirements in Canary Lab, then return here.',
       fallback: () => asJsonResult({ status: 'needs-input', reason: 'elicitation-unavailable', flightId, url: url.toString(),
-        next: 'Open this Canary Lab URL to provide input, then resume. Never paste credentials into chat.' }),
+        next: `${elicitationAdviceFor(facts, 'url')} Open this Canary Lab URL to provide input, then resume. Never paste credentials into chat.` }),
     }, async () => {
       const current = await read()
       return current && current.updatedAt !== flight.updatedAt
@@ -94,10 +100,10 @@ export async function requestFlightCheckpoint(
     choice: z.enum(choices as [string, ...string[]]),
     feedback: z.string().max(4000).optional(),
   }).refine((value) => value.choice !== 'revise' || !!value.feedback?.trim())
-  return requestUserInput(request, ctx.clientFacts(), {
+  return requestUserInput(request, facts, {
     scope, revision: [flight.updatedAt, stage.key, cp], mode: 'form', schema,
     message: cp.message,
-    fallback,
+    fallback: () => fallback(elicitationAdviceFor(facts, 'form')),
   }, async (answer) => {
     return respond({ choice: answer.choice, ...(answer.feedback ? { feedback: answer.feedback } : {}), expectedUpdatedAt: flight.updatedAt })
   })

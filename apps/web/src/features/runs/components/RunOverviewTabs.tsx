@@ -73,6 +73,23 @@ export function RunOverviewTab({
   onOpenEvaluationReport,
 }: RunOverviewTabProps) {
   const duration = durationBetween(manifest.startedAt, manifest.endedAt)
+  const serviceOwnsBootFailure = Boolean(
+    manifest.bootFailure
+    && manifest.bootFailure.reason !== 'dependency-incompatible'
+    && services.some((service) => service.safeName === manifest.bootFailure?.safeName),
+  )
+  const incompatibleRepos = new Set(
+    manifest.dependencyProvenance?.filter((item) => item.verdict === 'incompatible').map((item) => item.repoName) ?? [],
+  )
+  const needsAttention = (service: ServiceManifestEntry) => (
+    manifest.bootFailure?.safeName === service.safeName || incompatibleRepos.has(service.repoName ?? '')
+  )
+  // Preserve configured order within each group; only lift affected services
+  // so a failure is never buried below healthy peers in a longer stack.
+  const displayedServices = [
+    ...services.filter(needsAttention),
+    ...services.filter((service) => !needsAttention(service)),
+  ]
   // The "Create evaluation report" trigger moved to the run's tab row
   // (`ReviewEvaluationMenu`) — it is a run-level action, not an Overview one.
   return (
@@ -142,7 +159,9 @@ export function RunOverviewTab({
           {view.primaryAlert.message}
         </div>
       )}
-      {manifest.bootFailure && manifest.bootFailure.reason !== 'dependency-incompatible' && <BootFailureEvidence failure={manifest.bootFailure} />}
+      {manifest.bootFailure && manifest.bootFailure.reason !== 'dependency-incompatible' && !serviceOwnsBootFailure && (
+        <BootFailureEvidence failure={manifest.bootFailure} />
+      )}
       <div className="mt-4">
         {/* No `Services` heading: a stack of named service cards is self-evident,
             and the label was one more line of chrome between the run's facts and
@@ -154,7 +173,7 @@ export function RunOverviewTab({
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
         ) : (
           <ul className="space-y-2">
-            {services.map((s) => (
+            {displayedServices.map((s) => (
               <ServiceCard
                 key={s.safeName}
                 service={s}
@@ -192,7 +211,6 @@ export function BootFailureEvidence({ failure }: { failure: NonNullable<RunManif
         <button type="button" className="cl-button min-h-6 shrink-0 px-2 py-0.5" onClick={() => { void openEditor({ file: failure.logPath }).catch(() => {}) }}>
           Open full service log
         </button>
-        <span className="min-w-0 truncate text-muted font-mono" title={failure.logPath}>{failure.logPath}</span>
       </div>
     </section>
   )

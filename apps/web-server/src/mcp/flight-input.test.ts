@@ -103,6 +103,20 @@ describe('respond_flight_checkpoint — falling back to chat', () => {
     const t = tools(workspace(), () => ok(parked('similarity', { kind: 'similarity-choice', message: 'Reuse or create?' })))
     const result = await t.raw('respond_flight_checkpoint', { flightId: 'fl' }, context())
     expect(json(result).next).toMatch(/ASK THE USER for the checkpoint choice/)
+    // Structural fallback, not a client limitation: no client sentence leads it.
+    expect(json(result).next).not.toMatch(/Your client declares|declares no/)
+    expect(result).not.toHaveProperty('inputRequests')
+  })
+
+  it('names the Code-tab client before asking in chat when it cannot open the form', async () => {
+    // Desktop's Code tab as observed live: `local-agent-mode-<server>`, no
+    // elicitation. The client sentence leads; the checkpoint prose is unchanged.
+    const desktop: McpClientFacts = { surface: 'claude-code', name: 'local-agent-mode-Canary_Lab', canFanOut: true, sampling: false }
+    const t = tools(workspace(), () => ok(parked('similarity', { kind: 'similarity-choice', message: 'Reuse or create?', options: ['reuse', 'create'] })), { facts: desktop })
+    const result = await t.raw('respond_flight_checkpoint', { flightId: 'fl' }, context())
+    expect(json(result)).toMatchObject({ status: 'needs-input', reason: 'elicitation-unavailable' })
+    expect(json(result).next).toMatch(/^Claude Desktop's local agent mode \(Code tab\) presents no MCP forms/)
+    expect(json(result).next).toMatch(/ASK THE USER for the checkpoint choice/)
     expect(result).not.toHaveProperty('inputRequests')
   })
 

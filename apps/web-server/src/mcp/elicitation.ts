@@ -80,6 +80,21 @@ function expirePending(): number {
   return now
 }
 
+/** A non-accept answer is the CLIENT's, and canary cannot see whether a human ever
+ *  saw the request. A client that declares `elicitation` but wires no handler
+ *  answers `decline` by itself — observed on Claude Desktop's Code tab, whose MCP
+ *  client declares `elicitation:{}` (claude-code 2.1.251/2.1.275, captured live)
+ *  while its orchestrator never sets `onElicitation`, so the SDK declines for it.
+ *  Reporting that as "the user chose decline" invents a decision nobody made, and
+ *  for a test-review approval that is the one claim this product must never
+ *  fabricate. So: state what was observed, leave the human's intent unasserted.
+ *  Deliberately no instruction to go ask in chat — `inputPending` already forbids
+ *  repeating the question there, which is what stops a chat reply from becoming an
+ *  approval the human never gave. */
+function clientAnswerReport(action: 'decline' | 'cancel'): string {
+  return `The client answered "${action}". Nothing was applied. Canary cannot tell whether a human saw this request or the client answered on its own, so do not report this as the human's decision.`
+}
+
 /** Match a client's echoed handle to the question it answers, then apply it at
  *  most once. Every rejection here leaves the domain untouched. */
 async function applyAnswer<T>(
@@ -95,7 +110,7 @@ async function applyAnswer<T>(
   const response = z.object({ action: z.enum(['accept', 'decline', 'cancel']), content: z.unknown().optional() }).safeParse(ctx?.mcpReq.inputResponses?.answer)
   if (!response.success) return errorResult('Invalid elicitation response. Nothing was applied.')
   if (response.data.action !== 'accept') {
-    entry.result = Promise.resolve(inputPending(`The user chose ${response.data.action}. Nothing was applied.`))
+    entry.result = Promise.resolve(inputPending(clientAnswerReport(response.data.action)))
   } else if (spec.mode === 'form') {
     const parsed = spec.schema.safeParse(response.data.content)
     if (!parsed.success) return errorResult('The submitted input does not match the requested fields. Nothing was applied.')

@@ -366,8 +366,14 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
           : begin(args.isolation, { revision: coverage.freshness.revision, allowStale: true, change: coverage })
       })
     }
-    for (const allowStale of [false, true]) {
-      const decision: CoverageDecision = { revision: coverageRevision(coverage), allowStale, change: coverage }
+    for (const allowStale of [false, true] as const) {
+      // A stale-coverage isolation question was opened only with a concrete
+      // coverage change. If that evidence disappeared, its new revision fails
+      // applyUserInput's checkpoint before this callback can authorize a run.
+      if (allowStale && !coverage) continue
+      const decision: CoverageDecision = allowStale
+        ? { revision: coverageRevision(coverage), allowStale: true, change: coverage! }
+        : { revision: coverageRevision(coverage), allowStale: false, change: coverage }
       if (!matchesUserInput(request, isolationScope(decision))) continue
       return applyUserInput(request, isolationQuestion(decision), async (answer) => begin(answer.isolation, decision))
     }

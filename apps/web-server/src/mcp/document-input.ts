@@ -5,6 +5,7 @@ import { linkFeatureDoc, writeFeatureDoc } from '../features/config/logic/featur
 import { readDocsCollection } from '../features/coverage/logic/coverage/docs-collection'
 import { resolveFeatureDir } from '../features/coverage/logic/coverage/service'
 import path from 'path'
+import { elicitationAdviceFor } from './client-surface'
 import { requestUserInput, inputPending } from './elicitation'
 import { asJsonResult, authoringCtx, errorResult, type ToolGroupContext } from './tool-support'
 
@@ -32,10 +33,11 @@ export async function requestDocuments(
     if (!url) return fallback()
     const featureDir = resolveFeatureDir(ctx.deps.featuresDir, feature)
     const before = readDocsCollection(featureDir, { includeExcluded: true })
-    return requestUserInput(request, ctx.clientFacts(), {
+    const facts = ctx.clientFacts()
+    return requestUserInput(request, facts, {
       scope, mode: 'url', url,
       message: `Import the requirements documents for ${feature} in Canary Lab, then return here.`,
-      fallback: () => asJsonResult({ status: 'needs-docs', feature, url, next: `Open the document import URL, add the requirements, then retry ${options.command}. Do not invent a document.` }),
+      fallback: () => asJsonResult({ status: 'needs-docs', feature, url, next: `${elicitationAdviceFor(facts, 'url')} Open the document import URL, add the requirements, then retry ${options.command}. Do not invent a document.` }),
     }, async () => {
       const check = options.beforeWrite?.()
       const blocked = check instanceof Promise ? await check : check

@@ -528,14 +528,19 @@ describe('start_run: starting fresh', () => {
     expect(startRun).not.toHaveBeenCalled()
   })
 
-  it.each(['decline', 'cancel'])('starts nothing when the user chooses %s on the stale-coverage question', async (action) => {
+  it.each(['decline', 'cancel'])('starts nothing when the client answers %s on the stale-coverage question', async (action) => {
     const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
     const opened = await raw('start_run', START, context()) as InputRequiredResult
 
     const answered = await raw('start_run', START, context(opened.requestState, { action }))
 
-    expect(JSON.stringify(answered)).toContain(`user chose ${action}`)
+    // Reported as the CLIENT's answer: a client that declares elicitation and
+    // wires no handler declines by itself, so naming the human here would invent
+    // a decision about running against stale coverage that nobody made.
+    const { reason } = JSON.parse((answered as { content: [{ text: string }] }).content[0].text)
+    expect(reason).toContain(`The client answered "${action}"`)
+    expect(reason).not.toMatch(/the user chose/i)
     expect(startRun).not.toHaveBeenCalled()
   })
 
@@ -632,6 +637,27 @@ describe('start_run: starting fresh', () => {
     expect(JSON.stringify(answered)).toContain('work changed while the question was open')
     expect(startRun).toHaveBeenCalledOnce()
     expect(startRun.mock.calls[0]?.[3]).toBeUndefined()
+  })
+
+  it('does not route a stale-coverage isolation answer once coverage evidence is unavailable', async () => {
+    const startRun = vi.fn(async () => collision)
+    const read = vi.fn()
+      .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('stale', 'coverage-v1') })
+      .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('stale', 'coverage-v1') })
+      .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('stale', 'coverage-v1') })
+      .mockResolvedValue({ statusCode: 503, body: {} })
+    const { raw } = harness({ startRun, coverageRequest: read }, eliciting)
+    const coverageOpened = await raw('start_run', START, context()) as InputRequiredResult
+    const isolationOpened = await raw('start_run', START, context(coverageOpened.requestState, {
+      action: 'accept', content: { choice: 'Run now with stale coverage' },
+    })) as InputRequiredResult
+
+    const answered = await raw('start_run', START, context(isolationOpened.requestState, {
+      action: 'accept', content: { isolation: 'worktree' },
+    }))
+
+    expect(JSON.stringify(answered)).toContain('belongs to a different operation')
+    expect(startRun).toHaveBeenCalledOnce()
   })
 
   it('starts normally when coverage is current but still needs a proving run', async () => {

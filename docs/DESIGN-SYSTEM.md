@@ -322,17 +322,27 @@ Adopted by the coverage pane (`features/coverage/**`, which keeps only its own
 placement on top) and the two flight launchers (`FlightStartDialog`,
 `FlightControls`' re-run picker).
 
-### Row-state stack — precedence matters
+### Suite row states
 
-Live rows tint their background and animate an inset `::after` ring. Declared in
-this order so the later rule wins when a row is in two states at once:
+The suite list uses row colour for its primary state and a compact label when
+colour or motion cannot name the state by itself. A run cue owns the row colour;
+modified tests remain visible through the amber Review action instead of
+replacing execution state:
 
-| Class | Tint | Edge | Meaning |
+| State / class | Tint | Edge or label | Meaning |
 | --- | --- | --- | --- |
-| `.cl-list-row-running` | accent 16% | breathe 3s | test run in flight |
-| `.cl-list-row-healing` | warning 18% | breathe 3s | heal loop active |
-| `.cl-list-row-booted` | boot 14% | **steady** 0.7 | services up, idle — calmer on purpose |
-| `.cl-list-row-dirty` | danger 14% | breathe **4s** | test files modified — **wins over all of the above**; an integrity warning outranks activity. Slower breathe because the cue is held until resolved. |
+| selected / `.cl-list-row-selected` | neutral selected background | none | suite currently open |
+| flight active / `.cl-list-row-inflight` | running 6% | stage chip | authoring or another flight stage is moving, but tests are not executing |
+| flight attention / `.cl-list-row-inflight-attention` | warning 10% | stage chip | flight is waiting for the user |
+| queued | none | neutral `QUEUED` label | services and tests have not started |
+| running / `.cl-list-row-running` | running 16% | breathe 3s | test run in flight |
+| healing / `.cl-list-row-healing` | warning 18% | breathe 3s | heal loop actively working |
+| waiting / `.cl-list-row-waiting` | warning 10% | **steady** 0.7 plus `WAITING` or `TO REVIEW` | heal loop is paused for an agent or test review |
+| booted / `.cl-list-row-booted` | boot 14% | **steady** 0.7 | services up, idle — calmer on purpose |
+| changed / `.cl-list-row-changed` | text-muted 10% | amber Review action | modified tests while no execution state owns the row |
+
+`.cl-list-row-dirty` remains as a legacy danger 14% treatment for callers
+outside the suite list; `FeatureRow` does not use it for modified tests.
 
 All motion is opacity on a fully-inset `::after`, so nothing spills into row
 gaps. The running/healing edge keeps animating under `prefers-reduced-motion`
