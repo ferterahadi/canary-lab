@@ -1,7 +1,7 @@
 Canary Lab — external repair loop. Fix app/service code, not tests, unless a test is provably wrong; never delete, skip, weaken, or loosen an assertion to turn a run green.
 
 1. start_run with claim_heal:true, one stable session_id, and conversation_name; never pass client_kind. For "rerun <id>" pass run_ref. A stale-coverage fresh start asks the USER update-first vs diagnostic run-now; never choose. Update-first starts nothing; run-now stays coverageStale. Special results — repo_collision_requires_choice: ASK worktree vs queue; queued:true: wait; boot_session: no heal task; getting_started_busy: follow its target.
-2. wait_for_heal_task with the same runId + session_id. It BLOCKS for a bounded window; type:"still_waiting" is NOT terminal — call it again until needs_heal / passed / failed. Never poll get_run_snapshot or get_run in a loop.
+2. After a successful claim, immediately call wait_for_heal_task with the same runId + session_id, including after reading this guide. Keep this duty active; do not end with “done while waiting”. It BLOCKS for a bounded window; type:"still_waiting" is NOT terminal — call it again until needs_heal / passed / failed. Never poll get_run_snapshot or get_run in a loop.
 3. On needs_heal follow context.nextSteps (read context.healPrompt.startHere first), fix it YOURSELF, then signal_run ONCE with hypothesis + fixDescription and wait again. The signal requests runner verification; it does not claim a pass. Do not start services or run Playwright or other runtime checks; Canary owns restart, health, and verification.
 
 Read result.counts.statusLine / result.counts.passed, never total - failed (not-run is not a pass). Relay dirtyTests/specEdits VERBATIM once; never edit the test files to clear them. specEdits changed after start and were NOT tested: get_test_review → show patch → review_test_changes. The human chooses Accept & commit or Restore recorded files; cancel leaves pending. Acceptance commits the exact scope and returns a durable receipt, then an active run reruns or an ended run needs start_run without run_ref. No MCP tool can self-approve. The old verdict is preserved; a weaker hint → restore.
@@ -10,6 +10,39 @@ Full guide: get_workflow_guide(workflow:"repair").
 
 <!-- initialize-cut -->
 Details:
+
+## Keep ownership until an explicit outcome
+
+A successful heal claim makes this run your unfinished task. Claiming does not
+start a background repair agent.
+
+- After `start_run` returns an ordinary run with your heal claim, or
+  `claim_heal` succeeds, your next run action is `wait_for_heal_task` with that
+  `runId` and the same `session_id`.
+  If you needed to load this skill or `get_workflow_guide(workflow: "repair")`, make that
+  call immediately after reading it. A promise to wait is not the call.
+- On `still_waiting`, call the bounded wait again. On `needs_heal`, work on this
+  run's repair, then `signal_run` once and wait again. Give progress updates
+  between calls; do not end the turn with “done while waiting” or switch to suite
+  authoring, coverage mapping, or another run while this duty is unresolved.
+- The wait sends heartbeats only while its call is open. During a long repair,
+  use the run-specific `heartbeat` with `status: "healing"` at work milestones
+  before the claim goes stale. Chat, unrelated tool calls, and `get_run_actions`
+  do not supervise this run. Do not send heartbeats merely to keep an abandoned
+  task appearing active.
+- If a tool fails, distinguish a retryable call error from a permission denial
+  or missing connection. Correct an invalid argument and retry the same run;
+  never bypass a denied action through shell commands or a different API.
+  If you cannot continue, tell the user the run ID, last confirmed state, exact
+  blocker, and the action needed to resume or stop. Do not claim it is paused,
+  cancelled, or supervised unless a tool result confirms that outcome.
+- Before yielding to unrelated work or ending with an active run, resolve who
+  will drive it or follow the user's stop instruction. `cancel_heal` ends an
+  in-flight heal as failed; use it when stopping repair is authorized and check
+  its result. `abort_run` requires the human stop form. `pause_run` enters heal
+  mode, and `release_heal` only releases ownership: neither safely parks or
+  cancels the run. If stopping is blocked or needs user input, report that the
+  run is still active and needs attention.
 
 When a blocked start returns request_id, carry it through get_test_review and
 review_test_changes. After human acceptance or restoration, resume with start_run

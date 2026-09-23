@@ -58,6 +58,39 @@ guide's "Repair a Broken Suite" card emits exactly this shape) is a suite
 3. If the health check fails, start `npx canary-lab ui` from the workspace in a visible long-running terminal; if this client cannot run long-lived commands, ask the user to run `npx canary-lab ui` from the workspace and confirm when it's up.
 4. A healthy `/mcp/health` means the server is live. On the setup-installed `compact` profile, atomic names such as `get_feature_coverage` are deliberately absent from `tools/list`; only `exec` is public. Call `exec` with `{"command":"list_tools","arguments":{}}` before concluding the connection is missing. Only an unknown-tool error for `exec` means this session is not connected — ask the user to run `npx canary-lab setup --force` and reconnect/restart the client, then retry. Never drive `/mcp` with a hand-written HTTP/JSON-RPC client (curl included; the health check above is the only direct HTTP use): a custom client bypasses client detection and reconnect handling.
 
+## Keep ownership until an explicit outcome
+
+A successful heal claim makes this run your unfinished task. Claiming does not
+start a background repair agent.
+
+- After `start_run` returns an ordinary run with your heal claim, or
+  `claim_heal` succeeds, your next run action is `wait_for_heal_task` with that
+  `runId` and the same `session_id`.
+  If you needed to load this skill or `get_workflow_guide(workflow: "repair")`, make that
+  call immediately after reading it. A promise to wait is not the call.
+- On `still_waiting`, call the bounded wait again. On `needs_heal`, work on this
+  run's repair, then `signal_run` once and wait again. Give progress updates
+  between calls; do not end the turn with “done while waiting” or switch to suite
+  authoring, coverage mapping, or another run while this duty is unresolved.
+- The wait sends heartbeats only while its call is open. During a long repair,
+  use the run-specific `heartbeat` with `status: "healing"` at work milestones
+  before the claim goes stale. Chat, unrelated tool calls, and `get_run_actions`
+  do not supervise this run. Do not send heartbeats merely to keep an abandoned
+  task appearing active.
+- If a tool fails, distinguish a retryable call error from a permission denial
+  or missing connection. Correct an invalid argument and retry the same run;
+  never bypass a denied action through shell commands or a different API.
+  If you cannot continue, tell the user the run ID, last confirmed state, exact
+  blocker, and the action needed to resume or stop. Do not claim it is paused,
+  cancelled, or supervised unless a tool result confirms that outcome.
+- Before yielding to unrelated work or ending with an active run, resolve who
+  will drive it or follow the user's stop instruction. `cancel_heal` ends an
+  in-flight heal as failed; use it when stopping repair is authorized and check
+  its result. `abort_run` requires the human stop form. `pause_run` enters heal
+  mode, and `release_heal` only releases ownership: neither safely parks or
+  cancels the run. If stopping is blocked or needs user input, report that the
+  run is still active and needs attention.
+
 ## External Run Loop
 
 If `start_run` returns `type: "getting_started_busy"`, a Getting Started demo already owns the workspace. Follow the returned active target (a run, Flight, coverage job, draft, portify, or export) in its current owner; do not start another workflow.
