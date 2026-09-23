@@ -15,13 +15,14 @@ Corrections captured via /todo-learn. Each is a standing rule for this repo.
 - **Rule:** Treat a *flight* as the pipeline of stages, not as the presence of a
   `logs/flights/<id>/flight.json` record. A stage completed by standalone work —
   a coverage run, repo setup, requirement/PRD setup, docs setup, spec authoring,
-  envset capture, portify — counts as that flight stage being done, exactly as if
-  the conductor had driven it. A feature whose stages are complete HAS flown; the
+  envset capture, a run, an evaluation export, portify, or robustness work —
+  counts as that flight stage being done, exactly as if the conductor had driven
+  it. A feature whose stages are complete HAS flown; the
   missing record is a bookkeeping gap, not a statement about the feature.
 - **Why:** The user's mental model is stage-centric. The flight pipeline is just
   the ordered set of things a feature needs; who ran them (conductor vs. the user
   doing it standalone or via MCP) is an implementation detail. Telling a user with
-  7/7 stages complete that they have "not flown" — and offering to start from
+  every stage complete that they have "not flown" — and offering to start from
   scratch — asks them to redo finished work and makes the flight feature look like
   it only understands work it drove itself.
 - **How to apply:** When a UI or API must decide "does this feature have a
@@ -30,6 +31,7 @@ Corrections captured via /todo-learn. Each is a standing rule for this repo.
   "not flown" chip) to distinguish it from conductor-driven progress — the two are
   the same fact. If a row shows completed stages, its click target must lead to
   that progress (the flight detail view), never to a start-from-scratch dialog.
-  Concretely: `featureActivityRows` / `NotFlownRow` in
-  `apps/web/src/features/flights/components/FlightsPill.tsx` and the flights index
-  in `apps/web-server` are the surfaces where this rule is easy to violate.
+  Concretely: `featureActivityRows` in `FlightChipState.tsx`, `NotFlownRow` in
+  `FlightPickerRows.tsx`, and `derived-stages.ts` under
+  `apps/web/src/features/flights/` are surfaces where this rule is easy to violate.
+  Derive the current stage set from `FLIGHT_STAGE_KEYS` in `shared/flights/types.ts`.

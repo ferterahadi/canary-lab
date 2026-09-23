@@ -72,7 +72,8 @@ Channel differences to preserve when editing #3/#4:
   `isolation: "worktree"` or `"queue"`; never guess.
 - Queueing: `queued: true` + `queueReason`; `wait_for_heal_task` still blocks.
 - Boot-only sessions: `type: "boot_session"` / `executionType: "boot"` → no heal
-  claim, no waiting, `abort_run` (confirm) stops services.
+  claim or waiting. Stopping services through `abort_run` requires the human
+  stop form; an agent's `confirm:true` alone does not authorize it.
 - Heal-claim policy: denylist — only runner-spawned PTY agents (`claude-pty`/
   `codex-pty`) get `claimSuppressed: true`; interactive Claude/Codex clients
   (Desktop or CLI) can claim.

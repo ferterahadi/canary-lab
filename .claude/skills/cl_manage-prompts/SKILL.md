@@ -1,14 +1,16 @@
 ---
 name: cl_manage-prompts
-description: Use when adding, editing, or moving an agent prompt or MCP initialize instruction — every instruction source is a Markdown file under apps/web-server/prompts/, never an inline string in a .ts file.
+description: Use when adding, editing, or moving an agent prompt used by the Canary web server or an MCP initialize instruction — those instruction sources are Markdown files under apps/web-server/prompts/, never inline strings in .ts files.
 ---
 
 # Managing Canary Lab's LLM Prompts
 
-Every prompt Canary sends to a spawned agent (Claude/Codex), plus every static
+Every prompt the Canary web server sends to a spawned agent (Claude/Codex), plus every static
 MCP `initialize` instruction source, lives as a flat file in
 `apps/web-server/prompts/` — never as a template literal or string constant
-buried in a `.ts` file. MCP files use the `mcp-*-instructions.md` naming pattern and
+buried in a server `.ts` file. Contributor-only scripts such as
+`tools/generate-changelog.mjs` are outside this runtime prompt contract. MCP
+files use the `mcp-*-instructions.md` naming pattern and
 are loaded by `mcp/instructions.ts`: the text above a file's `<!-- initialize-cut -->`
 marker is the profile's initialize lead (the Claude Code CLI keeps only the first
 2048 characters of a server's instructions), and the whole file is the guide that

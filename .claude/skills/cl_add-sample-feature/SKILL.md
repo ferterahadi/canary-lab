@@ -27,7 +27,7 @@ Template files only ship via the build (`templates/project/` →
 
 ## What ships
 
-`demo-app/` is a three-service storefront with one ordered journey:
+`demo-app/` is a three-service storefront with seven ordered journeys:
 
 ```text
 catalog-service → inventory-service → checkout-service
@@ -76,7 +76,7 @@ templates/project/features/<name>/
 ├── playwright.config.ts
 ├── e2e/                    # specs + helpers/
 ├── envsets/                # envsets.config.json + <env>/<slot>.env
-└── docs/                   # prd.md + the generated _prd-summary.* sidecars
+└── docs/                   # source requirements + generated _prd-summary.* sidecars
 ```
 
 `feature.config.cjs` essentials (the shipped `storefront-journey` config is the
@@ -105,8 +105,8 @@ Spec rules:
 ## Checklist
 
 1. Confirm the new feature is meant to ship in every consumer workspace. The
-   scaffold already carries `storefront-journey` and `workflow-workbench`; another shipped feature needs
-   explicit product approval.
+   scaffold already carries `storefront-journey` and `workflow-workbench`;
+   another shipped feature needs explicit product approval.
 2. Start from `npx canary-lab new feature`; rename consistently (folder,
    `config.name`, `startCommand.name`, envset file names).
 3. For a concurrency-ready sample, declare ports + `${port.<slot>}` wherever an

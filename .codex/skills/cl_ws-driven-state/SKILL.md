@@ -45,27 +45,29 @@ where a dropped signal could otherwise leave a consumer stale indefinitely.
 
 | Event type | What it signals | Client action |
 |---|---|---|
-| `feature-created` | A new feature dir was created | `refreshFeatures(newFeature)` |
-| `feature-deleted` | A feature dir was removed | `refreshFeatures()` |
-| `features-changed` | Any `Feature` field changed (config, envs, portified) | `refreshFeatures()` |
-| `tests-changed` | Test files for a feature changed | Invalidate tests and every derived consumer, including coverage |
-| `envsets-changed` | Envset added/removed for a feature | `refreshFeatures()` |
-| `coverage-changed` (carries `feature`) | Source docs, summary, mappings or coverage-job state changed | Invalidate coverage, docs and dependent stage evidence |
-| `tests-dirty-changed` (carries `feature`) | A feature's tests-dirty status flipped | `refreshFeatures(selected)` |
-| `verification-config-changed` (carries `feature`) | Verify config saved (route or MCP tool) | `setVerificationRefreshKey(k+1)` if feature selected |
-| `journal-changed` (carries `runId`) | A run's journal file changed | bump `journalRefreshKeys[runId]` |
-| `draft-created/updated/deleted` | Wizard draft mutations | draft context reducer |
-| `evaluation-export-*` | Eval export task lifecycle | export task context |
-| `version-changed` | Registry `latest` moved, or an update job finished | `refreshVersion()` |
-| `flights-changed` | A flight's state changed (stage advance, checkpoint, completion) | `refreshFlights()` + bump `flightsRefreshKey` |
-| `project-config-changed` | `canary-lab.config.json` was written (PUT /api/project-config) | `invalidate('project-config')` — the demo launcher refetches `showDemo` |
+| `feature-created/deleted/renamed`, `features-changed` | Suite identity or metadata changed | Refresh features and follow a rename in selected views |
+| `tests-changed`, `tests-dirty-changed` | Test files or their integrity status changed | Invalidate tests and coverage; refresh derived feature evidence |
+| `discovery-repair-changed` | Test discovery repair state changed | Refresh its owning consumer |
+| `envsets-changed` | Envset added/removed for a feature | Refresh features and dependent setup state |
+| `coverage-changed` | Source docs, summary, mappings or coverage-job state changed | Invalidate coverage and refresh derived stage evidence |
+| `robustness-changed` | Robustness Lab job changed | Invalidate the robustness reader |
+| `verification-config-changed` | Verify config saved (route or MCP tool) | Invalidate verification for the selected feature |
+| `journal-changed` | A run's journal file changed | Invalidate the journal reader for its `runId` |
+| `draft-created/updated/deleted` | Wizard draft mutations | Draft context reducer |
+| `evaluation-export-*` | Evaluation export task lifecycle | Export task context |
+| `version-changed` | Registry `latest` moved, or an update job finished | Refresh version |
+| `flights-changed` | A Flight state changed | Invalidate flight artifact readers; the list rides `/ws/flights` |
+| `agent-jobs-changed`, `pre-flight-changed` | Agent/pre-flight job changed | Refresh the owning job consumer or pre-flight list |
+| `notifications-changed` | Notification state changed | Invalidate notifications |
+| `project-config-changed`, `getting-started-changed` | Workspace settings or onboarding state changed | Invalidate the owning settings/onboarding reader |
 
 Pick the narrowest type that fits. `features-changed` is a catch-all for the feature
 list; `coverage-changed` is scoped to coverage headlines. Prefer scoped events — they
 avoid unnecessary re-fetches across all features.
 
 The client-action column describes required consumers, not proof of current
-wiring. Read the authoritative `WorkspaceEvent` union in
+wiring. This is a grouped map, not a substitute for the authoritative
+`WorkspaceEvent` union in
 `apps/web-server/src/shared/workspace-events.ts` and its handlers before changing
 a type. Run streams and summary watchers also carry state: trace those into
 coverage proof readers even when no `WorkspaceEvent` directly represents a run.
@@ -115,8 +117,9 @@ Before closing a change to any producer, watcher or event bridge:
 - **A background job** — the coverage job store publishes `coverage-changed` on
   every write via `bridgeCoverageJobEvents(coverageJobStore, workspaceEvents)` in
   `server.ts`, so job completion reaches the client without the runner knowing
-  about the WS. For the client side read `feature-activity.ts` and
-  `use-stage-band-data.ts` under `apps/web/src/features/flights/`.
+  about the WS. For the client side read
+  `apps/web/src/features/flights/state/feature-activity.ts` and
+  `apps/web/src/features/flights/components/use-stage-band-data.ts`.
 
 ## Both surfaces, or it's only half-wired
 

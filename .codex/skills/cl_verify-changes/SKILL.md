@@ -65,7 +65,7 @@ exercise the changed surface.
 ### Tier 4 — heal-loop semantics
 
 Changes to the external run loop (claim, wait, signal, collision, boot sessions) need
-an end-to-end pass: drive the MCP loop against the `demo_catalog` sample
+an end-to-end pass: drive the MCP loop against the `storefront-journey` sample
 (`start_run` with `claim_heal` → `wait_for_heal_task` → fix → `signal_run` → wait).
 Evidence-integrity expectations for that loop (honest counts, the
 repair rule, artifact retention) live in `cl_run-evidence-invariants`.

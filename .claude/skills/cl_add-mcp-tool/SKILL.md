@@ -42,7 +42,9 @@ Run-loop *semantic* changes (collision/queue/heal-claim/pass-count rules) →
 5. **Size the result to the agent's token budget, not the transport limit** — see
    below.
 6. **Destructive tool?** Gate on `confirm: z.literal(true)` in the input schema
-   (pattern: `abort_run`, `write_envset`).
+   (pattern: `write_envset`). For `abort_run`, that flag is only a compatibility
+   guard: the owning command also requires a human stop-form decision. Follow
+   that pattern when the action needs human authority.
 7. **Run-following tool?** Append `nextSteps` via `healWaitNext` (`heal-task-wait.ts`) so result-driven
    agents block on `wait_for_heal_task`, and handle boot-only runs with
    `bootSessionValue`/`isActiveBootRun` so they don't dead-wait.
