@@ -765,10 +765,13 @@ export function FlightDetail({
                   <span className={`min-w-0 flex-1 truncate${s.status === 'pending' ? ' text-muted' : ''}`}>
                     {s.label}
                   </span>
+                  {/* The amber wash carries the tone; the text keeps the
+                      rubric's baked-in muted ink (a `text-*` utility beside
+                      `.cl-rubric` is dead). */}
                   {s.note && (
                     <span
                       data-testid={`stage-rail-note-${s.key}`}
-                      className="cl-rubric shrink-0 rounded bg-warning/12 px-1 text-warning"
+                      className="cl-rubric shrink-0 rounded bg-warning/12 px-1"
                     >
                       {s.note}
                     </span>

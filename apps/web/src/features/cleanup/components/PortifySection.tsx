@@ -181,8 +181,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
               type="button"
               onClick={() => setConfirmTargets(selectedTargets)}
               disabled={bulkBusy || selectedTargets.length === 0}
-              className="cl-button px-3 py-1"
-              style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
+              className="cl-button cl-button-danger px-3 py-1"
             >
               {bulkBusy ? 'Removing…' : `Delete records (${selectedTargets.length} · ${formatBytes(selectedBytes)})`}
             </button>

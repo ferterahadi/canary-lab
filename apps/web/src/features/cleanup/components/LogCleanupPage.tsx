@@ -303,8 +303,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
               type="button"
               onClick={askDelete}
               disabled={busy}
-              className="cl-button px-3 py-1"
-              style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
+              className="cl-button cl-button-danger px-3 py-1"
             >
               Delete runs ({selected.size} · {formatBytes(deleteBytes)})
             </button>

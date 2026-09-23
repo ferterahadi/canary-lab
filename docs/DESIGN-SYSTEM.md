@@ -283,6 +283,7 @@ Pills / dots / halos use `9999px` (`rounded-full`).
 | --- | --- |
 | `.cl-button` | default · hover (raised border) · focus-visible · `:disabled` (0.5 opacity, `not-allowed`) |
 | `.cl-button-primary` | Accent fill + glow; dark mode adds a gradient + inset highlight |
+| `.cl-button-danger` | Worn beside `.cl-button` for a destructive action: danger ink + danger-leaning border, kept through hover/focus so only the slab lifts |
 | `.cl-icon-button` | Muted → primary on hover, `--bg-hover` fill |
 | `.cl-run-menu-button` (+ `-compact`) | Primary launcher; `[aria-expanded="true"]` reads as hover |
 | `.cl-mode-toggle` / `-btn` | Segmented control; `[data-active="true"]` wears the thumb + shadow. The ground is a pair of variables — `--cl-toggle-track` / `--cl-toggle-thumb`, defaulting to `--bg-elevated` / `--bg-surface` — because a surface whose own background equals the track (the launch popover on dark) otherwise loses the inset and renders the picked segment darker than the rest. Such a surface re-points the pair; no hue, mode identity rides on the segment icon |

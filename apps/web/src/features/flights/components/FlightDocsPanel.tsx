@@ -4,9 +4,8 @@ import type { FlightStage, FlightStageStatus } from '@/shared/api/client'
 import type { FeatureDocsListing } from '@/shared/api/types'
 import { DocPill, readAsBase64 } from '@/features/coverage/components/CoverageDocsRail'
 import { useDocRelink } from '@/features/coverage/components/DocRelink'
-import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '@/shared/ui/PanelCard'
+import { PanelCard } from '@/shared/ui/PanelCard'
 import { STAGE_COLUMN, StageStatusChip } from './stage-meta'
-import { PANEL_KICKER_CLASS } from './RepoScanPanel'
 import { agentActivityLine } from './StageStatusLines'
 import { SkeletonLines, SkeletonRows, type AwaitingState } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
@@ -127,21 +126,19 @@ export function FlightDocsPanel({
   const showDistilled = summaryStatus !== undefined && summaryStatus !== 'pending'
   return (
     <section data-testid="flight-docs-panel" className={`flex flex-col gap-3 ${STAGE_COLUMN}`}>
-      <div className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
-        <div className="flex items-center gap-2">
-          <div className={PANEL_KICKER_CLASS}>
-            {docs.sourceDocs.length > 0 ? `Requirement docs · ${docs.sourceDocs.length}` : 'Requirement docs'}
-          </div>
-          <div className="flex-1" />
-          {approved && (
-            <span
-              data-testid="docs-locked-chip"
-              className="cl-badge-neutral mb-1"
-            >
-              Locked — approved
-            </span>
-          )}
-        </div>
+      <PanelCard
+        kicker="Requirement docs"
+        aside={(approved || docs.sourceDocs.length > 0) && (
+          <>
+            {approved && (
+              <span data-testid="docs-locked-chip" className="cl-badge-neutral">
+                Locked — approved
+              </span>
+            )}
+            {docs.sourceDocs.length > 0 && <span className="cl-count-chip">{docs.sourceDocs.length}</span>}
+          </>
+        )}
+      >
         {docs.sourceDocs.length === 0 ? (
           awaiting
             ? <SkeletonRows awaiting={awaiting} rows={2} sub={false} />
@@ -172,26 +169,25 @@ export function FlightDocsPanel({
           </p>
         )}
         {docs.error && <div className="mt-2 cl-type-meta text-danger">{docs.error}</div>}
-      </div>
+      </PanelCard>
 
       {/* The output half. Rendered from `summaryStatus` alone (not from the
           artifact existing) so the running state has a card too — otherwise
           the panel is a blank gap for the whole distillation, which is the
           longest part of the stage. */}
       {(showDistilled || awaiting) && (
-        <div className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE} data-testid="flight-distilled-panel">
-          <div className="flex items-center gap-2">
-            <div className={PANEL_KICKER_CLASS}>
-              {requirementCount != null ? `Requirements found · ${requirementCount}` : 'Requirements found'}
-            </div>
-            <div className="flex-1" />
-            {summaryStatus && (
-              <span className="mb-1 flex items-center gap-1.5 cl-type-meta text-muted" data-testid="docs-summary-chip">
-                Summary
-                <StageStatusChip status={summaryStatus} />
-              </span>
-            )}
-          </div>
+        <PanelCard
+          /* The count stays in the kicker here: it is the measured total the
+             summary produced, not a count of the rows this card lists. */
+          kicker={requirementCount != null ? `Requirements found · ${requirementCount}` : 'Requirements found'}
+          aside={summaryStatus && (
+            <span className="flex items-center gap-1.5 cl-type-meta text-muted" data-testid="docs-summary-chip">
+              Summary
+              <StageStatusChip status={summaryStatus} />
+            </span>
+          )}
+          testId="flight-distilled-panel"
+        >
 
           {docs.generatedDocs.length > 0 ? (
             <div className="flex flex-col gap-2">
@@ -234,7 +230,7 @@ export function FlightDocsPanel({
                   still has a home: AgentSessionView owns the history below. */}
             </div>
           )}
-        </div>
+        </PanelCard>
       )}
     </section>
   )

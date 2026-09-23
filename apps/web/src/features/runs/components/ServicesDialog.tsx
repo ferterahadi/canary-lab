@@ -56,7 +56,7 @@ export function ServicesDialog({ onClose }: Props) {
         <p className="text-[11px] text-secondary">Closing keeps services running. Stop tears down the session and reverts its environment.</p>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {sessions.length > 1 && <button className="px-2 py-1.5 text-xs text-danger" onClick={() => requestStop(sessions.map((session) => session.runId))}>Stop all &amp; revert</button>}
-          {selectedId && <button className="cl-button px-3 py-1.5 text-xs text-danger" onClick={() => requestStop([selectedId])}>Stop session &amp; revert</button>}
+          {selectedId && <button className="cl-button cl-button-danger px-3 py-1.5 text-xs" onClick={() => requestStop([selectedId])}>Stop session &amp; revert</button>}
           <button className="cl-button px-3 py-1.5 text-xs" onClick={onClose}>Done</button>
         </div>
       </div>}

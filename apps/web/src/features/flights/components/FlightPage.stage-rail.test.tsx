@@ -626,7 +626,8 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="repo-scan-output"]')).toBeNull()
     const intentCard = container.querySelector<HTMLElement>('[data-testid="flight-intent-card"]')
     const repoScanCard = container.querySelector<HTMLElement>('[data-testid="repo-scan-card"]')
-    expect(repoScanCard?.textContent).toContain('Repos · 2 scanned')
+    expect(repoScanCard?.textContent).toContain('Repos scanned')
+    expect(repoScanCard?.querySelector('.cl-count-chip')?.textContent).toBe('2')
     expect(repoScanCard?.className).toBe(intentCard?.className)
     // R73: the panel fills the shared STAGE_COLUMN so the repo cards and a
     // failed stage's error card line up as one column (no shrink-wrap

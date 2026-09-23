@@ -76,7 +76,7 @@ export function FailingTests({
   const hidden = parsed.length - shown.length
   return (
     // A section of the run hero, not its own card — the run stays ONE object
-    // (R80). Same rubric + dashed-rule header the previous-runs band uses.
+    // (R80). The dashed rule separates it from the stats line inside the card.
     <section className="mt-4 min-w-0" data-testid={testId}>
       <div className="mb-1.5 flex items-center gap-2">
         <span className="cl-rubric">Failing tests</span>

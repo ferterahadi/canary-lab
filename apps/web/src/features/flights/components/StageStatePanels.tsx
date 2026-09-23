@@ -7,6 +7,7 @@ import { CheckpointControls } from './CheckpointControls'
 import { truncate } from './StageDetail'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { BootEvidenceRows } from '@/shared/ui/BootEvidence'
+import { StatusDot } from '@/shared/ui/atoms'
 import { currentStageForPair } from './stage-metrics'
 
 /** R73: the one failure card every stage renders when it fails — a danger-toned
@@ -123,22 +124,20 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
               <p className="cl-type-body text-secondary">
                 Clear the uncommitted changes and the flight will try this step again.
               </p>
-              <div className="rounded border border-line">
-                {remedy.repos.map((repo, i) => (
-                  <div
-                    key={repo.path}
-                    className={`flex items-center gap-2 px-2.5 py-1.5${i > 0 ? ' border-t' : ''}`}
-                    style={i > 0 ? { borderColor: 'var(--border-default)' } : undefined}
-                    title={repo.path}
-                  >
-                    <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
-                    <span className="cl-type-data text-primary font-mono">{repo.name}</span>
-                    <span className="ml-auto cl-type-meta text-muted font-mono">
+              {/* Flush rows on the card's own text column, like the Boot check
+                  and failing-test rows — not a bordered box of hairline rows,
+                  which made a slab inside the error slab. */}
+              <ul className="m-0 flex list-none flex-col p-0">
+                {remedy.repos.map((repo) => (
+                  <li key={repo.path} className="flex min-w-0 items-center gap-2 py-1 cl-type-data" title={repo.path}>
+                    <StatusDot state="warning" className="shrink-0" />
+                    <span className="min-w-0 truncate text-primary font-mono">{repo.name}</span>
+                    <span className="ml-auto shrink-0 cl-type-meta text-muted font-mono">
                       {repo.modified} modified
                     </span>
-                  </div>
+                  </li>
                 ))}
-              </div>
+              </ul>
               <div className="flex items-center gap-2">
                 <DisabledControlTooltip>
                   <button
@@ -235,8 +234,10 @@ export function StagePausedPanel({ kind }: {
     <section
       data-testid="stage-paused"
       /* Same slab as every other stage card (PanelCard's chrome), so a paused
-         step doesn't read as a different kind of object. */
-      className={`flex flex-col gap-2 ${PANEL_CARD_CLASS} ${STAGE_COLUMN}`}
+         step doesn't read as a different kind of object — and the same 6px
+         kicker-to-content rhythm (PanelCard's `mb-1.5`); at `gap-2` its
+         sentence sat 2px lower than every other card's first line. */
+      className={`flex flex-col gap-1.5 ${PANEL_CARD_CLASS} ${STAGE_COLUMN}`}
       style={PANEL_CARD_STYLE}
     >
       <div className="cl-rubric flex items-center gap-2">

@@ -81,10 +81,11 @@ function expirePending(): number {
 }
 
 /** A non-accept answer is the CLIENT's, and canary cannot see whether a human ever
- *  saw the request. A client that declares `elicitation` but wires no handler
- *  answers `decline` by itself — observed on Claude Desktop's Code tab, whose MCP
- *  client declares `elicitation:{}` (claude-code 2.1.251/2.1.275, captured live)
- *  while its orchestrator never sets `onElicitation`, so the SDK declines for it.
+ *  saw the request. A client can declare `elicitation` and still answer `decline`
+ *  by itself: the Agent SDK does so whenever its host passes no `onElicitation`.
+ *  Claude Desktop's embedded `claude-code` client is that case — it declares
+ *  `elicitation:{}` (captured live), but Desktop passes no handler (read from the
+ *  2.2553.13 bundle; the decline itself has not been captured on the wire).
  *  Reporting that as "the user chose decline" invents a decision nobody made, and
  *  for a test-review approval that is the one claim this product must never
  *  fabricate. So: state what was observed, leave the human's intent unasserted.

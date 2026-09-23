@@ -7,7 +7,7 @@ import { PanelCard } from '@/shared/ui/PanelCard'
 import { CoverageFreshnessIndicator, coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { SkeletonBar, SkeletonBead, SkeletonPanel, type AwaitingState } from '@/shared/ui/Skeleton'
 import { StatusDot } from '@/shared/ui/atoms'
-import { evaluationArchiveFilename, formatBytes, formatDuration, timeAgo } from '@/shared/lib/format'
+import { evaluationArchiveFilename, formatBytes, formatDuration, shortRunRef, timeAgo } from '@/shared/lib/format'
 import { StageColumn } from './stage-meta'
 import { plural } from './StageFacts'
 import { CONFIG_GROUP, groupOverlayFiles, overlayDiffStat, serviceReadyMs, splitFilePath } from './stage-metrics'
@@ -19,7 +19,9 @@ import { CONFIG_GROUP, groupOverlayFiles, overlayDiffStat, serviceReadyMs, split
 // detail stays here (the same split the Test Run stage already uses: metric
 // tiles, then the failing tests by name).
 //
-// All four are PanelCard, like every other block in a stage pane.
+// All four are PanelCard, like every other block in a stage pane. Their lists
+// are flush rows with no dividers — the same rows the Test Run stage's failing
+// tests and previous runs use — so a list reads the same on every stage.
 
 /** One boot row: the run's own service entry, or the thinner shape recorded
  *  evidence can supply. `startingAt`/`readyAt` are absent on the latter, which is
@@ -75,7 +77,7 @@ export function BootCheckPanel({ boot, recorded = [], awaiting }: {
   return (
     <StageColumn>
       <PanelCard kicker="Boot check" testId={known ? 'boot-check-panel' : 'boot-check-skeleton'}>
-        <ul className="m-0 flex list-none flex-col divide-y divide-line-subtle p-0">
+        <ul className="m-0 flex list-none flex-col p-0">
           {(known ?? [null, null]).map((service, i) => {
             if (!service) {
               return (
@@ -146,7 +148,7 @@ export function DoubleBootPanel({ portify, awaiting }: { portify: PortifyManifes
   return (
     <StageColumn>
       <PanelCard kicker="Side-by-side proof" testId={proven ? 'double-boot-panel' : 'double-boot-skeleton'}>
-        <ul className="m-0 flex list-none flex-col divide-y divide-line-subtle p-0">
+        <ul className="m-0 flex list-none flex-col p-0">
           {rows.map((instance, i) => (
             <li key={i} className="flex min-w-0 items-center gap-2 py-1.5 cl-type-data">
               {instance
@@ -471,7 +473,9 @@ export function EvaluationDeliverablePanel({ task, awaiting, probed }: { task: E
               {filename}
             </div>
             <div className="mt-0.5 truncate cl-type-meta text-muted">
-              {[`run ${task.runId}`, builtBy(task), archiveContents(task)].filter(Boolean).join(' · ')}
+              {/* The short run ref, as the Test Run stage names runs — the
+                  filename above already spells the full id. */}
+              {[`run ${shortRunRef(task.runId)}`, builtBy(task), archiveContents(task)].filter(Boolean).join(' · ')}
             </div>
           </div>
           <ArchiveDownloadButton task={task} label="Download" />
@@ -510,13 +514,16 @@ export function AllReportsPanel({
   return (
     <StageColumn>
       <PanelCard kicker="All evaluation reports for this suite" aside={<span className="cl-count-chip">{mine.length}</span>} testId="all-reports-panel">
-        <ul className="m-0 flex list-none flex-col divide-y divide-line-subtle p-0">
+        <ul className="m-0 flex list-none flex-col p-0">
           {mine.map((task) => (
             <li key={task.taskId} data-testid={`report-row-${task.taskId}`} className="flex min-w-0 items-center gap-2 py-1.5">
               <StatusDot state={task.status === 'failed' ? 'failed' : task.status === 'running' ? 'running' : 'success'} className="shrink-0" />
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-1.5">
-                  <span className="truncate cl-type-data font-medium">Run {task.runId}</span>
+                  {/* Same `Run <ref>` label the Test Run stage's rows carry, so
+                      one run reads the same on both stages; the full id stays a
+                      hover away. */}
+                  <span className="truncate cl-type-data font-medium" title={task.runId}>Run {shortRunRef(task.runId)}</span>
                   {/* The flight's own row is marked, not decorated: the status dot
                       is this row's only colour, so the marker stays a quiet label. */}
                   {task.taskId === pinnedTaskId && (
@@ -565,7 +572,7 @@ function ArchiveDownloadButton({ task, label }: { task: EvaluationExportTask; la
       onClick={download}
       aria-label={title}
       title={title}
-      className={label ? 'cl-button shrink-0 px-2 py-0.5' : 'cl-icon-button h-6 w-6 shrink-0 text-[12px]'}
+      className={label ? 'cl-button min-h-6 shrink-0 px-2 py-0.5' : 'cl-icon-button h-6 w-6 shrink-0 text-[12px]'}
       style={failed ? { color: 'var(--danger)' } : undefined}
     >
       {label ? `⬇ ${label}` : '⬇'}

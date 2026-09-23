@@ -29,6 +29,12 @@ const DOT: Record<RunStatus, { state: StatusDotState; pulse: boolean }> = {
   aborted: { state: 'idle', pulse: false },
 }
 
+const CHROME_CLASS = {
+  row: 'rounded-md px-3 py-2 cl-hover-row',
+  headline: 'pb-0.5',
+  item: 'py-1.5',
+} as const
+
 function portsLabel(detail: RunDetail | undefined): string | null {
   const ports = (detail?.manifest.services ?? [])
     .flatMap((s) => Object.values(s.allocatedPorts ?? {}))
@@ -83,8 +89,10 @@ export function RunRow({
    *  failure rows share), and it drops the fill: a filled band the width of the
    *  card read as a nested slab, and it cut the run's title off from the stats
    *  line that belongs to it. Hover underlines the title instead, and the
-   *  always-on arrow carries the affordance at rest. */
-  chrome?: 'row' | 'headline'
+   *  always-on arrow carries the affordance at rest. `item` is a list row
+   *  INSIDE a card (the run stage's Previous runs): headline's flush edge and
+   *  underline, with the vertical rhythm of the Failing tests rows beside it. */
+  chrome?: 'row' | 'headline' | 'item'
 }) {
   const ports = showPorts ? portsLabel(detail) : null
   const note = queueNote(run, detail)
@@ -109,15 +117,13 @@ export function RunRow({
       <button
         type="button"
         onClick={() => onSelect(run)}
-        className={`group flex w-full items-center gap-2 text-left ${
-          chrome === 'headline' ? 'pb-0.5' : 'rounded-md px-3 py-2 cl-hover-row'
-        }`}
+        className={`group flex w-full items-center gap-2 text-left ${CHROME_CLASS[chrome]}`}
         title={`Go to run ${run.runId}`}
       >
         <StatusDot state={dot.state} pulse={dot.pulse && !waiting} halo={dot.pulse && !waiting} className="shrink-0" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span
-            className={`truncate text-[13px] ${chrome === 'headline' ? 'group-hover:underline' : ''}`}
+            className={`truncate text-[13px] ${chrome === 'row' ? '' : 'group-hover:underline'}`}
             style={{ color: 'var(--text-primary)', fontWeight: 500 }}
           >
             {primaryLabel ?? run.feature}

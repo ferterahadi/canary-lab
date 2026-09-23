@@ -28,6 +28,7 @@ import { flightStageLabel } from '@shared/flights/stage-labels'
 import { ModelPlanPopover } from './ModelPlanPopover'
 import { SkeletonPanel, awaitingFor } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '@/shared/ui/PanelCard'
 import { useStageBandData } from './use-stage-band-data'
 import {
   AllReportsPanel,
@@ -850,7 +851,10 @@ export function StageDetail({
           <OverlayPanel portify={band.portify ?? null} awaiting={awaitingData} />
           {band.portify && standalonePortifyActionable && !flightOwnsPortify && (
             <StageColumn>
-              <div className="cl-frame p-4">
+              {/* PanelCard's chrome, not `cl-frame p-4`: the 16px inset made this
+                  the one card on the pane whose text sat 4px in from every
+                  kicker above it. */}
+              <div className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
                 <PortifyWorkflowControls manifest={band.portify} onChanged={onResponded} />
               </div>
             </StageColumn>

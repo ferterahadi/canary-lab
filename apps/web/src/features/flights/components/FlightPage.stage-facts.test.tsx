@@ -993,8 +993,11 @@ describe('trailer model (R14–R18)', () => {
     mocks.taskById.mockReturnValue(mine)
     await openExportStage({ taskId: 'task-7' })
     const list = container.querySelector('[data-testid="all-reports-panel"]')
-    expect(list?.textContent).toContain('2026-07-23T1603-z6kc')
-    expect(list?.textContent).toContain('2026-07-20T0900-m4tq')
+    // Rows carry the short run ref, as the Test Run stage names runs; the full
+    // id is the label's tooltip.
+    expect(list?.textContent).toContain('Run z6kc')
+    expect(list?.textContent).toContain('Run m4tq')
+    expect(list?.querySelector('[title="2026-07-23T1603-z6kc"]')).toBeTruthy()
     // The stage's own report is badged; the others are just history.
     expect(list?.querySelector('[data-testid="report-row-task-7"]')?.textContent).toContain('this flight')
     expect(list?.querySelector('[data-testid="report-row-task-3"]')?.textContent).not.toContain('this flight')
@@ -1052,7 +1055,9 @@ describe('R83 — every stage pane wears the settled layout, with placeholders f
       .find((e) => e.textContent?.includes('Repos scanned'))
     expect(tile?.textContent).toContain('1')
     expect(container.querySelectorAll('[data-testid="repo-card-demo-app"]')).toHaveLength(1)
-    expect(container.querySelector('[data-testid="repo-scan-card"]')?.textContent).toContain('Repo · scanned')
+    // The kicker names the list; the count rides the kicker line as a chip.
+    expect(container.querySelector('[data-testid="repo-scan-card"]')?.textContent).toContain('Repo scanned')
+    expect(container.querySelector('[data-testid="repo-scan-card"] .cl-count-chip')?.textContent).toBe('1')
   })
 
   it('a pending stage still shows its band: the input-derived count is real, the unmeasured ones are placeholders', async () => {

@@ -227,8 +227,7 @@ export function WorktreesSection({ now }: { now: number }) {
               type="button"
               onClick={() => setConfirmOpen(true)}
               disabled={bulkBusy || selectedTargets.length === 0}
-              className="cl-button px-3 py-1"
-              style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
+              className="cl-button cl-button-danger px-3 py-1"
             >
               {bulkBusy ? 'Removing…' : `Remove worktrees (${selectedTargets.length} · ${formatBytes(selectedBytes)})`}
             </button>

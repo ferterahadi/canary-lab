@@ -85,7 +85,7 @@ export function PortifyWorkflowControls({
           onRequestChanges={() => setFeedbackOpen(true)}
           onDone={onChanged}
         />
-        {error && <div role="alert" className="mt-3 text-xs text-danger">{error}</div>}
+        {error && <div role="alert" className="mt-3 cl-type-meta text-danger">{error}</div>}
         {feedbackOpen && (
           <FeedbackModal
             busy={busy}
@@ -103,16 +103,19 @@ export function PortifyWorkflowControls({
 
   return (
     <div data-testid="portify-workflow-actions" className="flex items-center justify-between gap-3">
-      <div className="text-xs text-muted">Port work is running here in Flight.</div>
+      <div className="cl-type-body text-muted">Port work is running here in Flight.</div>
+      {/* `.cl-button` declares its own size and colour, so the `text-[11px]
+          text-danger` that sat here never rendered; the stage's compact button
+          geometry (Send to repair, Advanced setup) is what it should match. */}
       <button
         type="button"
-        className="cl-button shrink-0 px-3 py-1 text-[11px] text-danger"
+        className="cl-button min-h-6 shrink-0 px-2 py-0.5"
         disabled={busy}
         onClick={() => setConfirmCancel(true)}
       >
         Cancel port work
       </button>
-      {error && <div role="alert" className="text-xs text-danger">{error}</div>}
+      {error && <div role="alert" className="cl-type-meta text-danger">{error}</div>}
       <ConfirmModal
         open={confirmCancel}
         title="Discard this port work?"

@@ -47,10 +47,11 @@ export function panelCardStyle(tone: PanelCardTone = 'default'): CSSProperties {
 export const PANEL_KICKER_CLASS = 'cl-rubric'
 
 /** Card + kicker in one call, with an optional right-aligned `aside` (chips,
- *  status) on the kicker line. Callers needing bespoke header content compose
- *  the constants directly. */
+ *  status) on the kicker line. The kicker is usually a string; a node lets a
+ *  kicker carry an inline mark (an info `?`) without the caller re-composing the
+ *  header and drifting off its spacing. */
 export function PanelCard({ kicker, aside, testId, title, children }: {
-  kicker?: string
+  kicker?: ReactNode
   aside?: ReactNode
   testId?: string
   title?: string
@@ -62,7 +63,11 @@ export function PanelCard({ kicker, aside, testId, title, children }: {
         <div className="mb-1.5 flex min-w-0 items-center gap-2">
           {/* `.cl-rubric` already carries the muted colour — no inline twin. */}
           <div className={`min-w-0 truncate ${PANEL_KICKER_CLASS}`}>{kicker}</div>
-          {aside && <><div className="flex-1" />{aside}</>}
+          {/* `-my-1` lets the aside overhang into the card's padding instead of
+              growing the row: an 18px count chip beside the 15px kicker pushed
+              that card's kicker and content 2px lower than a chipless card's, and
+              moved a skeleton's content when its settled chip landed. */}
+          {aside && <><div className="flex-1" /><div className="-my-1 flex shrink-0 items-center gap-2">{aside}</div></>}
         </div>
       )}
       {children}

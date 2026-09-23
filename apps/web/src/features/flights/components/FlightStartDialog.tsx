@@ -405,8 +405,7 @@ export function FlightStartDialog({
                   data-testid="flight-start-stop-active"
                   disabled={busy}
                   onClick={stopAndStartFresh}
-                  className="cl-button px-2.5 py-1 text-xs"
-                  style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
+                  className="cl-button cl-button-danger px-2.5 py-1 text-xs"
                 >
                   {busy ? 'Stopping…' : 'Stop it and start fresh'}
                 </button>

@@ -40,9 +40,10 @@ export function AttemptVerdict({ attempt }: { attempt: PrdSourceAttempt }) {
     >
       <span aria-hidden="true" className="mt-px cl-type-meta text-warning">⊘</span>
       <div className="flex min-w-0 flex-col gap-1">
-        <span
-          className="cl-rubric text-warning"
-        >
+        {/* `.cl-rubric` bakes its muted colour and sits outside `@layer`, so a
+            `text-warning` beside it never rendered; the rule and the ⊘ carry
+            the amber. */}
+        <span className="cl-rubric">
           {attemptHeadline(attempt)}
         </span>
         {attempt.reason && (
@@ -113,13 +114,16 @@ export function RequirementsFork({
   return (
     <section
       data-testid="requirements-fork"
-      className={`relative flex flex-col gap-2 ${panelCardClass()} ${STAGE_COLUMN}`}
-      style={panelCardStyle()}
+      /* The prd-source checkpoint, so it wears the checkpoint's `warning` tone:
+         every other question a flight asks (CheckpointControls) does, and this
+         one sat in the plain slab — the same ⏸ ask in two weights. */
+      className={`relative flex flex-col gap-2 ${panelCardClass('warning')} ${STAGE_COLUMN}`}
+      style={panelCardStyle('warning')}
       {...dropHandlers}
     >
       {lastAttempt && <AttemptVerdict attempt={lastAttempt} />}
       <div className="flex items-center gap-2">
-        <span aria-hidden="true" className="cl-type-meta text-warning">⏸</span>
+        <span aria-hidden="true" className="text-warning">⏸</span>
         <span className="cl-type-title text-primary">Where should requirements come from?</span>
       </div>
       <IntentRow description={flight.description} />

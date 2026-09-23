@@ -208,20 +208,23 @@ export function TestRunPanel({
         )}
       </PanelCard>
 
-      {/* The runs before this one (R82). Same rubric + dashed-rule + count-chip
-          header the Failing tests band uses, so the two lists on this stage read
-          as one family instead of a card and a stray `<h3>`. Each row is labelled
-          by its run REF and ordinal — the old list repeated the feature name on
+      {/* The runs before this one (R82), as a card like every other block on
+          the stage. It used to be a bare dashed-rule band on the pane's own
+          background — the one block with no surface, its rubric 12px left of
+          every card kicker and its rows carrying RunRow's own gutter — so it
+          read as spill-over from the card above. The rows now sit flush on the
+          card's text column, the same edge the Latest run title uses, with no
+          dividers or fill, like the Failing tests rows. Each row is labelled by
+          its run REF and ordinal — the old list repeated the feature name on
           every row, which is the one thing every row shares — and carries its own
           open action rather than relying on the row being secretly clickable. */}
       {previous.length > 0 && (
-        <section data-testid="previous-runs" className="min-w-0">
-          <div className="mb-1 flex items-center gap-2">
-            <span className="cl-rubric">Previous runs</span>
-            <span className="h-px flex-1 border-t border-dashed border-line" />
-            <span className="cl-count-chip">{previous.length}</span>
-          </div>
-          <ul className="m-0 flex list-none flex-col divide-y divide-line-subtle p-0">
+        <PanelCard
+          kicker="Previous runs"
+          aside={<span className="cl-count-chip">{previous.length}</span>}
+          testId="previous-runs"
+        >
+          <ul className="m-0 flex list-none flex-col p-0">
             {previous.map(({ run, ordinal: n }) => (
               <RunRow
                 key={run.runId}
@@ -230,6 +233,7 @@ export function TestRunPanel({
                 primaryLabel={`Run ${shortRunRef(run.runId)}`}
                 marker={`run ${n} of ${featureRuns.length}`}
                 showPorts={false}
+                chrome="item"
                 /* The row IS the open action — its trailing arrow stops being
                    hover-only here so the affordance is visible at rest. */
                 arrow="always"
@@ -237,7 +241,7 @@ export function TestRunPanel({
               />
             ))}
           </ul>
-        </section>
+        </PanelCard>
       )}
     </div>
   )

@@ -61,13 +61,10 @@ export const COVERAGE_CSS = `
 .clcov-sub-sep{color:var(--border-strong);margin:0 6px}
 .clcov-sub-run{font-family:inherit;font-size:inherit;color:var(--text-secondary);white-space:nowrap}
 .clcov-stale{color:var(--warning);cursor:help;border-bottom:1px dotted color-mix(in srgb,var(--warning) 55%,transparent)}
-/* The two strips stack, one ruler over the other at the same width so they compare;
-   they take every pixel the bar has left, so both rulers end on the same edge as the
-   header's Close button — the panel reads as one column, not two inset ones. A hairline
-   on the left separates them from the headline like an instrument panel. Its inset is
-   the bar's own 16px, so the gap between the hairline and the strips matches the gap
-   between the strips and the panel's right edge — 28px used to read as a lopsided box. */
-.clcov-groups{flex:1 1 380px;min-width:0;display:grid;gap:12px;padding-left:16px;border-left:1px solid var(--border-default)}
+/* The two strips stack at the same width so their rulers compare. The inset
+   keeps both labels and bars compact while the left hairline still separates
+   the groups from the headline. */
+.clcov-groups{flex:1 1 380px;min-width:0;display:grid;gap:12px;padding-inline:32px;border-left:1px solid var(--border-default)}
 /* A strip is the positioning root for its hover card and is focusable so a keyboard
    user can open the card without filtering. The negative margin + padding give the
    hover zone a little room around the bar without moving anything. */
@@ -122,7 +119,7 @@ export const COVERAGE_CSS = `
    full width under the headline and the panel hairline becomes a rule above them. */
 @container (max-width:500px){
   .clcov-hero{flex:1 1 0;min-width:0}
-  .clcov-groups{flex-basis:100%;order:3;padding-left:0;border-left:0;padding-top:14px;border-top:1px solid var(--border-default)}
+  .clcov-groups{flex-basis:100%;order:3;padding-inline:0;border-left:0;padding-top:14px;border-top:1px solid var(--border-default)}
 }
 /* The glossary badge and its popover. The badge sits at the card's right edge
    (margin-left:auto above), so the popover hangs to the LEFT of the badge: anchoring it

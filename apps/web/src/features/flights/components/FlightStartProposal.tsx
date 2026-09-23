@@ -71,8 +71,7 @@ export function PlanningView({
               data-testid="flight-plan-cancel"
               disabled={busy}
               onClick={() => onCancel(task.taskId)}
-              className="cl-button shrink-0 px-2.5 py-1 text-xs"
-              style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
+              className="cl-button cl-button-danger shrink-0 px-2.5 py-1 text-xs"
             >
               {busy ? 'Stopping…' : 'Stop planning'}
             </button>
@@ -218,7 +217,7 @@ export function ProposalView({
                           type="button"
                           data-testid={`flight-proposal-cancel-${i}`}
                           onClick={() => closeEdit(i, true)}
-                          className="cl-button px-2.5 py-1 text-[11px]"
+                          className="cl-button px-2.5 py-1"
                         >
                           Cancel
                         </button>
@@ -227,7 +226,7 @@ export function ProposalView({
                           data-testid={`flight-proposal-done-${i}`}
                           disabled={!f.name.trim() || !f.description.trim()}
                           onClick={() => closeEdit(i, false)}
-                          className="cl-button-primary px-3 py-1 text-[11px]"
+                          className="cl-button-primary px-3 py-1"
                         >
                           Save
                         </button>

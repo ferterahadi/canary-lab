@@ -2,13 +2,12 @@ import { Fragment, useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import { BranchSuggestInput, branchSuggestions, useRepoGitStatus } from '@/features/config'
 import { HEAL_BEHAVIOR_INFO, HealBehaviorChoice } from '@/shared/ui/HealBehaviorChoice'
-import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '@/shared/ui/PanelCard'
+import { PanelCard } from '@/shared/ui/PanelCard'
 import {
   PLAYWRIGHT_RETAINED_ARTIFACT_MODES,
   PLAYWRIGHT_SCREENSHOT_MODES,
 } from '@shared/configs/playwright-modes'
 import { STAGE_COLUMN } from './stage-meta'
-import { PANEL_KICKER_CLASS } from './RepoScanPanel'
 import { SkeletonPanel, type AwaitingState } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 
@@ -193,10 +192,11 @@ export function FeatureSetupPanel({
           kicker, then a block per repo (the Advanced setup Service unit):
           editable name, location, branch picker, start command(s). */}
       {blocks.length > 0 && (
-        <div data-testid="setup-services-card" className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
-          <div className={PANEL_KICKER_CLASS}>
-            {blocks.length === 1 ? 'Service' : `Services · ${blocks.length}`}
-          </div>
+        <PanelCard
+          kicker={blocks.length === 1 ? 'Service' : 'Services'}
+          aside={<span className="cl-count-chip">{blocks.length}</span>}
+          testId="setup-services-card"
+        >
           <div className="flex flex-col">
             {blocks.map((block, index) => (
               <ServiceBlock
@@ -213,14 +213,11 @@ export function FeatureSetupPanel({
               />
             ))}
           </div>
-        </div>
+        </PanelCard>
       )}
 
       {pw && (
-        <div data-testid="setup-playwright" className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
-          <div className={PANEL_KICKER_CLASS}>
-            Playwright
-          </div>
+        <PanelCard kicker="Playwright" testId="setup-playwright">
           <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 cl-type-data">
             <NumberRow label="Workers" value={typeof pw.workers === 'number' ? pw.workers : null} editable={editable} lockedTitle={lockedTitle} onSave={(n) => setPw({ workers: n })} testId="setup-pw-workers" />
             <NumberRow label="Retries" value={typeof pw.retries === 'number' ? pw.retries : null} editable={editable} lockedTitle={lockedTitle} onSave={(n) => setPw({ retries: n })} testId="setup-pw-retries" />
@@ -230,7 +227,7 @@ export function FeatureSetupPanel({
                 so the setting is discoverable; a change writes use.screenshot. */}
             <ModeRow label="Screenshot" value={typeof pwUse?.screenshot === 'string' ? pwUse.screenshot : 'off'} modes={PW_SCREENSHOT_MODES} editable={editable} lockedTitle={lockedTitle} onSave={(v) => setPw({ screenshot: v })} testId="setup-pw-screenshot" />
           </div>
-        </div>
+        </PanelCard>
       )}
 
       {/* Heal behavior — its own card, not a Playwright row: the field lives in
@@ -241,11 +238,10 @@ export function FeatureSetupPanel({
           the hover tint span the card edge-to-edge; the rows' own px-3 then
           puts their text back under the kicker. */}
       {cfg && (
-        <div data-testid="setup-heal-card" className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
-          <div className="mb-1.5 flex items-center gap-1.5">
-            <span className={PANEL_KICKER_CLASS}>Auto-repair</span>
-            <InfoMark label="Auto-repair" info={HEAL_BEHAVIOR_INFO} />
-          </div>
+        <PanelCard
+          kicker={<span className="flex items-center gap-1.5">Auto-repair<InfoMark label="Auto-repair" info={HEAL_BEHAVIOR_INFO} /></span>}
+          testId="setup-heal-card"
+        >
           <HealBehaviorChoice
             threshold={healThreshold}
             editable={editable}
@@ -254,7 +250,7 @@ export function FeatureSetupPanel({
             lockedTitle={lockedTitle ?? 'Locked while the flight is running'}
             preserveControlsWhenLocked={lockedTitle != null}
           />
-        </div>
+        </PanelCard>
       )}
 
       {/* No "synced live with Advanced setup" footnote: the stage header already
@@ -267,16 +263,22 @@ export function FeatureSetupPanel({
   )
 }
 
-/** The hoverable `i` that carries a field's mechanism. One home so the info
- *  affordance reads the same on a row label and on a card kicker. */
+/** The hoverable `?` that carries a field's mechanism. One home so the info
+ *  affordance reads the same on a row label and on a card kicker — and the same
+ *  mark the At a glance tiles wear (StageFacts' `FactHelpMark`): a neutral ring
+ *  in the text's own colour. It was an accent-ringed `i`, a second shape for the
+ *  same meaning one card down, and an accent spent on "an explanation exists".
+ *  `font-sans normal-case` because it sits inside `.cl-rubric`, whose mono caps
+ *  would otherwise restyle the glyph. */
 export function InfoMark({ label, info }: { label: string; info: string }) {
   return (
     <span
       aria-label={`${label} explained`}
       title={info}
-      className="inline-flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full border border-accent/40 text-[9px] font-semibold text-accent"
+      className="inline-flex h-3 w-3 flex-none cursor-help items-center justify-center rounded-full border font-sans text-[8.5px] normal-case leading-none tracking-normal text-muted"
+      style={{ borderColor: 'currentColor' }}
     >
-      i
+      ?
     </span>
   )
 }
