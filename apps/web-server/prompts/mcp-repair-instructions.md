@@ -37,12 +37,16 @@ start a background repair agent.
   blocker, and the action needed to resume or stop. Do not claim it is paused,
   cancelled, or supervised unless a tool result confirms that outcome.
 - Before yielding to unrelated work or ending with an active run, resolve who
-  will drive it or follow the user's stop instruction. `cancel_heal` ends an
-  in-flight heal as failed; use it when stopping repair is authorized and check
-  its result. `abort_run` requires the human stop form. `pause_run` enters heal
-  mode, and `release_heal` only releases ownership: neither safely parks or
-  cancels the run. If stopping is blocked or needs user input, report that the
-  run is still active and needs attention.
+  will drive it or follow the user's stop instruction. To stop an in-flight
+  heal when the user authorizes stopping repair, call `cancel_heal` and check its
+  result; it ends the run as failed. Do not substitute `abort_run` for this heal
+  action or claim there is no direct stop tool without checking `cancel_heal`.
+  An `abort_run` denial does not prove `cancel_heal` is unavailable, but a denied
+  stop action is not permission to try alternate tools for the same effect.
+  `abort_run` is for a user-requested full abort and requires the human stop form.
+  `pause_run` enters heal mode, and `release_heal` only releases ownership:
+  neither parks nor cancels the run. If stopping is blocked or needs user
+  input, report that the run is still active and needs attention.
 
 When a blocked start returns request_id, carry it through get_test_review and
 review_test_changes. After human acceptance or restoration, resume with start_run
