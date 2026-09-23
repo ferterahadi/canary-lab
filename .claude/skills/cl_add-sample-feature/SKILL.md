@@ -85,8 +85,10 @@ three-service local example; `workflow-workbench` shows a remote env):
 - `envs` lists the feature's environments. `storefront-journey` declares only
   `local`; `workflow-workbench` declares `local` and `production`.
 - Each `startCommand`: `command`, `envs: ['local']` to gate local-only boots,
-  `ports: [{ name: 'api', env: 'PORT' }]` for per-run port allocation, and a per-env
-  `healthCheck` (exactly one transport per probe: `http: { url }` or `tcp: { port }`).
+  optional `ports: [{ name: 'api', env: 'PORT' }]` for per-run port allocation,
+  and a per-env `healthCheck` (exactly one transport per probe: `http: { url }`
+  or `tcp: { port }`). `workflow-workbench` deliberately starts with a fixed
+  port so Portify has work to do.
 - `${port.<slot>}` is the reserved token for the allocated port — valid in the
   command, the healthCheck URL, and applied envset files. See
   [docs/ARCHITECTURE.md → Concurrency](../../../docs/ARCHITECTURE.md#concurrency).
@@ -98,7 +100,7 @@ Spec rules:
 - The storefront helper resolves `CANARY_PORT_<slot>` then a standalone default
   (see `templates/project/features/storefront-journey/e2e/helpers/api.ts`). A
   feature that supports a remote env must also read its envset target, as
-  `workflow-workbench` does with `GATEWAY_URL`.
+  `workflow-workbench` does with `WORKFLOW_URL`.
 
 ## Checklist
 
@@ -107,9 +109,12 @@ Spec rules:
    explicit product approval.
 2. Start from `npx canary-lab new feature`; rename consistently (folder,
    `config.name`, `startCommand.name`, envset file names).
-3. Declare ports + `${port.<slot>}` everywhere a port appears — never hardcode.
-4. Add envsets for every env in `envs`; remote envs point `GATEWAY_URL` at the
-   target and gate `startCommands` with `envs: ['local']`.
+3. For a concurrency-ready sample, declare ports + `${port.<slot>}` wherever an
+   allocated port is needed. A fixed port is deliberate only when the sample
+   tests Portify, as `workflow-workbench` does.
+4. Add envsets for every env in `envs`; remote envs point the suite's target URL
+   variable (for example, `WORKFLOW_URL`) at that environment and gate local
+   `startCommands` with `envs: ['local']`.
 5. Tier-1 checks per `cl_verify-changes`, then **always finish with
    `npm run smoke:pack`** — it scaffolds a temp workspace and proves the template
    ships.

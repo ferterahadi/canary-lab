@@ -20,7 +20,7 @@ Run-loop *semantic* changes (collision/queue/heal-claim/pass-count rules) →
    run, heal, flight, portify, discovery, test-review, and authoring groups;
    `authoring.ts` is their composer, not a second home for a tool. Reuse the
    REST route via `app.inject()` where that route owns the behavior — never duplicate
-   orchestrator logic. Author-profile tools call
+   orchestrator logic. Feature-authoring tools call
    `apps/web-server/src/features/config/logic/feature-authoring.ts` directly.
    Groups are domain sections, **not** profiles: a tool in several profiles still
    gets exactly one registration in one group.
@@ -34,8 +34,8 @@ Run-loop *semantic* changes (collision/queue/heal-claim/pass-count rules) →
    coverage + export + flight + full_only; full = lifecycle + portify).
    `registerCanaryLabTools` throws at registration if a tool is in no profile.
 4. **Mirror the name in `apps/web-server/src/mcp/server.smoke.test.ts`** — the test keeps
-   its **own hand-authored copies** of the eight workflow arrays *plus* its own
-   `LIFECYCLE_TOOLS` union (nine authored lists; only its `FULL_TOOLS` is derived), so
+   its **own hand-authored copies** of the eight workflow arrays and independently
+   assembles `LIFECYCLE_TOOLS` (including the review tools), so
    SDK shape changes are caught. Update every array you touched in step 3. The mirror's
    lifecycle union must keep matching `tool-profiles.ts` — if you add a tool that lives *only*
    in `REPAIR_TOOLS` or `VERIFY_TOOLS`, check it still does.

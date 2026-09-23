@@ -45,8 +45,9 @@ the task inputs the agent must inspect and verify that it actually uses tools.
 | **On-disk session JSONL** — `AgentSessionView` tails it (REST snapshot + `/ws/.../agent-session`, parsed by `agent-session-log.ts`) | The agent CLI's own session file; the parser emits **complete events only** | Agentic loops; historical replay; the structured rail (thinking/tool/result rows, model+session header) | **Token-stream a one-shot** — the assistant block only lands at *completion*, by which point the job is done and the view moves on, so you see just the prompt |
 | **Claude stdout `--output-format=stream-json --include-partial-messages`** | The live token stream on stdout; parse deltas yourself (see `features/agent-sessions/logic/agent-stream.ts`) | Watching a Claude one-shot write its answer in real time | Give you the structured tool/think rows for free — you render the text. Check Codex's actual output format separately. |
 
-Rule of thumb: **agentic loop → AgentSessionView (file tail). One-shot you want to
-*watch* → stream-json stdout → a live log.** They are not interchangeable; the file
+Rule of thumb: **agentic loop → AgentSessionView (file tail). Claude one-shot
+whose answer must stream → stream-json stdout → a live log.** For Codex, inspect
+the CLI output this spawn actually uses before choosing a streaming view. The file
 tail physically cannot show token partials (the JSONL records whole blocks, and the
 shared parser drops partial lines). See [[cl_ui-design-philosophy]] "One agent
 timeline everywhere" for when the structured rail IS the right call.
