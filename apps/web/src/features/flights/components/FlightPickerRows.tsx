@@ -17,7 +17,7 @@ import { presentedIndexStages } from '../lib/external-work'
 /** One tiny cell per USER-VISIBLE stage (same rows as the flight detail rail —
  *  similarity hidden unless it needs a human, run+heal merged), colored by
  *  status — the at-a-glance progress rail in the picker rows and landing list. */
-export function StageMiniRail({ stages, coverageWarningText }: { stages: Array<{ key: string; status: FlightStageStatus }>; coverageWarningText?: string }) {
+export function StageMiniRail({ stages, coverageStatus }: { stages: Array<{ key: string; status: FlightStageStatus }>; coverageStatus?: string }) {
   const source = stages.length > 0
     ? stages
     : FLIGHT_STAGE_KEYS.map((key) => ({ key: key as string, status: 'pending' as FlightStageStatus }))
@@ -29,17 +29,16 @@ export function StageMiniRail({ stages, coverageWarningText }: { stages: Array<{
   return (
     <span className="inline-flex items-center gap-[3px]" data-testid="stage-mini-rail">
       {stageRailRows(source).map((row) => {
-        const warning = row.key === 'specs-coverage' ? coverageWarningText : undefined
-        // The saved status remains in the label even when live freshness
-        // changes the cell's tone: done work can carry an outdated result.
-        const label = `${row.label} — ${STAGE_STATUS_LABEL[row.status]}${warning ? `. ${warning}` : ''}`
+        const currentCoverageStatus = row.key === 'specs-coverage' ? coverageStatus : undefined
+        // Freshness qualifies the display; the saved stage status stays intact.
+        const label = `${row.label} — ${currentCoverageStatus ?? STAGE_STATUS_LABEL[row.status]}`
         return <Tooltip key={row.key} label={label}>
           <span
             data-testid={`stage-mini-cell-${row.key}`}
             className="inline-block h-[8px] w-[8px] rounded-[2px]"
             role="img"
             aria-label={label}
-            style={{ background: warning ? 'var(--warning)' : toneFor(row.status) }}
+            style={{ background: currentCoverageStatus ? 'var(--warning)' : toneFor(row.status) }}
           />
         </Tooltip>
       })}
@@ -73,11 +72,14 @@ export function FlightsPickerDialog({
   const rows = featureActivityRows(flights, activity, features)
   const coverage = useLiveCoverageStates(rows.map((row) => row.feature))
   const freshnessByFeature = new Map((coverage.value ?? []).map((state) => [state.feature, state.freshness]))
-  const coverageWarnings = new Map(rows.flatMap((row): Array<[string, string]> => {
+  const coverageStatuses = new Map(rows.flatMap((row): Array<[string, string]> => {
     const freshness = freshnessByFeature.get(row.feature)
     const warning = freshness?.state === 'not-measured' ? undefined
       : freshness || coverage.error ? coverageWarning(freshness, coverage.confirmed, coverage.error) : undefined
-    return warning ? [[row.feature, warning]] : []
+    if (!warning) return []
+    const status = !coverage.confirmed || !freshness ? 'unconfirmed'
+      : freshness.state === 'current' && freshness.latestRunFailed ? 'failed' : freshness.state
+    return [[row.feature, status]]
   }))
   const needsAttention = (row: FeatureActivityRow): boolean =>
     Boolean(row.activity?.waiting && row.activity.waiting.kind !== 'queued') || Boolean(row.flight && flightNeedsAttention(row.flight))
@@ -135,7 +137,7 @@ export function FlightsPickerDialog({
                 <PickerRow
                   key={row.flight?.flightId ?? `activity-${row.feature}`}
                   row={row}
-                  coverageWarningText={coverageWarnings.get(row.feature)}
+                  coverageStatus={coverageStatuses.get(row.feature)}
                   onPick={onPick}
                   onPickActivity={onPickActivity}
                   onStartFlight={onStartFlight}
@@ -148,7 +150,7 @@ export function FlightsPickerDialog({
               key={`${section.group}:${filtering}`}
               expandInitially={filtering}
               section={section}
-              coverageWarnings={coverageWarnings}
+              coverageStatuses={coverageStatuses}
               onPick={onPick}
               onPickActivity={onPickActivity}
               onStartFlight={onStartFlight}
@@ -164,13 +166,13 @@ export function FlightsPickerDialog({
  *  Shared by the flat top-level list and the group sections (R55). */
 export function PickerRow({
   row,
-  coverageWarningText,
+  coverageStatus,
   onPick,
   onPickActivity,
   onStartFlight,
 }: {
   row: FeatureActivityRow
-  coverageWarningText?: string
+  coverageStatus?: string
   onPick: (flightId: string | null) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
   onStartFlight: (feature: string) => void
@@ -187,7 +189,7 @@ export function PickerRow({
           title={`Open flight ${row.flight.flightId} (${row.feature})`}
         >
           <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{row.feature}</span>
-          <StageMiniRail stages={presentedIndexStages(row.flight)} coverageWarningText={coverageWarningText} />
+          <StageMiniRail stages={presentedIndexStages(row.flight)} coverageStatus={coverageStatus} />
           <FlightStatusChip flight={row.flight} activity={row.activity} />
           <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
         </button>
@@ -197,11 +199,11 @@ export function PickerRow({
   return (
     <li>
       {row.activity
-        ? <ActivityOnlyRow feature={row.feature} activity={row.activity} derived={row.derived} coverageWarningText={coverageWarningText} onOpen={onPickActivity} />
+        ? <ActivityOnlyRow feature={row.feature} activity={row.activity} derived={row.derived} coverageStatus={coverageStatus} onOpen={onPickActivity} />
         : <NotFlownRow
             feature={row.feature}
             derived={row.derived}
-            coverageWarningText={coverageWarningText}
+            coverageStatus={coverageStatus}
             onStart={onStartFlight}
             /* R81: derived progress opens the flight view under a token id —
                the same `onPick` channel a recorded flight uses. */
@@ -220,14 +222,14 @@ export const GROUPS_OPEN_STORAGE_KEY = 'cl-flight-groups-open'
  *  without expanding it), and an explicit user toggle is remembered. */
 export function PickerGroupSection({
   section,
-  coverageWarnings,
+  coverageStatuses,
   expandInitially = false,
   onPick,
   onPickActivity,
   onStartFlight,
 }: {
   section: PickerGroup
-  coverageWarnings?: ReadonlyMap<string, string>
+  coverageStatuses?: ReadonlyMap<string, string>
   expandInitially?: boolean
   onPick: (flightId: string | null) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
@@ -271,7 +273,7 @@ export function PickerGroupSection({
             <PickerRow
               key={row.flight?.flightId ?? `activity-${row.feature}`}
               row={row}
-              coverageWarningText={coverageWarnings?.get(row.feature)}
+              coverageStatus={coverageStatuses?.get(row.feature)}
               onPick={onPick}
               onPickActivity={onPickActivity}
               onStartFlight={onStartFlight}
@@ -299,13 +301,13 @@ export function PickerGroupSection({
 export function NotFlownRow({
   feature,
   derived,
-  coverageWarningText,
+  coverageStatus,
   onStart,
   onOpenDerived,
 }: {
   feature: string
   derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
-  coverageWarningText?: string
+  coverageStatus?: string
   onStart: (feature: string) => void
   onOpenDerived?: (feature: string) => void
 }) {
@@ -323,7 +325,7 @@ export function NotFlownRow({
     >
       <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium" style={{ color: 'var(--text-secondary)' }}>{feature}</span>
       <span style={{ opacity: chip.label === 'not flown' ? 0.55 : 1 }}>
-        <StageMiniRail stages={derived ?? []} coverageWarningText={coverageWarningText} />
+        <StageMiniRail stages={derived ?? []} coverageStatus={coverageStatus} />
       </span>
       <FlightStatusChip flight={null} derived={derived} />
       <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
@@ -339,13 +341,13 @@ export function ActivityOnlyRow({
   feature,
   activity,
   derived,
-  coverageWarningText,
+  coverageStatus,
   onOpen,
 }: {
   feature: string
   activity: FeatureActivity
   derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
-  coverageWarningText?: string
+  coverageStatus?: string
   onOpen: (feature: string, activity: FeatureActivity) => void
 }) {
   return (
@@ -358,7 +360,7 @@ export function ActivityOnlyRow({
       title={`${feature}: ${ACTIVITY_CHIP[activity.kind].title}`}
     >
       <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{feature}</span>
-      <StageMiniRail stages={activityStages(activity.kind, derived)} coverageWarningText={coverageWarningText} />
+      <StageMiniRail stages={activityStages(activity.kind, derived)} coverageStatus={coverageStatus} />
       <FlightStatusChip flight={null} activity={activity} />
       <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
     </button>

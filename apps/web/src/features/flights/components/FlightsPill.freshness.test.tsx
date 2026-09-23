@@ -82,9 +82,9 @@ describe('Flights picker coverage freshness', () => {
     await act(async () => invalidateCoverage())
     expect(document.querySelector('[data-testid="derived-open-cns_better_auth"]')).toBe(row)
     expect(cell().style.background).toContain('var(--warning)')
-    expect(cell().getAttribute('aria-label')).toContain('Tests & coverage — done. Coverage out of date. Mapping input revisions were not recorded')
+    expect(cell().getAttribute('aria-label')).toBe('Tests & coverage — stale')
     act(() => cell().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
-    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('Coverage out of date. Mapping input revisions were not recorded')
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Tests & coverage — stale')
     act(() => cell().dispatchEvent(new MouseEvent('mouseout', { bubbles: true })))
     expect(row.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Idle')
     expect(document.querySelector('button[aria-pressed="false"]')?.textContent).toContain('Needs input 0')
@@ -111,7 +111,7 @@ describe('Flights picker coverage freshness', () => {
     const row = document.querySelector<HTMLElement>('[data-testid="flight-open-fl_auth"]')!
     const cell = row.querySelector<HTMLElement>('[data-testid="stage-mini-cell-specs-coverage"]')!
     expect(cell.style.background).toContain('var(--warning)')
-    expect(cell.getAttribute('aria-label')).toContain('Tests & coverage — done. Coverage out of date.')
+    expect(cell.getAttribute('aria-label')).toBe('Tests & coverage — stale')
     expect(row.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Done')
     expect(flight.stages?.find((stage) => stage.key === 'specs-coverage')?.status).toBe('done')
   })
