@@ -196,12 +196,12 @@ describe('jump', () => {
     expect(final.status).toBe('done')
     expect(final.feature).toBe('existing-checkout')
     expect(final.stages.find((s) => s.key === 'similarity')!.status).toBe('done')
-    for (const key of ['scout', 'scaffold', 'env-capture', 'docs', 'prd-summary', 'specs-coverage', 'portify'] as const) {
+    for (const key of ['scout', 'scaffold', 'env-capture', 'docs', 'prd-summary', 'specs-coverage'] as const) {
       const s = final.stages.find((x) => x.key === key)!
       expect(s.status).toBe('skipped')
       expect(s.skipReason).toBe('rerun of existing feature')
     }
-    expect(calls).toEqual(['similarity', 'run', 'heal', 'robustness', 'evaluation-export'])
+    expect(calls).toEqual(['similarity', 'run', 'heal', 'evaluation-export', 'portify', 'robustness'])
   })
 
   it('treats a backwards jump as a machine bug and parks the flight', async () => {
@@ -270,10 +270,10 @@ describe('reopenStages', () => {
     expect(reopened.status).toBe('paused')
     expect(reopened.pauseReason).toBe('user')
     expect(reopened.currentStage).toBe('docs')
-    for (const key of ['similarity', 'scout', 'scaffold', 'env-capture'] as const) {
+    for (const key of ['similarity', 'scout', 'scaffold', 'env-capture', 'portify'] as const) {
       expect(reopened.stages.find((s) => s.key === key)!.status).toBe('done')
     }
-    for (const key of ['docs', 'prd-summary', 'specs-coverage', 'portify', 'run', 'heal', 'robustness', 'evaluation-export'] as const) {
+    for (const key of ['docs', 'prd-summary', 'specs-coverage', 'run', 'heal', 'robustness', 'evaluation-export'] as const) {
       expect(reopened.stages.find((s) => s.key === key)!.status).toBe('pending')
     }
     expect(reopened.links).toBeUndefined()
@@ -343,7 +343,7 @@ describe('restart wipe (R78)', () => {
     }
   })
 
-  it('jump resets the entry stage and every later stage — never the ones before it', async () => {
+  it('jumping from Requirements resets its dependents and retains Parallel setup', async () => {
     const events: string[] = []
     const d: FlightConductorDeps = { ...deps(recordingAdapters(events)), validateStageEntry: () => null }
     const first = startFlight(args(), d)
@@ -354,7 +354,7 @@ describe('restart wipe (R78)', () => {
     const jumped = startFlight({ ...args(), mode: 'jump' as const, fromStage: 'docs' as const }, d)
     await jumped.completion
 
-    const fromDocs = FLIGHT_STAGE_KEYS.slice(FLIGHT_STAGE_KEYS.indexOf('docs'))
+    const fromDocs = FLIGHT_STAGE_KEYS.slice(FLIGHT_STAGE_KEYS.indexOf('docs')).filter((key) => key !== 'portify')
     expect(events.filter((e) => e.startsWith('reset:'))).toEqual(fromDocs.map((k) => `reset:${k}`))
     // Earlier stages keep their sidecars (their transcripts are still true).
     expect(fs.existsSync(path.join(flightDir, 'scout'))).toBe(true)
@@ -373,7 +373,27 @@ describe('restart wipe (R78)', () => {
     }
   })
 
-  it('jumping to independent Parallel setup resets only that stage', async () => {
+  it('repeating Tests & coverage retains the saved Parallel setup attempt', async () => {
+    const events: string[] = []
+    const d: FlightConductorDeps = { ...deps(recordingAdapters(events)), validateStageEntry: () => null }
+    const first = startFlight(args(), d)
+    await first.completion
+    const flightDir = store.flightDir(first.manifest.flightId)
+    fs.mkdirSync(path.join(flightDir, 'portify'), { recursive: true })
+    fs.writeFileSync(path.join(flightDir, 'portify', 'agent-session.json'), '{}')
+
+    events.length = 0
+    const jumped = startFlight({ ...args(), mode: 'jump' as const, fromStage: 'specs-coverage' as const }, d)
+    expect(jumped.manifest.stages.find((stage) => stage.key === 'portify')?.status).toBe('done')
+    await jumped.completion
+
+    expect(events.filter((event) => event.startsWith('reset:'))).toEqual([
+      'reset:specs-coverage', 'reset:run', 'reset:heal', 'reset:robustness', 'reset:evaluation-export',
+    ])
+    expect(fs.existsSync(path.join(flightDir, 'portify', 'agent-session.json'))).toBe(true)
+  })
+
+  it('jumping to Parallel setup resets it and the Lab, while preserving Test run and Report', async () => {
     const events: string[] = []
     const d: FlightConductorDeps = { ...deps(recordingAdapters(events)), validateStageEntry: () => null }
     const first = startFlight(args(), d)
@@ -388,11 +408,11 @@ describe('restart wipe (R78)', () => {
     const jumped = startFlight({ ...args(), mode: 'jump' as const, fromStage: 'portify' as const }, d)
     await jumped.completion
 
-    expect(events.filter((event) => event.startsWith('reset:'))).toEqual(['reset:portify'])
+    expect(events.filter((event) => event.startsWith('reset:'))).toEqual(['reset:portify', 'reset:robustness'])
     expect(fs.existsSync(path.join(flightDir, 'portify'))).toBe(false)
     expect(fs.existsSync(path.join(flightDir, 'run'))).toBe(true)
     expect(fs.existsSync(path.join(flightDir, 'evaluation-export'))).toBe(true)
-    for (const key of ['run', 'heal', 'robustness', 'evaluation-export'] as const) {
+    for (const key of ['run', 'heal', 'evaluation-export'] as const) {
       expect(store.get(jumped.manifest.flightId)!.stages.find((stage) => stage.key === key)?.status).toBe('done')
     }
   })

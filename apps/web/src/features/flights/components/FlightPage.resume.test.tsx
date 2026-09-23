@@ -272,14 +272,25 @@ describe('FlightPage', () => {
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')?.click() })
     expect(container.querySelector('[data-testid="flight-resume"]')).toBeNull()
     expect(container.querySelector('[data-testid="flight-redo-scout"]')?.textContent).toContain('Repo scan')
+    expect(container.querySelector('[data-testid="flight-redo-section-setup"]')?.textContent).toContain('Setup')
+    expect(container.querySelector('[data-testid="flight-redo-section-verification"]')?.textContent).toContain('Verification cycle')
+    expect(container.querySelector('[data-testid="flight-redo-section-independent"]')?.textContent).toContain('Run separately')
     // Server-invalid step: disabled, with the validator's reason on the row.
     const runRow = container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-run"]')!
     const parallelSetupRow = container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-portify"]')!
     expectBefore(runRow, parallelSetupRow)
     expect(runRow.disabled).toBe(true)
     expect(runRow.textContent).toContain('no specs authored yet')
-    // Nothing selected yet → the primary is disabled.
-    expect(container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-submit"]')?.disabled).toBe(true)
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-robustness"]')?.click() })
+    expect(container.querySelector('[data-testid="flight-redo-effects"]')?.textContent)
+      .toContain('Resets: Robustness lab.')
+    expect(container.querySelector('[data-testid="flight-redo-effects"]')?.textContent)
+      .toContain('current report stay')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-specs-coverage"]')?.click() })
+    const effects = container.querySelector('[data-testid="flight-redo-effects"]')?.textContent ?? ''
+    expect(effects).toContain('Tests & coverage, Test run, Evaluation report, Robustness lab')
+    expect(effects).toContain('Parallel setup stays')
+    // Choosing another row updates the impact before the call is sent.
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-docs"]')?.click() })
     const note = container.querySelector<HTMLTextAreaElement>('[data-testid="flight-redo-feedback"]')!
     await act(async () => {

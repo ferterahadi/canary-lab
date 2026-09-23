@@ -24,7 +24,7 @@ completion?**
 | Shape | How to spot it | What it can show |
 | --- | --- | --- |
 | **Agentic loop** | spawned to read/iterate with tools: the heal agent, **and PRD-summary + coverage-mapping** (their prompts list file paths and make the agent read the docs/specs itself) — long-running, writes tool_use / tool_result / thinking to its session log | A genuine timeline — reads, thinks, tool calls, results, multiple turns |
-| **One-shot completion** | `codex exec`, or a prompt that **inlines all context** so the model answers in one turn (the evaluation rewrite) — seconds, no tool calls | **Only** the prompt + one final answer. No reads. No thinking trace. No tool steps. |
+| **One-shot completion** | A prompt that **inlines all context** and whose observed run makes no tool calls (often the evaluation rewrite). `codex exec` alone does not establish this shape; it can run an agentic loop. | Only the prompt + one final answer when no tools are used. No read/think/tool timeline to show. |
 
 **Don't classify by spawn flags alone.** `claude -p --dangerously-skip-permissions`
 already has tools ON — what makes a spawn one-shot *in practice* is a prompt that
@@ -33,17 +33,17 @@ coverage-mapping prompts list file *paths* and require reading them, so they str
 a real read/think/tool timeline through `AgentSessionView`. The evaluation rewrite
 inlines its evidence packet, so it is one-shot.
 
-If it's one-shot, **say so up front** and scope the view to reality. Do NOT mount a
-tool-loop timeline on it and hope — you'll ship "1 event, looks frozen", the user
-will bounce, and you'll rebuild it. The durable fix for a one-shot you want to *watch* is to make it agentic
-(stop inlining; hand it paths to read), not to dress up the empty timeline.
+If it is one-shot, **say so up front** and scope the view to reality. A session
+viewer may show only the final block. If the user needs to watch answer text
+arrive, use a supported stdout stream; if they need real read/tool steps, give
+the task inputs the agent must inspect and verify that it actually uses tools.
 
 ## Two transports — pick the one that fits the shape
 
 | Transport | What it is | Good for | Cannot |
 | --- | --- | --- | --- |
 | **On-disk session JSONL** — `AgentSessionView` tails it (REST snapshot + `/ws/.../agent-session`, parsed by `agent-session-log.ts`) | The agent CLI's own session file; the parser emits **complete events only** | Agentic loops; historical replay; the structured rail (thinking/tool/result rows, model+session header) | **Token-stream a one-shot** — the assistant block only lands at *completion*, by which point the job is done and the view moves on, so you see just the prompt |
-| **stdout `--output-format=stream-json --include-partial-messages`** | The live token stream on stdout; parse deltas yourself (see `features/agent-sessions/logic/agent-stream.ts`) | Watching a one-shot write its answer in real time | Give you the structured tool/think rows for free — you render the text |
+| **Claude stdout `--output-format=stream-json --include-partial-messages`** | The live token stream on stdout; parse deltas yourself (see `features/agent-sessions/logic/agent-stream.ts`) | Watching a Claude one-shot write its answer in real time | Give you the structured tool/think rows for free — you render the text. Check Codex's actual output format separately. |
 
 Rule of thumb: **agentic loop → AgentSessionView (file tail). One-shot you want to
 *watch* → stream-json stdout → a live log.** They are not interchangeable; the file

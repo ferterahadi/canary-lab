@@ -15,11 +15,11 @@ Run-loop *semantic* changes (collision/queue/heal-claim/pass-count rules) →
 
 ## Checklist
 
-1. **Implement as a thin wrapper** in the `apps/web-server/src/mcp/tool-groups/`
-   module for its domain — `reads.ts`, `run-lifecycle.ts`, `heal-flow.ts`, or one of
-   the authoring siblings (`authoring-features.ts`, `authoring-coverage.ts`,
-   `authoring-env.ts`, `authoring-export.ts`, `authoring-drafts.ts`, `flight.ts`,
-   `portify.ts`) — `authoring.ts` is only their composer. Reuse the REST route via `app.inject()` — never duplicate
+1. **Implement as a thin wrapper** in the domain's existing module under
+   `apps/web-server/src/mcp/tool-groups/`. List the directory first: it includes
+   run, heal, flight, portify, discovery, test-review, and authoring groups;
+   `authoring.ts` is their composer, not a second home for a tool. Reuse the
+   REST route via `app.inject()` where that route owns the behavior — never duplicate
    orchestrator logic. Author-profile tools call
    `apps/web-server/src/features/config/logic/feature-authoring.ts` directly.
    Groups are domain sections, **not** profiles: a tool in several profiles still

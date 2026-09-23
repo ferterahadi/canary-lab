@@ -13,10 +13,10 @@ import { robustnessJob } from './stage-jobs'
 // nothing to the green verdict and never touches it: its output is FINDINGS
 // (or none), read by the pane, the certificate and the repair agent.
 //
-// Two honest skips, stated as reasons rather than failures: a run that did not
-// pass has nothing green to perturb, and a suite whose start commands declare
-// no port slot has nothing for the shim to sit in front of — both are facts
-// about the suite, not faults in the stage. Harness predicate: the job record
+// Honest skips, stated as reasons rather than failures: an independent Lab
+// entry may have no run, a run that did not pass has nothing green to perturb,
+// and a suite whose start commands declare no port slot has nothing for the
+// shim to sit in front of. Harness predicate: the job record
 // settled `done`; a matrix that ended `failed`/`aborted` fails the stage with
 // the record's own reason.
 
@@ -79,7 +79,7 @@ export function robustnessStage(deps: FlightStageDeps): StageAdapter {
     async run(ctx) {
       const m = ctx.manifest()
       const runId = m.links?.runId
-      if (!runId) return { kind: 'failed', error: `no run to perturb — ${flightStageLabel('run')} must settle first` }
+      if (!runId) return { kind: 'skipped', reason: `no passed test run to perturb — complete ${flightStageLabel('run')} first` }
 
       // Resume/replay: the job this flight already started is the answer, still
       // running or already settled — never a second matrix over the same run.

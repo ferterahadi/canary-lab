@@ -59,7 +59,8 @@ green.** A test edited into passing is the exact failure this product exists to 
   status in the wording, never drop/merge/dedupe cases to make the report read better.
 - **The case list mirrors the DECLARED roster, not the executed set.**
   `buildTestReviewPacket`
-  (`apps/web-server/src/features/evaluation/logic/test-review-export.ts`) enumerates
+  (`apps/web-server/src/features/evaluation/logic/test-review/packet.ts`,
+  re-exported by `test-review-export.ts`) enumerates
   `summary.knownTests` — Playwright's own reporter walk of the whole suite, taken
   before the first test starts — and keeps that order. A test the run never reached is
   **present and labelled `NOT_RUN_STATUS` (`'not run'`)**: never dropped, and never

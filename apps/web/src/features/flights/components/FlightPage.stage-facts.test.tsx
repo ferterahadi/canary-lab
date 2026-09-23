@@ -928,6 +928,48 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Evaluation report ready.')
   })
 
+  it('offers a refreshed report when Robustness Lab finishes after the pinned export', async () => {
+    mocks.taskById.mockReturnValue(readyTask)
+    mocks.redoFlight.mockResolvedValue(exportFlight({ taskId: 'task-7' }))
+    const flight = exportFlight({ taskId: 'task-7' })
+    flight.links = { ...flight.links, runId: readyTask.runId }
+    flight.stages = flight.stages.map((stage) => stage.key === 'evaluation-export'
+      ? { ...stage, endedAt: '2026-07-23T16:10:00Z' }
+      : stage.key === 'robustness' ? {
+          ...stage,
+          endedAt: '2026-07-23T16:20:00Z',
+          evidence: { jobId: 'lab-new', runId: readyTask.runId },
+        }
+      : stage)
+    mocks.getFlight.mockResolvedValue(flight)
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-evaluation-export"]')?.click()
+    })
+
+    const refresh = container.querySelector<HTMLButtonElement>('[data-testid="flight-refresh-report"]')
+    expect(refresh?.disabled).toBe(false)
+    expect(container.querySelector('[data-testid="evaluation-deliverable"]')?.textContent)
+      .toContain('Robustness Lab finished after this report')
+    await act(async () => { refresh?.click() })
+    expect(mocks.redoFlight).toHaveBeenCalledWith('fl_1', { fromStage: 'evaluation-export' })
+    expect(container.querySelector('[data-testid="download-report-task-7"]')).not.toBeNull()
+  })
+
+  it('keeps the report download in the header while Robustness Lab repeats', async () => {
+    mocks.taskById.mockReturnValue(readyTask)
+    const flight = exportFlight({ taskId: 'task-7' })
+    flight.status = 'running'
+    flight.currentStage = 'robustness'
+    flight.stages = flight.stages.map((stage) => stage.key === 'robustness'
+      ? { key: 'robustness', status: 'running' }
+      : stage)
+    mocks.getFlight.mockResolvedValue(flight)
+    await render('fl_1')
+
+    expect(container.querySelector('[data-testid="flight-primary-download"]')).not.toBeNull()
+  })
+
   it('a read-time-probed export (a derived flight has no zip path) still offers the download', async () => {
     mocks.taskById.mockReturnValue(readyTask)
     await openExportStage({ taskId: 'task-7', runId: '2026-07-23T1603-z6kc', mode: 'localized' })

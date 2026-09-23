@@ -12,7 +12,7 @@ Corrections captured via /todo-learn. Each is a standing rule for this repo.
 ## 2026-08-06 — A demo is a tester-controlled full Flight
 - **Rule:** Ship one canonical demo that starts from an un-onboarded application and lets the tester drive every Flight stage; do not substitute an automated run that leaves behind a finished result.
 - **Why:** The demo must teach the complete product journey and preserve the tester's ability to pause, inspect, respond, rerun, and explore.
-- **How to apply:** When adding or changing a demo command, make its job provision + open + retain the workspace. Verify all seven Flight stages from a fresh state and keep the workspace until explicit cleanup.
+- **How to apply:** When adding or changing a demo command, make its job provision + open + retain the workspace. Verify every current Flight stage from a fresh state (derive the list from `FLIGHT_STAGE_KEYS` in `shared/flights/types.ts`) and keep the workspace until explicit cleanup.
 
 ## 2026-08-06 — Multi-service means cross-service repair evidence
 - **Rule:** A multi-service demo must require application changes in multiple participating services.

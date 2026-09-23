@@ -1,7 +1,7 @@
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, type AgentActivity, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightStage, type FlightStageAgentSession, type FlightStageErrorDetail, type FlightStageKey, type FlightStageTimingKey } from './types'
+import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, flightStagesResetByEntry, type AgentActivity, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightStage, type FlightStageAgentSession, type FlightStageErrorDetail, type FlightStageKey, type FlightStageTimingKey } from './types'
 import { FlightConductorDeps, StartFlightArgs, redoFlight, startFlight } from './conductor'
 import { drive } from './flight-drive'
 import { FlightStageEntryError, stampSystemLine } from './flight-errors'
@@ -288,15 +288,11 @@ export function stageSidecarDirs(key: FlightStageKey): string[] {
 }
 
 /** Which stage records and artifacts an explicit re-entry invalidates.
- *
- * Most entries retain the historical positional boundary: changing an earlier
- * artifact can invalidate everything recorded after it. Parallel setup is the
- * one independent terminal task. It reads suite/env configuration but neither
- * Test run nor Report reads its output, so retrying it must not erase evidence
- * the user already received. */
+ * Parallel setup reads the suite and envset, but Test run and Report do not
+ * read its output. Robustness reads the green run and the current port setup;
+ * the Report is an immutable snapshot and can be refreshed separately. */
 export function stagesResetByEntry(entry: FlightStageKey): readonly FlightStageKey[] {
-  if (entry === 'portify') return ['portify']
-  return FLIGHT_STAGE_KEYS.slice(FLIGHT_STAGE_KEYS.indexOf(entry))
+  return flightStagesResetByEntry(entry)
 }
 
 /** R78: rewind the feature to the state just before `entry` ran — invoke each
@@ -361,12 +357,12 @@ export function sameRepoSet(a: string[], b: string[]): boolean {
   return norm(a) === norm(b)
 }
 
-/** Fresh stage array; with `fromStage`, everything before it is pre-skipped
- *  (the stage-entry path — prerequisites were validated by the caller). */
+/** Fresh stage array; with `fromStage`, earlier execution-priority stages are
+ *  pre-skipped (the stage-entry path — prerequisites were validated). */
 export function freshStages(fromStage: FlightStageKey | undefined, now: () => string): FlightStage[] {
-  const startIdx = fromStage ? FLIGHT_STAGE_KEYS.indexOf(fromStage) : 0
-  return FLIGHT_STAGE_KEYS.map((key, i) =>
-    i < startIdx
+  const startIdx = fromStage ? FLIGHT_EXECUTION_ORDER.indexOf(fromStage) : 0
+  return FLIGHT_STAGE_KEYS.map((key) =>
+    FLIGHT_EXECUTION_ORDER.indexOf(key) < startIdx
       ? {
           key,
           status: 'skipped' as const,
@@ -378,10 +374,9 @@ export function freshStages(fromStage: FlightStageKey | undefined, now: () => st
 }
 
 /** Jump re-entry on an EXISTING record: unaffected stages keep their prior
- *  records verbatim, and the entry's invalidation set resets to pending. Most
- *  entries rewind the chosen step and every later stable-record stage;
- *  independent Parallel setup rewinds only itself. resetStagesForRestart wipes
- *  that same set on disk. The preserved steps already ran in THIS flight, so their
+ *  records verbatim, and the entry's artifact invalidation set resets to
+ *  pending. resetStagesForRestart wipes that same set on disk. The preserved
+ *  steps already ran in THIS flight, so their
  *  `done` status, evidence, log and agent-session refs stay true and the UI can
  *  still show their history. Contrast `freshStages(fromStage)`, which pre-skips
  *  earlier stages as `stage-entry` — correct only for a brand-new flight that

@@ -349,19 +349,22 @@ describe('trailer model (R14–R18)', () => {
     }))
     const onSelectStage = vi.fn()
     await render('fl_1', { stage: null, onSelectStage })
-    // Follow-mode: Report remains the foreground deliverable even though
-    // Parallel setup is the final persisted row.
+    // Follow-mode: Report remains the foreground deliverable while the
+    // independent work sits below it in the rail.
     expect(container.querySelector('[data-testid="stage-rail-evaluation-export"]')?.getAttribute('aria-current')).toBe('true')
     const railIds = [...container.querySelectorAll<HTMLElement>('[data-testid^="stage-rail-"]')]
       .map((row) => row.dataset.testid)
     expect(railIds.indexOf('stage-rail-evaluation-export'))
       .toBeLessThan(railIds.indexOf('stage-rail-portify'))
     const report = container.querySelector('[data-testid="stage-rail-evaluation-export"]')
-    const divider = container.querySelector('[data-testid="parallel-setup-divider"]')
+    const divider = container.querySelector('[data-testid="flight-rail-section-independent"]')
     const parallelSetup = container.querySelector('[data-testid="stage-rail-portify"]')
-    expect(divider?.textContent).toContain('Independent')
+    expect(divider?.textContent).toContain('Run separately')
     expect(report?.nextElementSibling).toBe(divider)
     expect(divider?.nextElementSibling).toBe(parallelSetup)
+    expect(container.querySelector('[data-testid="flight-rail-section-setup"]')?.textContent).toContain('Setup')
+    expect(container.querySelector('[data-testid="flight-rail-section-verification"]')?.textContent).toContain('Verification cycle')
+    expect(railIds.indexOf('stage-rail-portify')).toBeLessThan(railIds.indexOf('stage-rail-robustness'))
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')?.click()
@@ -377,7 +380,7 @@ describe('trailer model (R14–R18)', () => {
     expect(onSelectStage).not.toHaveBeenCalledWith(null)
   })
 
-  it('keeps the completed Report in front while final Parallel setup runs in the rail', async () => {
+  it('keeps the completed Report in front while Parallel setup runs in the rail', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'running',
       currentStage: 'portify',

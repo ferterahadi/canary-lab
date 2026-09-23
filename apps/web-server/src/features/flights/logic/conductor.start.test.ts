@@ -27,7 +27,7 @@ import {
   type StageOutcome,
 } from './conductor'
 
-import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from './types'
+import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, type FlightManifest, type FlightOptions, type FlightStageKey } from './types'
 
 let tmpDir: string
 
@@ -84,6 +84,7 @@ describe('startFlight', () => {
     expect(calls).toEqual([...FLIGHT_EXECUTION_ORDER])
     expect(calls.indexOf('run')).toBeLessThan(calls.indexOf('portify'))
     expect(calls.indexOf('evaluation-export')).toBeLessThan(calls.indexOf('portify'))
+    expect(calls.indexOf('portify')).toBeLessThan(calls.indexOf('robustness'))
   })
 
   it('honours an explicit Parallel-setup entry before normal drive priority', async () => {
@@ -95,10 +96,10 @@ describe('startFlight', () => {
 
     await completion
 
-    expect(calls).toEqual(['portify', 'run', 'heal', 'robustness', 'evaluation-export'])
+    expect(calls).toEqual(['portify', 'robustness'])
   })
 
-  it('keeps the Report downloadable when final Parallel setup fails', async () => {
+  it('keeps the Report downloadable when Parallel setup fails', async () => {
     const adapters = allDone()
     adapters.run = {
       teardown: () => null,
@@ -275,12 +276,12 @@ describe('startFlight', () => {
     const final = store.get(manifest.flightId)!
     expect(final.status).toBe('done')
     for (const s of final.stages) {
-      if (FLIGHT_STAGE_KEYS.indexOf(s.key) < FLIGHT_STAGE_KEYS.indexOf('run')) {
+      if (FLIGHT_EXECUTION_ORDER.indexOf(s.key) < FLIGHT_EXECUTION_ORDER.indexOf('run')) {
         expect(s.status).toBe('skipped')
         expect(s.skipReason).toBe('stage-entry')
       }
     }
-    expect(calls).toEqual(['run', 'heal', 'robustness', 'evaluation-export'])
+    expect(calls).toEqual(['run', 'heal', 'evaluation-export', 'portify', 'robustness'])
   })
 
   it('a jump to evaluation-export keeps the validated runId; report-changing jumps reset links', async () => {
@@ -353,6 +354,72 @@ describe('startFlight', () => {
     await jumped.completion
     expect(store.get(jumped.manifest.flightId)!.status).toBe('done')
     expect(store.get(jumped.manifest.flightId)!.links?.evaluationZip).toBe('/tmp/eval-42.zip')
+  })
+
+  it('repeating Robustness Lab retains the run, Parallel setup and downloadable Report', async () => {
+    const calls: FlightStageKey[] = []
+    const adapters = allDone(calls)
+    const first = startFlight(args(), deps(adapters))
+    await first.completion
+    const completed = store.get(first.manifest.flightId)!
+    store.save({
+      ...completed,
+      runVerdict: 'passed',
+      links: {
+        runId: 'run-42',
+        robustnessJobId: 'lab-old',
+        evaluationTaskId: 'eval-42',
+        evaluationZip: '/tmp/eval-42.zip',
+      },
+    })
+
+    calls.length = 0
+    const jumped = startFlight({ ...args(), mode: 'jump' as const, fromStage: 'robustness' as const }, {
+      ...deps(adapters),
+      validateStageEntry: () => null,
+    })
+    expect(jumped.manifest.runVerdict).toBe('passed')
+    expect(jumped.manifest.links).toEqual({
+      runId: 'run-42',
+      evaluationTaskId: 'eval-42',
+      evaluationZip: '/tmp/eval-42.zip',
+    })
+    expect(jumped.manifest.stages.find((stage) => stage.key === 'robustness')?.status).toBe('pending')
+    for (const key of ['run', 'portify', 'evaluation-export'] as const) {
+      expect(jumped.manifest.stages.find((stage) => stage.key === key)?.status).toBe('done')
+    }
+    await jumped.completion
+    expect(calls).toEqual(['robustness'])
+    expect(store.get(jumped.manifest.flightId)!.links?.evaluationZip).toBe('/tmp/eval-42.zip')
+  })
+
+  it('refreshing the Report keeps the Lab job as export evidence', async () => {
+    const adapters = allDone()
+    const first = startFlight(args(), deps(adapters))
+    await first.completion
+    const completed = store.get(first.manifest.flightId)!
+    store.save({
+      ...completed,
+      links: {
+        runId: 'run-42',
+        robustnessJobId: 'lab-new',
+        evaluationTaskId: 'eval-old',
+        evaluationZip: '/tmp/eval-old.zip',
+      },
+    })
+    let exportLinks: FlightManifest['links'] | undefined
+    adapters['evaluation-export'] = {
+      teardown: () => null,
+      run: async (ctx) => { exportLinks = ctx.manifest().links; return { kind: 'done' } },
+    }
+    const jumped = startFlight({ ...args(), mode: 'jump' as const, fromStage: 'evaluation-export' as const }, {
+      ...deps(adapters),
+      validateStageEntry: () => null,
+    })
+    expect(jumped.manifest.links).toEqual({ runId: 'run-42', robustnessJobId: 'lab-new' })
+    expect(jumped.manifest.stages.find((stage) => stage.key === 'robustness')?.status).toBe('done')
+    await jumped.completion
+    expect(exportLinks).toEqual({ runId: 'run-42', robustnessJobId: 'lab-new' })
   })
 
   it('a jump to evaluation-export adopts a standalone run when the record has none', async () => {

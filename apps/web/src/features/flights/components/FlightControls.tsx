@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Fragment, useEffect, useRef, useState, type CSSProperties } from 'react'
 import * as api from '@/shared/api/client'
 import type { FlightManifest, FlightStageKey, FlightStageStatus } from '@/shared/api/client'
 import { Modal, useEscapeToClose } from '@/shared/ui/atoms'
@@ -8,28 +8,18 @@ import { DeleteSuiteConfirm, ModelLaunchGate } from '@/features/config'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import { START_FRESH_BLURB, START_FRESH_LABEL } from './FlightStartDialog'
 import { STAGE_BLURB, STAGE_ICON, stageRowKey, stageStatusTone } from './stage-meta'
-import { FLIGHT_EXECUTION_ORDER } from '@shared/flights/types'
+import { FLIGHT_EXECUTION_ORDER, flightStagesResetByEntry } from '@shared/flights/types'
 import { flightRailLabel } from '@shared/flights/stage-labels'
+import { FLIGHT_SECTION_ROW_KEYS, FLIGHT_STAGE_SECTIONS } from './flight-sections'
 import { EMPTY_AGENT_MODELS, MODEL_STAGE_KEYS } from '@shared/agent-models'
 import { externalMutationTooltip, type ExternalMutationOwner } from '../lib/external-work'
 
 /** The stages Continue → "from a step…" offers — the user-facing rail rows
  *  (merged-pair primaries), labeled the way the rail labels them. The server
  *  validates prerequisites (checkStageEntry) and 400s an invalid target. */
-const REDO_STAGE_KEY_SET = new Set<FlightStageKey>([
-  'scout',
-  'scaffold',
-  'docs',
-  'specs-coverage',
-  'run',
-  'robustness',
-  'portify',
-  'evaluation-export',
-])
+const REDO_STAGE_KEY_SET = new Set<FlightStageKey>(FLIGHT_SECTION_ROW_KEYS)
 
-const REDO_STAGE_KEYS = FLIGHT_EXECUTION_ORDER.filter((key) => REDO_STAGE_KEY_SET.has(key))
-
-export const REDO_STAGES: Array<{ key: FlightStageKey; label: string }> = REDO_STAGE_KEYS.map((key) => ({
+export const REDO_STAGES: Array<{ key: FlightStageKey; label: string }> = FLIGHT_SECTION_ROW_KEYS.map((key) => ({
   key,
   label: flightRailLabel(key),
 }))
@@ -293,6 +283,21 @@ export function RedoFlightDialog({
     return option ?? { allowed: true }
   }
   const selectedLabel = REDO_STAGES.find((s) => s.key === fromStage)?.label
+  const affected = fromStage
+    ? REDO_STAGES.filter((stage) => flightStagesResetByEntry(fromStage)
+      .some((key) => stageRowKey(key) === stage.key))
+    : []
+  const effectNote = fromStage === 'robustness'
+    ? 'The test run, Parallel setup and current report stay. Refresh the report after new Lab findings settle to include them.'
+    : fromStage === 'portify'
+      ? 'The test run and current report stay. Robustness Lab repeats with the updated port setup.'
+      : fromStage === 'evaluation-export'
+        ? 'Completed reports stay downloadable in report history. A new report will be added.'
+        : fromStage === 'specs-coverage' || fromStage === 'run'
+          ? 'Parallel setup stays. Completed reports remain in history; the new report will use the new run.'
+          : fromStage === 'docs'
+            ? 'Parallel setup stays. Tests, the run and the report update from the new requirements.'
+            : 'Completed reports remain in history while the affected steps rebuild.'
 
   return (
     <Modal
@@ -300,7 +305,7 @@ export function RedoFlightDialog({
       onClose={onClose}
       width={560}
       title="Re-run from a step"
-      description="Pick where the flight restarts. Results from that step on are thrown away; files already written stay."
+      description="Choose a step to repeat. The affected steps are shown below; completed report downloads stay available."
       footer={
         <div className="flex items-center justify-end gap-2">
           <button type="button" onClick={onClose} className="cl-button px-3 py-1.5 text-xs">
@@ -353,7 +358,7 @@ export function RedoFlightDialog({
           </button>
         )}
 
-        {/* One connected pipeline the eye reads top-to-bottom. Each row's
+        {/* The same groups and order as the rail. Each row's
             badge carries the LAST record's verdict for that step (✓ done,
             number = never reached); its sub-line says what the step does — or
             the server's full reason when the step can't be an entry point
@@ -364,6 +369,7 @@ export function RedoFlightDialog({
           className="cl-ledger"
         >
           {REDO_STAGES.map((s, index) => {
+            const section = FLIGHT_STAGE_SECTIONS.find((group) => group.keys[0] === s.key)
             const { allowed, reason } = entryFor(s.key)
             const selected = fromStage === s.key
             const lastStatus = flight.stages.find((st) => st.key === s.key)?.status
@@ -373,8 +379,12 @@ export function RedoFlightDialog({
             // stage's last run did.
             const badgeTone = settled ? stageStatusTone(lastStatus) : 'var(--text-muted)'
             return (
-              <button
-                key={s.key}
+              <Fragment key={s.key}>
+                {section && <div data-testid={`flight-redo-section-${section.id}`} className="flex items-center gap-2 px-3 py-1.5">
+                  <span className="cl-rubric shrink-0">{section.label}</span>
+                  <span className="h-px flex-1 border-t border-dashed border-line" />
+                </div>}
+                <button
                 type="button"
                 role="radio"
                 aria-checked={selected}
@@ -418,9 +428,18 @@ export function RedoFlightDialog({
                     {!allowed && reason ? reason : STAGE_BLURB[s.key]}
                   </span>
                 </span>
-              </button>
+                </button>
+              </Fragment>
             )
           })}
+        </div>
+        <div data-testid="flight-redo-effects" className="cl-quote-rail px-3 py-0.5 text-[11px] leading-relaxed text-secondary">
+          {fromStage ? (
+            <>
+              <div><span className="font-medium text-primary">Resets:</span> {affected.map((stage) => stage.label).join(', ')}.</div>
+              <div>{effectNote}</div>
+            </>
+          ) : 'Select a step to see what will be reset and what stays.'}
         </div>
         <label className="flex flex-col gap-1.5">
           <span className="cl-type-data font-medium text-secondary">

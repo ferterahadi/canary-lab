@@ -12,9 +12,9 @@ import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectS
 import { CHECKPOINT_OPTIONS } from '../types'
 import { externalAgentSessionForFlight } from '../external-agent-session'
 
-// Terminal stage: a flight isn't done at green — it ends by producing the
-// evaluation archive through the existing test-review-export engine, so the
-// deliverable is run-grounded proof. A failed terminal run exports as-is
+// The repeatable verification path ends by producing the evaluation archive
+// through the existing test-review-export engine, so the deliverable is
+// run-grounded proof. A failed terminal run exports as-is
 // (status preserved, per the PRD). Before the export starts, non-yolo flights
 // park on the export-mode checkpoint: `raw` (fast report, no LLM rewrite) vs
 // `localized` (an agent rewrites per-test reasoning) — the mode the existing
@@ -222,13 +222,14 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
       if (choice === 'raw' || choice === 'localized') return startExport(ctx, choice)
       return modeCheckpoint(ctx)
     },
-    // R78 restart wipe: drop the export task dir (export.zip included) through
-    // the evaluation route — it aborts a still-running task and emits the
-    // evaluation-export-deleted event. The run record is the RUN stage's
-    // artifact; a restart entering here keeps it (it is this stage's input).
+    // A completed archive is an immutable historical report. Re-entering this
+    // stage starts a new task and leaves the old download in All reports.
+    // Only an unfinished task is stopped and discarded on restart.
     async reset(ctx) {
       const taskId = ctx.manifest().links?.evaluationTaskId
       if (!taskId) return
+      const archive = path.join(deps.logsDir, 'evaluation-exports', taskId, 'export.zip')
+      if (readEvaluationExportTask(deps.logsDir, taskId)?.downloadReady && fs.existsSync(archive)) return
       await deps
         .inject({ method: 'DELETE', url: `/api/evaluation-exports/${encodeURIComponent(taskId)}` })
         .catch(() => {})

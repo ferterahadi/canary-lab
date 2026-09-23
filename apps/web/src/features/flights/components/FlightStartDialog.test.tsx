@@ -343,7 +343,8 @@ describe('FlightStartDialog — fresh intent (R76)', () => {
   it('states what a fresh start costs', async () => {
     mocks.getFlightEntryOptions.mockResolvedValue(paused())
     await render({ intent: 'fresh' })
-    expect(byTestId('flight-start-reset-note')!.textContent).toContain('wiped')
+    expect(byTestId('flight-start-reset-note')!.textContent).toContain('stage evidence resets')
+    expect(byTestId('flight-start-reset-note')!.textContent).toContain('report downloads stay in history')
   })
 
   it('leaves the re-fly intent alone — the stage menu still preselects Continue', async () => {

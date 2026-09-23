@@ -513,10 +513,10 @@ export function FlightStartDialog({
             {hasRecord && (
               <div data-testid="flight-start-reset-note" className="cl-aside">
                 {freshMode
-                  ? 'The last attempt is wiped first — docs, tests, saved settings, run and report.'
+                  ? 'The flight starts over: stage evidence resets, while completed report downloads stay in history.'
                   : picked === 'continue'
                     ? 'Continue picks up from the last state — nothing is wiped.'
-                    : 'Restarting from a step throws away its results and everything after it — docs, tests, saved settings, run and report. Earlier steps are kept.'}
+                    : 'Restarting resets the selected step and its dependent evidence. Repeating tests keeps Parallel setup; repeating Robustness Lab keeps the current report. Completed reports stay in history.'}
               </div>
             )}
 

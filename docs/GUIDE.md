@@ -331,15 +331,16 @@ repositories through one server-owned pipeline:
 
 ```text
 similarity → scout → scaffold → env capture → docs → PRD summary
-→ Tests & coverage → Test run → Auto-repair → Robustness lab → Report → Parallel setup
+→ Tests & coverage → Test run → Auto-repair → Report → Parallel setup → Robustness Lab
 ```
 
-The serial Test run and downloadable Report finish before Parallel setup, so a
-large app produces its evaluation without first waiting for port-injection
-work. The Report is the end of the foreground journey: surface it as soon as it
-exists. Parallel setup remains a persisted, server-owned final stage that can
-finish, park, or be retried in the background without deleting the completed run
-or Report. The Flight page continues to show its live progress.
+The serial Test run and downloadable Report finish before the independent work,
+so a large app produces its evaluation without first waiting for port-injection
+work or the Robustness Lab. Surface the Report as soon as it exists. Parallel
+setup runs next, then the Lab uses its port slots to perturb the passed tests.
+Both can be repeated without deleting the completed Report. A Report built
+before Lab findings can be refreshed to include them. The Flight page shows
+their live progress.
 
 The server owns stage priority, persistence, and every verdict. Judgment work can
 come from two producers:
@@ -352,9 +353,9 @@ come from two producers:
   export. Canary Lab still re-reads artifacts and computes the verdict.
 
 Mechanical work—scaffold writes, env application, Playwright execution, and raw
-export—plus final Parallel setup stays in Canary Lab in both modes. Once
+export—plus Parallel setup and Robustness Lab stay in Canary Lab in both modes. Once
 `links.evaluationZip` appears, an external client reports that path and ends its
-turn; it does not keep polling while Parallel setup runs. An external client can
+turn; it does not keep polling while the independent work runs. An external client can
 return any earlier handoff to the internal agent with `choice: "run-internally"`.
 Flights persisted under the older client-owned Portify behavior use that same
 choice to migrate their final handoff back to Canary Lab.
@@ -407,10 +408,12 @@ One suite has one Flight record.
 - Recalling an active Flight follows it.
 - Recalling a paused Flight resumes its first open stage without deleting
   artifacts.
-- `from_stage` re-enters one stage after checking prerequisites. It normally
-  deletes that stage's and every later record stage's artifacts; re-entering
-  Parallel setup deletes only its own Portify attempt and preserves the run and
-  Report.
+- `from_stage` re-enters one stage after checking prerequisites and resets the
+  artifacts that depend on it. Repeating Tests & coverage or Test run keeps
+  Parallel setup. Repeating Parallel setup resets it and Robustness Lab while
+  preserving the run and Report. Repeating the Lab preserves the Report; refresh
+  the export if its new findings should be included. Completed reports stay
+  downloadable in history.
 - `redo: true` restarts from stage one and deletes all stage artifacts. A full
   redo may replace the stored repos and description; omit them to reuse the old
   values.

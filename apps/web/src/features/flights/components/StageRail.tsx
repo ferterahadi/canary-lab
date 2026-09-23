@@ -3,6 +3,7 @@ import { STAGE_LABEL, stageLabel } from './stage-meta'
 import { presentedStageStatus } from './stage-metrics'
 import { flightRailLabel } from '@shared/flights/stage-labels'
 import { FLIGHT_EXECUTION_ORDER } from '@shared/flights/types'
+import { FLIGHT_SECTION_ROW_KEYS } from './flight-sections'
 
 // ─── Rail rows (R21/R22/R32/R33) ────────────────────────────────────────────
 // The rail is a lens for the USER, not a dump of the conductor's internals:
@@ -124,5 +125,15 @@ export function stageRailRows(
     }
     rows.push({ key, label: stageLabel(key), status: s.status, note: stageRailNote(s) })
   }
-  return rows
+  // The user sees Setup → Verification cycle → Run separately even though the
+  // conductor and persisted manifest use their own orders. Keep an exceptional
+  // similarity checkpoint first and unknown future rows visible at the end.
+  return rows.sort((a, b) => {
+    const order = (key: FlightStageKey): number => key === 'similarity'
+      ? -1
+      : FLIGHT_SECTION_ROW_KEYS.indexOf(key) < 0
+        ? FLIGHT_SECTION_ROW_KEYS.length
+        : FLIGHT_SECTION_ROW_KEYS.indexOf(key)
+    return order(a.key) - order(b.key)
+  })
 }

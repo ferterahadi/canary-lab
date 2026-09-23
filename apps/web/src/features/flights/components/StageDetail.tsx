@@ -25,6 +25,7 @@ import { ACTIVITY_STAGE, type ExternalWorkTrace, type FeatureActivity, type Stag
 import { Chip } from '@/shared/ui/StatusChip'
 import { flightRowModelChips } from '@shared/flights/stage-models'
 import { flightStageLabel } from '@shared/flights/stage-labels'
+import { flightReportNeedsRefresh } from '@shared/flights/types'
 import { ModelPlanPopover } from './ModelPlanPopover'
 import { SkeletonPanel, awaitingFor } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
@@ -346,6 +347,17 @@ export function StageDetail({
   const activityEvalTask = (externalEvalTaskId ? taskById(externalEvalTaskId) : null)
     ?? liveEvalTask
     ?? (deliverableEvalTaskId ? taskById(deliverableEvalTaskId) : null)
+  const reportTask = deliverableEvalTaskId ? taskById(deliverableEvalTaskId) : null
+  const reportNeedsRefresh = stage.key === 'evaluation-export' && flight.status === 'done'
+    && flightReportNeedsRefresh(flight) && reportTask?.downloadReady === true
+  const refreshReport = async (): Promise<void> => {
+    try {
+      await api.redoFlight(flightId, { fromStage: 'evaluation-export' })
+      onResponded()
+    } catch (err) {
+      onActionError?.(err instanceof Error ? err.message : String(err))
+    }
+  }
   // Sources outside the flight record (ledger, boot run, portify workflow,
   // config, envsets, docs) — resolved for the VISIBLE stage only.
   const band = useStageBandData(
@@ -889,7 +901,16 @@ export function StageDetail({
         const probed = stage.evidenceSource === 'workspace' && !flight.links?.evaluationTaskId
         return (
           <>
-            <EvaluationDeliverablePanel task={band.evalTask ?? null} awaiting={awaiting} probed={probed} />
+            <EvaluationDeliverablePanel
+              task={band.evalTask ?? null}
+              awaiting={awaiting}
+              probed={probed}
+              refreshAvailable={reportNeedsRefresh}
+              onRefresh={externalMutationOwner ? undefined : refreshReport}
+              refreshDisabledReason={externalMutationOwner
+                ? externalMutationTooltip(externalMutationOwner, 'refresh the report')
+                : undefined}
+            />
             <AllReportsPanel feature={flight.feature} pinnedTaskId={deliverableEvalTaskId} awaiting={awaiting} probed={probed} />
           </>
         )

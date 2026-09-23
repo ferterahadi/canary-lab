@@ -5,14 +5,14 @@ description: Use when creating or editing a sample feature under templates/proje
 
 # Authoring Canary Lab Sample Features
 
-The public scaffold **ships its own demonstration**. It carries
-the storefront product repository at `templates/project/demo-app/` *and* the
-`storefront-journey` suite that exercises it, so a first-time user can press Run
-and watch fail → repair → green without authoring anything.
+The public scaffold ships two sample suites. `storefront-journey` exercises the
+three-service repository at `templates/project/demo-app/` so a first-time user
+can press Run and watch fail → repair → green. `workflow-workbench` supplies
+unfinished Coverage, Author, Verify, and Portify work over `workflow-app/`.
 
 The trade is deliberate: discoverability for a first-time user beats a
 clean scaffold for an experienced one, and `features/README.md` tells users they
-can delete the samples once they have seen them. Adding a *further* feature under
+can delete the samples once they have seen them. Adding another feature under
 `templates/project/features/` still changes the product contract and still needs
 explicit product approval.
 
@@ -36,21 +36,21 @@ catalog-service → inventory-service → checkout-service
 
 `demo-app/REQUIREMENTS.md` states seven journeys as twelve contracts — five
 ordered pairs plus two sound ones (J0, J6) that pass from the first run — and the
-services carry ten application defects between them. Every
-journey is ONE Playwright test whose assertions are ordered, and
-`maxFailures: 1` stops the run at the first failing journey, so a repair agent
-sees exactly one broken contract per cycle and each repair reveals the next.
+services carry ten application defects between them. Each journey is one
+Playwright test with ordered assertions. `healOnFailureThreshold: 4` lets up to
+four journeys report failures in a run; within each journey, a later contract
+becomes observable only after the earlier one is fixed.
 
 Keep all of that when editing. Three traps, each of which cost a full gate run:
 
-- **`maxFailures` in `playwright.config.ts` does not decide anything.**
+- **`maxFailures` in `playwright.config.ts` is not the run's cap.**
   `healOnFailureThreshold` in `feature.config.cjs` becomes `--max-failures=N` on
-  the command line and overrides it. The fixture sets it to `1`; at the default
-  `2`, two journeys fail together and the chain stops being a chain.
-- **Defects must be stateless.** The services hold data in memory and are NOT
-  restarted between heal cycles. A defect that leaks state (a reservation that
-  survives its own refusal) drifts every rerun and eventually breaks the setup
-  of the very journey that was meant to catch it.
+  the command line and overrides it. Both files currently say `4`; keep them in
+  agreement so the Suite setup panel reports the cap the runner uses.
+- **Defects must not leave unintended state.** The services persist data in a
+  per-run JSON file and are not restarted between heal cycles. A reservation
+  that survives its own refusal drifts every rerun and can break the setup of
+  the journey meant to catch it.
 - **A defect must sit on a code path no earlier journey exercises**, or it fails
   the wrong journey first — and repairing it then looks like a no-op.
 
@@ -80,9 +80,10 @@ templates/project/features/<name>/
 ```
 
 `feature.config.cjs` essentials (the shipped `storefront-journey` config is the
-three-service example):
+three-service local example; `workflow-workbench` shows a remote env):
 
-- `envs: ['local', 'production']` — which envsets exist for the feature.
+- `envs` lists the feature's environments. `storefront-journey` declares only
+  `local`; `workflow-workbench` declares `local` and `production`.
 - Each `startCommand`: `command`, `envs: ['local']` to gate local-only boots,
   `ports: [{ name: 'api', env: 'PORT' }]` for per-run port allocation, and a per-env
   `healthCheck` (exactly one transport per probe: `http: { url }` or `tcp: { port }`).
@@ -94,14 +95,15 @@ Spec rules:
 
 - Specs MUST import the fixture:
   `import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'`
-- Helpers resolve the target as `CANARY_PORT_<slot>` → `GATEWAY_URL` → hardcoded
-  default (see `templates/project/features/storefront-journey/e2e/helpers/api.ts`) so
-  the same spec runs locally and against a remote env.
+- The storefront helper resolves `CANARY_PORT_<slot>` then a standalone default
+  (see `templates/project/features/storefront-journey/e2e/helpers/api.ts`). A
+  feature that supports a remote env must also read its envset target, as
+  `workflow-workbench` does with `GATEWAY_URL`.
 
 ## Checklist
 
 1. Confirm the new feature is meant to ship in every consumer workspace. The
-   scaffold already carries `storefront-journey`; a second shipped feature needs
+   scaffold already carries `storefront-journey` and `workflow-workbench`; another shipped feature needs
    explicit product approval.
 2. Start from `npx canary-lab new feature`; rename consistently (folder,
    `config.name`, `startCommand.name`, envset file names).

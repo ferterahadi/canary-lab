@@ -39,11 +39,12 @@ default dotdir silently breaks lookup when a user relocates it.
 | claude | `CLAUDE_CONFIG_DIR` | `claudeConfigDir(homeDir)` |
 | codex | `CODEX_HOME` | `codexConfigDir(homeDir)` |
 
-Both live in `agent-session-log.ts` and return the override (trimmed, non-empty)
+Both live in `agent-session-paths.ts` (re-exported by `agent-session-log.ts`)
+and return the override (trimmed, non-empty)
 else `path.join(homeDir, '.claude' | '.codex')`.
 
-(All basenames in this skill — `agent-session-log.ts`, `agent-config-env.ts`,
-`agent-session-tailer.ts`, their tests — live under
+(All basenames in this skill — `agent-session-paths.ts`, `agent-session-log.ts`,
+`agent-config-env.ts`, `agent-session-tailer.ts`, their tests — live under
 `apps/web-server/src/features/agent-sessions/logic/` unless a path prefix says
 otherwise.)
 
@@ -136,8 +137,9 @@ env already carries the vars (the common case — no shell spawned).
    cwd symlink mismatch or a clock/timezone skew drops the match.
 
 ## Verify
-- `agent-session-log.test.ts` and `agent-config-env.test.ts` cover the resolvers
-  + hydration; run them plus `apps/cli/ui-command.test.ts` for the boot wiring.
+- `agent-session-paths.test.ts`, `agent-session-paths.codex.test.ts`, and
+  `agent-config-env.test.ts` cover the resolvers + hydration; run them plus
+  `apps/cli/ui-command.test.ts` for the boot wiring.
 - `agent-session-log.ts` / `ui-command.ts` are `apps/web-server/**` + `apps/cli/`
   changes → only take effect after the `canary-apply` cycle (`cl_verify-changes`
   Tier 3).

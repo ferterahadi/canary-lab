@@ -15,7 +15,7 @@ What's left is judgement. That's this file.
 
 ## Comments carry the why, never the what
 
-Comment density is an outcome (16% of lines repo-wide), not a target. A comment
+Comment density is an outcome, not a target. A comment
 earns its place by holding something the code cannot:
 
 - **Why**, when the code's shape looks arbitrary without it.

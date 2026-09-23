@@ -28,6 +28,7 @@ import { FlightTakeoverAction } from './FlightTakeoverAction'
 import { FlightDrillThroughs, FlightPage } from './FlightPage'
 import { FlightSummaryStrip } from './FlightSummaryStrip'
 import { StageDetail, truncate } from './StageDetail'
+import { FLIGHT_STAGE_SECTIONS } from './flight-sections'
 import { useLiveCoverage } from '@/shared/state/use-live-coverage'
 import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 
@@ -343,9 +344,9 @@ export function FlightDetail({
 
   // Default the selected stage to the one that needs eyes: waiting → running →
   // first failed → the row that resumes next → last done. The user's explicit
-  // pick wins. Parallel setup is the one background exception: once Report is
-  // ready, its ordinary pending/running/done states stay in the rail while the
-  // main panel keeps the deliverable in front. A checkpoint or failure still
+  // pick wins. Once Report is ready, ordinary Parallel setup and Robustness Lab
+  // progress stays in the rail while the main panel keeps the deliverable in
+  // front. A checkpoint or failure still
   // takes focus because it needs the user. (R78: a paused flight whose current
   // row is half-finished has no `done` row after it, so without the pending
   // fallback the panel would open on "Pick a stage." instead of the step the
@@ -361,7 +362,8 @@ export function FlightDetail({
     const pick =
       railRows.find((s) => s.status === 'waiting-for-approval')
       ?? railRows.find((s) => s.key === coveragePhase)
-      ?? railRows.find((s) => s.status === 'running' && !(reportForeground && s.key === 'portify'))
+      ?? railRows.find((s) => s.status === 'running'
+        && !(reportForeground && (s.key === 'portify' || s.key === 'robustness')))
       ?? railRows.find((s) => s.status === 'failed')
       ?? railRows.find((s) => s.key === coverageLanding)
       ?? reportForeground
@@ -623,7 +625,7 @@ export function FlightDetail({
           </>
         ) : (
           <>
-            {flight.status === 'done' && evalStage && (
+            {evalStage?.status === 'done' && (
               <DownloadEvaluationAction flight={flight} stage={evalStage} testId="flight-primary-download" primary />
             )}
             {!activeCoverageJob && (flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
@@ -722,6 +724,7 @@ export function FlightDetail({
             </button>
           </div>
           {railRows.map((s) => {
+            const section = FLIGHT_STAGE_SECTIONS.find((group) => group.keys[0] === s.key)
             const selected = s.key === stageKey
             const rowWaiting = s.key === activityRowKey ? featureActivity?.waiting : undefined
             const displayStatus = stagePresentationStatus(s.status, rowWaiting)
@@ -741,10 +744,10 @@ export function FlightDetail({
               : rowWaiting ? `${rowWaiting.label}. ${rowWaiting.detail}` : STAGE_BLURB[s.key]
             return (
               <Fragment key={s.key}>
-                {s.key === 'portify' && (
-                  <div data-testid="parallel-setup-divider" className="mb-1 mt-2 px-2">
+                {section && (
+                  <div data-testid={`flight-rail-section-${section.id}`} className="mb-1 mt-2 px-2">
                     <div className="flex items-center gap-2">
-                      <span className="cl-rubric shrink-0">Independent</span>
+                      <span className="cl-rubric shrink-0">{section.label}</span>
                       <span className="h-px flex-1 border-t border-dashed border-line" />
                     </div>
                   </div>

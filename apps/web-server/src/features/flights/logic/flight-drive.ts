@@ -1,4 +1,4 @@
-import { FLIGHT_STAGE_KEYS, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey, type FlightStageTimingKey } from './types'
+import { FLIGHT_EXECUTION_ORDER, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey, type FlightStageTimingKey } from './types'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { FlightConductorDeps, abortFlight, drainQueuedFlights, pauseFlight, resumeFlight } from './conductor'
 import { stampSystemLine } from './flight-errors'
@@ -279,8 +279,9 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
       }
       if (outcome.kind === 'jump') {
         const jump = outcome
-        const targetIdx = FLIGHT_STAGE_KEYS.indexOf(jump.to)
-        if (targetIdx <= idx) {
+        const currentOrder = FLIGHT_EXECUTION_ORDER.indexOf(stage.key)
+        const targetOrder = FLIGHT_EXECUTION_ORDER.indexOf(jump.to)
+        if (targetOrder <= currentOrder) {
           patchStage(stage.key, { status: 'failed', endedAt: now(), error: `illegal jump ${stage.key} → ${jump.to}` })
           const cur = read()
           save({ ...cur, status: 'paused', updatedAt: now() })
@@ -301,7 +302,8 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
                 checkpoint: undefined,
               }
             }
-            if (i > idx && i < targetIdx) {
+            const order = FLIGHT_EXECUTION_ORDER.indexOf(s.key)
+            if (order > currentOrder && order < targetOrder) {
               return { ...s, status: 'skipped' as const, endedAt: now(), skipReason: jump.skipReason }
             }
             return s
@@ -310,8 +312,9 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
         continue
       }
       if (outcome.kind === 'rewind') {
-        const targetIdx = FLIGHT_STAGE_KEYS.indexOf(outcome.to)
-        if (targetIdx < 0 || targetIdx > idx) {
+        const currentOrder = FLIGHT_EXECUTION_ORDER.indexOf(stage.key)
+        const targetOrder = FLIGHT_EXECUTION_ORDER.indexOf(outcome.to)
+        if (targetOrder < 0 || targetOrder > currentOrder) {
           patchStage(stage.key, {
             status: 'failed',
             endedAt: now(),
@@ -328,9 +331,12 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
           ...cur,
           updatedAt: now(),
           currentStage: outcome.to,
-          stages: cur.stages.map((s, i) =>
-            i >= targetIdx && i <= idx ? { key: s.key, status: 'pending' as const } : s,
-          ),
+          stages: cur.stages.map((s) => {
+            const order = FLIGHT_EXECUTION_ORDER.indexOf(s.key)
+            return order >= targetOrder && order <= currentOrder
+              ? { key: s.key, status: 'pending' as const }
+              : s
+          }),
         })
         continue
       }

@@ -146,10 +146,10 @@ describe('robustnessStageEvidence', () => {
 })
 
 describe('robustness stage — what there is to perturb', () => {
-  it('fails when the flight has no run to perturb', async () => {
+  it('skips when an independent Lab has no passed run to perturb', async () => {
     writeFeature()
     const outcome = await robustnessStage(deps(makeInject(() => undefined))).run(ctxFor(manifest()).ctx)
-    expect(outcome).toEqual({ kind: 'failed', error: 'no run to perturb — Test run must settle first' })
+    expect(outcome).toEqual({ kind: 'skipped', reason: 'no passed test run to perturb — complete Test run first' })
   })
 
   it('fails when the linked run has no record any more', async () => {
