@@ -287,7 +287,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
     if (deps.coverageMonitor) {
       return deps.coverageMonitor.readAll().map(({ feature, freshness: fresh, measurement }) => {
         const measured = fresh.state === 'current' && measurement
-        return { feature,
+        return { feature, freshness: fresh,
           headline: measured ? `Mapped ${Math.round(measurement.coveragePct)}%`
             : fresh.state === 'updating' ? 'Generating' : fresh.state === 'unavailable' ? 'Freshness unconfirmed' : fresh.state === 'not-measured' ? 'No coverage' : 'Stale',
           summary: fresh.nextAction?.stage === 'prd-summary' ? fresh.state === 'not-measured' ? 'absent' : 'stale' : 'fresh',

@@ -161,7 +161,7 @@ describe('coverage routes', () => {
         { feature: 'unavailable', freshness: freshness('unavailable'), measurement: undefined },
         { feature: 'absent', freshness: freshness('not-measured', { nextAction: { stage: 'prd-summary' } }), measurement: undefined },
         { feature: 'stale-summary', freshness: freshness('stale', { nextAction: { stage: 'prd-summary' } }), measurement: undefined },
-        { feature: 'stale-coverage', freshness: freshness('stale'), measurement: undefined },
+        { feature: 'stale-coverage', freshness: freshness('stale', { reasons: ['Mapping input revisions were not recorded.'] }), measurement: undefined },
       ],
     }
     const monitored = Fastify()
@@ -179,7 +179,7 @@ describe('coverage routes', () => {
         expect.objectContaining({ feature: 'unavailable', headline: 'Freshness unconfirmed' }),
         expect.objectContaining({ feature: 'absent', headline: 'No coverage', summary: 'absent', coverage: 'absent' }),
         expect.objectContaining({ feature: 'stale-summary', summary: 'stale' }),
-        expect.objectContaining({ feature: 'stale-coverage', headline: 'Stale', coverage: 'stale' }),
+        expect.objectContaining({ feature: 'stale-coverage', headline: 'Stale', coverage: 'stale', freshness: expect.objectContaining({ state: 'stale', reasons: ['Mapping input revisions were not recorded.'] }) }),
       ]))
     } finally {
       await monitored.close()

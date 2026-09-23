@@ -2,6 +2,7 @@
 // Split out of client.ts; see that barrel for the shared surface.
 
 import type { StageModelChoice } from '@shared/agent-models'
+import type { CoverageFreshness } from '@shared/coverage/freshness'
 import type {
   CoverageLedger,
   CoverageJobIndexEntry,
@@ -70,6 +71,8 @@ export interface CoverageStateSummary {
   summary: string | null
   coverage: string | null
   coveragePct: number | null
+  /** Authoritative live monitor snapshot; absent in the lightweight fallback. */
+  freshness?: CoverageFreshness
 }
 
 export function listCoverageStates(opts?: ClientOptions): Promise<CoverageStateSummary[]> {

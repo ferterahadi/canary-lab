@@ -9,6 +9,12 @@ import type { FeatureActivity } from '../state/feature-activity'
 import { FlightsPill, featureActivityRows, featureChipState, groupPickerRows, resolveFeatureFlightAction } from './FlightsPill'
 import { ACTIVITY_CHIP, RUNNING_STAGE_CHIP } from './FlightChipState'
 
+const { listCoverageStates } = vi.hoisted(() => ({ listCoverageStates: vi.fn() }))
+vi.mock('@/shared/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/client')>()),
+  listCoverageStates,
+}))
+
 const preFlight = (over: Partial<PlanFeaturesTask>): PlanFeaturesTask => ({
   taskId: 'fp_1',
   repoPaths: ['/repo/shop'],
@@ -25,6 +31,8 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
+  listCoverageStates.mockReset()
+  listCoverageStates.mockResolvedValue([])
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)

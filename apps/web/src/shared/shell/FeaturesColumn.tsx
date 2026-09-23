@@ -10,8 +10,7 @@ import { Chip } from '../ui/StatusChip'
 import { VersionUpdateButton } from './VersionUpdateButton'
 import { ChevronRightIcon } from '@/shared/ui/atoms'
 import { Tooltip } from '../ui/Tooltip'
-import { useLiveResource } from '../state/use-live-resource'
-import { COVERAGE_FRESHNESS_LEASE_MS, COVERAGE_RECONCILE_MS } from '@shared/coverage/freshness'
+import { useLiveCoverageStates } from '../state/use-live-coverage'
 import type { ModelsAgent } from '../lib/workspace-view-state'
 
 interface Props {
@@ -161,14 +160,12 @@ export function FeaturesColumn({
   // Per-feature coverage headline → colours the column's Coverage icon (R8).
   // Workspace events plus bounded reconciliation keep source changes live.
   // Failed reads or an expired freshness lease withdraw the previous badge.
-  const featureKey = features.map((f) => f.name).join(',')
   // The effect only asks *whether* coverage is reachable, never calls the handler.
   // Depending on the callback itself made every App re-render refetch the same
   // workspace status index — App passes a fresh arrow each render. The server
   // scan is lightweight now, but duplicate requests are still needless work.
   const canOpenCoverage = Boolean(onOpenCoverage)
-  const coverage = useLiveResource('coverage', canOpenCoverage && features.length ? featureKey : null,
-    (_key, opts) => api.listCoverageStates(opts), { reconcileMs: COVERAGE_RECONCILE_MS, leaseMs: COVERAGE_FRESHNESS_LEASE_MS })
+  const coverage = useLiveCoverageStates(canOpenCoverage ? features.map((feature) => feature.name) : null)
   const coverageHeadlines = useMemo(() => Object.fromEntries((coverage.value ?? []).map((state) => [state.feature,
     coverage.confirmed ? state.headline : 'Freshness unconfirmed'])), [coverage.value, coverage.confirmed])
 

@@ -32,7 +32,7 @@ cd my-lab
 npx canary-lab ui
 ```
 
-If `/canary-lab` or the Canary Lab `exec` tool is missing, run `npx canary-lab setup --force` from the workspace and restart your agent.
+If `/canary-lab` or the Canary Lab `exec` tool is missing, run `npx canary-lab setup --force` from the workspace and restart your agent. Setup reports each saved connection separately; see [configuration repair](docs/COMMANDS.md#repair-agent-configuration) for skill migration, backups, and verification outcomes.
 
 ## What Happens During a Flight
 

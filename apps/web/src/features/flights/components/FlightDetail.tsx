@@ -682,46 +682,44 @@ export function FlightDetail({
           className="flex w-[240px] shrink-0 flex-col gap-0.5 overflow-auto border-r border-line p-2 scrollbar-thin"
           style={{ scrollbarGutter: 'stable' }}
         >
-          {/* R72 (restyled): follow-mode now reads as a real button, not a bare
-              text link — the standard bordered `cl-button` chrome. Still
-              subordinate to Continue (10px, tucked in the rail corner), just
-              unmistakably clickable. ONE element in both states so nothing
-              jumps: a sky ● + "Follow" in a pressed/selected look while
-              auto-following, a "↺ Follow" resume button once a manual pick
-              parks the selection. Enabled in both — clicking while already
-              following is a harmless no-op. */}
-          {/* R85: the same rubric + dashed-rule header the run stage's bands use
-              (FailingTests, Previous runs), so the rail's label band reads as a
-              header ABOVE the list instead of the list's first row. The rule is
-              what does the separating — the strip no longer needs a fixed
-              height, so the pill sizes to its own content and stops filling the
-              band edge to edge. `mb-1.5` puts real air between label and list;
-              the old 2px flex gap glued the button to "Repo scan". */}
+          {/* R72: follow-mode is a real bordered `cl-button`, not a bare text
+              link, so it reads as clickable. ONE element in both states so
+              nothing jumps — "● Follow" pressed while auto-following, "↺ Follow"
+              once a manual pick parks the selection. Enabled in both: clicking
+              while already following is a harmless no-op. That no-op is why the
+              pressed look stays quiet — the default state, where the click does
+              nothing, must not be the loudest thing in the rail. It is the
+              selected grey plus ONE sky element, the dot; text and border stay
+              neutral, and `py-0.5` keeps the chip from towering over the title. */}
+          {/* "Steps" TITLES the list instead of opening a band of its own. The
+              rail's section bands (Setup, Verification cycle, …) carry the rubric
+              + dashed rule, so a ruled "Steps" stacked straight onto "Setup" read
+              as an empty band. One tone up and unruled, it sits above them as
+              their parent. `mb-1.5` still keeps air between the title and a first
+              row that opens no section (the pre-flight check). */}
           <div className="mb-1.5 flex items-center gap-2 px-2">
             {/* "Steps", not "Stages": every tooltip and card in the pane says
                 "step" — one word for one thing. */}
-            <span className="cl-rubric shrink-0">
+            <span className="cl-rubric-strong shrink-0">
               Steps
             </span>
-            <span className="h-px flex-1 border-t border-dashed border-line" />
-            <button
-              type="button"
-              data-testid={selectedStage === null ? 'rail-following' : 'rail-resume-follow'}
-              aria-pressed={selectedStage === null}
-              onClick={() => setSelectedStage(null)}
-              className="cl-button flex shrink-0 items-center gap-1 px-1.5 py-1 leading-none"
-              style={selectedStage === null
-                ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))', background: 'var(--bg-selected)' }
-                : undefined}
-              title={selectedStage === null
-                ? 'Following whichever step needs you'
-                : 'Go back to following the step that needs you'}
-            >
-              <span aria-hidden="true" className="text-[9px]" style={selectedStage !== null ? { color: 'var(--accent)' } : undefined}>
-                {selectedStage === null ? '●' : '↺'}
-              </span>
-              Follow
-            </button>
+            <Tooltip label={selectedStage === null
+              ? 'Following whichever step needs you'
+              : 'Go back to following the step that needs you'}>
+              <button
+                type="button"
+                data-testid={selectedStage === null ? 'rail-following' : 'rail-resume-follow'}
+                aria-pressed={selectedStage === null}
+                onClick={() => setSelectedStage(null)}
+                className="cl-button ml-auto flex shrink-0 items-center gap-1 px-1.5 py-0.5 leading-none"
+                style={selectedStage === null ? { background: 'var(--bg-selected)' } : undefined}
+              >
+                <span aria-hidden="true" className="text-[9px]" style={selectedStage === null ? { color: 'var(--accent)' } : undefined}>
+                  {selectedStage === null ? '●' : '↺'}
+                </span>
+                Follow
+              </button>
+            </Tooltip>
           </div>
           {railRows.map((s) => {
             const section = FLIGHT_STAGE_SECTIONS.find((group) => group.keys[0] === s.key)

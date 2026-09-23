@@ -6,6 +6,8 @@ import os from 'os'
 import path from 'path'
 import { runAsScript } from './run-as-script'
 import { copyDirRecursive } from '../../shared/lib/copy-dir'
+import { claudeConfigDir, codexConfigDir } from '../web-server/src/features/agent-sessions/logic/agent-session-paths'
+import { isManagedSkill, recordManagedSkill, retireLegacySkill } from './agent-skill-ownership'
 
 type Target = 'codex' | 'claude' | 'all'
 export type AgentInstallTarget = Target
@@ -27,6 +29,7 @@ interface AgentOperation {
   /** Which installed unit this op belongs to. `refreshInstalled` treats a group
    *  as one unit rather than each op on its own — see the comment there. */
   group: 'codex' | 'claude' | 'plugin'
+  legacy?: string[]
 }
 
 export async function main(
@@ -54,26 +57,9 @@ export async function main(
 }
 
 export function install(target: Target, opts: AgentInstallOptions = {}): void {
-  const home = opts.homeDir ?? os.homedir()
   const log = opts.log ?? console.log
-  const assets = resolveAgentAssetsDir()
-  const dryRun = opts.dryRun ?? false
-  const force = opts.force ?? false
   const printConfig = opts.printConfig ?? true
-
-  for (const op of buildOperations(target, home, assets)) {
-    if (!fs.existsSync(op.from)) throw new Error(`missing packaged asset: ${op.from}`)
-    if (dryRun) {
-      log(`[dry-run] copy ${op.label}: ${op.from} -> ${op.to}`)
-      continue
-    }
-    if (fs.existsSync(op.to)) {
-      if (!force) throw new Error(`${op.label} already exists at ${op.to}; rerun with --force to replace it`)
-      fs.rmSync(op.to, { recursive: true, force: true })
-    }
-    copyDirRecursive(op.from, op.to)
-    log(`Installed ${op.label}: ${op.to}`)
-  }
+  applyIntegrations(target, 'install', opts)
 
   if (!printConfig) return
 
@@ -99,80 +85,63 @@ export function install(target: Target, opts: AgentInstallOptions = {}): void {
 }
 
 export function installOrRefresh(target: Target, opts: AgentInstallOptions = {}): number {
-  const home = opts.homeDir ?? os.homedir()
-  const log = opts.log ?? console.log
-  const assets = resolveAgentAssetsDir()
-  const dryRun = opts.dryRun ?? false
-  const force = opts.force ?? false
-  let changed = 0
-
-  for (const op of buildOperations(target, home, assets)) {
-    if (!fs.existsSync(op.from)) throw new Error(`missing packaged asset: ${op.from}`)
-    if (dryRun) {
-      log(`[dry-run] install or refresh ${op.label}: ${op.from} -> ${op.to}`)
-      continue
-    }
-    if (fs.existsSync(op.to)) {
-      if (!force && dirsEqual(op.from, op.to)) {
-        log(`${op.label} already up to date: ${op.to}`)
-        continue
-      }
-      fs.rmSync(op.to, { recursive: true, force: true })
-      copyDirRecursive(op.from, op.to)
-      log(`Updated ${op.label}: ${op.to}`)
-      changed += 1
-      continue
-    }
-    copyDirRecursive(op.from, op.to)
-    log(`Installed ${op.label}: ${op.to}`)
-    changed += 1
-  }
-
-  return changed
+  return applyIntegrations(target, 'setup', opts)
 }
 
-/**
- * Bring already-installed integrations up to the running package's version.
- *
- * The unit is the GROUP, not the individual op: a client that has any canary-lab
- * skill installed receives the package's whole current skill set, new members
- * included. Skipping every destination that does not exist looks equivalent and
- * is not — 2.0.0 split the single `canary-lab` skill into seven, so an op-wise
- * refresh left every pre-2.0.0 user with exactly the one they already had,
- * rewritten to 2.0.0 wording that points the agent at `canary-lab-run` and five
- * siblings that were never written to disk. Nothing warns, because from the
- * refresh's side every op it looked at succeeded.
- *
- * A client with nothing installed is still left entirely alone: opting in stays
- * explicit via `canary-lab setup`.
- */
 export function refreshInstalled(target: Target, opts: AgentInstallOptions = {}): number {
-  const home = opts.homeDir ?? os.homedir()
+  return applyIntegrations(target, 'refresh', opts)
+}
+
+function applyIntegrations(target: Target, mode: 'install' | 'setup' | 'refresh', opts: AgentInstallOptions): number {
+  const homeDir = opts.homeDir ?? os.homedir()
   const log = opts.log ?? console.log
   const assets = resolveAgentAssetsDir()
-  const operations = buildOperations(target, home, assets)
-  const installedGroups = new Set(
-    operations.filter((op) => fs.existsSync(op.to)).map((op) => op.group),
-  )
-  let updated = 0
+  const operations = buildOperations(target, homeDir, assets)
+  // A client with any managed Canary skill receives the whole current set. A
+  // client which never opted in remains untouched by automatic refresh.
+  const installed = new Set(operations.filter((op) => [op.to, ...(op.legacy ?? [])].some((dir) => fs.existsSync(dir))).map((op) => op.group))
+  const selected = operations.filter((op) => mode !== 'refresh' || installed.has(op.group))
 
-  for (const op of operations) {
+  // Check every destination before replacing any. --force replaces managed
+  // versions, not an unrelated/customized skill sharing the same name.
+  for (const op of selected) {
     if (!fs.existsSync(op.from)) throw new Error(`missing packaged asset: ${op.from}`)
-    if (!installedGroups.has(op.group)) continue
-    if (!fs.existsSync(op.to)) {
-      copyDirRecursive(op.from, op.to)
-      log(`Installed ${op.label}: ${op.to}`)
-      updated += 1
-      continue
+    if (mode === 'install' && !opts.force && !opts.dryRun && fs.existsSync(op.to)) {
+      throw new Error(`${op.label} already exists at ${op.to}; rerun with --force to replace it`)
     }
-    if (dirsEqual(op.from, op.to)) continue
-    fs.rmSync(op.to, { recursive: true, force: true })
-    copyDirRecursive(op.from, op.to)
-    log(`Updated ${op.label}: ${op.to}`)
-    updated += 1
+    if (op.group === 'plugin') continue
+    for (const dir of [op.to, ...(op.legacy ?? [])]) {
+      if (fs.existsSync(dir) && !isManagedSkill(dir, op.from, assets, homeDir)) {
+        throw new Error(`Customized or unrecognized ${op.label} at ${dir}; left unchanged. Move this copy outside the skill directories before rerunning setup.`)
+      }
+    }
   }
 
-  return updated
+  let changed = 0
+  for (const op of selected) {
+    const legacy = (op.legacy ?? []).filter((dir) => fs.existsSync(dir))
+    if (opts.dryRun) {
+      log(`[dry-run] ${mode === 'install' ? 'copy' : 'install or refresh'} ${op.label}: ${op.from} -> ${op.to}`)
+      for (const dir of legacy) log(`[dry-run] back up and retire legacy ${op.label}: ${dir}`)
+      continue
+    }
+    const exists = fs.existsSync(op.to)
+    if (!exists || !dirsEqual(op.from, op.to)) {
+      if (exists) fs.rmSync(op.to, { recursive: true, force: true })
+      copyDirRecursive(op.from, op.to)
+      log(`${exists ? 'Updated' : 'Installed'} ${op.label}: ${op.to}`)
+      changed += 1
+    } else if (mode !== 'refresh') {
+      log(`${op.label} already up to date: ${op.to}`)
+    }
+    if (op.group !== 'plugin') recordManagedSkill(op.to, homeDir)
+    for (const dir of legacy) {
+      const backup = retireLegacySkill(dir, homeDir)
+      log(`Migrated legacy ${op.label}: ${dir} (backup: ${backup})`)
+      changed += 1
+    }
+  }
+  return changed
 }
 
 /**
@@ -200,8 +169,9 @@ export function refreshAgentIntegrationsQuietly(
       homeDir: opts.homeDir ?? process.env.CANARY_LAB_AGENT_HOME,
       log: opts.log,
     })
-  } catch {
-    // Best-effort: a missing/locked asset must never block the server boot.
+  } catch (error) {
+    // Best-effort: a missing/locked/customized asset must never block server boot.
+    opts.log?.(`Agent integration refresh skipped: ${(error as Error).message}`)
     return 0
   }
 }
@@ -229,8 +199,9 @@ function buildOperations(target: Target, home: string, assets: string): AgentOpe
       operations.push({
         label: `Codex skill (${skill})`,
         from: path.join(assets, 'codex', 'skills', skill),
-        to: path.join(home, '.codex', 'skills', skill),
+        to: path.join(home, '.agents', 'skills', skill),
         group: 'codex',
+        legacy: [...new Set([codexConfigDir(home), path.join(home, '.codex')])].map((dir) => path.join(dir, 'skills', skill)),
       })
     }
   }
@@ -239,7 +210,7 @@ function buildOperations(target: Target, home: string, assets: string): AgentOpe
       operations.push({
         label: `Claude skill (${skill})`,
         from: path.join(assets, 'claude', 'skills', skill),
-        to: path.join(home, '.claude', 'skills', skill),
+        to: path.join(claudeConfigDir(home), 'skills', skill),
         group: 'claude',
       })
     }

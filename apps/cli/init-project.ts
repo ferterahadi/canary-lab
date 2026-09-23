@@ -419,7 +419,7 @@ export async function main(
   const setupProject = extras.setupProject ?? setupCanaryLab
   let setupOk = true
   try {
-    setupProject(
+    await setupProject(
       // implicit: an init-driven setup in a temp workspace (smoke test or a
       // user-created disposable workspace)
       // must not claim the user's global MCP pointers — see setup.ts.

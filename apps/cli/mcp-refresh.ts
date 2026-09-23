@@ -51,6 +51,7 @@ export function refreshCanaryLabMcp(opts: RefreshOptions = {}): void {
     log: opts.log,
     execPath: opts.execPath,
     cliPath: opts.cliPath,
+    homeDir: opts.homeDir,
   }
   registerCanaryLabMcp('codex', base)
   registerCanaryLabMcp('claude', base)

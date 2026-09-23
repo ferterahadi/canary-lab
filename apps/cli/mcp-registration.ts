@@ -1,5 +1,7 @@
 import { execFileSync } from 'child_process'
 import path from 'path'
+import { claudeGlobalConfigFile } from '../web-server/src/features/agent-sessions/logic/agent-workspace-trust'
+import { isRecord, readMcpConfig } from './mcp-config'
 import type { CanaryLabMcpProfile } from '../web-server/src/mcp/tools'
 import { isUnderTempDir } from '../../shared/runtime/temp-path'
 
@@ -9,6 +11,7 @@ export interface ResolvedMcpInvocation {
   command: string
   args: string[]
   env?: Record<string, string>
+  cwd?: string
 }
 
 export interface McpRegistrationOptions {
@@ -22,6 +25,19 @@ export interface McpRegistrationOptions {
   /** Re-point an already-configured client only; never add to a client that
    *  has no canary-lab entry, and heal a stale/legacy entry without prompting. */
   refreshOnly?: boolean
+  homeDir?: string
+}
+
+export type McpRegistrationResult =
+  | { status: 'configured' | 'unchanged'; invocation: ResolvedMcpInvocation }
+  | { status: 'skipped'; reason: string }
+  | { status: 'conflict'; reason: string }
+
+export interface SavedMcpEntry {
+  invocation: ResolvedMcpInvocation | null
+  enabled: boolean
+  alwaysLoad?: boolean
+  envVars?: string[]
 }
 
 // Client config key + display name. Claude Code/Codex show the registered key
@@ -83,13 +99,9 @@ export function resolveMcpInvocation(opts: {
   /** Workspace this registration is for. GUI clients only — see below. */
   projectRoot?: string
 }): ResolvedMcpInvocation {
-  if (isEphemeralNpxInstall(opts.cliPath)) {
-    return { command: 'npx', args: ['-y', `${PACKAGE_NAME}@latest`, 'mcp', '--profile', REGISTERED_CANARY_LAB_MCP_PROFILE] }
-  }
-  const invocation: ResolvedMcpInvocation = {
-    command: opts.execPath,
-    args: [opts.cliPath, 'mcp', '--profile', REGISTERED_CANARY_LAB_MCP_PROFILE],
-  }
+  const invocation: ResolvedMcpInvocation = isEphemeralNpxInstall(opts.cliPath)
+    ? { command: 'npx', args: ['-y', `${PACKAGE_NAME}@latest`, 'mcp', '--profile', REGISTERED_CANARY_LAB_MCP_PROFILE] }
+    : { command: opts.execPath, args: [opts.cliPath, 'mcp', '--profile', REGISTERED_CANARY_LAB_MCP_PROFILE] }
   // GUI clients (Claude/Codex Desktop) launch servers with a minimal env that
   // often lacks the nvm/homebrew node dir, so embed an explicit PATH.
   if (opts.forGui) {
@@ -112,72 +124,111 @@ function defaultGuiPath(execPath: string): string {
 export function registerCanaryLabMcp(
   target: McpRegistrationTarget,
   opts: McpRegistrationOptions = {},
-): void {
+): McpRegistrationResult {
   const log = opts.log ?? console.log
   const command = target
   const label = target === 'codex' ? 'Codex' : 'Claude'
 
   if (!commandAvailable(command)) {
     log(`${label} MCP skipped: ${command} CLI not found on PATH.`)
-    return
+    return { status: 'skipped', reason: `${command} CLI not found on PATH` }
   }
 
+  const current = readRegisteredMcp(target, opts)
+  const legacy = LEGACY_SERVER_NAMES.map((name) => ({ name, entry: readRegisteredMcp(target, opts, name) }))
+  const legacyPresent = legacy.filter(({ entry }) => entry !== null).map(({ name }) => name)
+  const previous = current ?? legacy.find(({ entry }) => entry !== null)?.entry
+  if (opts.refreshOnly && ((current && !current.enabled) || (!current && legacy.some(({ entry }) => entry && !entry.enabled)))) {
+    log(`${label} MCP refresh skipped: the integration is disabled.`)
+    return { status: 'skipped', reason: 'integration is disabled' }
+  }
+  if (opts.refreshOnly && (previous?.invocation?.cwd || previous?.envVars?.length)) {
+    log(`${label} MCP refresh skipped: custom cwd or env_vars requires explicit setup --force.`)
+    return { status: 'skipped', reason: 'custom cwd or env_vars requires explicit setup --force' }
+  }
   const invocation = resolveMcpInvocation({
     execPath: opts.execPath ?? process.execPath,
     cliPath: opts.cliPath ?? resolveCliPath(),
   })
+  // Preserve user environment values while explicit setup removes a legacy CLI
+  // workspace pin. Terminal clients select their workspace from their own cwd.
+  const env = { ...previous?.invocation?.env }
+  if (!opts.refreshOnly) delete env.CANARY_LAB_PROJECT_ROOT
+  if (Object.keys(env).length) invocation.env = env
   const addArgs = addArgsFor(target, invocation)
-  const legacyPresent = LEGACY_SERVER_NAMES.filter((name) => clientHasServer(target, name))
 
   if (opts.dryRun) {
     for (const name of legacyPresent) {
       log(`[dry-run] migrate ${label} MCP: ${renderCommand(command, removeServerArgs(target, name))}`)
     }
     log(`[dry-run] configure ${label} MCP: ${renderCommand(command, addArgs)}`)
-    return
+    return { status: 'skipped', reason: 'dry run' }
   }
 
-  for (const name of legacyPresent) {
-    execFileSync(command, removeServerArgs(target, name), { stdio: 'ignore' })
-    log(`${label} MCP: migrated legacy "${name}" entry to "${SERVER_NAME}"`)
-  }
-
-  const current = getExistingConfig(target, invocation)
-  if (current.status === 'expected') {
+  if (current && savedMcpMatches(current, invocation, target === 'claude')) {
+    removeLegacyEntries()
     log(`${label} MCP already configured`)
-    return
+    return { status: 'unchanged', invocation: current.invocation! }
   }
 
-  // refreshOnly never adds to a client that was never configured — but a legacy
-  // entry we just removed counts as "was configured", so the rename still lands.
-  if (current.status === 'missing' && opts.refreshOnly && legacyPresent.length === 0) {
-    return
+  // A legacy entry counts as previously configured, so refresh can migrate it.
+  if (!current && opts.refreshOnly && legacyPresent.length === 0) {
+    return { status: 'skipped', reason: 'not previously configured' }
   }
 
-  if (current.status === 'conflict') {
+  if (current) {
     if (!opts.force && !opts.refreshOnly) {
       log(`${label} MCP is already configured differently. Rerun \`npx canary-lab setup --force\` to replace it.`)
-      return
+      return { status: 'conflict', reason: 'saved configuration differs; rerun setup --force' }
     }
     execFileSync(command, removeArgsFor(target), { stdio: 'ignore' })
   }
 
   execFileSync(command, addArgs, { stdio: 'ignore' })
+  const saved = readRegisteredMcp(target, opts)
+  if (!saved || !savedMcpMatches(saved, invocation, target === 'claude')) {
+    throw new Error(`${label} MCP saved configuration does not match the requested setup.`)
+  }
+  removeLegacyEntries()
   log(`${label} MCP configured`)
+  return { status: 'configured', invocation: saved.invocation! }
+
+  function removeLegacyEntries(): void {
+    for (const name of legacyPresent) {
+      execFileSync(command, removeServerArgs(target, name), { stdio: 'ignore' })
+      log(`${label} MCP: migrated legacy "${name}" entry to "${SERVER_NAME}"`)
+    }
+  }
 }
 
-function getExistingConfig(
+export function readRegisteredMcp(
   target: McpRegistrationTarget,
-  invocation: ResolvedMcpInvocation,
-): { status: 'missing' | 'expected' | 'conflict' } {
+  opts: Pick<McpRegistrationOptions, 'homeDir'> = {},
+  name = SERVER_NAME,
+): SavedMcpEntry | null {
+  if (target === 'claude') {
+    const config = readMcpConfig(claudeGlobalConfigFile(opts.homeDir))
+    const servers = config.mcpServers as Record<string, unknown> | undefined
+    return servers && name in servers ? parseSavedMcpEntry(servers[name]) : null
+  }
+  let output: string
   try {
-    const output = execFileSync(target, ['mcp', 'get', SERVER_NAME], {
+    output = execFileSync(target, ['mcp', 'get', name, '--json'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     })
-    return expectedConfig(output, invocation) ? { status: 'expected' } : { status: 'conflict' }
-  } catch {
-    return { status: 'missing' }
+  } catch (error) {
+    const failure = error as Error & { stderr?: Buffer | string }
+    if (/No MCP server named|missing MCP server/i.test(`${failure.message}\n${failure.stderr ?? ''}`)) return null
+    throw new Error(`Cannot read ${target} MCP configuration: ${failure.message}`)
+  }
+  const config: unknown = JSON.parse(output)
+  if (!isRecord(config)) throw new Error(`Invalid ${target} MCP configuration response`)
+  const transport = isRecord(config.transport) ? config.transport : {}
+  const blocked = (Array.isArray(config.disabled_tools) && config.disabled_tools.includes('exec')) ||
+    (Array.isArray(config.enabled_tools) && !config.enabled_tools.includes('exec'))
+  return { ...parseSavedMcpEntry({ ...transport, enabled: config.enabled !== false && !blocked }),
+    envVars: Array.isArray(transport.env_vars) ? transport.env_vars.filter((value): value is string => typeof value === 'string') : [],
   }
 }
 
@@ -188,33 +239,38 @@ function getExistingConfig(
 export function registeredCliPath(target: McpRegistrationTarget): string | null {
   if (!commandAvailable(target)) return null
   try {
-    const output = execFileSync(target, ['mcp', 'get', SERVER_NAME], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    return output.match(/[^\s"',]*[/\\]cli\.js/)?.[0] ?? null
+    return readRegisteredMcp(target)?.invocation?.args.find((arg) => /[/\\]cli\.js$/.test(arg)) ?? null
   } catch {
     return null
   }
 }
 
-// True when the client has any entry under `name` (used to detect legacy keys
-// to migrate). A non-zero `mcp get` exit means no such server.
-function clientHasServer(target: McpRegistrationTarget, name: string): boolean {
-  try {
-    execFileSync(target, ['mcp', 'get', name], { stdio: ['ignore', 'pipe', 'pipe'] })
-    return true
-  } catch {
-    return false
+export function parseSavedMcpEntry(value: unknown): SavedMcpEntry {
+  if (!isRecord(value)) return { enabled: true, invocation: null }
+  const env = value.env == null ? {} : value.env
+  const valid = typeof value.command === 'string' && Array.isArray(value.args) && value.args.every((arg) => typeof arg === 'string') &&
+    (value.type === undefined || value.type === 'stdio') && isRecord(env) && Object.values(env).every((item) => typeof item === 'string')
+  return {
+    enabled: value.enabled !== false && value.disabled !== true,
+    alwaysLoad: value.alwaysLoad === true,
+    invocation: valid ? {
+      command: value.command as string,
+      args: value.args as string[],
+      ...(Object.keys(env as object).length ? { env: env as Record<string, string> } : {}),
+      ...(typeof value.cwd === 'string' ? { cwd: value.cwd } : {}),
+    } : null,
   }
 }
 
-// The registered command is now machine-specific (absolute node + cli.js), so
-// match the live `mcp get` output against the invocation we would write rather
-// than a fixed string. A legacy `npx -y canary-lab mcp` config therefore reads
-// as a conflict and is replaced on `setup --force` / `upgrade`.
-function expectedConfig(output: string, invocation: ResolvedMcpInvocation): boolean {
-  return output.includes(invocation.command) && output.includes(invocation.args.join(' '))
+export function savedMcpMatches(entry: SavedMcpEntry, desired: ResolvedMcpInvocation, requireAlwaysLoad = false): boolean {
+  const actual = entry.invocation
+  if (!actual || !entry.enabled || entry.envVars?.length || (requireAlwaysLoad && !entry.alwaysLoad)) return false
+  return actual.command === desired.command && JSON.stringify(actual.args) === JSON.stringify(desired.args) &&
+    actual.cwd === desired.cwd && JSON.stringify(sortedEnv(actual.env)) === JSON.stringify(sortedEnv(desired.env))
+}
+
+function sortedEnv(env: Record<string, string> = {}): [string, string][] {
+  return Object.entries(env).sort(([a], [b]) => a.localeCompare(b))
 }
 
 function commandAvailable(command: string): boolean {
@@ -229,7 +285,8 @@ function commandAvailable(command: string): boolean {
 
 function addArgsFor(target: McpRegistrationTarget, invocation: ResolvedMcpInvocation): string[] {
   const tail = ['--', invocation.command, ...invocation.args]
-  if (target === 'codex') return ['mcp', 'add', SERVER_NAME, ...tail]
+  if (target === 'codex') return ['mcp', 'add', SERVER_NAME,
+    ...Object.entries(invocation.env ?? {}).flatMap(([key, value]) => ['--env', `${key}=${value}`]), ...tail]
   const config = {
     type: 'stdio',
     command: invocation.command,
@@ -251,5 +308,14 @@ function removeServerArgs(target: McpRegistrationTarget, name: string): string[]
 }
 
 function renderCommand(command: string, args: string[]): string {
-  return [command, ...args].join(' ')
+  const redacted = args.map((arg, index) => {
+    if (args[index - 1] === '--env') return `${arg.split('=')[0]}=<set>`
+    if (arg.startsWith('{')) {
+      const config = JSON.parse(arg) as { env?: Record<string, string> }
+      if (config.env) config.env = Object.fromEntries(Object.keys(config.env).map((key) => [key, '<set>']))
+      return JSON.stringify(config)
+    }
+    return arg
+  })
+  return [command, ...redacted].join(' ')
 }

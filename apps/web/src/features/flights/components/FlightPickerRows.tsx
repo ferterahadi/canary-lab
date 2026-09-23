@@ -6,6 +6,8 @@ import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import type { FeatureActivity } from '../state/feature-activity'
 import { Chip } from '@/shared/ui/StatusChip'
 import { Tooltip } from '@/shared/ui/Tooltip'
+import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
+import { useLiveCoverageStates } from '@/shared/state/use-live-coverage'
 import { FLIGHT_OVERVIEW, STAGE_STATUS_LABEL, stageRailRows, stageStatusTone } from './stage-meta'
 import { readGroupOpen, writeGroupOpen } from '../lib/group-open-state'
 import { derivedFlightToken } from '../lib/derived-stages'
@@ -15,7 +17,7 @@ import { presentedIndexStages } from '../lib/external-work'
 /** One tiny cell per USER-VISIBLE stage (same rows as the flight detail rail —
  *  similarity hidden unless it needs a human, run+heal merged), colored by
  *  status — the at-a-glance progress rail in the picker rows and landing list. */
-export function StageMiniRail({ stages }: { stages: Array<{ key: string; status: FlightStageStatus }> }) {
+export function StageMiniRail({ stages, coverageWarningText }: { stages: Array<{ key: string; status: FlightStageStatus }>; coverageWarningText?: string }) {
   const source = stages.length > 0
     ? stages
     : FLIGHT_STAGE_KEYS.map((key) => ({ key: key as string, status: 'pending' as FlightStageStatus }))
@@ -26,22 +28,21 @@ export function StageMiniRail({ stages }: { stages: Array<{ key: string; status:
   }
   return (
     <span className="inline-flex items-center gap-[3px]" data-testid="stage-mini-rail">
-      {stageRailRows(source).map((row) => (
-        // Humanized status (the same words the stage chip uses), never the raw
-        // wire value — "needs approval", not "waiting-for-approval".
-        <Tooltip key={row.key} label={`${row.label} — ${STAGE_STATUS_LABEL[row.status]}`}>
+      {stageRailRows(source).map((row) => {
+        const warning = row.key === 'specs-coverage' ? coverageWarningText : undefined
+        // The saved status remains in the label even when live freshness
+        // changes the cell's tone: done work can carry an outdated result.
+        const label = `${row.label} — ${STAGE_STATUS_LABEL[row.status]}${warning ? `. ${warning}` : ''}`
+        return <Tooltip key={row.key} label={label}>
           <span
             data-testid={`stage-mini-cell-${row.key}`}
             className="inline-block h-[8px] w-[8px] rounded-[2px]"
-            // The cells are colour-coded for sighted users; the label carries
-            // the same fact for everyone else — without it this was the one
-            // colour-only status surface in the flight UI.
             role="img"
-            aria-label={`${row.label} — ${STAGE_STATUS_LABEL[row.status]}`}
-            style={{ background: toneFor(row.status) }}
+            aria-label={label}
+            style={{ background: warning ? 'var(--warning)' : toneFor(row.status) }}
           />
         </Tooltip>
-      ))}
+      })}
     </span>
   )
 }
@@ -70,6 +71,14 @@ export function FlightsPickerDialog({
   const [query, setQuery] = useState('')
   const [attentionOnly, setAttentionOnly] = useState(false)
   const rows = featureActivityRows(flights, activity, features)
+  const coverage = useLiveCoverageStates(rows.map((row) => row.feature))
+  const freshnessByFeature = new Map((coverage.value ?? []).map((state) => [state.feature, state.freshness]))
+  const coverageWarnings = new Map(rows.flatMap((row): Array<[string, string]> => {
+    const freshness = freshnessByFeature.get(row.feature)
+    const warning = freshness?.state === 'not-measured' ? undefined
+      : freshness || coverage.error ? coverageWarning(freshness, coverage.confirmed, coverage.error) : undefined
+    return warning ? [[row.feature, warning]] : []
+  }))
   const needsAttention = (row: FeatureActivityRow): boolean =>
     Boolean(row.activity?.waiting && row.activity.waiting.kind !== 'queued') || Boolean(row.flight && flightNeedsAttention(row.flight))
   const search = query.trim().toLowerCase()
@@ -102,7 +111,7 @@ export function FlightsPickerDialog({
           <button className={`${attentionOnly ? 'cl-button-primary' : 'cl-button'} px-3 py-2 text-xs`} aria-pressed={attentionOnly} onClick={() => setAttentionOnly(!attentionOnly)}>Needs input <span className="ml-1">{attentionCount}</span></button>
         </div>
       }
-      footer={<p className="mr-auto text-[11px] text-secondary">Stage indicators reflect evidence collected by Canary.</p>}
+      footer={<p className="mr-auto text-[11px] text-secondary">Stage indicators show collected evidence and current coverage freshness.</p>}
     >
       {filtered.length === 0 && preFlightRows.length === 0 ? (
         <div className="px-4 py-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -126,6 +135,7 @@ export function FlightsPickerDialog({
                 <PickerRow
                   key={row.flight?.flightId ?? `activity-${row.feature}`}
                   row={row}
+                  coverageWarningText={coverageWarnings.get(row.feature)}
                   onPick={onPick}
                   onPickActivity={onPickActivity}
                   onStartFlight={onStartFlight}
@@ -138,6 +148,7 @@ export function FlightsPickerDialog({
               key={`${section.group}:${filtering}`}
               expandInitially={filtering}
               section={section}
+              coverageWarnings={coverageWarnings}
               onPick={onPick}
               onPickActivity={onPickActivity}
               onStartFlight={onStartFlight}
@@ -153,11 +164,13 @@ export function FlightsPickerDialog({
  *  Shared by the flat top-level list and the group sections (R55). */
 export function PickerRow({
   row,
+  coverageWarningText,
   onPick,
   onPickActivity,
   onStartFlight,
 }: {
   row: FeatureActivityRow
+  coverageWarningText?: string
   onPick: (flightId: string | null) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
   onStartFlight: (feature: string) => void
@@ -174,7 +187,7 @@ export function PickerRow({
           title={`Open flight ${row.flight.flightId} (${row.feature})`}
         >
           <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{row.feature}</span>
-          <StageMiniRail stages={presentedIndexStages(row.flight)} />
+          <StageMiniRail stages={presentedIndexStages(row.flight)} coverageWarningText={coverageWarningText} />
           <FlightStatusChip flight={row.flight} activity={row.activity} />
           <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
         </button>
@@ -184,10 +197,11 @@ export function PickerRow({
   return (
     <li>
       {row.activity
-        ? <ActivityOnlyRow feature={row.feature} activity={row.activity} derived={row.derived} onOpen={onPickActivity} />
+        ? <ActivityOnlyRow feature={row.feature} activity={row.activity} derived={row.derived} coverageWarningText={coverageWarningText} onOpen={onPickActivity} />
         : <NotFlownRow
             feature={row.feature}
             derived={row.derived}
+            coverageWarningText={coverageWarningText}
             onStart={onStartFlight}
             /* R81: derived progress opens the flight view under a token id —
                the same `onPick` channel a recorded flight uses. */
@@ -206,12 +220,14 @@ export const GROUPS_OPEN_STORAGE_KEY = 'cl-flight-groups-open'
  *  without expanding it), and an explicit user toggle is remembered. */
 export function PickerGroupSection({
   section,
+  coverageWarnings,
   expandInitially = false,
   onPick,
   onPickActivity,
   onStartFlight,
 }: {
   section: PickerGroup
+  coverageWarnings?: ReadonlyMap<string, string>
   expandInitially?: boolean
   onPick: (flightId: string | null) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
@@ -255,6 +271,7 @@ export function PickerGroupSection({
             <PickerRow
               key={row.flight?.flightId ?? `activity-${row.feature}`}
               row={row}
+              coverageWarningText={coverageWarnings?.get(row.feature)}
               onPick={onPick}
               onPickActivity={onPickActivity}
               onStartFlight={onStartFlight}
@@ -282,11 +299,13 @@ export function PickerGroupSection({
 export function NotFlownRow({
   feature,
   derived,
+  coverageWarningText,
   onStart,
   onOpenDerived,
 }: {
   feature: string
   derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
+  coverageWarningText?: string
   onStart: (feature: string) => void
   onOpenDerived?: (feature: string) => void
 }) {
@@ -304,7 +323,7 @@ export function NotFlownRow({
     >
       <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium" style={{ color: 'var(--text-secondary)' }}>{feature}</span>
       <span style={{ opacity: chip.label === 'not flown' ? 0.55 : 1 }}>
-        <StageMiniRail stages={derived ?? []} />
+        <StageMiniRail stages={derived ?? []} coverageWarningText={coverageWarningText} />
       </span>
       <FlightStatusChip flight={null} derived={derived} />
       <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
@@ -320,11 +339,13 @@ export function ActivityOnlyRow({
   feature,
   activity,
   derived,
+  coverageWarningText,
   onOpen,
 }: {
   feature: string
   activity: FeatureActivity
   derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
+  coverageWarningText?: string
   onOpen: (feature: string, activity: FeatureActivity) => void
 }) {
   return (
@@ -337,7 +358,7 @@ export function ActivityOnlyRow({
       title={`${feature}: ${ACTIVITY_CHIP[activity.kind].title}`}
     >
       <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{feature}</span>
-      <StageMiniRail stages={activityStages(activity.kind, derived)} />
+      <StageMiniRail stages={activityStages(activity.kind, derived)} coverageWarningText={coverageWarningText} />
       <FlightStatusChip flight={null} activity={activity} />
       <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
     </button>

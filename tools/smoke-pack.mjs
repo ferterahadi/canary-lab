@@ -247,7 +247,7 @@ for (const client of ['codex', 'claude']) {
   const packaged = childDirectories(
     path.join(upgradeProjectDir, 'node_modules', 'canary-lab', 'dist', 'agent-integrations', client, 'skills'),
   )
-  const installed = childDirectories(path.join(upgradeHomeDir, `.${client}`, 'skills'))
+  const installed = childDirectories(path.join(upgradeHomeDir, client === 'codex' ? '.agents' : '.claude', 'skills'))
     .filter((name) => name.startsWith('canary-lab'))
   if (JSON.stringify(installed) !== JSON.stringify(packaged)) {
     throw new Error(`Smoke test failed: ${client} skills did not refresh from ${upgradeFromVersion} to ${releaseVersion}`)

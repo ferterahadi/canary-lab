@@ -5,9 +5,10 @@ import path from 'path'
 // the target, so a reader never observes a half-written file. Parent dirs are
 // created as needed. Consolidated from the per-store copies (portify, coverage,
 // benchmark, manifest).
-export function atomicWrite(file: string, body: string): void {
+export function atomicWrite(file: string, body: string, mode?: number): void {
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const tmp = `${file}.tmp`
-  fs.writeFileSync(tmp, body)
+  if (mode !== undefined && fs.existsSync(tmp)) fs.chmodSync(tmp, mode)
+  fs.writeFileSync(tmp, body, { mode })
   fs.renameSync(tmp, file)
 }

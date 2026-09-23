@@ -655,4 +655,36 @@ describe('rail follow mode (R71/W2)', () => {
     expect(document.body.querySelector('[role="tooltip"]')?.textContent)
       .toBe('Checks your repo and how to start it.')
   })
+
+  it('the Follow chip spends its one sky accent on the dot, and only while following', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ stages: runningStages() }))
+    await render('fl_1')
+    // Following is the default and a click there is a no-op, so the pressed chip
+    // must not be the loudest thing in the rail: text and border keep
+    // `.cl-button`'s neutral ink and the dot is the only sky element.
+    const following = container.querySelector<HTMLButtonElement>('[data-testid="rail-following"]')!
+    expect(following.style.color).toBe('')
+    expect(following.style.borderColor).toBe('')
+    expect(following.querySelector<HTMLElement>('[aria-hidden="true"]')?.style.color).toBe('var(--accent)')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click() })
+    // Parked, it is a plain resume button — the ↺ carries no accent either.
+    const resume = container.querySelector<HTMLButtonElement>('[data-testid="rail-resume-follow"]')!
+    expect(resume.style.color).toBe('')
+    expect(resume.querySelector<HTMLElement>('[aria-hidden="true"]')?.style.color).toBe('')
+  })
+
+  it('the Follow chip explains each state in the shared tooltip, not a native title', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ stages: runningStages() }))
+    await render('fl_1')
+    const following = container.querySelector<HTMLButtonElement>('[data-testid="rail-following"]')!
+    expect(following.getAttribute('title')).toBeNull()
+    act(() => { following.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe('Following whichever step needs you')
+    act(() => { following.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })) })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click() })
+    const resume = container.querySelector<HTMLButtonElement>('[data-testid="rail-resume-follow"]')!
+    expect(resume.getAttribute('title')).toBeNull()
+    act(() => { resume.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe('Go back to following the step that needs you')
+  })
 })

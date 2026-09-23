@@ -106,11 +106,36 @@ or its source changes. Regression fixtures run with the regular Vitest suite.
 
 - `init` creates the workspace, installs dependencies and Chromium, and registers agent skills plus the compact MCP profile. Use `--no-install` for CI or offline setup.
 - `ui` starts the main human interface. Its port comes from `canary-lab.config.json`; change it in Project Settings, not with `ui --port`.
-- `setup` refreshes agent skills and registers only the `compact` MCP profile. It exposes one always-loaded `exec` tool that dispatches every Canary Lab command, including Portify. `--force` replaces existing entries, `--dry-run` previews changes, and `--agent` limits the target.
+- `setup` refreshes agent skills and registers only the `compact` MCP profile. It exposes one always-loaded `exec` tool that dispatches every Canary Lab command, including Portify. `--force` repairs differing or disabled MCP entries, `--dry-run` previews changes, and `--agent` selects the CLI integrations. Claude Desktop is configured independently when installed.
 - `boot` starts a suite's services without tests. It requires the UI server; `boot stop <runId>` ends the session.
 - `mcp` connects an AI client to the UI server. A bare command and setup-installed clients both default to `compact`; focused profiles, `lifecycle`, and `full` remain opt-in direct-tool surfaces for debugging and rollback.
 - `new feature` creates a suite deterministically. `env` applies or restores an envset.
 - `upgrade` refreshes managed workspace files, existing agent skills, and existing MCP connections. It also repairs the browser-install hook and downloads the matching browser when an older workspace needs it. It does not install a newer npm package by itself.
+
+### Repair agent configuration
+
+Run `npx canary-lab setup --force` from the workspace. Codex skills install into
+`~/.agents/skills`; recognized older copies in `~/.codex/skills` (or the configured
+Codex home) move into backups under `~/.canary-lab/agent-integrations/skill-backups`.
+Customized or unrecognized skills stop setup without overwriting them, even with
+`--force`. Move those copies outside the skill directories before retrying.
+
+Setup compares the saved command, arguments, environment, and enabled state.
+CLI connections resolve the workspace from their working directory; Claude
+Desktop receives an explicit workspace and executable search path. Automatic
+refresh preserves disabled integrations and skips custom Codex working-directory
+or inherited-environment settings that require explicit repair.
+
+Invalid client JSON stops setup before configuration or skills change. Desktop
+updates preserve unrelated settings and save the original file beside it with
+a `.canary-lab-backup` suffix before an atomic replacement.
+
+Each saved connection is checked separately: the child process must connect,
+expose `exec`, discover commands, and reach the selected workspace. Broken
+configuration exits nonzero. When the UI is stopped, setup reports
+`configured; connection unverified`; start `npx canary-lab ui` and rerun setup.
+Restart connected agent apps to load changed configuration and skills. A
+successful setup probe does not prove an already-running app has reloaded them.
 
 ### Upgrade from 1.5.x to 2.0.0
 

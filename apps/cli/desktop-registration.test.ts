@@ -36,6 +36,43 @@ describe('claudeDesktopConfigPath', () => {
 })
 
 describe('registerClaudeDesktopMcp', () => {
+  it.each(['{ broken JSON', 'null', '[]', '{"mcpServers": []}'])('preserves invalid configuration: %s', (source) => {
+    const configPath = tmpConfig()
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, source)
+    expect(() => registerClaudeDesktopMcp({ configPath, force: true, log: () => {} })).toThrow(/left unchanged/)
+    expect(fs.readFileSync(configPath, 'utf-8')).toBe(source)
+    expect(fs.readdirSync(path.dirname(configPath))).toEqual(['claude_desktop_config.json'])
+  })
+
+  it('backs up the original config and preserves unrelated servers through repeated setup', () => {
+    const configPath = tmpConfig()
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    const original = JSON.stringify({ preferences: { theme: 'system' }, mcpServers: { Other: { command: 'other' } } })
+    fs.writeFileSync(configPath, original, { mode: 0o600 })
+    const options = { configPath, execPath: EXEC, cliPath: CLI, force: true, log: () => {} }
+    registerClaudeDesktopMcp(options)
+    const written = fs.readFileSync(configPath, 'utf-8')
+    const modified = fs.statSync(configPath).mtimeMs
+    expect(registerClaudeDesktopMcp(options)).toBe('unchanged')
+    expect(fs.statSync(configPath).mtimeMs).toBe(modified)
+    expect(fs.readFileSync(configPath, 'utf-8')).toBe(written)
+    expect(fs.readFileSync(`${configPath}.canary-lab-backup`, 'utf-8')).toBe(original)
+    expect(read(configPath).mcpServers.Other).toEqual({ command: 'other' })
+    expect(read(configPath).preferences).toEqual({ theme: 'system' })
+  })
+
+  it('preserves a disabled Desktop integration during refresh and repairs it during explicit forced setup', () => {
+    const configPath = tmpConfig()
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    const original = JSON.stringify({ mcpServers: { Canary_Lab: { command: EXEC, args: [CLI, 'mcp'], disabled: true } } })
+    fs.writeFileSync(configPath, original)
+    expect(registerClaudeDesktopMcp({ configPath, refreshOnly: true, force: true, log: () => {} })).toBe('skipped')
+    expect(fs.readFileSync(configPath, 'utf-8')).toBe(original)
+    expect(registerClaudeDesktopMcp({ configPath, execPath: EXEC, cliPath: CLI, force: true, log: () => {} })).toBe('configured')
+    expect(read(configPath).mcpServers.Canary_Lab.disabled).toBeUndefined()
+  })
+
   it('adds the canary-lab server with a PATH env, preserving existing keys', () => {
     const configPath = tmpConfig()
     fs.mkdirSync(path.dirname(configPath), { recursive: true })
@@ -102,12 +139,13 @@ describe('registerClaudeDesktopMcp', () => {
     expect(lines[0]).toContain('[dry-run]')
   })
 
-  it('uses the npx@latest form without env for an ephemeral install', () => {
+  it('keeps GUI environment settings for an ephemeral install', () => {
     const configPath = tmpConfig()
-    registerClaudeDesktopMcp({ configPath, execPath: EXEC, cliPath: EPHEMERAL_CLI, log: () => {} })
+    registerClaudeDesktopMcp({ configPath, execPath: EXEC, cliPath: EPHEMERAL_CLI, projectRoot: '/work/canary-workspace', log: () => {} })
     expect(read(configPath).mcpServers['Canary_Lab']).toEqual({
       command: 'npx',
       args: ['-y', 'canary-lab@latest', 'mcp', '--profile', 'compact'],
+      env: { PATH: expect.stringContaining('/usr/bin'), CANARY_LAB_PROJECT_ROOT: '/work/canary-workspace' },
       alwaysLoad: true,
     })
   })
