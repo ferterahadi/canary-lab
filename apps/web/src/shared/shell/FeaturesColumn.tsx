@@ -1,8 +1,8 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import * as api from '../api/client'
 import type { ExecutionType, Feature, RunStatus, VersionStatus } from '../api/types'
 import { useMcpPromo } from './McpPromoContext'
-import { FeatureConfigEditor, SettingsModal } from '@/features/config'
+import { SettingsModal } from '@/features/config'
 import { FeatureChipBadge, FlightStatusChip, flightAwaitsUser, readGroupOpen, writeGroupOpen, type FeatureFlightAction } from '@/features/flights'
 import { SPEC_TONE, featureTone, type RunWaitingState } from '@/features/runs'
 import { ThemeToggle } from '../ui/ThemeToggle'
@@ -26,7 +26,7 @@ interface Props {
   activeRunWaiting?: RunWaitingState
   onReviewFeature?: (name: string) => void
   onSelectFeature: (name: string) => void
-  onFeaturesChanged?: (preferredFeature?: string | null) => void
+  onOpenConfig: (feature: string) => void
   /** Opens the Requirement Coverage ledger when generation is not active in Flight. */
   onOpenCoverage?: (feature: string) => void
   /** Opens the new-flight dialog (intent + repo picker) — the "+ New" action.
@@ -43,8 +43,6 @@ interface Props {
   /** Current-vs-latest version + self-update job state. Drives the footer
    *  "update available" indicator; null until the registry check resolves. */
   versionStatus?: VersionStatus | null
-  /** Open the feature's Flight at Parallel setup (config dialog → Ports tab). */
-  onOpenPortify?: (feature: string) => void
   /** Project Settings is route-driven (`?dialog=settings`) when these are
    *  supplied — controlled by App. Omitted (e.g. in unit tests) → the column
    *  falls back to its own internal open-state. Same hybrid the runs column's
@@ -135,21 +133,18 @@ export function FeaturesColumn({
   activeRunWaiting,
   onSelectFeature,
   onReviewFeature,
-  onFeaturesChanged,
+  onOpenConfig,
   onOpenCoverage,
   onStartNewFlight,
   onOpenFlight,
   flightAction,
   versionStatus,
-  onOpenPortify,
   settingsOpen,
   onSettingsOpenChange,
   modelsFor,
   onModelsFor,
 }: Props) {
   const { gatePromo } = useMcpPromo()
-  // Coverage headlines re-fetch when a coverage job finishes (`coverage-changed`).
-  const [configFor, setConfigFor] = useState<string | null>(null)
   // Controlled when App drives it from the route; uncontrolled otherwise.
   const [settingsOpenInternal, setSettingsOpenInternal] = useState(false)
   const settingsDialogOpen = settingsOpen ?? settingsOpenInternal
@@ -173,6 +168,24 @@ export function FeaturesColumn({
   // stay flat. Sections order worst-first (a group with a running/dirty
   // feature above a calm one).
   const { ungrouped, groups } = groupFeatures(features, activeRunFeature)
+  const renderFeatureRow = (feature: Feature): ReactNode => (
+    <FeatureRow
+      key={feature.name}
+      feature={feature}
+      selectedFeature={selectedFeature}
+      activeRunFeature={activeRunFeature}
+      activeRunStatus={activeRunStatus}
+      activeRunExecutionType={activeRunExecutionType}
+      activeRunWaiting={activeRunWaiting}
+      coverageHeadline={coverageHeadlines[feature.name]}
+      onSelectFeature={onSelectFeature}
+      onReviewFeature={onReviewFeature}
+      onOpenCoverage={onOpenCoverage}
+      onOpenFlight={onOpenFlight}
+      flightAction={flightAction}
+      onConfigure={onOpenConfig}
+    />
+  )
 
   return (
     <div className="cl-panel flex h-full flex-col">
@@ -197,40 +210,14 @@ export function FeaturesColumn({
           <div className="flex flex-col gap-1">
             {ungrouped.length > 0 && (
               <ul className="flex flex-col gap-1">
-                {ungrouped.map((f) => (
-                  <FeatureRow
-                    key={f.name}
-                    feature={f}
-                    selectedFeature={selectedFeature}
-                    activeRunFeature={activeRunFeature}
-                    activeRunStatus={activeRunStatus}
-                    activeRunExecutionType={activeRunExecutionType}
-                    activeRunWaiting={activeRunWaiting}
-                    coverageHeadline={coverageHeadlines[f.name]}
-                    onSelectFeature={onSelectFeature} onReviewFeature={onReviewFeature}
-                    onOpenCoverage={onOpenCoverage}
-                    onOpenFlight={onOpenFlight}
-                    flightAction={flightAction}
-                    onConfigure={setConfigFor}
-                  />
-                ))}
+                {ungrouped.map(renderFeatureRow)}
               </ul>
             )}
             {groups.map((section) => (
               <FeatureGroupAccordion
                 key={section.group}
                 section={section}
-                selectedFeature={selectedFeature}
-                activeRunFeature={activeRunFeature}
-                activeRunStatus={activeRunStatus}
-                activeRunExecutionType={activeRunExecutionType}
-                activeRunWaiting={activeRunWaiting}
-                coverageHeadlines={coverageHeadlines}
-                onSelectFeature={onSelectFeature} onReviewFeature={onReviewFeature}
-                onOpenCoverage={onOpenCoverage}
-                onOpenFlight={onOpenFlight}
-                flightAction={flightAction}
-                onConfigure={setConfigFor}
+                renderRow={renderFeatureRow}
               />
             ))}
           </div>
@@ -262,22 +249,6 @@ export function FeaturesColumn({
         />
       )}
 
-      {configFor && (
-        <FeatureConfigEditor
-          feature={configFor}
-          portified={features.find((f) => f.name === configFor)?.portified ?? false}
-          onOpenPortify={onOpenPortify}
-          onClose={() => setConfigFor(null)}
-          onRenamed={(_, nextFeature) => {
-            setConfigFor(nextFeature)
-            onFeaturesChanged?.(nextFeature)
-          }}
-          onDeleted={(deletedFeature) => {
-            setConfigFor(null)
-            onFeaturesChanged?.(selectedFeature === deletedFeature ? null : selectedFeature)
-          }}
-        />
-      )}
     </div>
   )
 }
@@ -512,32 +483,10 @@ function FeatureRow({
  *  disclosure. */
 function FeatureGroupAccordion({
   section,
-  selectedFeature,
-  activeRunFeature,
-  activeRunStatus,
-  activeRunExecutionType,
-  activeRunWaiting,
-  coverageHeadlines,
-  onSelectFeature,
-  onReviewFeature,
-  onOpenCoverage,
-  onOpenFlight,
-  flightAction,
-  onConfigure,
+  renderRow,
 }: {
   section: FeatureGroupSection
-  selectedFeature: string | null
-  activeRunFeature?: string | null
-  activeRunStatus?: RunStatus | null
-  activeRunExecutionType?: ExecutionType | null
-  activeRunWaiting?: RunWaitingState
-  coverageHeadlines: Record<string, string | null>
-  onReviewFeature?: (name: string) => void
-  onSelectFeature: (name: string) => void
-  onOpenCoverage?: (feature: string) => void
-  onOpenFlight?: (flightId: string) => void
-  flightAction?: (feature: string) => FeatureFlightAction | null
-  onConfigure: (feature: string) => void
+  renderRow: (feature: Feature) => ReactNode
 }) {
   const { group } = section
   const [open, setOpen] = useState(() => readGroupOpen(FEATURE_GROUPS_OPEN_STORAGE_KEY, group))
@@ -565,23 +514,7 @@ function FeatureGroupAccordion({
       </button>
       {open && (
         <ul className="mt-1 flex flex-col gap-1 pl-4">
-          {section.features.map((f) => (
-            <FeatureRow
-              key={f.name}
-              feature={f}
-              selectedFeature={selectedFeature}
-              activeRunFeature={activeRunFeature}
-              activeRunStatus={activeRunStatus}
-              activeRunExecutionType={activeRunExecutionType}
-              activeRunWaiting={activeRunWaiting}
-              coverageHeadline={coverageHeadlines[f.name]}
-              onSelectFeature={onSelectFeature} onReviewFeature={onReviewFeature}
-              onOpenCoverage={onOpenCoverage}
-              onOpenFlight={onOpenFlight}
-              flightAction={flightAction}
-              onConfigure={onConfigure}
-            />
-          ))}
+          {section.features.map(renderRow)}
         </ul>
       )}
     </section>

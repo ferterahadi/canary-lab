@@ -75,7 +75,7 @@ describe('TestCasesColumn', () => {
       const { invalidate } = useInvalidation()
       return <>
         <button onClick={() => invalidate('tests')}>Refresh tests</button>
-        <TestCasesColumn feature="alpha" activeRunStatus={undefined} activeRunSummary={undefined} />
+        <TestCasesColumn feature="alpha" />
       </>
     }
     await act(async () => { root.render(<InvalidationProvider><View /></InvalidationProvider>) })
@@ -92,7 +92,7 @@ describe('TestCasesColumn', () => {
   it('bounds discovery retries and offers a manual retry without showing incomplete definitions', async () => {
     vi.useFakeTimers()
     vi.mocked(getFeatureTests).mockResolvedValue([{ file: '/tmp/a.spec.ts', tests: [], discoveryError: 'Discovery unavailable' }])
-    await act(async () => { root.render(<TestCasesColumn feature="alpha" activeRunStatus={undefined} activeRunSummary={undefined} />) })
+    await act(async () => { root.render(<TestCasesColumn feature="alpha" />) })
     await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
     expect(getFeatureTests).toHaveBeenCalledTimes(3)
     expect(container.textContent).toContain('Discovery unavailable')
@@ -121,9 +121,7 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       root.render(
         <TestCasesColumn
-          feature="alpha"
-          activeRunStatus="running"
-          activeRunSummary={{
+          feature="alpha" runEvidence={{ summary: {
             complete: false,
             total: 1,
             passed: 0,
@@ -141,7 +139,7 @@ describe('TestCasesColumn', () => {
                 location: '/tmp/features/alpha/e2e/current.spec.ts:393',
               },
             ],
-          }}
+          }, status: 'running' }}
         />,
       )
     })
@@ -205,9 +203,7 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       root.render(
         <TestCasesColumn
-          feature="alpha"
-          activeRunStatus="aborted"
-          activeRunSummary={{
+          feature="alpha" runEvidence={{ summary: {
             complete: false,
             total: 31,
             passed: 12,
@@ -223,7 +219,7 @@ describe('TestCasesColumn', () => {
             ],
             knownTests,
             failed: [],
-          } as any}
+          } as any, status: 'aborted' }}
         />,
       )
     })
@@ -245,10 +241,7 @@ it('hydrates the recorded snapshot results without confusing them with live sour
   })))
   await act(async () => {
     root.render(<TestCasesColumn
-      feature="sample-suite"
-      activeRunStatus="healing"
-      activeRunManifest={fixture.manifest as RunManifest}
-      activeRunSummary={fixture.summary as RunSummary}
+      feature="sample-suite" runEvidence={{ manifest: fixture.manifest as RunManifest, summary: fixture.summary as RunSummary, status: 'healing' }}
     />)
   })
   const badges = Array.from(container.querySelectorAll('button')).map((b) => (b.textContent ?? '').toUpperCase())
@@ -273,7 +266,7 @@ it('shows the discovery error on the card and never parsed definitions as a test
     discoveryDiagnostics: 'Cannot find module ./fixtures/login',
   }])
   const total = vi.fn()
-  await act(async () => root.render(<TestCasesColumn feature="alpha" activeRunStatus="queued" activeRunSummary={undefined} onTotalTestsChange={total} />))
+  await act(async () => root.render(<TestCasesColumn feature="alpha" runEvidence={{ status: 'queued' }} onTotalTestsChange={total} />))
   // The error reads on the card itself, with no disclosure to open first.
   expect(container.querySelector('[data-testid="test-list-error-summary"]')?.textContent).toBe('Cannot find module ./fixtures/login')
   expect(container.querySelectorAll('details')).toHaveLength(0)
@@ -289,7 +282,7 @@ it('retains a suite’s last discovered list when returning from another suite a
   vi.mocked(getFeatureTests).mockResolvedValueOnce([{ file: '/alpha/a.spec.ts', tests: [test('resolved alpha')] }])
     .mockResolvedValueOnce([{ file: '/beta/b.spec.ts', tests: [test('resolved beta')] }])
     .mockResolvedValue([{ file: '/alpha/a.spec.ts', tests: [test('${alpha}')], discoveryError: 'Discovery failed' }])
-  const render = (feature: string) => act(async () => root.render(<TestCasesColumn feature={feature} activeRunStatus={undefined} activeRunSummary={undefined} />))
+  const render = (feature: string) => act(async () => root.render(<TestCasesColumn feature={feature} />))
   await render('alpha'); await render('beta'); await render('alpha')
   expect(container.textContent).toContain('Showing the last list that loaded.')
   expect(container.textContent).toContain('resolved alpha')
@@ -313,7 +306,7 @@ it('keeps all recorded verdicts when current test names changed', async () => {
   vi.mocked(getFeatureTests).mockImplementation(async (_feature, _opts, runId) => runId ? saved : [{
     file: 'current.spec.ts', tests: [{ name: 'sample: renamed current test', line: 1, bodySource: '{}', steps: [], readable: readableTest('current') }],
   }])
-  await act(async () => root.render(<TestCasesColumn feature="renamed-suite" activeRunStatus="failed" activeRunManifest={recorded.manifest as RunManifest} activeRunSummary={summary} />))
+  await act(async () => root.render(<TestCasesColumn feature="renamed-suite" runEvidence={{ manifest: recorded.manifest as RunManifest, summary, status: 'failed' }} />))
   expect(getFeatureTests).toHaveBeenCalledWith('renamed-suite', undefined, recorded.manifest.runId)
   const labels = [...container.querySelectorAll('button')].map((button) => button.textContent ?? '')
   expect(labels.filter((text) => text.endsWith('passed'))).toHaveLength(85)
@@ -324,7 +317,7 @@ it('keeps all recorded verdicts when current test names changed', async () => {
   expect(container.textContent).toContain('85/98')
 
   vi.mocked(getFeatureTests).mockRejectedValue(new ApiError(409, { error: 'Snapshot unavailable' }))
-  await act(async () => root.render(<TestCasesColumn feature="renamed-suite" activeRunStatus="failed" activeRunManifest={{ ...recorded.manifest, runId: 'missing' } as RunManifest} activeRunSummary={summary} />))
+  await act(async () => root.render(<TestCasesColumn feature="renamed-suite" runEvidence={{ manifest: { ...recorded.manifest, runId: 'missing' } as RunManifest, summary, status: 'failed' }} />))
   expect(container.textContent).toContain('Recorded tests unavailable')
   expect(container.textContent).not.toContain(summary.knownTests![0].title!)
   expect(container.textContent).not.toContain('Repair in Canary Lab')
@@ -336,13 +329,13 @@ it('keeps all recorded verdicts when current test names changed', async () => {
 it('loads the recorded roster when it arrives after the run booted', async () => {
   const manifest = { runId: 'booting-run', featureDir: '/workspace/features/suite', suiteSnapshot: { kind: 'taken', dir: '/workspace/logs/runs/booting-run/suite', takenAt: '', digest: '' } } as RunManifest
   vi.mocked(getFeatureTests).mockResolvedValueOnce([])
-  await act(async () => root.render(<TestCasesColumn feature="suite" activeRunStatus="running" activeRunManifest={manifest} activeRunSummary={undefined} />))
+  await act(async () => root.render(<TestCasesColumn feature="suite" runEvidence={{ manifest, status: 'running' }} />))
   expect(container.querySelector('[data-testid="tests-run-listing"]')?.textContent).toBe('Listing tests…')
   const name = 'recorded test'
   const file = `${manifest.suiteSnapshot!.kind === 'taken' ? manifest.suiteSnapshot!.dir : ''}/e2e/a.spec.ts`
   vi.mocked(getFeatureTests).mockResolvedValue([{ file, tests: [{ name, line: 1, bodySource: '{}', steps: [], readable: readableTest(name) }] }])
   const summary: RunSummary = { complete: false, total: 1, passed: 0, failed: [], passedIds: [], knownTests: [{ id: 'one', name: 'test-case-recorded-test', title: name, location: `${file}:1` }] }
-  await act(async () => root.render(<TestCasesColumn feature="suite" activeRunStatus="running" activeRunManifest={manifest} activeRunSummary={summary} />))
+  await act(async () => root.render(<TestCasesColumn feature="suite" runEvidence={{ manifest, summary, status: 'running' }} />))
   expect(container.textContent).not.toContain('Recorded tests unavailable')
   expect(container.textContent).toContain(name)
   expect(getFeatureTests).toHaveBeenCalledTimes(2)
@@ -356,7 +349,7 @@ it('shows the 23 recorded legacy passes without offering current source as evide
     return { file, recordedSourceUnavailable: true, tests: [{ name: known.title!, line: Number(line), bodySource: '', steps: [], readable: readableTest(known.title!) }] }
   })
   vi.mocked(getFeatureTests).mockResolvedValue(specs)
-  await act(async () => root.render(<TestCasesColumn feature={legacy.manifest.feature} activeRunManifest={legacy.manifest as RunManifest} activeRunStatus="passed" activeRunSummary={summary} />))
+  await act(async () => root.render(<TestCasesColumn feature={legacy.manifest.feature} runEvidence={{ manifest: legacy.manifest as RunManifest, summary, status: 'passed' }} />))
   expect(container.textContent).toContain('23/23')
   expect([...container.querySelectorAll('button')].filter((button) => button.textContent?.endsWith('passed'))).toHaveLength(23)
   // One statement of the fact, on the card it is about. The banner that used
@@ -371,7 +364,7 @@ it('shows the 23 recorded legacy passes without offering current source as evide
 it('explains an aborted run with no roster without inviting discovery retries', async () => {
   vi.mocked(getFeatureTests).mockResolvedValue([])
   const manifest = { runId: 'aborted-before-start', featureDir: '/workspace/features/suite' } as RunManifest
-  await act(async () => root.render(<TestCasesColumn feature="suite" activeRunManifest={manifest} activeRunStatus="aborted" activeRunSummary={undefined} />))
+  await act(async () => root.render(<TestCasesColumn feature="suite" runEvidence={{ manifest, status: 'aborted' }} />))
   expect(container.querySelector('[data-testid="tests-run-none"]')?.textContent).toBe('This run recorded no tests')
   expect(container.textContent).not.toContain('Retry discovery')
   expect(container.textContent).not.toContain('No tests in this suite yet')
@@ -386,7 +379,7 @@ it('lets an empty historical run open current tests without inheriting its verdi
   const manifest = { runId: 'old-run', featureDir: '/workspace/features/suite' } as RunManifest
   function View() {
     const [current, setCurrent] = useState(false)
-    return <TestCasesColumn feature="suite" currentTests={current} onCurrentTestsChange={setCurrent} activeRunManifest={current ? undefined : manifest} activeRunStatus={current ? undefined : 'aborted'} activeRunSummary={undefined} />
+    return <TestCasesColumn feature="suite" currentTests={current} onCurrentTestsChange={setCurrent} runEvidence={{ manifest, status: 'aborted' }} />
   }
   await act(async () => root.render(<View />))
   expect(container.querySelector('[data-testid="tests-run-none"]')).not.toBeNull()
@@ -421,8 +414,8 @@ it('keeps switching reversible when the saved suite and current source are ident
   function View() {
     const [source, setSource] = useState(false)
     return <TestCasesColumn feature="suite" currentTests={source} onCurrentTestsChange={setSource}
-      baselineRun={manifest} activeRunManifest={source ? undefined : manifest}
-      activeRunStatus={source ? undefined : 'passed'} activeRunSummary={source ? undefined : { complete: true, total: 1, passed: 1, passedNames: ['test-case-same-test'], failed: [] }} />
+      runEvidence={{ manifest, summary: { complete: true, total: 1, passed: 1, passedNames: ['test-case-same-test'], failed: [] }, status: 'passed' }}
+      comparisonBaseline={{ manifest }} />
   }
   await act(async () => root.render(<View />))
   for (const label of ['Current source', 'Recorded run', 'Current source']) {
@@ -448,9 +441,7 @@ it('offers current source from a legacy run while keeping its results in recorde
   }])
   function View() {
     const [current, setCurrent] = useState(false)
-    return <TestCasesColumn feature={legacy.manifest.feature} currentTests={current} onCurrentTestsChange={setCurrent}
-      activeRunManifest={current ? undefined : legacy.manifest as RunManifest}
-      activeRunSummary={current ? undefined : legacy.summary as RunSummary} activeRunStatus={current ? undefined : 'passed'} />
+    return <TestCasesColumn feature={legacy.manifest.feature} currentTests={current} onCurrentTestsChange={setCurrent} runEvidence={{ manifest: legacy.manifest as RunManifest, summary: legacy.summary as RunSummary, status: 'passed' }} />
   }
   await act(async () => root.render(<View />))
   expect(container.querySelector('.cl-card')?.textContent).toContain('passed')

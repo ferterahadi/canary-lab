@@ -29,6 +29,19 @@ export const FLIGHT_STATUS_TONE: Record<FlightStatus, string> = {
   'aborted': 'var(--text-muted)',
 }
 
+export function summarizeFlightActivity(
+  flights: FlightIndexEntry[],
+  preFlights: PlanFeaturesTask[],
+  activity: Map<string, FeatureActivity>,
+): { activeFeatures: Set<string>; preFlightRows: PlanFeaturesTask[]; activeCount: number } {
+  const activeFeatures = new Set([
+    ...flights.filter((flight) => flight.status === 'running' || flight.status === 'waiting-for-approval').map((flight) => flight.feature),
+    ...activity.keys(),
+  ])
+  const preFlightRows = preFlights.filter((task) => task.status === 'running' || task.status === 'done')
+  return { activeFeatures, preFlightRows, activeCount: activeFeatures.size + preFlightRows.length }
+}
+
 export function flightStatusLabel(status: FlightStatus): string {
   if (status === 'waiting-for-approval') return 'needs approval'
   return status
@@ -270,6 +283,15 @@ export interface FeatureFlightAction {
   queued?: boolean
 }
 
+/** Prefer the first recorded flight; standalone progress uses a derived token. */
+export function resolveFeatureFlightTarget(
+  feature: string,
+  flights: FlightIndexEntry[],
+): { flight: FlightIndexEntry | null; flightId: string } {
+  const flight = flights.find((entry) => entry.feature === feature) ?? null
+  return { flight, flightId: flight?.flightId ?? derivedFlightToken(feature) }
+}
+
 /** Resolve the shortcut for one suite, or null when there is no flight to open.
  *
  *  Null means "nothing has happened to this suite yet" — no flight record and
@@ -287,11 +309,11 @@ export function resolveFeatureFlightAction(
 ): FeatureFlightAction | null {
   // First match wins — the same dedupe-by-feature rule the picker rows use, so
   // a suite with several flights opens the one the picker would.
-  const flight = flights.find((f) => f.feature === feature) ?? null
+  const { flight, flightId } = resolveFeatureFlightTarget(feature, flights)
   if (!flight && !derived?.some((s) => s.status !== 'pending')) return null
   const chip = featureChipState(flight, activity, derived)
   return {
-    flightId: flight?.flightId ?? derivedFlightToken(feature),
+    flightId,
     tone: chip.tone,
     label: chip.label,
     title: chip.title,

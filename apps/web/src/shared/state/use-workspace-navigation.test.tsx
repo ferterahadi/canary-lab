@@ -162,6 +162,14 @@ describe('useWorkspaceNavigation — seeding from the route', () => {
 })
 
 describe('useWorkspaceNavigation — dialog openers', () => {
+  it('opens config for the suite named by the URL, including its tab', async () => {
+    await mount(persisted({ feature: 'checkout' }))
+
+    await act(async () => { nav.openConfig('billing', 'ports') })
+    expect([nav.selectedFeature, nav.configFor, nav.configTab, nav.routedDialog]).toEqual(['billing', 'billing', 'ports', 'config'])
+    expect(viewState.persistView).toHaveBeenLastCalledWith(expect.objectContaining({ feature: 'billing', dialog: 'config', configTab: 'ports' }))
+  })
+
   it('pairs the config tab with the open that set it', async () => {
     await mount()
 

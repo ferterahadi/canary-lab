@@ -72,6 +72,8 @@ export interface WorkspaceNavigation {
    *  tab it lands on; omitting it resets to the mount's default, so a later
    *  open can't inherit the tab a previous one left behind. */
   setConfigFor: (f: string | null, tab?: ConfigTab | null) => void
+  /** Open config for this suite and keep the URL's feature qualifier aligned. */
+  openConfig: (feature: string, tab?: ConfigTab) => void
   /** Follow the dialog's own tab switches into the route. */
   setConfigTab: (tab: ConfigTab) => void
   setVerifyOpen: (open: boolean) => void
@@ -144,6 +146,10 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setConfigForState(f)
     setConfigTab(f !== null ? tab : null)
   }, [])
+  const openConfig = useCallback((feature: string, tab?: ConfigTab) => {
+    setSelectedFeature(feature)
+    setConfigFor(feature, tab)
+  }, [setConfigFor])
   const [verifyOpen, setVerifyOpen] = useState<boolean>(SEED.verifyOpen)
   const [notificationsOpen, setNotificationsOpen] = useState<boolean>(SEED.notificationsOpen)
   const [reviewFocus, setReviewFocus] = useState<ReviewFocus | undefined>(PERSISTED.reviewFocus)
@@ -307,6 +313,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setSelectedRunId,
     setSelectedFlightId,
     setConfigFor,
+    openConfig,
     setConfigTab,
     setVerifyOpen,
     setSpecReviewOpen,

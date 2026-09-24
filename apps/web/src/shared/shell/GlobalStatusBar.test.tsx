@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act } from 'react'
+import { act, type ComponentProps } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../api/client'
@@ -111,7 +111,7 @@ function runsButton(): HTMLButtonElement | undefined {
 it('shows dynamic committed-source feedback, dismisses before normal run action, and emits no follow-up toast', async () => {
   acceptance.enabled = true
   const onRunLatestTests = vi.fn()
-  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} specReviewOpen onRunLatestTests={onRunLatestTests} />))
+  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} review={{ open: true }} onRunLatestTests={onRunLatestTests} />))
   expect(document.querySelector('[data-testid="toast-host"]')).toBeNull()
   await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
   const toast = document.querySelector('[data-testid="toast-test-review-accepted"]')!
@@ -126,7 +126,7 @@ it('shows dynamic committed-source feedback, dismisses before normal run action,
 it('dismisses acceptance feedback without starting a run', async () => {
   acceptance.enabled = true
   const onRunLatestTests = vi.fn()
-  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} specReviewOpen onRunLatestTests={onRunLatestTests} />))
+  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} review={{ open: true }} onRunLatestTests={onRunLatestTests} />))
   await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
   await act(async () => (document.querySelector('[data-testid="toast-test-review-accepted"] [aria-label="Dismiss"]') as HTMLButtonElement).click())
   expect(onRunLatestTests).not.toHaveBeenCalled()
@@ -136,7 +136,7 @@ it('dismisses acceptance feedback without starting a run', async () => {
 it.each(['running', 'healing', 'queued'])('suppresses the recommendation when another run is %s', async (status) => {
   acceptance.enabled = true
   mockRuns.value = [{ runId: 'other', feature: 'other', status }]
-  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} specReviewOpen />))
+  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} review={{ open: true }} />))
   await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
   expect(document.querySelector('[data-testid="toast-host"]')).toBeNull()
 })
@@ -144,7 +144,7 @@ it.each(['running', 'healing', 'queued'])('suppresses the recommendation when an
 it.each(['rerun-requested', 'none'] as const)('suppresses feedback when acceptance execution is %s', async (status) => {
   acceptance.enabled = true
   acceptance.status = status
-  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} specReviewOpen />))
+  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} review={{ open: true }} />))
   await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
   expect(document.querySelector('[data-testid="toast-host"]')).toBeNull()
 })
@@ -152,14 +152,14 @@ it.each(['rerun-requested', 'none'] as const)('suppresses feedback when acceptan
 it.each(['running', 'healing', 'queued'] as const)('suppresses the recommendation when the run detail is %s before the index hydrates', async (status) => {
   acceptance.enabled = true
   const activeRunDetail = { manifest: { runId: 'active', feature: 'other', status } } as RunDetail
-  await act(async () => root.render(<GlobalStatusBar activeRunDetail={activeRunDetail} specReviewOpen />))
+  await act(async () => root.render(<GlobalStatusBar activeRunDetail={activeRunDetail} review={{ open: true }} />))
   await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
   expect(document.querySelector('[data-testid="toast-host"]')).toBeNull()
 })
 
 it('suppresses the recommendation while an existing run request is continuing', async () => {
   acceptance.enabled = true
-  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} specReviewOpen runStartPending />))
+  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} review={{ open: true }} runStartPending />))
   await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
   expect(document.querySelector('[data-testid="toast-host"]')).toBeNull()
 })
@@ -167,7 +167,7 @@ it('suppresses the recommendation while an existing run request is continuing', 
 it('uses honest generic wording when current source cannot be read', async () => {
   acceptance.enabled = true
   vi.mocked(api.getFeatureTests).mockRejectedValueOnce(new Error('Unavailable'))
-  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} specReviewOpen onRunLatestTests={vi.fn()} />))
+  await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} review={{ open: true }} onRunLatestTests={vi.fn()} />))
   await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Accept fixture')!.click())
   expect(document.querySelector('[data-testid="toast-test-review-accepted"]')?.textContent).toContain('Current source changes are committed.')
   expect(document.querySelector('[data-testid="toast-test-review-accepted"]')?.textContent).toContain('Run latest tests')
@@ -189,7 +189,7 @@ describe('GlobalStatusBar', () => {
       root.render(
         <GlobalStatusBar
           activeRunDetail={null}
-          activity={new Map([['checkout', { kind: 'running', runId: 'r1' }]])}
+          flightPill={{ flights: [], onOpenFlight: vi.fn(), activity: new Map([['checkout', { kind: 'running', runId: 'r1' }]]) }}
         />,
       )
     })
@@ -203,10 +203,10 @@ describe('GlobalStatusBar', () => {
       root.render(
         <GlobalStatusBar
           activeRunDetail={null}
-          activity={new Map([
+          flightPill={{ flights: [], onOpenFlight: vi.fn(), activity: new Map([
             ['pay', { kind: 'portifying', workflowId: 'wf1' }],
             ['cart', { kind: 'authoring', draftId: 'd1' }],
-          ])}
+          ]) }}
         />,
       )
     })
@@ -218,11 +218,14 @@ describe('GlobalStatusBar', () => {
       root.render(
         <GlobalStatusBar
           activeRunDetail={null}
-          features={[
-            { name: 'checkout', repos: [], envs: [], group: 'shop' },
-            { name: 'cart', repos: [], envs: [], group: 'shop' },
-            { name: 'admin', repos: [], envs: [] },
-          ]}
+          flightPill={{
+            flights: [], onOpenFlight: vi.fn(),
+            features: [
+              { name: 'checkout', group: 'shop' },
+              { name: 'cart', group: 'shop' },
+              { name: 'admin' },
+            ],
+          }}
         />,
       )
     })
@@ -279,9 +282,7 @@ describe('GlobalStatusBar', () => {
       root.render(
         <GlobalStatusBar
           activeRunDetail={null}
-          returnFlight="fl_abc"
-          returnFlightLabel="merchant-pass-fnb"
-          onReturnToFlight={onReturnToFlight}
+          returnToFlight={{ flightId: 'fl_abc', label: 'merchant-pass-fnb', onOpen: onReturnToFlight }}
         />,
       )
     })
@@ -303,7 +304,7 @@ describe('GlobalStatusBar', () => {
   it('R83: still offers the way back when the flight index no longer names it', async () => {
     await act(async () => {
       root.render(
-        <GlobalStatusBar activeRunDetail={null} returnFlight="fl_abc" onReturnToFlight={vi.fn()} />,
+        <GlobalStatusBar activeRunDetail={null} returnToFlight={{ flightId: 'fl_abc', onOpen: vi.fn() }} />,
       )
     })
     expect(container.querySelector('[data-testid="return-to-flight"]')?.getAttribute('aria-label'))
@@ -405,35 +406,35 @@ describe('GlobalStatusBar', () => {
       [...container.querySelectorAll('button')]
         .find((b): b is HTMLButtonElement => b.textContent?.includes('Getting started') ?? false)
 
-    const renderBar = async (props: Record<string, unknown>): Promise<void> => {
+    const renderBar = async (props: Partial<ComponentProps<typeof GlobalStatusBar>>): Promise<void> => {
       await act(async () => {
         root.render(<GlobalStatusBar activeRunDetail={null} {...props} />)
       })
     }
 
     it('is absent when the workspace hides Getting Started', async () => {
-      await renderBar({ demoAvailable: false })
+      await renderBar({ gettingStarted: { available: false, unseen: false, onOpen: vi.fn() } })
       expect(demoPill()).toBeUndefined()
     })
 
     it('appears when Getting Started is enabled', async () => {
-      await renderBar({ demoAvailable: true })
+      await renderBar({ gettingStarted: { available: true, unseen: false, onOpen: vi.fn() } })
       expect(demoPill()).toBeDefined()
     })
 
     it('carries an attention dot until the chooser has been opened', async () => {
-      await renderBar({ demoAvailable: true, demoUnseen: true })
+      await renderBar({ gettingStarted: { available: true, unseen: true, onOpen: vi.fn() } })
       expect(demoPill()?.querySelector('span[aria-hidden="true"].absolute')).not.toBeNull()
     })
 
     it('drops the dot once the chooser has been opened', async () => {
-      await renderBar({ demoAvailable: true, demoUnseen: false })
+      await renderBar({ gettingStarted: { available: true, unseen: false, onOpen: vi.fn() } })
       expect(demoPill()?.querySelector('span[aria-hidden="true"].absolute')).toBeNull()
     })
 
     it('opens the guide — the permanent way back after it is closed', async () => {
       const onOpenDemo = vi.fn()
-      await renderBar({ demoAvailable: true, onOpenDemo })
+      await renderBar({ gettingStarted: { available: true, unseen: false, onOpen: onOpenDemo } })
       await act(async () => {
         demoPill()?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       })
@@ -449,14 +450,14 @@ describe('GlobalStatusBar notifications and test review', () => {
   it('retains a linked completed suite when switching to committed tests', async () => {
     mockRuns.value = [{ runId: 'r1', feature: 'checkout', status: 'passed', pendingSpecEdits: 0 }]
     for (const baseline of ['run', undefined] as const) {
-      await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} features={[]} specReviewOpen specReviewRunId="r1" specReviewFeature="checkout" reviewFocus={{ baseline }} />))
+      await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} review={{ features: [], open: true, runId: 'r1', feature: 'checkout', focus: { baseline } }} />))
       expect(document.querySelector('[data-testid="dirty-review-suite-checkout"]')).not.toBeNull()
     }
   })
 
   it('places Notifications in the right cluster and removes the separate changed-tests pill', async () => {
     mockRuns.value = [{ runId: 'r1', feature: 'checkout', status: 'healing', startedAt: '', pendingSpecEdits: 1 }]
-    await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} features={[dirty as never]} notificationControl={<button>Notifications</button>} />))
+    await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} review={{ features: [dirty as never] }} notificationControl={<button>Notifications</button>} />))
     const inbox = container.querySelector('[data-testid="status-bar-notifications"]')!
     expect(inbox.textContent).toBe('Notifications')
     expect(inbox.parentElement?.className).toContain('ml-auto')
@@ -466,7 +467,7 @@ describe('GlobalStatusBar notifications and test review', () => {
 
   it('renders the review from its routed open-state and reports closing to the host', async () => {
     const onOpenChange = vi.fn()
-    await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} features={[dirty as never]} specReviewOpen onSpecReviewOpenChange={onOpenChange} />))
+    await act(async () => root.render(<GlobalStatusBar activeRunDetail={null} review={{ features: [dirty as never], open: true, onOpenChange }} />))
     expect(document.querySelector('[role="dialog"][aria-label="Changed test files"]')).not.toBeNull()
     await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"][aria-label="Changed test files"] button[aria-label="Close"]')!.click())
     expect(onOpenChange).toHaveBeenCalledWith(false)

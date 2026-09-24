@@ -82,7 +82,7 @@ function statusBadges(): string[] {
 describe('TestCasesColumn', () => {
   it('states only that no suite is picked, with no body to restate it', async () => {
     await act(async () => {
-      root.render(<TestCasesColumn feature={null} activeRunSummary={undefined} activeRunStatus={undefined} />)
+      root.render(<TestCasesColumn feature={null} />)
     })
 
     const empty = container.querySelector('[data-testid="tests-no-suite"]')
@@ -95,7 +95,7 @@ describe('TestCasesColumn', () => {
     vi.mocked(getFeatureTests).mockReturnValue(new Promise<FeatureTests>(() => {}))
 
     act(() => {
-      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+      root.render(<TestCasesColumn feature="alpha" />)
     })
 
     const placeholder = container.querySelector('[data-testid="tests-loading-placeholder"]')
@@ -107,7 +107,7 @@ describe('TestCasesColumn', () => {
   it('does not flash the old filtered count while the full saved suite is loading', async () => {
     vi.mocked(getFeatureTests).mockReturnValue(new Promise<FeatureTests>(() => {}))
     await act(async () => {
-      root.render(<TestCasesColumn feature="alpha" activeRunStatus="aborted" activeRunManifest={{ runId: 'meta' }} activeRunSummary={{ complete: true, total: 4, passed: 2, failed: [] }} />)
+      root.render(<TestCasesColumn feature="alpha" runEvidence={{ manifest: { runId: 'meta' }, summary: { complete: true, total: 4, passed: 2, failed: [] }, status: 'aborted' }} />)
     })
     expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).not.toBeNull()
     expect(container.querySelector('.cl-panel-header')?.textContent).not.toContain('2/4')
@@ -117,10 +117,10 @@ describe('TestCasesColumn', () => {
     const names = ['local one', 'local two', 'meta case']
     vi.mocked(getFeatureTests).mockResolvedValue([{ file, tests: names.map((name, index) => ({ name, line: index + 1, bodySource: '', steps: [], readable: readableTest(name) })) }])
     await act(async () => {
-      root.render(<TestCasesColumn feature="alpha" activeRunStatus="passed" activeRunManifest={{ runId: 'meta' }} activeRunSummary={{
+      root.render(<TestCasesColumn feature="alpha" runEvidence={{ manifest: { runId: 'meta' }, summary: {
         complete: true, total: 1, passed: 1, failed: [], passedNames: ['test-case-meta-case'], passedIds: ['meta'],
         knownTests: [{ id: 'meta', name: 'test-case-meta-case', title: 'meta case', location: `${file}:3` }],
-      }} />)
+      }, status: 'passed' }} />)
     })
     expect(container.querySelector('.cl-panel-header')?.textContent).toContain('1/3')
     expect(container.querySelector('.cl-panel-header')?.textContent).not.toContain('not run')
@@ -135,7 +135,7 @@ describe('TestCasesColumn', () => {
     vi.mocked(getFeatureTests).mockReturnValue(new Promise<FeatureTests>(() => {}))
 
     act(() => {
-      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+      root.render(<TestCasesColumn feature="alpha" />)
     })
 
     expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).not.toBeNull()
@@ -170,7 +170,7 @@ describe('TestCasesColumn', () => {
     ])
 
     await act(async () => {
-      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+      root.render(<TestCasesColumn feature="alpha" />)
     })
 
     expect(container.textContent).toContain('loads checkout')
@@ -215,7 +215,7 @@ describe('TestCasesColumn', () => {
     }])
 
     await act(async () => {
-      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+      root.render(<TestCasesColumn feature="alpha" />)
     })
 
     expect(container.textContent).toContain('Run alpha first step')
@@ -227,12 +227,12 @@ describe('TestCasesColumn', () => {
     expect(container.querySelector('[data-testid="test-presentation-english"]')).toBeNull()
 
     await act(async () => {
-      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+      root.render(<TestCasesColumn feature="alpha" />)
     })
     expect(container.querySelector('[data-testid="test-presentation-english"]')).toBeNull()
 
     await act(async () => {
-      root.render(<TestCasesColumn feature="beta" activeRunSummary={undefined} activeRunStatus={undefined} />)
+      root.render(<TestCasesColumn feature="beta" />)
     })
 
     expect(container.textContent).toContain('Run beta first step')
@@ -256,7 +256,7 @@ describe('TestCasesColumn', () => {
     ])
 
     await act(async () => {
-      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+      root.render(<TestCasesColumn feature="alpha" />)
     })
 
     const rows = [...container.querySelectorAll('button')].map((el) => el.textContent ?? '')
@@ -293,7 +293,7 @@ describe('TestCasesColumn', () => {
     ])
 
     await act(async () => {
-      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+      root.render(<TestCasesColumn feature="alpha" />)
     })
 
     // The compact header keeps the count beside its kicker without implying a
@@ -322,10 +322,7 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       root.render(
         <TestCasesColumn
-          feature="alpha"
-          activeRunStatus="passed"
-          activeRunManifest={{ runId: 'r1' }}
-          activeRunSummary={{ complete: true, total: 1, passed: 1, passedNames: ['test-case-connects-meta'], failed: [] }}
+          feature="alpha" runEvidence={{ manifest: { runId: 'r1' }, summary: { complete: true, total: 1, passed: 1, passedNames: ['test-case-connects-meta'], failed: [] }, status: 'passed' }}
         />,
       )
     })
@@ -347,7 +344,7 @@ describe('TestCasesColumn', () => {
     ])
 
     await act(async () => {
-      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+      root.render(<TestCasesColumn feature="alpha" />)
     })
 
     const header = container.querySelector('.cl-panel-header')
@@ -374,16 +371,14 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       root.render(
         <TestCasesColumn
-          feature="alpha"
-          activeRunStatus="passed"
-          activeRunSummary={{
+          feature="alpha" runEvidence={{ summary: {
             complete: true,
             total: 3,
             passed: 1,
             passedNames: ['test-case-loads-checkout'],
             skippedNames: ['test-case-connects-meta', 'test-case-connects-reserve'],
             failed: [],
-          }}
+          }, status: 'passed' }}
         />,
       )
     })
@@ -411,9 +406,7 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       root.render(
         <TestCasesColumn
-          feature="alpha"
-          activeRunStatus="aborted"
-          activeRunSummary={{ complete: false, total: 3, passed: 1, passedNames: ['test-case-loads-checkout'], failed: [] }}
+          feature="alpha" runEvidence={{ summary: { complete: false, total: 3, passed: 1, passedNames: ['test-case-loads-checkout'], failed: [] }, status: 'aborted' }}
         />,
       )
     })
@@ -440,7 +433,7 @@ describe('TestCasesColumn', () => {
     ])
 
     await act(async () => {
-      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus="running" />)
+      root.render(<TestCasesColumn feature="alpha" runEvidence={{ status: 'running' }} />)
     })
 
     expect(container.textContent).toContain('Running')
@@ -466,9 +459,7 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       root.render(
         <TestCasesColumn
-          feature="alpha"
-          activeRunStatus="running"
-          activeRunSummary={{
+          feature="alpha" runEvidence={{ summary: {
             complete: false,
             total: 1,
             passed: 0,
@@ -478,7 +469,7 @@ describe('TestCasesColumn', () => {
               name: 'test-case-loads-checkout',
               location: '/tmp/features/alpha/e2e/a.spec.ts:3:1',
             },
-          }}
+          }, status: 'running' }}
         />,
       )
     })
@@ -513,9 +504,7 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       root.render(
         <TestCasesColumn
-          feature="alpha"
-          activeRunStatus="running"
-          activeRunSummary={{
+          feature="alpha" runEvidence={{ summary: {
             complete: false,
             total: 2,
             passed: 0,
@@ -535,7 +524,7 @@ describe('TestCasesColumn', () => {
                 location: '/tmp/features/alpha/e2e/a.spec.ts:12:1',
               },
             ],
-          }}
+          }, status: 'running' }}
         />,
       )
     })
@@ -599,9 +588,7 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       root.render(
         <TestCasesColumn
-          feature="alpha"
-          activeRunStatus="running"
-          activeRunSummary={{
+          feature="alpha" runEvidence={{ summary: {
             complete: false,
             total: 1,
             passed: 0,
@@ -616,7 +603,7 @@ describe('TestCasesColumn', () => {
                 location: '/tmp/features/alpha/e2e/a.spec.ts:8:5',
               },
             },
-          }}
+          }, status: 'running' }}
         />,
       )
     })
@@ -639,9 +626,7 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       root.render(
         <TestCasesColumn
-          feature="alpha"
-          activeRunStatus="running"
-          activeRunSummary={{
+          feature="alpha" runEvidence={{ summary: {
             complete: false,
             total: 1,
             passed: 0,
@@ -656,7 +641,7 @@ describe('TestCasesColumn', () => {
                 location: '/tmp/features/alpha/helpers/send.ts:8:5',
               },
             },
-          }}
+          }, status: 'running' }}
         />,
       )
     })
@@ -667,9 +652,7 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       root.render(
         <TestCasesColumn
-          feature="alpha"
-          activeRunStatus="healing"
-          activeRunSummary={{
+          feature="alpha" runEvidence={{ summary: {
             complete: true,
             total: 1,
             passed: 0,
@@ -679,7 +662,7 @@ describe('TestCasesColumn', () => {
               location: '/tmp/features/alpha/e2e/a.spec.ts:3:1',
               locations: ['/tmp/features/alpha/e2e/a.spec.ts:7:5'],
             }],
-          }}
+          }, status: 'healing' }}
         />,
       )
     })
@@ -716,8 +699,6 @@ describe('TestCasesColumn', () => {
       root.render(
         <TestCasesColumn
           feature="alpha"
-          activeRunSummary={undefined}
-          activeRunStatus={undefined}
           dirtySpecs={[{ file: 'e2e/a.spec.ts', affectedTests: ['b'] }]}
           onReviewTest={review}
         />,
@@ -761,10 +742,7 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       root.render(
         <TestCasesColumn
-          feature="alpha"
-          activeRunSummary={undefined}
-          activeRunStatus={undefined}
-          baselineRun={{ runId: 'r1', featureDir: '/tmp/features/alpha', suiteSnapshot: { kind: 'taken', dir: '/tmp/runs/r1/suite', takenAt: 'now', digest: 'digest' } }}
+          feature="alpha" comparisonBaseline={{ manifest: { runId: 'r1', featureDir: '/tmp/features/alpha', suiteSnapshot: { kind: 'taken', dir: '/tmp/runs/r1/suite', takenAt: 'now', digest: 'digest' } } }}
           onCurrentTestsChange={setCurrentTests}
           onReviewTest={review}
         />,
@@ -802,9 +780,7 @@ describe('TestCasesColumn', () => {
       tests: [{ name: 'same title', line: 3, bodySource: '', steps: [], readable: readableTest('same title') }],
     })))
     vi.mocked(getTestSourceComparison).mockResolvedValue({ state: 'ready', files: ['e2e/a.spec.ts', 'e2e/b.spec.ts'], differences: [{ file: 'e2e/b.spec.ts', affectedTests: ['same title'] }], changes: { added: [], changed: [], removed: [] } })
-    await act(async () => root.render(<TestCasesColumn feature="alpha" currentTests
-      activeRunSummary={undefined} activeRunStatus={undefined}
-      baselineRun={{ runId: 'r1', featureDir: '/tmp/features/alpha', suiteSnapshot: { kind: 'taken', dir: '/tmp/runs/r1/suite', takenAt: 'now', digest: 'digest' } }} />))
+    await act(async () => root.render(<TestCasesColumn feature="alpha" currentTests comparisonBaseline={{ manifest: { runId: 'r1', featureDir: '/tmp/features/alpha', suiteSnapshot: { kind: 'taken', dir: '/tmp/runs/r1/suite', takenAt: 'now', digest: 'digest' } } }} />))
     const cards = container.querySelectorAll('.cl-card')
     expect(container.querySelectorAll('.cl-card > button > span.uppercase')).toHaveLength(0)
     expect(cards[0].querySelector('[data-testid="test-modified-dot"]')).toBeNull()
@@ -825,8 +801,6 @@ describe('TestCasesColumn', () => {
       root.render(
         <TestCasesColumn
           feature="alpha"
-          activeRunSummary={undefined}
-          activeRunStatus={undefined}
           dirtySpecs={[{ file: 'e2e/a.spec.ts', affectedTests: ['a'] }]}
         />,
       )
@@ -848,7 +822,7 @@ describe('TestCasesColumn', () => {
     vi.mocked(getFeatureTests).mockRejectedValue(new ApiError(500, { error: 'boom' }))
 
     await act(async () => {
-      root.render(<TestCasesColumn feature="alpha" activeRunSummary={undefined} activeRunStatus={undefined} />)
+      root.render(<TestCasesColumn feature="alpha" />)
     })
 
     expect(container.textContent).toContain('Unable to load tests for this suite. Server returned HTTP 500.')
@@ -859,7 +833,7 @@ describe('TestCasesColumn', () => {
     vi.mocked(getFeatureTests).mockResolvedValue([])
 
     await act(async () => {
-      root.render(<TestCasesColumn feature="alpha beta" activeRunSummary={undefined} activeRunStatus="passed" />)
+      root.render(<TestCasesColumn feature="alpha beta" runEvidence={{ status: 'passed' }} />)
     })
 
     expect(container.textContent).not.toContain('Evaluation')
@@ -884,9 +858,7 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       root.render(
         <TestCasesColumn
-          feature="alpha"
-          activeRunStatus="passed"
-          activeRunSummary={{
+          feature="alpha" runEvidence={{ summary: {
             complete: true,
             total: 1,
             passed: 1,
@@ -901,7 +873,7 @@ describe('TestCasesColumn', () => {
               },
             ],
             failed: [],
-          }}
+          }, status: 'passed' }}
         />,
       )
     })
@@ -929,9 +901,7 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       root.render(
         <TestCasesColumn
-          feature="alpha"
-          activeRunStatus="passed"
-          activeRunSummary={{
+          feature="alpha" runEvidence={{ summary: {
             complete: true,
             total: 1,
             passed: 1,
@@ -941,7 +911,7 @@ describe('TestCasesColumn', () => {
               { id: 'test-id-checkout', name: 'test-case-validates-checkout', title: 'validates checkout', location: '/tmp/features/alpha/e2e/current.spec.ts:14' },
             ],
             failed: [],
-          }}
+          }, status: 'passed' }}
         />,
       )
     })
@@ -964,9 +934,7 @@ describe('TestCasesColumn', () => {
     await act(async () => {
       root.render(
         <TestCasesColumn
-          feature="alpha"
-          activeRunStatus="failed"
-          activeRunSummary={{
+          feature="alpha" runEvidence={{ summary: {
             complete: true,
             total: 2,
             passed: 1,
@@ -977,7 +945,7 @@ describe('TestCasesColumn', () => {
               { id: 'id-host', name: 'test-case-renders', title: 'renders', location: '/tmp/features/alpha/e2e/current.spec.ts:30' },
             ],
             failed: [{ id: 'id-host', name: 'test-case-renders' }],
-          }}
+          }, status: 'failed' }}
         />,
       )
     })

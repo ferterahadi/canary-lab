@@ -1,9 +1,9 @@
 import type { ReviewFocus } from '../lib/workspace-view-state'
 import { useEffect, useRef, useState } from 'react'
-import type { CoverageJobIndexEntry, Feature, RunDetail } from '../api/types'
+import type { Feature, RunDetail } from '../api/types'
 import { BenchmarkPill, BenchmarkWindow, useBenchmarks } from '@/features/benchmark'
 import { CleanupPill } from '@/features/cleanup'
-import { type DerivedStage, type FeatureActivity, FlightsPill } from '@/features/flights'
+import { type FlightsPillProps, FlightsPill, summarizeFlightActivity } from '@/features/flights'
 import {
   DirtyReviewDialog,
   ServicesDialog,
@@ -18,75 +18,39 @@ import { McpHealthBadge } from './McpHealthBadge'
 import { ConnectionBadge } from './ConnectionBadge'
 import { StatusChip } from '../ui/StatusChip'
 import { Tooltip } from '../ui/Tooltip'
-import type { FlightIndexEntry, PlanFeaturesTask, PortifyIndexEntry } from '../api/client'
+
+interface ReviewControl {
+  features?: Feature[]
+  onFeaturesChanged?: () => void
+  runId?: string | null
+  feature?: string | null
+  runDetail?: RunDetail | null
+  focus?: ReviewFocus
+  onFocus?: (focus: ReviewFocus) => void
+  onChooseFeature?: (name: string) => void
+  /** The routed `?dialog=tests-review` state. When absent, local state applies. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}
 
 interface Props {
   activeRunDetail: RunDetail | null
   notificationControl?: React.ReactNode
-  specReviewRunId?: string | null
-  specReviewFeature?: string | null
-  specReviewRunDetail?: RunDetail | null
-  /** Every feature — feeds the dirty-tests review panel. */
-  features?: Feature[]
-  onFeaturesChanged?: () => void
   onRunLatestTests?: (feature: string) => void
   runStartPending?: boolean
   onOpenCleanup?: () => void
-  /** Flight index (App owns it, WS-driven) — feeds the Flights pill. */
-  flights?: FlightIndexEntry[]
-  /** Pre-flight (plan-features) tasks in progress / awaiting review — the
-   *  pill's pre-flight rows (App owns it, `pre-flight-changed`-driven). */
-  preFlights?: PlanFeaturesTask[]
-  /** Reopen the new-flight dialog attached to a running/awaiting pre-flight. */
-  onOpenPreFlight?: (taskId: string) => void
-  /** Per-feature live activity (runs / portify / authoring) — App owns the
-   *  one useFeatureActivity instance; the pill stays presentational. */
-  activity?: Map<string, FeatureActivity>
-  /** Per-feature evidence-derived stage rails for flightless picker rows —
-   *  App owns the one useDerivedFeatureStages instance (same ownership rule
-   *  as `activity`). */
-  derivedStages?: Map<string, DerivedStage[]>
-  coverageJobs?: CoverageJobIndexEntry[]
-  portifyWorkflows?: PortifyIndexEntry[]
-  /** Whether to offer Getting Started — driven by the workspace visibility setting. */
-  demoAvailable?: boolean
-  /** Attention dot on that pill: the chooser has never been opened. */
-  demoUnseen?: boolean
-  onOpenDemo?: () => void
-  /** Open the routed flight detail view (null = the flights picker). */
-  onOpenFlight?: (flightId: string | null) => void
-  /** Picker open-state, driven off the route (`view=flights` + no flight) so it's
-   *  the same deep-linkable surface the URL addresses — see cl_route-every-surface. */
-  flightsPickerOpen?: boolean
-  onFlightsPickerOpenChange?: (open: boolean) => void
-  /** Open the real surface behind an activity-only pill row (run detail /
-   *  portify workflow / wizard draft) — App routes it. */
-  onOpenActivity?: (feature: string, activity: FeatureActivity) => void
-  /** Open the flight launcher for a never-flown picker row (R49). */
-  onStartFlight?: (feature: string) => void
+  /** App owns the live flight data and routed picker actions. */
+  flightPill?: FlightsPillProps
+  review?: ReviewControl
+  gettingStarted?: { available: boolean; unseen: boolean; onOpen: () => void }
+  returnToFlight?: { flightId: string; label?: string | null; onOpen: (flightId: string) => void } | null
   /** Open a feature's Flight directly at Parallel setup. */
   onOpenPortify?: (feature: string) => void
   /** Open a run's detail (the Deploy-check pill's click-through) — App routes it. */
   onNavigateToRun?: (feature: string, runId: string) => void
-  /** R83: the flight a stage drill-through left, or null. A flight's drill-through
-   *  swaps the whole view (the run detail is a workspace column, with no close of
-   *  its own), so without a way back the trip is one-way. Lives outside the
-   *  collapsible action cluster deliberately — collapsing the actions must not
-   *  hide the only exit. */
-  returnFlight?: string | null
-  /** Destination for the back button's tooltip — the flight's feature name. */
-  returnFlightLabel?: string | null
-  onReturnToFlight?: (flightId: string) => void
-  /** The changed-tests review panel's open-state, driven off the route
-   *  (`?dialog=tests-review`) so a refresh keeps it open — see
-   *  cl_route-every-surface. Uncontrolled (local state) when absent, which keeps
-   *  the bar's own tests and any host without routing working unchanged. */
-  reviewFocus?: ReviewFocus
-  onReviewFocus?: (focus: ReviewFocus) => void
-  onReviewFeature?: (name: string) => void
-  specReviewOpen?: boolean
-  onSpecReviewOpenChange?: (open: boolean) => void
 }
+
+const EMPTY_FLIGHT_PILL: FlightsPillProps = { flights: [], onOpenFlight: () => {} }
 
 // Always-visible top bar showing whether any run is currently active across
 // all features. Single source of truth for "is something running right now?"
@@ -105,7 +69,19 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocus, onReviewFeature, specReviewRunId, specReviewFeature, specReviewRunDetail, activeRunDetail, features = [], onFeaturesChanged, onRunLatestTests, runStartPending = false, onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), coverageJobs = [], portifyWorkflows = [], demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onOpenPortify, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight, specReviewOpen, onSpecReviewOpenChange }: Props) {
+export function GlobalStatusBar({
+  notificationControl,
+  review,
+  activeRunDetail,
+  onRunLatestTests,
+  runStartPending = false,
+  onOpenCleanup,
+  flightPill = EMPTY_FLIGHT_PILL,
+  gettingStarted,
+  onOpenPortify,
+  onNavigateToRun,
+  returnToFlight,
+}: Props) {
   const { connection, runs } = useRuns()
   const [acceptedReview, setAcceptedReview] = useState<{ feature: string; revision: string; detail?: RunDetail | null } | null>(null)
   const runInProgress = runStartPending || isUnsettledRunStatus(activeRunDetail?.manifest.status)
@@ -125,13 +101,13 @@ export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocu
   const [servicesOpen, setServicesOpen] = useState(false)
   const [benchmarkOpen, setBenchmarkOpen] = useState(false)
   const [localSpecReviewOpen, setLocalSpecReviewOpen] = useState(false)
-  const reviewOpen = specReviewOpen ?? localSpecReviewOpen
+  const reviewOpen = review?.open ?? localSpecReviewOpen
   const setReviewOpen = (open: boolean): void => {
     setLocalSpecReviewOpen(open)
-    onSpecReviewOpenChange?.(open)
+    review?.onOpenChange?.(open)
   }
   // A baseline toggle must not remove the linked suite from the review rail.
-  const pendingRuns = runs.filter((r) => (isActiveRunStatus(r.status) && (r.pendingSpecEdits ?? 0) > 0) || r.runId === specReviewRunId)
+  const pendingRuns = runs.filter((r) => (isActiveRunStatus(r.status) && (r.pendingSpecEdits ?? 0) > 0) || r.runId === review?.runId)
   // The right-hand action cluster collapses into a single toggle. Default
   // expanded (actions stay glanceable); the choice persists across reloads.
   const [actionsExpanded, setActionsExpanded] = useState<boolean>(() => {
@@ -156,13 +132,7 @@ export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocu
   // Aggregate "something's happening" count shown on the toggle when collapsed,
   // so an active benchmark / flight / run / portify / authoring job is never
   // hidden behind the chevron. Mirrors the Flights pill's own attention set.
-  const activeFlightCount = new Set([
-    ...flights.filter((f) => f.status === 'running' || f.status === 'waiting-for-approval').map((f) => f.feature),
-    ...activity.keys(),
-  ]).size
-    // Pre-flights in progress / awaiting review count as active too, so a
-    // backgrounded plan isn't hidden behind the collapsed-actions chevron.
-    + preFlights.filter((t) => t.status === 'running' || t.status === 'done').length
+  const activeFlightCount = summarizeFlightActivity(flightPill.flights, flightPill.preFlights ?? [], flightPill.activity ?? new Map()).activeCount
   const actionsActiveCount =
     (showBenchmark && activeBenchmark ? 1 : 0) + (activeFlightCount > 0 ? 1 : 0)
   const status = activeRunDetail?.manifest.status
@@ -173,8 +143,8 @@ export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocu
   const isActive = isActiveRunStatus(status)
   const services = activeRunDetail?.manifest.services ?? []
   const servicesActive = isActive
-  const returnFlightTooltip = returnFlightLabel
-    ? `Go back to the “${returnFlightLabel}” flight.`
+  const returnFlightTooltip = returnToFlight?.label
+    ? `Go back to the “${returnToFlight.label}” flight.`
     : 'Go back to the flight you came from.'
 
   return (
@@ -184,13 +154,13 @@ export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocu
       >
       {/* Keep the drill-through exit before the wordmark, separate from status
           indicators and outside the collapsible action cluster. */}
-      {returnFlight && onReturnToFlight && (
+      {returnToFlight && (
         <div className="shrink-0 border-r pr-3" style={{ borderColor: 'var(--border-default)' }}>
           <Tooltip label={returnFlightTooltip}>
             <button
               type="button"
               data-testid="return-to-flight"
-              onClick={() => onReturnToFlight(returnFlight)}
+              onClick={() => returnToFlight.onOpen(returnToFlight.flightId)}
               className="cl-icon-button h-7 w-7"
               aria-label={returnFlightTooltip}
             >
@@ -289,28 +259,15 @@ export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocu
               ariaLabel={`Open deploy check (${verifyRuns.length} active)`}
             />
           )}
-          <FlightsPill
-            flights={flights}
-            preFlights={preFlights}
-            activity={activity}
-            features={features.map((f) => ({ name: f.name, group: f.group, stages: derivedStages.get(f.name) }))}
-            coverageJobs={coverageJobs}
-            portifyWorkflows={portifyWorkflows}
-            open={flightsPickerOpen}
-            onOpenChange={onFlightsPickerOpenChange}
-            onStartFlight={(feature) => onStartFlight?.(feature)}
-            onOpenFlight={(flightId) => onOpenFlight?.(flightId)}
-            onOpenActivity={(feature, act) => onOpenActivity?.(feature, act)}
-            onOpenPreFlight={(taskId) => onOpenPreFlight?.(taskId)}
-          />
+          <FlightsPill {...flightPill} />
           {/* Onboarding's permanent home. It remains useful after the samples
               are deleted because the external-agent side teaches every skill. */}
-          {demoAvailable && (
+          {gettingStarted?.available && (
             <StatusPill
               dotState="idle"
               name="Getting started"
-              overlayDot={demoUnseen}
-              onClick={() => onOpenDemo?.()}
+              overlayDot={gettingStarted.unseen}
+              onClick={gettingStarted.onOpen}
               title="Choose a workflow for an external or internal agent"
               ariaLabel="Open Getting Started"
             />
@@ -358,9 +315,25 @@ export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocu
       </div>
       </div>
       {servicesOpen && <ServicesDialog onClose={() => setServicesOpen(false)} />}
-      {reviewOpen && <DirtyReviewDialog onFeaturesChanged={onFeaturesChanged} onChooseFeature={onReviewFeature} focus={reviewFocus} onFocus={onReviewFocus} focusFeature={specReviewFeature} focusRunId={specReviewRunId} focusRunDetail={specReviewRunDetail} features={features} pendingRuns={pendingRuns} onClose={() => setReviewOpen(false)} onAccepted={(feature, receipt, detail) => {
-        if (receipt.decision === 'accepted' && receipt.execution.status === 'new-run-required' && !runInProgressRef.current) setAcceptedReview({ feature, revision: receipt.review_revision, detail })
-      }} />}
+      {reviewOpen && (
+        <DirtyReviewDialog
+          onFeaturesChanged={review?.onFeaturesChanged}
+          onChooseFeature={review?.onChooseFeature}
+          focus={review?.focus}
+          onFocus={review?.onFocus}
+          focusFeature={review?.feature}
+          focusRunId={review?.runId}
+          focusRunDetail={review?.runDetail}
+          features={review?.features ?? []}
+          pendingRuns={pendingRuns}
+          onClose={() => setReviewOpen(false)}
+          onAccepted={(feature, receipt, detail) => {
+            if (receipt.decision === 'accepted' && receipt.execution.status === 'new-run-required' && !runInProgressRef.current) {
+              setAcceptedReview({ feature, revision: receipt.review_revision, detail })
+            }
+          }}
+        />
+      )}
       {acceptedReview && !runInProgress && <TestReviewAcceptedToast key={`${acceptedReview.feature}:${acceptedReview.revision}`} {...acceptedReview} onDismiss={() => setAcceptedReview(null)} onRun={onRunLatestTests} />}
       {benchmarkOpen && (
         <BenchmarkWindow

@@ -8,13 +8,12 @@ export interface PanelConfig {
   /** Vertical placement of the collapse button on this panel's right-side
    *  handle. Defaults to 'center'. */
   collapseButtonY?: 'top' | 'center' | 'bottom'
-  content: ReactNode
 }
 
 const STORAGE_KEY = 'canary-lab.panel-widths'
 const HANDLE_WIDTH = 4
 
-function loadWidths(panels: PanelConfig[]): number[] {
+function loadWidths(panels: readonly PanelConfig[]): number[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
@@ -28,7 +27,7 @@ function loadWidths(panels: PanelConfig[]): number[] {
   return panels.map((p) => p.defaultWidth)
 }
 
-function saveWidths(panels: PanelConfig[], widths: number[]): void {
+function saveWidths(panels: readonly PanelConfig[], widths: number[]): void {
   try {
     const obj: Record<string, number> = {}
     panels.forEach((p, i) => { obj[p.id] = widths[i] })
@@ -36,18 +35,25 @@ function saveWidths(panels: PanelConfig[], widths: number[]): void {
   } catch { /* ignore */ }
 }
 
-export function ResizablePanels({ panels }: { panels: PanelConfig[] }) {
+export function ResizablePanels({ panels, contentByPanel }: {
+  panels: readonly PanelConfig[]
+  contentByPanel: Record<string, ReactNode>
+}) {
   const [widths, setWidths] = useState<number[]>(() => loadWidths(panels))
   const [collapsed, setCollapsed] = useState<boolean[]>(() => panels.map(() => false))
   const [containerWidth, setContainerWidth] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ index: number; startX: number; startWidths: number[] } | null>(null)
+  const resizedRef = useRef(false)
   const [dragging, setDragging] = useState<number | null>(null)
   const displayWidths = computePanelWidths(panels, widths, collapsed, containerWidth)
 
+  // Storage writes block the drag path, so persist only after release.
   useEffect(() => {
+    if (dragging !== null || !resizedRef.current) return
+    resizedRef.current = false
     saveWidths(panels, widths)
-  }, [panels, widths])
+  }, [dragging, panels, widths])
 
   useEffect(() => {
     const node = containerRef.current
@@ -98,6 +104,7 @@ export function ResizablePanels({ panels }: { panels: PanelConfig[] }) {
 
       if (newLeft < leftMin || newRight < rightMin) return
 
+      resizedRef.current = true
       setWidths((prev) => {
         const next = [...prev]
         next[leftIdx] = newLeft
@@ -141,14 +148,14 @@ export function ResizablePanels({ panels }: { panels: PanelConfig[] }) {
         return (
           <div key={panel.id} className="contents">
             <div
-              className="shrink-0 overflow-hidden transition-[width] duration-200"
+              className={`shrink-0 overflow-hidden${dragging === null ? ' transition-[width] duration-200' : ''}`}
               style={{
                 width: isCollapsed ? 0 : `${panelWidth}px`,
                 minWidth: isCollapsed ? 0 : undefined,
               }}
             >
               <div className="cl-panel h-full overflow-hidden">
-                {panel.content}
+                {contentByPanel[panel.id]}
               </div>
             </div>
             {!isLast && (
@@ -183,7 +190,7 @@ export function ResizablePanels({ panels }: { panels: PanelConfig[] }) {
 }
 
 export function computePanelWidths(
-  panels: Pick<PanelConfig, 'minWidth'>[],
+  panels: readonly Pick<PanelConfig, 'minWidth'>[],
   widths: number[],
   collapsed: boolean[],
   containerWidth: number,

@@ -39,6 +39,12 @@ interface ExpandedTestSelection {
   autoExpandPending: boolean
 }
 
+type TestRunEvidence = {
+  manifest?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'specEdits' | 'runId'>
+  summary?: RunSummary
+  status?: RunStatus
+}
+
 interface Props {
   currentTests?: boolean
   /** Present while a run is selected, including while its details are loading. */
@@ -47,17 +53,11 @@ interface Props {
   /** Workspace discovery is expected to be incomplete while the authoring
    *  agent is still changing spec files. */
   isAuthoringTests?: boolean
-  activeRunSummary: RunSummary | undefined
-  activeRunManifest?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'specEdits' | 'runId'>
-  activeRunStatus: RunStatus | undefined
-  /** The selected run, whichever source the column is showing. `activeRun*`
-   *  goes undefined while the user inspects workspace source — the results
-   *  belong to the copy, not to what is on disk — but drift is still measured
-   *  against that run's snapshot from both sides, so the baseline has to
-   *  survive the mode switch. */
-  baselineRun?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'runId'>
-  baselineRunSummary?: RunSummary
-  baselineRunStatus?: RunStatus
+  /** Verdicts appear on cards only while the recorded source is shown. */
+  runEvidence?: TestRunEvidence
+  /** The run used for source comparison, including while current tests are shown.
+   *  It can be present before the displayed run's roster has loaded. */
+  comparisonBaseline?: TestRunEvidence
   onReviewTest?: (file: string, line?: number, baseline?: 'run', change?: TestChangeKind, test?: string) => void
   onTotalTestsChange?: (n: number) => void
   /** Spec files flagged as modified, each with the test title(s) actually
@@ -65,7 +65,13 @@ interface Props {
   dirtySpecs?: DirtySpecSummary[]
 }
 
-export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSummary, activeRunManifest, activeRunStatus, baselineRun, baselineRunSummary, baselineRunStatus, onTotalTestsChange, onReviewTest, currentTests = false, onCurrentTestsChange, dirtySpecs = [] }: Props) {
+export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence, comparisonBaseline, onTotalTestsChange, onReviewTest, currentTests = false, onCurrentTestsChange, dirtySpecs = [] }: Props) {
+  const baselineRun = comparisonBaseline?.manifest
+  const baselineRunSummary = comparisonBaseline?.summary
+  const baselineRunStatus = comparisonBaseline?.status
+  const activeRunManifest = currentTests ? undefined : runEvidence?.manifest
+  const activeRunSummary = currentTests ? undefined : runEvidence?.summary
+  const activeRunStatus = currentTests ? undefined : runEvidence?.status
   // The spec list refetches when a `tests-changed` event fires for the selected
   // feature (App gates the invalidation to the visible feature).
   const refreshKey = useInvalidationKey('tests')
@@ -370,7 +376,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, activeRunSu
   )
 }
 
-function statusesForSpecs(specs: FeatureSpecFile[] | null, manifest: Props['activeRunManifest'], summary: RunSummary | undefined, running: boolean): StepStatus[] {
+function statusesForSpecs(specs: FeatureSpecFile[] | null, manifest: TestRunEvidence['manifest'], summary: RunSummary | undefined, running: boolean): StepStatus[] {
   return (specs ?? []).flatMap((spec) => spec.tests.map((test) => statusForTest(
     summaryIdentityForWorkspaceTest(test.name, test.line, sourceFileInRun(test.sourceFile ?? spec.file, manifest), summary, Boolean(manifest?.runId)),
     summary, running,

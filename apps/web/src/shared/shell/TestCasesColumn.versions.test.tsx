@@ -27,9 +27,9 @@ let invalidate: ReturnType<typeof useInvalidation>['invalidate']
 function View({ baseline = manifest, result = summary }: { baseline?: typeof manifest; result?: RunSummary }) {
   const [source, setSource] = useState(true)
   invalidate = useInvalidation().invalidate
-  return <TestCasesColumn feature="suite" currentTests={source} onCurrentTestsChange={setSource} baselineRun={baseline}
-    baselineRunSummary={result} baselineRunStatus="passed" activeRunManifest={source ? undefined : baseline}
-    activeRunSummary={source ? undefined : result} activeRunStatus={source ? undefined : 'passed'} onReviewTest={review} />
+  const evidence = { manifest: baseline, summary: result, status: 'passed' as const }
+  return <TestCasesColumn feature="suite" currentTests={source} onCurrentTestsChange={setSource}
+    runEvidence={evidence} comparisonBaseline={evidence} onReviewTest={review} />
 }
 beforeEach(() => {
   vi.resetAllMocks()

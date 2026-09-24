@@ -37,7 +37,7 @@ beforeEach(() => {
 })
 afterEach(() => { act(() => root.unmount()); container.remove() })
 async function render(isAuthoringTests = false) {
-  await act(async () => root.render(<InvalidationProvider><TestCasesColumn feature="suite" isAuthoringTests={isAuthoringTests} activeRunSummary={undefined} activeRunStatus={undefined} /></InvalidationProvider>))
+  await act(async () => root.render(<InvalidationProvider><TestCasesColumn feature="suite" isAuthoringTests={isAuthoringTests} /></InvalidationProvider>))
 }
 describe('Tests column discovery repair', () => {
   it('puts all three ways out on the card, with nothing to open for a one-line error', async () => {

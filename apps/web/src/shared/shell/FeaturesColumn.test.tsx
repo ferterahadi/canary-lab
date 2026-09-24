@@ -10,6 +10,7 @@ import { InvalidationProvider, useInvalidation } from '../state/invalidation'
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const gatePromo = vi.fn((_action: string, continueAction: () => void) => continueAction())
+const onOpenConfig = vi.fn()
 
 // Hoisted so the factory below can close over it without re-importing the mocked
 // module (that shape deadlocks vitest collection).
@@ -31,10 +32,6 @@ vi.mock('./McpPromoContext', () => ({
   useMcpPromo: () => ({ gatePromo }),
 }))
 
-vi.mock('@/features/config/components/FeatureConfigEditor', () => ({
-  FeatureConfigEditor: () => <div>feature config</div>,
-}))
-
 vi.mock('@/features/config/components/SettingsModal', () => ({
   SettingsModal: () => <div>settings</div>,
 }))
@@ -51,6 +48,7 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   gatePromo.mockReset()
+  onOpenConfig.mockReset()
   gatePromo.mockImplementation((_action: string, continueAction: () => void) => continueAction())
   listCoverageStates.mockReset()
   listCoverageStates.mockResolvedValue([])
@@ -68,6 +66,7 @@ describe('FeaturesColumn MCP promo gate', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[]}
           selectedFeature={null}
           onSelectFeature={() => {}}
@@ -87,6 +86,7 @@ describe('FeaturesColumn MCP promo gate', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[]}
           selectedFeature={null}
           onSelectFeature={() => {}}
@@ -118,6 +118,7 @@ describe('FeaturesColumn active-run highlight', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('alpha'), feature('beta')]}
           selectedFeature="alpha"
           activeRunFeature="beta"
@@ -141,6 +142,7 @@ describe('FeaturesColumn active-run highlight', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('alpha')]}
           selectedFeature="alpha"
           activeRunFeature="alpha"
@@ -165,6 +167,7 @@ describe('FeaturesColumn active-run highlight', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('alpha'), feature('beta')]}
           selectedFeature="alpha"
           activeRunFeature="beta"
@@ -188,6 +191,7 @@ describe('FeaturesColumn active-run highlight', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('alpha'), feature('beta')]}
           selectedFeature="alpha"
           activeRunFeature="beta"
@@ -212,6 +216,7 @@ describe('FeaturesColumn active-run highlight', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[changed]}
           selectedFeature={null}
           activeRunFeature="alpha"
@@ -238,6 +243,7 @@ describe('FeaturesColumn active-run highlight', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('alpha')]}
           selectedFeature={null}
           activeRunFeature="alpha"
@@ -270,6 +276,7 @@ describe('FeaturesColumn coverage action (R8)', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('alpha')]}
           selectedFeature={null}
           onSelectFeature={onSelectFeature}
@@ -287,7 +294,7 @@ describe('FeaturesColumn coverage action (R8)', () => {
   it('omits the coverage action when no handler is provided', () => {
     act(() => {
       root.render(
-        <FeaturesColumn features={[feature('alpha')]} selectedFeature={null} onSelectFeature={() => {}} />,
+        <FeaturesColumn onOpenConfig={onOpenConfig} features={[feature('alpha')]} selectedFeature={null} onSelectFeature={() => {}} />,
       )
     })
     expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBeNull()
@@ -306,6 +313,7 @@ describe('FeaturesColumn coverage action (R8)', () => {
     await act(async () => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('alpha')]}
           selectedFeature={null}
           onSelectFeature={() => {}}
@@ -352,6 +360,7 @@ describe('FeaturesColumn coverage action (R8)', () => {
         <InvalidationProvider>
           <InvalidationTap />
           <FeaturesColumn
+            onOpenConfig={onOpenConfig}
             features={[feature('alpha')]}
             selectedFeature={null}
             onSelectFeature={() => {}}
@@ -379,6 +388,7 @@ describe('FeaturesColumn flight action (R40: per-row action removed)', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('alpha')]}
           selectedFeature={null}
           onSelectFeature={() => {}}
@@ -392,7 +402,7 @@ describe('FeaturesColumn flight action (R40: per-row action removed)', () => {
   it('omits the flight action when no handler is provided', () => {
     act(() => {
       root.render(
-        <FeaturesColumn features={[feature('alpha')]} selectedFeature={null} onSelectFeature={() => {}} />,
+        <FeaturesColumn onOpenConfig={onOpenConfig} features={[feature('alpha')]} selectedFeature={null} onSelectFeature={() => {}} />,
       )
     })
     expect(container.querySelector('[data-testid="flight-action-alpha"]')).toBeNull()
@@ -408,6 +418,7 @@ describe('FeaturesColumn grouping (R55)', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('checkout', 'shop'), feature('cart', 'shop'), feature('admin')]}
           selectedFeature={null}
           onSelectFeature={() => {}}
@@ -429,6 +440,7 @@ describe('FeaturesColumn grouping (R55)', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('checkout', 'shop'), feature('cart', 'shop')]}
           selectedFeature={null}
           onSelectFeature={() => {}}
@@ -449,6 +461,7 @@ describe('FeaturesColumn grouping (R55)', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('checkout', 'shop'), feature('cart', 'shop')]}
           selectedFeature={null}
           onSelectFeature={() => {}}
@@ -462,6 +475,7 @@ describe('FeaturesColumn grouping (R55)', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('calm', 'zzz-calm'), feature('busy', 'aaa-active')]}
           selectedFeature={null}
           activeRunFeature="busy"
@@ -492,6 +506,7 @@ describe('FeaturesColumn pending placeholders (R69)', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[pendingFeature('login')]}
           selectedFeature={null}
           onSelectFeature={onSelectFeature}
@@ -517,6 +532,7 @@ describe('FeaturesColumn pending placeholders (R69)', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[pendingFeature('signup', 'Auth'), pendingFeature('login', 'Auth')]}
           selectedFeature={null}
           onSelectFeature={() => {}}
@@ -542,6 +558,7 @@ describe('FeaturesColumn pending placeholders (R69)', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[parked('scan', 'Alpha', 'external-work'), parked('keys', 'Beta', 'missing-env')]}
           selectedFeature={null}
           onSelectFeature={() => {}}
@@ -579,6 +596,7 @@ describe('FeaturesColumn flight shortcut (open the suite\'s existing flight)', (
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('alpha')]}
           selectedFeature={null}
           onSelectFeature={onSelectFeature}
@@ -600,6 +618,7 @@ describe('FeaturesColumn flight shortcut (open the suite\'s existing flight)', (
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('alpha')]}
           selectedFeature={null}
           onSelectFeature={() => {}}
@@ -614,7 +633,7 @@ describe('FeaturesColumn flight shortcut (open the suite\'s existing flight)', (
   it('omits the shortcut when no resolver or no destination handler is wired', () => {
     act(() => {
       root.render(
-        <FeaturesColumn features={[feature('alpha')]} selectedFeature={null} onSelectFeature={() => {}} />,
+        <FeaturesColumn onOpenConfig={onOpenConfig} features={[feature('alpha')]} selectedFeature={null} onSelectFeature={() => {}} />,
       )
     })
     expect(container.querySelector('[data-testid="flight-shortcut-alpha"]')).toBeNull()
@@ -622,6 +641,7 @@ describe('FeaturesColumn flight shortcut (open the suite\'s existing flight)', (
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('alpha')]}
           selectedFeature={null}
           onSelectFeature={() => {}}
@@ -638,7 +658,7 @@ describe('FeaturesColumn flight shortcut (open the suite\'s existing flight)', (
     const render = (props: Record<string, unknown>) => {
       act(() => {
         root.render(
-          <FeaturesColumn features={[feature('alpha')]} selectedFeature={null} onSelectFeature={() => {}} {...props} />,
+          <FeaturesColumn onOpenConfig={onOpenConfig} features={[feature('alpha')]} selectedFeature={null} onSelectFeature={() => {}} {...props} />,
         )
       })
       return container.querySelector<HTMLElement>('li.feature-row')?.style.getPropertyValue('--feature-row-actions')
@@ -652,6 +672,7 @@ describe('FeaturesColumn flight shortcut (open the suite\'s existing flight)', (
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[{ name: 'beta', repos: [], envs: [], group: 'CNS' }]}
           selectedFeature={null}
           onSelectFeature={() => {}}
@@ -662,6 +683,20 @@ describe('FeaturesColumn flight shortcut (open the suite\'s existing flight)', (
     })
     expect(container.querySelector('[data-testid="flight-shortcut-beta"]')).toBeTruthy()
   })
+
+  it('sends flat and grouped config actions to the routed owner', () => {
+    const render = (features: Array<{ name: string; repos: never[]; envs: never[]; group?: string }>) => {
+      act(() => { root.render(<FeaturesColumn onOpenConfig={onOpenConfig} features={features} selectedFeature={null} onSelectFeature={() => {}} />) })
+    }
+    render([feature('alpha')])
+    act(() => { container.querySelector<HTMLButtonElement>('[aria-label="Configure alpha"]')!.click() })
+    expect(onOpenConfig).toHaveBeenLastCalledWith('alpha')
+
+    render([{ ...feature('beta'), group: 'CNS' }])
+    act(() => { container.querySelector<HTMLButtonElement>('[aria-label="Configure beta"]')!.click() })
+    expect(onOpenConfig).toHaveBeenLastCalledWith('beta')
+    expect(onOpenConfig).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('FeaturesColumn in-flight row cue', () => {
@@ -670,6 +705,7 @@ describe('FeaturesColumn in-flight row cue', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('alpha')]}
           selectedFeature={null}
           onSelectFeature={() => {}}
@@ -720,6 +756,7 @@ describe('FeaturesColumn in-flight row cue', () => {
       act(() => {
         root.render(
           <FeaturesColumn
+            onOpenConfig={onOpenConfig}
             features={[feature('alpha')]}
             selectedFeature={null}
             onSelectFeature={() => {}}
@@ -741,6 +778,7 @@ describe('FeaturesColumn in-flight row cue', () => {
     act(() => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={[feature('alpha')]}
           selectedFeature={null}
           activeRunFeature="alpha"
@@ -767,6 +805,7 @@ describe('FeaturesColumn coverage-headline fetching', () => {
     await act(async () => {
       root.render(
         <FeaturesColumn
+          onOpenConfig={onOpenConfig}
           features={features}
           selectedFeature={null}
           onSelectFeature={() => {}}
@@ -797,7 +836,7 @@ describe('FeaturesColumn coverage-headline fetching', () => {
   it('does not fetch at all when coverage is not reachable', async () => {
     await act(async () => {
       root.render(
-        <FeaturesColumn features={[feature('alpha')]} selectedFeature={null} onSelectFeature={() => {}} />,
+        <FeaturesColumn onOpenConfig={onOpenConfig} features={[feature('alpha')]} selectedFeature={null} onSelectFeature={() => {}} />,
       )
     })
     expect(listCoverageStates).not.toHaveBeenCalled()
@@ -819,7 +858,7 @@ describe('FeaturesColumn modified-tests badge', () => {
   })
   const render = (features: unknown[]) => {
     act(() => {
-      root.render(<FeaturesColumn features={features as never} selectedFeature={null} onSelectFeature={() => {}} />)
+      root.render(<FeaturesColumn onOpenConfig={onOpenConfig} features={features as never} selectedFeature={null} onSelectFeature={() => {}} />)
     })
   }
   const badge = (name: string) => container.querySelector(`[data-testid="dirty-badge-${name}"]`)

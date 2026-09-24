@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlightIndexEntry, FlightStageStatus, PlanFeaturesTask } from '@/shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import type { FeatureActivity } from '../state/feature-activity'
-import { FlightsPill, featureActivityRows, featureChipState, groupPickerRows, resolveFeatureFlightAction } from './FlightsPill'
+import { FlightsPill, featureActivityRows, featureChipState, groupPickerRows, resolveFeatureFlightAction, resolveFeatureFlightTarget, summarizeFlightActivity } from './FlightsPill'
 import { ACTIVITY_CHIP, RUNNING_STAGE_CHIP } from './FlightChipState'
 
 const { listCoverageStates } = vi.hoisted(() => ({ listCoverageStates: vi.fn() }))
@@ -59,6 +59,26 @@ function render(flights: FlightIndexEntry[], onOpenFlight = vi.fn()) {
   act(() => { root.render(<FlightsPill flights={flights} onOpenFlight={onOpenFlight} />) })
   return onOpenFlight
 }
+
+it('shares one active count across the pill and status bar', () => {
+  const flights = [flight({}), flight({ flightId: 'fl_2', id: 'fl_2', feature: 'billing', status: 'done' })]
+  const preFlights = [preFlight({ taskId: 'fp_running' }), preFlight({ taskId: 'fp_done', status: 'done' }), preFlight({ taskId: 'fp_failed', status: 'failed' })]
+  const activity = new Map<string, FeatureActivity>([['checkout', { kind: 'running', runId: 'r1' }], ['search', { kind: 'authoring', draftId: 'd1' }]])
+  const summary = summarizeFlightActivity(flights, preFlights, activity)
+
+  expect([...summary.activeFeatures]).toEqual(['checkout', 'search'])
+  expect(summary.preFlightRows.map((task) => task.taskId)).toEqual(['fp_running', 'fp_done'])
+  expect(summary.activeCount).toBe(4)
+  act(() => { root.render(<FlightsPill flights={flights} preFlights={preFlights} activity={activity} onOpenFlight={vi.fn()} />) })
+  expect(container.querySelector('[data-testid="flights-pill-count"]')?.textContent).toBe(String(summary.activeCount))
+})
+
+it('resolves the same first recorded flight or derived target for feature links', () => {
+  const first = flight({ flightId: 'fl_first' })
+  const later = flight({ flightId: 'fl_later' })
+  expect(resolveFeatureFlightTarget('checkout', [first, later])).toEqual({ flight: first, flightId: 'fl_first' })
+  expect(resolveFeatureFlightTarget('search', [first, later])).toEqual({ flight: null, flightId: 'feature:search' })
+})
 
 describe('FlightsPill', () => {
   it('stays visible when idle and shows the active count while flights run', () => {
