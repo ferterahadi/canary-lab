@@ -95,11 +95,8 @@ function repoSetsIntersect(a: string[], b: string[]): boolean {
  *  written, inserted as `pending` in canonical order.
  *
  *  A flight's stage array is minted once, at start, from the stage keys of that
- *  build and is never re-derived. So a flight flown before `robustness` shipped
- *  carries no record for it, and every surface that walks the array — the
- *  picker's mini rail, the flight rail, "continue from a step" — omits the step
- *  silently instead of showing it unrun. The gap reads as "this pipeline has no
- *  such step", which is false.
+ *  build and is never re-derived. New steps would otherwise be absent from
+ *  older records and every surface that walks them.
  *
  *  `pending` and not `skipped`: the stage genuinely never ran, and `skipped`
  *  would assert a decision nobody made. A backfilled step is therefore

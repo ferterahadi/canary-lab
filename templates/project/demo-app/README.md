@@ -48,7 +48,7 @@ header is applied once; the same key again returns the first reply unchanged. Th
 suite sends a fresh key on every write. Checkout also expires a cart nobody has
 touched for `STOREFRONT_CART_IDLE_MS` (default 30000) with 410.
 
-These three properties are what a Canary Lab robustness envelope probes (latency,
-duplicate, restart). They change nothing about the ten seeded contract defects.
+These properties keep the sample service safe across repeated writes and restarts.
+They change nothing about the ten seeded contract defects.
 
 This is training material, not a dependency. Delete `demo-app/` after the tour.

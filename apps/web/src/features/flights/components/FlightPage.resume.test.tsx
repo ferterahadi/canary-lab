@@ -286,25 +286,19 @@ describe('FlightPage', () => {
     const markedRows = () => Array.from(container.querySelectorAll('[data-testid="flight-redo-reset-mark"]'))
       .map((mark) => mark.closest('[role="radio"]')?.getAttribute('data-testid'))
     const effects = () => container.querySelector('[data-testid="flight-redo-effects"]')?.textContent
-    const tip = () => container.querySelector('[data-testid="flight-redo-tip"]')?.textContent ?? null
     expect(markedRows()).toEqual([])
     expect(effects()).toBe('')
-    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-robustness"]')?.click() })
-    expect(markedRows()).toEqual(['flight-redo-robustness'])
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-portify"]')?.click() })
+    expect(markedRows()).toEqual(['flight-redo-portify'])
     expect(effects()).toBe('↻ Resets 1 step')
-    // The report is not among the marked rows, so the one thing left to say is
-    // that the Lab's new findings reach it only through a refresh.
-    expect(tip()).toContain('Refresh the report')
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-specs-coverage"]')?.click() })
     // Parallel setup (portify) is the one later row left unmarked — it stays.
     expect(markedRows()).toEqual([
       'flight-redo-specs-coverage',
       'flight-redo-run',
       'flight-redo-evaluation-export',
-      'flight-redo-robustness',
     ])
-    expect(effects()).toBe('↻ Resets 4 steps')
-    expect(tip()).toBeNull()
+    expect(effects()).toBe('↻ Resets 3 steps')
     // Choosing another row updates the impact before the call is sent.
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-docs"]')?.click() })
     const note = container.querySelector<HTMLTextAreaElement>('[data-testid="flight-redo-feedback"]')!

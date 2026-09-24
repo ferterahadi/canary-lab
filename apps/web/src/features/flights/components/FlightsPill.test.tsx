@@ -150,8 +150,7 @@ describe('FlightsPill', () => {
       status: key === 'run' || key === 'scout' || key === 'scaffold'
         || key === 'env-capture' || key === 'docs' || key === 'prd-summary'
         || key === 'specs-coverage' ? 'done' as const
-        : key === 'evaluation-export' ? 'failed' as const
-          : key === 'robustness' ? 'skipped' as const : 'pending' as const,
+        : key === 'evaluation-export' ? 'failed' as const : 'pending' as const,
       startedAt: '2026-09-23T00:00:00Z',
     }))
     act(() => root.render(<FlightsPill
@@ -174,7 +173,6 @@ describe('FlightsPill', () => {
       ['run', 'running', 'var(--running)'],
       ['evaluation-export', 'failed', 'var(--danger)'],
       ['portify', 'needs approval', 'var(--warning)'],
-      ['robustness', 'skipped'],
     ]
     for (const [key, label, tone] of expected) {
       expect(cell(key).getAttribute('aria-label')).toContain(label)

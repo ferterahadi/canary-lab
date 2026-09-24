@@ -14,8 +14,8 @@ export const PANEL_CARD_STYLE: CSSProperties = {
   boxShadow: 'var(--shadow-panel)',
 }
 
-/** A card that needs the user — a checkpoint's question, a stage error, a
- *  robustness finding — is the same slab in a louder tone, not a differently
+/** A card that needs the user — a checkpoint's question or a stage error —
+ *  is the same slab in a louder tone, not a differently
  *  shaped one. Four such cards each hand-rolled `p-3` (12px all round) beside
  *  PanelCard's `px-3 py-2.5`, so the one card the user MUST read sat 2px
  *  taller than every card around it. `warning` keeps the plain surface (the

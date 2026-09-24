@@ -112,7 +112,7 @@ describe('blocked run request ownership', () => {
     expect((await decide(blocked.review_revision)).statusCode).toBe(202)
     await vi.waitFor(async () => expect(await read(blocked.request.requestId)).toMatchObject({ status: 'started', runId: expect.any(String) }))
     expect(starts).toHaveLength(1)
-    expect(starts[0]).toMatchObject(['checkout', 'dev', undefined, 'worktree', 'run', models, undefined, undefined, { updateRepos: false, runId: expect.any(String) }])
+    expect(starts[0]).toMatchObject(['checkout', 'dev', undefined, 'worktree', 'run', models, { updateRepos: false, runId: expect.any(String) }])
     expect(events.some((event) => event.type === 'tests-changed')).toBe(true)
   })
 

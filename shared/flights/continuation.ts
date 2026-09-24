@@ -62,9 +62,6 @@ export function recommendFlightContinuation(
   if (evidence.run?.status !== 'passed') {
     return { fromStage: 'run', reason: 'there is no passing feature run for the current suite' }
   }
-  if (!evidence.robustness) {
-    return { fromStage: 'robustness', reason: 'no completed Robustness Lab result is present' }
-  }
   if (!evidence['evaluation-export']) {
     return { fromStage: 'evaluation-export', reason: 'no completed evaluation Report is present' }
   }

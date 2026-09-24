@@ -41,7 +41,6 @@ const PICKABLE: FlightStageKey[] = [
   'specs-coverage',
   'portify',
   'run',
-  'robustness',
   'evaluation-export',
 ]
 
@@ -516,7 +515,7 @@ export function FlightStartDialog({
                   ? 'The flight starts over: stage evidence resets, while completed report downloads stay in history.'
                   : picked === 'continue'
                     ? 'Continue picks up from the last state — nothing is wiped.'
-                    : 'Restarting resets the selected step and its dependent evidence. Repeating tests keeps Parallel setup; repeating Robustness Lab keeps the current report. Completed reports stay in history.'}
+                    : 'Restarting resets the selected step and its dependent evidence. Repeating tests keeps Parallel setup. Completed reports stay in history.'}
               </div>
             )}
 

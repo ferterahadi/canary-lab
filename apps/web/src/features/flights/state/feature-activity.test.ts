@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RunManifest, CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunIndexEntry } from '@/shared/api/types'
 import type { PortifyIndexEntry } from '@/shared/api/client'
-import type { RobustnessJobIndexEntry } from '@shared/robustness/jobs'
 import fixture from '../../runs/utils/__fixtures__/run-snapshot-review.json'
 import { deriveFeatureActivity, deriveFeatureExternalHistory } from './feature-activity'
 
@@ -538,40 +537,4 @@ it('carries the recorded review wait from run detail into the feature activity',
     portifyWorkflows: [], drafts: [],
   })
   expect(result.get('sample-suite')?.waiting?.label).toBe('Awaiting test review')
-})
-
-describe('deriveFeatureActivity — Robustness lab (D16)', () => {
-  const robustnessJob = (over: Partial<RobustnessJobIndexEntry> = {}): RobustnessJobIndexEntry => ({
-    jobId: 'rj-1',
-    feature: 'checkout',
-    runId: 'run-9',
-    status: 'running',
-    startedAt: '2026-01-01T00:00:00Z',
-    findings: 0,
-    ...over,
-  })
-
-  it('a running matrix job is the "perturbing" verb, pinned to the job and the green run it perturbs', () => {
-    const map = deriveFeatureActivity({ activeRuns: [], portifyWorkflows: [], drafts: [], robustnessJobs: [robustnessJob()] })
-    expect(map.get('checkout')).toEqual({ kind: 'perturbing', jobId: 'rj-1', runId: 'run-9', external: false })
-  })
-
-  it('settled jobs are silent; the job outranks an export and a real test run outranks the job', () => {
-    const settled = deriveFeatureActivity({
-      activeRuns: [], portifyWorkflows: [], drafts: [],
-      robustnessJobs: [robustnessJob({ status: 'done' }), robustnessJob({ jobId: 'rj-2', feature: 'other', status: 'aborted' })],
-    })
-    expect(settled.size).toBe(0)
-
-    const exportTask = { taskId: 't-a', runId: 'r-a', feature: 'checkout', status: 'running' } as EvaluationExportTask
-    const overExport = deriveFeatureActivity({ activeRuns: [], portifyWorkflows: [], drafts: [], exportTasks: [exportTask], robustnessJobs: [robustnessJob()] })
-    expect(overExport.get('checkout')?.kind).toBe('perturbing')
-
-    // The matrix's own cells are auxiliary runs and never the verb; a user's run is.
-    const underRun = deriveFeatureActivity({
-      activeRuns: [run({ runId: 'cell', executionType: 'robustness' }), run({ runId: 'r-user' })],
-      portifyWorkflows: [], drafts: [], robustnessJobs: [robustnessJob()],
-    })
-    expect(underRun.get('checkout')).toEqual({ kind: 'running', runId: 'r-user', external: false })
-  })
 })

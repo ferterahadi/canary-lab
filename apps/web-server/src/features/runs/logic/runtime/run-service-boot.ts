@@ -11,7 +11,6 @@ import type { HttpProbe, TcpProbe } from '../../../../../../../shared/launcher/t
 import { coerceTcpPort, isHealthy, isTcpListening } from '../../../../shared/launcher-startup'
 import { type RunBootFailure } from './manifest'
 import type { RunBootEvidence } from '../../../../../../../shared/run-state'
-import { clientPortMap } from './perturbation/client-ports'
 import { classifyBootEvidence, diagnosticExcerpt, redactDiagnosticText } from './diagnostic-redaction'
 import type { PtyHandle } from './pty-spawner'
 import os from 'os'
@@ -159,12 +158,10 @@ export function testPortEnvKey(slot: string): string {
 // Per-run allocated ports exposed to the Playwright process under the
 // shell-safe key above so tests can resolve the dynamic target. Empty when the
 // feature declares no port slots (remote runs keep their static envset URL).
-// Under a perturbation these are the SHIM ports: the suite must cross the shim
-// while the service itself (env + health probe) stays on the real port.
 export function testPortEnv(ctx: RunContext): Record<string, string> {
   const out: Record<string, string> = {}
   const owners = new Map<string, string>()
-  const ports = clientPortMap(ctx)
+  const ports = ctx.portMap
   if (ports) {
     for (const [slot, port] of ports) {
       const key = testPortEnvKey(slot)

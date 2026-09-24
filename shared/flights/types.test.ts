@@ -76,9 +76,6 @@ describe('STAGE_DEPENDS_ON — the real dependency graph', () => {
     expect(STAGE_DEPENDS_ON['portify']).not.toContain('specs-coverage')
     expect(STAGE_DEPENDS_ON['run']).not.toContain('prd-summary')
     expect(STAGE_DEPENDS_ON['evaluation-export']).toEqual(['run'])
-    // The Robustness Lab perturbs the GREEN run's own spec files. Port slots
-    // may already be native, so a suite can re-enter it from a standalone run.
-    expect(STAGE_DEPENDS_ON['robustness']).toEqual(['run'])
     // Requirements collection boots nothing, so it needs no envset.
     expect(STAGE_DEPENDS_ON['docs']).toEqual(['scaffold'])
     expect(STAGE_DEPENDS_ON['prd-summary']).toEqual(['scaffold'])
@@ -89,10 +86,8 @@ describe('STAGE_DEPENDS_ON — the real dependency graph', () => {
 })
 
 describe('FLIGHT_EXECUTION_ORDER', () => {
-  it('publishes the Report before independent Parallel setup and Robustness Lab', () => {
+  it('publishes the Report before independent Parallel setup', () => {
     expect(FLIGHT_EXECUTION_ORDER.indexOf('evaluation-export'))
       .toBeLessThan(FLIGHT_EXECUTION_ORDER.indexOf('portify'))
-    expect(FLIGHT_EXECUTION_ORDER.indexOf('portify'))
-      .toBeLessThan(FLIGHT_EXECUTION_ORDER.indexOf('robustness'))
   })
 })

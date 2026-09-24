@@ -4,7 +4,6 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunDetail, RunIndexEntry } from '@/shared/api/types'
-import type { RobustnessJobIndexEntry } from '@shared/robustness/jobs'
 import type { PortifyIndexEntry } from '@/shared/api/client'
 import type { FeatureActivity } from './feature-activity'
 
@@ -24,7 +23,6 @@ const stores = {
   records: [] as DraftRecord[] | undefined,
   tasks: [] as EvaluationExportTask[],
   coverageJobs: null as CoverageJobIndexEntry[] | null,
-  robustnessJobs: null as RobustnessJobIndexEntry[] | null,
 }
 
 vi.mock('@/features/runs', async () => ({
@@ -42,11 +40,10 @@ vi.mock('@/features/wizard', async () => ({
   useWizardDrafts: () => ({ drafts: stores.drafts, records: stores.records }),
   isActiveWizardTask: (status: string) => status === 'generating',
 }))
-// The coverage-jobs and robustness-jobs reads ride useLiveResource
+// The coverage-jobs read rides useLiveResource
 // (WS-invalidated fetch) — the same un-unit-testable edge as the stores, so
-// they're stubbed the same way, served by topic. The stub RUNS the fetcher it
-// is handed (against a mocked API client), so the hook's wiring to each
-// all-jobs endpoint is asserted, not assumed.
+// it is stubbed the same way. The stub RUNS the fetcher it is handed
+// (against a mocked API client), so the endpoint wiring is asserted.
 const liveReads: Array<{ topic: string; key: string; cache?: string }> = []
 // Captured per topic so the poll predicate can be driven directly: the real
 // hook only calls it once a fetch has resolved, which the stub replaces.
@@ -57,16 +54,15 @@ vi.mock('@/shared/state/use-live-resource', () => ({
     liveReads.push({ topic, key, ...(opts?.cache ? { cache: opts.cache } : {}) })
     if (opts?.pollWhile) pollPredicates.set(topic, opts.pollWhile)
     void fetcher()
-    return { value: topic === 'robustness' ? stores.robustnessJobs : stores.coverageJobs }
+    return { value: stores.coverageJobs }
   },
 }))
 vi.mock('@/shared/api/client', () => ({
   listAllCoverageJobs: vi.fn(async () => []),
-  listAllRobustnessJobs: vi.fn(async () => []),
 }))
 
 const { useFeatureActivity } = await import('./feature-activity')
-const { listAllCoverageJobs, listAllRobustnessJobs } = await import('@/shared/api/client')
+const { listAllCoverageJobs } = await import('@/shared/api/client')
 
 let container: HTMLDivElement
 let root: Root
@@ -85,7 +81,6 @@ beforeEach(() => {
   stores.records = []
   stores.tasks = []
   stores.coverageJobs = null
-  stores.robustnessJobs = null
 })
 
 afterEach(() => {
@@ -106,21 +101,18 @@ describe('useFeatureActivity', () => {
     expect(seen.size).toBe(0)
   })
 
-  it('wires the coverage-jobs and robustness-jobs reads to their all-jobs endpoints, each on its own topic', () => {
+  it('wires the coverage-jobs read to its all-jobs endpoint', () => {
     liveReads.length = 0
     render()
     expect(liveReads).toEqual([
       { topic: 'coverage', key: 'all-jobs', cache: 'coverage-jobs' },
-      { topic: 'robustness', key: 'all-jobs', cache: 'robustness-jobs' },
     ])
     expect(listAllCoverageJobs).toHaveBeenCalled()
-    expect(listAllRobustnessJobs).toHaveBeenCalled()
   })
 
   // A coverage job that finishes server-side without its `coverage-changed`
   // event reaching this client would otherwise stay "running" in the pill
-  // forever, so the coverage read polls until nothing is in flight. Robustness
-  // has no predicate: it relies on its socket topic alone.
+  // forever, so the coverage read polls until nothing is in flight.
   it('polls the coverage jobs while any is unfinished, and stops once they all settle', () => {
     pollPredicates.clear()
     render()
@@ -130,7 +122,6 @@ describe('useFeatureActivity', () => {
     expect(pollWhile!([{ status: 'done' }, { status: 'running' }])).toBe(true)
     expect(pollWhile!([{ status: 'done' }, { status: 'error' }])).toBe(false)
     expect(pollWhile!([])).toBe(false)
-    expect(pollPredicates.has('robustness')).toBe(false)
   })
 
   it('composes all the stores into one verb per feature', () => {
@@ -139,7 +130,6 @@ describe('useFeatureActivity', () => {
     stores.drafts = [{ draftId: 'd-c', featureName: 'c', status: 'generating' } as DraftRecord]
     stores.tasks = [{ taskId: 't-d', runId: 'r-d', feature: 'd', status: 'running' } as EvaluationExportTask]
     stores.coverageJobs = [{ jobId: 'j-e', feature: 'e', kind: 'coverage', status: 'running' } as CoverageJobIndexEntry]
-    stores.robustnessJobs = [{ jobId: 'rj-f', feature: 'f', runId: 'r-f', status: 'running' } as RobustnessJobIndexEntry]
 
     render()
     expect(seen.get('a')).toEqual({ kind: 'running', runId: 'r-a', external: false })
@@ -147,7 +137,6 @@ describe('useFeatureActivity', () => {
     expect(seen.get('c')).toEqual({ kind: 'authoring', draftId: 'd-c', external: false })
     expect(seen.get('d')).toEqual({ kind: 'exporting', taskId: 't-d', runId: 'r-d', external: false })
     expect(seen.get('e')).toEqual({ kind: 'mapping', jobId: 'j-e', external: false })
-    expect(seen.get('f')).toEqual({ kind: 'perturbing', jobId: 'rj-f', runId: 'r-f', external: false })
   })
 
   it('reads a run detail\'s external heal mode through the runDetails store', () => {

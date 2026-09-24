@@ -39,9 +39,6 @@ import type {
 import type { VerificationRunMetadata, ExecutionType as ExecutionType } from '../../../../../../../shared/verification'
 import type { PlaywrightSpawner } from './run-spawn'
 import type { RunModelPlan } from './run-model-plan'
-import type { PlaywrightRerunSelection } from './rerun-targets'
-import type { RunPerturbation } from './perturbation/client-ports'
-import type { ProxyShim } from './perturbation/proxy-shim'
 import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
 import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 
@@ -66,9 +63,6 @@ export interface RunContext {
    *  unit tests and the CLI shim, which have no project config to consult. */
   readonly projectRoot?: string
   readonly portMap?: Map<string, number>
-  /** Set when the run boots under a robustness envelope: Playwright and the
-   *  envsets get `perturbation.shimPorts`; services keep `portMap`. */
-  readonly perturbation?: RunPerturbation
   readonly worktreeHandles: WorktreeHandle[]
   readonly repoPathOverrides: Record<string, string>
   /** Track a loaded config disappearing during repair; programmatic features
@@ -110,7 +104,6 @@ export interface RunContext {
   readonly executionType: ExecutionType
   readonly verification?: VerificationRunMetadata
   readonly playwrightEnv: Record<string, string>
-  readonly initialSelection?: PlaywrightRerunSelection
   readonly testReviewApproval?: RunTestReviewApproval
 
   // ── run state ─────────────────────────────────────────────────────────────
@@ -159,9 +152,6 @@ export interface RunContext {
    *  the start of every service boot/restart attempt so a stale failure from a
    *  prior cycle doesn't survive a successful reboot. */
   bootFailure: RunBootFailure | undefined
-  /** The shims fronting each slot while a perturbed run is live; empty for an
-   *  unperturbed run and after teardown. */
-  perturbationShims: ProxyShim[]
 
   // ── heal-agent state ──────────────────────────────────────────────────────
   /** Tracked while a heal-agent pty is in flight so cancelHeal() can SIGTERM it.
@@ -218,7 +208,6 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     logsRoot,
     ...(opts.projectRoot === undefined ? {} : { projectRoot: opts.projectRoot }),
     portMap: opts.portMap,
-    perturbation: opts.perturbation,
     worktreeHandles,
     repoPathOverrides,
     dependencyConfigPath: ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
@@ -265,7 +254,6 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     executionType: opts.executionType ?? 'run',
     verification: opts.verification,
     playwrightEnv: opts.playwrightEnv ?? {},
-    initialSelection: opts.initialSelection,
     testReviewApproval: opts.testReviewApproval,
 
     // A restart builds a fresh context over the SAME run dir without calling
@@ -290,7 +278,6 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     playwrightPty: null,
     playwrightExitWaiter: null,
     bootFailure: undefined,
-    perturbationShims: [],
 
     healAgentPty: null,
     healAgentMcpOutputDir: undefined,

@@ -881,7 +881,7 @@ body {
 
 /* Title — names one card. Same metrics as `.cl-frame-heading`, which is the
    older twin that also bakes in `--text-primary`; a card titled in a status
-   hue (a failed stage, a robustness finding) needs the colour left free, so
+   hue (a failed stage) needs the colour left free, so
    the flight panes spell every title with this step plus a colour utility. */
 .cl-type-title {
   font-family: var(--font-sans);

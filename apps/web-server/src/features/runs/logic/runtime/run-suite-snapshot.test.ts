@@ -169,18 +169,6 @@ describe('snapshotSuite', () => {
     }])
   })
 
-  // The robustness envelope (D15) lives in the suite folder precisely so it
-  // rides in this copy: a mid-run edit to it is then a spec edit under D9.
-  it('carries robustness/envelope.json into the copy', () => {
-    const { ctx } = ctxFor()
-    write(ctx.feature.featureDir, 'e2e/a.spec.ts', SPEC_A)
-    write(ctx.feature.featureDir, 'robustness/envelope.json', '{"format":"canary-lab/robustness-envelope@1"}\n')
-
-    snapshotSuite(ctx)
-
-    expect(fs.readFileSync(path.join(ctx.suiteDir, 'robustness', 'envelope.json'), 'utf8')).toBe('{"format":"canary-lab/robustness-envelope@1"}\n')
-  })
-
   it('leaves envsets, materialized env targets, backups, node_modules and .git out of the copy', () => {
     // Envsets carry secrets and are read from the live dir by the env switcher;
     // its target and backup are runtime state, node_modules resolves by walking
@@ -843,24 +831,6 @@ describe('restoreSpecEdits', () => {
     expect(last.integrity).toMatchObject({ hints: [] })
     // No rerun: the verdict already rests on the copy the live suite now matches.
     expect(ctx.signalGate.consume()).toBeNull()
-  })
-
-  it('puts a mid-run envelope edit back from the copy and reports no hint for it', () => {
-    // D15: the envelope is suite content under the boundary. Restoring it is the
-    // same lever as restoring a spec; the differential has nothing to say about it.
-    const { ctx, sink } = ctxFor()
-    const live = ctx.feature.featureDir
-    write(live, 'e2e/a.spec.ts', SPEC_A)
-    write(live, 'robustness/envelope.json', '{"format":"canary-lab/robustness-envelope@1","latency":{"ms":300}}')
-    snapshotSuite(ctx)
-    write(live, 'robustness/envelope.json', '{"format":"canary-lab/robustness-envelope@1","latency":{"ms":5}}')
-    recordSpecEdits(ctx)
-    const recorded = sink.patches.at(-1) as { specEdits: RunManifest['specEdits']; integrity: RunManifest['integrity'] }
-    expect(recorded.specEdits?.pending).toEqual([{ file: 'robustness/envelope.json', change: 'modified', affectedTests: [] }])
-    expect(recorded.integrity?.hints).toEqual([])
-
-    expect(restoreSpecEdits(ctx)).toEqual({ ok: true, restored: ['robustness/envelope.json'] })
-    expect(fs.readFileSync(path.join(live, 'robustness', 'envelope.json'), 'utf8')).toBe('{"format":"canary-lab/robustness-envelope@1","latency":{"ms":300}}')
   })
 
   it('fails closed, re-measures what did change, and warns when a file cannot be rewritten', () => {

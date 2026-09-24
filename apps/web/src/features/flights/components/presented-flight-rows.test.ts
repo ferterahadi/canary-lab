@@ -18,8 +18,7 @@ function manifest(): FlightManifest {
       status: key === 'run' || key === 'scaffold' || key === 'env-capture'
         || key === 'docs' || key === 'prd-summary' || key === 'specs-coverage' || key === 'portify'
         ? 'skipped' as const
-        : key === 'evaluation-export' ? 'failed' as const
-          : key === 'robustness' ? 'pending' as const : 'done' as const,
+        : key === 'evaluation-export' ? 'failed' as const : 'done' as const,
       ...(key === 'scaffold' || key === 'env-capture' || key === 'docs'
         || key === 'prd-summary' || key === 'specs-coverage' || key === 'portify'
         ? { evidence: { captured: 1 } } : {}),
@@ -47,7 +46,7 @@ describe('presented Flight rows', () => {
     expect(picker.map(({ key, status }) => [key, status])).toEqual([
       ['scout', 'done'], ['scaffold', 'done'], ['docs', 'running'],
       ['specs-coverage', 'failed'], ['run', 'running'], ['evaluation-export', 'failed'],
-      ['portify', 'waiting-for-approval'], ['robustness', 'pending'],
+      ['portify', 'waiting-for-approval'],
     ])
     expect(flight.stages.find((stage) => stage.key === 'specs-coverage')?.status).toBe('skipped')
   })

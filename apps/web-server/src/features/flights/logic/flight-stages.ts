@@ -289,8 +289,7 @@ export function stageSidecarDirs(key: FlightStageKey): string[] {
 
 /** Which stage records and artifacts an explicit re-entry invalidates.
  * Parallel setup reads the suite and envset, but Test run and Report do not
- * read its output. Robustness reads the green run and the current port setup;
- * the Report is an immutable snapshot and can be refreshed separately. */
+ * read its output. The Report is an immutable snapshot. */
 export function stagesResetByEntry(entry: FlightStageKey): readonly FlightStageKey[] {
   return flightStagesResetByEntry(entry)
 }
@@ -414,14 +413,17 @@ export function bankStageActivity(stage: FlightStage, nowIso: string): FlightSta
 
 export function firstOpenStageIndex(m: FlightManifest): number {
   const settled = (stage: FlightStage): boolean => stage.status === 'done' || stage.status === 'skipped'
+  // Historical manifests can still carry the retired Lab stage. Preserve its
+  // record, but never select it now that its adapter has been removed.
+  const retired = (stage: FlightStage): boolean => String(stage.key) === 'robustness'
   // A live/checkpointed stage owns the next call even when its key is later in
   // normal priority. Otherwise a checkpoint response could be delivered to
   // Test run while an older Flight is still parked in Parallel setup.
-  const foreground = m.stages.findIndex((stage) => stage.key === m.currentStage
+  const foreground = m.stages.findIndex((stage) => !retired(stage) && stage.key === m.currentStage
     && (stage.status === 'running' || stage.status === 'waiting-for-approval'))
   if (foreground >= 0) return foreground
   const active = m.stages.findIndex((stage) =>
-    stage.status === 'running' || stage.status === 'waiting-for-approval',
+    !retired(stage) && (stage.status === 'running' || stage.status === 'waiting-for-approval'),
   )
   if (active >= 0) return active
 
@@ -429,7 +431,7 @@ export function firstOpenStageIndex(m: FlightManifest): number {
   // what preserves “From Parallel setup” while fresh linear progression
   // takes the faster Test Run-first path below.
   const current = m.currentStage
-    ? m.stages.findIndex((stage) => stage.key === m.currentStage && !settled(stage))
+    ? m.stages.findIndex((stage) => !retired(stage) && stage.key === m.currentStage && !settled(stage))
     : -1
   if (current >= 0) return current
 

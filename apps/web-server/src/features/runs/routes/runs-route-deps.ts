@@ -2,10 +2,8 @@
 import type { RunQueueDiagnostics } from '../../../../../../shared/run-queue'
 import fs from 'fs'
 import path from 'path'
-import type { RobustnessEnvelope } from '../../../../../../shared/robustness/types'
 import type { RunStore, RestartHealResult, RestartRunResult, StartRunOutcome } from '../logic/run-store'
 import type { ExecutionType } from '../../../../../../shared/verification'
-import type { PlaywrightRerunSelection } from '../logic/runtime/rerun-targets'
 import type { ExternalHealBroker } from '../logic/heal/external-heal-broker'
 import { type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { ExternalHealAgentRequest } from './runs-route-support'
@@ -52,11 +50,6 @@ export interface RunsRouteDeps {
      *  normalizes it against the chosen agent's vocabulary before resolving
      *  override → workspace config → agent default. */
     models?: unknown,
-    /** Already validated by the route; the factory allocates the shim ports. */
-    perturbation?: RobustnessEnvelope,
-    /** A Robustness Lab cell's one spec file (`executionType: 'robustness'`
-     *  only): the first Playwright pass runs this selection, and nothing heals. */
-    cellSelection?: PlaywrightRerunSelection,
     options?: StartRunOptions,
   ): Promise<StartRunOutcome>
   /** Cancel a run still waiting in the admission queue (no orchestrator yet).

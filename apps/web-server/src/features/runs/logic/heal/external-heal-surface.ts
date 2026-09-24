@@ -10,8 +10,6 @@ import type { HealSignalKind, RunBootFailure } from '../../../../../../../shared
 import type { StrengthVerdict } from '../../../../../../../shared/verification-strength/types'
 import type { PendingSpecEdit } from '../dirty-specs/detect'
 import type { RunManifest } from '../runtime/manifest'
-import { reproLine } from '../../../../../../../shared/robustness/shrink'
-import type { RobustnessEnvelope } from '../../../../../../../shared/robustness/types'
 import { INTEGRITY_HINT_DISCLOSURE, type IntegrityHint } from '../runtime/run-integrity-hints'
 import { CompactRunCounts, NormalizedRunCounts, compactCounts, normalizeRunCounts } from './external-heal-counts'
 import { dependencyIncompatibilityReason, type DependencyIncompatibilityCause } from '../../../../../../../shared/dependency-provenance'
@@ -37,13 +35,6 @@ export interface ExternalHealFailedTest {
   /** Absolute path to `failed/<failureId>/playwright-mcp/`, when non-empty. */
   playwrightMcpDir?: string
   artifacts: Array<{ name: string; kind: string; url: string }>
-}
-
-/** The environment a perturbed run booted under (D16 "Send to repair"): the
- *  envelope itself for a machine, and the one-line repro a reader acts on. */
-export interface RunPerturbationContext {
-  envelope: RobustnessEnvelope
-  repro: string
 }
 
 export interface DependencyBlocker {
@@ -84,11 +75,6 @@ export interface ExternalHealContext {
   status: string
   healCycles: number
   repoBranches: RunDetail['manifest']['repoBranches']
-  // Present only when the run booted under a robustness envelope. The failing
-  // test then failed because of latency / a duplicated write / a slot restart
-  // that production also does — the defect is the app's tolerance, and the
-  // repair rule holds as written: fix the app, never the test.
-  perturbation?: RunPerturbationContext
   // Repo name → the per-run git worktree this run actually booted that repo from,
   // present whenever the run is worktree-isolated (every portified feature, and
   // any run the user isolated after a collision). REQUIRED reading before an edit:
@@ -190,8 +176,6 @@ export interface ExternalRunSnapshot {
   worktrees?: RunDetail['manifest']['worktrees']
   dependencyProvenance?: RunDetail['manifest']['dependencyProvenance']
   dependencyBlockers?: DependencyBlocker[]
-  /** See ExternalHealContext.perturbation. */
-  perturbation?: RunPerturbationContext
   lifecycle: RunDetail['manifest']['lifecycle'] | null
   externalHealSession: RunDetail['manifest']['externalHealSession'] | null
   summary: RunDetail['summary'] | null
@@ -340,29 +324,6 @@ function withWorktreeRule(
   return [steps[0]!, worktreeEditRule(worktrees), ...steps.slice(1)]
 }
 
-export function perturbationContext(envelope: RobustnessEnvelope): RunPerturbationContext {
-  return { envelope, repro: reproLine(envelope) }
-}
-
-/** The one sentence a repair agent needs about a perturbed run, shared by the
- *  external heal procedure and the auto-heal prompt so both agents read the
- *  same rule. */
-export function perturbationRule(perturbation: RunPerturbationContext): string {
-  return `THIS RUN IS PERTURBED: the services ran behind a proxy applying ${perturbation.repro}. `
-    + 'That is what production does too (slow links, retried writes, restarts), so a test that fails only under it has found an app defect: '
-    + 'make the app tolerate the perturbation (idempotency keys, timeouts, durable state) — never relax the test or the envelope. '
-    + 'A signal_run replays the SAME perturbation.'
-}
-
-// Directly behind the repair rule and the worktree rule (when present): it
-// changes what "the root cause" means for every edit that follows, so it has
-// to be read before any of them.
-function withPerturbationRule(steps: string[], perturbation: RunPerturbationContext | undefined): string[] {
-  if (!perturbation) return steps
-  const afterWorktree = steps[1]?.includes('EDIT THE WORKTREE') ? 2 : 1
-  return [...steps.slice(0, afterWorktree), perturbationRule(perturbation), ...steps.slice(afterWorktree)]
-}
-
 export function buildExternalHealContext(input: BuildExternalHealContextInput): ExternalHealContext {
   const snapshot = buildExternalRunSnapshot(input)
   const runDir = runDirFor(input.logsDir, snapshot.runId)
@@ -399,7 +360,6 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     ...(snapshot.dependencyBlockers?.length
       ? { dependencyBlockers: snapshot.dependencyBlockers, dependencyProvenance: snapshot.dependencyProvenance?.filter((item) => item.verdict === 'incompatible') }
       : {}),
-    ...(snapshot.perturbation ? { perturbation: snapshot.perturbation } : {}),
     lifecycle: snapshot.lifecycle,
     externalHealSession: snapshot.externalHealSession,
     counts: compactCounts(snapshot.counts),
@@ -415,15 +375,12 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     // The where-to-edit rule rides directly behind the repair rule in both
     // procedures: it governs every edit that follows, so an agent that stops
     // reading early has still seen it.
-    nextSteps: withPerturbationRule(
-      withWorktreeRule(
-        [
-          ...(snapshot.dependencyBlockers?.length ? [DEPENDENCY_RECOVERY_GUIDANCE] : []),
-          ...(snapshot.bootFailure ? bootFailureNextSteps(snapshot.bootFailure) : EXTERNAL_HEAL_NEXT_STEPS),
-        ],
-        snapshot.worktrees,
-      ),
-      snapshot.perturbation,
+    nextSteps: withWorktreeRule(
+      [
+        ...(snapshot.dependencyBlockers?.length ? [DEPENDENCY_RECOVERY_GUIDANCE] : []),
+        ...(snapshot.bootFailure ? bootFailureNextSteps(snapshot.bootFailure) : EXTERNAL_HEAL_NEXT_STEPS),
+      ],
+      snapshot.worktrees,
     ),
     ...(escalation ? { escalation } : {}),
   }
@@ -473,7 +430,6 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
       : {}),
     ...(detail.manifest.dependencyProvenance ? { dependencyProvenance: detail.manifest.dependencyProvenance } : {}),
     ...(dependencyBlockers.length > 0 ? { dependencyBlockers } : {}),
-    ...(detail.manifest.perturbation ? { perturbation: perturbationContext(detail.manifest.perturbation.envelope) } : {}),
     lifecycle: detail.manifest.lifecycle ?? null,
     externalHealSession: detail.manifest.externalHealSession ?? null,
     summary: summary ?? null,

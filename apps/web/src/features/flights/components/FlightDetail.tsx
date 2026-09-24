@@ -326,7 +326,7 @@ export function FlightDetail({
 
   // Default the selected stage to the one that needs eyes: waiting → running →
   // first failed → the row that resumes next → last done. The user's explicit
-  // pick wins. Once Report is ready, ordinary Parallel setup and Robustness Lab
+  // pick wins. Once Report is ready, ordinary Parallel setup
   // progress stays in the rail while the main panel keeps the deliverable in
   // front. A checkpoint or failure still
   // takes focus because it needs the user. (R78: a paused flight whose current
@@ -345,7 +345,7 @@ export function FlightDetail({
       railRows.find((s) => s.status === 'waiting-for-approval')
       ?? railRows.find((s) => s.key === coveragePhase)
       ?? railRows.find((s) => s.status === 'running'
-        && !(reportForeground && (s.key === 'portify' || s.key === 'robustness')))
+        && !(reportForeground && s.key === 'portify'))
       ?? railRows.find((s) => s.status === 'failed')
       ?? railRows.find((s) => s.key === coverageLanding)
       ?? reportForeground
@@ -354,7 +354,9 @@ export function FlightDetail({
       ?? [...railRows].reverse().find((s) => s.status === 'done')
     return pick?.key ?? null
   }, [railRows, coveragePhase, coverageLanding])
-  const stageKey = selectedStage ?? autoStage
+  const stageKey = selectedStage && railRows.some((stage) => stage.key === selectedStage)
+    ? selectedStage
+    : autoStage
   const row = railRows.find((s) => s.key === stageKey) ?? null
   const stage = flight?.stages.find((s) => s.key === stageKey) ?? null
   // The pair-merged rows (run+heal, scaffold+env-capture, docs+prd-summary)

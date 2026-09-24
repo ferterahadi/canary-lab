@@ -8,7 +8,6 @@ const completeEvidence = (): FlightWorkspaceEvidence => ({
   'prd-summary': { requirementCount: 6 },
   'specs-coverage': { mappingState: 'fresh', coveragePct: 100, testsWritten: 8 },
   run: { runId: 'run-green', status: 'passed' },
-  robustness: { cellsRun: 4 },
   'evaluation-export': { taskId: 'export-1' },
   portify: { declaredInjectable: 2 },
 })
@@ -52,10 +51,9 @@ describe('recommendFlightContinuation', () => {
 
   it('selects the first missing downstream result in execution order', () => {
     const evidence = completeEvidence()
-    delete evidence.robustness
     delete evidence['evaluation-export']
 
-    expect(recommendFlightContinuation(evidence, 100)?.fromStage).toBe('robustness')
+    expect(recommendFlightContinuation(evidence, 100)?.fromStage).toBe('evaluation-export')
   })
 
   it('explains stale mapping separately from the displayed percentage', () => {

@@ -443,15 +443,11 @@ function CompositionGroup({ heading, count, rows, testId, awaiting }: {
  *  `probed` = the task was found by the read-time workspace probe (newest
  *  completed export for the feature, whatever produced it), so the kicker says
  *  "latest" rather than claiming the flight built it. */
-export function EvaluationDeliverablePanel({ task, awaiting, probed, refreshAvailable, onRefresh, refreshDisabledReason }: {
+export function EvaluationDeliverablePanel({ task, awaiting, probed }: {
   task: EvaluationExportTask | null
   awaiting?: AwaitingState
   probed?: boolean
-  refreshAvailable?: boolean
-  onRefresh?: () => Promise<void>
-  refreshDisabledReason?: string
 }) {
-  const [refreshing, setRefreshing] = useState(false)
   const kicker = probed ? 'Latest evaluation report for this suite' : "This flight's evaluation report"
   if (!task) {
     return awaiting ? <StageColumn><SkeletonPanel kicker={kicker} awaiting={awaiting} testId="evaluation-deliverable-skeleton" rows={2} /></StageColumn> : null
@@ -488,25 +484,6 @@ export function EvaluationDeliverablePanel({ task, awaiting, probed, refreshAvai
           </div>
           <ArchiveDownloadButton task={task} label="Download" />
         </div>
-        {refreshAvailable && (
-          <div className="mt-3 flex items-center gap-3 border-t border-line pt-2.5 text-[11px] text-secondary">
-            <span className="min-w-0 flex-1">Robustness Lab finished after this report. Refresh it to include the new findings.</span>
-            <button
-              type="button"
-              data-testid="flight-refresh-report"
-              disabled={!onRefresh || refreshing}
-              title={refreshDisabledReason}
-              onClick={() => {
-                if (!onRefresh || refreshing) return
-                setRefreshing(true)
-                void onRefresh().finally(() => setRefreshing(false))
-              }}
-              className="cl-button shrink-0 px-2.5 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              {refreshing ? 'Starting…' : 'Refresh report'}
-            </button>
-          </div>
-        )}
       </PanelCard>
     </StageColumn>
   )

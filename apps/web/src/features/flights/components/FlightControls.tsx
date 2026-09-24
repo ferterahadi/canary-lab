@@ -288,13 +288,8 @@ export function RedoFlightDialog({
     ? REDO_STAGES.filter((stage) => flightStagesResetByEntry(fromStage)
       .some((key) => stageRowKey(key) === stage.key))
     : []
-  // The rows' ↻ marks and the footer count say what resets, and a row without a
-  // mark stays — which is everything the old per-step notes restated. What
-  // neither can say is advice: re-running the Lab leaves the report untouched,
-  // so its new findings only reach the report once it is refreshed.
-  const tip = fromStage === 'robustness'
-    ? 'Refresh the report after new Lab findings settle to include them.'
-    : null
+  // The rows' ↻ marks and the footer count show which steps reset. Rows
+  // without a mark keep their work.
 
   return (
     <Modal
@@ -450,7 +445,6 @@ export function RedoFlightDialog({
             )
           })}
         </div>
-        {tip && <p data-testid="flight-redo-tip" className="cl-type-meta -mt-2 px-3.5 text-secondary">{tip}</p>}
         {/* Sans helper line under the field, as Project Settings writes one — a
             mono aside inside the label switched register mid-sentence. */}
         <div className="flex flex-col gap-1">

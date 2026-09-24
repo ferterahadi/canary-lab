@@ -547,24 +547,20 @@ describe('the behavior certificate through the export tools', () => {
     const paths = evaluationExportTaskPaths(logsDir, taskId)!
 
     // The digest is what an agent relays: the sentence, the counts, the suite
-    // check, what is not proven, how to re-check — never the whole predicate list.
+    // check and what is not proven — never the whole predicate list.
     expect(submitted).toMatchObject({
       certificatePath: paths.certificatePath,
-      certificateInsideArchive: 'certificate.json',
-      checkerInsideArchive: 'verify-certificate.mjs',
       certificate: {
         format: 'canary-lab/behavior-certificate@2',
         counts: { declared: 1, passed: 1, failed: 0, skipped: 0, interrupted: 0, notRun: 0 },
         suite: { source: 'none', runStartCheck: 'unverifiable' },
         pendingSpecEdits: 'unknown',
         hints: 0,
-        robustness: 'none',
       },
     })
-    const digest = submitted.certificate as { statement: string; notProven: string[]; verifyOffline: string; tests?: unknown }
+    const digest = submitted.certificate as { statement: string; notProven: string[]; tests?: unknown }
     expect(digest.statement).toContain('ran 1 declared test for run run-1')
     expect(digest.notProven[0]).toMatch(/^The absence of weakening/)
-    expect(digest.verifyOffline).toContain('node verify-certificate.mjs certificate.json')
     expect(digest).not.toHaveProperty('tests')
     expect(String(submitted.nextSteps)).toContain('not the absence of weakening')
 
@@ -644,17 +640,8 @@ describe('the behavior certificate through the export tools', () => {
       claims: { total: 5, allPassed: 2, someFailed: 1, notRun: 1, noTests: 1 },
       pendingSpecEdits: 2,
       hints: 1,
-      robustness: 'none',
       notProven: ['n1'],
-      verifyOffline: expect.stringContaining('node verify-certificate.mjs certificate.json --suite "/logs/runs/r/suite"'),
     })
-    expect(digest.verifyOffline).toContain('/logs/evaluation-exports/eval-1/certificate.json')
-
-    const perturbed = certificateDigest({
-      ...certificate,
-      robustness: { jobId: 'rj-1', status: 'done', envelope: {}, cells: { planned: 4, judged: 3, notRun: 1 }, findings: [{}, {}], unconfirmed: [{}], skipped: [{}] },
-    } as unknown as BehaviorCertificate, '/c.json')
-    expect(perturbed.robustness).toEqual({ jobId: 'rj-1', status: 'done', cells: { planned: 4, judged: 3, notRun: 1 }, findings: 2, unconfirmed: 1 })
   })
 })
 

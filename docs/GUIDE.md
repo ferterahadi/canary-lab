@@ -94,26 +94,9 @@ When the suite has a PRD summary, the report separates two questions:
 
 Canary Lab never borrows a result from another run for an export.
 
-The archive also carries a **behavior certificate** (`certificate.json`) with a
-zero-dependency checker beside it (`verify-certificate.mjs`). The certificate
-states which tests ran from the test copy recorded at run start (and its
-digest), what each test asserted and how strongly, how the run ended, which live
-test-file changes the run did not execute, and any advisory hints. When the
-Robustness lab has run against that run, the certificate also carries its
-findings: which tests passed green and failed under latency, a duplicated write
-or a restart, the smallest envelope that still reproduces each, and every cell
-the matrix never judged. It says in its own text what it does not prove: the
-absence of weakening, the completeness of the requirement set, anything the
-listed assertions did not observe, and — when no matrix ran, or cells were not
-run — behaviour under perturbation. A third party re-checks it without Canary
-Lab (the checker reads certificate formats `@1` and `@2`):
-
-```bash
-node verify-certificate.mjs certificate.json --suite <path-to-the-suite-copy>
-```
-
-The checker re-derives every spec hash, the suite digest and every assertion's
-line from files on disk and exits non-zero when any of them differ.
+Canary stores a behavior certificate separately for internal evidence and MCP
+consumers. The downloadable archive contains the HTML report and captured media;
+it does not contain `certificate.json` or the offline checker.
 
 The Export menu offers two wording modes:
 
@@ -331,16 +314,14 @@ repositories through one server-owned pipeline:
 
 ```text
 similarity → scout → scaffold → env capture → docs → PRD summary
-→ Tests & coverage → Test run → Auto-repair → Report → Parallel setup → Robustness Lab
+→ Tests & coverage → Test run → Auto-repair → Report → Parallel setup
 ```
 
 The serial Test run and downloadable Report finish before the independent work,
 so a large app produces its evaluation without first waiting for port-injection
-work or the Robustness Lab. Surface the Report as soon as it exists. Parallel
-setup runs next, then the Lab uses its port slots to perturb the passed tests.
-Both can be repeated without deleting the completed Report. A Report built
-before Lab findings can be refreshed to include them. The Flight page shows
-their live progress.
+work. Surface the Report as soon as it exists. Parallel
+setup runs next and can be repeated without deleting the completed Report.
+The Flight page shows its live progress.
 
 The server owns stage priority, persistence, and every verdict. Judgment work can
 come from two producers:
@@ -353,7 +334,7 @@ come from two producers:
   export. Canary Lab still re-reads artifacts and computes the verdict.
 
 Mechanical work—scaffold writes, env application, Playwright execution, and raw
-export—plus Parallel setup and Robustness Lab stay in Canary Lab in both modes. Once
+export—plus Parallel setup stays in Canary Lab in both modes. Once
 `links.evaluationZip` appears, an external client reports that path and ends its
 turn; it does not keep polling while the independent work runs. An external client can
 return any earlier handoff to the internal agent with `choice: "run-internally"`.
@@ -410,9 +391,8 @@ One suite has one Flight record.
   artifacts.
 - `from_stage` re-enters one stage after checking prerequisites and resets the
   artifacts that depend on it. Repeating Tests & coverage or Test run keeps
-  Parallel setup. Repeating Parallel setup resets it and Robustness Lab while
-  preserving the run and Report. Repeating the Lab preserves the Report; refresh
-  the export if its new findings should be included. Completed reports stay
+  Parallel setup. Repeating Parallel setup resets only that stage while
+  preserving the run and Report. Completed reports stay
   downloadable in history.
 - `redo: true` restarts from stage one and deletes all stage artifacts. A full
   redo may replace the stored repos and description; omit them to reuse the old

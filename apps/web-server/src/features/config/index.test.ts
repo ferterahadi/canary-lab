@@ -9,7 +9,6 @@ import { DirtySpecStore } from '../runs/logic/dirty-specs/store'
 import { BenchmarkRunStore } from '../benchmark/logic/runtime/store'
 import { PortifyRunStore } from '../portify/logic/runtime/store'
 import { CoverageJobRunStore } from '../coverage/logic/coverage/jobs/store'
-import { RobustnessJobRunStore } from '../runs/logic/robustness/store'
 import { FlightRunStore } from '../flights/logic/store'
 import type { FlightManifest, FlightStatus } from '../../../../../shared/flights/types'
 import type { CoverageJobManifest } from '../coverage/logic/coverage/jobs/types'
@@ -38,7 +37,6 @@ let runStore: RunStore
 let benchmarkStore: BenchmarkRunStore
 let portifyStore: PortifyRunStore
 let coverageJobStore: CoverageJobRunStore
-let robustnessJobStore: RobustnessJobRunStore
 let flightStore: FlightRunStore
 let dirtySpecStore: DirtySpecStore
 let gettingStarted: unknown
@@ -69,7 +67,6 @@ beforeEach(() => {
   benchmarkStore = new BenchmarkRunStore(logsDir)
   portifyStore = new PortifyRunStore(logsDir)
   coverageJobStore = new CoverageJobRunStore(logsDir)
-  robustnessJobStore = new RobustnessJobRunStore(logsDir)
   flightStore = new FlightRunStore(logsDir)
   dirtySpecStore = new DirtySpecStore(logsDir)
   // Only `.read()` is ever called on it, by the onboarding route.
@@ -92,7 +89,6 @@ function makeCtx(): ServerContext {
     benchmarkStore,
     portifyStore,
     coverageJobStore,
-    robustnessJobStore,
     flightStore,
     dirtySpecStore,
     workspaceEvents,

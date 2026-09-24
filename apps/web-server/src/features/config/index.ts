@@ -70,7 +70,6 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     benchmarkStore,
     portifyStore,
     coverageJobStore,
-    robustnessJobStore,
     flightStore,
     dirtySpecStore,
     workspaceEvents,
@@ -111,7 +110,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
       blockedBy: featureRenameBlockedBy,
       apply: (from, to) => renameFeatureRecords(from, to, {
         logsDir,
-        stores: [flightStore, coverageJobStore, robustnessJobStore, portifyStore, benchmarkStore, dirtySpecStore, sharedAgentJobStore(logsDir), discoveryRepairStore(logsDir), runStartRequestStore(logsDir)],
+        stores: [flightStore, coverageJobStore, portifyStore, benchmarkStore, dirtySpecStore, sharedAgentJobStore(logsDir), discoveryRepairStore(logsDir), runStartRequestStore(logsDir)],
         activeWork: featureRenameBlockedBy,
       }).moved,
     },

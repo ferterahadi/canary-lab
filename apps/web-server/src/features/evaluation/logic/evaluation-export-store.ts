@@ -28,8 +28,7 @@ export interface EvaluationExportTaskPaths {
   taskJson: string
   logPath: string
   zipPath: string
-  /** The behavior certificate, also bundled inside the zip; kept beside it so
-   *  the MCP tools can hand it out without unpacking the archive. */
+  /** Internal behavior certificate sidecar for the MCP export tools. */
   certificatePath: string
 }
 
@@ -206,8 +205,8 @@ export function writeEvaluationExportZip(logsDir: string, taskId: string, zip: B
   fs.writeFileSync(p.zipPath, zip)
 }
 
-/** Persist what the archive builder produced: the zip and, beside it, the
- *  behavior certificate the zip also carries. One writer for the UI route, the
+/** Persist what the archive builder produced: the report zip and, beside it,
+ *  the internal behavior certificate. One writer for the UI route, the
  *  MCP submit and the flight hand-off, so no completion path can store an
  *  archive without its certificate. */
 export function writeEvaluationExportBuild(

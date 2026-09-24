@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import {
   readManifest,
+  hasRetiredPerturbation,
   readRunsIndex,
   suiteDirForReading,
   updateManifest,
@@ -33,6 +34,11 @@ function makeManifest(over: Partial<RunManifest> = {}): RunManifest {
 }
 
 describe('writeManifest / readManifest', () => {
+  it('identifies historical faulted runs so they cannot restart without their runtime', () => {
+    expect(hasRetiredPerturbation(makeManifest())).toBe(false)
+    expect(hasRetiredPerturbation({ ...makeManifest(), perturbation: { envelope: {} } } as unknown as RunManifest)).toBe(true)
+  })
+
   it('round-trips through atomic write', () => {
     const file = path.join(tmpDir, 'manifest.json')
     const m = makeManifest({ services: [{ name: 'api', safeName: 'api', command: 'go run', cwd: '/x', logPath: '/x/api.log' }] })

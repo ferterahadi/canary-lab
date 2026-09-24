@@ -2,9 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
-// What lets these services survive the two things a robustness envelope does
-// to them by default — a restart and a replayed write — without the suite
-// noticing either.
+// What lets these services survive a restart and a replayed write without
+// the suite noticing either.
 //
 // Durability: a service's whole state is one JSON file, rewritten synchronously
 // as each write is answered and read back on boot, so a SIGTERM between two

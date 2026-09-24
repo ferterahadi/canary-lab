@@ -113,11 +113,10 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
     const nextRepoPaths = mode === 'redo' && wantsNewRepos ? args.repoPaths : existing.repoPaths
     const nextDescription = mode === 'redo' && wantsNewIntent ? trimmedDescription : existing.description
     const entryLinks = checkStageEntry({ ...args, repoPaths: nextRepoPaths }, deps, existing)
-    const preservesReport = mode === 'jump'
-      && (args.fromStage === 'portify' || args.fromStage === 'robustness')
+    const preservesReport = mode === 'jump' && args.fromStage === 'portify'
     const preservesRun = mode === 'jump'
       && (preservesReport || args.fromStage === 'evaluation-export')
-    const { robustnessJobId: _discardedLab, ...reportLinks } = existing.links ?? {}
+    const reportLinks = existing.links ?? {}
     const nextOpts: FlightOptions = {
       ...args.opts,
       ...(mode === 'redo'
@@ -184,18 +183,13 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       error: undefined,
       runVerdict: preservesRun ? existing.runVerdict : undefined,
       // Re-entering independent work keeps the run and its completed report.
-      // The Lab job itself is discarded on a Lab or Parallel setup restart;
-      // re-entering Report keeps the settled Lab job so the new archive can
-      // include it. Earlier entries regenerate their downstream artifacts.
+      // Earlier entries regenerate their downstream artifacts.
       links:
         preservesReport
           ? { ...reportLinks, ...entryLinks }
           : mode === 'jump' && args.fromStage && STAGE_DEPENDS_ON[args.fromStage].includes('run')
           ? {
               ...(existing.links?.runId ? { runId: existing.links.runId } : entryLinks),
-              ...(args.fromStage === 'evaluation-export' && existing.links?.robustnessJobId
-                ? { robustnessJobId: existing.links.robustnessJobId }
-                : {}),
             }
           : undefined,
     }
@@ -433,7 +427,6 @@ export function reopenStages(
     FLIGHT_EXECUTION_ORDER.indexOf(key) < FLIGHT_EXECUTION_ORDER.indexOf(first) ? key : first)
   const reset = new Set(validKeys.flatMap((key) => stagesResetByEntry(key)))
   const preservedLinks = { ...current.links }
-  if (reset.has('robustness')) delete preservedLinks.robustnessJobId
   if (reset.has('evaluation-export')) {
     delete preservedLinks.evaluationTaskId
     delete preservedLinks.evaluationZip

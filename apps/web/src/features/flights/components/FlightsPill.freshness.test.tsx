@@ -70,7 +70,7 @@ describe('Flights picker coverage freshness', () => {
     vi.useFakeTimers()
     let current = stateSummary('current')
     listCoverageStates.mockImplementation(async () => [current])
-    const stages = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'robustness' ? 'pending' as const : 'done' as const }))
+    const stages = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'portify' ? 'pending' as const : 'done' as const }))
 
     await act(async () => {
       root.render(<InvalidationProvider>

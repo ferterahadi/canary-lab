@@ -14,8 +14,6 @@ import type { ExecutionType } from '../../../../../../shared/verification'
 import { ExternalHealAgentRequest, findActiveRunForFeature, parseExternalHealAgent } from './runs-route-support'
 import { GettingStartedBusyError, type GettingStartedOwner } from '../../config/logic/getting-started-session'
 import type { GettingStartedRunWorkflow } from '../../config/routes/onboarding'
-import { parseRobustnessEnvelope } from '../../../../../../shared/robustness/envelope'
-import type { RobustnessEnvelope } from '../../../../../../shared/robustness/types'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 import { restoreReviewedSuiteFiles } from '../logic/runtime/run-suite-snapshot'
 import { suiteReviewFiles } from '../logic/runtime/suite-review'
@@ -48,13 +46,15 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       models?: unknown
       gettingStartedSource?: GettingStartedOwner
       gettingStartedWorkflow?: GettingStartedRunWorkflow
-      /** A robustness envelope to boot under; validated below. */
-      perturbation?: unknown
       /** Fast-forward the repo checkouts to their upstream tips first — see
        *  `StartRunOptions.updateRepos`. Non-boolean values read as unset. */
       updateRepos?: unknown
     }
   }>('/api/runs', async (req, reply) => {
+    if (Object.prototype.hasOwnProperty.call(req.body ?? {}, 'perturbation')) {
+      reply.code(400)
+      return { error: 'perturbation runs are no longer supported' }
+    }
     const feature = req.body?.feature
     if (typeof feature !== 'string' || feature.length === 0) {
       reply.code(400)
@@ -78,17 +78,6 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
     if (healAgent && 'error' in healAgent) {
       reply.code(400)
       return { error: healAgent.error }
-    }
-    // A robustness envelope to boot under (D14). Human-edited JSON, so a bad
-    // one is named here rather than booted as "no perturbation".
-    let perturbation: RobustnessEnvelope | undefined
-    if (req.body?.perturbation !== undefined) {
-      const parsed = parseRobustnessEnvelope(req.body.perturbation)
-      if (!parsed.ok) {
-        reply.code(400)
-        return { error: `invalid perturbation: ${parsed.reason}` }
-      }
-      perturbation = parsed.envelope
     }
     // Heal-claim policy: only runner-spawned PTY agents Canary Lab launches
     // itself (claude-pty/codex-pty) are denied a heal claim. A disallowed
@@ -168,7 +157,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
     const reservedRunId = deps.runRequests?.allocatedRunId(req.body?.resumeRequestId)
     try {
       const outcome = await deps.startRun(
-        feature, env, externalRunReq, isolation, executionType, req.body?.models, perturbation, undefined,
+        feature, env, externalRunReq, isolation, executionType, req.body?.models,
         updateRepos === undefined && !reservedRunId ? undefined : { updateRepos, ...(reservedRunId ? { runId: reservedRunId } : {}) },
       )
       if (outcome.kind === 'collision') {

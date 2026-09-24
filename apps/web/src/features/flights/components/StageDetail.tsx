@@ -1,11 +1,9 @@
-import { useState } from 'react'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import type { ExternalWorkCheckpointData, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
 import type { CoverageJobIndexEntry } from '@/shared/api/types'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { coverageSessionSources, stageCoverageJobs } from '../lib/coverage-activity'
 import * as api from '@/shared/api/client'
-import type { RobustnessFinding } from '@shared/robustness/jobs'
 import type { AgentSessionSegmentSource, AgentSessionSource, ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
 import { clientLabel, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
@@ -19,13 +17,11 @@ import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
 import type { FlightDrillThroughs } from './FlightPage'
 import { StageErrorPanel, StagePausedPanel, pausedResumeKind } from './StageStatePanels'
-import { RobustnessFindingsPanel, RobustnessMatrixPanel, robustnessFindingKey } from './RobustnessPanels'
 import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
 import { ACTIVITY_STAGE, type ExternalWorkTrace, type FeatureActivity, type StageExternalHistory } from '../state/feature-activity'
 import { Chip } from '@/shared/ui/StatusChip'
 import { flightRowModelChips } from '@shared/flights/stage-models'
 import { flightStageLabel } from '@shared/flights/stage-labels'
-import { flightReportNeedsRefresh } from '@shared/flights/types'
 import { ModelPlanPopover } from './ModelPlanPopover'
 import { SkeletonPanel, awaitingFor } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
@@ -347,17 +343,6 @@ export function StageDetail({
   const activityEvalTask = (externalEvalTaskId ? taskById(externalEvalTaskId) : null)
     ?? liveEvalTask
     ?? (deliverableEvalTaskId ? taskById(deliverableEvalTaskId) : null)
-  const reportTask = deliverableEvalTaskId ? taskById(deliverableEvalTaskId) : null
-  const reportNeedsRefresh = stage.key === 'evaluation-export' && flight.status === 'done'
-    && flightReportNeedsRefresh(flight) && reportTask?.downloadReady === true
-  const refreshReport = async (): Promise<void> => {
-    try {
-      await api.redoFlight(flightId, { fromStage: 'evaluation-export' })
-      onResponded()
-    } catch (err) {
-      onActionError?.(err instanceof Error ? err.message : String(err))
-    }
-  }
   // Sources outside the flight record (ledger, boot run, portify workflow,
   // config, envsets, docs) — resolved for the VISIBLE stage only.
   const band = useStageBandData(
@@ -385,28 +370,6 @@ export function StageDetail({
     : undefined
   const pausedKind = coverageOwnsCurrent ? null : pausedResumeKind(stage, flight, companion)
   const pausedNotice = pausedKind ? <StagePausedPanel kind={pausedKind} /> : null
-  // Send to repair (D16): a finding becomes a run booted under its smallest
-  // failing envelope, so the repair agent works on a failure that reproduces
-  // instead of a green suite. The run route owns admission (collision, queue,
-  // envelope validity); the pane only relays its answer on the header's error
-  // line and lands on the run it started.
-  const [repairSending, setRepairSending] = useState<string | null>(null)
-  const sendToRepair = async (finding: RobustnessFinding): Promise<void> => {
-    setRepairSending(robustnessFindingKey(finding))
-    try {
-      const { runId } = await api.startRun(flight.feature, {
-        env: flight.opts.env,
-        perturbation: finding.shrink?.envelope ?? finding.envelope,
-      })
-      drill.onOpenRun?.(flight.feature, runId)
-    } catch (err) {
-      onActionError?.(api.asRepoCollision(err)
-        ? 'another run of this suite is active — stop it or wait for it, then send again'
-        : err instanceof Error ? err.message : String(err))
-    } finally {
-      setRepairSending(null)
-    }
-  }
   // The merged Run stage renders as the Test Run hero (TestRunPanel) — it owns
   // the run detail poll, so StageDetail no longer fetches it here (R80). The
   // hero renders from this evidence immediately (before its first poll) and
@@ -874,21 +837,6 @@ export function StageDetail({
         </>
       )}
 
-      {/* Robustness lab: which cells broke or could not be judged, then one
-          danger-toned card per finding with the action that follows from it. A
-          read-only external flight keeps the cards and drops the action. */}
-      {stage.key === 'robustness' && (
-        <>
-          <RobustnessMatrixPanel job={band.robustnessJob ?? null} awaiting={awaitingData} />
-          <RobustnessFindingsPanel
-            job={band.robustnessJob ?? null}
-            awaiting={awaitingData}
-            sending={repairSending}
-            {...(externalMutationOwner ? {} : { onSendToRepair: sendToRepair })}
-          />
-        </>
-      )}
-
       {/* Evaluation Report: this flight's deliverable, then every archive ever
           built for the suite — the stage is where reports are collected, not just
           where the newest one is announced. */}
@@ -905,11 +853,6 @@ export function StageDetail({
               task={band.evalTask ?? null}
               awaiting={awaiting}
               probed={probed}
-              refreshAvailable={reportNeedsRefresh}
-              onRefresh={externalMutationOwner ? undefined : refreshReport}
-              refreshDisabledReason={externalMutationOwner
-                ? externalMutationTooltip(externalMutationOwner, 'refresh the report')
-                : undefined}
             />
             <AllReportsPanel feature={flight.feature} pinnedTaskId={deliverableEvalTaskId} awaiting={awaiting} probed={probed} />
           </>

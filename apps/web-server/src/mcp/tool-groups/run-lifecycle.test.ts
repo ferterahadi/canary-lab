@@ -682,19 +682,7 @@ describe('start_run: starting fresh', () => {
       'worktree',
       undefined,
       undefined,
-      undefined,
     )
-    expect(out).toEqual({ runId: 'run-new', reused: false, claimed: true, nextSteps: ['wait_for_heal_task'] })
-  })
-
-  it('forwards a robustness envelope untouched, so the route is the one validator of it', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
-    const { call } = harness({ startRun })
-    const perturbation = { format: 'canary-lab/robustness-envelope@1', latency: { ms: 262 } }
-
-    const out = await call('start_run', { ...START, perturbation })
-
-    expect(startRun.mock.calls[0]?.[5]).toEqual(perturbation)
     expect(out).toEqual({ runId: 'run-new', reused: false, claimed: true, nextSteps: ['wait_for_heal_task'] })
   })
 
@@ -713,7 +701,6 @@ describe('start_run: starting fresh', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
     )
     expect(out).toEqual({
       runId: 'run-new',
@@ -724,13 +711,13 @@ describe('start_run: starting fresh', () => {
     })
   })
 
-  it('forwards the update_repos choice as the seventh factory argument', async () => {
+  it('forwards the update_repos choice as the sixth factory argument', async () => {
     const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
     const { call } = harness({ startRun })
 
     await call('start_run', { ...START, update_repos: false })
 
-    expect(startRun.mock.calls[0]?.[6]).toBe(false)
+    expect(startRun.mock.calls[0]?.[5]).toBe(false)
   })
 
   it('relays a refused upstream update with the per-repo rows, having started nothing', async () => {

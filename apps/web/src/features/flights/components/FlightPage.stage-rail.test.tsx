@@ -345,7 +345,10 @@ describe('trailer model (R14–R18)', () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'done',
       currentStage: null,
-      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+      stages: [
+        ...FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+        { key: 'robustness', status: 'done' } as unknown as FlightManifest['stages'][number],
+      ],
     }))
     const onSelectStage = vi.fn()
     await render('fl_1', { stage: null, onSelectStage })
@@ -364,7 +367,7 @@ describe('trailer model (R14–R18)', () => {
     expect(divider?.nextElementSibling).toBe(parallelSetup)
     expect(container.querySelector('[data-testid="flight-rail-section-setup"]')?.textContent).toContain('Setup')
     expect(container.querySelector('[data-testid="flight-rail-section-verification"]')?.textContent).toContain('Verification cycle')
-    expect(railIds.indexOf('stage-rail-portify')).toBeLessThan(railIds.indexOf('stage-rail-robustness'))
+    expect(railIds).not.toContain('stage-rail-robustness')
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')?.click()

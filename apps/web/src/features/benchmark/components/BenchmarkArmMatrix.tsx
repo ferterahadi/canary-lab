@@ -48,10 +48,7 @@ export const ARM_MATRIX: { section: string; note: string; rows: ArmRow[] }[] = [
   },
 ]
 
-/** The states one matrix cell can show. `yes`/`no` are the arm matrix's own
- *  pair (has it / lacks it, a neutral cross); the Robustness Lab adds `failed`
- *  (a finding, in the danger hue), `skipped` (a cell nobody could judge) and
- *  `pending` (not run yet), so the two matrices share one glyph vocabulary. */
+/** The states one benchmark matrix cell can show. */
 export type MatrixCellState = 'yes' | 'no' | 'failed' | 'skipped' | 'pending'
 
 const CELL_GLYPH: Record<MatrixCellState, { glyph: string; color: string; opacity: number }> = {

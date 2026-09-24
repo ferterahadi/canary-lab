@@ -14,7 +14,6 @@ import {
   type AgentResolveDeps,
 } from '../../../agent-sessions/logic/agent-binary'
 import { directoryExists, renderPlaywrightMcpHint, renderTraceExtractHint } from './heal-prompt-map'
-import { perturbationContext, perturbationRule } from '../heal/external-heal-surface'
 
 export { buildAgentSpawnCommand, buildClaudeMcpConfigArg, makeAgentSpawnCommandBuilder, pickAvailableHealAgent, readPriorSessionId, readPriorSessionIdFromValue } from './heal-agent-spawn'
 export type { AgentSpawnArgs, AgentSpawnCommandDefaults } from './heal-agent-spawn'
@@ -140,7 +139,6 @@ export function buildOrchestratorHealPrompt(
       failedDir: paths.failedDir,
       journalPath: paths.diagnosisJournalPath,
       featureDocsMap: renderFeatureDocsMap(paths.manifestPath),
-      perturbationNote: renderPerturbationNote(paths.manifestPath),
       traceExtractHint: renderTraceExtractHint(paths.failedDir),
       playwrightMcpHint: renderPlaywrightMcpHint(paths.failedDir),
       restartSignal: paths.restartSignal,
@@ -176,13 +174,6 @@ export function buildOrchestratorHealPrompt(
     fs.writeFileSync(promptFile, fullPrompt)
     return fullPrompt
   }
-}
-
-// Empty (and so dropped from the prompt) for the common unperturbed run; the
-// wording is shared with the external heal procedure via perturbationRule.
-function renderPerturbationNote(manifestPath: string): string {
-  const envelope = readManifest(manifestPath)?.perturbation?.envelope
-  return envelope ? perturbationRule(perturbationContext(envelope)) : ''
 }
 
 function renderFeatureDocsMap(manifestPath: string): string {

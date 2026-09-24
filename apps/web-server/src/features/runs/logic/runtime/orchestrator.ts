@@ -15,7 +15,6 @@ import { readManifest, type RunManifest } from './manifest'
 import type { RunnerLog } from './runner-log'
 import { planRestart } from './restart-planner'
 import { releasePorts } from './port-allocator'
-import { startPerturbationShims, stopPerturbationShims } from './perturbation/run-perturbation'
 import { removeWorktree } from './repo-worktree'
 // Headless event-emitting orchestrator for a single feature run. Wraps the
 // existing health-check / signal-file semantics behind a clean API the future
@@ -202,9 +201,6 @@ export class RunOrchestrator extends EventEmitter {
     // any service (and therefore any heal agent) can touch it. The diff against
     // this baseline at teardown is exactly the heal agent's fix (R80).
     await ensureServicesRunning(this.ctx, () => captureFixBaseline(this.ctx))
-    // Only once every service is up: the shims forward to the real ports, and
-    // the first request a test makes must be the first one perturbed.
-    await startPerturbationShims(this.ctx)
   }
 
   // Manually fire a restart. When `filesChanged` is supplied and non-empty,
@@ -327,9 +323,7 @@ export class RunOrchestrator extends EventEmitter {
     // Declare the run failed and route it into heal (the agent fixes the
     // service) instead of running tests against a dead service.
     if (this.ctx.bootFailure) return await this.failRunForBootFailure()
-    // A robustness cell names its one spec file here; every other run starts
-    // with the whole suite and only the heal reruns narrow the selection.
-    let exitCode = await runPlaywright(this.ctx, this.ctx.initialSelection)
+    let exitCode = await runPlaywright(this.ctx)
     // If the user clicked Abort while Playwright was running, bail out
     // immediately — don't compute a finalStatus from the killed pty's
     // exit code, and don't fall through into the heal loop where a fresh
@@ -462,7 +456,6 @@ export class RunOrchestrator extends EventEmitter {
     }
     // Shims before services: a request held for a restart is released rather
     // than left hanging on a socket whose upstream is about to die.
-    await stopPerturbationShims(this.ctx)
     for (const [name, pty] of this.ctx.servicePtys) {
       killTree(pty, 'SIGTERM')
       this.ctx.servicePtys.delete(name)
@@ -498,7 +491,6 @@ export class RunOrchestrator extends EventEmitter {
     // worktree run, tear the worktree down so the source repo doesn't
     // accumulate stale checkouts. Failures here must not block finalization.
     if (this.ctx.portMap) releasePorts(this.ctx.portMap.values())
-    if (this.ctx.perturbation) releasePorts(this.ctx.perturbation.shimPorts.values())
     if (this.ctx.portified) {
       await reversePortifyOverlay(this.ctx).catch(() => {})
     } else {

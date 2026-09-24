@@ -354,7 +354,7 @@ export interface UseGlobalActiveRunResult {
 export function useGlobalActiveRun(): UseGlobalActiveRunResult {
   const { state } = useRunsContext()
   // Benchmark runs (arms + the validity-gate trial) drive the benchmark window
-  // and robustness cells drive their job — never surface one as the
+  // and historical auxiliary cells had their own owner — never surface one as the
   // globally-active run. A boot session IS surfaced: it is the user's own.
   const entry = state.runs.find((r) => isActiveRunStatus(r.status) && r.executionType !== 'benchmark' && r.executionType !== 'robustness') ?? null
   const detail = entry ? (state.details[entry.runId] ?? null) : null
