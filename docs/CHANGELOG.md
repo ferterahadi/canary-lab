@@ -33,7 +33,7 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 2.3.0 — Verification Integrity (Unreleased)
+## 2.3.0 — Verification Integrity (2026-09-25)
 
 > After upgrading, run `npx canary-lab upgrade`, then restart connected agent apps, to refresh Flight and Portify instructions.
 
