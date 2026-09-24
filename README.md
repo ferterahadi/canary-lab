@@ -3,29 +3,31 @@
 [![npm](https://img.shields.io/npm/v/canary-lab.svg)](https://www.npmjs.com/package/canary-lab)
 [![license](https://img.shields.io/npm/l/canary-lab.svg)](LICENSE)
 
-**Give Claude or Codex a repo. Get an independently verified Playwright evaluation.**
+**Give Claude or Codex an app repo. Get a Playwright evaluation backed by a run the agent cannot mark green itself.**
 
-Run this in your agent after the one-time setup below:
+Your agent investigates the app, writes tests, and fixes application failures. Canary Lab starts the services, runs Playwright, and records the results. You get a report that links requirements, tests, captured evidence, and the actual pass or fail result.
 
-```text
-/canary-lab /absolute/path/to/your-app "checkout flow"
-```
+## Quick Start
 
-The `/canary-lab` skill takes the repo from first scan to finished evaluation. Your agent understands the code, gathers requirements, writes tests, and repairs application failures. Canary Lab starts the services, runs Playwright, stores the evidence, and owns the verdict.
+You need Node.js 22.12 or newer and npm 9 or newer.
 
-![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab-flight.gif)
+1. Create a Canary Lab workspace. This is separate from the app repo you want to test:
 
-## Set Up Once
+   ```bash
+   npx canary-lab init my-lab
+   ```
 
-Canary Lab requires Node.js 22.12 or newer and npm 9 or newer.
+   `init` installs the workspace dependencies and Chromium, then registers the Canary Lab skills and one Model Context Protocol (MCP) connection, exposed as `exec`, for supported Claude and Codex clients. The workspace holds test suites and run evidence; your app stays in its own repo.
 
-```bash
-npx canary-lab init my-lab
-```
+2. Restart Claude or Codex so it discovers the skill and connection. In its chat, ask it to test a specific flow using your app's absolute path:
 
-`init` creates a Canary Lab workspace, installs its dependencies and Chromium, and registers the skills plus one compact MCP connection (`exec`) for supported Claude and Codex clients. Restart your agent once so it discovers them.
+   ```text
+   /canary-lab /absolute/path/to/your-app "checkout flow"
+   ```
 
-The connection starts the local Canary Lab service when the skill needs it. To open the interface yourself:
+3. Follow the Flight (the end-to-end evaluation) in your agent or open the Canary Lab interface. When the report is ready, open its evaluation archive to review the test results and captured evidence. A failed run keeps its failed verdict in the report.
+
+The connection starts the local Canary Lab service when needed. To open the interface yourself:
 
 ```bash
 cd my-lab
@@ -34,34 +36,30 @@ npx canary-lab ui
 
 If `/canary-lab` or the Canary Lab `exec` tool is missing, run `npx canary-lab setup --force` from the workspace and restart your agent. Setup reports each saved connection separately; see [configuration repair](docs/COMMANDS.md#repair-agent-configuration) for skill migration, backups, and verification outcomes.
 
+![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab-flight.gif)
+
 ## What Happens During a Flight
 
 `/canary-lab` starts one resumable Flight:
 
-scan repo → create suite → collect requirements → author and map tests → prepare isolated ports → run and repair → export evaluation
+scan repo → create suite → collect requirements → author and map tests → run and repair → export evaluation → check readiness for parallel runs
 
 The skill keeps the reasoning work in your current Claude or Codex session. Canary Lab performs the mechanical checks and calculates every stage result from saved evidence.
 
 - **Requirements stay reviewable.** Add a product requirements document, link a local file, gather relevant repo documents, or infer requirements from the branch diff.
 - **Coverage is explicit.** Tests map to requirements and paths instead of producing a guessed percentage.
-- **Repairs stay isolated.** Each run receives its own ports and Git worktree, so repairs do not alter your working copy.
+- **Repairs are usually isolated.** Runs use separate Git checkouts when available. Before a suite is prepared for parallel runs, worktree creation failure can make a run use the app's working copy; Canary Lab warns you.
 - **Progress survives interruption.** Run `/canary-lab` again with the same repo to continue the existing Flight.
-- **The evaluation is the deliverable.** The final archive contains the real verdict, test evidence, browser media, and per-test reasoning.
+- **The evaluation is the deliverable.** The archive preserves the real verdict, test evidence, any captured browser media, and per-test reasoning. It is available before the separate Parallel setup stage finishes.
 
 ## Why the Verdict Is Independent
 
-An agent can start a server and run Playwright itself. The gap is trust: the same actor that writes a fix should not be able to declare that fix correct.
-
-| The agent can | The agent cannot |
-| --- | --- |
-| Read logs, traces, screenshots, and videos | Run Canary Lab's tests itself |
-| Fix the application, or correct a test only when it is provably wrong | Declare a run green |
-| Signal `rerun` or `restart` | Change Canary Lab's saved evidence |
+An agent can propose a fix and say it works. Canary Lab checks that claim with its own Playwright run. The agent can read the evidence and request a rerun, but its statement alone cannot turn a failed run into a pass.
 
 Canary Lab adds:
 
 - **Results the agent does not own.** The harness runs the tests and holds the pass/fail result.
-- **Concurrency without conflicts.** Runs receive isolated ports and Git worktrees; conflicting work waits in a queue.
+- **Controlled concurrency.** After Canary Lab verifies that the app accepts assigned ports, runs can use separate ports and Git worktrees. Conflicting work waits in a queue.
 - **Safe environment switching.** Environment files are backed up before changes and restored when the run ends.
 
 ## Choose the Right Skill
@@ -88,7 +86,7 @@ The agent skill is the normal interactive path. The same Flight can also start f
 npx canary-lab flight /absolute/path/to/your-app "checkout flow"
 ```
 
-Use the CLI for shell automation or when you want Canary Lab to conduct the Flight outside an existing agent conversation. Running the command again resumes existing work instead of creating a duplicate.
+Use the CLI for shell automation or when you want Canary Lab to conduct the Flight outside an existing agent conversation. Calling it again follows an active Flight or resumes a paused one. A completed Flight needs `--redo` or `--from-stage` to run again.
 
 The UI and MCP server share one configurable port, `7421` by default. Choose another during setup with `npx canary-lab init my-lab --port 8200`, or change it later in Project Settings. The `ui --port` option is not supported.
 
@@ -96,7 +94,7 @@ Custom MCP clients should connect to `http://localhost:<port>/mcp?profile=compac
 
 ## Playwright Without a New Test Language
 
-Canary Lab suites use normal Playwright tests plus a service configuration that names your existing development commands. Canary Lab assigns free ports, starts each service, waits for health checks, and tags the output so failures map back to the correct test.
+Canary Lab suites use normal Playwright tests plus a service configuration that names your existing development commands. Canary Lab starts each service, waits for health checks, and tags the output so failures map back to the correct test. Once the app is prepared for parallel runs, Canary Lab can assign free ports to concurrent runs.
 
 See [Suite Folders](docs/FEATURES.md) for the file structure and examples, or [Guide](docs/GUIDE.md) for the complete run and repair workflow.
 
@@ -112,8 +110,8 @@ Use Docker Compose for infrastructure such as Postgres or Redis, and let Canary 
 | --- | :---: | :---: | :---: | :---: |
 | Runs existing development commands with hot reload | One service | Needs a development image and watch rules | Varies | Yes |
 | Boots several services together | You script it | Yes | Varies | Yes |
-| Runs concurrently on one machine | Manual | Not built in | Hosted | Isolated ports and worktrees |
-| Keeps evidence outside the repair agent's control | No | No | Yes | Yes, locally |
+| Runs concurrently on one machine | Manual | Not built in | Hosted | After port readiness is verified |
+| Keeps the run verdict separate from the repair agent's report | Manual | Manual | Varies | Yes |
 | Switches environment files with backup and restore | Manual | Manual | No | Yes |
 | Keeps harness data on your machine | Yes | Yes | No | Yes |
 
