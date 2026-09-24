@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Fragment, useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import * as api from '@/shared/api/client'
 import type { FlightManifest, FlightStageKey, FlightStageStatus } from '@/shared/api/client'
 import { Modal, useEscapeToClose } from '@/shared/ui/atoms'
@@ -265,6 +265,7 @@ export function RedoFlightDialog({
   const [entryFailed, setEntryFailed] = useState(false)
   const [fromStage, setFromStage] = useState<FlightStageKey | null>(initialStage)
   const [feedback, setFeedback] = useState('')
+  const feedbackHintId = useId()
 
   useEffect(() => {
     let alive = true
@@ -287,17 +288,13 @@ export function RedoFlightDialog({
     ? REDO_STAGES.filter((stage) => flightStagesResetByEntry(fromStage)
       .some((key) => stageRowKey(key) === stage.key))
     : []
-  const effectNote = fromStage === 'robustness'
-    ? 'The test run, Parallel setup and current report stay. Refresh the report after new Lab findings settle to include them.'
-    : fromStage === 'portify'
-      ? 'The test run and current report stay. Robustness Lab repeats with the updated port setup.'
-      : fromStage === 'evaluation-export'
-        ? 'Completed reports stay downloadable in report history. A new report will be added.'
-        : fromStage === 'specs-coverage' || fromStage === 'run'
-          ? 'Parallel setup stays. Completed reports remain in history; the new report will use the new run.'
-          : fromStage === 'docs'
-            ? 'Parallel setup stays. Tests, the run and the report update from the new requirements.'
-            : 'Completed reports remain in history while the affected steps rebuild.'
+  // The rows' ↻ marks and the footer count say what resets, and a row without a
+  // mark stays — which is everything the old per-step notes restated. What
+  // neither can say is advice: re-running the Lab leaves the report untouched,
+  // so its new findings only reach the report once it is refreshed.
+  const tip = fromStage === 'robustness'
+    ? 'Refresh the report after new Lab findings settle to include them.'
+    : null
 
   return (
     <Modal
@@ -305,9 +302,17 @@ export function RedoFlightDialog({
       onClose={onClose}
       width={560}
       title="Re-run from a step"
-      description="Choose a step to repeat. The affected steps are shown below; completed report downloads stay available."
+      description="Pick where to start again. Finished reports stay downloadable."
       footer={
-        <div className="flex items-center justify-end gap-2">
+        <>
+          {/* The consequence sits beside the button that causes it. The body
+              scrolls, so a note under the list was out of view at the moment
+              of the click; the rows' marks say which steps, this says how many. */}
+          <span data-testid="flight-redo-effects" aria-live="polite" className="cl-type-meta mr-auto text-secondary">
+            {affected.length > 0 && (
+              <><span aria-hidden="true">↻ </span>Resets {affected.length} {affected.length === 1 ? 'step' : 'steps'}</>
+            )}
+          </span>
           <button type="button" onClick={onClose} className="cl-button px-3 py-1.5 text-xs">
             Cancel
           </button>
@@ -327,7 +332,7 @@ export function RedoFlightDialog({
           >
             {selectedLabel ? `Re-run from ${selectedLabel}` : 'Re-run'}
           </button>
-        </div>
+        </>
       }
     >
       <div className="flex flex-col gap-4 p-4">
@@ -378,9 +383,14 @@ export function RedoFlightDialog({
             // which one is picked, so the badge is free to keep saying what the
             // stage's last run did.
             const badgeTone = settled ? stageStatusTone(lastStatus) : 'var(--text-muted)'
+            const resets = affected.some((stage) => stage.key === s.key)
             return (
               <Fragment key={s.key}>
-                {section && <div data-testid={`flight-redo-section-${section.id}`} className="flex items-center gap-2 px-3 py-1.5">
+                {/* `px-3.5` puts the rubric on the bead column. The band's dashed
+                    rule is the group divider, so `.cl-ledger-band` drops the
+                    ledger hairline on it and on the row it opens; the space
+                    above instead keeps each group with the rows below it. */}
+                {section && <div data-testid={`flight-redo-section-${section.id}`} className="cl-ledger-band flex items-center gap-2 px-3.5 pb-0.5 pt-3 first:pt-1">
                   <span className="cl-rubric shrink-0">{section.label}</span>
                   <span className="h-px flex-1 border-t border-dashed border-line" />
                 </div>}
@@ -428,32 +438,36 @@ export function RedoFlightDialog({
                     {!allowed && reason ? reason : STAGE_BLURB[s.key]}
                   </span>
                 </span>
+                {/* The same ↻ the Continue menu spends on "run again". */}
+                {resets && (
+                  <span data-testid="flight-redo-reset-mark" className="shrink-0 self-center text-[12px] text-secondary">
+                    <span aria-hidden="true">↻</span>
+                    <span className="sr-only">Resets</span>
+                  </span>
+                )}
                 </button>
               </Fragment>
             )
           })}
         </div>
-        <div data-testid="flight-redo-effects" className="cl-quote-rail px-3 py-0.5 text-[11px] leading-relaxed text-secondary">
-          {fromStage ? (
-            <>
-              <div><span className="font-medium text-primary">Resets:</span> {affected.map((stage) => stage.label).join(', ')}.</div>
-              <div>{effectNote}</div>
-            </>
-          ) : 'Select a step to see what will be reset and what stays.'}
+        {tip && <p data-testid="flight-redo-tip" className="cl-type-meta -mt-2 px-3.5 text-secondary">{tip}</p>}
+        {/* Sans helper line under the field, as Project Settings writes one — a
+            mono aside inside the label switched register mid-sentence. */}
+        <div className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1.5">
+            <span className="cl-type-data font-medium text-secondary">What went wrong last time?</span>
+            <textarea
+              data-testid="flight-redo-feedback"
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              placeholder="e.g. it collected docs for the wrong part of the app"
+              rows={2}
+              aria-describedby={feedbackHintId}
+              className="cl-input w-full px-2.5 py-2 text-[11.5px]"
+            />
+          </label>
+          <span id={feedbackHintId} className="cl-type-meta text-muted">Optional — added to the agent's prompt.</span>
         </div>
-        <label className="flex flex-col gap-1.5">
-          <span className="cl-type-data font-medium text-secondary">
-            What went wrong last time? <span className="cl-aside">(optional — added to the agent's prompt)</span>
-          </span>
-          <textarea
-            data-testid="flight-redo-feedback"
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            placeholder="e.g. it collected docs for the wrong part of the app"
-            rows={2}
-            className="cl-input w-full px-2.5 py-2 text-[11.5px]"
-          />
-        </label>
       </div>
     </Modal>
   )

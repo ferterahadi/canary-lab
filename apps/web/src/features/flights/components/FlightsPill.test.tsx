@@ -143,6 +143,56 @@ describe('FlightsPill', () => {
     expect(rail?.children.length).toBe(FLIGHT_STAGE_KEYS.length - 4)
   })
 
+  it('updates every mini cell from the same live stage signals as the Flight rail', () => {
+    const activity = new Map<string, FeatureActivity>([['checkout', { kind: 'running', runId: 'run-1' }]])
+    const stages = FLIGHT_STAGE_KEYS.map((key) => ({
+      key,
+      status: key === 'run' || key === 'scout' || key === 'scaffold'
+        || key === 'env-capture' || key === 'docs' || key === 'prd-summary'
+        || key === 'specs-coverage' ? 'done' as const
+        : key === 'evaluation-export' ? 'failed' as const
+          : key === 'robustness' ? 'skipped' as const : 'pending' as const,
+      startedAt: '2026-09-23T00:00:00Z',
+    }))
+    act(() => root.render(<FlightsPill
+      flights={[flight({ status: 'paused', stages })]}
+      activity={activity}
+      coverageJobs={[
+        { jobId: 'summary-1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: '2026-09-24T00:00:00Z' },
+        { jobId: 'mapping-1', feature: 'checkout', kind: 'coverage', status: 'failed', startedAt: '2026-09-24T00:00:00Z' },
+      ]}
+      portifyWorkflows={[{ workflowId: 'port-1', feature: 'checkout', status: 'ready-to-save', startedAt: '2026-09-24T00:00:00Z' }]}
+      onOpenFlight={vi.fn()} open
+    />))
+    const row = document.querySelector('[data-testid="flight-open-fl_1"]')!
+    const cell = (key: string) => row.querySelector<HTMLElement>(`[data-testid="stage-mini-cell-${key}"]`)!
+    const expected = [
+      ['scout', 'done', 'var(--success)'],
+      ['scaffold', 'done', 'var(--success)'],
+      ['docs', 'running', 'var(--running)'],
+      ['specs-coverage', 'failed', 'var(--danger)'],
+      ['run', 'running', 'var(--running)'],
+      ['evaluation-export', 'failed', 'var(--danger)'],
+      ['portify', 'needs approval', 'var(--warning)'],
+      ['robustness', 'skipped'],
+    ]
+    for (const [key, label, tone] of expected) {
+      expect(cell(key).getAttribute('aria-label')).toContain(label)
+      if (tone) expect(cell(key).getAttribute('style')).toContain(tone)
+    }
+  })
+
+  it('shows a queued run as queued instead of as executing', () => {
+    const activity = new Map<string, FeatureActivity>([['checkout', {
+      kind: 'running', runId: 'run-1',
+      waiting: { kind: 'queued', label: 'Queued', shortLabel: 'queued', detail: 'Waiting for the repo.' },
+    }]])
+    act(() => root.render(<FlightsPill flights={[]} activity={activity} onOpenFlight={vi.fn()} open />))
+    const run = document.querySelector<HTMLElement>('[data-testid="stage-mini-cell-run"]')!
+    expect(run.getAttribute('aria-label')).toBe('Test run — Queued')
+    expect(run.style.background).toContain('var(--border-default)')
+  })
+
   // R26 — the pill is the one live indicator for the absorbed surfaces.
 
   it('lights up from activity alone (a standalone run, zero flights)', () => {

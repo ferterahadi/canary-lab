@@ -1,6 +1,6 @@
 import type { ReviewFocus } from '../lib/workspace-view-state'
 import { useEffect, useRef, useState } from 'react'
-import type { Feature, RunDetail } from '../api/types'
+import type { CoverageJobIndexEntry, Feature, RunDetail } from '../api/types'
 import { BenchmarkPill, BenchmarkWindow, useBenchmarks } from '@/features/benchmark'
 import { CleanupPill } from '@/features/cleanup'
 import { type DerivedStage, type FeatureActivity, FlightsPill } from '@/features/flights'
@@ -18,7 +18,7 @@ import { McpHealthBadge } from './McpHealthBadge'
 import { ConnectionBadge } from './ConnectionBadge'
 import { StatusChip } from '../ui/StatusChip'
 import { Tooltip } from '../ui/Tooltip'
-import type { FlightIndexEntry, PlanFeaturesTask } from '../api/client'
+import type { FlightIndexEntry, PlanFeaturesTask, PortifyIndexEntry } from '../api/client'
 
 interface Props {
   activeRunDetail: RunDetail | null
@@ -46,6 +46,8 @@ interface Props {
    *  App owns the one useDerivedFeatureStages instance (same ownership rule
    *  as `activity`). */
   derivedStages?: Map<string, DerivedStage[]>
+  coverageJobs?: CoverageJobIndexEntry[]
+  portifyWorkflows?: PortifyIndexEntry[]
   /** Whether to offer Getting Started — driven by the workspace visibility setting. */
   demoAvailable?: boolean
   /** Attention dot on that pill: the chooser has never been opened. */
@@ -103,7 +105,7 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocus, onReviewFeature, specReviewRunId, specReviewFeature, specReviewRunDetail, activeRunDetail, features = [], onFeaturesChanged, onRunLatestTests, runStartPending = false, onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onOpenPortify, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight, specReviewOpen, onSpecReviewOpenChange }: Props) {
+export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocus, onReviewFeature, specReviewRunId, specReviewFeature, specReviewRunDetail, activeRunDetail, features = [], onFeaturesChanged, onRunLatestTests, runStartPending = false, onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), coverageJobs = [], portifyWorkflows = [], demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onOpenPortify, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight, specReviewOpen, onSpecReviewOpenChange }: Props) {
   const { connection, runs } = useRuns()
   const [acceptedReview, setAcceptedReview] = useState<{ feature: string; revision: string; detail?: RunDetail | null } | null>(null)
   const runInProgress = runStartPending || isUnsettledRunStatus(activeRunDetail?.manifest.status)
@@ -292,6 +294,8 @@ export function GlobalStatusBar({ notificationControl, reviewFocus, onReviewFocu
             preFlights={preFlights}
             activity={activity}
             features={features.map((f) => ({ name: f.name, group: f.group, stages: derivedStages.get(f.name) }))}
+            coverageJobs={coverageJobs}
+            portifyWorkflows={portifyWorkflows}
             open={flightsPickerOpen}
             onOpenChange={onFlightsPickerOpenChange}
             onStartFlight={(feature) => onStartFlight?.(feature)}

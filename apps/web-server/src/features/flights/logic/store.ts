@@ -1,6 +1,7 @@
 import path from 'path'
 import type { FlightIndexEntry, FlightManifest, FlightStage, FlightStageKey, FlightStatus } from './types'
 import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, isTerminalFlightStatus } from './types'
+import { stageHasEvidence } from '../../../../../../shared/flights/types'
 import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../shared/lib/file-backed-task-store'
 
 // File-backed, event-emitting store for Flight background jobs. A thin
@@ -74,7 +75,11 @@ function indexEntryFromManifest(m: FlightManifest): FlightIndexEntry {
     // that started it) from one this UI may act on.
     stageProducer: m.opts.stageProducer,
     currentStage: m.currentStage,
-    stages: m.stages.map((s) => ({ key: s.key, status: s.status })),
+    stages: m.stages.map((s) => ({
+      key: s.key, status: s.status,
+      ...(s.startedAt ? { startedAt: s.startedAt } : {}),
+      ...(stageHasEvidence(s.evidence) ? { hasEvidence: true } : {}),
+    })),
     updatedAt: m.updatedAt,
     endedAt: m.endedAt,
   }
@@ -197,7 +202,12 @@ export class FlightRunStore implements FlightStore {
       const stages = settleLegacyTerminalStages(backfillMissingStages(manifest.stages), manifest.status)
       // Identity, not deep equality: both repairs hand back the ORIGINAL array
       // when they changed nothing, so an unchanged record is never rewritten.
-      if (stages !== manifest.stages) this.store.save({ ...manifest, stages })
+      const indexStages = (entry as FlightIndexEntry).stages
+      const missingPresentationData = stages.some((stage, index) =>
+        indexStages?.[index]?.key !== stage.key
+        || indexStages[index]?.startedAt !== stage.startedAt
+        || Boolean(indexStages[index]?.hasEvidence) !== stageHasEvidence(stage.evidence))
+      if (stages !== manifest.stages || missingPresentationData) this.store.save({ ...manifest, stages })
     }
   }
 

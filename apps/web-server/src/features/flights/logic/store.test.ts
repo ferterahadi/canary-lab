@@ -183,6 +183,30 @@ describe('index row staleness (merge-upsert can update but never delete)', () =>
 })
 
 describe('legacy terminal-stage repair', () => {
+  it('backfills stage evidence and timing in an older picker index', () => {
+    const flight = {
+      flightId: 'fl-index-legacy', feature: 'checkout', repoPaths: ['/repo/a'],
+      description: 'checkout flow', opts: OPTS,
+      status: 'done' as const, currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key, status: key === 'docs' ? 'skipped' as const : 'done' as const,
+        ...(key === 'docs' ? { evidence: { captured: 1 }, startedAt: now() } : {}),
+      })),
+      createdAt: now(), updatedAt: now(), endedAt: now(),
+    }
+    store.save(flight)
+    const indexPath = path.join(tmpDir, 'flights', 'index.json')
+    const index = JSON.parse(fs.readFileSync(indexPath, 'utf8')) as Array<{ stages: Array<{ key: string; status: string; startedAt?: string; hasEvidence?: boolean }> }>
+    index[0].stages = index[0].stages.map(({ key, status }) => ({ key, status }))
+    fs.writeFileSync(indexPath, JSON.stringify(index))
+
+    const reopened = new FlightRunStore(tmpDir)
+    expect(reopened.list()[0].stages?.find((stage) => stage.key === 'docs')).toMatchObject({
+      status: 'skipped', startedAt: now(), hasEvidence: true,
+    })
+    expect(reopened.get(flight.flightId)?.stages.find((stage) => stage.key === 'docs')?.evidence).toEqual({ captured: 1 })
+  })
+
   it('clears a stale live stage from a terminal record when the store reopens', () => {
     const stale = {
       flightId: 'fl-legacy',

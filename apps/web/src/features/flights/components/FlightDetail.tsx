@@ -1,5 +1,5 @@
 import type { CoverageJobIndexEntry } from '@/shared/api/types'
-import { coverageJobStage, stageCoverageJobs } from '../lib/coverage-activity'
+import { coverageJobStage } from '../lib/coverage-activity'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { ExternalWorkCheckpointData, FlightEntryOptions, FlightIndexEntry, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
@@ -15,7 +15,7 @@ import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type E
 import { ACTIVITY_STAGE, type FeatureActivity, type FeatureExternalHistory } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageRailRows, stageRowKey, stageStatusTone, stagePresentationStatus } from './stage-meta'
+import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageRowKey, stageStatusTone, stagePresentationStatus } from './stage-meta'
 import {
   buildDerivedManifest,
   derivedEntryStage,
@@ -31,6 +31,8 @@ import { StageDetail, truncate } from './StageDetail'
 import { FLIGHT_STAGE_SECTIONS } from './flight-sections'
 import { useLiveCoverage } from '@/shared/state/use-live-coverage'
 import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
+import { coverageStageWarning, isCoverageWarningRow } from './coverage-stage-warning'
+import { activityRowKey as rowKeyForActivity, presentedFlightRows } from './presented-flight-rows'
 
 // Flight detail — the routed full-screen view (?view=flights&flight=<id>)
 // that owns a flight's lifecycle: a stage rail on the left (harness-computed
@@ -207,6 +209,7 @@ export function FlightDetail({
   const flight = derivedManifest ?? (derivedFeature ? null : (liveFlight ?? fetched ?? seed))
   const coverage = useLiveCoverage(flight?.feature ?? derivedFeature ?? null)
   const coverageWarningText = coverageWarning(coverage.value?.freshness, coverage.confirmed, coverage.error)
+  const stageCoverageWarning = coverageStageWarning(coverage.value?.freshness, coverage.confirmed, coverage.error)
   const coverageNextAction = coverage.value?.freshness?.nextAction
   const coverageRecovery = coverageWarningText && coverage.confirmed && coverageNextAction && coverage.value?.freshness?.state !== 'updating'
     ? { stage: coverageNextAction.stage, warning: coverageWarningText } : undefined
@@ -289,7 +292,7 @@ export function FlightDetail({
   // Standalone work can restart a completed step. The rail and Follow must
   // read the same live activity as the chip, not just the saved flight verdict.
   const featureActivity = flight ? activity?.get(flight.feature) : undefined
-  const activityRowKey = featureActivity ? stageRowKey(ACTIVITY_STAGE[featureActivity.kind]) : undefined
+  const activityRowKey = rowKeyForActivity(featureActivity)
   const featureCoverageJobs = coverageJobs.filter((job) => job.feature === flight?.feature)
   const activeCoverageJob = featureCoverageJobs.filter((job) => job.status === 'running')
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || (a.kind === 'coverage' ? -1 : 1))[0]
@@ -302,9 +305,6 @@ export function FlightDetail({
   // selection still wins, and another live stage can take over follow-mode.
   const coverageLanding = followedCoverage?.flightId === flightId ? followedCoverage.stage : null
   const featureExternalHistory = flight ? externalHistory?.get(flight.feature) : undefined
-  // A run is intentionally the louder feature-level activity, so that map may
-  // hide a simultaneous Portify job. Read Portify's own index as well: the
-  // Parallel setup pane must keep its workflow and header state while tests run.
   const featurePortify = flight
     ? portifyWorkflows.find((workflow) => workflow.feature === flight.feature && isActivePortify(workflow.status))
     : undefined
@@ -315,32 +315,14 @@ export function FlightDetail({
   // has no such record, so its live run identity comes from the shared run
   // stream. This is display-only: it never navigates or starts another run.
   const derivedActiveRunId = derivedFeature && runLive ? featureActivity.runId : undefined
-  const railRows = useMemo(() => {
-    let rows = flight ? stageRailRows(flight.stages) : []
-    if (activityRowKey) {
-      rows = rows.map((candidate) => (
-        candidate.key === activityRowKey && candidate.status !== 'running'
-          ? { ...candidate, status: 'running' as const }
-          : candidate
-      ))
-    }
-    if (featurePortify) {
-      const status = featurePortify.status === 'ready-to-save'
-        ? 'waiting-for-approval' as const
-        : 'running' as const
-      rows = rows.map((candidate) => candidate.key === 'portify' ? { ...candidate, status } : candidate)
-    }
-    return rows.map((candidate) => {
-      const latest = stageCoverageJobs(coverageJobs, flight?.feature ?? '', candidate.key).at(-1)
-      const recorded = flight?.stages.find((stage) => stage.key === (candidate.key === 'docs' ? 'prd-summary' : candidate.key))
-      if (!latest || (recorded?.startedAt && latest.startedAt < recorded.startedAt)) return candidate
-      if (latest.status === 'running') return { ...candidate, status: 'running' as const }
-      if (latest.status === 'failed' || latest.status === 'aborted') return { ...candidate, status: 'failed' as const }
-      const derivedStatus = derivedStages?.get(latest.feature)?.find((stage) => stage.key === candidate.key)?.status
-      if (derivedStatus) return { ...candidate, status: derivedStatus }
-      return candidate
-    })
-  }, [flight, activityRowKey, featurePortify, coverageJobs, derivedStages])
+  const railRows = useMemo(() => flight ? presentedFlightRows({
+    feature: flight.feature,
+    stages: flight.stages,
+    activity: featureActivity,
+    portifyWorkflows,
+    coverageJobs,
+    derivedStages: derivedStages?.get(flight.feature),
+  }) : [], [flight, featureActivity, portifyWorkflows, coverageJobs, derivedStages])
 
   // Default the selected stage to the one that needs eyes: waiting → running →
   // first failed → the row that resumes next → last done. The user's explicit
@@ -726,8 +708,7 @@ export function FlightDetail({
             const selected = s.key === stageKey
             const rowWaiting = s.key === activityRowKey ? featureActivity?.waiting : undefined
             const displayStatus = stagePresentationStatus(s.status, rowWaiting)
-            const warning = (s.key === 'specs-coverage' || s.key === (coverageNextAction ? stageRowKey(coverageNextAction.stage) : null))
-              ? coverageWarningText : undefined
+            const warning = isCoverageWarningRow(s.key, stageCoverageWarning) ? stageCoverageWarning?.message : undefined
             const t = warning ? 'var(--warning)' : stageStatusTone(displayStatus)
             // A merged row's duration sums its primary + folded companion
             // (run→heal, scaffold→env-capture, docs→prd-summary) — R61. Work
@@ -738,8 +719,7 @@ export function FlightDetail({
             // One custom tooltip owns the rail row. Status remains visible in its
             // icon and the selected-stage pane; folding it into the short stage
             // explanation made the hover copy needlessly dense.
-            const tooltip = warning ? `${warning} Use Continue → From a step… to update the affected step.`
-              : rowWaiting ? `${rowWaiting.label}. ${rowWaiting.detail}` : STAGE_BLURB[s.key]
+            const tooltip = warning ?? (rowWaiting ? `${rowWaiting.label}. ${rowWaiting.detail}` : STAGE_BLURB[s.key])
             return (
               <Fragment key={s.key}>
                 {section && (

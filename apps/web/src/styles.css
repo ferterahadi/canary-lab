@@ -1038,6 +1038,19 @@ body {
   border-top: 1px solid var(--border-default);
 }
 
+/* A ledger split into named groups: each group opens with a band, a rubric
+   carrying its own dashed rule, and that rule is the divider. The hairline on
+   the band plus the one on the row it opens stacked three lines around a single
+   label, so neither takes one — and a ledger that opens with a band drops its
+   top edge too, because the band already is that edge. */
+.cl-ledger:has(> .cl-ledger-band:first-child) {
+  border-top: 0;
+}
+.cl-ledger > .cl-ledger-band,
+.cl-ledger > .cl-ledger-band + * {
+  border-top: 0;
+}
+
 /* Disclosed or quoted detail belonging to the thing above it: a 2px neutral
    rail and a half-step-deeper ground. Neutral on purpose — the rail says "this
    belongs to that", which is structure, not status, so it never takes a hue. */

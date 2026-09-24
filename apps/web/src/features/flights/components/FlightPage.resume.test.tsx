@@ -281,18 +281,36 @@ describe('FlightPage', () => {
     expectBefore(runRow, parallelSetupRow)
     expect(runRow.disabled).toBe(true)
     expect(runRow.textContent).toContain('no specs authored yet')
+    // The impact is split in two: a ↻ mark on every row that resets (a row
+    // without one stays) and a count in the footer, beside the button.
+    const markedRows = () => Array.from(container.querySelectorAll('[data-testid="flight-redo-reset-mark"]'))
+      .map((mark) => mark.closest('[role="radio"]')?.getAttribute('data-testid'))
+    const effects = () => container.querySelector('[data-testid="flight-redo-effects"]')?.textContent
+    const tip = () => container.querySelector('[data-testid="flight-redo-tip"]')?.textContent ?? null
+    expect(markedRows()).toEqual([])
+    expect(effects()).toBe('')
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-robustness"]')?.click() })
-    expect(container.querySelector('[data-testid="flight-redo-effects"]')?.textContent)
-      .toContain('Resets: Robustness lab.')
-    expect(container.querySelector('[data-testid="flight-redo-effects"]')?.textContent)
-      .toContain('current report stay')
+    expect(markedRows()).toEqual(['flight-redo-robustness'])
+    expect(effects()).toBe('↻ Resets 1 step')
+    // The report is not among the marked rows, so the one thing left to say is
+    // that the Lab's new findings reach it only through a refresh.
+    expect(tip()).toContain('Refresh the report')
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-specs-coverage"]')?.click() })
-    const effects = container.querySelector('[data-testid="flight-redo-effects"]')?.textContent ?? ''
-    expect(effects).toContain('Tests & coverage, Test run, Evaluation report, Robustness lab')
-    expect(effects).toContain('Parallel setup stays')
+    // Parallel setup (portify) is the one later row left unmarked — it stays.
+    expect(markedRows()).toEqual([
+      'flight-redo-specs-coverage',
+      'flight-redo-run',
+      'flight-redo-evaluation-export',
+      'flight-redo-robustness',
+    ])
+    expect(effects()).toBe('↻ Resets 4 steps')
+    expect(tip()).toBeNull()
     // Choosing another row updates the impact before the call is sent.
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-docs"]')?.click() })
     const note = container.querySelector<HTMLTextAreaElement>('[data-testid="flight-redo-feedback"]')!
+    // The helper line under the field is its description, not part of its name.
+    expect(document.getElementById(note.getAttribute('aria-describedby') ?? '')?.textContent)
+      .toBe("Optional — added to the agent's prompt.")
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
       setter.call(note, 'collected the wrong docs — focus on OAuth')

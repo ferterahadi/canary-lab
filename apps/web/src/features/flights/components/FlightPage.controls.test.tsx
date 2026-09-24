@@ -299,7 +299,7 @@ describe('flight controls (R48/R71)', () => {
     expect(rail.getAttribute('title')).toBeNull()
     act(() => { rail.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
     expect(document.body.querySelector('[role="tooltip"]')?.textContent)
-      .toBe('Coverage out of date. Source requirements changed. Showing results from the last calculation. Use Continue → From a step… to update the affected step.')
+      .toBe('Coverage out of date.')
     expect(container.querySelector('[data-testid="coverage-freshness-notice"]')).toBeNull()
     await act(async () => container.querySelector<HTMLButtonElement>(`[data-testid="stage-rail-${selectedStage}"]`)!.click())
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')!.click())
@@ -325,6 +325,24 @@ describe('flight controls (R48/R71)', () => {
     await act(async () => recovery.click())
     expect(container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-submit"]')!.disabled).toBe(true)
     expect(mocks.redoFlight).not.toHaveBeenCalled()
+  })
+
+  it('keeps the missing-requirements warning short on both affected steps', async () => {
+    const ledger = structuredClone(LEDGER)
+    ledger.freshness = {
+      ...ledger.freshness!, state: 'not-measured', reasons: ['Requirements have not been generated.'],
+      nextAction: { stage: 'prd-summary', command: 'start_external_summary', label: 'Generate requirements & coverage', arguments: { feature: 'checkout' } },
+    }
+    mocks.getFeatureCoverage.mockResolvedValue(ledger)
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', currentStage: 'docs' }))
+    await render('fl_1')
+    for (const key of ['docs', 'specs-coverage']) {
+      const rail = container.querySelector<HTMLButtonElement>(`[data-testid="stage-rail-${key}"]`)!
+      expect(rail.getAttribute('aria-label')).toContain('Requirements missing; coverage not measured.')
+      act(() => rail.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+      expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe('Requirements missing; coverage not measured.')
+      act(() => rail.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })))
+    }
   })
 
   it('shows only recovery when Resume would enter the same stage', async () => {

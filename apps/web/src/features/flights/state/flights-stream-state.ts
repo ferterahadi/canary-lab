@@ -1,4 +1,5 @@
 import type { FlightIndexEntry, FlightManifest } from '@/shared/api/client'
+import { stageHasEvidence } from '@shared/flights/types'
 
 // Pure reducer behind the `/ws/flights` push channel. Mirrors
 // portify-state.ts / runs-state.ts so it unit-tests in the node vitest config
@@ -53,7 +54,11 @@ export function flightIndexEntry(m: FlightManifest): FlightIndexEntry {
     checkpointKind: m.stages.find((s) => s.status === 'waiting-for-approval')?.checkpoint?.kind,
     stageProducer: m.opts.stageProducer,
     currentStage: m.currentStage,
-    stages: m.stages.map((s) => ({ key: s.key, status: s.status })),
+    stages: m.stages.map((s) => ({
+      key: s.key, status: s.status,
+      ...(s.startedAt ? { startedAt: s.startedAt } : {}),
+      ...(stageHasEvidence(s.evidence) ? { hasEvidence: true } : {}),
+    })),
     updatedAt: m.updatedAt,
     endedAt: m.endedAt,
   }

@@ -565,11 +565,18 @@ export interface FlightIndexEntry {
    *  user a checkpoint is waiting for them. Absent = internal. */
   stageProducer?: 'internal' | 'external'
   currentStage: FlightStageKey | null
-  /** Slim per-stage status summary (feeds the UI's mini progress rail). */
-  stages?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
+  /** Slim per-stage summary: enough to present the same status as the detail
+   * rail and to ignore coverage jobs older than a recorded stage attempt. */
+  stages?: Array<{ key: FlightStageKey; status: FlightStageStatus; startedAt?: string; hasEvidence?: boolean }>
   updatedAt: string
   endedAt?: string
   [key: string]: unknown
+}
+
+export function stageHasEvidence(evidence: unknown): boolean {
+  return evidence !== null
+    && typeof evidence === 'object'
+    && Object.keys(evidence as object).length > 0
 }
 
 /** What a stage's spawned agent is doing between the rows that reach

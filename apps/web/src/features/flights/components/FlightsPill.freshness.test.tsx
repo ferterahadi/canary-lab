@@ -33,6 +33,13 @@ const stateSummary = (state: 'current' | 'stale'): CoverageStateSummary => ({
   coveragePct: state === 'stale' ? null : 35.7,
   freshness: freshness(state),
 })
+const missingRequirements = (): CoverageStateSummary => ({
+  ...stateSummary('current'), coverage: 'absent', coveragePct: null,
+  freshness: {
+    ...freshness('current'), state: 'not-measured', reasons: ['Requirements have not been generated.'],
+    nextAction: { stage: 'prd-summary', command: 'start_external_summary', label: 'Generate requirements & coverage', arguments: { feature: 'cns_better_auth' } },
+  },
+})
 
 let container: HTMLDivElement
 let root: Root
@@ -82,9 +89,9 @@ describe('Flights picker coverage freshness', () => {
     await act(async () => invalidateCoverage())
     expect(document.querySelector('[data-testid="derived-open-cns_better_auth"]')).toBe(row)
     expect(cell().style.background).toContain('var(--warning)')
-    expect(cell().getAttribute('aria-label')).toBe('Tests & coverage — stale')
+    expect(cell().getAttribute('aria-label')).toBe('Tests & coverage — Coverage out of date.')
     act(() => cell().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
-    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Tests & coverage — stale')
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Tests & coverage — Coverage out of date.')
     act(() => cell().dispatchEvent(new MouseEvent('mouseout', { bubbles: true })))
     expect(row.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Idle')
     expect(document.querySelector('button[aria-pressed="false"]')?.textContent).toContain('Needs input 0')
@@ -111,8 +118,49 @@ describe('Flights picker coverage freshness', () => {
     const row = document.querySelector<HTMLElement>('[data-testid="flight-open-fl_auth"]')!
     const cell = row.querySelector<HTMLElement>('[data-testid="stage-mini-cell-specs-coverage"]')!
     expect(cell.style.background).toContain('var(--warning)')
-    expect(cell.getAttribute('aria-label')).toBe('Tests & coverage — stale')
+    expect(cell.getAttribute('aria-label')).toBe('Tests & coverage — Coverage out of date.')
     expect(row.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Done')
     expect(flight.stages?.find((stage) => stage.key === 'specs-coverage')?.status).toBe('done')
+  })
+
+  it('marks Requirements and Tests & coverage together when requirements are missing, then clears both live', async () => {
+    let current: CoverageStateSummary = missingRequirements()
+    listCoverageStates.mockImplementation(async () => [current])
+    const stages = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'scout' ? 'done' as const : 'pending' as const }))
+    await act(async () => root.render(<InvalidationProvider>
+      <InvalidationTap />
+      <FlightsPill flights={[]} features={[{ name: 'cns_better_auth', stages }]} open onOpenFlight={vi.fn()} />
+    </InvalidationProvider>))
+
+    const row = document.querySelector<HTMLButtonElement>('[data-testid="derived-open-cns_better_auth"]')!
+    const cell = (key: string) => row.querySelector<HTMLElement>(`[data-testid="stage-mini-cell-${key}"]`)!
+    for (const key of ['docs', 'specs-coverage']) {
+      expect(cell(key).style.background).toContain('var(--warning)')
+      expect(cell(key).getAttribute('aria-label')).toContain('Requirements missing; coverage not measured.')
+    }
+    expect(cell('scout').style.background).toContain('var(--success)')
+    expect(cell('run').style.background).toContain('var(--border-default)')
+    expect(row.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Idle')
+
+    current = stateSummary('current')
+    await act(async () => invalidateCoverage())
+    expect(document.querySelector('[data-testid="derived-open-cns_better_auth"]')).toBe(row)
+    for (const key of ['docs', 'specs-coverage']) {
+      expect(cell(key).style.background).toContain('var(--border-default)')
+      expect(cell(key).getAttribute('aria-label')).toContain('pending')
+    }
+  })
+
+  it('keeps an untouched feature muted because it has no Flight detail yet', async () => {
+    listCoverageStates.mockResolvedValue([missingRequirements()])
+    const stages = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const }))
+    await act(async () => root.render(<InvalidationProvider>
+      <FlightsPill flights={[]} features={[{ name: 'cns_better_auth', stages }]} open onOpenFlight={vi.fn()} />
+    </InvalidationProvider>))
+    const row = document.querySelector<HTMLButtonElement>('[data-testid="not-flown-cns_better_auth"]')!
+    const docs = row.querySelector<HTMLElement>('[data-testid="stage-mini-cell-docs"]')!
+    expect(docs.getAttribute('aria-label')).toBe('Requirements — pending')
+    expect(docs.style.background).toContain('var(--border-default)')
+    expect(docs.parentElement?.parentElement?.style.opacity).toBe('0.55')
   })
 })

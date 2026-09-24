@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import type { FlightIndexEntry, FlightStageKey, FlightStageStatus, PlanFeaturesTask } from '@/shared/api/client'
+import type { PortifyIndexEntry } from '@/shared/api/client'
+import type { CoverageJobIndexEntry } from '@/shared/api/types'
 import type { FeatureActivity } from '../state/feature-activity'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { FLIGHT_STATUS_TONE, featureActivityRows, featureChipState, preFlightChipState } from './FlightChipState'
@@ -17,6 +19,8 @@ export function FlightsPill({
   preFlights = [],
   activity = new Map(),
   features = [],
+  coverageJobs = [],
+  portifyWorkflows = [],
   open: controlledOpen,
   onOpenChange,
   onOpenFlight,
@@ -30,6 +34,8 @@ export function FlightsPill({
   preFlights?: PlanFeaturesTask[]
   /** Per-feature live activity (runs / portify / authoring) from useFeatureActivity — App owns it. */
   activity?: Map<string, FeatureActivity>
+  coverageJobs?: CoverageJobIndexEntry[]
+  portifyWorkflows?: PortifyIndexEntry[]
   /** Every workspace feature — the picker lists them 1:1 (R49) and groups those
    *  that declare a `group` under a disclosure (R55). `stages` is the feature's
    *  evidence-derived rail (derived-stages.ts) for flightless rows. */
@@ -132,6 +138,8 @@ export function FlightsPill({
           preFlights={preFlightRows}
           activity={activity}
           features={features}
+          coverageJobs={coverageJobs}
+          portifyWorkflows={portifyWorkflows}
           onPick={(id) => { setOpen(false); onOpenFlight(id) }}
           onPickActivity={(feature, act) => { setOpen(false); onOpenActivity?.(feature, act) }}
           onStartFlight={(feature) => { setOpen(false); onStartFlight?.(feature) }}

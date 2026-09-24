@@ -100,7 +100,7 @@ export function App() {
   // R26: per-feature live activity (runs / portify / authoring) — the one
   // instance behind the Flights pill and the flights landing list. Clicking an
   // activity-only row opens the activity's REAL surface.
-  const { activity: featureActivity, externalHistory: featureExternalHistory, coverageJobs } = useFeatureWorkState()
+  const { activity: featureActivity, externalHistory: featureExternalHistory, coverageJobs, portifyWorkflows } = useFeatureWorkState()
   const selectedFeatureActivity = selectedFeature ? featureActivity.get(selectedFeature) : undefined
   const coverageJobVersion = coverageJobs.map((job) => `${job.jobId}:${job.status}`).join('|')
   const seenCoverageJobVersion = useRef(coverageJobVersion)
@@ -532,6 +532,8 @@ export function App() {
         onOpenPreFlight={(taskId) => { setResumePlanTaskId(taskId); setFlightStartNew(true) }}
         activity={featureActivity}
         derivedStages={derivedStages}
+        coverageJobs={coverageJobs}
+        portifyWorkflows={portifyWorkflows}
         demoAvailable={demo.available}
         demoUnseen={demo.unseen}
         onOpenDemo={() => { demo.markSeen(); setDemoOpen(true) }}

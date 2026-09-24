@@ -75,6 +75,7 @@ export interface FeatureWorkState {
   activity: Map<string, FeatureActivity>
   externalHistory: FeatureExternalHistory
   coverageJobs: CoverageJobIndexEntry[]
+  portifyWorkflows: PortifyIndexEntry[]
 }
 
 /** Which flight stage a standalone activity kind maps onto — so an
@@ -408,6 +409,7 @@ export function useFeatureWorkState(): FeatureWorkState {
   )
   return useMemo(() => ({
     coverageJobs: coverageJobs ?? [],
+    portifyWorkflows: workflows,
     activity: deriveFeatureActivity({
       activeRuns: runs,
       portifyWorkflows: workflows,
