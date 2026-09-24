@@ -384,6 +384,18 @@ describe('makeRestartExternalRun — rejections', () => {
     })
   })
 
+  it('409s a legacy perturbation run without claiming an external heal session', async () => {
+    const retiredFields = { perturbation: {} }
+    writeRunManifest({ runId: 'legacy', ...retiredFields })
+
+    await expect(build()('legacy', healReq())).rejects.toMatchObject({
+      message: 'This run used a retired perturbation and cannot be restarted; start a new run.',
+      statusCode: 409,
+    })
+    expect(claims).toEqual([])
+    expect(orchHarness.options).toEqual([])
+  })
+
   it('409s a run that is still active', async () => {
     writeRunManifest({ runId: 'r-1', status: 'healing' })
     await expect(build()('r-1', healReq())).rejects.toMatchObject({

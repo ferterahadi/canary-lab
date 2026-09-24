@@ -289,6 +289,62 @@ describe('reopenStages', () => {
     expect(reopened.links).toBeUndefined()
   })
 
+  it('chooses the earliest requested stage and clears the run evidence it invalidates', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    store.save({
+      ...store.get(manifest.flightId)!,
+      links: { runId: 'run-1', evaluationTaskId: 'export-1' },
+      runVerdict: 'failed',
+    })
+
+    const reopened = reopenStages(manifest.flightId, ['run', 'docs'], deps(allDone()))!
+
+    expect(reopened.currentStage).toBe('docs')
+    expect(reopened.links).toBeUndefined()
+    expect(reopened.runVerdict).toBeUndefined()
+    expect(reopened.stages.find((stage) => stage.key === 'docs')?.status).toBe('pending')
+    expect(reopened.stages.find((stage) => stage.key === 'run')?.status).toBe('pending')
+  })
+
+  it('keeps run evidence when only the evaluation export is reopened', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    const saved = store.get(manifest.flightId)!
+    store.save({
+      ...saved,
+      links: { runId: 'run-1', evaluationTaskId: 'export-1', evaluationZip: '/tmp/export.zip' },
+      runVerdict: 'passed',
+    })
+
+    const reopened = reopenStages(manifest.flightId, ['evaluation-export'], deps(allDone()))!
+
+    expect(reopened.links).toEqual({ runId: 'run-1' })
+    expect(reopened.runVerdict).toBe('passed')
+    expect(reopened.stages.find((stage) => stage.key === 'run')?.status).toBe('done')
+    expect(reopened.stages.find((stage) => stage.key === 'evaluation-export')?.status).toBe('pending')
+
+    store.save({ ...saved, links: undefined })
+    expect(reopenStages(manifest.flightId, ['evaluation-export'], deps(allDone()))?.links).toBeUndefined()
+  })
+
+  it('keeps the run and evaluation export when only portify is reopened', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    store.save({
+      ...store.get(manifest.flightId)!,
+      links: { runId: 'run-1', evaluationTaskId: 'export-1' },
+      runVerdict: 'passed',
+    })
+
+    const reopened = reopenStages(manifest.flightId, ['portify'], deps(allDone()))!
+
+    expect(reopened.links).toEqual({ runId: 'run-1', evaluationTaskId: 'export-1' })
+    expect(reopened.runVerdict).toBe('passed')
+    expect(reopened.stages.find((stage) => stage.key === 'portify')?.status).toBe('pending')
+    expect(reopened.stages.find((stage) => stage.key === 'evaluation-export')?.status).toBe('done')
+  })
+
   it('is a no-op on an active flight (the running conductor owns it)', async () => {
     const adapters = allDone()
     adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }

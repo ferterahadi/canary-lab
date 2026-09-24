@@ -227,6 +227,15 @@ describe('makeRestartLocalHeal — rejections', () => {
     expect(fakeOrch.built).toHaveLength(0)
   })
 
+  it('refuses a legacy perturbation run before starting a heal agent', async () => {
+    writeFeature('demo')
+    const retiredFields = { perturbation: {} }
+    seedRun('legacy', { status: 'failed', ...retiredFields })
+
+    expect(await harness().restart('legacy', 'go')).toEqual({ ok: false, reason: 'not-restartable' })
+    expect(fakeOrch.built).toEqual([])
+  })
+
   it('refuses a verification execution, which has no heal loop to restart', async () => {
     writeFeature('demo')
     seedRun('v1', { executionType: 'verify' })

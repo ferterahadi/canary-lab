@@ -1278,6 +1278,16 @@ describe('restartRun — refusals', () => {
     expect(await h.deps.restartRun!('ghost')).toEqual({ ok: false, reason: 'run-not-found' })
   })
 
+  it('refuses a legacy perturbation run before constructing an orchestrator', async () => {
+    const h = harness()
+    writeFeature('demo')
+    const retiredFields = { perturbation: {} }
+    seedRun(h.runStore, 'legacy', { status: 'failed', ...retiredFields })
+
+    expect(await h.deps.restartRun!('legacy')).toEqual({ ok: false, reason: 'not-restartable' })
+    expect(orchHarness.options).toEqual([])
+  })
+
   it('refuses a verification execution, which is re-run from its own surface', async () => {
     const h = harness()
     writeFeature('demo')

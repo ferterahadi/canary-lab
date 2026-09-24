@@ -88,6 +88,13 @@ async function build(opts: {
 }
 
 describe('POST /api/runs', () => {
+  it('400s when the request has no body', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs' })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ error: 'feature required' })
+  })
+
   it('400s when feature missing from body', async () => {
     const { app } = await build()
     const res = await app.inject({ method: 'POST', url: '/api/runs', payload: {} })
