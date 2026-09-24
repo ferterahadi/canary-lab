@@ -1,6 +1,24 @@
 # Changelog
 
 All notable changes to Canary Lab are listed here. We try to keep the language plain so anyone can follow along.
+
+### Product milestones
+
+| Version | Theme | What changed for you |
+| --- | --- | --- |
+| 2.3.x | Verification Integrity | See which tests actually ran, review later edits, and tell whether requirement proof is still current. |
+| 2.2.x | Model Choice | Choose the model and reasoning effort for each agent step. |
+| 2.1.x | Tests in Plain English | Read and navigate test behavior without working through source code first. |
+| 2.0.x | Flight | Take a repository and testing goal through setup, requirements, tests, a real run, and an evaluation report. |
+| 1.5.x | Test Change Tracking | See when a test changed after a trusted run. |
+| 1.4.x | Verified Coverage | Map requirements to tests and see the gaps. |
+| 1.3.x | Parallel Readiness | Prepare suites to run alongside other work and manage their stored runs. |
+| 1.2.x | Concurrent Runs | Run independent suites together and queue work when resources conflict. |
+| 1.1.x | MCP Integration | Connect Model Context Protocol (MCP) clients such as Claude and Codex to start runs and work from saved evidence. |
+| 1.0.x | Local UI | Run and inspect Canary Lab from one local web interface. |
+
+Planned versions are in the [roadmap](ROADMAP.md).
+
 ---
 Each entry is tagged with the area it touches:
 
@@ -15,40 +33,42 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 2.3.0 — Unreleased
+## 2.3.0 — Verification Integrity (Unreleased)
 
 > After upgrading, run `npx canary-lab upgrade`, then restart connected agent apps, to refresh Flight and Portify instructions.
 
-- **[General]** **Boot checks and requirements work run together.** Flight starts both after setup, waits for both before authoring tests, and keeps completed requirements when boot needs a retry.
-- **[Test Generation]** **Requirements need fewer agent handoffs.** Document collection can also produce the structured requirements draft. Flight validates it through the usual summary checks and uses a separate summary session when the draft is missing, invalid, or stale.
-- **[Test Generation]** **Spec validation runs in parallel.** Playwright test discovery and TypeScript checks run together, with both results checked before Flight continues.
-- **[Coverage]** **Unchanged coverage decisions are reused.** Flight avoids asking the mapper about the same test and requirement inputs again, including tests it previously could not map. Changes to tests, helpers, supporting files, configuration, dependencies, or requirement definitions invalidate reuse; test execution and coverage verification still run.
-- **[Portify]** **Parallel-ready suites can finish setup without an agent.** Portify first verifies suites that already declare configurable ports with two simultaneous boots on different ports. Healthy suites finish without edits; failed checks give the repair agent the boot diagnostics.
+Canary Lab now keeps the test version a run executed separate from later edits, and shows when requirement proof needs another run.
+
+- **[Test Runner]** **A run keeps the tests it actually executed.** Tests run from a copy made at the start; edits made during the run are recorded separately and cannot change its result.
+- **[Test Runner]** **Test changes get an exact review.** Compare the recorded and current files in English or code, then restore them or accept and commit the reviewed version. Connected agents can request this decision, but only a person can make it.
+- **[Test Runner]** **Possible weakening is flagged as a hint.** Canary Lab can point to an edit that may make a test easier to pass; the hint is advisory and never changes the run result.
+- **[Test Runner]** **Current and recorded test cases stay distinct.** New, changed, and removed cases are visible, while a current test cannot inherit a pass badge from an older run.
+- **[Coverage]** **Requirement coverage separates claims from proof.** See what tests claim to cover, what the latest run actually passed, and whether a test or requirement changed after that proof.
+- **[Coverage]** **Stale coverage points to the work to redo.** Changed documents, tests, or mappings stop showing old coverage as current; Flight offers recovery from the affected step.
+- **[Test Generation]** **Flight gets to test authoring sooner.** Boot checks and requirements work start together, and document collection can provide a validated requirements draft without a second agent session.
+- **[Test Generation]** **New tests are checked sooner.** Playwright discovery and TypeScript validation run together, and Flight checks both results before continuing.
+- **[Coverage]** **Unchanged mappings are reused.** Flight keeps earlier decisions for unchanged inputs, including tests it could not map, while still running tests and checking proof.
+- **[Portify]** **Already parallel-ready suites need no repair agent.** Portify verifies them with two simultaneous boots on different ports; failures show the boot diagnostics.
 
 ---
 
-## 2.2.1 — 2026-08-31
-
-- **[General]** **Flight stages keep one stable layout.** Every stage preserves the same At a Glance tiles and evidence panels while pending, running, failed, or complete, using consistent placeholders whenever evidence is unavailable.
-- **[Test Runner]** **Run history stays honest and predictable.** Test Run always shows runs performed, successes, and average duration, while missing measurements remain placeholders instead of zeroes or repair-cycle counts.
-- **[Export evaluation]** **Reports keep their full evidence view.** The Report stage always shows its four verification tiles and streams export work into the same Activity rail used by every other stage.
-- **[Test Generation]** **Requirements work has one history.** Flight keeps document collection and requirement summarization in one ordered Activity timeline, including older Flights that recorded them separately.
-- **[General]** **Changed tests stay visible in plain English.** Modified executable steps are marked directly in the readable view, with an exact-diff prompt when changed source has no English step.
-
----
-
-## 2.2.0 — 2026-08-30
+## 2.2.x — Model Choice (2026-08-30 to 2026-08-31)
 
 > Run `npx canary-lab upgrade`, then restart connected agent apps, to refresh Canary Lab skills.
 
 - **[General]** **Internal agent work now has a model plan.** Choose the model and reasoning effort for each step, keep separate Claude and Codex plans, optionally review the choices at launch, and see the locked plan on each run, Flight, or coverage record.
+- **[General]** **Flight stages keep one stable layout.** Every stage preserves the same At a Glance tiles and evidence panels while pending, running, failed, or complete, using consistent placeholders whenever evidence is unavailable.
+- **[Test Generation]** **Requirements work has one history.** Flight keeps document collection and requirement summarization in one ordered Activity timeline, including older Flights that recorded them separately.
+- **[Test Runner]** **Run history stays honest and predictable.** Test Run always shows runs performed, successes, and average duration, while missing measurements remain placeholders instead of zeroes or repair-cycle counts.
+- **[Export evaluation]** **Reports keep their full evidence view.** The Report stage always shows its four verification tiles and streams export work into the same Activity rail used by every other stage.
+- **[General]** **Changed tests stay visible in plain English.** Modified executable steps are marked directly in the readable view, with an exact-diff prompt when changed source has no English step.
 - **[General]** **Code stays readable in narrow panels.** Long source lines now wrap inside the code view while line numbers stay in a separate gutter and out of copied code.
 - **[Portify]** **Parallel setup can run beside the rest of a Flight.** Start it as soon as the suite exists; Flight follows the same workflow when it reaches that step, so work is not duplicated and review stays in one place.
 - **[General]** **Flight planning can be stopped cleanly.** Cancelling a background plan now ends its agent processes and prevents a late result from starting a Flight.
 
 ---
 
-## 2.1.0 — 2026-08-28
+## 2.1.0 — Tests in Plain English (2026-08-28)
 
 > Run `npx canary-lab upgrade`, then restart connected agent apps, to refresh Canary Lab skills and switch existing connections to the compact profile.
 
@@ -62,9 +82,11 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 2.0.x — 2026-08-25
+## 2.0.x — Flight (2026-08-25)
 
 > **Upgrading from 1.5.x:** install Node 22.12+, run `npm install --save-dev canary-lab@2 && npx canary-lab upgrade`, then restart Canary Lab and connected agent apps.
+
+Flight is a guided workflow that starts with a repository and a testing goal, then takes them through setup, requirements, Playwright test authoring, coverage, a real run, and a reviewable evaluation report.
 
 - **[General]** **Flight is now the main workflow.** It guides a repo through seven steps: scan, setup, requirements, test authoring and coverage, parallel readiness, test run, and evaluation report.
   - Start from the UI by choosing repos and describing what to test, or run `npx canary-lab flight <repo...> "<what to test>"`.
@@ -83,7 +105,7 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 1.5.x — 2026-07-01 to 2026-07-03
+## 1.5.x — Test Change Tracking (2026-07-01 to 2026-07-03)
 
 > Node 20.19+ (or 22.12+) is now required — see Breaking changes.
 
@@ -99,7 +121,7 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 1.4.x — 2026-06-26 to 2026-06-30
+## 1.4.x — Verified Coverage (2026-06-26 to 2026-06-30)
 
 - **[Coverage]** **The Verified Coverage Ledger maps requirements to tests.** Coverage is calculated from the paths and variants that have mapped tests, not guessed. Agents add reviewable requirement tags in the background, and you can reset the ledger when needed.
 - **[Test Runner]** **Runs stop and start healing after two failures by default.** This gives the repair agent useful evidence without waiting for the full suite. You can disable the limit per feature.
@@ -115,7 +137,7 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 1.3.x — 2026-06-14 to 2026-06-16
+## 1.3.x — Parallel Readiness (2026-06-14 to 2026-06-16)
 
 > MCP server is renamed to `Canary_Lab` — run `npx canary-lab setup --force` and restart your agent after upgrading.
 
@@ -130,7 +152,7 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 1.2.0 — 2026-06-01
+## 1.2.0 — Concurrent Runs (2026-06-01)
 
 > Run `npx canary-lab upgrade` to refresh your sample features so they pick up per-run ports for concurrent runs.
 
@@ -139,7 +161,7 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 1.1.0 — 2026-05-28
+## 1.1.x — MCP Integration (2026-05-28)
 
 > Canary Lab can now be controlled from Codex, Claude, and other MCP clients. Run `npx canary-lab setup` after upgrading to refresh the connection.
 
@@ -150,7 +172,7 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 1.0.x — 2026-04-30 to 2026-05-17
+## 1.0.x — Local UI (2026-04-30 to 2026-05-17)
 
 > Canary Lab now runs from a local web UI with `canary-lab ui`. Run `npx canary-lab upgrade` after upgrading to refresh managed workspace files.
 >

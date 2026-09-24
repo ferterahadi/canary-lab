@@ -151,6 +151,7 @@ Restart Canary Lab and connected agent apps afterwards so they load the refreshe
 | Document | What it covers |
 | --- | --- |
 | [Changelog](docs/CHANGELOG.md) | Release history. |
+| [Roadmap](docs/ROADMAP.md) | Planned product milestones and their evidence bars. |
 | [Guide](docs/GUIDE.md) | Environment switching, run output, repairs, and evaluation reports. |
 | [Commands](docs/COMMANDS.md) | Full CLI and trigger-surface reference. |
 | [Suite Folders](docs/FEATURES.md) | Suite structure, configuration, and Playwright tests. |
