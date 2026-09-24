@@ -93,8 +93,9 @@ export function stageRailRows(
     .map((key) => byKey.get(key))
     .filter((stage): stage is (typeof stages)[number] => stage != null)
   // Preserve forward compatibility with a newer server that sends an unknown
-  // stage: known rows follow Flight priority; unknown rows remain visible last.
-  orderedStages.push(...stages.filter((stage) => !knownKeys.has(stage.key)))
+  // stage. The retired Lab stage can still exist in historical manifests but
+  // does not have a panel, so omit it from the rail.
+  orderedStages.push(...stages.filter((stage) => !knownKeys.has(stage.key) && stage.key !== 'robustness'))
 
   for (const raw of orderedStages) {
     // `presented`, not `settled`: a stage parked on a hand-off to the user's own

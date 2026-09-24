@@ -475,12 +475,6 @@ describe('useWorkspaceData — workspace events', () => {
     expect(harness.invalidated).toEqual([['coverage', undefined]])
   })
 
-  it('invalidates the robustness slot on a robustness job write', async () => {
-    await mount()
-    await fire({ type: 'robustness-changed', feature: 'checkout' })
-    expect(harness.invalidated).toEqual([['robustness', undefined]])
-  })
-
   it('invalidates coverage and re-reads features on a coverage change', async () => {
     await mount()
     const before = api.listFeatures.mock.calls.length
@@ -570,7 +564,7 @@ describe('useWorkspaceData — server reconnect resync', () => {
     await fire({ type: 'connected' })
 
     expect(harness.invalidated).toEqual([
-      ['repos', undefined], ['tests', undefined], ['coverage', undefined], ['robustness', undefined],
+      ['repos', undefined], ['tests', undefined], ['coverage', undefined],
       ['verification', undefined], ['journal', 'r1'], ['flights', undefined],
       ['project-config', undefined], ['onboarding', undefined], ['notifications', undefined],
     ])

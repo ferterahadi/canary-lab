@@ -457,7 +457,7 @@ describe('start_flight — typed refusals', () => {
     // The caller needs the artifact boundaries before choosing a restart.
     expect(String(out.next)).toContain('from_stage resets only affected artifacts')
     expect(String(out.next)).toContain('Tests & coverage keeps Parallel setup')
-    expect(String(out.next)).toContain('Robustness Lab keeps the completed Report')
+    expect(String(out.next)).toContain('Parallel setup resets itself')
   })
 
   it('reports a null feature on the exists-choice when the caller named none', async () => {
@@ -862,33 +862,9 @@ describe('get_flight — steering per checkpoint kind', () => {
 
     expect(next).toContain('Report is ready')
     expect(next).toContain('/runs/evaluation.zip')
-    expect(next).toContain('Parallel setup and Robustness Lab')
+    expect(next).toContain('Parallel setup')
     expect(next).toContain('Tell the user now, then end your turn')
     expect(next).toContain('Do not keep polling')
-  })
-
-  it('offers a refreshed export after newer Robustness Lab findings without hiding the old Report', async () => {
-    const { call } = flightHarness({
-      reply: {
-        statusCode: 200,
-        body: {
-          flightId: 'fl-1',
-          feature: 'checkout',
-          status: 'done',
-          currentStage: null,
-          links: { runId: 'run-1', evaluationZip: '/runs/evaluation.zip' },
-          stages: [
-            { key: 'evaluation-export', status: 'done', endedAt: '2026-09-23T00:10:00Z' },
-            { key: 'robustness', status: 'done', endedAt: '2026-09-23T00:20:00Z', evidence: { jobId: 'lab-1', runId: 'run-1' } },
-          ],
-        },
-      },
-    })
-
-    const flight = await call('get_flight', { flightId: 'fl-1' })
-    expect(flight.reportRefreshAvailable).toBe(true)
-    expect(String(flight.next)).toContain('The current Report stays downloadable')
-    expect(String(flight.next)).toContain('from_stage:"evaluation-export"')
   })
 
   it('migrates a legacy external Parallel setup hand-off back to Canary after Report', async () => {

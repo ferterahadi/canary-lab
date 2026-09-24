@@ -27,9 +27,8 @@ const FINISHED_STATUSES: RunStatus[] = ['passed', 'failed', 'aborted']
 
 export function RunsListDialog({ onClose, onNavigateToRun }: Props) {
   const { runs: allRuns } = useRuns()
-  // Boot sessions live in the Services dialog; benchmark runs (arms + the
-  // validity-gate trial) live in the benchmark window; robustness cells live in
-  // their job's pane — none belongs here.
+  // Boot sessions live in Services; benchmark runs live in Benchmark.
+  // Historical auxiliary cells also stay out of the ordinary Runs list.
   const runs = allRuns.filter((r) => !isAuxiliaryExecution(r.executionType))
   const details = useRunDetails()
   // Finished runs are the long tail — collapsed by default so active work leads.

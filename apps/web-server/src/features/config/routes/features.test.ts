@@ -143,7 +143,6 @@ describe('GET /api/features', () => {
       specs: true,
       coverageMapping: 'absent',
       portInjectability: 'none',
-      robustness: false,
     })
     expect(body.find((f) => f.name === 'bare')?.evidence).toEqual({
       envCapture: false,
@@ -152,7 +151,6 @@ describe('GET /api/features', () => {
       specs: false,
       coverageMapping: 'absent',
       portInjectability: 'none',
-      robustness: false,
     })
   })
 

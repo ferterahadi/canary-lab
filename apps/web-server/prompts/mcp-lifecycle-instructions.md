@@ -2,7 +2,7 @@ Canary Lab workflows. Fix app/service code, not tests, unless a test is provably
 
 Read get_workflow_guide(workflow:"<name>").
 
-- repair — start_run(claim_heal:true, stable session_id, conversation_name) → wait_for_heal_task (still_waiting is not terminal; never poll) → fix the app YOURSELF → signal_run(hypothesis, fixDescription) → wait. Fresh stale coverage asks update-first or run-now; never choose; run-now stays coverageStale; reuse/run_ref is ungated. Runner verifies; do not run services/Playwright. Read passes from counts. Robustness: start_robustness → get_robustness → start_run(perturbation).
+- repair — start_run(claim_heal:true, stable session_id, conversation_name) → wait_for_heal_task (still_waiting is not terminal; never poll) → fix the app YOURSELF → signal_run(hypothesis, fixDescription) → wait. Fresh stale coverage asks update-first or run-now; never choose; run-now stays coverageStale; reuse/run_ref is ungated. Runner verifies; do not run services/Playwright. Read passes from counts.
 - verify — saved Verify configs: boot_services → execute_verification(targetUrls, playwrightEnvsetId, bootRunId) → get_verification_result.
 - author — create_feature for a NEW suite (do not list_features first); existing suites: write specs into features/<feature>/e2e tagged { tag: ['@req-R2'] }.
 - coverage — write_feature_doc → start/submit_external_summary → start/submit_external_coverage (EVERY test in mappings[] or unmappable[]) → get_feature_coverage and report from that ledger.

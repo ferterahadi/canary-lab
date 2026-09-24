@@ -96,7 +96,6 @@ export function deriveFeatureStages(
     'heal': runStatus,
     // A completed matrix on record — the server reads the job index, so a
     // failed or aborted lab (cells left unjudged) keeps the step open.
-    'robustness': ev.robustness ? 'done' : 'pending',
     'evaluation-export': hasExport ? 'done' : 'pending',
   }
   return FLIGHT_STAGE_KEYS.map((key) => ({

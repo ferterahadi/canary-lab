@@ -1,5 +1,4 @@
 import path from 'path'
-import type { RunPerturbation } from './perturbation/client-ports'
 import type { FeatureConfig, HealthProbe } from '../../../../../../../shared/launcher/types'
 import type { ExecutionType, VerificationRunMetadata } from '../../../../../../../shared/verification'
 import { type ExternalHealSession, type RunLifecycleAbortReason, type RunLifecycleEvent, type RunLifecycleRestartPlan, type RunLifecycleSeverity, type RunLifecycleTargetedRerun, type RepoBranchSnapshot, type RunManifest } from './manifest'
@@ -11,7 +10,6 @@ import type { RunnerLog } from './runner-log'
 import { type WorktreeHandle } from './repo-worktree'
 import type { PlaywrightSpawner } from './run-spawn'
 import type { RunModelPlan } from './run-model-plan'
-import type { PlaywrightRerunSelection } from './rerun-targets'
 import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
 import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 
@@ -43,9 +41,6 @@ export interface DirtySpecHooks {
 
 export interface OrchestratorOptions {
   feature: FeatureConfig
-  /** Boot under a robustness envelope (D14): the launcher allocates one shim
-   *  port per slot up front; the orchestrator starts the shims after health. */
-  perturbation?: RunPerturbation
   runId: string
   runDir: string
   // Repo root where the diagnosis journal lives (independent of the run dir).
@@ -132,11 +127,6 @@ export interface OrchestratorOptions {
   executionType?: ExecutionType
   verification?: VerificationRunMetadata
   playwrightEnv?: Record<string, string>
-  /** Run only these tests on the FIRST Playwright pass — a Robustness Lab cell
-   *  (one spec file under one atom). Playwright's inventory is then the
-   *  selection, so the verdict is the cell's, not the whole suite's. Absent on
-   *  every ordinary run, which starts with the full suite. */
-  initialSelection?: PlaywrightRerunSelection
   testReviewApproval?: RunTestReviewApproval
   /** Per-run allocated ports keyed by slot name (allocated by the start flow
    *  before construction). Resolves `${port.<slot>}` tokens and is injected as

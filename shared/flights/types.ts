@@ -3,7 +3,7 @@
 // A "flight" is the conducted onboarding pipeline behind `canary-lab flight`: one
 // background job that takes a bare product repo (or several) through
 // similarity → scout → scaffold → env-capture → docs → prd-summary →
-// specs-coverage → run → heal → evaluation-export → portify → robustness, pausing at typed
+// specs-coverage → run → heal → evaluation-export → portify, pausing at typed
 // human checkpoints. The conductor is a deterministic server-side stage
 // machine; agents are spawned per-stage for judgment work only, and every
 // stage verdict is computed by the harness (see docs/PRD.md's trust posture —
@@ -30,7 +30,6 @@ export const FLIGHT_STAGE_KEYS = [
   'portify',
   'run',
   'heal',
-  'robustness',
   'evaluation-export',
 ] as const
 
@@ -41,7 +40,6 @@ export type FlightStageKey = (typeof FLIGHT_STAGE_KEYS)[number]
  *  Parallel setup is independent of the serial Test run and the Report. The
  *  report therefore becomes available first; a large app can finish or retry
  *  its port-injection pass afterward without discarding that evidence.
- *  Robustness runs after Parallel setup so it can use the declared port slots.
  *  The stable record order above remains unchanged for persisted manifests. */
 export const FLIGHT_EXECUTION_ORDER = [
   'similarity',
@@ -55,14 +53,12 @@ export const FLIGHT_EXECUTION_ORDER = [
   'heal',
   'evaluation-export',
   'portify',
-  'robustness',
 ] as const satisfies readonly FlightStageKey[]
 
 /** Artifact boundaries for an explicit "from a step" restart. Keep this
  *  shared so the dialog describes the same reset the conductor performs. */
 export function flightStagesResetByEntry(entry: FlightStageKey): readonly FlightStageKey[] {
-  if (entry === 'portify') return ['portify', 'robustness']
-  if (entry === 'robustness') return ['robustness']
+  if (entry === 'portify') return ['portify']
   if (entry === 'evaluation-export') return ['evaluation-export']
   const resetsPortify = entry === 'similarity' || entry === 'scout'
     || entry === 'scaffold' || entry === 'env-capture'
@@ -89,10 +85,6 @@ export function flightStagesResetByEntry(entry: FlightStageKey): readonly Flight
  *    requirements — and the envset, because its validate pass compiles the specs.
  *  - `portify` double-boots services: config + envset, nothing else.
  *  - `run` executes specs: config + envset + specs.
- *  - `robustness` re-runs the GREEN run's spec files under the suite's
- *    perturbation envelope: it needs the run inventory and current port slots.
- *    Those slots may already be native to the suite, so Portify is not an
- *    entry prerequisite even though changing its overlay invalidates a Lab job.
  *  - `evaluation-export` builds its archive from the run record alone.
  *  - `heal` is driven by `run` and is refused as an entry point outright. */
 export const STAGE_DEPENDS_ON: Record<FlightStageKey, readonly FlightStageKey[]> = {
@@ -106,7 +98,6 @@ export const STAGE_DEPENDS_ON: Record<FlightStageKey, readonly FlightStageKey[]>
   'portify': ['scaffold', 'env-capture'],
   'run': ['scaffold', 'env-capture', 'specs-coverage'],
   'heal': ['run'],
-  'robustness': ['run'],
   'evaluation-export': ['run'],
 }
 
@@ -511,29 +502,10 @@ export interface FlightManifest {
   /** Pointers to the flight's deliverables. */
   links?: {
     runId?: string
-    /** The Robustness Lab job this flight started over `runId` — pinned at
-     *  START so a pause can stop it and a resume can re-attach to it. */
-    robustnessJobId?: string
     evaluationTaskId?: string
     /** Absolute path of the evaluation archive — the flight's deliverable. */
     evaluationZip?: string
   }
-}
-
-/** A completed Lab job newer than the pinned Report can be included by
- *  re-exporting the same run. The older archive remains valid and downloadable. */
-export function flightReportNeedsRefresh(flight: Pick<FlightManifest, 'stages' | 'links'>): boolean {
-  if (!flight.links?.evaluationZip || !flight.links.runId) return false
-  const stages = Array.isArray(flight.stages) ? flight.stages : []
-  const report = stages.find((stage) => stage.key === 'evaluation-export')
-  const lab = stages.find((stage) => stage.key === 'robustness')
-  if (report?.status !== 'done' || lab?.status !== 'done') return false
-  const evidence = lab.evidence as { jobId?: unknown; runId?: unknown } | undefined
-  if (typeof evidence?.jobId !== 'string' || evidence.runId !== flight.links.runId) return false
-  const reportFinishedAt = Date.parse(report.endedAt ?? '')
-  const labFinishedAt = Date.parse(lab.endedAt ?? '')
-  return Number.isFinite(reportFinishedAt) && Number.isFinite(labFinishedAt)
-    && labFinishedAt > reportFinishedAt
 }
 
 export interface FlightIndexEntry {

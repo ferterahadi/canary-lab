@@ -73,24 +73,6 @@ export function evaluationExportJob(deps: FlightStageDeps, taskId: string): Stag
   }
 }
 
-/** A Robustness Lab matrix: the cell run in flight plus every cell and shrink
- *  probe still queued behind it. The abort route settles the record as `aborted`
- *  with its findings so far — a pause must leave what was found readable — and
- *  answers idempotently for a job that already settled, so no status read is
- *  needed here. */
-export function robustnessJob(deps: FlightStageDeps, jobId: string): StageJob {
-  return {
-    id: jobId,
-    async stop() {
-      await deps.inject({
-        method: 'POST',
-        url: `/api/robustness/${encodeURIComponent(jobId)}/abort`,
-        payload: {},
-      })
-    },
-  }
-}
-
 /** The agents a stage spawned in this process. Reached by SCOPE rather than by
  *  handle: the spawn happens several layers down (inside `defaultSpawnAgent`, the
  *  PRD distiller, or the coverage annotator), none of which hand the handle back,

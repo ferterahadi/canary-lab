@@ -6,7 +6,7 @@ import { isRestartableRunStatus } from '../../../../../shared/run-state'
 import type { ClientKind } from '../../../../../shared/run-mode'
 import { type OrchestratorLike } from './logic/run-store'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
-import { allocatePerturbationPorts } from './logic/runtime/perturbation/run-perturbation'
+import { hasRetiredPerturbation } from './logic/runtime/manifest'
 import { PaneBroker } from './logic/pane-broker'
 import { loadFeatures } from '../../shared/feature-loader'
 import { httpFailure } from '../../shared/http-error'
@@ -137,6 +137,7 @@ export function makeRestartExternalRun(
   const detail = runStore.get(runId)
   if (!detail) throw Object.assign(new Error('run-not-found'), { statusCode: 404 })
   const manifest = detail.manifest
+  if (hasRetiredPerturbation(manifest)) throw Object.assign(new Error('This run used a retired perturbation and cannot be restarted; start a new run.'), { statusCode: 409 })
   if (!isRestartableRunStatus(manifest.status)) throw Object.assign(new Error('not-restartable'), { statusCode: 409 })
 
   const features = loadFeatures(featuresDir)
@@ -148,12 +149,10 @@ export function makeRestartExternalRun(
   const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
 
   const portMap = await allocateRunPorts(feature, env)
-  // A restart meets the same perturbation the original run booted under.
-  const perturbation = await allocatePerturbationPorts(manifest.perturbation?.envelope, portMap)
   let backups: BackupRecord[] | null = null
   if (env) {
     try {
-      backups = applyFeatureEnvset(feature.featureDir, env, perturbation?.shimPorts ?? portMap)
+      backups = applyFeatureEnvset(feature.featureDir, env, portMap)
       if (backups) runnerLog.info(`Applied envset "${env}" for external restart ${feature.name}`)
     } catch (err) {
       runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
@@ -193,7 +192,6 @@ export function makeRestartExternalRun(
       runId,
       runDir,
       portMap,
-      perturbation,
       ptyFactory,
       runnerLog,
       externalHeal: true,

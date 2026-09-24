@@ -17,21 +17,15 @@ import {
 import { completeExternalEvaluationExport, createExternalEvaluationExportTask } from '../../features/evaluation/logic/external-evaluation-export'
 import { applyEvaluationTextSlotRewrite, buildTestReviewPacket, deterministicEvaluationRewrite, normalizeEvaluationRewrite, type EvaluationRewrite } from '../../features/evaluation/logic/test-review-export'
 import { isTerminalRunStatus } from '../../../../../shared/run-state'
-import {
-  BEHAVIOR_CERTIFICATE_CHECKER_FILENAME,
-  BEHAVIOR_CERTIFICATE_FILENAME,
-  type BehaviorCertificate,
-} from '../../../../../shared/verification-strength/certificate'
+import type { BehaviorCertificate } from '../../../../../shared/verification-strength/certificate'
 import { type ToolGroupContext, asJsonResult, asToonResult, errorResult, evaluationRewriteInput, evaluationTextSlotInput, externalEvaluationReportSchema, failureResult, gettingStartedBusyResult } from '../tool-support'
 import { isAuxiliaryExecution } from '../../../../../shared/verification'
 
 type EvaluationExportToolView = EvaluationExportTaskView & {
   archivePath?: string
   reportInsideArchive?: 'evaluation.html'
-  /** The behavior certificate beside the zip, and its offline checker inside it. */
+  /** The internal behavior certificate beside the zip. */
   certificatePath?: string
-  certificateInsideArchive?: typeof BEHAVIOR_CERTIFICATE_FILENAME
-  checkerInsideArchive?: typeof BEHAVIOR_CERTIFICATE_CHECKER_FILENAME
   /** The certificate's headline, sized for a tool result; the full file is at
    *  `certificatePath` and comes inline only from download_evaluation_export. */
   certificate?: CertificateDigest
@@ -45,18 +39,13 @@ interface CertificateDigest {
   claims: { total: number; allPassed: number; someFailed: number; notRun: number; noTests: number }
   pendingSpecEdits: number | 'unknown'
   hints: number
-  /** The Robustness Lab block in one row (@2): cells judged, confirmed and
-   *  unconfirmed findings — or 'none' when no settled matrix ran against this
-   *  run. Each confirmed finding's repro is in the full file. */
-  robustness: { jobId: string; status: string; cells: { planned: number; judged: number; notRun: number }; findings: number; unconfirmed: number } | 'none'
   notProven: string[]
-  verifyOffline: string
 }
 
 /** What an agent relays about the certificate without paying for the whole
  *  file: the claim in one sentence, the counts, the suite check, what is not
  *  proven, and how a third party re-checks it. */
-export function certificateDigest(certificate: BehaviorCertificate, certificatePath: string): CertificateDigest {
+export function certificateDigest(certificate: BehaviorCertificate): CertificateDigest {
   const claims = { total: certificate.claims.length, allPassed: 0, someFailed: 0, notRun: 0, noTests: 0 }
   for (const claim of certificate.claims) {
     if (claim.outcome === 'all-passed') claims.allPassed += 1
@@ -72,11 +61,7 @@ export function certificateDigest(certificate: BehaviorCertificate, certificateP
     claims,
     pendingSpecEdits: certificate.specEdits ? certificate.specEdits.pending.length : 'unknown',
     hints: certificate.hints.length,
-    robustness: certificate.robustness
-      ? { jobId: certificate.robustness.jobId, status: certificate.robustness.status, cells: certificate.robustness.cells, findings: certificate.robustness.findings.length, unconfirmed: certificate.robustness.unconfirmed.length }
-      : 'none',
     notProven: certificate.notProven,
-    verifyOffline: `unzip the archive, then: node ${BEHAVIOR_CERTIFICATE_CHECKER_FILENAME} ${BEHAVIOR_CERTIFICATE_FILENAME}${'dir' in certificate.suite ? ` --suite ${JSON.stringify(certificate.suite.dir)}` : ''} — re-derives the spec hashes, the suite digest and every listed assertion from files on disk, with no Canary Lab code involved (certificate on this machine: ${certificatePath})`,
   }
 }
 
@@ -104,9 +89,7 @@ function evaluationExportToolView(logsDir: string, task: EvaluationExportTaskRec
   return {
     ...withArchive,
     certificatePath,
-    certificateInsideArchive: BEHAVIOR_CERTIFICATE_FILENAME,
-    checkerInsideArchive: BEHAVIOR_CERTIFICATE_CHECKER_FILENAME,
-    certificate: certificateDigest(certificate, certificatePath),
+    certificate: certificateDigest(certificate),
   }
 }
 

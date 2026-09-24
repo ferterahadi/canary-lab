@@ -32,7 +32,7 @@ describe('deriveFeatureStages', () => {
     const stages = deriveFeatureStages({ evidence: { envCapture: false, prdSummary: false, specs: false } })!
     expect(statusOf(stages, 'similarity')).toBe('done')
     expect(statusOf(stages, 'scout')).toBe('done')
-    for (const key of ['scaffold', 'env-capture', 'docs', 'prd-summary', 'specs-coverage', 'portify', 'run', 'heal', 'robustness', 'evaluation-export']) {
+    for (const key of ['scaffold', 'env-capture', 'docs', 'prd-summary', 'specs-coverage', 'portify', 'run', 'heal', 'evaluation-export']) {
       expect(statusOf(stages, key)).toBe('pending')
     }
   })
@@ -104,13 +104,6 @@ describe('deriveFeatureStages', () => {
     )!
     expect(statusOf(stages, 'portify')).toBe('done')
     expect(statusOf(stages, 'evaluation-export')).toBe('done')
-  })
-
-  it('a completed robustness matrix lights its cell; none leaves it pending', () => {
-    const base = { envCapture: false, prdSummary: false, specs: false }
-    expect(statusOf(deriveFeatureStages({ evidence: { ...base, robustness: true } })!, 'robustness')).toBe('done')
-    expect(statusOf(deriveFeatureStages({ evidence: { ...base, robustness: false } })!, 'robustness')).toBe('pending')
-    expect(statusOf(deriveFeatureStages({ evidence: base })!, 'robustness')).toBe('pending')
   })
 
   it('uses the external Portify stream as immediate derived-stage evidence', () => {

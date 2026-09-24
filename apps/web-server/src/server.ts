@@ -52,7 +52,6 @@ import { bridgeDraftEvents, readDraft, reconcileInterruptedDrafts } from './feat
 import { agentJobStore as sharedAgentJobStore, bridgeAgentJobEvents } from './features/agent-sessions/logic/agent-jobs/store'
 import { bridgeEvaluationExportEvents, readEvaluationExportTask } from './features/evaluation/logic/evaluation-export-store'
 import { bridgeCoverageJobEvents } from './features/coverage/logic/coverage/jobs/store'
-import { robustnessJobStore as sharedRobustnessJobStore, bridgeRobustnessJobEvents } from './features/runs/logic/robustness/store'
 import { runDirFor, buildRunPaths } from './features/runs/logic/runtime/run-paths'
 import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './features/runs/logic/runtime/orchestrator'
 import { RunScheduler, type SchedulerActiveRun } from './features/runs/logic/runtime/run-scheduler'
@@ -137,10 +136,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // show as live forever.
   const coverageJobStore = sharedCoverageJobStore(logsDir)
   coverageJobStore.reconcileInterrupted(() => new Date().toISOString())
-  // Robustness Lab jobs: same rule — a matrix left 'running' has no driver any
-  // more, so it is 'aborted' rather than a lock the suite can never reclaim.
-  const robustnessJobStore = sharedRobustnessJobStore(logsDir)
-  robustnessJobStore.reconcileInterrupted(() => new Date().toISOString())
   // Flight background jobs: a flight left 'running' belongs to a dead
   // process — flip it to 'paused' (flights are resumable by design: the stage
   // array records where to pick up) so it neither holds the repo-keyed
@@ -215,7 +210,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   bridgeDraftEvents(logsDir, workspaceEvents)
   bridgeEvaluationExportEvents(logsDir, workspaceEvents)
   bridgeCoverageJobEvents(coverageJobStore, workspaceEvents)
-  bridgeRobustnessJobEvents(robustnessJobStore, workspaceEvents)
   bridgeAgentJobEvents(agentJobs, workspaceEvents)
   const dirtySpecStore = new DirtySpecStore(logsDir)
   dirtySpecStore.onEvent((e) => {
@@ -326,7 +320,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     portifyStore,
     coverageJobStore,
     coverageMonitor,
-    robustnessJobStore,
     flightStore,
     planStore,
     dirtySpecStore,
@@ -383,12 +376,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const response = await app.inject({ method: request.method, url: request.url, payload: request.payload as Record<string, unknown> | undefined })
       return { statusCode: response.statusCode, body: response.json() }
     },
-    // Robustness Lab over MCP: the same routes the stage and the pane drive, so
-    // admission is judged in one place. Reads only (POST start, GET read/list).
-    robustnessRequest: async (request) => {
-      const response = await app.inject({ method: request.method, url: request.url, payload: request.payload as Record<string, unknown> | undefined })
-      return { statusCode: response.statusCode, body: response.json() }
-    },
     store: runStore,
     broker: externalHealBroker,
     featuresDir,
@@ -421,7 +408,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })() as unknown
       return { statusCode: resp.statusCode, body }
     },
-	    startRun: async (feature, env, healAgent, isolation, executionType, perturbation, updateRepos) => {
+	    startRun: async (feature, env, healAgent, isolation, executionType, updateRepos) => {
 	      const demoWorkflow = executionType === 'boot' ? null : gettingStartedRunWorkflow(feature)
 	      const resp = await app.inject({
 	        method: 'POST',
@@ -432,7 +419,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
             ...(healAgent ? { healAgent } : {}),
             ...(isolation ? { isolation } : {}),
             ...(executionType === 'boot' ? { mode: 'boot' } : {}),
-            ...(perturbation !== undefined ? { perturbation } : {}),
             ...(updateRepos !== undefined ? { updateRepos } : {}),
             ...(demoWorkflow
               ? { gettingStartedSource: 'external', gettingStartedWorkflow: demoWorkflow }

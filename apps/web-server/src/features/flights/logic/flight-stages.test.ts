@@ -88,6 +88,16 @@ describe('stage selection and entry validation', () => {
     expect(firstOpenStageIndex({ ...base, currentStage: null, stages: stages.map((stage) => ({ ...stage, status: 'done' as const })) })).toBe(-1)
   })
 
+  it('keeps a historical Lab stage out of the runnable Flight sequence', () => {
+    const done = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
+    for (const status of ['pending', 'running', 'waiting-for-approval'] as const) {
+      const stages = [...done, { key: 'robustness' as FlightStageKey, status }]
+      const base = { ...args(), flightId: 'fl-legacy', status: 'paused' as const, currentStage: 'robustness' as FlightStageKey, stages, createdAt: now(), updatedAt: now() }
+      expect(firstOpenStageIndex(base)).toBe(-1)
+      expect(firstOpenStageIndex({ ...base, stages: stages.map((stage) => stage.key === 'run' ? { ...stage, status: 'pending' as const } : stage) })).toBe(FLIGHT_STAGE_KEYS.indexOf('run'))
+    }
+  })
+
   it('banks only positive active work and leaves a parked stage unchanged', () => {
     const running = { key: 'docs' as const, status: 'running' as const, activeSince: '2026-01-01T00:00:10Z', activeMs: 50 }
     expect(bankStageActivity(running, '2026-01-01T00:00:13Z')).toMatchObject({ activeMs: 3050, activeSince: undefined })
@@ -201,7 +211,7 @@ describe('jump', () => {
       expect(s.status).toBe('skipped')
       expect(s.skipReason).toBe('rerun of existing feature')
     }
-    expect(calls).toEqual(['similarity', 'run', 'heal', 'evaluation-export', 'portify', 'robustness'])
+    expect(calls).toEqual(['similarity', 'run', 'heal', 'evaluation-export', 'portify'])
   })
 
   it('treats a backwards jump as a machine bug and parks the flight', async () => {
@@ -273,7 +283,7 @@ describe('reopenStages', () => {
     for (const key of ['similarity', 'scout', 'scaffold', 'env-capture', 'portify'] as const) {
       expect(reopened.stages.find((s) => s.key === key)!.status).toBe('done')
     }
-    for (const key of ['docs', 'prd-summary', 'specs-coverage', 'run', 'heal', 'robustness', 'evaluation-export'] as const) {
+    for (const key of ['docs', 'prd-summary', 'specs-coverage', 'run', 'heal', 'evaluation-export'] as const) {
       expect(reopened.stages.find((s) => s.key === key)!.status).toBe('pending')
     }
     expect(reopened.links).toBeUndefined()
@@ -388,12 +398,12 @@ describe('restart wipe (R78)', () => {
     await jumped.completion
 
     expect(events.filter((event) => event.startsWith('reset:'))).toEqual([
-      'reset:specs-coverage', 'reset:run', 'reset:heal', 'reset:robustness', 'reset:evaluation-export',
+      'reset:specs-coverage', 'reset:run', 'reset:heal', 'reset:evaluation-export',
     ])
     expect(fs.existsSync(path.join(flightDir, 'portify', 'agent-session.json'))).toBe(true)
   })
 
-  it('jumping to Parallel setup resets it and the Lab, while preserving Test run and Report', async () => {
+  it('jumping to Parallel setup resets it while preserving Test run and Report', async () => {
     const events: string[] = []
     const d: FlightConductorDeps = { ...deps(recordingAdapters(events)), validateStageEntry: () => null }
     const first = startFlight(args(), d)
@@ -408,7 +418,7 @@ describe('restart wipe (R78)', () => {
     const jumped = startFlight({ ...args(), mode: 'jump' as const, fromStage: 'portify' as const }, d)
     await jumped.completion
 
-    expect(events.filter((event) => event.startsWith('reset:'))).toEqual(['reset:portify', 'reset:robustness'])
+    expect(events.filter((event) => event.startsWith('reset:'))).toEqual(['reset:portify'])
     expect(fs.existsSync(path.join(flightDir, 'portify'))).toBe(false)
     expect(fs.existsSync(path.join(flightDir, 'run'))).toBe(true)
     expect(fs.existsSync(path.join(flightDir, 'evaluation-export'))).toBe(true)

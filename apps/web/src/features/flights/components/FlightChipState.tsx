@@ -72,7 +72,6 @@ export const ACTIVITY_CHIP: Record<FeatureActivityKind, { label: string; title: 
   'healing': { label: 'repairing', title: 'A repair agent is fixing the app so the failing tests pass', tone: 'var(--warning)' },
   'running': { label: 'running', title: 'Test run in progress', tone: FLIGHT_STATUS_TONE['running'] },
   'exporting': { label: 'exporting', title: 'Building the evaluation report', tone: FLIGHT_STATUS_TONE['running'] },
-  'perturbing': { label: 'perturbing', title: 'Booting the tests under perturbation', tone: FLIGHT_STATUS_TONE['running'] },
   'portifying': { label: 'port setup', title: 'Making the suite safe to run two at a time', tone: FLIGHT_STATUS_TONE['running'] },
   'authoring': { label: 'writing', title: 'Writing tests', tone: FLIGHT_STATUS_TONE['running'] },
   'verifying': { label: 'verifying', title: 'Verifying the suite against a deployed environment', tone: FLIGHT_STATUS_TONE['running'] },
@@ -109,7 +108,6 @@ export const RUNNING_STAGE_CHIP: Record<FlightStageKey, string> = {
   'portify': 'port setup',
   'run': 'running',
   'heal': 'repairing',
-  'robustness': 'perturbing',
   'evaluation-export': 'exporting',
 }
 
@@ -196,7 +194,7 @@ export function featureChipState(
   // (stage-failed, restart, user) fall through to the resting branches below,
   // because those are states, not demands.
   if (isExternalWorkPark(flight) || (flight?.status === 'waiting-for-approval' && isExternallyDriven(flight))) {
-    const verb = flight?.currentStage ? RUNNING_STAGE_CHIP[flight.currentStage] : 'running'
+    const verb = flight?.currentStage ? RUNNING_STAGE_CHIP[flight.currentStage] ?? 'running' : 'running'
     return { label: verb, tone: FLIGHT_STATUS_TONE['running'], live: true, rank: 1, title: externalWorkChipTitle(verb) }
   }
   if (flight?.status === 'waiting-for-approval') {
@@ -230,11 +228,11 @@ export function featureChipState(
     return {
       // The one remaining fallback is a flight with no stage recorded yet (just
       // launched) — every KNOWN stage now has its own verb.
-      label: flight.currentStage ? RUNNING_STAGE_CHIP[flight.currentStage] : 'running',
+      label: flight.currentStage ? RUNNING_STAGE_CHIP[flight.currentStage] ?? 'running' : 'running',
       tone: FLIGHT_STATUS_TONE['running'],
       live: true,
       rank: 1,
-      title: flight.currentStage ? stageLabel(flight.currentStage) : 'running',
+      title: flight.currentStage && RUNNING_STAGE_CHIP[flight.currentStage] ? stageLabel(flight.currentStage) : 'running',
     }
   }
   // R74: a pause the USER chose is a quiet resting state (shelving a flight is

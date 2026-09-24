@@ -7,7 +7,7 @@ import { pickConfiguredHealAgent } from './pick-heal-agent'
 import path from 'path'
 import { isRestartableRunStatus } from '../../../../../shared/run-state'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
-import { allocatePerturbationPorts } from './logic/runtime/perturbation/run-perturbation'
+import { hasRetiredPerturbation } from './logic/runtime/manifest'
 import type { ServerContext } from '../../server-context'
 import { loadFeatures } from '../../shared/feature-loader'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
@@ -49,6 +49,7 @@ export function makeRestartLocalHeal(
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
       const manifest = detail.manifest
+      if (hasRetiredPerturbation(manifest)) return { ok: false, reason: 'not-restartable' as const }
       if ((manifest.executionType ?? 'run') === 'verify') return { ok: false, reason: 'not-restartable' as const }
       if (!isRestartableRunStatus(manifest.status)) return { ok: false, reason: 'not-restartable' as const }
       if (manifest.healMode === 'manual') return { ok: false, reason: 'manual-mode' as const }
@@ -78,12 +79,10 @@ export function makeRestartLocalHeal(
         runnerLog.warn(`Restarting heal for legacy run without persisted env; defaulting to "${env}".`)
       }
       const portMap = await allocateRunPorts(feature, env)
-      // A restart meets the same perturbation the original run booted under.
-      const perturbation = await allocatePerturbationPorts(manifest.perturbation?.envelope, portMap)
       let backups: BackupRecord[] | null = null
       if (env) {
         try {
-          backups = applyFeatureEnvset(feature.featureDir, env, perturbation?.shimPorts ?? portMap)
+          backups = applyFeatureEnvset(feature.featureDir, env, portMap)
           if (backups) runnerLog.info(`Applied envset "${env}" for restarted heal ${feature.name}`)
         } catch (err) {
           runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
@@ -109,7 +108,6 @@ export function makeRestartLocalHeal(
           runId,
           runDir,
           portMap,
-          perturbation,
 	          ptyFactory,
           runnerLog,
           autoHeal: {

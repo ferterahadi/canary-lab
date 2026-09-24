@@ -3,10 +3,8 @@ import path from 'path'
 
 // The ten scripted repairs of the shipped storefront demo (templates/project/
 // demo-app), one per seeded heal defect, in the order the five journeys expose
-// them. Two consumers: `smoke:demo` applies one per heal cycle as the LLM-free
-// stand-in for a repair agent, and `tools/robustness-trials/` applies all ten
-// at once to build the GREEN app the perturbation trials run against. One
-// home, so the trials fixture can never drift from what the heal demo repairs.
+// them. `smoke:demo` applies one per heal cycle as the LLM-free stand-in for a
+// repair agent.
 
 export function replaceOnce(filePath, find, replacement) {
   const source = fs.readFileSync(filePath, 'utf-8')

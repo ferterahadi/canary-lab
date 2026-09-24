@@ -727,7 +727,7 @@ describe('startRun — worktree isolation', () => {
 
 describe('startRun — upstream tracking', () => {
   const startWith = (h: Harness, updateRepos: boolean | undefined) =>
-    h.deps.startRun('demo', undefined, undefined, undefined, undefined, undefined, undefined, undefined, { updateRepos })
+    h.deps.startRun('demo', undefined, undefined, undefined, undefined, undefined, { updateRepos })
 
   it('fast-forwards a tracked repo before the worktree is cut, and records the pull', async () => {
     const { from, to } = initBehindClone(repoDir)
@@ -1151,34 +1151,6 @@ describe('startRun — external heal origin', () => {
     expect(opts.externalHealSession).toBeUndefined()
     expect(h.claims).toEqual([])
     expect(runnerLogText(runId)).toContain("can't claim heal — waiting in external mode")
-  })
-})
-
-// ─── startRun: boot-only sessions ────────────────────────────────────────────
-
-describe('startRun — robustness cell', () => {
-  it('runs one spec file under one atom with every heal mode off, in place, and hands the orchestrator the cell selection', async () => {
-    writeProjectConfig('claude')
-    initRepo(repoDir)
-    // A cell is a perturbed run, and a shim needs a declared port slot to front.
-    writeFeature('demo', { repos: [{ name: 'app', localPath: repoDir, startCommands: [{ name: 'app', command: 'true', ports: [{ name: 'api', env: 'PORT' }] }] }] })
-    const h = harness()
-    const envelope = { format: 1 as const, latency: { ms: 300 } }
-    const selection = { kind: 'grep' as const, grep: 'browse', selected: 1, total: 3, mode: 'robustness-cell' as const, reason: 'Robustness Lab cell: e2e/storefront.spec.ts under latency.' }
-
-    const runId = await startOk(h, 'demo', undefined, undefined, 'worktree', 'robustness', undefined, envelope, selection)
-
-    const opts = lastOpts()
-    expect(opts.executionType).toBe('robustness')
-    expect(opts.autoHeal).toBeUndefined()
-    expect(opts.manualHeal).toBe(false)
-    expect(opts.externalHeal).toBe(false)
-    expect(opts.initialSelection).toEqual(selection)
-    // Nothing edits the repos in a cell, so with no collision and no overlay
-    // there is nothing to isolate — the `worktree` answer is only for a collision.
-    expect(opts.worktrees).toEqual([])
-    expect(agentProbe.asked).toEqual([])
-    expect(runnerLogText(runId)).toContain('Robustness cell: one spec file under one atom of the envelope — no heal')
   })
 })
 

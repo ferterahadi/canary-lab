@@ -1,5 +1,4 @@
 // Capturing what a heal agent actually changed, and the per-run worktree setup
-import { clientPortMap } from './perturbation/client-ports'
 // that makes that capture honest: the pre-boot stash baseline, the envset
 // hydration, and the ephemeral portify overlay applied and reversed around the
 // run. Split out of orchestrator.ts; the bodies are unchanged.
@@ -110,9 +109,7 @@ export async function captureFixes(ctx: RunContext): Promise<RunFixCapture | nul
  *  disposable. No-op without an env, worktrees, or an envsets config. */
 export function hydrateWorktreeEnvsets(ctx: RunContext): void {
   if (!ctx.env || ctx.worktreeHandles.length === 0) return
-  // The shim ports under a perturbation, the real ones otherwise — the same
-  // choice `testPortEnv` makes for Playwright.
-  const clientPorts = clientPortMap(ctx)
+  const clientPorts = ctx.portMap
   const { written } = hydrateEnvsetIntoWorktrees({
     featureDir: ctx.feature.featureDir,
     setName: ctx.env,

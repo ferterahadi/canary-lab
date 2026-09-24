@@ -73,8 +73,4 @@ describe('pendingFileScope', () => {
     expect(pendingFileScope({ file: 'e2e/a.spec.ts', affectedTests: ['a', 'b'] })).toBe('2 tests')
     expect(pendingFileScope({ file: 'e2e/a.spec.ts', affectedTests: [] })).toBe('0 tests')
   })
-
-  it('names the robustness envelope for what it is rather than as zero tests', () => {
-    expect(pendingFileScope({ file: 'robustness/envelope.json', affectedTests: [] })).toBe('perturbation envelope')
-  })
 })

@@ -133,8 +133,8 @@ export function buildStageEntryValidator(featuresDir: string, logsDir?: string) 
 
 /** Links external stage evidence into the record that is about to consume it.
  *  Validation decides whether entry is allowed; this resolver makes the same
- *  passed run the explicit input of every stage that READS a run (the
- *  Robustness Lab and the Report — `STAGE_DEPENDS_ON`, not a name list). */
+ *  passed run the explicit input of every stage that READS a run
+ *  (`STAGE_DEPENDS_ON`, not a name list). */
 export function buildStageEntryLinkResolver(logsDir?: string) {
   return (args: {
     feature: string

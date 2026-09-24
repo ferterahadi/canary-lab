@@ -10,7 +10,6 @@ import { pickConfiguredHealAgent } from './pick-heal-agent'
 import { type OrchestratorLike, type StartRunOutcome } from './logic/run-store'
 import type { StartRunOptions } from './routes/runs-route-deps'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
-import { allocatePerturbationPorts } from './logic/runtime/perturbation/run-perturbation'
 import type { ServerContext } from '../../server-context'
 import { loadFeatures } from '../../shared/feature-loader'
 import { generateRunId } from './logic/runtime/run-id'
@@ -28,13 +27,12 @@ import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../.
 import { assertStableSpecSelection } from '../../shared/playwright-config'
 import { assertNoPendingRunReview } from './logic/runtime/run-review-gate'
 import { RunnerLog } from './logic/runtime/runner-log'
+import { hasRetiredPerturbation } from './logic/runtime/manifest'
 import {
   restore,
 } from './logic/runtime/env-switcher/switch'
 import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { ExecutionType } from '../../../../../shared/verification'
-import type { PlaywrightRerunSelection } from './logic/runtime/rerun-targets'
-import type { RobustnessEnvelope } from '../../../../../shared/robustness/types'
 import type { makeAttachRunStreams, makeRestartExternalRun } from './run-stream-wiring'
 import type { buildRunScheduling } from './run-scheduling'
 import { settleOrchestratorRun } from './logic/settle-run'
@@ -91,20 +89,13 @@ export function buildRunsRouteDeps(
       isolation?: 'worktree' | 'queue',
       executionType: ExecutionType = 'run',
       modelsOverride?: unknown,
-      perturbationEnvelope?: RobustnessEnvelope,
-      cellSelection?: PlaywrightRerunSelection,
       options?: StartRunOptions,
     ): Promise<StartRunOutcome> => {
       const isBoot = executionType === 'boot'
-      // A robustness cell never heals: a failure under perturbation is the
-      // finding the job that started it is looking for, not something to fix
-      // here. It also runs in place — nothing edits the repos, so there is no
-      // diff to capture — unless the feature is portified or a collision asks.
-      const isCell = executionType === 'robustness'
       const features = loadFeatures(featuresDir)
       const feature = features.find((f) => f.name === featureName)
       if (!feature) throw new Error(`feature not found: ${featureName}`)
-      if (!isBoot && !isCell) assertNoPendingRunReview(runStore, feature.name, feature.featureDir)
+      if (!isBoot) assertNoPendingRunReview(runStore, feature.name, feature.featureDir)
       // A boot brings services up and runs no tests, so it declares no roster
       // and this cannot corrupt one — and refusing it would block the very boot
       // someone needs to debug the config they are here to fix.
@@ -153,7 +144,7 @@ export function buildRunsRouteDeps(
       // construction + kickoff. Deferred and reused by the queue when the run
       // can't start immediately.
       const launch = async (): Promise<OrchestratorLike> => {
-        const testReviewApproval = !isBoot && !isCell
+        const testReviewApproval = !isBoot
           ? assertNoPendingRunReview(runStore, feature.name, feature.featureDir, runId)
           : undefined
         const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
@@ -164,13 +155,10 @@ export function buildRunsRouteDeps(
         const repoBranchSnapshots = await collectRepoBranchSnapshots(feature, updatedFromUpstreamByRepo(repoUpdates))
 
       const portMap = await allocateRunPorts(feature, env)
-      // Shim ports are allocated before the envset is written so `${port.<slot>}`
-      // already points at the shim; a slot-less suite is refused here as a 400.
-      const perturbation = await allocatePerturbationPorts(perturbationEnvelope, portMap)
       let backups: BackupRecord[] | null = null
       if (env) {
         try {
-          backups = applyFeatureEnvset(feature.featureDir, env, perturbation?.shimPorts ?? portMap)
+          backups = applyFeatureEnvset(feature.featureDir, env, portMap)
           if (backups) runnerLog.info(`Applied envset "${env}" for ${feature.name}`)
         } catch (err) {
           runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
@@ -212,13 +200,11 @@ export function buildRunsRouteDeps(
         }
       }
       let autoHeal: AutoHealConfig | undefined
-      const agentChoice = (externalOrigin || isBoot || isCell)
+      const agentChoice = (externalOrigin || isBoot)
         ? null
         : pickConfiguredHealAgent(projectConfig.healAgent)
       if (isBoot) {
         runnerLog.info('Boot-only session: booting services and holding them — no tests, no heal.')
-      } else if (isCell) {
-        runnerLog.info('Robustness cell: one spec file under one atom of the envelope — no heal; a failure here is a finding for the job that started it.')
       } else if (externalOrigin && canClaim) {
         runnerLog.info(
           `Auto-heal disabled: external agent session (${healAgentReq?.clientKind}, session ${healAgentReq?.sessionId.slice(0, 8)}) claimed and will drive the heal loop.`,
@@ -258,7 +244,7 @@ export function buildRunsRouteDeps(
         } catch (err) {
           runnerLog.warn(`Auto-heal disabled: ${(err as Error).message}`)
         }
-      } else if (!isBoot && !isCell) {
+      } else if (!isBoot) {
         runnerLog.warn('Auto-heal disabled: no `claude` or `codex` CLI on PATH (set CANARY_LAB_HEAL_AGENT=claude|codex to override).')
       }
 
@@ -303,23 +289,19 @@ export function buildRunsRouteDeps(
           runId,
           runDir,
           portMap,
-          perturbation,
           worktrees,
           ptyFactory,
           runnerLog,
           executionType,
           testReviewApproval,
-          // A boot-only session never runs tests, so it never heals, and a
-          // robustness cell must not — force all heal modes off regardless of
-          // project config.
-          autoHeal: isBoot || isCell ? undefined : autoHeal,
+          // A boot-only session never runs tests, so it never heals.
+          autoHeal: isBoot ? undefined : autoHeal,
           ...(models ? { models } : {}),
           manualHeal:
-            !isBoot && !isCell && !externalOrigin && projectConfig.healAgent === 'manual',
+            !isBoot && !externalOrigin && projectConfig.healAgent === 'manual',
           // External heal is an MCP-origin fact, not a workspace setting: the
           // retired `external` config value migrates to `claude` on load.
-          externalHeal: !isBoot && !isCell && externalOrigin,
-          ...(cellSelection ? { initialSelection: cellSelection } : {}),
+          externalHeal: !isBoot && externalOrigin,
           externalHealSession,
           repoBranchSnapshots,
           // Route every manifest/index write through RunStore so its event
@@ -398,6 +380,7 @@ export function buildRunsRouteDeps(
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
       const manifest = detail.manifest
+      if (hasRetiredPerturbation(manifest)) return { ok: false, reason: 'not-restartable' as const }
       if ((manifest.executionType ?? 'run') === 'verify') return { ok: false, reason: 'not-restartable' as const }
       if (isActiveRunStatus(manifest.status)) return { ok: false, reason: 'already-active' as const }
       if (!isRestartableRunStatus(manifest.status)) return { ok: false, reason: 'not-restartable' as const }
@@ -413,12 +396,10 @@ export function buildRunsRouteDeps(
         runnerLog.warn(`Restarting run for legacy manifest without persisted env; defaulting to "${env}".`)
       }
       const portMap = await allocateRunPorts(feature, env)
-      // A restart meets the same perturbation the original run booted under.
-      const perturbation = await allocatePerturbationPorts(manifest.perturbation?.envelope, portMap)
       let backups: BackupRecord[] | null = null
       if (env) {
         try {
-          backups = applyFeatureEnvset(feature.featureDir, env, perturbation?.shimPorts ?? portMap)
+          backups = applyFeatureEnvset(feature.featureDir, env, portMap)
           if (backups) runnerLog.info(`Applied envset "${env}" for run restart ${feature.name}`)
         } catch (err) {
           runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
@@ -480,7 +461,6 @@ export function buildRunsRouteDeps(
           runId,
           runDir,
           portMap,
-          perturbation,
           ptyFactory,
           runnerLog,
           autoHeal,

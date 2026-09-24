@@ -5,7 +5,7 @@ import type { FlightStageKey } from '@/shared/api/client'
 export const FLIGHT_STAGE_SECTIONS = [
   { id: 'setup', label: 'Setup', keys: ['scout', 'scaffold', 'docs'] },
   { id: 'verification', label: 'Verification cycle', keys: ['specs-coverage', 'run', 'evaluation-export'] },
-  { id: 'independent', label: 'Run separately', keys: ['portify', 'robustness'] },
+  { id: 'independent', label: 'Run separately', keys: ['portify'] },
 ] as const satisfies readonly {
   id: string
   label: string

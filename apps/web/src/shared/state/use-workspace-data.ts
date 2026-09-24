@@ -157,7 +157,6 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
       invalidate('repos')
       invalidate('tests')
       invalidate('coverage')
-      invalidate('robustness')
       invalidate('verification')
       const currentRunId = selectedRunIdRef.current
       if (currentRunId) invalidate('journal', currentRunId)
@@ -210,9 +209,6 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
             // A generated PRD summary lights the derived rail (prdSummary evidence).
             refreshFeatures(selectedFeatureRef.current)
           }
-          // The Robustness stage reads the suite's job records (findings, shrink
-          // trace); a write to any of them re-reads the slot.
-          if (event.type === 'robustness-changed') invalidate('robustness')
           if (event.type === 'tests-dirty-changed') {
             invalidate('coverage')
             refreshFeatures(selectedFeatureRef.current)

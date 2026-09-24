@@ -6,7 +6,6 @@ import type { OrchestratorRegistry, RunStore } from './features/runs/logic/run-s
 import type { BenchmarkRunStore } from './features/benchmark/logic/runtime/store'
 import type { PortifyRunStore } from './features/portify/logic/runtime/store'
 import type { CoverageJobRunStore } from './features/coverage/logic/coverage/jobs/store'
-import type { RobustnessJobRunStore } from './features/runs/logic/robustness/store'
 import type { FlightRunStore } from './features/flights/logic/store'
 import type { PlanFeaturesStore } from './features/flights/logic/plan-features'
 import type { DirtySpecStore } from './features/runs/logic/dirty-specs/store'
@@ -83,7 +82,6 @@ export interface ServerContext {
   portifyStore: PortifyRunStore
   coverageJobStore: CoverageJobRunStore
   coverageMonitor?: CoverageFreshnessMonitor
-  robustnessJobStore: RobustnessJobRunStore
   flightStore: FlightRunStore
   planStore: PlanFeaturesStore
   dirtySpecStore: DirtySpecStore

@@ -287,10 +287,8 @@ export function RedoFlightDialog({
     ? REDO_STAGES.filter((stage) => flightStagesResetByEntry(fromStage)
       .some((key) => stageRowKey(key) === stage.key))
     : []
-  const effectNote = fromStage === 'robustness'
-    ? 'The test run, Parallel setup and current report stay. Refresh the report after new Lab findings settle to include them.'
-    : fromStage === 'portify'
-      ? 'The test run and current report stay. Robustness Lab repeats with the updated port setup.'
+  const effectNote = fromStage === 'portify'
+      ? 'The test run and current report stay.'
       : fromStage === 'evaluation-export'
         ? 'Completed reports stay downloadable in report history. A new report will be added.'
         : fromStage === 'specs-coverage' || fromStage === 'run'

@@ -262,17 +262,17 @@ describe('legacy terminal-stage repair', () => {
 })
 
 describe('missing-stage backfill', () => {
-  // A flight written before a stage key existed. `robustness` is the real case:
+  // A flight written before a stage key existed. `evaluation-export` is an example:
   // records from before it shipped carry every other key and not that one.
-  const withoutRobustness = (overrides: Record<string, unknown> = {}) => ({
-    flightId: 'fl-pre-robustness',
+  const withoutEvaluationExport = (overrides: Record<string, unknown> = {}) => ({
+    flightId: 'fl-pre-export',
     feature: 'checkout',
     repoPaths: ['/repo/a'],
     description: 'checkout flow',
     opts: OPTS,
     status: 'done' as const,
     currentStage: null,
-    stages: FLIGHT_STAGE_KEYS.filter((key) => key !== 'robustness').map((key) => ({ key, status: 'done' as const })),
+    stages: FLIGHT_STAGE_KEYS.filter((key) => key !== 'evaluation-export').map((key) => ({ key, status: 'done' as const })),
     createdAt: now(),
     updatedAt: now(),
     endedAt: now(),
@@ -280,7 +280,7 @@ describe('missing-stage backfill', () => {
   })
 
   it('inserts a stage the record predates as pending, in canonical order', () => {
-    const stale = withoutRobustness()
+    const stale = withoutEvaluationExport()
     store.save(stale)
 
     const reopened = new FlightRunStore(tmpDir)
@@ -289,7 +289,7 @@ describe('missing-stage backfill', () => {
     // `pending`, not `skipped`: the step genuinely never ran, and the flight's
     // own `done` status is untouched — the backfill records a gap, it does not
     // reopen the flight.
-    expect(repaired.stages.find((stage) => stage.key === 'robustness')?.status).toBe('pending')
+    expect(repaired.stages.find((stage) => stage.key === 'evaluation-export')?.status).toBe('pending')
     expect(repaired.status).toBe('done')
     // The index row is rebuilt from the manifest, so the picker's mini rail
     // sees the step without loading the record.
@@ -298,8 +298,8 @@ describe('missing-stage backfill', () => {
   })
 
   it('keeps every stage the record already had', () => {
-    const stale = withoutRobustness({
-      stages: FLIGHT_STAGE_KEYS.filter((key) => key !== 'robustness').map((key) => ({
+    const stale = withoutEvaluationExport({
+      stages: FLIGHT_STAGE_KEYS.filter((key) => key !== 'evaluation-export').map((key) => ({
         key,
         status: key === 'portify' ? 'skipped' as const : 'done' as const,
         activeMs: 1200,
@@ -313,11 +313,11 @@ describe('missing-stage backfill', () => {
   })
 
   it('backfills an ACTIVE flight without settling its live stage', () => {
-    const stale = withoutRobustness({
+    const stale = withoutEvaluationExport({
       status: 'waiting-for-approval' as const,
       currentStage: 'scout' as const,
       endedAt: undefined,
-      stages: FLIGHT_STAGE_KEYS.filter((key) => key !== 'robustness').map((key) => ({
+      stages: FLIGHT_STAGE_KEYS.filter((key) => key !== 'evaluation-export').map((key) => ({
         key,
         status: key === 'scout' ? 'waiting-for-approval' as const : 'pending' as const,
       })),
@@ -325,14 +325,14 @@ describe('missing-stage backfill', () => {
     store.save(stale)
 
     const repaired = new FlightRunStore(tmpDir).get(stale.flightId)!
-    expect(repaired.stages.find((stage) => stage.key === 'robustness')?.status).toBe('pending')
+    expect(repaired.stages.find((stage) => stage.key === 'evaluation-export')?.status).toBe('pending')
     // Only a TERMINAL record gets its live stage cleared; a parked flight is
     // still answerable and must keep its checkpoint.
     expect(repaired.stages.find((stage) => stage.key === 'scout')?.status).toBe('waiting-for-approval')
   })
 
   it('skips an index row whose record file is gone', () => {
-    const stale = withoutRobustness()
+    const stale = withoutEvaluationExport()
     store.save(stale)
     // A half-deleted workspace: the index still lists the flight, the record
     // it points at does not exist. Repair must step over it, not throw on open.
@@ -346,7 +346,7 @@ describe('missing-stage backfill', () => {
   it('preserves a stage key written by a newer build', () => {
     // An older tarball installed over the same workspace reads records whose
     // keys it has never heard of. The rewrite must not be what deletes them.
-    const future = { ...withoutRobustness(), flightId: 'fl-from-the-future' }
+    const future = { ...withoutEvaluationExport(), flightId: 'fl-from-the-future' }
     future.stages = [...future.stages, { key: 'teleport' as never, status: 'done' as const }]
     store.save(future)
 

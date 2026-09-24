@@ -18,6 +18,7 @@ export const KIND_LABEL: Record<Row['kind'], string> = {
   verify: 'VERIFY',
   boot: 'BOOT',
   benchmark: 'BENCH',
+  robustness: 'CELL',
   orphan: 'ORPHAN',
 }
 

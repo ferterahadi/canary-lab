@@ -281,14 +281,14 @@ describe('FlightPage', () => {
     expectBefore(runRow, parallelSetupRow)
     expect(runRow.disabled).toBe(true)
     expect(runRow.textContent).toContain('no specs authored yet')
-    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-robustness"]')?.click() })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-portify"]')?.click() })
     expect(container.querySelector('[data-testid="flight-redo-effects"]')?.textContent)
-      .toContain('Resets: Robustness lab.')
+      .toContain('Resets: Parallel setup.')
     expect(container.querySelector('[data-testid="flight-redo-effects"]')?.textContent)
       .toContain('current report stay')
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-specs-coverage"]')?.click() })
     const effects = container.querySelector('[data-testid="flight-redo-effects"]')?.textContent ?? ''
-    expect(effects).toContain('Tests & coverage, Test run, Evaluation report, Robustness lab')
+    expect(effects).toContain('Tests & coverage, Test run, Evaluation report')
     expect(effects).toContain('Parallel setup stays')
     // Choosing another row updates the impact before the call is sent.
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-docs"]')?.click() })
