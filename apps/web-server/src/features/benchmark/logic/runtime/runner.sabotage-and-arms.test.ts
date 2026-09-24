@@ -151,15 +151,22 @@ describe('createBenchmarkRunner', () => {
       // Simulates a real failure mode (e.g. disk full / permission denied)
       // opening `sabotage-agent.log` — runAgentHeadless must still complete
       // the agent run, just without teeing output to disk.
-      const openSyncSpy = vi.spyOn(fs, 'openSync').mockImplementation(() => { throw new Error('EACCES (mock)') })
       const { appRepo, logsDir } = await flatFixture()
       amock.editMode = 'none'
       const { store, deps } = makeDeps({ logsDir, loadFeatures: () => [feat({ featureDir: appRepo, repos: [{ name: 'app', localPath: appRepo }] })] })
       const { startBenchmark } = createBenchmarkRunner(deps)
-      const { benchmarkId } = await startBenchmark({ feature: 'bench-feat', agent: 'claude', iterations: 1, ...OFF_BY_ONE })
-      expect(await waitForStatus(store, benchmarkId, ['error', 'invalid', 'done', 'aborted'])).toBe('error')
-      expect(openSyncSpy).toHaveBeenCalled()
-      openSyncSpy.mockRestore()
+      const originalOpenSync = fs.openSync
+      const openSyncSpy = vi.spyOn(fs, 'openSync').mockImplementation(((...args: Parameters<typeof fs.openSync>) => {
+        if (String(args[0]).endsWith('sabotage-agent.log')) throw new Error('EACCES (mock)')
+        return originalOpenSync(...args)
+      }) as typeof fs.openSync)
+      try {
+        const { benchmarkId } = await startBenchmark({ feature: 'bench-feat', agent: 'claude', iterations: 1, ...OFF_BY_ONE })
+        expect(await waitForStatus(store, benchmarkId, ['error', 'invalid', 'done', 'aborted'])).toBe('error')
+        expect(openSyncSpy).toHaveBeenCalledWith(expect.stringMatching(/sabotage-agent\.log$/), 'a')
+      } finally {
+        openSyncSpy.mockRestore()
+      }
     })
 
     it('errors when the agent edits a test file (no-cheat violation)', async () => {
