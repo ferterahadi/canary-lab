@@ -4,6 +4,8 @@ import { plural } from '../../../../../../../shared/lib/plural'
 import { captureFeatureEnvFiles } from '../../../config/logic/feature-authoring'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { RunManifest } from '../../../runs/logic/runtime/manifest'
+import type { RunBootFailure } from '../../../../../../../shared/run-state'
+import { diagnosticExcerpt } from '../../../runs/logic/runtime/diagnostic-redaction'
 import type { FlightStageErrorDetail } from '../types'
 import type { EnvCaptureStageProgress } from '../../../../../../../shared/flights/types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
@@ -20,22 +22,28 @@ import { CHECKPOINT_OPTIONS } from '../types'
 // `--yolo` honors: canary never guesses secrets.
 
 const BOOT_VERIFY_TIMEOUT_MS = 5 * 60 * 1000
-const LOG_TAIL_LINES = 15
 
 interface BootEvidence {
   runId: string
   services: Array<{ name: string; status?: string }>
 }
 
-/** Last lines of the failed service's log — the actual cause (a crash, a bind
- *  error, a stack trace) lives here, so it ships on the stage error instead of
- *  leaving the user a bare verdict to go digging from. */
-function serviceLogTail(logPath: string): string {
-  try {
-    return fs.readFileSync(logPath, 'utf-8').replace(/\s+$/, '').split('\n').slice(-LOG_TAIL_LINES).join('\n')
-  } catch {
-    return ''
-  }
+// One sentence per reason, so a new reason is a compile error here rather than
+// silently falling through to the health-check wording.
+const BOOT_ERROR_BY_REASON: Record<RunBootFailure['reason'], string> = {
+  'dependency-incompatible': 'was blocked before boot because its dependency state is incompatible',
+  'spawn-failed': 'could not be spawned',
+  'process-exited': 'exited during boot — it never reached its health check',
+  'health-timeout': 'never passed its health check',
+}
+
+// The evidence fields the stage passes straight through from the run's record.
+const BOOT_DETAIL_KEYS = ['classification', 'command', 'cwd', 'exitCode', 'signal', 'nextAction'] as const
+
+function pickDefined<T extends object, K extends keyof T>(source: T, keys: readonly K[]): Partial<Pick<T, K>> {
+  const out: Partial<Pick<T, K>> = {}
+  for (const key of keys) if (source[key] !== undefined) out[key] = source[key]
+  return out
 }
 
 async function bootVerify(
@@ -98,14 +106,15 @@ async function bootVerify(
         return {
           ok: false,
           evidence,
-          error: boot.reason === 'process-exited'
-            ? `service "${boot.service}" crashed during boot — it never reached its health check`
-            : `service "${boot.service}" never passed its health check`,
+          error: `service "${boot.service}" ${BOOT_ERROR_BY_REASON[boot.reason]}`,
           errorDetail: {
+            ...pickDefined(boot, BOOT_DETAIL_KEYS),
             service: boot.service,
             reason: boot.reason,
             logPath: boot.logPath ?? '',
-            logTail: boot.logPath ? serviceLogTail(boot.logPath) : '',
+            // Always the redacted, ANSI-stripped excerpt: the raw tail this
+            // used to fall back to carried unmasked secrets onto the stage.
+            logTail: boot.excerpt ?? (boot.logPath ? diagnosticExcerpt(boot.logPath).excerpt ?? '' : ''),
           },
         }
       }

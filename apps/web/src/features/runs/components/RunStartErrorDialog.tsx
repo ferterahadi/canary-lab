@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ApiError, asBranchMismatch, type RepoBranchMismatch } from '@/shared/api/client'
+import { ApiError, asBranchMismatch, asTestReviewRequired, type RepoBranchMismatch, type TestReviewRequired } from '@/shared/api/client'
 import { Modal } from '@/shared/ui/atoms'
 
 // Maps a failed `POST /api/runs` into a human headline, the raw server reason,
@@ -60,6 +60,7 @@ interface Props {
   feature: string
   /** Re-issue the same start request. Omitted when a retry can't be replayed. */
   onRetry?: () => void
+  onReviewTests?: (review: TestReviewRequired) => void
   /** Branch-mismatch only: check out each repo's pinned branch, then retry. */
   onSwitchBranches?: () => Promise<void>
   /** Branch-mismatch only: re-pin the feature to the current branches, then retry. */
@@ -74,8 +75,9 @@ interface Props {
 //   • everything else — the server's reason plus a next-step hint, so a failed
 //     Run button never dead-ends silently.
 // Mirrors the CollisionConfirmDialog pattern.
-export function RunStartErrorDialog({ error, feature, onRetry, onSwitchBranches, onPinCurrent, onClose }: Props) {
+export function RunStartErrorDialog({ error, feature, onRetry, onReviewTests, onSwitchBranches, onPinCurrent, onClose }: Props) {
   const mismatch = asBranchMismatch(error)
+  const review = asTestReviewRequired(error)
 
   return (
     <Modal
@@ -83,14 +85,41 @@ export function RunStartErrorDialog({ error, feature, onRetry, onSwitchBranches,
       onClose={onClose}
       width={480}
       role="alertdialog"
-      ariaLabel={mismatch ? 'Repos not on the suite’s branch' : 'Run failed to start'}
+      ariaLabel={review ? 'Review test changes before starting' : mismatch ? 'Repos not on the suite’s branch' : 'Run failed to start'}
     >
       <div className="p-5">
-        {mismatch
+        {review ? <TestReviewBody review={review} onReviewTests={onReviewTests} onClose={onClose} /> : mismatch
           ? <BranchMismatchBody mismatch={mismatch} onSwitchBranches={onSwitchBranches} onPinCurrent={onPinCurrent} onClose={onClose} />
           : <GenericErrorBody error={error} feature={feature} onRetry={onRetry} onClose={onClose} />}
       </div>
     </Modal>
+  )
+}
+
+function TestReviewBody({ review, onReviewTests, onClose }: { review: TestReviewRequired } & Pick<Props, 'onReviewTests' | 'onClose'>) {
+  const count = review.changedFileCount
+  const owner = review.request?.owner
+  return (
+    <>
+      <h2 className="text-sm font-semibold text-primary">Review test changes before starting</h2>
+      <p className="mt-2 text-[13px] leading-relaxed text-secondary">
+        {count} suite file{count === 1 ? '' : 's'} changed for <span className="font-mono">{review.feature}</span> since the recorded run.
+        {' '}Please review these changes before running the updated tests.
+      </p>
+      <p className="mt-2 text-[13px] leading-relaxed text-muted">
+        {owner?.kind === 'external'
+          ? 'After review, your original external client can continue this request.'
+          : owner?.kind === 'internal'
+            ? 'After you accept or restore the changes, Canary will continue your requested run automatically.'
+            : 'Accept the updated tests or restore the recorded files to clear this review.'}
+      </p>
+      <div className="mt-4 flex justify-end gap-2">
+        <button type="button" onClick={onClose} className="cl-button px-3 py-1 text-xs">Close</button>
+        {onReviewTests
+          ? <button type="button" onClick={() => onReviewTests(review)} className="cl-button cl-button-primary px-3 py-1 text-xs">Review test changes</button>
+          : <a href={review.reviewUrl} className="cl-button cl-button-primary px-3 py-1 text-xs">Review test changes</a>}
+      </div>
+    </>
   )
 }
 

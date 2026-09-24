@@ -21,6 +21,7 @@ import type {
   VerificationTarget,
 } from '@shared/verification'
 import type { RunProducer } from '@shared/run-mode'
+import type { SpecDiff, TestChange } from '@shared/verification-strength/types'
 import type {
   FlightCheckpointKind,
   FlightPauseReason,
@@ -102,6 +103,17 @@ export interface FeatureRepo {
 export interface DirtySpecSummary {
   file: string
   affectedTests: string[]
+  /** The verification-strength differential for this spec: its assertions
+   *  before the edit against now, from the run-start copy when a run took one,
+   *  else the committed spec. Each changed test carries the `@requirement` ids
+   *  the live spec gives it. Absent when no baseline content is readable. An
+   *  advisory reading (D13) — nothing here changes a verdict. */
+  strength?: DirtySpecStrength
+}
+
+export interface DirtySpecStrength extends SpecDiff {
+  baseline: 'run-start' | 'head'
+  tests: Array<TestChange & { requirements?: string[] }>
 }
 
 export interface FeatureDirtyState {
@@ -189,6 +201,8 @@ export interface ExtractedStep {
 export interface ExtractedTest {
   name: string
   line: number
+  endLine?: number
+  sourceChanges?: { changedLines: number[]; count: number }
   bodySource: string
   /** First source line represented by bodySource. Older payloads omit it. */
   bodyLine?: number
@@ -206,7 +220,12 @@ export interface ExtractedTest {
 export interface FeatureSpecFile {
   file: string
   tests: ExtractedTest[]
+  /** Recorded identities are available, but their historical source is not. */
+  recordedSourceUnavailable?: boolean
   parseError?: string
+  discoveryError?: string
+  discoveryDiagnostics?: string
+  discoveryRepairPrompt?: string
 }
 
 export type FeatureTests = FeatureSpecFile[]
@@ -261,6 +280,8 @@ export type {
   CoverageStatus,
   CoverageTotals,
   DriftDetail,
+  EnforcementState,
+  EnforcementSummary,
   GapType,
   PathCoverage,
   PathType,
@@ -268,6 +289,8 @@ export type {
   ProposedMapping,
   Requirement,
   RequirementCoverage,
+  RequirementEnforcement,
+  RequirementTestChange,
   StrictnessTier,
   SummaryState,
   CoverageState,

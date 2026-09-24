@@ -1,4 +1,5 @@
 import path from 'path'
+import type { EnvironmentExclusion } from '../../../../../../../shared/run-applicability'
 
 export function slugify(title: string): string {
   return title
@@ -8,6 +9,7 @@ export function slugify(title: string): string {
 }
 
 export interface TestEntry {
+  environmentExclusion?: EnvironmentExclusion
   id?: string
   name: string
   status: string

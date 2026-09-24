@@ -20,6 +20,26 @@ afterEach(() => {
 })
 
 describe('workspace-view-state (R12)', () => {
+  it('keeps current test browsing URL-local while preserving the selected run', () => {
+    persistView(view({ feature: 'checkout', run: 'old-run', currentTests: true }))
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', run: 'old-run', currentTests: true }))
+    expect(window.location.search).toContain('tests=current')
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ view: 'workspace', feature: 'checkout' })
+    persistView(view({ feature: 'checkout', run: 'old-run', currentTests: false }))
+    expect(window.location.search).toContain('tests=recorded')
+    expect(readPersistedView().currentTests).toBe(false)
+    expect(readPersistedView().run).toBe('old-run')
+    persistView(view({ view: 'coverage', feature: 'checkout', currentTests: true }))
+    expect(window.location.search).not.toContain('tests=')
+  })
+  it('requires a workspace suite and run for explicit recorded-source links', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&run=r1&tests=recorded')
+    expect(readPersistedView().currentTests).toBe(false)
+    for (const query of ['feature=checkout', 'run=r1', 'view=coverage&feature=checkout&run=r1']) {
+      window.history.replaceState(null, '', `/?${query}&tests=recorded`)
+      expect(readPersistedView().currentTests).toBeUndefined()
+    }
+  })
   it('defaults to the workspace view with no feature', () => {
     expect(readPersistedView()).toEqual(view({}))
   })
@@ -45,6 +65,30 @@ describe('workspace-view-state (R12)', () => {
     persistView(view({ feature: 'checkout', focusTest: 'test-case-req-r4-otp-guard' }))
     expect(window.location.search).not.toContain('test=')
     expect(readPersistedView().focusTest).toBeNull()
+  })
+
+  // Reading current source is a departure FROM a specific run's results, so it
+  // qualifies a selected run the same way `test` does: without one there is
+  // nothing to depart from, and the flag would outlive its reason.
+  it('drops current test browsing when no run is selected', () => {
+    persistView(view({ feature: 'checkout', currentTests: true }))
+    expect(window.location.search).not.toContain('tests=')
+    expect(readPersistedView().currentTests).toBeUndefined()
+  })
+
+  it('ignores a stale tests=current link that names no run', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&tests=current')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout' }))
+  })
+
+  it('reads tests=current from a link that spells out the workspace view', () => {
+    window.history.replaceState(null, '', '/?view=workspace&feature=checkout&run=r1&tests=current')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', run: 'r1', currentTests: true }))
+  })
+
+  it('ignores tests=current on a view that has no Tests column', () => {
+    window.history.replaceState(null, '', '/?view=coverage&feature=checkout&run=r1&tests=current')
+    expect(readPersistedView().currentTests).toBeUndefined()
   })
 
   it('ignores a stray test param on a URL with no run', () => {
@@ -255,6 +299,14 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'verification' }))
   })
 
+  it('round-trips the changed-tests review (URL-only, not mirrored)', () => {
+    persistView(view({ feature: 'checkout', dialog: 'tests-review' }))
+    expect(window.location.search).toContain('dialog=tests-review')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'tests-review' }))
+    // A review open in one tab must not pop open in another.
+    expect(localStorage.getItem(KEY)).not.toContain('tests-review')
+  })
+
   it('round-trips the feature-scoped flight-start dialog (URL-only, not mirrored)', () => {
     persistView(view({ feature: 'checkout', dialog: 'flight-start' }))
     expect(window.location.search).toContain('dialog=flight-start')
@@ -459,4 +511,65 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     persistView(view({ dialog: null }))
     expect(window.location.search).not.toContain('models=')
   })
+})
+
+it('opens a hand-shortened review link on the committed baseline, in English, with no line', () => {
+  // Only `reviewFile` survives a link someone trimmed or retyped. Every other
+  // review param has to fall back to the dialog's default rather than leave it
+  // pointing at a baseline, line or language the URL never named.
+  window.history.replaceState(null, '', '/?feature=shop&dialog=tests-review&reviewFile=e2e%2Fa.spec.ts')
+  expect(readPersistedView().reviewFocus).toEqual({ file: 'e2e/a.spec.ts', line: undefined, mode: 'english' })
+})
+
+it('round-trips a test review source, language and baseline without leaking them into other dialogs', () => {
+  const reviewFocus = { file: 'e2e/conversations.spec.ts', line: 79, mode: 'code' as const, baseline: 'run' as const, change: 'removed' as const, test: 'Deleted test' }
+  persistView(view({ dialog: 'tests-review', feature: 'shop', run: 'run-1', reviewFocus }))
+  expect(readPersistedView().reviewFocus).toEqual(reviewFocus)
+  expect(JSON.parse(localStorage.getItem(KEY)!)).not.toHaveProperty('reviewFocus')
+  persistView(view({ dialog: null, feature: 'shop' }))
+  expect(readPersistedView().reviewFocus).toBeUndefined()
+  expect(window.location.search).not.toContain('review')
+})
+
+it('preserves the exact run-review destination before any file is selected', () => {
+  window.history.replaceState(null, '', '/?feature=shop&run=run-1&dialog=tests-review&reviewBase=run&reviewMode=code')
+  expect(readPersistedView().reviewFocus).toEqual({ baseline: 'run', mode: 'code', line: undefined })
+  persistView(readPersistedView())
+  expect(window.location.search).toContain('reviewBase=run')
+  expect(window.location.search).toContain('reviewMode=code')
+  expect(window.location.search).not.toContain('reviewFile')
+  expect(JSON.parse(localStorage.getItem(KEY)!)).not.toHaveProperty('reviewFocus')
+})
+
+// A URL-mode elicitation invite is scoped to one flight's checkpoint. Navigating
+// inside that flight has to keep it — the human is mid-answer — while leaving the
+// flight or the view drops both params so the invite cannot be replayed elsewhere.
+it('keeps an open elicitation invite while its own flight stays open, and drops it otherwise', () => {
+  window.history.replaceState(null, '', '/?view=flights&flight=fl1&elicitation=fl1%3Amissing-env&inputToken=tok')
+  persistView(view({ view: 'flights', flight: 'fl1', flightStage: 'run' }))
+  expect(window.location.search).toContain('elicitation=fl1%3Amissing-env')
+  expect(window.location.search).toContain('inputToken=tok')
+  persistView(view({ view: 'flights', flight: 'fl2' }))
+  expect(window.location.search).not.toContain('elicitation')
+  expect(window.location.search).not.toContain('inputToken')
+})
+
+// The run baseline narrows in steps: pick the recorded run, then a category,
+// then one test. Each step has to survive a reload on its own — a half-made
+// selection must not invent the missing part or drop the part already chosen.
+it('round-trips a run baseline with no category, and a category with no pinned test', () => {
+  persistView(view({ dialog: 'tests-review', reviewFocus: { file: 'a.spec.ts', baseline: 'run' } }))
+  expect(window.location.search).not.toContain('reviewChange')
+  expect(readPersistedView().reviewFocus).toEqual({ file: 'a.spec.ts', baseline: 'run', line: undefined, mode: 'english' })
+  persistView(view({ dialog: 'tests-review', reviewFocus: { file: 'a.spec.ts', baseline: 'run', change: 'added' } }))
+  expect(window.location.search).toContain('reviewChange=added')
+  expect(window.location.search).not.toContain('reviewTest')
+  expect(readPersistedView().reviewFocus).toEqual({ file: 'a.spec.ts', baseline: 'run', change: 'added', line: undefined, mode: 'english' })
+})
+
+it('ignores unknown review categories and clears the category when switching to Git HEAD', () => {
+  window.history.replaceState(null, '', '/?dialog=tests-review&reviewFile=a.spec.ts&reviewBase=run&reviewChange=bogus')
+  expect(readPersistedView().reviewFocus?.change).toBeUndefined()
+  persistView(view({ dialog: 'tests-review', reviewFocus: { file: 'a.spec.ts', change: 'added' } }))
+  expect(window.location.search).not.toContain('reviewChange')
 })

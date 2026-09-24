@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -167,7 +167,7 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
-  it('start_run asks for a collision choice when a run is already using the same app', async () => {
+  it('start_run asks about stale coverage before asking how to resolve a repo collision', async () => {
     const repoRoot = path.resolve(__dirname, '..', '..', '..', '..')
     const workspace = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-project-')))
     const projectRoot = path.join(workspace, 'project')
@@ -182,17 +182,24 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      const answer = vi.fn(async ({ params }: { params: Record<string, unknown> }) => {
+        const schema = params.requestedSchema as { properties?: Record<string, unknown> } | undefined
+        return schema?.properties?.choice
+          ? { action: 'accept' as const, content: { choice: 'Run now with stale coverage' } }
+          : { action: 'accept' as const, content: { isolation: 'queue' } }
+      })
       client = new Client(
         { name: 'canary-lab-smoke', version: '0.0.1' },
-        { capabilities: {} },
+        { capabilities: { elicitation: { form: {} } } },
       )
+      client.setRequestHandler('elicitation/create', answer)
       await client.connect(new StreamableHTTPClientTransport(new URL('/mcp?profile=lifecycle', address)))
 
-      // A run already occupying the storefront repo (running, not healing,
-      // so the route's heal-reuse path doesn't short-circuit).
+      // Another feature already occupies the same app repo. Same-feature
+      // starts continue the existing run before reaching collision handling.
       runStore.bootstrap({
         runId: 'busy-run',
-        feature: 'storefront-journey',
+        feature: 'other-storefront-suite',
         env: 'local',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'running',
@@ -204,9 +211,9 @@ describe('MCP HTTP server (smoke)', () => {
         repoPaths: [path.join(projectRoot, 'demo-app')],
       })
 
-      // A fresh same-app start detects the collision and asks how to resolve it
-      // instead of blindly starting (or the old active_heal_blocks_start).
-      const collision = await client.callTool({
+      // The suite's copied mapping is stale, so the fresh start asks whether to
+      // update it before reaching the independent repository collision choice.
+      const result = await client.callTool({
         name: 'start_run',
         arguments: {
           feature: 'storefront-journey',
@@ -216,11 +223,14 @@ describe('MCP HTTP server (smoke)', () => {
           client_kind: 'claude',
         },
       })
-      expect(JSON.parse(toolText(collision))).toMatchObject({
-        type: 'repo_collision_requires_choice',
-        conflictingRunId: 'busy-run',
-        options: ['worktree', 'queue'],
+      expect(JSON.parse(toolText(result))).toMatchObject({
+        queued: true,
+        queueReason: 'repo-collision',
+        coverageStale: true,
       })
+      expect(answer).toHaveBeenCalledTimes(2)
+      expect(answer.mock.calls[0]?.[0].params).toMatchObject({ message: expect.stringContaining('Previous coverage percentages') })
+      expect(answer.mock.calls[1]?.[0].params).toMatchObject({ message: expect.stringContaining('other-storefront-suite') })
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()

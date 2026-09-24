@@ -14,9 +14,10 @@
 //   1. Do NOT strip comments before looking for a MISSING comment. The first
 //      version stripped comment-only lines, which turned every properly
 //      explained multi-line catch into a violation — 66 false positives.
-//   2. Pattern rules run on .ts/.tsx only, never on this tools/ tree. A checker's
-//      own source contains the patterns it hunts; the first version flagged
-//      itself and check-feature-boundaries.mjs.
+//   2. Code-pattern rules run on .ts/.tsx only, never on this tools/ tree. A
+//      checker's own source contains the patterns it hunts; the first version
+//      flagged itself and check-feature-boundaries.mjs. Fixture portability
+//      separately checks data files, including JSON.
 //
 // BASELINES: three rules have pre-existing violations, listed explicitly rather
 // than softened, so a NEW violation fails while existing debt stays visible. A
@@ -24,9 +25,10 @@
 // the list outliving its reason (same trick as ALLOWED_DEEP in
 // check-feature-boundaries.mjs).
 
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync, lstatSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
+import { isFixturePath, personalFixturePathLines } from './fixture-policy.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '..')
 const ROOTS = ['apps', 'shared', 'tools']
@@ -110,8 +112,13 @@ function check(rule, rel, message, fix) {
 function walk(dir) {
   const out = []
   for (const name of readdirSync(dir)) {
-    if (name === 'node_modules' || name === 'dist' || name === 'coverage') continue
     const p = path.join(dir, name)
+    const rel = path.relative(REPO, p).split(path.sep).join('/')
+    if (!isFixturePath(rel) && (name === 'node_modules' || name === 'dist' || name === 'coverage')) continue
+    if (isFixturePath(rel) && lstatSync(p).isSymbolicLink()) {
+      check('fixture-portability', rel, 'fixture is a symlink', 'keep self-contained, sanitized data in the repository; keep original recordings in the workspace')
+      continue
+    }
     if (statSync(p).isDirectory()) out.push(...walk(p))
     else out.push(p)
   }
@@ -125,6 +132,15 @@ const files = ROOTS.filter((r) => existsSync(path.join(REPO, r)))
 const SOURCE = /\.(ts|tsx|mjs)$/
 const TEST = /\.test\.tsx?$/
 const sources = files.filter((f) => SOURCE.test(f))
+
+// JSON recordings bypass the source-only rules below, so inspect every fixture
+// format, including untracked files, before filtering to executable sources.
+for (const rel of files.filter(isFixturePath)) {
+  const text = readFileSync(path.join(REPO, rel), 'utf8')
+  for (const line of personalFixturePathLines(text)) {
+    check('fixture-portability', `${rel}:${line}`, 'fixture contains a personal filesystem path', 'keep raw recordings in the workspace; use /workspace or <featureDir> in a sanitized regression fixture')
+  }
+}
 
 for (const rel of sources) {
   const base = path.basename(rel)

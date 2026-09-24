@@ -6,7 +6,7 @@ import type { StageContext, StageJob } from '../conductor'
 import { stageSidecarDirs } from '../flight-stages'
 import type { FlightStageDeps } from './context'
 
-// The four kinds of work a flight stage can own, each behind the one `StageJob`
+// The five kinds of work a flight stage can own, each behind the one `StageJob`
 // handle. Every stage's teardown is `await job.stop(reason)`; what that means
 // differs per subsystem, and that difference belongs HERE (or further down, in
 // the subsystem itself) rather than in eleven adapters.
@@ -18,7 +18,7 @@ import type { FlightStageDeps } from './context'
 // `editing`. The subsystem knows all of that; the flight does not, and should
 // not have to.
 //
-// All four swallow non-2xx: the caller is a pause, and a teardown that cannot
+// All five swallow non-2xx: the caller is a pause, and a teardown that cannot
 // reach its subsystem must not fail the pause.
 
 /** A run — the Test Run stage's run, and env-capture's dry-run boot, which IS a

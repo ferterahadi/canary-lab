@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
+import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { connectPane, type ConnectPaneOptions, type PaneConnection } from '../api/pane-socket'
@@ -147,12 +148,15 @@ afterEach(() => {
   container.remove()
 })
 
+const PANE_COPY = { idle: EMPTY_COPY.panePlaywrightIdle, missing: EMPTY_COPY.panePlaywrightMissing }
+
 describe('PaneTerminal', () => {
   it('keeps re-fitting the agent pane on resize, debounced and only when the grid changes', async () => {
     vi.useFakeTimers()
     try {
       await act(async () => {
-        root.render(<PaneTerminal runId="r1" paneId="agent" />)
+        root.render(<PaneTerminal runId="r1" paneId="agent"
+            emptyState={PANE_COPY} />)
       })
 
       expect(resizeState.observers).toHaveLength(1)
@@ -219,7 +223,8 @@ describe('PaneTerminal', () => {
 
   it('fits non-agent panes when their container resize observer fires', async () => {
     await act(async () => {
-      root.render(<PaneTerminal runId="r1" paneId="playwright" />)
+      root.render(<PaneTerminal runId="r1" paneId="playwright"
+            emptyState={PANE_COPY} />)
     })
 
     expect(resizeState.observers).toHaveLength(1)
@@ -234,7 +239,8 @@ describe('PaneTerminal', () => {
   it('notifies the parent when the agent pane exits', async () => {
     const onExit = vi.fn()
     await act(async () => {
-      root.render(<PaneTerminal runId="r1" paneId="agent" onExit={onExit} />)
+      root.render(<PaneTerminal runId="r1" paneId="agent" onExit={onExit}
+            emptyState={PANE_COPY} />)
     })
 
     act(() => {
@@ -253,7 +259,7 @@ describe('PaneTerminal', () => {
           <PaneTerminal
             runId="r1"
             paneId="playwright"
-            emptyState={{ title: 'Playwright', hint: 'Test output appears here.' }}
+            emptyState={PANE_COPY}
           />,
         )
       })
@@ -266,7 +272,7 @@ describe('PaneTerminal', () => {
         vi.advanceTimersByTime(700)
       })
       expect(container.textContent).toContain('Playwright')
-      expect(container.textContent).toContain('Test output appears here.')
+      expect(container.textContent).toContain(PANE_COPY.idle.body)
 
       // First streamed chunk → the pane has content, placeholder disappears.
       act(() => {
@@ -278,16 +284,23 @@ describe('PaneTerminal', () => {
     }
   })
 
-  it('omits the placeholder entirely when no emptyState is provided', async () => {
+  it('captions a missing log as an empty state rather than writing it into the buffer', async () => {
     vi.useFakeTimers()
     try {
       await act(async () => {
-        root.render(<PaneTerminal runId="r1" paneId="agent" />)
+        root.render(<PaneTerminal runId="r1" paneId="playwright" emptyState={PANE_COPY} />)
       })
       act(() => {
+        paneState.options[0].onError?.('log not available')
         vi.advanceTimersByTime(700)
       })
-      expect(container.textContent).toBe('')
+
+      // The distinction that matters: `log not available` must not reach the
+      // terminal as output. It used to, and marking the pane as having written
+      // something suppressed the very placeholder it was trying to explain.
+      expect(terminalState.writes.join('')).not.toContain('log not available')
+      expect(container.textContent).toContain(PANE_COPY.missing.body)
+      expect(container.textContent).not.toContain(PANE_COPY.idle.body)
     } finally {
       vi.useRealTimers()
     }
@@ -303,7 +316,8 @@ describe('PaneTerminal', () => {
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 0 })
 
     await act(async () => {
-      root.render(<PaneTerminal runId="r1" paneId="agent" />)
+      root.render(<PaneTerminal runId="r1" paneId="agent"
+            emptyState={PANE_COPY} />)
     })
 
     // Renderer is dormant: no open(), no WebGL context, no fit.
@@ -350,7 +364,8 @@ describe('PaneTerminal', () => {
     })
     try {
       await act(async () => {
-        root.render(<PaneTerminal runId="r1" paneId="agent" />)
+        root.render(<PaneTerminal runId="r1" paneId="agent"
+            emptyState={PANE_COPY} />)
       })
       // Socket open: the initial (possibly fallback-font) resize was sent.
       act(() => {
@@ -382,7 +397,8 @@ describe('PaneTerminal', () => {
 
   it('loads the WebGL renderer for the agent pane only', async () => {
     await act(async () => {
-      root.render(<PaneTerminal runId="r1" paneId="agent" />)
+      root.render(<PaneTerminal runId="r1" paneId="agent"
+            emptyState={PANE_COPY} />)
     })
     expect(terminalState.webglAddonCtorCalls).toBe(1)
     expect(terminalState.instances[0].loadedAddons).toHaveLength(2) // fit + webgl
@@ -391,7 +407,8 @@ describe('PaneTerminal', () => {
     terminalState.instances = []
 
     await act(async () => {
-      root.render(<PaneTerminal runId="r1" paneId="playwright" />)
+      root.render(<PaneTerminal runId="r1" paneId="playwright"
+            emptyState={PANE_COPY} />)
     })
     expect(terminalState.webglAddonCtorCalls).toBe(0)
     expect(terminalState.instances[0].loadedAddons).toHaveLength(1) // fit only

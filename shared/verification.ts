@@ -7,7 +7,18 @@
 // `benchmark` — a run spawned by the benchmark (an arm or the validity-gate
 //            trial). Behaves like `run`, but is hidden from the global Runs
 //            list/count — it's surfaced only inside the benchmark window.
-export type ExecutionType = 'run' | 'verify' | 'boot' | 'benchmark'
+// `robustness` — retired execution type retained to classify historical runs.
+export type ExecutionType = 'run' | 'verify' | 'boot' | 'benchmark' | 'robustness'
+
+/** Runs that never stand in for the suite: a boot session runs no tests, and
+ *  benchmark arms and historical cells are auxiliary. Every Runs list and
+ *  every "latest run" lookup skips them — one
+ *  predicate so a new kind is added here, not at each of those sites. A
+ *  `verify` run is NOT auxiliary: it is the suite, observed against a
+ *  deployment, and the sites that also exclude it say so themselves. */
+export function isAuxiliaryExecution(type: ExecutionType | undefined): boolean {
+  return type === 'boot' || type === 'benchmark' || type === 'robustness'
+}
 
 export interface VerificationTarget {
   id: string

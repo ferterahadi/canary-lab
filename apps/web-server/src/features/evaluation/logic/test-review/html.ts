@@ -5,6 +5,7 @@ import type { CoverageLedger, TestCoverage, TestStrength } from '../../../../../
 import { qualitySummaryForAudience } from './assertions'
 import { displayCaseTitle, shortLocation, specFileLabel } from './audience'
 import { createFlowcharts } from './flowchart'
+import { renderEnglishSource } from './english'
 import { statusBucket, testStatusCounts } from './packet'
 import { ASSERTION_HTML_SCRIPT } from './report-script'
 import { ASSERTION_HTML_CSS } from './report-styles'
@@ -90,6 +91,10 @@ export async function renderHtml(
           ${renderFailureDetail(test)}
           ${renderFlowchartSection(flowchart, audienceCase.title)}
           <div class="drawers">
+            <details class="drawer english-details" open>
+              <summary>English explanation</summary>
+              <div class="drawer-body">${test.testBody ? renderEnglishSource(test.location ?? 'evaluation.spec.ts', test.testBody) : '<p class="muted">Source unavailable.</p>'}</div>
+            </details>
             <details class="drawer test-code-details">
               <summary>Test code</summary>
               <div class="drawer-body">${test.testBody ? await renderTestCode(test.testBody) : '<p class="muted">Source unavailable.</p>'}</div>
@@ -404,7 +409,7 @@ export async function renderImplementations(externalImports: string[], helpers: 
   return `<section class="implementations" id="${escapeAttr(id)}">
     <details class="drawer">
       <summary>Helper functions used</summary>
-      <div class="drawer-body">${await highlightCode(source)}</div>
+      <div class="drawer-body">${renderEnglishSource('helpers.ts', source)}${await highlightCode(source)}</div>
     </details>
   </section>`
 }

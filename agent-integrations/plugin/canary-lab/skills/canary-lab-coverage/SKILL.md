@@ -6,6 +6,18 @@ type: skill
 
 # Canary Lab — Semantic Coverage Ledger
 
+## User input through MCP 2.0
+
+Let the owning MCP command request missing input with SDK 2.0 elicitation
+(`input_required`). The client collects the response and retries the command.
+Do not answer a user form yourself or ask the same question in chat first.
+Existing user instructions and autopilot choices still apply without another ask.
+On `needs-input`, leave work pending after decline/cancel, stale input, or an
+unfinished UI action; never retry or repeat the question automatically. Chat is
+only the fallback when elicitation is unavailable. Never collect passwords, API
+keys, or access tokens in chat or form elicitation: use the returned Canary UI URL.
+Setup and reconnection questions still use chat while MCP is unavailable.
+
 ## MCP Invocation
 
 Setup and the plugin expose one public Canary Lab MCP tool: `exec` (usually
@@ -39,6 +51,26 @@ feature has a recorded run the ledger also carries an additive **proven**
 axis (`provenPct`, `totals.proven`, per-requirement/path `proven`,
 `provenRunId`): covered = a tag claims it; proven = the covering test
 actually passed in the latest run (omitted when no run is recorded).
+A path or variant cell also carries `failed` — no claiming test passed and
+at least one FAILED in that run. That is a broken promise, distinct from an
+unkept one (nothing has run it yet); fix the app, never the test. A pass
+wins, so `failed` is never true alongside `proven`.
+The ledger also carries the **time axis**: per requirement an `enforcement`
+block — `state`, `provenAt` (the newest run in which every mapped test
+passed), `testsChangedAt` (the last classified spec edit on a mapped test, with
+its verdict), `wordingChangedAt` — where `state` is one of:
+
+| `state` | Meaning |
+| --- | --- |
+| `proven-unchanged` | A green run over every mapped test is newer than both the tests' and the wording's last change |
+| `tests-weakened` | A mapped test was classified weaker AFTER the proof — the run that proved it never saw the weaker test |
+| `proof-stale` | A mapped test changed after the proof (or no run ever proved it) and no green run has followed |
+| `wording-ahead` | The wording moved after the tests and the proof — the tests may no longer test what it says |
+
+The ledger-level `enforcement` rolls it up (`provenUnchanged`/`total` for
+`runId`). Report these states as Canary derived them, never a claim of your
+own. A `tests-weakened` requirement is fixed by restoring the assertion — the
+weaker edit is exactly what the proof never saw — never by re-running.
 
 ## Workspace Bootstrap
 
@@ -65,6 +97,29 @@ a job.
 
 ## Coverage Loop
 
+### Freshness and connected-session updates
+
+Canary must show current state without refreshing the browser. Read `freshness`
+and the `coverageUpdate` added to related tool replies before reporting numbers
+or choosing the next action. Stale, updating, unavailable or missing freshness
+means the displayed measurements are historical; do not call them current.
+While actively monitoring this suite, use `wait_for_feature_change(feature,
+afterRevision, timeout_ms:30000)` and retain its revision. Omit the revision to
+catch up after reconnecting. This reaches the agent through a tool response; it
+does not promise to wake an idle Claude/Codex host.
+
+Follow `nextAction` only within the user's task and existing launch permissions.
+Documents invalidate requirements then mapping; semantic test changes, including
+referenced helpers and hooks, invalidate mapping. Suite configuration does not,
+and remapping does not require a later verification run. Reuse valid earlier
+Flight stages. Respect `activeJobId`, its owner and any active Flight: continue
+owned work, never create a competing recovery. A rejected stale-input submission
+releases its job; obtain new context instead of resubmitting an obsolete answer.
+After recovery, re-read the ledger. Mapping completeness, latest-run outcomes and
+historical enforcement proof are separate; an old pass cannot conceal a newer
+failure. Do not clear summaries, weaken tests or launch paid work just to remove
+a freshness warning.
+
 **Start by reading the ledger, not by regenerating it**: call
 `get_feature_coverage(feature)` first and branch on `state`:
 
@@ -77,18 +132,30 @@ a job.
 - `state.summary` `stale`/`absent` → run Step 1 (echo the previous ids!).
 - `state.coverage: "blocked"` → read the ledger's `next:` field and follow
   it — don't present a menu. When `next` reports no source doc ("Setup
-  needed", `sourceDocCount: 0`), **ask the user to attach or paste the
-  PRD/spec in the chat** — never invent one or pull an external file. Drop
-  source docs (specs, tickets, notes) into the feature with
-  `write_feature_doc` first.
+  needed", `sourceDocCount: 0`), call `start_external_summary` with the
+  feature and your stable `session_id`. `needs-document-discovery` means search
+  the task's repositories, existing docs, and user-provided references first.
+  Read contents, honor source precedence, and use clearly relevant, authorized
+  documents automatically. Return `document_resolution` with `status: "resolved"`,
+  `searched`, and `sources: [{path, sha256, reason}]`; hashes identify the bytes read.
+  For missing material return `status: "missing"`, `searched`, `reason`; for
+  ambiguous/conflicting material return that status, `searched`, `question`, and
+  `candidates: [{label, sources}]` (1–5 for ambiguity, 2–5 for conflicts). Only these unresolved cases elicit input.
+  Use the selected documents from the result; rejected originals remain on disk.
+  When the user chooses to supply material, follow `document_source: "form"` or
+  `"upload"`. Only an unsupported client asks the focused question in chat.
+  Preserve previous user choices. Never invent requirements or infer them from
+  code/tests without authorization. A confidence percentage is not source evidence.
 
 **Step 1 — PRD summary** (only when stale/absent; author it YOURSELF; no local agent):
 
 Choose one stable `session_id` before the first start call and reuse it for
 both externally driven jobs in this conversation.
 
-1. `start_external_summary(feature, session_id)` → returns a `jobId`, the source-doc
-   paths, the previous requirement ids to PRESERVE, and a `prompt`.
+1. `start_external_summary(feature, session_id)` → first follow any
+   `needs-document-discovery` result, including for linked or changed documents.
+   Once sources are resolved, it returns a `jobId`, selected source-doc paths,
+   the previous requirement ids to PRESERVE, and a `prompt`.
 2. Read each doc in the returned paths; extract the testable requirements.
 3. `submit_external_summary(jobId, requirements[, variantDimension])`.
 
@@ -174,9 +241,10 @@ PRD summary exists:
 the final ledger. The ledger reports per
 requirement → covering tests → `gapType` (`untested` / `path-incomplete` /
 `variant-incomplete` / `covered`) + coarse `coverageStatus`
-(covered/partial/uncovered), a coverage % (`covered ÷ total` — every
-declared path claimed by a mapped test) and a mapped % (requirements with ≥1
-test), per-test `strength` (`strong` / `solid` / `basic` / `shallow`, graded
+(covered/partial/uncovered), a `Mapped N%` headline from `coveragePct` (fully
+mapped requirements ÷ total — every declared path and variant claimed) and a
+linked breadth in `mappedPct` (requirements with ≥1 test), per-test `strength`
+(`strong` / `solid` / `basic` / `shallow`, graded
 from each test's assertion tiers — independent of runs), `orphanTestNames`
 (tests with no requirement), and the derived `state` (summary × coverage
 axes + headline).
@@ -199,3 +267,6 @@ same computation.
   whole conversation. The submit calls take their `jobId`, not `session_id`.
 - New tests belong to the `canary-lab-author` skill/profile; this profile maps and measures.
 - Proving coverage takes a run — `canary-lab-run` (or a flight) records the run the `proven` axis reads.
+- The time axis reads run records, never a stored opinion: a `proof-stale` requirement is cleared by a green run, a `wording-ahead` one by matching tests passing after the wording change, a `tests-weakened` one by restoring the assertion.
+
+Broken document links are repaired before source discovery: the owning command elicits the moved file's new path on the Canary server. On `document-relinked`, retry that command with the same arguments. Keep the symlink and existing baseline; never omit the missing source or create recovery copies. Cancel/decline leaves work pending. Unsupported clients use Relink in the returned Canary UI.

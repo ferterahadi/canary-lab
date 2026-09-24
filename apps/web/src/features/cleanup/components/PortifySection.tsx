@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { PortifyCleanupEntry } from '@/shared/api/types'
 import { formatBytes, timeAgo } from '@/shared/lib/format'
+import { ConfirmModal } from '@/shared/ui/atoms'
 import { CleanupEmptyState, FolderGlyph, QuickSelectMenu, SpinnerGlyph, WarnGlyph } from './CleanupTableParts'
 import { PORTIFY_STATUS_COLOR, SEVEN_DAYS_MS } from './cleanup-rows'
 
@@ -23,6 +24,9 @@ export function PortifySection({ now, onNavigateToPortify }: {
   // the runs tab), so the "record only, saved overlay untouched" note is seen
   // on each path, not just bulk.
   const [confirmTargets, setConfirmTargets] = useState<PortifyCleanupEntry[] | null>(null)
+  // In the page, above the table it is about — this was a `window.alert`, an OS
+  // sheet in the middle of a surface that draws all its own chrome.
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -75,7 +79,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
     setSelected((prev) => new Set([...prev].filter((id) => !targets.some((t) => t.workflowId === id))))
     setBulkBusy(false)
     await load()
-    if (failures > 0) window.alert(`${failures} of ${n} removals failed.`)
+    setActionError(failures > 0 ? `${failures} of ${n} removals failed. Refreshed below.` : null)
   }
 
   return (
@@ -98,6 +102,9 @@ export function PortifySection({ now, onNavigateToPortify }: {
           <button type="button" onClick={() => void load()} className="cl-button px-2 py-1" disabled={loading || bulkBusy}>Refresh</button>
         </div>
       </div>
+      {actionError && (
+        <div role="alert" data-testid="portify-action-error" className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>{actionError}</div>
+      )}
       <div className="min-h-0 flex-1 overflow-auto px-5 py-2">
       {loading && <CleanupEmptyState icon={<SpinnerGlyph />} title="Loading Portify records…" />}
       {!loading && err && (
@@ -174,8 +181,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
               type="button"
               onClick={() => setConfirmTargets(selectedTargets)}
               disabled={bulkBusy || selectedTargets.length === 0}
-              className="cl-button px-3 py-1"
-              style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
+              className="cl-button cl-button-danger px-3 py-1"
             >
               {bulkBusy ? 'Removing…' : `Delete records (${selectedTargets.length} · ${formatBytes(selectedBytes)})`}
             </button>
@@ -183,35 +189,18 @@ export function PortifySection({ now, onNavigateToPortify }: {
         </div>
       )}
 
-      {/* Confirm dialog — mirrors the runs/worktrees delete confirm. Serves
-          both the per-row Delete and the bulk action bar. */}
-      {confirmTargets && (
-        <div className="cl-modal-backdrop fixed inset-0 z-[70] flex items-center justify-center p-6" onClick={() => !bulkBusy && setConfirmTargets(null)}>
-          <div
-            role="dialog"
-            aria-modal="true"
-            className="cl-modal w-full max-w-md p-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Delete Portify record{confirmTargets.length === 1 ? '' : 's'}</h2>
-            <p className="mt-2" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-              Remove <strong>{confirmTargets.length}</strong> port-ification record{confirmTargets.length === 1 ? '' : 's'} from history, reclaiming about <strong>{formatBytes(confirmTargets.reduce((s, w) => s + w.folderBytes, 0))}</strong>. This drops the workflow record only — a suite&apos;s saved overlay (its live port-ification) is untouched. Remove an overlay from the suite&apos;s Ports tab.
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={() => setConfirmTargets(null)} disabled={bulkBusy} className="cl-button px-3 py-1">Cancel</button>
-              <button
-                type="button"
-                disabled={bulkBusy}
-                onClick={() => void doRemove(confirmTargets)}
-                className="cl-button px-3 py-1"
-                style={{ color: 'var(--danger)' }}
-              >
-                {bulkBusy ? 'Working…' : 'Delete'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* The shared confirmation, serving both the per-row Delete and the bulk
+          action bar. */}
+      <ConfirmModal
+        open={confirmTargets !== null}
+        title={`Delete Portify record${confirmTargets?.length === 1 ? '' : 's'}`}
+        variant="danger"
+        busy={bulkBusy}
+        confirmLabel="Delete"
+        onCancel={() => setConfirmTargets(null)}
+        onConfirm={() => { if (confirmTargets) void doRemove(confirmTargets) }}
+        message={<>Remove <strong>{confirmTargets?.length ?? 0}</strong> port-ification record{confirmTargets?.length === 1 ? '' : 's'} from history, reclaiming about <strong>{formatBytes((confirmTargets ?? []).reduce((s, w) => s + w.folderBytes, 0))}</strong>. This drops the workflow record only — a suite&apos;s saved overlay (its live port-ification) is untouched. Remove an overlay from the suite&apos;s Ports tab.</>}
+      />
     </div>
   )
 }

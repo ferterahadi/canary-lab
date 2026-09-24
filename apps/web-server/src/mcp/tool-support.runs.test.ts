@@ -5,7 +5,7 @@ import {
   activeRunPriority,
   claimRun,
   ensureExternalClaimForMcpCall,
-  findHealingRunForFeature,
+  findContinuingRunForFeature,
   mcpVerificationStatus,
   resolveRunRef,
   runCandidate,
@@ -137,19 +137,19 @@ describe('activeRunPriority', () => {
   })
 })
 
-describe('findHealingRunForFeature', () => {
+describe('findContinuingRunForFeature', () => {
   it('hands back the healing run for the feature', () => {
     const detail = runDetail()
     const store = fakeStore([indexRow()], [detail])
 
-    expect(findHealingRunForFeature(asDeps({ store }), 'checkout', undefined)).toBe(detail)
+    expect(findContinuingRunForFeature(asDeps({ store }), 'checkout', undefined)).toBe(detail)
   })
 
   it('ignores index rows that are not healing', () => {
     const passed = runDetail({ runId: 'run-passed', status: 'passed' })
     const store = fakeStore([indexRow({ runId: 'run-passed', status: 'passed' })], [passed])
 
-    expect(findHealingRunForFeature(asDeps({ store }), 'checkout', undefined)).toBeNull()
+    expect(findContinuingRunForFeature(asDeps({ store }), 'checkout', undefined)).toBeNull()
   })
 
   it('ignores a healing row whose run artifacts are gone', () => {
@@ -157,7 +157,7 @@ describe('findHealingRunForFeature', () => {
     // Returning the row would hand the client a runId with no manifest to heal.
     const store = fakeStore([indexRow({ runId: 'run-swept' })], [])
 
-    expect(findHealingRunForFeature(asDeps({ store }), 'checkout', undefined)).toBeNull()
+    expect(findContinuingRunForFeature(asDeps({ store }), 'checkout', undefined)).toBeNull()
   })
 
   it('keeps only the requested env when one is named, and every env when none is', () => {
@@ -166,8 +166,8 @@ describe('findHealingRunForFeature', () => {
     const rows = [indexRow({ runId: 'run-local' }), indexRow({ runId: 'run-staging' })]
     const deps = asDeps({ store: fakeStore(rows, [local, staging]) })
 
-    expect(findHealingRunForFeature(deps, 'checkout', 'staging')).toBe(staging)
-    expect(findHealingRunForFeature(deps, 'checkout', undefined)).toBe(local)
+    expect(findContinuingRunForFeature(deps, 'checkout', 'staging')).toBe(staging)
+    expect(findContinuingRunForFeature(deps, 'checkout', undefined)).toBe(local)
   })
 
   it('prefers the run parked for a fix over a newer one still mid-cycle', () => {
@@ -183,7 +183,7 @@ describe('findHealingRunForFeature', () => {
 
     // Newest-first would pick run-mid; priority beats recency because only the
     // parked run can accept the signal the client is about to send.
-    expect(findHealingRunForFeature(asDeps({ store: fakeStore(rows, [midCycle, parked]) }), 'checkout', undefined))
+    expect(findContinuingRunForFeature(asDeps({ store: fakeStore(rows, [midCycle, parked]) }), 'checkout', undefined))
       .toBe(parked)
   })
 
@@ -203,10 +203,10 @@ describe('findHealingRunForFeature', () => {
 
     // The real index arrives newest-first; the helper re-sorts rather than
     // trusting that, so both input orders have to land on the same run.
-    expect(findHealingRunForFeature(
+    expect(findContinuingRunForFeature(
       asDeps({ store: fakeStore(rows(['run-older', 'run-newer']), [older, newer]) }), 'checkout', undefined,
     )).toBe(newer)
-    expect(findHealingRunForFeature(
+    expect(findContinuingRunForFeature(
       asDeps({ store: fakeStore(rows(['run-newer', 'run-older']), [older, newer]) }), 'checkout', undefined,
     )).toBe(newer)
   })
@@ -221,7 +221,7 @@ describe('findHealingRunForFeature', () => {
       indexRow({ runId: 'run-mine', feature: 'checkout', startedAt: '2026-05-25T08:00:00.000Z' }),
     ]
 
-    const found = findHealingRunForFeature(asDeps({ store: fakeStore(rows, [mine, theirs]) }), 'checkout', undefined)
+    const found = findContinuingRunForFeature(asDeps({ store: fakeStore(rows, [mine, theirs]) }), 'checkout', undefined)
 
     // start_run("checkout") continuing search's heal loop would drive an agent
     // at the wrong repos entirely.
@@ -233,7 +233,7 @@ describe('findHealingRunForFeature', () => {
     const second = runDetail({ runId: 'run-b' })
     const rows = [indexRow({ runId: 'run-a' }), indexRow({ runId: 'run-b' })]
 
-    expect(findHealingRunForFeature(asDeps({ store: fakeStore(rows, [first, second]) }), 'checkout', undefined))
+    expect(findContinuingRunForFeature(asDeps({ store: fakeStore(rows, [first, second]) }), 'checkout', undefined))
       .toBe(first)
   })
 })

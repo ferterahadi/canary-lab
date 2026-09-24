@@ -1,8 +1,12 @@
 import fs from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
-import { INSTRUCTIONS_BY_PROFILE } from './server'
-import { EXTERNAL_HEAL_NEXT_STEPS } from '../features/runs/logic/heal/external-heal-surface'
+import { INSTRUCTIONS_BY_PROFILE, INSTRUCTIONS_DELIVERED_WINDOW, WORKFLOW_GUIDES } from './instructions'
+import { EXEC_TOOL_NAME, FULL_TOOLS } from './tool-profiles'
+import { classifyWaitForHealTask, type CanaryLabMcpDeps } from './tools'
+import { EXTERNAL_HEAL_NEXT_STEPS, buildSpecEditsWarning, normalizeRunCounts } from '../features/runs/logic/heal/external-heal-surface'
+import type { RunDetail, RunStore } from '../features/runs/logic/run-store'
+import type { RunManifest } from '../features/runs/logic/runtime/manifest'
 
 // The repair rule — "fix app/service code, not tests, unless a test is provably
 // wrong" — is the guardrail Canary Lab exists to enforce (docs/PRD.md, Problem +
@@ -81,6 +85,31 @@ describe('repair guardrail — MCP instructions', () => {
     expect(INSTRUCTIONS_BY_PROFILE.repair).toMatch(/never edit the test files/i)
   })
 
+  it('repair instructions read specEdits as untested edits with an explicit human decision', () => {
+    // The lead is what a skill-less client gets; the rule must be there, not
+    // only in the guide.
+    const lead = INSTRUCTIONS_BY_PROFILE.repair
+    expect(lead).toMatch(/specEdits/)
+    expect(lead).toMatch(/not tested/i)
+    expect(lead).toMatch(/restore/i)
+    expect(lead).toMatch(/human chooses Accept & commit/i)
+    expect(lead).toMatch(/no (MCP )?tool can self-approve/i)
+  })
+
+  it('the repair guide orders a restore on a weaker hint, never an edit to the test', () => {
+    const guide = WORKFLOW_GUIDES.repair
+    expect(guide).toMatch(/kind:"weaker"|weaker hint/i)
+    expect(guide).toMatch(/restore/i)
+    expect(guide).toMatch(/never a repair|never edit the test files/i)
+    expect(guide).toMatch(/one AI labelled/i)
+  })
+
+  it('compact instructions carry the specEdits rule too', () => {
+    const text = INSTRUCTIONS_BY_PROFILE.compact
+    expect(text).toMatch(/specEdits/)
+    expect(text).toMatch(/human chooses Accept & commit/i)
+  })
+
   it('repair instructions keep the honest pass-count rule', () => {
     // Counts come from the real result lines; `total - failed` silently converts
     // never-run tests into passes.
@@ -94,16 +123,14 @@ describe('repair guardrail — MCP instructions', () => {
 })
 
 // Presence in the string above is NOT delivery. The Claude Code CLI truncates a
-// server's `instructions` at 2048 chars (`HB=2048` in the binary; 2,268 recorded
-// truncations of canary-lab under ~/Library/Caches/claude-cli-nodejs/*/
-// mcp-logs-canary-lab/). Every assertion above passes on text a skill-less client
-// may never receive — which is exactly how the two rules pinned below came to be
-// asserted-but-undelivered. So each load-bearing rule needs a home in a channel
-// the client provably gets: either inside the delivered window of `instructions`,
-// or in a tool result (results and tool descriptions are not truncated).
+// server's `instructions` at INSTRUCTIONS_DELIVERED_WINDOW chars (its logs read
+// "Server instructions truncated from N to 2048 chars"). Every profile's lead now
+// fits the window (instructions.test.ts), but the two rules pinned below once sat
+// past the cut while every other test in this file stayed green — so each
+// load-bearing rule also keeps a home in a channel the client provably gets: a
+// tool result (results and tool descriptions are not truncated).
 describe('repair guardrail — delivery, not just presence', () => {
-  /** What the Claude Code CLI keeps of a server's `instructions`. */
-  const DELIVERED_WINDOW = 2048
+  const DELIVERED_WINDOW = INSTRUCTIONS_DELIVERED_WINDOW
 
   const healProfiles = ['repair', 'lifecycle', 'full', 'compact'] as const
 
@@ -115,11 +142,10 @@ describe('repair guardrail — delivery, not just presence', () => {
     expect(at).toBeLessThan(DELIVERED_WINDOW)
   })
 
-  // These two live past the cut in `instructions` (measured: ~3549 and ~3847 in
-  // `repair`), so the heal RESULT is the only channel that delivers them. Do not
-  // "de-duplicate" them out of the nextSteps on the grounds that session-init
-  // prose already says it — that reasoning is what the truncation invalidates,
-  // and heal-task-wait.ts's own comment once recorded it as settled.
+  // The repair lead carries these two, but a compact client (the setup-installed
+  // default) reads the compact instructions, not the repair lead — so the heal
+  // RESULT is the one channel every client gets. Do not "de-duplicate" them out
+  // of the nextSteps on the grounds that session-init prose already says it.
   it('the pass-count invariant rides the heal result, not only session-init prose', () => {
     const steps = EXTERNAL_HEAL_NEXT_STEPS.join('\n')
     expect(steps).toMatch(/never total - failed/i)
@@ -174,6 +200,19 @@ describe('repair guardrail — shipped agent skills', () => {
   )
 
   it.each(runLoopSkills.map((f) => [path.relative(REPO_ROOT, f), f]))(
+    '%s reads specEdits as untested edits with an explicit human decision',
+    (_label, file) => {
+      const text = fs.readFileSync(file, 'utf8')
+      expect(text).toMatch(/specEdits/)
+      expect(text).toMatch(/not tested/i)
+      expect(text).toMatch(/restore/i)
+      expect(text).toMatch(/human chooses `?Accept & commit`?/i)
+      expect(text).toMatch(/no (MCP )?tool can self-approve/i)
+      expect(text).toMatch(/weaker/i)
+    },
+  )
+
+  it.each(runLoopSkills.map((f) => [path.relative(REPO_ROOT, f), f]))(
     '%s assigns runtime verification to the runner',
     (_label, file) => {
       const text = fs.readFileSync(file, 'utf8')
@@ -182,4 +221,110 @@ describe('repair guardrail — shipped agent skills', () => {
       expect(text).toContain('targeted Playwright verification after the signal')
     },
   )
+})
+
+// The spec-edit boundary (D9) and the integrity hint (D13). A run executes a
+// run-start copy of its suite, so a live spec edit is inert until a HUMAN adopts
+// it in Canary Lab; the differential's reading of that edit is a hint, never a
+// gate. Two things would quietly undo this without failing any other test: an
+// MCP tool that self-approves (the agent that weakened the spec then blesses
+// its own edit), or a verdict path that consults the hint (a `withheld` status,
+// a blocked export). Both are pinned here. Procedure: `cl_sync-agent-surfaces`.
+describe('spec-edit boundary — humans adopt, hints advise', () => {
+  const MCP_SRC = path.join(REPO_ROOT, 'apps', 'web-server', 'src', 'mcp')
+  const VERDICT_SRC = path.join(REPO_ROOT, 'apps', 'web-server', 'src', 'features', 'runs', 'logic', 'runtime', 'run-verdict.ts')
+
+  /** Every non-test source under the MCP layer, discovered — never hardcoded. */
+  function findSources(dir: string): string[] {
+    const out: string[] = []
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) out.push(...findSources(full))
+      else if (entry.name.endsWith('.ts') && !entry.name.includes('.test.')) out.push(full)
+    }
+    return out.sort()
+  }
+
+  it('exposes no tool that adopts, restores or approves a spec edit, or accepts a requirement wording', () => {
+    for (const name of [...FULL_TOOLS, EXEC_TOOL_NAME]) {
+      expect(name).not.toMatch(/adopt|approve[-_]?(dirty|spec)|commit[-_]?dirty|restore[-_]?spec|accept[-_]?(wording|requirement)/i)
+    }
+  })
+
+  it('only the elicited review handler reaches adoption; other human-only actions remain unreachable', () => {
+    const sources = findSources(MCP_SRC)
+    expect(sources.length).toBeGreaterThan(20)
+    for (const file of sources) {
+      const text = fs.readFileSync(file, 'utf8')
+      // Compact profile's `exec` dispatches by internal tool name, so a route
+      // reached through app.inject() would be reachable from every client.
+      // Keep the retired requirement-confirmation action forbidden too; removing
+      // its UI must never transfer that action to an agent.
+      expect(text, path.relative(REPO_ROOT, file)).not.toMatch(/approve-dirty|commit-dirty|adoptSpecEdits\(|restoreSpecEdits\(|requirements\/[^'"`]*\/accept|acceptRequirementWording\(/)
+      if (file === path.join(MCP_SRC, 'tool-groups', 'test-review.ts')) {
+        expect(text).toContain('requestUserInput(')
+        expect(text).toContain('expectedRevision: review_revision')
+      } else expect(text, path.relative(REPO_ROOT, file)).not.toMatch(/adopt-spec-edits|restore-spec-edits/)
+    }
+  })
+
+  function passedWithWeakerHint(): RunManifest {
+    return {
+      runId: 'run-1',
+      feature: 'checkout',
+      startedAt: '2026-05-25T08:00:00.000Z',
+      status: 'passed',
+      healCycles: 0,
+      services: [],
+      specEdits: {
+        checkedAt: 't',
+        pending: [{ file: 'e2e/a.spec.ts', change: 'modified', affectedTests: ['a'], strength: { verdict: 'weaker', tests: [], baseline: 'run-start' } }],
+        adopted: [],
+      },
+      integrity: {
+        hints: [{ kind: 'weaker', file: 'e2e/a.spec.ts', test: 'a', was: ['expect(x).toBe(1)'], now: [] }],
+        disclosure: 'd',
+      },
+    }
+  }
+
+  it('the warning forbids self-approval, offers human review, and orders a restore', () => {
+    const warning = buildSpecEditsWarning(passedWithWeakerHint())
+    const steps = warning?.nextSteps.join('\n') ?? ''
+    expect(steps).toMatch(/No MCP tool can self-approve/)
+    expect(steps).toContain('review_test_changes')
+    expect(steps).toMatch(/ask the human to adopt/)
+    expect(steps).toMatch(/Restore/)
+    // Nothing in the warning is a lever.
+    expect(JSON.stringify(warning)).not.toMatch(/withheld|blocked|gate/i)
+  })
+
+  it('a weaker hint leaves a passed verdict passed, with its counts intact', () => {
+    const summary = { complete: true, total: 1, passed: 1, passedNames: ['a'], failed: [] } as unknown as RunDetail['summary']
+    const detail = { runId: 'run-1', manifest: passedWithWeakerHint(), summary } as unknown as RunDetail
+    const deps = {
+      store: { get: () => detail, registry: { get: () => undefined } } as unknown as RunStore,
+      broker: {},
+      featuresDir: '/tmp/features',
+      projectRoot: '/tmp',
+      startRun: async () => ({ kind: 'started', runId: 'r' }),
+    } as unknown as CanaryLabMcpDeps
+
+    const result = classifyWaitForHealTask(deps, 'run-1', 's')
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { type: 'passed', counts: normalizeRunCounts(summary), specEdits: { hints: [{ kind: 'weaker' }] } },
+    })
+    // The union has no `withheld` arm; the hint rides beside the verdict, not
+    // in place of it.
+    expect(JSON.stringify(result)).not.toMatch(/withheld/)
+  })
+
+  it('the verdict derivation takes no integrity input at all', () => {
+    // decideRunStatus reads the exit code and the summary against the suite
+    // copy — nothing else. A hint consulted here is a gate by another name.
+    const text = fs.readFileSync(VERDICT_SRC, 'utf8')
+    expect(text).not.toMatch(/integrity|IntegrityHint|specEdits|strength/)
+  })
 })

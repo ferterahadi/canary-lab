@@ -3,6 +3,7 @@ import { STAGE_LABEL, stageLabel } from './stage-meta'
 import { presentedStageStatus } from './stage-metrics'
 import { flightRailLabel } from '@shared/flights/stage-labels'
 import { FLIGHT_EXECUTION_ORDER } from '@shared/flights/types'
+import { FLIGHT_SECTION_ROW_KEYS } from './flight-sections'
 
 // ─── Rail rows (R21/R22/R32/R33) ────────────────────────────────────────────
 // The rail is a lens for the USER, not a dump of the conductor's internals:
@@ -92,8 +93,9 @@ export function stageRailRows(
     .map((key) => byKey.get(key))
     .filter((stage): stage is (typeof stages)[number] => stage != null)
   // Preserve forward compatibility with a newer server that sends an unknown
-  // stage: known rows follow Flight priority; unknown rows remain visible last.
-  orderedStages.push(...stages.filter((stage) => !knownKeys.has(stage.key)))
+  // stage. The retired Lab stage can still exist in historical manifests but
+  // does not have a panel, so omit it from the rail.
+  orderedStages.push(...stages.filter((stage) => !knownKeys.has(stage.key) && stage.key !== 'robustness'))
 
   for (const raw of orderedStages) {
     // `presented`, not `settled`: a stage parked on a hand-off to the user's own
@@ -124,5 +126,15 @@ export function stageRailRows(
     }
     rows.push({ key, label: stageLabel(key), status: s.status, note: stageRailNote(s) })
   }
-  return rows
+  // The user sees Setup → Verification cycle → Run separately even though the
+  // conductor and persisted manifest use their own orders. Keep an exceptional
+  // similarity checkpoint first and unknown future rows visible at the end.
+  return rows.sort((a, b) => {
+    const order = (key: FlightStageKey): number => key === 'similarity'
+      ? -1
+      : FLIGHT_SECTION_ROW_KEYS.indexOf(key) < 0
+        ? FLIGHT_SECTION_ROW_KEYS.length
+        : FLIGHT_SECTION_ROW_KEYS.indexOf(key)
+    return order(a.key) - order(b.key)
+  })
 }

@@ -116,16 +116,16 @@ cross-cutting.
 
 - Run tests against a **deployed** environment with `execute_verification`, target URLs, and a Playwright envset. Verification never boots local services or heals; configs are reusable and scoped to the `verify` MCP profile.
 
-### [Export evaluation]
+### [Evaluation report]
 
-- Export any terminal run as `evaluation.html`. Failed or aborted runs preserve their status.
-- **Raw** uses run evidence; **localized** asks a local agent to improve per-test wording. External MCP clients supply their own wording. Tests and verdicts stay the same.
+- Create an evaluation report for any terminal run as `evaluation.html`. Failed or aborted runs preserve their status.
+- **Evidence report** uses run evidence; **Plain-English report** asks a local agent to clarify the wording. External MCP clients supply their own wording. Tests and verdicts stay the same.
 
 ### [General]
 
 - One published CLI (`flight`, `init`, `setup`, `ui`, `mcp`, `new feature`, `env`,
   `boot`, `upgrade`), a local web UI, and an MCP server sharing one port.
-- Profile-scoped MCP surface with seven workflow profiles (`repair`, `verify`, `author`, `coverage`, `export`, `flight`, and `portify`), two composed direct-tool profiles (`lifecycle` and `full`), and the default `compact` profile. `compact` exposes one `exec` tool that dispatches the same 63 atomic handlers by exact command name; bare and setup-installed connections both use it, while `lifecycle` and `full` remain opt-in direct-tool rollback surfaces.
+- Profile-scoped MCP surface with seven workflow profiles (`repair`, `verify`, `author`, `coverage`, `export`, `flight`, and `portify`), two composed direct-tool profiles (`lifecycle` and `full`), and the default `compact` profile. `compact` exposes one `exec` tool that dispatches the same 64 atomic handlers by exact command name; bare and setup-installed connections both use it, while `lifecycle` and `full` remain opt-in direct-tool rollback surfaces.
 
 ## Non-goals
 

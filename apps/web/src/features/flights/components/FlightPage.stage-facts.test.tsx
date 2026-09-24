@@ -43,6 +43,8 @@ const mocks = vi.hoisted(() => ({
   cancelHealRun: vi.fn(),
   stopRun: vi.fn(),
   restartRun: vi.fn(),
+  startRun: vi.fn(),
+  asRepoCollision: vi.fn(() => null),
   taskById: vi.fn(),
   taskForRun: vi.fn(),
   evaluationTasks: vi.fn((): EvaluationExportTask[] => []),
@@ -81,6 +83,8 @@ vi.mock('@/shared/api/client', () => ({
   cancelHealRun: mocks.cancelHealRun,
   stopRun: mocks.stopRun,
   restartRun: mocks.restartRun,
+  startRun: mocks.startRun,
+  asRepoCollision: mocks.asRepoCollision,
   ApiError: class ApiError extends Error {
     constructor(message: string, public status = 500, public body: unknown = null) { super(message) }
   },
@@ -917,7 +921,7 @@ describe('trailer model (R14–R18)', () => {
     expect(deliverable).toContain('2026-07-23T1603-z6kc')
     expect(deliverable).toContain('canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc.zip')
     expect(deliverable).not.toContain('export.zip')
-    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Report ready.')
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Evaluation report ready.')
   })
 
   it('a read-time-probed export (a derived flight has no zip path) still offers the download', async () => {
@@ -985,8 +989,11 @@ describe('trailer model (R14–R18)', () => {
     mocks.taskById.mockReturnValue(mine)
     await openExportStage({ taskId: 'task-7' })
     const list = container.querySelector('[data-testid="all-reports-panel"]')
-    expect(list?.textContent).toContain('2026-07-23T1603-z6kc')
-    expect(list?.textContent).toContain('2026-07-20T0900-m4tq')
+    // Rows carry the short run ref, as the Test Run stage names runs; the full
+    // id is the label's tooltip.
+    expect(list?.textContent).toContain('Run z6kc')
+    expect(list?.textContent).toContain('Run m4tq')
+    expect(list?.querySelector('[title="2026-07-23T1603-z6kc"]')).toBeTruthy()
     // The stage's own report is badged; the others are just history.
     expect(list?.querySelector('[data-testid="report-row-task-7"]')?.textContent).toContain('this flight')
     expect(list?.querySelector('[data-testid="report-row-task-3"]')?.textContent).not.toContain('this flight')
@@ -1044,7 +1051,9 @@ describe('R83 — every stage pane wears the settled layout, with placeholders f
       .find((e) => e.textContent?.includes('Repos scanned'))
     expect(tile?.textContent).toContain('1')
     expect(container.querySelectorAll('[data-testid="repo-card-demo-app"]')).toHaveLength(1)
-    expect(container.querySelector('[data-testid="repo-scan-card"]')?.textContent).toContain('Repo · scanned')
+    // The kicker names the list; the count rides the kicker line as a chip.
+    expect(container.querySelector('[data-testid="repo-scan-card"]')?.textContent).toContain('Repo scanned')
+    expect(container.querySelector('[data-testid="repo-scan-card"] .cl-count-chip')?.textContent).toBe('1')
   })
 
   it('a pending stage still shows its band: the input-derived count is real, the unmeasured ones are placeholders', async () => {
@@ -1262,8 +1271,8 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     expect(facts?.textContent).toContain('Test depth')
     expect(facts?.textContent).toContain('Tests that passed')
     expect(facts?.textContent).toContain('Requirements proven')
-    expect(container.querySelector('[data-testid="evaluation-deliverable-skeleton"]')?.textContent).toContain("This flight's report")
-    expect(container.querySelector('[data-testid="all-reports-skeleton"]')?.textContent).toContain('All reports for this suite')
+    expect(container.querySelector('[data-testid="evaluation-deliverable-skeleton"]')?.textContent).toContain("This flight's evaluation report")
+    expect(container.querySelector('[data-testid="all-reports-skeleton"]')?.textContent).toContain('All evaluation reports for this suite')
   })
 
   // R83's promise is that a value lands in the SLOT its placeholder held. These
@@ -1343,6 +1352,7 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     // Passes card below it has not moved.
     await act(async () => {
       landLedger({
+        freshness: { revision: 'current', checkedAt: new Date().toISOString(), state: 'current', reasons: [], changedTests: [], latestRunFailed: false },
         feature: 'checkout',
         requirements: [],
         tests: [{ name: 't1', requirements: ['R1'], pathTypes: ['happy'], strength: 'solid', file: 'a.spec.ts' }],
@@ -1357,7 +1367,7 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('Tests written')
     expect(container.querySelector('[data-testid="coverage-composition-skeleton"]')).toBeNull()
     const composition = container.querySelector('[data-testid="coverage-composition"]')
-    expect(composition?.querySelector('.cl-frame-heading')?.textContent).toBe('Test depth')
+    expect(composition?.querySelector('.cl-type-title')?.textContent).toBe('Test depth')
     expect(composition?.textContent).toContain('1 test')
   })
 })

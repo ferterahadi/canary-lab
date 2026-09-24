@@ -15,9 +15,13 @@ import type { CoverageJobManifest } from '../coverage/logic/coverage/jobs/types'
 import type { PortifyManifest } from '../portify/logic/runtime/types'
 import type { BenchmarkManifest } from '../benchmark/logic/runtime/types'
 import { agentJobStore } from '../agent-sessions/logic/agent-jobs/store'
+import { discoveryRepairStore } from './logic/discovery-repair-store'
+import { runStartRequestStore } from '../runs/logic/run-start-requests'
+import type { DiscoveryRepair } from '../../../../../shared/discovery-repair'
 import type { AgentJobManifest } from '../agent-sessions/logic/agent-jobs/types'
 import type { WorkspaceEventPublisher } from '../../shared/workspace-events'
 import { featuresRoutes } from './routes/features'
+import { discoveryRepairRoutes } from './routes/discovery-repair'
 import { featureConfigRoutes } from './routes/feature-config'
 import { projectConfigRoutes } from './routes/project-config'
 import { agentProbeRoutes } from './routes/agent-probe'
@@ -134,6 +138,24 @@ function seedFlight(flightId: string, feature: string, status: FlightStatus): vo
   } satisfies FlightManifest)
 }
 
+function seedDiscoveryRepair(id: string, feature: string, status: DiscoveryRepair['status']): void {
+  const now = '2026-08-21T00:00:00.000Z'
+  discoveryRepairStore(logsDir).save({
+    id,
+    feature,
+    featureDir: path.join(featuresDir, feature),
+    status,
+    owner: { kind: 'internal', agent: 'claude' },
+    createdAt: now,
+    updatedAt: now,
+    heartbeatAt: now,
+    message: 'Repairing discovery',
+    diagnostic: 'missing import',
+    log: [],
+    promptPath: path.join(logsDir, 'discovery-repairs', id, 'prompt.md'),
+  } satisfies DiscoveryRepair)
+}
+
 type Blocked = (featureName: string) => string | null
 
 async function renameDeps(): Promise<{
@@ -143,7 +165,7 @@ async function renameDeps(): Promise<{
   removeFlightRecordsFor: (featureName: string) => { removed: number; error?: string }
 }> {
   const registrations = await registerFeature()
-  const opts = registrations[1].opts
+  const opts = registrations[2].opts
   const rename = opts.featureRename as { blockedBy: Blocked; apply: (from: string, to: string) => number }
   return {
     blockedBy: rename.blockedBy,
@@ -155,24 +177,28 @@ async function renameDeps(): Promise<{
 }
 
 describe('config feature registrar', () => {
-  it('mounts the five configuration surfaces with the stores each one reads', async () => {
+  it('mounts the six configuration surfaces with the stores each one reads', async () => {
     const registrations = await registerFeature()
 
     expect(registrations.map((r) => r.plugin)).toEqual([
       featuresRoutes,
+      discoveryRepairRoutes,
       featureConfigRoutes,
       projectConfigRoutes,
       agentProbeRoutes,
       onboardingRoutes,
     ])
-    expect(registrations[0].opts).toEqual({ featuresDir, logsDir, dirtySpecStore })
-    expect(registrations[1].opts).toMatchObject({ featuresDir })
-    expect(registrations[2].opts).toMatchObject({ projectRoot: tmpDir, onPortChange })
-    // The live-update bus on both writing surfaces, by identity — see the
+    expect(registrations[0].opts).toEqual({ featuresDir, logsDir, dirtySpecStore, workspaceEvents })
+    expect(registrations[1].opts).toMatchObject({ projectRoot: tmpDir, featuresDir, logsDir })
+    expect(registrations[2].opts).toMatchObject({ featuresDir })
+    expect(registrations[3].opts).toMatchObject({ projectRoot: tmpDir, onPortChange })
+    // The live-update bus on every writing surface, by identity — see the
     // fixture comment for what an omission silently costs.
+    expect(registrations[0].opts.workspaceEvents).toBe(workspaceEvents)
     expect(registrations[1].opts.workspaceEvents).toBe(workspaceEvents)
     expect(registrations[2].opts.workspaceEvents).toBe(workspaceEvents)
-    expect(registrations[4].opts).toMatchObject({ projectRoot: tmpDir, featuresDir, sessionStore: gettingStarted })
+    expect(registrations[3].opts.workspaceEvents).toBe(workspaceEvents)
+    expect(registrations[5].opts).toMatchObject({ projectRoot: tmpDir, featuresDir, sessionStore: gettingStarted })
 
     const res = await app.inject({ method: 'GET', url: '/api/features' })
     expect(res.statusCode).toBe(200)
@@ -193,7 +219,7 @@ describe('config feature registrar', () => {
 
   it('counts every active run across suites for the port-change gate', async () => {
     const registrations = await registerFeature()
-    const countActiveRuns = registrations[2].opts.countActiveRuns as () => number
+    const countActiveRuns = registrations[3].opts.countActiveRuns as () => number
 
     expect(countActiveRuns()).toBe(0)
     seedRuns(
@@ -206,9 +232,16 @@ describe('config feature registrar', () => {
     expect(countActiveRuns()).toBe(2)
   })
 
-  it('refuses a rename while a run or a flight still holds the old name', async () => {
+  it('refuses a rename while a discovery repair, a run or a flight still holds the old name', async () => {
     const { blockedBy } = await renameDeps()
 
+    expect(blockedBy('checkout')).toBeNull()
+
+    // A repair is the FIRST blocker checked: its agent is editing that suite's
+    // files by name right now.
+    seedDiscoveryRepair('dr_1', 'checkout', 'repairing')
+    expect(blockedBy('checkout')).toBe('discovery repair dr_1 is active — finish it before renaming the suite')
+    seedDiscoveryRepair('dr_1', 'checkout', 'succeeded')
     expect(blockedBy('checkout')).toBeNull()
 
     seedRuns({ runId: 'r1', feature: 'checkout', status: 'healing' })
@@ -239,6 +272,29 @@ describe('config feature registrar', () => {
     expect(apply('checkout', 'basket')).toBe(2)
     expect(readRunsIndex(logsDir).map((e) => e.feature).sort()).toEqual(['basket', 'billing'])
     expect(flightStore.list().map((e) => e.feature)).toEqual(['basket'])
+  })
+
+  it('keeps a pending request at its original suite and carries completed intent history on rename', async () => {
+    const { blockedBy, apply } = await renameDeps()
+    const store = runStartRequestStore(logsDir)
+    const record = {
+      requestId: 'request-1', feature: 'checkout', owner: { kind: 'internal' as const },
+      status: 'awaiting-review' as const, version: 1,
+      createdAt: '2026-09-21T00:00:00.000Z', updatedAt: '2026-09-21T00:00:00.000Z',
+      review: { runId: 'run-1', revision: 'revision-1' },
+      payload: { feature: 'checkout', env: 'local' }, fingerprint: 'intent-1', allocatedRunId: 'next-run',
+    }
+    for (const status of ['awaiting-review', 'ready', 'starting'] as const) {
+      store.save({ ...record, status })
+      expect(blockedBy('checkout')).toContain('run request request-1 is pending')
+      expect(blockedBy('billing')).toBeNull()
+      expect(apply('checkout', 'basket')).toBe(0)
+      expect(store.get(record.requestId)?.feature).toBe('checkout')
+    }
+    store.save({ ...record, status: 'cancelled' })
+    expect(blockedBy('checkout')).toBeNull()
+    expect(apply('checkout', 'basket')).toBe(1)
+    expect(store.get(record.requestId)).toMatchObject({ feature: 'basket', payload: { feature: 'basket', env: 'local' } })
   })
 
   it('deletes a suite\'s flight history with it, unless a flight is still live', async () => {

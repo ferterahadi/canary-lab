@@ -211,7 +211,11 @@ export async function projectConfigRoutes(
       return { error: 'file not found' }
     }
 
-    if (!isInside(resolvedFile, resolvedRoot)) {
+    // Linked project files may live elsewhere. Authorize the project entry path,
+    // then launch its real target; an unrelated outside path is still rejected.
+    const projectEntry = isInside(path.resolve(file), path.resolve(deps.projectRoot))
+      || isInside(path.resolve(file), resolvedRoot)
+    if (!projectEntry && !isInside(resolvedFile, resolvedRoot)) {
       reply.code(400)
       return { error: 'file must be inside the project root' }
     }

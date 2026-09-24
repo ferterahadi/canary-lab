@@ -142,16 +142,6 @@ export function seededSlotsAlreadyDeclared(seededFrom: SeededFrom[], declared: P
   return wanted.every((e) => have.has(e))
 }
 
-/** Prepended to the external instructions when canary started the double-boot
- *  itself (see {@link seededSlotsAlreadyDeclared}) — the client must poll, not
- *  edit-and-submit, or it fights a verification already in flight. */
-export const SEEDED_AUTO_VERIFY_NOTE =
-  'NOTE: nothing to edit. The same app was already port-ified for another suite, its patch is PRE-APPLIED to the ' +
-  'worktree, and this suite already declares every matching `ports` slot — so the concurrent double-boot that proves ' +
-  'it is ALREADY RUNNING. Do NOT edit the worktree and do NOT call submit_external_portify (it returns 409 while the ' +
-  'boot is in flight). Poll get_portify instead: `ready-to-save` means you are done — call save_portify. `editing` means ' +
-  'the boot did NOT pass; `verification.failureDetail` says why, and you then fix the worktree and submit as usual.'
-
 /** Pick the best sibling patch for a root: exact base-SHA match first, then newest. */
 export function pickBorrowable(candidates: BorrowCandidate[] | undefined, baseSha: string): BorrowCandidate | null {
   if (!candidates || candidates.length === 0) return null

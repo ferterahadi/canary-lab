@@ -3,7 +3,7 @@ import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type FlightManifest } from './
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { drive } from './flight-drive'
 import { FlightExistsError } from './flight-errors'
-import { bankAllStageTimings, bankStageActivity, defaultFlightId, driveControllers, freshStages, interruptStage } from './flight-stages'
+import { bankAllStageTimings, bankStageActivity, defaultFlightId, abortFlightWork, freshStages, interruptStage } from './flight-stages'
 import { agentJobStore } from '../../agent-sessions/logic/agent-jobs/store'
 import { FlightConductorDeps, StartFlightArgs, resumeFlight } from './conductor'
 
@@ -107,7 +107,7 @@ export async function abortFlight(flightId: string, deps: FlightConductorDeps): 
   const now = deps.now ?? (() => new Date().toISOString())
   const current = store.get(flightId)
   if (!current) throw new Error(`flight not found: ${flightId}`)
-  const openStage = current.stages.find(
+  const openStages = current.stages.filter(
     (s) => s.status === 'running' || s.status === 'waiting-for-approval',
   )
   const abortedAt = now()
@@ -123,16 +123,16 @@ export async function abortFlight(flightId: string, deps: FlightConductorDeps): 
     stages: current.stages.map((s) =>
       // Same clock close as pause — an aborted stage's banked work is still the
       // honest record of what it did before the stop.
-      s.key === openStage?.key
+      openStages.some((open) => open.key === s.key)
         ? { ...bankAllStageTimings(bankStageActivity(s, abortedAt), abortedAt), status: 'pending' as const, checkpoint: undefined }
         : s,
     ),
   }
   store.save(manifest)
-  driveControllers.get(flightId)?.abort()
+  abortFlightWork(flightId)
   // Before the drain: a queued sibling waiting on these repos must not boot while
   // this flight's run or workflow is still being torn down.
-  if (openStage) await interruptStage(flightId, openStage.key, 'abort', deps)
+  await Promise.all(openStages.map((stage) => interruptStage(flightId, stage.key, 'abort', deps)))
   // Same re-read as pause: the teardown's log line lands after the snapshot above.
   const settled = store.get(flightId) ?? manifest
   drainQueuedFlights(deps)

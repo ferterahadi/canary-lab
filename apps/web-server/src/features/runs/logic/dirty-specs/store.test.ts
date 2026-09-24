@@ -25,6 +25,8 @@ const TAMPERED = `test('applies voucher', async () => { expect(1).toBe(2) })\n`
 const TWO_TESTS = `test('a', async () => { expect(1).toBe(1) })
 test('b', async () => { expect(2).toBe(2) })
 `
+const TWO_ASSERTIONS = `test('applies voucher', async () => { expect(1).toBe(1); expect(2).toBe(2) })\n`
+const ONE_ASSERTION_DROPPED = `test('applies voucher', async () => { expect(1).toBe(1) })\n`
 const TWO_TESTS_B_EDITED = `test('a', async () => { expect(1).toBe(1) })
 test('b', async () => { expect(2).toBe(3) })
 `
@@ -58,6 +60,7 @@ describe('DirtySpecStore', () => {
     const rec = await store.recompute('checkout', featureDir)
     expect(rec.status).toBe('dirty')
     expect(store.isDirty('checkout')).toBe(true)
+    expect(store.list()).toEqual([rec])
     expect(events).toContain('changed')
 
     // record persisted to disk atomically
@@ -186,6 +189,23 @@ describe('DirtySpecStore', () => {
     expect(rec.dirtySpecs[0].affectedTests).toEqual(['b'])
   })
 
+  it('captureRunStart records the run-start copy so a later recompute carries a verdict', async () => {
+    const copyDir = path.join(root, 'snapshot')
+    fs.mkdirSync(path.join(copyDir, 'e2e'), { recursive: true })
+    fs.writeFileSync(path.join(copyDir, 'e2e', 'voucher.spec.ts'), TWO_ASSERTIONS)
+    writeSpec(TWO_ASSERTIONS)
+    const store = new DirtySpecStore(logsDir)
+
+    const captured = await store.captureRunStart('checkout', copyDir)
+    expect(captured.runStartSourceDir).toBe(copyDir)
+    expect(captured.status).toBe('clean')
+
+    writeSpec(ONE_ASSERTION_DROPPED)
+    const rec = await store.recompute('checkout', featureDir)
+    expect(rec.status).toBe('dirty')
+    expect(rec.dirtySpecs[0].strength).toMatchObject({ baseline: 'run-start', verdict: 'weaker' })
+  })
+
   it('stamps `since` only when status changes', async () => {
     const clock = vi.fn()
     clock.mockReturnValueOnce('t0').mockReturnValueOnce('t0').mockReturnValue('t1')
@@ -237,6 +257,31 @@ describe('DirtySpecStore', () => {
     expect(events).toEqual([])
   })
 
+  it('contains a listener failure so persistence and healthy listeners continue', async () => {
+    writeSpec(PASS)
+    const store = new DirtySpecStore(logsDir)
+    const events: string[] = []
+    store.onEvent(() => { throw new Error('subscriber disconnected') })
+    store.onEvent((event) => events.push(event.kind))
+
+    await expect(store.captureRunStart('checkout', featureDir)).resolves.toMatchObject({ status: 'clean' })
+    expect(events).toContain('changed')
+  })
+
+  it('replaces a prior receipt for the same review revision', async () => {
+    writeSpec(PASS)
+    const store = new DirtySpecStore(logsDir)
+    await store.captureRunStart('checkout', featureDir)
+    const receipt = (decision: 'accepted' | 'restored') => ({
+      decision, review_revision: 'a'.repeat(64), files: ['e2e/voucher.spec.ts'], at: 'now',
+      git: { status: 'not-requested' as const }, execution: { status: 'none' as const },
+    })
+
+    store.recordReviewReceipt('checkout', receipt('accepted'))
+    const next = store.recordReviewReceipt('checkout', receipt('restored'))
+    expect(next.reviewReceipts).toEqual([receipt('restored')])
+  })
+
   it('renameFeature() moves the record to the new feature id', async () => {
     // Here the feature name IS the record id, so a rename re-homes the record
     // directory as well as the field — the dirty cue has to follow the suite.
@@ -266,5 +311,22 @@ describe('DirtySpecStore', () => {
     await store.captureRunStart('checkout', featureDir)
     store.remove('checkout')
     expect(store.get('checkout')).toBeNull()
+  })
+
+  it('skips a feature whose record file is gone instead of listing a row it cannot read', async () => {
+    // A half-deleted record: the index row survives after the record file goes
+    // (a manual `rm` inside the logs dir, or a crash between the two writes).
+    // `list()` feeds the dirty flag on every suite card, so a row with no
+    // record behind it must drop out rather than surface a state-less suite.
+    const store = new DirtySpecStore(logsDir)
+    writeSpec(PASS)
+    await store.captureRunStart('checkout', featureDir)
+    expect(store.list()).toHaveLength(1)
+
+    fs.rmSync(path.join(logsDir, 'dirty-specs', 'checkout', 'dirty.json'))
+
+    expect(store.list()).toEqual([])
+    // Still indexed — `list()` filters on read; it does not repair the index.
+    expect(JSON.parse(fs.readFileSync(path.join(logsDir, 'dirty-specs', 'index.json'), 'utf8'))).toHaveLength(1)
   })
 })

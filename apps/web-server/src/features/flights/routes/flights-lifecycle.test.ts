@@ -263,7 +263,7 @@ describe('flight entry modes (continue / redo / jump)', () => {
 describe('POST /api/flights/:id/pause + /redo, frozen args, DELETE', () => {
   const hangingScout = (): StageAdapters => {
     const adapters = allDone()
-    adapters.scout = { run: () => new Promise(() => {}) }
+    adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
     return adapters
   }
 

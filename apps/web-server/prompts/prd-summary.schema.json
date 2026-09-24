@@ -3,16 +3,26 @@
   "additionalProperties": false,
   "properties": {
     "variantDimension": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string" },
+        "name": {
+          "type": "string"
+        },
         "values": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       },
-      "required": ["name", "values"]
+      "required": [
+        "name",
+        "values"
+      ]
     },
     "requirements": {
       "type": "array",
@@ -20,19 +30,44 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "id": { "type": "string" },
-          "kind": { "type": "string", "enum": ["functional", "non-functional"] },
-          "title": { "type": "string" },
-          "text": { "type": "string" },
-          "happyPath": { "type": "string" },
-          "unhappyPath": { "type": "string" },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "functional",
+              "non-functional"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "happyPath": {
+            "type": "string"
+          },
+          "unhappyPath": {
+            "type": "string"
+          },
           "pathTypes": {
             "type": "array",
-            "items": { "type": "string", "enum": ["happy", "sad", "edge"] }
+            "items": {
+              "type": "string",
+              "enum": [
+                "happy",
+                "sad",
+                "edge"
+              ]
+            }
           },
           "variants": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "variantsNA": {
             "type": "array",
@@ -40,10 +75,17 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "variant": { "type": "string" },
-                "reason": { "type": "string" }
+                "variant": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
               },
-              "required": ["variant", "reason"]
+              "required": [
+                "variant",
+                "reason"
+              ]
             }
           },
           "strictnessLadder": {
@@ -52,16 +94,66 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "tier": { "type": "integer", "enum": [1, 2, 3, 4] },
-                "description": { "type": "string" }
+                "tier": {
+                  "type": "integer",
+                  "enum": [
+                    1,
+                    2,
+                    3,
+                    4
+                  ]
+                },
+                "description": {
+                  "type": "string"
+                }
               },
-              "required": ["tier", "description"]
+              "required": [
+                "tier",
+                "description"
+              ]
             }
+          },
+          "source": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "doc": {
+                "type": "string"
+              },
+              "heading": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "doc",
+              "heading"
+            ]
           }
         },
-        "required": ["id", "kind", "title", "text", "happyPath", "unhappyPath", "pathTypes", "variants", "variantsNA", "strictnessLadder"]
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "text",
+          "happyPath",
+          "unhappyPath",
+          "pathTypes",
+          "variants",
+          "variantsNA",
+          "strictnessLadder",
+          "source"
+        ]
       }
     }
   },
-  "required": ["variantDimension", "requirements"]
+  "required": [
+    "variantDimension",
+    "requirements"
+  ]
 }

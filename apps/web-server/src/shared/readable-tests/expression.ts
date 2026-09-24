@@ -65,6 +65,7 @@ const ZERO_ARGUMENT_METHOD_TEXT = new Map<string, string>([
   ['trim', '{owner} without surrounding spaces'],
   ['getTime', '{owner} as a timestamp'],
   ['toISOString', '{owner} as an ISO timestamp'],
+  ['toLocaleString', '{owner} as localized text'],
   ['toString', '{owner} as text'],
   ['json', 'the JSON body of {owner}'],
   ['text', 'the text body of {owner}'],
@@ -335,6 +336,18 @@ function renderCallbackExpression(
   return rendered.fidelity === 'unresolved' ? undefined : rendered
 }
 
+function renderCollectionOwner(
+  ownerExpression: ts.Expression,
+  sourceFile: ts.SourceFile,
+  bindings: ExpressionBindings,
+): RenderedPart {
+  const exactPath = exactPropertyAccessPath(ownerExpression)
+  const root = exactPath?.split('.')[0]
+  return exactPath && root && !bindings.has(root)
+    ? { text: exactPath, fidelity: 'exact', compound: false }
+    : renderPart(ownerExpression, sourceFile, bindings)
+}
+
 function renderZeroBasedSum(
   callback: SafeCallbackExpression,
   owner: RenderedPart,
@@ -351,7 +364,7 @@ function renderZeroBasedSum(
     ? { text: 'each item' }
     : renderCallbackExpression(
         { ...callback, body: callback.body.right },
-        ['the running value', "each item's", "each item's index", "the collection's"],
+        ['the running value', 'each item', "each item's index", "the collection's"],
         sourceFile,
         bindings,
       )
@@ -365,34 +378,44 @@ function renderCollectionPredicate(
   sourceFile: ts.SourceFile,
   bindings: ExpressionBindings,
 ): RenderedPart | undefined {
-  if ((method !== 'every' && method !== 'some' && method !== 'find') || node.arguments.length !== 1) return undefined
+  if (!['every', 'some', 'find', 'findIndex', 'findLast', 'findLastIndex'].includes(method)
+    || node.arguments.length !== 1) return undefined
   if (ts.isIdentifier(node.arguments[0])) {
-    const owner = renderPart(ownerExpression, sourceFile, bindings)
+    const owner = renderCollectionOwner(ownerExpression, sourceFile, bindings)
     const predicate = renderPart(node.arguments[0], sourceFile, bindings)
     if (owner.fidelity === 'unresolved' || predicate.fidelity === 'unresolved') return undefined
-    const text = method === 'find'
-      ? `the first item in ${childText(owner)} matching ${predicate.text}`
-      : method === 'every'
-        ? `every item in ${childText(owner)} matches ${predicate.text}`
-        : `at least one item in ${childText(owner)} matches ${predicate.text}`
-    return { text, fidelity: 'derived', compound: method !== 'find' }
+    const text = method === 'every'
+      ? `every item in ${childText(owner)} matches ${predicate.text}`
+      : method === 'some'
+        ? `at least one item in ${childText(owner)} matches ${predicate.text}`
+        : method === 'find' || method === 'findLast'
+          ? `the ${method === 'find' ? 'first' : 'last'} item in ${childText(owner)} matching ${predicate.text}`
+          : `the index of the ${method === 'findIndex' ? 'first' : 'last'} item in ${childText(owner)} matching ${predicate.text}`
+    return { text, fidelity: 'derived', compound: method === 'every' || method === 'some' }
   }
   const callback = safeCallbackExpression(node.arguments[0], [1, 3])
   if (!callback) return undefined
-  const owner = renderPart(ownerExpression, sourceFile, bindings)
+  const owner = renderCollectionOwner(ownerExpression, sourceFile, bindings)
   if (owner.fidelity === 'unresolved') return undefined
-  const predicate = renderCallbackExpression(callback, ['item', 'item index', 'collection'], sourceFile, bindings)
+  const predicate = renderCallbackExpression(callback, ['that item', 'item index', 'collection'], sourceFile, bindings)
   if (!predicate) return undefined
-  if (method === 'find') {
+  if (method === 'find' || method === 'findLast') {
     return {
-      text: `the first item in ${childText(owner)} where ${predicate.text}`,
+      text: `the ${method === 'find' ? 'first' : 'last'} item in ${childText(owner)} where ${predicate.text}`,
+      fidelity: 'derived',
+      compound: false,
+    }
+  }
+  if (method === 'findIndex' || method === 'findLastIndex') {
+    return {
+      text: `the index of the ${method === 'findIndex' ? 'first' : 'last'} item in ${childText(owner)} where ${predicate.text}`,
       fidelity: 'derived',
       compound: false,
     }
   }
   const quantifier = method === 'every' ? 'every' : 'at least one'
   return {
-    text: `for ${quantifier} item in ${childText(owner)}, ${predicate.text}`,
+    text: `${quantifier} item in ${childText(owner)} meets this condition: ${predicate.text}`,
     fidelity: 'derived',
     compound: true,
   }
@@ -405,10 +428,10 @@ function renderCollectionTransform(
   sourceFile: ts.SourceFile,
   bindings: ExpressionBindings,
 ): RenderedPart | undefined {
-  const owner = renderPart(ownerExpression, sourceFile, bindings)
+  const owner = renderCollectionOwner(ownerExpression, sourceFile, bindings)
   if (owner.fidelity === 'unresolved') return undefined
 
-  if (method === 'map' || method === 'flatMap' || method === 'filter' || method === 'findIndex') {
+  if (method === 'map' || method === 'flatMap' || method === 'filter') {
     if (node.arguments.length !== 1) return undefined
     if (method === 'filter' && ts.isIdentifier(node.arguments[0]) && node.arguments[0].text === 'Boolean') {
       return {
@@ -420,7 +443,7 @@ function renderCollectionTransform(
     const callback = safeCallbackExpression(node.arguments[0], [1, 3])
     const result = callback && renderCallbackExpression(
       callback,
-      ['item', 'item index', 'collection'],
+      ['that item', 'item index', 'collection'],
       sourceFile,
       bindings,
     )
@@ -429,25 +452,24 @@ function renderCollectionTransform(
       ? `${childText(owner)} transformed so each item becomes ${result.text}`
       : method === 'flatMap'
         ? `${childText(owner)} transformed and flattened so each item becomes ${result.text}`
-        : method === 'filter'
-          ? `${childText(owner)} filtered to keep each item where ${result.text}`
-          : `the index of the first item in ${childText(owner)} where ${result.text}`
+        : `${childText(owner)} filtered to keep each item where ${result.text}`
     return { text, fidelity: 'derived', compound: false }
   }
 
-  if (method === 'reduce') {
+  if (method === 'reduce' || method === 'reduceRight') {
     if (node.arguments.length < 1 || node.arguments.length > 2) return undefined
     const callback = safeCallbackExpression(node.arguments[0], [2, 4])
     if (!callback) return undefined
     const initialExpression = node.arguments[1]
-    const naturalSum = initialExpression
+    const naturalSum = method === 'reduce'
+      && initialExpression
       && ts.isNumericLiteral(initialExpression)
       && initialExpression.text === '0'
       && renderZeroBasedSum(callback, owner, sourceFile, bindings)
     if (naturalSum) return { text: naturalSum, fidelity: 'derived', compound: false }
     const result = renderCallbackExpression(
       callback,
-      ['the running value', "that item's", "that item's index", "the collection's"],
+      ['the running value', 'that item', "that item's index", "the collection's"],
       sourceFile,
       bindings,
     )
@@ -456,8 +478,108 @@ function renderCollectionTransform(
     if (initial?.fidelity === 'unresolved') return undefined
     return {
       text: initial
-        ? `the result of combining ${childText(owner)}, starting with ${childText(initial)} and updating the running value for each item to ${result.text}`
-        : `the result of combining ${childText(owner)}, starting with the first item and updating the running value for each remaining item to ${result.text}`,
+        ? `the result of combining ${childText(owner)}${method === 'reduceRight' ? ' from right to left' : ''}, starting with ${childText(initial)} and updating the running value for each item to ${result.text}`
+        : `the result of combining ${childText(owner)}${method === 'reduceRight' ? ' from right to left' : ''}, starting with the ${method === 'reduceRight' ? 'last' : 'first'} item and updating the running value for each remaining item to ${result.text}`,
+      fidelity: 'derived',
+      compound: false,
+    }
+  }
+
+  if (method === 'at') {
+    if (node.arguments.length !== 1) return undefined
+    const [index] = renderedArguments(node.arguments, sourceFile, bindings) ?? []
+    return index
+      ? { text: `the item at index ${index.text} in ${childText(owner)}`, fidelity: 'derived', compound: false }
+      : undefined
+  }
+
+  if (method === 'flat') {
+    if (node.arguments.length > 1) return undefined
+    const depth = node.arguments[0] && renderPart(node.arguments[0], sourceFile, bindings)
+    if (depth?.fidelity === 'unresolved') return undefined
+    return {
+      text: `${childText(owner)} flattened${depth ? ` to ${childText(depth)} ${depth.text === '1' ? 'level' : 'levels'}` : ' by one level'}`,
+      fidelity: 'derived',
+      compound: false,
+    }
+  }
+
+  if (method === 'entries' || method === 'keys' || method === 'values') {
+    if (node.arguments.length) return undefined
+    const noun = method === 'entries' ? 'index-and-item pairs' : method === 'keys' ? 'indexes' : 'items'
+    return { text: `the ${noun} in ${childText(owner)}`, fidelity: 'derived', compound: false }
+  }
+
+  if (method === 'indexOf' || method === 'lastIndexOf') {
+    if (node.arguments.length < 1 || node.arguments.length > 2) return undefined
+    const parts = renderedArguments(node.arguments, sourceFile, bindings)
+    if (!parts) return undefined
+    return {
+      text: `the ${method === 'lastIndexOf' ? 'last ' : ''}index of ${childText(parts[0])} in ${childText(owner)}${parts[1] ? `, searching from index ${childText(parts[1])}` : ''}`,
+      fidelity: 'derived',
+      compound: false,
+    }
+  }
+
+  if (method === 'copyWithin') {
+    if (node.arguments.length < 2 || node.arguments.length > 3) return undefined
+    const parts = renderedArguments(node.arguments, sourceFile, bindings)
+    if (!parts) return undefined
+    return {
+      text: `${childText(owner)} after copying items from index ${childText(parts[1])}${parts[2] ? ` up to index ${childText(parts[2])}` : ' to the end'} into index ${childText(parts[0])}`,
+      fidelity: 'derived',
+      compound: false,
+    }
+  }
+
+  if (method === 'fill') {
+    if (node.arguments.length < 1 || node.arguments.length > 3) return undefined
+    const parts = renderedArguments(node.arguments, sourceFile, bindings)
+    if (!parts) return undefined
+    return {
+      text: `${childText(owner)} after filling items${parts[1] ? ` from index ${childText(parts[1])}` : ''}${parts[2] ? ` up to index ${childText(parts[2])}` : ''} with ${childText(parts[0])}`,
+      fidelity: 'derived',
+      compound: false,
+    }
+  }
+
+  if (method === 'toReversed') {
+    return node.arguments.length === 0
+      ? { text: `${childText(owner)} in reverse order`, fidelity: 'derived', compound: false }
+      : undefined
+  }
+
+  if (method === 'with') {
+    if (node.arguments.length !== 2) return undefined
+    const parts = renderedArguments(node.arguments, sourceFile, bindings)
+    return parts
+      ? {
+          text: `a copy of ${childText(owner)} with the item at index ${childText(parts[0])} replaced by ${childText(parts[1])}`,
+          fidelity: 'derived',
+          compound: false,
+        }
+      : undefined
+  }
+
+  if (method === 'includes') {
+    if (node.arguments.length < 1 || node.arguments.length > 2) return undefined
+    const parts = renderedArguments(node.arguments, sourceFile, bindings)
+    return parts
+      ? {
+          text: `${childText(owner)} contains ${childText(parts[0])}${parts[1] ? ` when searching from index ${childText(parts[1])}` : ''}`,
+          fidelity: 'derived',
+          compound: true,
+        }
+      : undefined
+  }
+
+  if (method === 'toSpliced') {
+    if (node.arguments.length < 1) return undefined
+    const parts = renderedArguments(node.arguments, sourceFile, bindings)
+    if (!parts) return undefined
+    const [start, deleteCount, ...insertions] = parts
+    return {
+      text: `a copy of ${childText(owner)} with items changed from index ${childText(start)}${deleteCount ? `, removing ${childText(deleteCount)} items` : ''}${insertions.length ? ` and inserting ${insertions.map((part) => part.text).join(', ')}` : ''}`,
       fidelity: 'derived',
       compound: false,
     }
@@ -616,6 +738,49 @@ function renderCall(
         return { text: mathCall.replace('{value}', childText(value)), fidelity: 'derived', compound: false }
       }
     }
+
+    if (path === 'Array.of') {
+      const items = renderedArguments(node.arguments, sourceFile, bindings)
+      if (items) {
+        return {
+          text: items.length ? `a list containing ${items.map((item) => item.text).join(', ')}` : 'an empty list',
+          fidelity: 'derived',
+          compound: false,
+        }
+      }
+    }
+
+    if ((path === 'Array.from' || path === 'Array.fromAsync') && node.arguments.length >= 1 && node.arguments.length <= 3) {
+      const source = renderPart(node.arguments[0], sourceFile, bindings)
+      if (source.fidelity !== 'unresolved') {
+        const asynchronous = path === 'Array.fromAsync'
+        if (node.arguments.length === 1) {
+          return {
+            text: `a list made from ${childText(source)}${asynchronous ? ', waiting for asynchronous values' : ''}`,
+            fidelity: 'derived',
+            compound: false,
+          }
+        }
+        const callback = safeCallbackExpression(node.arguments[1], [1, 2])
+        const mapped = callback && renderCallbackExpression(
+          callback,
+          ['that item', 'item index'],
+          sourceFile,
+          bindings,
+        )
+        if (mapped && node.arguments.length === 2) {
+          return {
+            text: `a list made from ${childText(source)}, transforming each item to ${mapped.text}${asynchronous ? ' and waiting for asynchronous values' : ''}`,
+            fidelity: 'derived',
+            compound: false,
+          }
+        }
+      }
+    }
+
+    // Invalid calls to these static inspection helpers must not fall through
+    // and be mistaken for same-named collection instance methods.
+    if (OBJECT_INSPECTION_TEXT.has(path)) return undefined
   }
 
   if (ts.isIdentifier(node.expression)) {
@@ -661,12 +826,14 @@ function renderCall(
         }
       }
     }
-    if (method === 'slice' && (node.arguments.length === 1 || node.arguments.length === 2)) {
+    if (method === 'slice' && node.arguments.length <= 2) {
       const owner = renderPart(node.expression.expression, sourceFile, bindings)
       const bounds = renderedArguments(node.arguments, sourceFile, bindings)
       if (owner.fidelity !== 'unresolved' && bounds) {
         return {
-          text: `${childText(owner)} sliced from ${childText(bounds[0])}${bounds[1] ? ` to ${childText(bounds[1])}` : ''}`,
+          text: bounds.length
+            ? `${childText(owner)} sliced from ${childText(bounds[0])}${bounds[1] ? ` to ${childText(bounds[1])}` : ''}`
+            : `a shallow copy of ${childText(owner)}`,
           fidelity: mergeFidelity([owner, ...bounds]),
           compound: false,
         }
@@ -821,6 +988,18 @@ function readableObjectDetails(details: readonly string[]): string {
   return `${details.slice(0, -1).join(', ')}, and ${details.at(-1)}`
 }
 
+function expressionIsBoundIdentifier(node: ts.Expression, bindings: ExpressionBindings): boolean {
+  let expression = node
+  while (
+    ts.isParenthesizedExpression(expression)
+    || ts.isAsExpression(expression)
+    || ts.isTypeAssertionExpression(expression)
+    || ts.isNonNullExpression(expression)
+    || ts.isSatisfiesExpression(expression)
+  ) expression = expression.expression
+  return ts.isIdentifier(expression) && bindings.has(expression.text)
+}
+
 function renderPart(
   node: ts.Expression,
   sourceFile: ts.SourceFile,
@@ -895,8 +1074,10 @@ function renderPart(
     const owner = renderPart(node.expression, sourceFile, bindings)
     if (owner.fidelity === 'unresolved') return unresolved(node, sourceFile)
     const property = humanizeIdentifier(node.name.text)
+    const boundOwner = expressionIsBoundIdentifier(node.expression, bindings)
+    const ownerText = boundOwner && !owner.text.endsWith("'s") ? `${owner.text}'s` : owner.text
     return {
-      text: `${owner.text} ${property}${node.questionDotToken ? ', if available' : ''}`,
+      text: `${ownerText} ${property}${node.questionDotToken ? ', if available' : ''}`,
       fidelity: 'derived',
       compound: false,
     }

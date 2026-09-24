@@ -5,6 +5,7 @@ import type { FlightIndexEntry, FlightManifest, PlanFeaturesTask } from '../api/
 import { connectWorkspaceEvents } from '@/shared/api/workspace-socket'
 import { useFlightsStream } from '@/features/flights'
 import type { InvalidationTopic } from './invalidation-bus'
+import { isAuxiliaryExecution } from '@shared/verification'
 
 // Owns the workspace's server-sourced data — the features list, the flights +
 // pre-flights indexes, the version status — plus the refresh helpers, the
@@ -17,7 +18,7 @@ import type { InvalidationTopic } from './invalidation-bus'
 // refs — the data layer stays free of nav STATE, and the render-coupled
 // run-selection reconciliation remains in App where `featureRuns` is derived.
 
-const NON_TEST = (r: RunIndexEntry) => r.executionType !== 'boot' && r.executionType !== 'benchmark'
+const NON_TEST = (r: RunIndexEntry) => !isAuxiliaryExecution(r.executionType)
 
 export interface WorkspaceDataDeps {
   invalidate: (topic: InvalidationTopic, scope?: string) => void
@@ -93,6 +94,9 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
       setFeatures(data)
       const runs = allRunsRef.current
       if (preferredFeature && data.some((f) => f.name === preferredFeature)) {
+        // Reconnect and metadata refreshes target the current suite too. Keep
+        // its explicit run selection, including one awaiting the runs snapshot.
+        if (selectedFeatureRef.current === preferredFeature && selectedRunIdRef.current) return
         pendingRunSelectionRef.current = null
         setSelectedFeature(preferredFeature)
         setSelectedRunId(runs.find((r) => r.feature === preferredFeature && NON_TEST(r))?.runId ?? null)
@@ -148,9 +152,32 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   // restart) resync everything, since the bus has no replay.
   useEffect(() => {
     let conn: { close(): void } | null = null
+    const resyncWorkspace = (): void => {
+      refreshFeatures(selectedFeatureRef.current)
+      invalidate('repos')
+      invalidate('tests')
+      invalidate('coverage')
+      invalidate('verification')
+      const currentRunId = selectedRunIdRef.current
+      if (currentRunId) invalidate('journal', currentRunId)
+      refreshVersion()
+      refreshFlights()
+      invalidate('flights')
+      refreshPreFlights()
+      invalidate('project-config')
+      invalidate('onboarding')
+      invalidate('notifications')
+    }
     try {
       conn = connectWorkspaceEvents({
         onEvent: (event) => {
+          // The server handshake is the authoritative recovery point. Keep the
+          // resync on that frame so canary-apply recovery does not depend on a
+          // client-local "has this socket opened before?" classification.
+          if (event.type === 'connected') {
+            resyncWorkspace()
+            return
+          }
           if (event.type === 'feature-renamed') {
             // The suite kept its identity but changed its name. Follow it —
             // otherwise the selected feature (and any surface keyed by the old
@@ -171,6 +198,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
             return
           }
           if (event.type === 'tests-changed') {
+            invalidate('coverage')
             if (selectedFeatureRef.current === event.feature) invalidate('tests')
             // Authored specs light the picker's derived rail (specs evidence).
             refreshFeatures(selectedFeatureRef.current)
@@ -181,7 +209,11 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
             // A generated PRD summary lights the derived rail (prdSummary evidence).
             refreshFeatures(selectedFeatureRef.current)
           }
-          if (event.type === 'tests-dirty-changed') refreshFeatures(selectedFeatureRef.current)
+          if (event.type === 'tests-dirty-changed') {
+            invalidate('coverage')
+            refreshFeatures(selectedFeatureRef.current)
+            if (selectedFeatureRef.current === event.feature) invalidate('tests')
+          }
           if (event.type === 'verification-config-changed' && selectedFeatureRef.current === event.feature) invalidate('verification')
           if (event.type === 'journal-changed') invalidate('journal', event.runId)
           if (event.type === 'version-changed') refreshVersion()
@@ -189,27 +221,13 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
           // surfaces keyed to flights that are NOT the list (a stage's artifact
           // reads), which is what the `flights` topic invalidates.
           if (event.type === 'flights-changed') invalidate('flights')
+          if (event.type === 'notifications-changed') invalidate('notifications')
           if (event.type === 'pre-flight-changed') refreshPreFlights()
           // canary-lab.config.json changed — in this tab or another client.
           // The demo launcher reads `showDemo` from it, so the status-bar pill
           // appears/disappears live instead of on the next reload.
           if (event.type === 'project-config-changed') invalidate('project-config')
           if (event.type === 'getting-started-changed') invalidate('onboarding')
-        },
-        onReconnect: () => {
-          refreshFeatures(selectedFeatureRef.current)
-          invalidate('repos')
-          invalidate('tests')
-          invalidate('coverage')
-          invalidate('verification')
-          const currentRunId = selectedRunIdRef.current
-          if (currentRunId) invalidate('journal', currentRunId)
-          refreshVersion()
-          refreshFlights()
-          invalidate('flights')
-          refreshPreFlights()
-          invalidate('project-config')
-          invalidate('onboarding')
         },
       })
     } catch {

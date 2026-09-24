@@ -1,0 +1,55 @@
+{
+  "complete": true,
+  "total": 3,
+  "passed": 3,
+  "passedNames": [
+    "test-case-the-budget-is-declared-before-anything-is-measured",
+    "test-case-a-cold-inbound-reaches-the-host-inside-the-budget",
+    "test-case-warm-inbounds-stay-inside-the-budget-across-five-samples"
+  ],
+  "passedIds": [
+    "test-id-1toc64y",
+    "test-id-cr614p",
+    "test-id-1orufj9"
+  ],
+  "mergedFromPriorExecution": true,
+  "knownTests": [
+    {
+      "id": "test-id-1toc64y",
+      "name": "test-case-the-budget-is-declared-before-anything-is-measured",
+      "title": "the budget is declared before anything is measured",
+      "titlePath": [
+        "cns-inbound-latency-budget.spec.ts",
+        "inbound-to-Host latency budget",
+        "the budget is declared before anything is measured"
+      ],
+      "listLine": "cns-inbound-latency-budget.spec.ts › inbound-to-Host latency budget › the budget is declared before anything is measured",
+      "location": "<featureDir>/e2e/cns-inbound-latency-budget.spec.ts:149"
+    },
+    {
+      "id": "test-id-cr614p",
+      "name": "test-case-a-cold-inbound-reaches-the-host-inside-the-budget",
+      "title": "a COLD inbound reaches the Host inside the budget",
+      "titlePath": [
+        "cns-inbound-latency-budget.spec.ts",
+        "inbound-to-Host latency budget",
+        "a COLD inbound reaches the Host inside the budget"
+      ],
+      "listLine": "cns-inbound-latency-budget.spec.ts › inbound-to-Host latency budget › a COLD inbound reaches the Host inside the budget",
+      "location": "<featureDir>/e2e/cns-inbound-latency-budget.spec.ts:178"
+    },
+    {
+      "id": "test-id-1orufj9",
+      "name": "test-case-warm-inbounds-stay-inside-the-budget-across-five-samples",
+      "title": "warm inbounds stay inside the budget across five samples",
+      "titlePath": [
+        "cns-inbound-latency-budget.spec.ts",
+        "inbound-to-Host latency budget",
+        "warm inbounds stay inside the budget across five samples"
+      ],
+      "listLine": "cns-inbound-latency-budget.spec.ts › inbound-to-Host latency budget › warm inbounds stay inside the budget across five samples",
+      "location": "<featureDir>/e2e/cns-inbound-latency-budget.spec.ts:202"
+    }
+  ],
+  "failed": []
+}

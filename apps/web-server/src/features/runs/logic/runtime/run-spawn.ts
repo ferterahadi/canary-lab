@@ -21,6 +21,8 @@ export interface PlaywrightInvocation {
 
 export type PlaywrightSpawner = (args: {
   feature: FeatureConfig
+  /** Where Playwright runs from — the run-start suite copy (see `RunContext.suiteDir`). */
+  suiteDir: string
   paths: RunPaths
   rerunTargets?: readonly string[]
   rerunGrep?: string
@@ -40,8 +42,8 @@ export const BRACKETED_PASTE_BEGIN = '\x1b[200~'
 export const BRACKETED_PASTE_END = '\x1b[201~'
 
 // Production Playwright invocation. Uses `npx playwright test` with our custom
-// summary reporter, rooted at the feature dir. Tests inject their own.
-export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths, rerunTargets, rerunGrep, rerunSelection }) => {
+// summary reporter, rooted at the run's suite copy. Tests inject their own.
+export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, suiteDir, paths, rerunTargets, rerunGrep, rerunSelection }) => {
   const reporter = SUMMARY_REPORTER_PATH
   const threshold = feature.healOnFailureThreshold
   const maxFailures = typeof threshold === 'number' && threshold > 0
@@ -56,7 +58,7 @@ export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths, re
     : ''
   return {
     command: `npx playwright test${targets}${grep}${testList} --output=${JSON.stringify(paths.playwrightArtifactsDir)} --reporter=${JSON.stringify(reporter)},list${maxFailures}`,
-    cwd: feature.featureDir,
+    cwd: suiteDir,
   }
 }
 

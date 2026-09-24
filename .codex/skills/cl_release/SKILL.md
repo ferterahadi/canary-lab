@@ -14,15 +14,16 @@ and changelog with the user before `publish:package`.
 
 ## Checklist
 
-1. **Changelog**: `npm run changelog:preview` (dry run), then `npm run changelog`.
+1. **Version**: set the next `version` in both `package.json` and
+   `package-lock.json` (for example, `npm version --no-git-tag-version <next>`).
+   The changelog and tag tools read `package.json`, so this must happen first.
+2. **Changelog**: `npm run changelog:preview` (dry run), then `npm run changelog`.
    Entries are plain-language and area-tagged using the area tags defined in the
    `docs/CHANGELOG.md` header (that header is the source of truth — don't rely on
    a memorized list).
    If consumers should refresh their workspace (template/sample changes, MCP
    re-registration), say so in the release's header line
    (e.g. "Run `npx canary-lab upgrade` …" / "run `npx canary-lab setup`").
-2. **Version**: bump `version` in `package.json` (the changelog and tag tools read
-   it).
 3. **Gates**: `npx vitest run`, `npx tsc -p tsconfig.build.json --noEmit`, then
    `npm run smoke:pack` (builds, packs, scaffolds a temp project, verifies the
    scaffold flow).

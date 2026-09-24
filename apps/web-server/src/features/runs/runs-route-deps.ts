@@ -8,6 +8,7 @@ import type { ClientKind } from '../../../../../shared/run-mode'
 import { runsRoutes } from './routes/runs'
 import { pickConfiguredHealAgent } from './pick-heal-agent'
 import { type OrchestratorLike, type StartRunOutcome } from './logic/run-store'
+import type { StartRunOptions } from './routes/runs-route-deps'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
 import type { ServerContext } from '../../server-context'
 import { loadFeatures } from '../../shared/feature-loader'
@@ -16,13 +17,17 @@ import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
 import { RunOrchestrator, buildServiceSpecs, type AutoHealConfig } from './logic/runtime/orchestrator'
 import { estimateRunCost } from './logic/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from './logic/runtime/repo-collision'
-import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from './logic/runtime/repo-worktree'
+import { describeRepoUpdates, updateReposToUpstream, updatedFromUpstreamByRepo } from './logic/runtime/repo-upstream-update'
+import { addWorktree, hydrateWorkingTreeDiff, type WorktreeHandle } from './logic/runtime/repo-worktree'
 import { overlayExists as portifyOverlayExists } from '../portify/logic/runtime/overlay'
 import { buildOrchestratorHealPrompt, makeAgentSpawnCommandBuilder, resolveAgentBinary } from './logic/runtime/auto-heal'
 import { resolveRunModelPlan, reuseRunModelPlan, type RunModelPlan } from './logic/runtime/run-model-plan'
 import { loadProjectConfig } from './logic/runtime/launcher/project-config'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
+import { assertStableSpecSelection } from '../../shared/playwright-config'
+import { assertNoPendingRunReview } from './logic/runtime/run-review-gate'
 import { RunnerLog } from './logic/runtime/runner-log'
+import { hasRetiredPerturbation } from './logic/runtime/manifest'
 import {
   restore,
 } from './logic/runtime/env-switcher/switch'
@@ -65,6 +70,7 @@ export function buildRunsRouteDeps(
 	    featuresDir,
 	    projectRoot: projectRoot,
 	    store: runStore,
+	    dirtySpecStore,
 	    broker: externalHealBroker,
       workspaceEvents,
       gettingStarted,
@@ -83,13 +89,28 @@ export function buildRunsRouteDeps(
       isolation?: 'worktree' | 'queue',
       executionType: ExecutionType = 'run',
       modelsOverride?: unknown,
+      options?: StartRunOptions,
     ): Promise<StartRunOutcome> => {
       const isBoot = executionType === 'boot'
       const features = loadFeatures(featuresDir)
       const feature = features.find((f) => f.name === featureName)
       if (!feature) throw new Error(`feature not found: ${featureName}`)
+      if (!isBoot) assertNoPendingRunReview(runStore, feature.name, feature.featureDir)
+      // A boot brings services up and runs no tests, so it declares no roster
+      // and this cannot corrupt one — and refusing it would block the very boot
+      // someone needs to debug the config they are here to fix.
+      if (!isBoot) assertStableSpecSelection(feature.featureDir, feature.name)
       await validateConfiguredRepoBranches(feature)
-      const runId = generateRunId()
+      // Pull each tracked repo to its upstream tip BEFORE anything is allocated:
+      // a refusal (dirty, diverged, in use by an in-place run) is a 409 with
+      // nothing to unwind, and the snapshot below then records the commit the
+      // run actually boots. The branch gate above already guarantees every
+      // pinned repo sits on its branch, which is the fast-forward's precondition.
+      const activeRuns = listActiveForScheduler()
+      const repoUpdates = await updateReposToUpstream(feature, options?.updateRepos, {
+        inUseBy: (repoPath) => detectRepoCollision([repoPath], activeRuns)?.conflictingRunId ?? null,
+      })
+      const runId = options?.runId ?? generateRunId()
       const runDir = runDirFor(logsDir, runId)
       const sourceRepoPaths = normalizeRepoPaths((feature.repos ?? []).map((r) => r.localPath))
       const cost = estimateRunCost(buildServiceSpecs(feature, runDir, env).length)
@@ -123,11 +144,15 @@ export function buildRunsRouteDeps(
       // construction + kickoff. Deferred and reused by the queue when the run
       // can't start immediately.
       const launch = async (): Promise<OrchestratorLike> => {
+        const testReviewApproval = !isBoot
+          ? assertNoPendingRunReview(runStore, feature.name, feature.featureDir, runId)
+          : undefined
         const runnerLog = new RunnerLog(buildRunPaths(runDir).runnerLogPath)
         runnerLog.info(
           `Run started: feature=${feature.name}${env ? ` env=${env}` : ''} runId=${runId}`,
         )
-        const repoBranchSnapshots = await collectRepoBranchSnapshots(feature)
+        for (const line of describeRepoUpdates(repoUpdates)) runnerLog.info(line)
+        const repoBranchSnapshots = await collectRepoBranchSnapshots(feature, updatedFromUpstreamByRepo(repoUpdates))
 
       const portMap = await allocateRunPorts(feature, env)
       let backups: BackupRecord[] | null = null
@@ -231,13 +256,6 @@ export function buildRunsRouteDeps(
         const repoName = repo.name
         try {
           const handle = await addWorktree({ repoName, localPath: repo.localPath, worktreesDir: path.join(runDir, 'worktrees') })
-          // Git worktrees skip gitignored deps, so a fresh worktree has no
-          // node_modules — the service boot command (`yarn start`, `npx tsx …`)
-          // can't resolve its bins/deps and dies (e.g. `concurrently: command
-          // not found`, exit 127), which then reads as a health-check timeout.
-          // Symlink the source repo's node_modules in, exactly like the
-          // benchmark and portify worktree paths already do.
-          linkNodeModules(handle)
           // R80: reproduce the user's uncommitted edits in the worktree so an
           // always-worktree run tests their WIP, not just HEAD. A portified run's
           // intended tree state is its overlay (applied at boot), so skip it
@@ -272,11 +290,11 @@ export function buildRunsRouteDeps(
           runDir,
           portMap,
           worktrees,
-	          ptyFactory,
+          ptyFactory,
           runnerLog,
           executionType,
-          // A boot-only session never runs tests, so it never heals — force all
-          // heal modes off regardless of project config.
+          testReviewApproval,
+          // A boot-only session never runs tests, so it never heals.
           autoHeal: isBoot ? undefined : autoHeal,
           ...(models ? { models } : {}),
           manualHeal:
@@ -357,10 +375,12 @@ export function buildRunsRouteDeps(
       return { kind: 'started', orch }
     },
     cancelQueuedRun,
+    queueDiagnostics: (runId) => scheduler.diagnostics(runId),
     restartRun: async (runId: string) => {
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
       const manifest = detail.manifest
+      if (hasRetiredPerturbation(manifest)) return { ok: false, reason: 'not-restartable' as const }
       if ((manifest.executionType ?? 'run') === 'verify') return { ok: false, reason: 'not-restartable' as const }
       if (isActiveRunStatus(manifest.status)) return { ok: false, reason: 'already-active' as const }
       if (!isRestartableRunStatus(manifest.status)) return { ok: false, reason: 'not-restartable' as const }

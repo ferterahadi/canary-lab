@@ -13,6 +13,8 @@ import { TestPresentation } from './TestPresentation'
 
 vi.mock('shiki/core', () => ({
   createHighlighterCore: async () => ({
+    getTheme: () => ({}),
+    codeToTokens: () => ({ tokens: [[{ color: '#7f848e' }]] }),
     codeToHtml: (code: string, options: { theme: string }) => (
       `<pre class="shiki" data-shiki-theme="${options.theme}"><code>${code.split('\n').map((line) => `<span class="line">${line}</span>`).join('\n')}</code></pre>`
     ),
@@ -144,7 +146,7 @@ describe('TestPresentation', () => {
 
     expect(container.querySelector('[data-testid="test-presentation-english"]')).not.toBeNull()
     expect(container.textContent).toContain('Open “/checkout”')
-    expect(container.textContent).toContain('Some syntax could not be translated')
+    expect(container.textContent).toContain('English representation is incomplete')
     // The header names the same file:range in both modes, so switching feels
     // like changing the representation, not the component.
     expect(container.textContent).toContain('e2e/checkout.spec.ts:L10–12')
@@ -186,6 +188,18 @@ describe('TestPresentation', () => {
     expect(codeBlock?.classList.contains('overflow-hidden')).toBe(true)
     expect(codeBlock?.classList.contains('overflow-x-auto')).toBe(false)
     expect(codeBlock?.classList.contains('overflow-y-hidden')).toBe(false)
+  })
+
+  it('uses source change markers without a caller converting absolute lines', async () => {
+    await act(async () => root.render(<TestPresentation
+      test={{ ...TEST, sourceChanges: { changedLines: [11], count: 1 } }}
+      sourceFile="/repo/e2e/checkout.spec.ts"
+    />))
+    expect(container.querySelector('[data-testid="readable-modified-open-checkout"]')?.textContent).toBe('MODIFIED')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="test-presentation-code-tab"]')!.click()
+    })
+    expect(container.querySelector('[data-testid="test-presentation-code"] [data-changed-line="true"]')).toBeTruthy()
   })
 
   it('shows changed executable steps in English and calls out changed source with no English step', async () => {
@@ -610,14 +624,21 @@ describe('TestPresentation', () => {
     act(() => root.render(<TestPresentation test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" />))
     await act(async () => {
       ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
-      await Promise.resolve()
     })
-    expect(container.querySelector('[data-shiki-theme="one-light"]')).not.toBeNull()
+    await vi.waitFor(() => expect(container.querySelector('[data-shiki-theme="one-light"]')).not.toBeNull())
 
     await act(async () => {
       applyTheme('dark')
-      await Promise.resolve()
     })
-    expect(container.querySelector('[data-shiki-theme="one-dark-pro"]')).not.toBeNull()
+    await vi.waitFor(() => expect(container.querySelector('[data-shiki-theme="one-dark-pro"]')).not.toBeNull())
   })
+})
+
+it('retains the recorded failure when the same source line is also edited', async () => {
+  await act(async () => root.render(<TestPresentation test={TEST} sourceFile="/repo/e2e/checkout.spec.ts" changedLines={new Set([2])} executionHighlight={{ kind: 'failed', bodyLine: 2 }} />))
+  await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="test-presentation-code-tab"]')!.click() })
+  const line = container.querySelector('[data-execution-highlight="failed"]')
+  expect(line?.getAttribute('data-changed-line')).toBe('true')
+  expect(line?.getAttribute('style')).toContain('var(--danger)')
+  expect(line?.textContent).toContain('FAILED HERE')
 })

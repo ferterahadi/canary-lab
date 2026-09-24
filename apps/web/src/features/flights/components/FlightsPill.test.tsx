@@ -6,8 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlightIndexEntry, FlightStageStatus, PlanFeaturesTask } from '@/shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import type { FeatureActivity } from '../state/feature-activity'
-import { FlightsPill, featureActivityRows, featureChipState, groupPickerRows, resolveFeatureFlightAction } from './FlightsPill'
+import { FlightsPill, featureActivityRows, featureChipState, groupPickerRows, resolveFeatureFlightAction, resolveFeatureFlightTarget, summarizeFlightActivity } from './FlightsPill'
 import { ACTIVITY_CHIP, RUNNING_STAGE_CHIP } from './FlightChipState'
+
+const { listCoverageStates } = vi.hoisted(() => ({ listCoverageStates: vi.fn() }))
+vi.mock('@/shared/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/api/client')>()),
+  listCoverageStates,
+}))
 
 const preFlight = (over: Partial<PlanFeaturesTask>): PlanFeaturesTask => ({
   taskId: 'fp_1',
@@ -25,6 +31,8 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
+  listCoverageStates.mockReset()
+  listCoverageStates.mockResolvedValue([])
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -51,6 +59,26 @@ function render(flights: FlightIndexEntry[], onOpenFlight = vi.fn()) {
   act(() => { root.render(<FlightsPill flights={flights} onOpenFlight={onOpenFlight} />) })
   return onOpenFlight
 }
+
+it('shares one active count across the pill and status bar', () => {
+  const flights = [flight({}), flight({ flightId: 'fl_2', id: 'fl_2', feature: 'billing', status: 'done' })]
+  const preFlights = [preFlight({ taskId: 'fp_running' }), preFlight({ taskId: 'fp_done', status: 'done' }), preFlight({ taskId: 'fp_failed', status: 'failed' })]
+  const activity = new Map<string, FeatureActivity>([['checkout', { kind: 'running', runId: 'r1' }], ['search', { kind: 'authoring', draftId: 'd1' }]])
+  const summary = summarizeFlightActivity(flights, preFlights, activity)
+
+  expect([...summary.activeFeatures]).toEqual(['checkout', 'search'])
+  expect(summary.preFlightRows.map((task) => task.taskId)).toEqual(['fp_running', 'fp_done'])
+  expect(summary.activeCount).toBe(4)
+  act(() => { root.render(<FlightsPill flights={flights} preFlights={preFlights} activity={activity} onOpenFlight={vi.fn()} />) })
+  expect(container.querySelector('[data-testid="flights-pill-count"]')?.textContent).toBe(String(summary.activeCount))
+})
+
+it('resolves the same first recorded flight or derived target for feature links', () => {
+  const first = flight({ flightId: 'fl_first' })
+  const later = flight({ flightId: 'fl_later' })
+  expect(resolveFeatureFlightTarget('checkout', [first, later])).toEqual({ flight: first, flightId: 'fl_first' })
+  expect(resolveFeatureFlightTarget('search', [first, later])).toEqual({ flight: null, flightId: 'feature:search' })
+})
 
 describe('FlightsPill', () => {
   it('stays visible when idle and shows the active count while flights run', () => {
@@ -133,6 +161,54 @@ describe('FlightsPill', () => {
     const rail = document.body.querySelector('[data-testid="stage-mini-rail"]')
     // similarity hidden; run+heal, scaffold+env-capture, docs+prd-summary merged (R21/R22/R32/R33).
     expect(rail?.children.length).toBe(FLIGHT_STAGE_KEYS.length - 4)
+  })
+
+  it('updates every mini cell from the same live stage signals as the Flight rail', () => {
+    const activity = new Map<string, FeatureActivity>([['checkout', { kind: 'running', runId: 'run-1' }]])
+    const stages = FLIGHT_STAGE_KEYS.map((key) => ({
+      key,
+      status: key === 'run' || key === 'scout' || key === 'scaffold'
+        || key === 'env-capture' || key === 'docs' || key === 'prd-summary'
+        || key === 'specs-coverage' ? 'done' as const
+        : key === 'evaluation-export' ? 'failed' as const : 'pending' as const,
+      startedAt: '2026-09-23T00:00:00Z',
+    }))
+    act(() => root.render(<FlightsPill
+      flights={[flight({ status: 'paused', stages })]}
+      activity={activity}
+      coverageJobs={[
+        { jobId: 'summary-1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: '2026-09-24T00:00:00Z' },
+        { jobId: 'mapping-1', feature: 'checkout', kind: 'coverage', status: 'failed', startedAt: '2026-09-24T00:00:00Z' },
+      ]}
+      portifyWorkflows={[{ workflowId: 'port-1', feature: 'checkout', status: 'ready-to-save', startedAt: '2026-09-24T00:00:00Z' }]}
+      onOpenFlight={vi.fn()} open
+    />))
+    const row = document.querySelector('[data-testid="flight-open-fl_1"]')!
+    const cell = (key: string) => row.querySelector<HTMLElement>(`[data-testid="stage-mini-cell-${key}"]`)!
+    const expected = [
+      ['scout', 'done', 'var(--success)'],
+      ['scaffold', 'done', 'var(--success)'],
+      ['docs', 'running', 'var(--running)'],
+      ['specs-coverage', 'failed', 'var(--danger)'],
+      ['run', 'running', 'var(--running)'],
+      ['evaluation-export', 'failed', 'var(--danger)'],
+      ['portify', 'needs approval', 'var(--warning)'],
+    ]
+    for (const [key, label, tone] of expected) {
+      expect(cell(key).getAttribute('aria-label')).toContain(label)
+      if (tone) expect(cell(key).getAttribute('style')).toContain(tone)
+    }
+  })
+
+  it('shows a queued run as queued instead of as executing', () => {
+    const activity = new Map<string, FeatureActivity>([['checkout', {
+      kind: 'running', runId: 'run-1',
+      waiting: { kind: 'queued', label: 'Queued', shortLabel: 'queued', detail: 'Waiting for the repo.' },
+    }]])
+    act(() => root.render(<FlightsPill flights={[]} activity={activity} onOpenFlight={vi.fn()} open />))
+    const run = document.querySelector<HTMLElement>('[data-testid="stage-mini-cell-run"]')!
+    expect(run.getAttribute('aria-label')).toBe('Test run — Queued')
+    expect(run.style.background).toContain('var(--border-default)')
   })
 
   // R26 — the pill is the one live indicator for the absorbed surfaces.
@@ -595,4 +671,39 @@ describe('external-work hand-off (a step running in the user\'s own agent)', () 
     // A genuine question on the same status keeps the attention treatment.
     expect(resolveFeatureFlightAction('checkout', [handOff({ checkpointKind: 'portify-apply' })])?.attention).toBe(true)
   })
+})
+
+it('shows an adoption wait as review needed, and returns to active when the wait clears', () => {
+  const work: FeatureActivity = { kind: 'healing', runId: 'r1', waiting: {
+    kind: 'test-review', label: 'Awaiting test review', shortLabel: 'to review', detail: 'Adopt or restore the edits.',
+  } }
+  const activity = new Map([['checkout', work]])
+  act(() => { root.render(<FlightsPill flights={[]} activity={activity} onOpenFlight={vi.fn()} />) })
+  expect(container.textContent).toContain('Flights · review needed')
+  const state = featureChipState(null, work)
+  expect(state).toMatchObject({ label: 'to review', live: false, rank: 0 })
+  expect(resolveFeatureFlightAction('checkout', [flight({})], work)).toMatchObject({ label: 'to review', live: false, attention: true })
+  act(() => { root.render(<FlightsPill flights={[]} activity={new Map([['checkout', { kind: 'running', runId: 'r1' }]])} onOpenFlight={vi.fn()} />) })
+  expect(container.textContent).toContain('Flights · 1 active')
+  expect(container.textContent).not.toContain('review needed')
+})
+
+it('searches inside collapsed groups and filters attention without treating queued or external work as a question', () => {
+  const entries = [
+    flight({ flightId: 'paused', feature: 'batch-paused', status: 'paused', pauseReason: 'stage-failed' }),
+    flight({ flightId: 'queued', feature: 'batch-queued', status: 'paused', pauseReason: 'queued' }),
+    flight({ flightId: 'external', feature: 'batch-external', status: 'waiting-for-approval', stageProducer: 'external' }),
+  ]
+  act(() => root.render(<FlightsPill flights={entries} features={entries.map((entry) => ({ name: entry.feature, group: 'Batch' }))} onOpenFlight={vi.fn()} open />))
+  const input = document.querySelector<HTMLInputElement>('[aria-label="Search flights"]')!
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'batch')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  expect(document.querySelectorAll('[data-testid^="flight-open-"]')).toHaveLength(3)
+  const filter = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.startsWith('Needs input'))!
+  act(() => filter.click())
+  expect(document.querySelector('[data-testid="flight-open-paused"]')).not.toBeNull()
+  expect(document.querySelector('[data-testid="flight-open-queued"]')).toBeNull()
+  expect(document.querySelector('[data-testid="flight-open-external"]')).toBeNull()
 })

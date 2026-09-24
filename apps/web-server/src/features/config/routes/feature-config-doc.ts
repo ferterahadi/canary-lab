@@ -9,6 +9,7 @@ import path from 'path'
 import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
+import { describeFastForward, describeRepoCheckout, fastForwardToUpstream } from '../../../shared/git-upstream'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { overlayExists as portifyOverlayExists } from '../../portify/logic/runtime/overlay'
 import { revertPortification } from '../../portify/logic/runtime/unportify'
@@ -131,7 +132,9 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
     return { name: feature.name, portified: portifyOverlayExists(feature.featureDir), reverted }
   })
 
-  app.get<{ Params: { name: string; repo: string } }>(
+  // `?fetch=1` contacts the remote first so `behindUpstream` describes its tip;
+  // the default is local-only so the Repos tab never blocks on the network.
+  app.get<{ Params: { name: string; repo: string }; Querystring: { fetch?: string } }>(
     '/api/features/:name/repos/:repo/git',
     async (req, reply) => {
       const features = loadFeatures(deps.featuresDir)
@@ -145,11 +148,43 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
         reply.code(404)
         return { error: 'repo not found' }
       }
-      const status = await getGitStatus(repo.localPath)
+      return describeRepoCheckout(repo, { fetch: req.query?.fetch === '1' || req.query?.fetch === 'true' })
+    },
+  )
+
+  // Fast-forward the checkout to its upstream tip. Same guards as checkout —
+  // the working tree is the user's — plus the fast-forward's own: dirty,
+  // detached, off-branch or diverged checkouts are refused with a 409 and left
+  // exactly as they were.
+  app.post<{ Params: { name: string; repo: string } }>(
+    '/api/features/:name/repos/:repo/update',
+    async (req, reply) => {
+      const features = loadFeatures(deps.featuresDir)
+      const feature = features.find((f) => f.name === req.params.name)
+      if (!feature) {
+        reply.code(404)
+        return { error: 'feature not found' }
+      }
+      const repo = findRepo(feature, req.params.repo)
+      if (!repo) {
+        reply.code(404)
+        return { error: 'repo not found' }
+      }
+      if (deps.isRepoActive?.(feature.name, repo.name)) {
+        reply.code(409)
+        return { error: 'repo has an active service run' }
+      }
+      const outcome = await fastForwardToUpstream(repo.localPath, { branch: repo.branch })
+      if (outcome.kind === 'refused') {
+        reply.code(409)
+        return { error: `${outcome.reason}: ${outcome.message}`, reason: outcome.reason }
+      }
+      // Only a moved checkout changes what the Repos tab shows.
+      if (outcome.kind === 'fast-forwarded') publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       return {
-        ...status,
-        path: resolveRepoPath(repo.localPath),
-        expectedBranch: repo.branch ?? null,
+        update: outcome,
+        summary: describeFastForward(outcome),
+        ...await describeRepoCheckout(repo),
       }
     },
   )

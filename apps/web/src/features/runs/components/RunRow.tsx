@@ -1,6 +1,7 @@
 import type { ExecutionType, RunDetail, RunIndexEntry, RunStatus } from '@/shared/api/types'
 import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
+import { runWaitingState } from '../utils/run-waiting-state'
 import { shortTime } from '@/shared/lib/format'
 
 // One run row + its status chip, extracted verbatim from RunsListDialog (R64)
@@ -28,6 +29,12 @@ const DOT: Record<RunStatus, { state: StatusDotState; pulse: boolean }> = {
   aborted: { state: 'idle', pulse: false },
 }
 
+const CHROME_CLASS = {
+  row: 'rounded-md px-3 py-2 cl-hover-row',
+  headline: 'pb-0.5',
+  item: 'py-1.5',
+} as const
+
 function portsLabel(detail: RunDetail | undefined): string | null {
   const ports = (detail?.manifest.services ?? [])
     .flatMap((s) => Object.values(s.allocatedPorts ?? {}))
@@ -51,6 +58,7 @@ export function RunRow({
   showPorts = true,
   passCount = 'meta',
   arrow = 'hover',
+  chrome = 'row',
 }: {
   run: RunIndexEntry
   detail: RunDetail | undefined
@@ -74,13 +82,30 @@ export function RunRow({
    *  short list whose whole point is going somewhere — the flight run stage's
    *  Previous runs — so the affordance reads at rest. */
   arrow?: 'hover' | 'always'
+  /** `row` (default) is a list item: its own gutter, rounding and hover fill,
+   *  scanned among siblings. `headline` is a card's own opening line — the
+   *  flight run stage's Latest run. It drops the gutter so its text starts on
+   *  the card's OWN left edge (the column the kicker, the stats line and the
+   *  failure rows share), and it drops the fill: a filled band the width of the
+   *  card read as a nested slab, and it cut the run's title off from the stats
+   *  line that belongs to it. Hover underlines the title instead, and the
+   *  always-on arrow carries the affordance at rest. `item` is a list row
+   *  INSIDE a card (the run stage's Previous runs): headline's flush edge and
+   *  underline, with the vertical rhythm of the Failing tests rows beside it. */
+  chrome?: 'row' | 'headline' | 'item'
 }) {
   const ports = showPorts ? portsLabel(detail) : null
   const note = queueNote(run, detail)
+  const waiting = runWaitingState(detail ?? run)
   // A held boot session is status 'running' but reads as teal "services up".
   const isBoot = run.executionType === 'boot'
   const dot = isBoot && run.status === 'running' ? { state: 'booted' as const, pulse: true } : DOT[run.status]
   const meta: Array<{ text: string; mono?: boolean }> = [{ text: shortTime(run.startedAt) }]
+  // The envset sits next to the timestamp — when and where, before any outcome.
+  // Spec selection cannot vary by envset, so sibling runs of one suite declare
+  // the same roster and differ only in what the environment let execute: this is
+  // what separates "41/45 passed" from "4/45 passed" on the row below it.
+  if (run.env) meta.push({ text: run.env })
   if (ports) meta.push({ text: ports, mono: true })
   if (note) meta.push({ text: note })
   if (marker) meta.push({ text: marker })
@@ -92,12 +117,15 @@ export function RunRow({
       <button
         type="button"
         onClick={() => onSelect(run)}
-        className="group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left cl-hover-row"
+        className={`group flex w-full items-center gap-2 text-left ${CHROME_CLASS[chrome]}`}
         title={`Go to run ${run.runId}`}
       >
-        <StatusDot state={dot.state} pulse={dot.pulse} halo={dot.pulse} className="shrink-0" />
+        <StatusDot state={dot.state} pulse={dot.pulse && !waiting} halo={dot.pulse && !waiting} className="shrink-0" />
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-[13px]" style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
+          <span
+            className={`truncate text-[13px] ${chrome === 'row' ? '' : 'group-hover:underline'}`}
+            style={{ color: 'var(--text-primary)', fontWeight: 500 }}
+          >
             {primaryLabel ?? run.feature}
           </span>
           <span className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
@@ -122,7 +150,7 @@ export function RunRow({
             {passLabel}
           </span>
         )}
-        <RunStatusChip status={run.status} executionType={run.executionType} />
+        <RunStatusChip status={run.status} executionType={run.executionType} pendingSpecEdits={run.pendingSpecEdits} waitingLabel={waiting?.label} />
         <span
           className={`shrink-0 transition-opacity ${arrow === 'always' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
           style={{ color: 'var(--accent)' }}
@@ -135,24 +163,44 @@ export function RunRow({
   )
 }
 
-export function RunStatusChip({ status, executionType }: { status: RunStatus; executionType?: ExecutionType }) {
+/** The status chip, plus — for an active run holding spec edits it has not
+ *  executed (D9) — a quiet "N pending" companion. It sits WITH the status because
+ *  that is the claim it qualifies: HEALING or PASSED describes the suite as it
+ *  stood at run start, and this says the live suite has since moved. Border
+ *  chrome and muted tone: a fact about provenance, not an alarm (the danger
+ *  reading, if any, is the features column's weaker badge). The count is
+ *  mirrored onto the runs index by the server so this needs no detail read. */
+export function RunStatusChip({ status, executionType, pendingSpecEdits, waitingLabel }: { status: RunStatus; executionType?: ExecutionType; pendingSpecEdits?: number; waitingLabel?: string }) {
   const boot = executionType === 'boot' && (status === 'running' || status === 'aborted')
   const palette = boot
     ? (status === 'running'
         ? { bg: 'var(--boot-soft)', text: 'var(--boot)' }
         : { bg: 'var(--bg-selected)', text: 'var(--text-muted)' })
     : CHIP[status]
-  const label = boot ? (status === 'running' ? 'services up' : 'stopped') : status
+  const label = boot ? (status === 'running' ? 'services up' : 'stopped') : waitingLabel ?? status
+  const pending = pendingSpecEdits ?? 0
   return (
-    <Chip
-      chrome="fill"
-      tone={palette.text}
-      background={palette.bg}
-      label={label}
-      uppercase
-      fontSize={10}
-      fontWeight={600}
-    />
+    <>
+      {pending > 0 && (
+        <Chip
+          chrome="border"
+          tone="var(--text-muted)"
+          label={`${pending} pending`}
+          fontSize={10}
+          testId="run-pending-edits"
+          title={`${pending} test-file change${pending > 1 ? 's' : ''} made since this run started ${pending > 1 ? 'have' : 'has'} not run. This run result is based on the recorded tests. Review, then adopt or restore the changes under Tests changed.`}
+        />
+      )}
+      <Chip
+        chrome="fill"
+        tone={palette.text}
+        background={palette.bg}
+        label={label}
+        uppercase
+        fontSize={10}
+        fontWeight={600}
+      />
+    </>
   )
 }
 

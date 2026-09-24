@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { FeaturesColumn } from './shared/shell/FeaturesColumn'
 import { TestCasesColumn } from './shared/shell/TestCasesColumn'
 import { RunsColumn } from './features/runs/components/RunsColumn'
@@ -7,11 +7,12 @@ import { DEMO_FLIGHT_STAGE, demoFlightLaunch, useDemoLauncher } from './shared/s
 import { RunDetailColumn } from './features/runs/components/RunDetailColumn'
 import { FeatureConfigEditor } from './features/config/components/FeatureConfigEditor'
 import { ModelLaunchGate } from './features/config'
-import { ResizablePanels } from './shared/ui/ResizablePanels'
+import { ResizablePanels, type PanelConfig } from './shared/ui/ResizablePanels'
 import { VerticalSplit } from './shared/ui/VerticalSplit'
 import { GlobalStatusBar } from './shared/shell/GlobalStatusBar'
 import { CollisionConfirmDialog } from './features/runs/components/CollisionConfirmDialog'
 import { RunStartErrorDialog } from './features/runs/components/RunStartErrorDialog'
+import { PendingRunStartNotice } from './features/runs/components/PendingRunStartNotice'
 // The three routed full-screen views load lazily: none of them is needed for
 // the workspace's first paint, and together (the flight detail tree above all)
 // they were a large slice of the single main chunk every cold load downloaded.
@@ -19,24 +20,36 @@ const LogCleanupPage = lazy(() => import('./features/cleanup/components/LogClean
 const CoverageLedgerPage = lazy(() => import('./features/coverage/components/CoverageLedgerPage').then((m) => ({ default: m.CoverageLedgerPage })))
 const FlightPage = lazy(() => import('./features/flights/components/FlightPage').then((m) => ({ default: m.FlightPage })))
 import { FlightStartDialog } from './features/flights/components/FlightStartDialog'
+import { runWaitingState } from './features/runs'
 import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useRunStart } from './features/runs/state/use-run-start'
 import { useFeatureWorkState, type FeatureActivity } from './features/flights/state/feature-activity'
-import { presentedIndexStages, resolveFeatureFlightAction } from './features/flights'
+import { presentedIndexStages, resolveFeatureFlightAction, resolveFeatureFlightTarget, type FlightsPillProps } from './features/flights'
 import { derivedFlightFeature, derivedFlightToken, useDerivedFeatureStages } from './features/flights/lib/derived-stages'
 import { derivePendingFeatures } from './features/flights/lib/pending-features'
 import type { RepoOption } from './features/flights/components/RepoMultiPicker'
-import { ToastHost } from '@/shared/ui/atoms'
-import { useFlightToasts } from './features/flights/state/use-flight-toasts'
+import { NotificationCenter } from './features/notifications/NotificationCenter'
 import { useInvalidation } from './shared/state/invalidation'
 import { useWorkspaceNavigation } from './shared/state/use-workspace-navigation'
 import { useWorkspaceData } from './shared/state/use-workspace-data'
 import { resolveActivityTarget } from './shared/state/nav-state'
 import * as api from './shared/api/client'
-import type { GettingStartedTarget, ModelStageKey, OnboardingWorkflowAction } from './shared/api/client'
+import type { FlightStageKey, GettingStartedTarget, ModelStageKey, OnboardingWorkflowAction } from './shared/api/client'
+import type { NotificationTarget } from './shared/api/notifications'
+import type { RunIndexEntry } from './shared/api/types'
+import { isAuxiliaryExecution } from '@shared/verification'
 
 // The two stages a suite run spawns — the models gate scopes its rows to them.
 const RUN_MODEL_STAGES: readonly ModelStageKey[] = ['heal', 'commit']
+const WORKSPACE_PANELS = [
+  { id: 'features', minWidth: 180, defaultWidth: 220, collapsible: true, collapseButtonY: 'top' },
+  { id: 'tests', minWidth: 280, defaultWidth: 360, collapsible: true, collapseButtonY: 'bottom' },
+  { id: 'runs', minWidth: 400, defaultWidth: 500, collapsible: false },
+] as const satisfies readonly PanelConfig[]
+
+function latestFeatureRunId(runs: readonly RunIndexEntry[], feature: string): string | null {
+  return runs.find((run) => run.feature === feature && !isAuxiliaryExecution(run.executionType))?.runId ?? null
+}
 
 export function App() {
   const [specTotalTests, setSpecTotalTests] = useState(0)
@@ -50,8 +63,9 @@ export function App() {
     selectedFeature, setSelectedFeature,
     selectedRunId, setSelectedRunId,
     selectedFlightId, setSelectedFlightId,
-    configFor, setConfigFor, configTab, setConfigTab,
+    configFor, setConfigFor, openConfig, configTab, setConfigTab,
     verifyOpen, setVerifyOpen,
+    specReviewOpen, setSpecReviewOpen, reviewFocus, setReviewFocus,
     flightStartFor, flightStartFresh, flightStartStage, setFlightStartFor,
     flightStartNew, setFlightStartNew,
     demoOpen, setDemoOpen,
@@ -89,25 +103,36 @@ export function App() {
     // A rename anywhere (this tab, another tab, an MCP client) must move the
     // open config dialog with the suite instead of leaving it on a name the
     // server no longer resolves.
-    onFeatureRenamed: (from, to) => { if (configFor === from) setConfigFor(to) },
+    onFeatureRenamed: (from, to) => { if (configFor === from) setConfigFor(to, configTab) },
   })
 
   const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
+  const activeRunWaiting = runWaitingState(activeRunDetail ?? globalActiveRunEntry)
   // R26: per-feature live activity (runs / portify / authoring) — the one
   // instance behind the Flights pill and the flights landing list. Clicking an
   // activity-only row opens the activity's REAL surface.
-  const { activity: featureActivity, externalHistory: featureExternalHistory } = useFeatureWorkState()
+  const { activity: featureActivity, externalHistory: featureExternalHistory, coverageJobs, portifyWorkflows } = useFeatureWorkState()
+  const selectedFeatureActivity = selectedFeature ? featureActivity.get(selectedFeature) : undefined
+  const coverageJobVersion = coverageJobs.map((job) => `${job.jobId}:${job.status}`).join('|')
+  const seenCoverageJobVersion = useRef(coverageJobVersion)
+  useEffect(() => {
+    if (seenCoverageJobVersion.current === coverageJobVersion) return
+    seenCoverageJobVersion.current = coverageJobVersion
+    // A reconciled completion must update stage evidence and the ledger too,
+    // even when the workspace broadcast carrying that completion was lost.
+    refreshFeatures()
+    invalidate('coverage')
+  }, [coverageJobVersion, refreshFeatures, invalidate])
   // Evidence-derived stage rails for flightless picker rows — one instance,
   // same ownership rule as featureActivity (the pill stays presentational).
   const derivedStages = useDerivedFeatureStages(features, featureExternalHistory)
   // The Getting Started launcher — the server-owned guided catalog `init`
   // prepared for this workspace, plus whether to offer it at all.
   const demo = useDemoLauncher(allRuns, flights)
-  // Set only when the new-flight dialog is opened FROM the demo chooser, so the
-  // plain "+ New" button still opens an empty form. Deliberately not routed: a
-  // cold load of `?dialog=flight-new` has no chooser behind it, and an empty
-  // form is the honest thing to land on.
-  const [demoFlightPrefill, setDemoFlightPrefill] = useState<{ repoPaths: string[]; description: string } | null>(null)
+  const handleDemoOpen = useCallback((): void => {
+    demo.markSeen()
+    setDemoOpen(true)
+  }, [demo.markSeen, setDemoOpen])
   // Push once: a workspace that still has its samples and has never produced a
   // run verdict or a flight opens the chooser itself, so nobody has to discover
   // a pill they have never seen. Opening it is what retires the prompt —
@@ -115,9 +140,8 @@ export function App() {
   // and never reopens over a user who closed it.
   useEffect(() => {
     if (!demo.autoOpen) return
-    demo.markSeen()
-    setDemoOpen(true)
-  }, [demo.autoOpen, demo.markSeen, setDemoOpen])
+    handleDemoOpen()
+  }, [demo.autoOpen, handleDemoOpen])
   // The Features column's per-row flight shortcut — one jump from a suite to its
   // flight instead of the pill → picker → find-the-row detour. Same inputs the
   // picker rows resolve from, so the two agree on where a suite's flight lives
@@ -133,27 +157,29 @@ export function App() {
     navigateToCoverage(feature)
   }, [navigateToCoverage])
 
-  // Portify is a Flight stage, regardless of whether a conductor record exists.
-  // Every entry point resolves the feature's recorded flight or its evidence-
-  // derived token, then pins Parallel setup in the routed stage selection.
-  const openPortifyStage = useCallback((feature: string): void => {
-    const flight = flightsRef.current.find((entry) => entry.feature === feature)
-    setConfigFor(null)
+  const openFlightStage = useCallback((flightId: string, stage: FlightStageKey): void => {
+    openFlight(flightId)
+    // Opening a different flight resets its stage, so set the destination after.
+    setFlightStage(stage)
+  }, [openFlight, setFlightStage])
+
+  const openFeatureStage = useCallback((feature: string, stage: FlightStageKey): void => {
     setSelectedFeature(feature)
-    openFlight(flight ? flight.flightId : derivedFlightToken(feature))
-    setFlightStage('portify')
-  }, [flightsRef, openFlight, setConfigFor, setFlightStage, setSelectedFeature])
+    openFlightStage(resolveFeatureFlightTarget(feature, flightsRef.current).flightId, stage)
+  }, [flightsRef, openFlightStage, setSelectedFeature])
+
+  // Portify is a Flight stage, regardless of whether a conductor record exists.
+  const openPortifyStage = useCallback((feature: string): void => {
+    setConfigFor(null)
+    openFeatureStage(feature, 'portify')
+  }, [openFeatureStage, setConfigFor])
 
   // Evaluation exports are reviewed on Flight's Report stage. A suite need not
   // have a conductor record: standalone work uses the same evidence-derived
   // `feature:` Flight the picker and per-suite shortcuts already use.
   const openEvaluationReport = useCallback((feature: string): void => {
-    const flight = flightsRef.current.find((entry) => entry.feature === feature)
-    setSelectedFeature(feature)
-    openFlight(flight?.flightId ?? derivedFlightToken(feature))
-    // `openFlight` clears a stage when the flight changes, so pin Report after.
-    setFlightStage('evaluation-export')
-  }, [flightsRef, openFlight, setFlightStage, setSelectedFeature])
+    openFeatureStage(feature, 'evaluation-export')
+  }, [openFeatureStage])
 
   // R83: what the return chip says. The origin is whatever `flight` held — a
   // recorded id (name it from the index) or a `feature:<name>` derived token
@@ -174,18 +200,15 @@ export function App() {
   const openActivity = useCallback((feature: string, activity: FeatureActivity) => {
     const target = resolveActivityTarget(feature, activity, flightsRef.current)
     if (target.kind === 'run') navigateToRun(target.feature, target.runId)
-    else {
-      openFlight(target.flightId)
-      // openFlight clears the stage when the flight changes, so pin it after.
-      if (target.stage) setFlightStage(target.stage)
-    }
-  }, [navigateToRun, openFlight, setFlightStage, flightsRef])
+    else if (target.stage) openFlightStage(target.flightId, target.stage)
+    else openFlight(target.flightId)
+  }, [navigateToRun, openFlight, openFlightStage, flightsRef])
 
   // Column 3 lists runs scoped to the currently-selected feature. Boot-only
   // sessions are excluded — they're not test runs and live in the global
   // Services surface, not the Runs list.
   const featureRuns = useMemo(
-    () => allRuns.filter((r) => r.feature === selectedFeature && r.executionType !== 'boot' && r.executionType !== 'benchmark'),
+    () => allRuns.filter((r) => r.feature === selectedFeature && !isAuxiliaryExecution(r.executionType)),
     [allRuns, selectedFeature],
   )
 
@@ -227,12 +250,18 @@ export function App() {
     statusRunDetail.detail?.manifest.status
     ?? selectedRunForFeature?.status
     ?? latestRunForFeature?.status
+  const selectedRunEvidence = {
+    manifest: statusRunDetail.detail?.manifest,
+    summary: summaryForSelectedFeature,
+    status: statusForSelectedFeature,
+  }
 
   // The run-start flow (collision prompt, branch-mismatch recovery, silent-
   // failure guard) lives in useRunStart — App just wires selection + the dialogs.
   const {
     collisionPrompt, setCollisionPrompt,
     startError, setStartError,
+    pendingStarts, dismissPendingStart,
     modelsPrompt, setModelsPrompt, resolveModelsPrompt,
     handleStartRun, resolveCollision, retryStartError, switchBranchesAndRun, pinCurrentAndRun,
     handleStartVerification,
@@ -242,6 +271,46 @@ export function App() {
     startVerification: startVerificationAction,
     onRunStarted: selectStartedRun,
   })
+  const openPendingReview = useCallback((feature: string, runId: string): void => {
+    setStartError(null)
+    navigateToRun(feature, runId)
+    setReviewFocus({ baseline: 'run', mode: 'code' })
+    setSpecReviewOpen(true)
+  }, [setStartError, navigateToRun, setReviewFocus, setSpecReviewOpen])
+
+  const handleNotificationNavigate = (target: NotificationTarget): void => {
+    if (target.kind === 'flight') {
+      openFlight(target.flightId)
+    } else if (target.kind === 'coverage') {
+      setSelectedFeature(target.feature)
+      openFlightStage(target.flightId ?? derivedFlightToken(target.feature), target.stage)
+    } else {
+      if ('runId' in target && target.runId) navigateToRun(target.feature, target.runId)
+      else { setSelectedFeature(target.feature); setSelectedRunId(null); setView('workspace') }
+      setReviewFocus(target.kind === 'test-review' && target.runId ? { baseline: 'run', mode: 'code' } : undefined)
+      setSpecReviewOpen(target.kind === 'test-review')
+    }
+  }
+
+  const handleFlightsPickerOpenChange = useCallback((open: boolean): void => {
+    if (open) { setSelectedFlightId(null); setView('flights') }
+    else setView('workspace')
+  }, [setSelectedFlightId, setView])
+
+  const handlePreFlightOpen = useCallback((taskId: string): void => {
+    setResumePlanTaskId(taskId)
+    setFlightStartNew(true)
+  }, [setResumePlanTaskId, setFlightStartNew])
+
+  const handleStartFlight = useCallback((feature: string): void => {
+    setSelectedFeature(feature)
+    setFlightStartFor(feature)
+  }, [setSelectedFeature, setFlightStartFor])
+
+  const handleReviewFeature = useCallback((name: string): void => {
+    setSelectedFeature(name)
+    setSelectedRunId(latestFeatureRunId(allRuns, name))
+  }, [allRuns, setSelectedFeature, setSelectedRunId])
 
   // R14: the coverage ledger's content is generated by a flight's docs /
   // prd-summary / specs-coverage stages — hand the ledger that fact so it can
@@ -275,26 +344,6 @@ export function App() {
     return [...seen.values()]
   }, [features])
 
-  // R51/R68: attention toasts — diff flight statuses on every index refresh and
-  // toast a flight the moment it starts needing the user (waiting-for-approval,
-  // or a non-user / non-queue pause). These are STICKY (never auto-dismiss) so a
-  // laptop-sleep-reconnect nag isn't gone by the time the user looks. R68 fixes:
-  //  - the seed pass no longer swallows already-waiting flights: on first load,
-  //    if N flights already need input, fire ONE aggregate sticky toast (a storm
-  //    of per-flight toasts on boot would be noise);
-  //  - a flight FIRST SEEN in an attention state after seed fires its own toast
-  //    (the old code skipped `was === undefined`, so a reconnect that revealed a
-  //    freshly-parked flight never toasted);
-  //  - queued flights never toast (they wait on capacity, not the user).
-  // An individual flight's toast is suppressed only while THAT flight's detail is
-  // on screen; the aggregate + other flights' toasts still show.
-  // The attention-toast diff (seed/aggregate/transition/suppress rules) lives in
-  // the pure `diffFlightToasts`; the hook owns the toast list + prev-key ref.
-  const { toasts, dismissToast } = useFlightToasts(flights, view, selectedFlightId, {
-    openFlight: (id) => openFlight(id),
-    openFlightsView: () => setView('flights'),
-  })
-
   const demoExportRun = useMemo(() => {
     const feature = demo.workflows.find((workflow) => workflow.id === 'export')?.internalAction
     if (!feature || feature.kind !== 'export') return null
@@ -302,8 +351,7 @@ export function App() {
     // or observational verification is not the normal run Export requires.
     return allRuns.find((run) =>
       run.feature === feature.feature
-      && run.executionType !== 'boot'
-      && run.executionType !== 'benchmark'
+      && !isAuxiliaryExecution(run.executionType)
       && run.executionType !== 'verify'
       && run.status === 'passed') ?? null
   }, [allRuns, demo.workflows])
@@ -358,11 +406,10 @@ export function App() {
         : launch.flightId
       setSelectedFeature(action.feature)
       setDemoOpen(false)
-      openFlight(flightId)
-      setFlightStage(stage)
+      openFlightStage(flightId, stage)
       return
     }
-  }, [navigateToCoverage, navigateToRun, openFlight, setDemoOpen, setFlightStage, setSelectedFeature])
+  }, [navigateToCoverage, navigateToRun, openFlight, openFlightStage, setDemoOpen, setSelectedFeature])
 
   const openDemoTarget = useCallback((target: GettingStartedTarget): void => {
     setDemoOpen(false)
@@ -379,9 +426,7 @@ export function App() {
       // These demos live on the suite's flight page, pinned to their stage —
       // a stage completed standalone still routes there via the derived token.
       const stage = DEMO_FLIGHT_STAGE[target.kind === 'draft' ? 'author' : target.kind]
-      const flight = flightsRef.current.find((entry) => entry.feature === target.feature)
-      openFlight(flight ? flight.flightId : derivedFlightToken(target.feature))
-      setFlightStage(stage)
+      openFeatureStage(target.feature, stage)
       return
     }
     // kind 'run' — a run demo's target, or a verify demo's verification run.
@@ -391,7 +436,7 @@ export function App() {
     const runWorkflow = demo.workflows.find((workflow) => workflow.id === 'run')?.internalAction
     const feature = runFeature ?? (runWorkflow?.kind === 'run' ? runWorkflow.feature : null)
     if (feature) navigateToRun(feature, target.id)
-  }, [allRuns, demo.workflows, flightsRef, navigateToCoverage, navigateToRun, openFlight, setDemoOpen, setFlightStage, setSelectedFeature])
+  }, [allRuns, demo.workflows, navigateToCoverage, navigateToRun, openFeatureStage, openFlight, setDemoOpen, setSelectedFeature])
 
   const selectedFeatureEnvs =
     features.find((f) => f.name === selectedFeature)?.envs ?? []
@@ -407,131 +452,139 @@ export function App() {
     return pending.length ? [...features, ...pending] : features
   }, [features, flights])
 
-  const panels = [
-    {
-      id: 'features',
-      minWidth: 180,
-      defaultWidth: 220,
-      collapsible: true,
-      collapseButtonY: 'top' as const,
-      content: (
-        <FeaturesColumn
-          features={featuresWithPending}
-          selectedFeature={selectedFeature}
-          activeRunFeature={globalActiveRunEntry?.feature ?? null}
-          activeRunStatus={globalActiveRunEntry?.status ?? null}
-          activeRunExecutionType={globalActiveRunEntry?.executionType ?? null}
-          onSelectFeature={(name) => {
-            pendingRunSelectionRef.current = null
-            setSelectedFeature(name)
-            setSelectedRunId(allRuns.find((r) => r.feature === name && r.executionType !== 'boot' && r.executionType !== 'benchmark')?.runId ?? null)
-          }}
-          onFeaturesChanged={refreshFeatures}
-          versionStatus={versionStatus}
-          onOpenCoverage={openCoverageFor}
-          onStartNewFlight={() => setFlightStartNew(true)}
-          onOpenFlight={openFlight}
-          flightAction={flightAction}
-          onOpenPortify={openPortifyStage}
-          settingsOpen={settingsOpen}
-          onSettingsOpenChange={setSettingsOpen}
-          modelsFor={modelsFor}
-          onModelsFor={setModelsFor}
-        />
-      ),
-    },
-    {
-      id: 'tests',
-      minWidth: 280,
-      defaultWidth: 360,
-      collapsible: true,
-      collapseButtonY: 'bottom' as const,
-      content: (
-        <TestCasesColumn
-          feature={selectedFeature}
-          activeRunSummary={summaryForSelectedFeature}
-          activeRunStatus={statusForSelectedFeature}
-          onTotalTestsChange={setSpecTotalTests}
-          dirtySpecs={features.find((f) => f.name === selectedFeature)?.dirty?.specs ?? []}
-        />
-      ),
-    },
-    {
-      id: 'runs',
-      minWidth: 400,
-      defaultWidth: 500,
-      collapsible: false,
-      content: (
-        <VerticalSplit
-          storageKey="canary-lab.runs-detail-split-v2"
-          defaultTopPercent={25}
-          minTopPx={120}
-          minBottomPx={320}
-          collapsible
-          top={(
-            <RunsColumn
-              feature={selectedFeature}
-              envs={selectedFeatureEnvs}
-              runs={featureRuns}
-              selectedRunId={selectedRunId}
-              onSelectRun={setSelectedRunId}
-              onStartRun={handleStartRun}
-              onStartVerification={handleStartVerification}
-              runDisabled={false}
-              verifyOpen={verifyOpen}
-              onVerifyOpenChange={setVerifyOpen}
-              /* Read straight from the server's onboarding samples rather than a
-                 literal suite name — so it stays correct if the shipped demo is
-                 ever renamed, and goes quiet once the user deletes it. */
-              sampleSuite={demo.suite}
-            />
-          )}
-          bottom={(
-            <RunDetailColumn
-              runId={selectedRunId}
-              onOpenPlaywrightSettings={(f) => setConfigFor(f, 'playwright')}
-              onOpenEvaluationReport={openEvaluationReport}
-              totalTests={specTotalTests}
-              /* Honoured only when the focus belongs to the run being shown, so a
-                 stale pair from a previous selection can't scroll this one. */
-              {...(focusTest && focusTest.runId === selectedRunId ? { focusTest: focusTest.test } : {})}
-              /* Same pairing rule for the arrival tab a drill-through named. */
-              {...(runTab && runTab.runId === selectedRunId ? { arriveTab: runTab.tab } : {})}
-            />
-          )}
-        />
-      ),
-    },
-  ]
+  const contentByPanel = {
+    features: (
+      <FeaturesColumn
+        features={featuresWithPending}
+        selectedFeature={selectedFeature}
+        activeRunFeature={globalActiveRunEntry?.feature ?? null}
+        activeRunStatus={globalActiveRunEntry?.status ?? null}
+        activeRunWaiting={activeRunWaiting}
+        activeRunExecutionType={globalActiveRunEntry?.executionType ?? null}
+        onSelectFeature={(name) => {
+          pendingRunSelectionRef.current = null
+          setSelectedFeature(name)
+          setSelectedRunId(latestFeatureRunId(allRuns, name))
+        }}
+        onReviewFeature={(name) => { setSelectedFeature(name); setReviewFocus(undefined); setSpecReviewOpen(true) }}
+        onOpenConfig={openConfig}
+        versionStatus={versionStatus}
+        onOpenCoverage={openCoverageFor}
+        onStartNewFlight={() => setFlightStartNew(true)}
+        onOpenFlight={openFlight}
+        flightAction={flightAction}
+        settingsOpen={settingsOpen}
+        onSettingsOpenChange={setSettingsOpen}
+        modelsFor={modelsFor}
+        onModelsFor={setModelsFor}
+      />
+    ),
+    tests: (
+      <TestCasesColumn
+        feature={selectedFeature}
+        isAuthoringTests={selectedFeatureActivity?.kind === 'authoring'}
+        runEvidence={selectedRunEvidence}
+        comparisonBaseline={selectedRunEvidence}
+        currentTests={nav.currentTests}
+        onCurrentTestsChange={selectedRunForFeature ? nav.setCurrentTests : undefined}
+        onReviewTest={(file, line, baseline, change, test) => { setReviewFocus({ file, line, baseline, change, test, mode: 'english' }); setSpecReviewOpen(true) }}
+        onTotalTestsChange={setSpecTotalTests}
+        dirtySpecs={features.find((f) => f.name === selectedFeature)?.dirty?.specs ?? []}
+      />
+    ),
+    runs: (
+      <VerticalSplit
+        storageKey="canary-lab.runs-detail-split-v2"
+        defaultTopPercent={25}
+        minTopPx={120}
+        minBottomPx={320}
+        collapsible
+        top={(
+          <RunsColumn
+            feature={selectedFeature}
+            envs={selectedFeatureEnvs}
+            runs={featureRuns}
+            selectedRunId={selectedRunId}
+            onSelectRun={setSelectedRunId}
+            onStartRun={handleStartRun}
+            onStartVerification={handleStartVerification}
+            runDisabled={false}
+            verifyOpen={verifyOpen}
+            onVerifyOpenChange={setVerifyOpen}
+            /* Read straight from the server's onboarding samples rather than a
+               literal suite name — so it stays correct if the shipped demo is
+               ever renamed, and goes quiet once the user deletes it. */
+            sampleSuite={demo.suite}
+          />
+        )}
+        bottom={(
+          <RunDetailColumn
+            runId={selectedRunId}
+            onOpenPlaywrightSettings={(f) => openConfig(f, 'playwright')}
+            onOpenSpecReview={() => setSpecReviewOpen(true)}
+            onOpenEvaluationReport={openEvaluationReport}
+            totalTests={specTotalTests}
+            /* Honoured only when the focus belongs to the run being shown, so a
+               stale pair from a previous selection can't scroll this one. */
+            {...(focusTest && focusTest.runId === selectedRunId ? { focusTest: focusTest.test } : {})}
+            /* Same pairing rule for the arrival tab a drill-through named. */
+            {...(runTab && runTab.runId === selectedRunId ? { arriveTab: runTab.tab } : {})}
+          />
+        )}
+      />
+    ),
+  } satisfies Record<(typeof WORKSPACE_PANELS)[number]['id'], ReactNode>
+
+  const flightPill: FlightsPillProps = {
+    flights,
+    preFlights,
+    activity: featureActivity,
+    features: features.map((feature) => ({
+      name: feature.name,
+      group: feature.group,
+      stages: derivedStages.get(feature.name),
+    })),
+    coverageJobs,
+    portifyWorkflows,
+    open: view === 'flights' && !selectedFlightId,
+    onOpenChange: handleFlightsPickerOpenChange,
+    onOpenFlight: openFlight,
+    onOpenActivity: openActivity,
+    onOpenPreFlight: handlePreFlightOpen,
+    onStartFlight: handleStartFlight,
+  }
+
+  const review = {
+    features,
+    onFeaturesChanged: refreshFeatures,
+    runId: selectedRunId,
+    feature: selectedFeature,
+    runDetail: statusRunDetail.detail,
+    focus: reviewFocus,
+    onFocus: setReviewFocus,
+    onChooseFeature: handleReviewFeature,
+    open: specReviewOpen,
+    onOpenChange: setSpecReviewOpen,
+  }
 
   return (
     <div className="flex h-full w-full flex-col">
       <GlobalStatusBar
         activeRunDetail={activeRunDetail}
-        features={features}
+        onRunLatestTests={(feature) => { void handleStartRun(undefined, 'test', feature) }}
+        runStartPending={pendingStarts.length > 0 || !!modelsPrompt || !!collisionPrompt}
         onOpenCleanup={() => setView('cleanup')}
-        flights={flights}
-        preFlights={preFlights}
-        onOpenPreFlight={(taskId) => { setResumePlanTaskId(taskId); setFlightStartNew(true) }}
-        activity={featureActivity}
-        derivedStages={derivedStages}
-        demoAvailable={demo.available}
-        demoUnseen={demo.unseen}
-        onOpenDemo={() => { demo.markSeen(); setDemoOpen(true) }}
-        onOpenFlight={openFlight}
-        flightsPickerOpen={view === 'flights' && !selectedFlightId}
-        onFlightsPickerOpenChange={(open) => {
-          if (open) { setSelectedFlightId(null); setView('flights') }
-          else setView('workspace')
-        }}
-        onOpenActivity={openActivity}
-        onStartFlight={(feature) => { setSelectedFeature(feature); setFlightStartFor(feature) }}
+        flightPill={flightPill}
+        review={review}
+        gettingStarted={{ available: demo.available, unseen: demo.unseen, onOpen: handleDemoOpen }}
+        returnToFlight={returnFlight ? { flightId: returnFlight, label: returnFlightLabel, onOpen: openFlight } : null}
         onOpenPortify={openPortifyStage}
-        onNavigateToRun={(feature, runId) => navigateToRun(feature, runId)}
-        returnFlight={returnFlight}
-        returnFlightLabel={returnFlightLabel}
-        onReturnToFlight={openFlight}
+        onNavigateToRun={navigateToRun}
+        notificationControl={<NotificationCenter open={nav.notificationsOpen} onOpenChange={nav.setNotificationsOpen} onNavigate={handleNotificationNavigate} />}
       />
+      {pendingStarts.map((pending) => <PendingRunStartNotice key={pending.requestId} pending={pending}
+        onDismiss={dismissPendingStart} onRunStarted={(runId) => navigateToRun(pending.feature, runId)}
+        onReview={openPendingReview} />)}
       <div className="min-h-0 flex-1">
         {/* One-time chunk load for a lazy view — a quiet line on the app's own
             canvas, gone in well under a second on a local server. */}
@@ -552,6 +605,17 @@ export function App() {
               onClose={() => returnFlight ? openFlight(returnFlight) : setView('workspace')}
               generatingFlight={coverageGeneratingFlight}
               onOpenFlight={openFlight}
+              coverageJobs={coverageJobs}
+              onOpenRecovery={(stage) => {
+                openFeatureStage(selectedFeature, stage)
+                setFlightStartFor(selectedFeature, 'refly', stage)
+              }}
+              onOpenGeneration={(job) => {
+                invalidate('coverage')
+                openActivity(job.feature, { kind: job.kind === 'summary' ? 'condensing' : 'mapping', jobId: job.jobId })
+                // Follow the summary → mapping handoff in the Flight rail.
+                setFlightStage(null)
+              }}
             />
           : view === 'flights' && selectedFlightId
           ? <FlightPage
@@ -565,12 +629,13 @@ export function App() {
               indexEntry={flights.find((f) => f.flightId === selectedFlightId) ?? null}
               activity={featureActivity}
               externalHistory={featureExternalHistory}
+              coverageJobs={coverageJobs}
               derivedStages={derivedStages}
               // Select the feature too: the config dialog is qualified by the
               // durable `feature` param, so opening it for a flight's feature
               // while a DIFFERENT one is selected would deep-link to the wrong
               // suite. Same alignment onStartFlight already does below.
-              onOpenConfig={(feature, tab) => { setSelectedFeature(feature); setConfigFor(feature, tab ?? null) }}
+              onOpenConfig={openConfig}
               onSelectFlight={setSelectedFlightId}
               onClose={() => { setSelectedFlightId(null); setView('workspace') }}
               /* R82: `target` is where in the run detail to land — a failed
@@ -589,11 +654,14 @@ export function App() {
               stage={flightStage}
               onSelectStage={setFlightStage}
               onStartFlight={(feature, intent, fromStage) => { setSelectedFeature(feature); setFlightStartFor(feature, intent, fromStage) }}
+              /* The run hero's "verdict from run-start snapshot · N pending
+                 edits" link lands on the same review the status-bar pill
+                 opens — one dialog, routed once (?dialog=tests-review). */
+              onOpenSpecReview={() => setSpecReviewOpen(true)}
             />
-          : <ResizablePanels panels={panels} />}
+          : <ResizablePanels panels={WORKSPACE_PANELS} contentByPanel={contentByPanel} />}
         </Suspense>
       </div>
-      <ToastHost toasts={toasts} onDismiss={dismissToast} />
       <DemoDialog
         open={demoOpen}
         onClose={() => setDemoOpen(false)}
@@ -611,14 +679,12 @@ export function App() {
           intent={flightStartFresh ? 'fresh' : 'refly'}
           fromStage={flightStartNew ? null : flightStartStage}
           resumePlanTaskId={flightStartNew ? resumePlanTaskId : null}
-          newFlightPrefill={flightStartNew ? demoFlightPrefill : null}
           knownRepos={knownRepos}
-          onClose={() => { setFlightStartFor(null); setFlightStartNew(false); setResumePlanTaskId(null); setDemoFlightPrefill(null) }}
+          onClose={() => { setFlightStartFor(null); setFlightStartNew(false); setResumePlanTaskId(null) }}
           onOpenFlight={(flightId) => {
             setFlightStartFor(null)
             setFlightStartNew(false)
             setResumePlanTaskId(null)
-            setDemoFlightPrefill(null)
             setSelectedFlightId(flightId)
             setView('flights')
             refreshFlights()
@@ -680,6 +746,7 @@ export function App() {
           error={startError.error}
           feature={startError.feature}
           onRetry={() => { void retryStartError() }}
+          onReviewTests={(review) => openPendingReview(review.feature, review.runId)}
           onSwitchBranches={switchBranchesAndRun}
           onPinCurrent={pinCurrentAndRun}
           onClose={() => setStartError(null)}

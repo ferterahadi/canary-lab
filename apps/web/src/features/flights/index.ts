@@ -13,8 +13,10 @@ export {
   isExternallyDriven,
   presentedIndexStages,
   resolveFeatureFlightAction,
+  resolveFeatureFlightTarget,
+  summarizeFlightActivity,
 } from './components/FlightsPill'
-export type { FeatureFlightAction } from './components/FlightsPill'
+export type { FeatureFlightAction, FlightsPillProps } from './components/FlightsPill'
 export {
   StageStatusChip,
   stageLabel,

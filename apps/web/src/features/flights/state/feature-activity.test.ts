@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunIndexEntry } from '@/shared/api/types'
+import type { RunManifest, CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunIndexEntry } from '@/shared/api/types'
 import type { PortifyIndexEntry } from '@/shared/api/client'
+import fixture from '../../runs/utils/__fixtures__/run-snapshot-review.json'
 import { deriveFeatureActivity, deriveFeatureExternalHistory } from './feature-activity'
 
 const run = (over: Partial<RunIndexEntry>): RunIndexEntry => ({
@@ -120,11 +121,12 @@ describe('deriveFeatureActivity', () => {
     expect(noRun.get('checkout')?.kind).toBe('portifying')
   })
 
-  it('ignores boots, benchmarks, terminal portify workflows, and resting drafts', () => {
+  it('ignores boots, benchmarks, robustness cells, terminal portify workflows, and resting drafts', () => {
     const map = deriveFeatureActivity({
       activeRuns: [
         run({ feature: 'boot-f', executionType: 'boot' }),
         run({ feature: 'bench-f', executionType: 'benchmark' }),
+        run({ feature: 'cell-f', executionType: 'robustness' }),
       ],
       portifyWorkflows: [portify({ feature: 'saved-f', status: 'saved' })],
       drafts: [draft({ featureName: 'ready-f', status: 'spec-ready' })],
@@ -421,6 +423,7 @@ describe('deriveFeatureExternalHistory', () => {
         run({ feature: 'run-verify', runId: 'r-verify', executionType: 'verify' }),
         run({ feature: 'ignored-boot', runId: 'r-boot', executionType: 'boot' }),
         run({ feature: 'ignored-benchmark', runId: 'r-benchmark', executionType: 'benchmark' }),
+        run({ feature: 'ignored-cell', runId: 'r-cell', executionType: 'robustness' }),
         run({ feature: 'internal-run', runId: 'r-internal' }),
       ],
       runDetails: {
@@ -500,6 +503,7 @@ describe('deriveFeatureExternalHistory', () => {
     expect(history.get('run-verify')?.run?.current).toMatchObject({ kind: 'verifying', status: 'running', clientKind: 'codex' })
     expect(history.has('ignored-boot')).toBe(false)
     expect(history.has('ignored-benchmark')).toBe(false)
+    expect(history.has('ignored-cell')).toBe(false)
     expect(history.has('internal-run')).toBe(false)
   })
 
@@ -523,4 +527,14 @@ describe('deriveFeatureExternalHistory', () => {
       run: { current: { kind: 'running' } },
     })
   })
+})
+
+it('carries the recorded review wait from run detail into the feature activity', () => {
+  const manifest = fixture.manifest as RunManifest
+  const result = deriveFeatureActivity({
+    activeRuns: [{ runId: manifest.runId, feature: manifest.feature, status: manifest.status, startedAt: manifest.startedAt }],
+    runDetails: { [manifest.runId]: { runId: manifest.runId, manifest } },
+    portifyWorkflows: [], drafts: [],
+  })
+  expect(result.get('sample-suite')?.waiting?.label).toBe('Awaiting test review')
 })

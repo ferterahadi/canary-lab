@@ -6,6 +6,10 @@ import { createEvaluationExport, type AssertionHtmlOptions } from './test-review
 import { computeFeatureCoverage } from '../../coverage/logic/coverage/service'
 import { createZip } from '../../../shared/simple-zip'
 import type { EvaluationArchiveContents } from './evaluation-export-types'
+import { buildBehaviorCertificate } from './behavior-certificate'
+import {
+  type BehaviorCertificate,
+} from '../../../../../../shared/verification-strength/certificate'
 
 export type { EvaluationArchiveContents } from './evaluation-export-types'
 
@@ -21,7 +25,7 @@ export interface EvaluationExportArchiveOptions {
 export async function buildEvaluationExportArchive(
   detail: RunDetail,
   options: EvaluationExportArchiveOptions,
-): Promise<{ archiveBase: string; zip: Buffer; contents: EvaluationArchiveContents }> {
+): Promise<{ archiveBase: string; zip: Buffer; contents: EvaluationArchiveContents; certificate: BehaviorCertificate }> {
   const runPaths = buildRunPaths(runDirFor(options.logsDir, detail.runId))
   const videos = assertionVideos(
     detail.playwrightArtifacts,
@@ -46,6 +50,7 @@ export async function buildEvaluationExportArchive(
     coverage,
   })
   const videoEntries = videos.map((video) => ({ filename: video.filename, data: fs.readFileSync(video.path) }))
+  const certificate = buildBehaviorCertificate(detail, { coverage })
   const zip = createZip([
     { filename: 'evaluation.html', data: Buffer.from(exported.html, 'utf8') },
     ...exported.assets,
@@ -55,6 +60,7 @@ export async function buildEvaluationExportArchive(
     archiveBase: `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`,
     zip,
     contents: { bytes: zip.length, videos: videoEntries.length, assets: exported.assets.length },
+    certificate,
   }
 }
 

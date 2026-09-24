@@ -59,21 +59,34 @@ green.** A test edited into passing is the exact failure this product exists to 
   status in the wording, never drop/merge/dedupe cases to make the report read better.
 - **The case list mirrors the DECLARED roster, not the executed set.**
   `buildTestReviewPacket`
-  (`apps/web-server/src/features/evaluation/logic/test-review-export.ts`) enumerates
+  (`apps/web-server/src/features/evaluation/logic/test-review/packet.ts`,
+  re-exported by `test-review-export.ts`) enumerates
   `summary.knownTests` — Playwright's own reporter walk of the whole suite, taken
   before the first test starts — and keeps that order. A test the run never reached is
   **present and labelled `NOT_RUN_STATUS` (`'not run'`)**: never dropped, and never
   rounded into a pass or a fail. A 23-test suite that stopped at the failure limit
   after 6 reports **23 cases with 17 marked never-run**; building the roster from
-  `playbackEvents` instead (the old behavior) silently reported it as a 6-test suite.
+  `playbackEvents` instead silently reports it as a 6-test suite.
   - Anything the run actually reported that the roster misses is **appended, not
     discarded** — evidence is never dropped in either direction.
+  - **An attempt belongs to a test by name + spec file, never by line.** A heal
+    cycle may edit the spec, which moves every later test onto a new line, and the
+    reporter mints a fresh id from that line — so one test can be recorded at two
+    lines under two ids inside one run. Keying on the line turned the pre-fix
+    failure into a phantom fourth case ("3 passed, 1 failed" for a three-test suite
+    that ended green — run `2026-09-04T0638-7rcl`). The line decides only when one
+    file declares the same title more than once; with no roster to count against,
+    the current spec source is counted instead, and when it can't tell, both lines
+    stay. The Tests panel (`TestCasesColumn`) and the Playwright tab follow the
+    same rule, so all three surfaces report the same count.
   - Status conflicts resolve **downward**: a per-test playback verdict beats the
     summary lists, and failed/skipped are checked before passed.
   - Runs recorded before the reporter emitted `knownTests` have none — those **fall
     back to the executed set**, which is all the evidence that exists for them.
-  - Pinned by the `declared-test roster` describe block in
-    `apps/web-server/src/features/evaluation/logic/test-review-export.test.ts`.
+  - Pinned by the `declared-test roster` and `a test that moved lines between heal
+    cycles` describe blocks in
+    `apps/web-server/src/features/evaluation/logic/test-review-export.roster.test.ts`
+    (the latter against the recorded evidence of that run, under `__fixtures__/`).
 - External export wording is **client-authored**; Canary renders and stores it, and
   never agent-generates or rewrites the report content.
 
@@ -85,7 +98,7 @@ green.** A test edited into passing is the exact failure this product exists to 
    `npx vitest run apps/web-server/src/mcp apps/web-server/src/features/runs/logic/runtime/auto-heal.test.ts`
    and then `cl_sync-agent-surfaces` for the surfaces that must agree.
 3. Did you change the run loop's observable behavior? Tier 4 in `cl_verify-changes` —
-   drive `demo_catalog` end to end and read the counts off a real result.
+   drive `storefront-journey` end to end and read the counts off a real result.
 
 ## Common mistakes
 

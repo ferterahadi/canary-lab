@@ -16,10 +16,16 @@ export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
 export const DEFAULT_CANARY_LAB_MCP_PROFILE: CanaryLabMcpProfile = 'compact'
 
 export type CanaryLabMcpToolName =
+  | 'wait_for_feature_change'
+  | 'start_discovery_repair'
+  | 'get_discovery_repair'
+  | 'update_discovery_repair'
   | 'list_features'
   | 'list_runs'
   | 'get_run'
   | 'get_run_snapshot'
+  | 'get_test_review'
+  | 'review_test_changes'
   | 'get_run_actions'
   | 'list_verification_configs'
   | 'get_verification_config'
@@ -43,6 +49,7 @@ export type CanaryLabMcpToolName =
   | 'delete_feature'
   | 'get_feature_repo_status'
   | 'checkout_feature_repo_branch'
+  | 'update_feature_repo_branch'
   | 'start_external_evaluation_export'
   | 'submit_external_evaluation_export'
   | 'list_evaluation_exports'
@@ -75,10 +82,12 @@ export type CanaryLabMcpToolName =
   | 'submit_external_portify'
   | 'revise_external_portify'
   | 'get_portify'
+  | 'review_portify'
   | 'save_portify'
   | 'cancel_portify'
   | 'remove_portification'
   | 'list_portify_status'
+  | 'get_workflow_guide'
 
 export const EXEC_TOOL_NAME = 'exec' as const
 export type CanaryLabMcpExposedToolName = CanaryLabMcpToolName | typeof EXEC_TOOL_NAME
@@ -97,6 +106,15 @@ export interface CanaryLabMcpExecCallEvent {
 }
 
 export const REPAIR_TOOLS = [
+  'wait_for_feature_change',
+  'get_test_review',
+  'review_test_changes',
+  'start_discovery_repair',
+  'get_discovery_repair',
+  'update_discovery_repair',
+  // Cross-workflow like list_features: every profile can read its own full guide,
+  // because the initialize lead is capped at INSTRUCTIONS_DELIVERED_WINDOW.
+  'get_workflow_guide',
   'list_features',
   'list_runs',
   'start_run',
@@ -115,6 +133,8 @@ export const REPAIR_TOOLS = [
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
 export const VERIFY_TOOLS = [
+  'wait_for_feature_change',
+  'get_workflow_guide',
   'list_features',
   'list_runs',
   'get_run',
@@ -134,6 +154,8 @@ export const VERIFY_TOOLS = [
 // array; the split keeps each skill/client surface lean while `lifecycle`/`full`
 // stay the same computed unions.
 export const AUTHOR_TOOLS = [
+  'wait_for_feature_change',
+  'get_workflow_guide',
   'list_features',
   'list_runs',
   'get_run',
@@ -145,6 +167,7 @@ export const AUTHOR_TOOLS = [
   'delete_feature',
   'get_feature_repo_status',
   'checkout_feature_repo_branch',
+  'update_feature_repo_branch',
   // Read-only views of the coverage ledger and its source docs. Authoring "a
   // test for the missing behavior" starts from the gap, and without these the
   // narrowest profile that can write a spec cannot see which requirement is
@@ -160,6 +183,8 @@ export const AUTHOR_TOOLS = [
 // Coverage = feature docs → PRD summary → semantic coverage ledger (carved out
 // of the old author array; the tools are unchanged).
 export const COVERAGE_TOOLS = [
+  'wait_for_feature_change',
+  'get_workflow_guide',
   'list_features',
   'write_feature_doc',
   'delete_feature_doc',
@@ -175,6 +200,8 @@ export const COVERAGE_TOOLS = [
 // Export = evaluation archives for a terminal run (carved out of the old
 // author array). list_runs/get_run ride along to pick the run to export.
 export const EXPORT_TOOLS = [
+  'wait_for_feature_change',
+  'get_workflow_guide',
   'list_features',
   'list_runs',
   'get_run',
@@ -189,6 +216,10 @@ export const EXPORT_TOOLS = [
 // Flight = the conducted end-to-end pipeline. write_feature_doc rides along so
 // the client can distill conversation docs at the prd-source checkpoint.
 export const FLIGHT_TOOLS = [
+  'wait_for_feature_change',
+  'get_test_review',
+  'review_test_changes',
+  'get_workflow_guide',
   // Every shipped skill's bootstrap uses list_features as its liveness probe
   // ("only an unknown-tool error means the server is disconnected") — flight
   // was the one profile where that probe itself errored, misreporting a
@@ -239,12 +270,14 @@ export const FLIGHT_TOOLS = [
 // profile=portify (or full). The three tools a FLIGHT's portify hand-off needs
 // live in FLIGHT_TOOLS as well, so they reach lifecycle through that union.
 export const PORTIFY_TOOLS = [
+  'get_workflow_guide',
   'list_features',
   'list_runs',
   'start_external_portify',
   'submit_external_portify',
   'revise_external_portify',
   'get_portify',
+  'review_portify',
   'save_portify',
   'cancel_portify',
   'remove_portification',

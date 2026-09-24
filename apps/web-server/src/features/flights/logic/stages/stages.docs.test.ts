@@ -32,6 +32,9 @@ vi.mock('child_process', async (importOriginal) => {
 })
 
 import { attemptLogLine, describeAttempt, docsStage } from './docs'
+import { prdSummaryStage } from './prd-summary'
+import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary'
+import { readRequirementsDraft } from './requirements-draft'
 
 import type { FlightInject, FlightStageDeps } from './context'
 
@@ -147,6 +150,40 @@ describe('docs stage', () => {
   beforeEach(() => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
     fs.mkdirSync(path.join(featuresDir, 'checkout', 'docs'), { recursive: true })
+  })
+
+  it.each(['internal', 'external'] as const)('collects and drafts requirements in one %s session, then assembles them without a second agent', async (producer) => {
+    const featureDir = path.join(featuresDir, 'checkout')
+    const outPath = path.join(featureDir, 'docs', 'checkout-prd.md')
+    const answer = { requirements: [{ id: 'R1', kind: 'functional', title: 'Checkout', text: 'It should complete checkout.', pathTypes: ['happy'] }] }
+    const writeResult = () => { fs.writeFileSync(outPath, '# Checkout\nIt should complete checkout.\n'); return JSON.stringify(answer) }
+    const spawnAgent = vi.fn<NonNullable<FlightStageDeps['spawnAgent']>>(async ({ prompt }) => {
+      expect(prompt).toContain('CRITICAL — requirement id stability')
+      expect(prompt).toContain(outPath)
+      return { text: writeResult() }
+    })
+    const regenerate = vi.fn<NonNullable<FlightStageDeps['coverage']>['regenerate']>()
+    const d = deps({ spawnAgent, coverage: { regenerate } })
+    const { ctx, setStage } = ctxFor(manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: producer } }))
+    const adapter = docsStage(d)
+    let collected = await adapter.onCheckpointResponse!(ctx, { choice: 'collect-repo-docs' })
+    if (producer === 'external') {
+      expect(collected.kind).toBe('checkpoint')
+      if (collected.kind !== 'checkpoint') throw new Error('expected external handoff')
+      setStage('docs', { checkpoint: collected.checkpoint })
+      const data = collected.checkpoint.data as { handOffId: string; prompt: string }
+      expect(data.prompt).toContain('CRITICAL — requirement id stability')
+      writeResult()
+      collected = await adapter.onCheckpointResponse!(ctx, { choice: 'submit', token: data.handOffId, data: answer })
+    }
+    expect(collected.kind).toBe('done')
+    expect(readPrdSummary(featureDir)).toBeNull()
+    expect(readRequirementsDraft(featureDir, ctx.flightDir)?.requirements).toHaveLength(1)
+    expect(await prdSummaryStage(d).run(ctx)).toMatchObject({ kind: 'done', evidence: { requirementCount: 1 } })
+    expect(readPrdSummary(featureDir)?.requirements[0].text).toBe('It should complete checkout.')
+    expect(regenerate).not.toHaveBeenCalled()
+    expect(spawnAgent).toHaveBeenCalledTimes(producer === 'internal' ? 1 : 0)
+    expect(readRequirementsDraft(featureDir, ctx.flightDir)).toBeNull()
   })
 
   function initGitRepoWithDiff(): void {

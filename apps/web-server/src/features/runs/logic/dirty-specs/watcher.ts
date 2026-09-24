@@ -34,7 +34,7 @@ interface WatcherDeps {
    *  host's watcher limits or event-coalescing behavior. */
   watchPath?: (
     target: string,
-    options: { persistent: boolean },
+    options: { persistent: boolean; recursive?: boolean },
     listener: fs.WatchListener<string>,
   ) => fs.FSWatcher
 }
@@ -90,9 +90,9 @@ export function startDirtySpecWatcher(deps: WatcherDeps): DirtySpecWatcher {
     const e2eDir = path.join(featureDir, 'e2e')
     if (fs.existsSync(e2eDir)) {
       try {
-        const w = watchPath(e2eDir, { persistent: false }, (_event, filename) => {
-          // null filename (some platforms) → recompute anyway; otherwise only specs.
-          if (filename && !String(filename).endsWith('.spec.ts')) return
+        const w = watchPath(e2eDir, { persistent: false, recursive: true }, () => {
+          // Fixtures, nested helpers and data are part of the reviewed snapshot
+          // too. Publish their edits so an open comparison cannot stay stale.
           pendingContentChange.add(feature.name)
           scheduleRecompute(feature.name, featureDir)
         })

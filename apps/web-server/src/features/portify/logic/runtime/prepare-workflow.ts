@@ -18,7 +18,7 @@ import { buildPortifyPaths, portifyDir } from './paths'
 import { createBranchAndWorktree, captureDiff, changedFiles, discardWorktree, portifyBranchName, applyOverlay, resetWorktree } from './git-ops'
 import { runPortifyAgent, writePortifyClaudeRef } from './agent'
 import { buildPortifyPrompt, buildPortifyRetryPrompt, buildPortifyFeedbackPrompt, type RepoEditTarget } from './prompt'
-import { verifyDoubleBoot } from './verify'
+import { hasDeclaredPortInjection, verifyDoubleBoot } from './verify'
 import type { PortifyManifest, PortifyRepoState, PortifyProducer, PortifyExternalSession } from './types'
 
 // Wires the real I/O behind the (tested) PortifyOrchestrator: a git branch +
@@ -231,17 +231,18 @@ export async function prepareWorkflow(
       return states
     },
 
-    // Attempt-0 gate: a borrowed sibling overlay may already complete the
-    // rewrite — the orchestrator verifies it before spending an agent run.
-    seeded: () => state.seededFrom.length > 0,
+    verifyBeforeAgent: () => state.seededFrom.length > 0 || hasDeclaredPortInjection(feature, env),
 
     runAgent: async (attempt, failureDetail) => {
       // setup() ran (and fully succeeded) before any runAgent, so every
       // member has an editPath and every group a handle.
       const targets: RepoEditTarget[] = allMembers().map((m) => ({ name: m.name, editPath: m.editPath! }))
-      const prompt = attempt === 1 || !failureDetail
-        ? buildPortifyPrompt(feature, targets, buildSeededNote(state.seededFrom))
-        : buildPortifyRetryPrompt(feature, failureDetail)
+      // A failed attempt-0 boot needs the full edit paths AND its diagnostics:
+      // this is the agent's first session, so a retry-only prompt lacks context.
+      const prompt = [
+        ...(attempt === 1 || !failureDetail ? [buildPortifyPrompt(feature, targets, buildSeededNote(state.seededFrom))] : []),
+        ...(failureDetail ? [buildPortifyRetryPrompt(feature, failureDetail)] : []),
+      ].join('\n\n')
       await runAgentWithPrompt(prompt, attempt > 1)
     },
 

@@ -74,6 +74,16 @@ describe('presentedIndexStages', () => {
       { key: 'scaffold', status: 'running' },
     ])
   })
+
+  it('shows skipped stages with evidence as complete while preserving empty skips', () => {
+    expect(presentedIndexStages(entry({ stages: [
+      { key: 'docs', status: 'skipped', hasEvidence: true },
+      { key: 'scout', status: 'skipped' },
+    ] }))).toEqual([
+      { key: 'docs', status: 'done', hasEvidence: true },
+      { key: 'scout', status: 'skipped' },
+    ])
+  })
 })
 
 describe('EXTERNAL_WORK_COPY', () => {

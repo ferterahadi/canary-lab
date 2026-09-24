@@ -1,8 +1,9 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { AgentModelsConfig, AgentStagePlans, ModelAgentKind, RepoCollisionChoice } from '@/shared/api/client'
 import { EMPTY_AGENT_MODELS } from '@shared/agent-models'
 import type { RunStartModels } from './RunsContext'
+import { readPendingRunStarts, savePendingRunStarts, type PendingRunStart } from './pending-run-starts'
 
 // The run-start flow, lifted out of App so its branching (models gate →
 // collision → isolate/queue prompt, branch-mismatch recovery, silent-failure
@@ -65,6 +66,8 @@ export interface UseRunStartDeps {
 }
 
 export interface UseRunStart {
+  pendingStarts: PendingRunStart[]
+  dismissPendingStart: (requestId: string) => void
   collisionPrompt: CollisionPrompt | null
   setCollisionPrompt: (p: CollisionPrompt | null) => void
   startError: StartError | null
@@ -94,6 +97,18 @@ export function useRunStart({ selectedFeature, startRun, startVerification, onRu
   const [collisionPrompt, setCollisionPrompt] = useState<CollisionPrompt | null>(null)
   const [startError, setStartError] = useState<StartError | null>(null)
   const [modelsPrompt, setModelsPrompt] = useState<RunModelsPrompt | null>(null)
+  const [pendingStarts, setPendingStarts] = useState(readPendingRunStarts)
+  useEffect(() => { savePendingRunStarts(pendingStarts) }, [pendingStarts])
+  const dismissPendingStart = useCallback((requestId: string): void => {
+    setPendingStarts((items) => items.filter((item) => item.requestId !== requestId))
+    setStartError((current) => current && api.asTestReviewRequired(current.error)?.request?.requestId === requestId ? null : current)
+  }, [])
+  const rememberReviewRequest = useCallback((error: unknown, mode: 'test' | 'boot'): void => {
+    const request = api.asTestReviewRequired(error)?.request
+    if (!request) return
+    setPendingStarts((items) => items.some((item) => item.requestId === request.requestId) ? items
+      : [...items, { requestId: request.requestId, feature: request.feature, mode }])
+  }, [])
 
   // The actual start + its failure branching, shared by the gate's confirm and
   // the error-dialog replays so none of them re-enters the models gate.
@@ -113,6 +128,7 @@ export function useRunStart({ selectedFeature, startRun, startVerification, onRu
       // Boot sessions are managed in the global Services overlay, never column 3.
       if (mode !== 'boot') onRunStarted(runId)
     } catch (err) {
+      rememberReviewRequest(err, mode)
       const collision = api.asRepoCollision(err)
       if (collision) {
         // The one case where hardcoded ports actually clash — check whether ports
@@ -124,7 +140,7 @@ export function useRunStart({ selectedFeature, startRun, startVerification, onRu
       }
       setStartError({ feature, env, mode, error: err, models })
     }
-  }, [startRun, onRunStarted])
+  }, [startRun, onRunStarted, rememberReviewRequest])
 
   const handleStartRun = useCallback(async (
     env?: string,
@@ -175,9 +191,10 @@ export function useRunStart({ selectedFeature, startRun, startVerification, onRu
       const runId = await startRun(prompt.feature, prompt.env, isolation, prompt.mode, prompt.models)
       if (prompt.mode !== 'boot') onRunStarted(runId)
     } catch (err) {
+      rememberReviewRequest(err, prompt.mode)
       setStartError({ feature: prompt.feature, env: prompt.env, mode: prompt.mode, error: err, models: prompt.models })
     }
-  }, [collisionPrompt, startRun, onRunStarted])
+  }, [collisionPrompt, startRun, onRunStarted, rememberReviewRequest])
 
   const retryStartError = useCallback(async (): Promise<void> => {
     const se = startError
@@ -221,6 +238,8 @@ export function useRunStart({ selectedFeature, startRun, startVerification, onRu
   }, [selectedFeature, startVerification, onRunStarted])
 
   return {
+    pendingStarts,
+    dismissPendingStart,
     collisionPrompt,
     setCollisionPrompt,
     startError,

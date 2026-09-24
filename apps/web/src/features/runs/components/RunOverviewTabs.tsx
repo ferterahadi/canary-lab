@@ -1,17 +1,19 @@
 import { pinnedPlanSummary } from '@shared/agent-models'
 import { useEffect, useMemo, useState } from 'react'
 import type { AuditEntry, RepoBranchSnapshot, ServiceManifestEntry, RunManifest, RunStatus, RunSummary } from '@/shared/api/types'
-import { getRunAudit } from '@/shared/api/client'
+import { getRunAudit, openEditor } from '@/shared/api/client'
+import { BootEvidenceRows, bootEvidenceLabel } from '@/shared/ui/BootEvidence'
 import { formatDuration, durationBetween } from '@/shared/lib/format'
 import { buildTimelineRows } from '../utils/run-timeline'
 import { branchForService, branchLabel } from '../utils/run-detail-playback'
 import { type RunViewModel } from '../utils/run-view-model'
 import { isRestartableRunStatus } from '@shared/run-state'
 import { RecoveryTimeline, alertClass, useTimelineNow } from './RunDiagnosticsPanels'
-import { EmptyGlyph } from '@/shared/ui/EmptyState'
+import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
+import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { ReviewEvaluationMenu } from './ReviewEvaluationMenu'
 import { RunPane } from './RunPane'
-import { EmptyPane, SectionHeader } from './RunPlaybackPanels'
+import { SectionHeader } from './RunPlaybackPanels'
 import { ServiceCard } from './RunServicePanels'
 import { isAssertionExportable, isTerminalRunStatus } from './run-export-links'
 
@@ -71,7 +73,24 @@ export function RunOverviewTab({
   onOpenEvaluationReport,
 }: RunOverviewTabProps) {
   const duration = durationBetween(manifest.startedAt, manifest.endedAt)
-  // The "Review Evaluation" trigger moved to the run's tab row
+  const serviceOwnsBootFailure = Boolean(
+    manifest.bootFailure
+    && manifest.bootFailure.reason !== 'dependency-incompatible'
+    && services.some((service) => service.safeName === manifest.bootFailure?.safeName),
+  )
+  const incompatibleRepos = new Set(
+    manifest.dependencyProvenance?.filter((item) => item.verdict === 'incompatible').map((item) => item.repoName) ?? [],
+  )
+  const needsAttention = (service: ServiceManifestEntry) => (
+    manifest.bootFailure?.safeName === service.safeName || incompatibleRepos.has(service.repoName ?? '')
+  )
+  // Preserve configured order within each group; only lift affected services
+  // so a failure is never buried below healthy peers in a longer stack.
+  const displayedServices = [
+    ...services.filter(needsAttention),
+    ...services.filter((service) => !needsAttention(service)),
+  ]
+  // The "Create evaluation report" trigger moved to the run's tab row
   // (`ReviewEvaluationMenu`) — it is a run-level action, not an Overview one.
   return (
     <RunPane padded>
@@ -86,8 +105,8 @@ export function RunOverviewTab({
         <dt className="cl-rubric self-center">Envset</dt>
         <dd className="truncate" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }} title={manifest.env ?? ''}>{manifest.env ?? '-'}</dd>
         <dt className="cl-rubric self-center">Duration</dt>
-        <dd style={{ color: 'var(--text-primary)' }}>{duration == null ? 'in progress' : formatDuration(duration)}</dd>
-        <dt className="cl-rubric self-center">Started</dt>
+        <dd style={{ color: 'var(--text-primary)' }}>{manifest.status === 'queued' ? 'Not started' : duration == null ? 'in progress' : formatDuration(duration)}</dd>
+        <dt className="cl-rubric self-center">{manifest.status === 'queued' ? 'Queued at' : 'Started'}</dt>
         <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.startedAt}>{manifest.startedAt}</dd>
         {manifest.endedAt && (
           <>
@@ -140,6 +159,9 @@ export function RunOverviewTab({
           {view.primaryAlert.message}
         </div>
       )}
+      {manifest.bootFailure && manifest.bootFailure.reason !== 'dependency-incompatible' && !serviceOwnsBootFailure && (
+        <BootFailureEvidence failure={manifest.bootFailure} />
+      )}
       <div className="mt-4">
         {/* No `Services` heading: a stack of named service cards is self-evident,
             and the label was one more line of chrome between the run's facts and
@@ -151,13 +173,46 @@ export function RunOverviewTab({
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
         ) : (
           <ul className="space-y-2">
-            {services.map((s) => (
-              <ServiceCard key={s.safeName} service={s} branch={branchForService(s, repoBranches)} siblings={repoServiceCount(s, services)} />
+            {displayedServices.map((s) => (
+              <ServiceCard
+                key={s.safeName}
+                service={s}
+                branch={branchForService(s, repoBranches)}
+                siblings={repoServiceCount(s, services)}
+                bootFailure={manifest.bootFailure?.safeName === s.safeName ? manifest.bootFailure : undefined}
+                dependency={manifest.dependencyProvenance?.find((item) => item.repoName === s.repoName && item.verdict === 'incompatible')}
+              />
             ))}
           </ul>
         )}
       </div>
     </RunPane>
+  )
+}
+
+export function BootFailureEvidence({ failure }: { failure: NonNullable<RunManifest['bootFailure']> }) {
+  return (
+    <section data-testid="boot-failure-evidence" className={`mt-4 rounded-md border p-3 text-xs ${alertClass('error')}`}>
+      <div className="flex items-center justify-between gap-3">
+        <SectionHeader>Boot failure evidence</SectionHeader>
+        <span className="font-mono">{bootEvidenceLabel(failure)}</span>
+      </div>
+      <p className="mt-1">{failure.detail}</p>
+      <div className="mt-2">
+        <BootEvidenceRows failure={failure} />
+      </div>
+      {failure.excerpt && (
+        <pre className="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded border border-line bg-canvas p-2 font-mono text-secondary">
+          {failure.excerpt}{failure.excerptTruncated ? '\n… excerpt truncated; open the full log' : ''}
+        </pre>
+      )}
+      {failure.nextAction && <p className="mt-2 text-secondary">{failure.nextAction}</p>}
+      <div className="mt-2 flex min-w-0 items-center gap-2">
+        <button type="button" className="cl-button min-h-6 shrink-0 px-2 py-0.5" onClick={() => { void openEditor({ file: failure.logPath }).catch(() => {}) }}>
+          Open full service log
+        </button>
+      </div>
+    </section>
   )
 }
 
@@ -203,8 +258,8 @@ export function VerifyOverviewTab({
         <dt className="cl-rubric self-center">Playwright envset</dt>
         <dd className="truncate" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }} title={verification?.playwrightEnvsetId ?? manifest.env ?? ''}>{verification?.playwrightEnvsetId ?? manifest.env ?? '-'}</dd>
         <dt className="cl-rubric self-center">Duration</dt>
-        <dd style={{ color: 'var(--text-primary)' }}>{duration == null ? 'in progress' : formatDuration(duration)}</dd>
-        <dt className="cl-rubric self-center">Started</dt>
+        <dd style={{ color: 'var(--text-primary)' }}>{manifest.status === 'queued' ? 'Not started' : duration == null ? 'in progress' : formatDuration(duration)}</dd>
+        <dt className="cl-rubric self-center">{manifest.status === 'queued' ? 'Queued at' : 'Started'}</dt>
         <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.startedAt}>{manifest.startedAt}</dd>
         {manifest.endedAt && (
           <>
@@ -265,11 +320,7 @@ export function RunLogsTab({
   return (
     <RunPane padded>
       {rows.length === 0 ? (
-        <EmptyPane
-          icon={EmptyGlyph.timeline}
-          title="No lifecycle events yet"
-          body="Canary Lab records one row per moment that matters — a service coming up, the test process starting, a recovery attempt, the final verdict. The first one lands as soon as this run does something."
-        />
+        <EmptyState {...EMPTY_COPY.lifecycle} icon={EmptyGlyph.timeline} />
       ) : (
         <RecoveryTimeline
           rows={rows}

@@ -11,6 +11,7 @@ import { flightStageRemedy } from '../logic/stage-remedy'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { buildStageEntryValidator } from './flight-route-support'
 import { withWorkspaceEvidence, workspaceStageEvidence } from '../logic/workspace-evidence'
+import { recommendFlightContinuation } from '../../../../../../shared/flights/continuation'
 
 export async function registerFlightReadRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
   const { store, planStore, conductorDeps } = ctx
@@ -28,7 +29,7 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
 
   // Stage-entry menu for one feature (the UI's "flight from here" dialog).
   // Static segment, so it never shadows /api/flights/:id.
-  app.get<{ Querystring: { feature?: string; env?: string } }>(
+  app.get<{ Querystring: { feature?: string; env?: string; coverageTarget?: string } }>(
     '/api/flights/entry',
     async (req, reply) => {
       const feature = req.query?.feature?.trim()
@@ -37,6 +38,8 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
         return { error: 'feature query is required' }
       }
       const env = req.query?.env?.trim() || 'local'
+      const rawTarget = req.query?.coverageTarget?.trim()
+      const requestedTarget = rawTarget ? Number(rawTarget) : Number.NaN
 
       const entry = store.latestForFeature(feature)
       const manifest = entry ? store.get(entry.flightId) : null
@@ -87,6 +90,15 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
           seen.add(key)
           return true
         })
+      const coverageTarget = Number.isFinite(requestedTarget) && requestedTarget >= 0 && requestedTarget <= 100
+        ? requestedTarget
+        : manifest?.opts.coverageTarget ?? 100
+      const evidence = workspaceStageEvidence(
+        { featuresDir: deps.featuresDir, logsDir: deps.logsDir },
+        feature,
+        [...FLIGHT_STAGE_KEYS],
+        env,
+      )
       const options: FlightEntryOptions = {
         feature,
         flight: manifest
@@ -107,18 +119,14 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
           // and the launcher opens prefilled rather than empty.
           description: manifest?.description ?? config?.description ?? '',
           env: manifest?.opts.env ?? env,
-          coverageTarget: manifest?.opts.coverageTarget ?? 100,
+          coverageTarget,
         },
         stages,
         // A derived flight has no manifest, so its panels have nowhere else to
         // get facts from. Probed here because this is the one call the derived
         // view already makes — no extra round trip, nothing persisted.
-        evidence: workspaceStageEvidence(
-          { featuresDir: deps.featuresDir, logsDir: deps.logsDir },
-          feature,
-          [...FLIGHT_STAGE_KEYS],
-          env,
-        ),
+        evidence,
+        continuation: recommendFlightContinuation(evidence, coverageTarget),
       }
       return options
     },

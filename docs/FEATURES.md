@@ -50,6 +50,31 @@ current test source:
 - Pass, fail, running, and changed-test states remain attached to the real test.
   Static English child nodes never claim execution evidence they do not have.
 
+## Discovery errors
+
+The Tests panel lists cases with Playwright before displaying them. If a config
+or import fails, choose **In Canary Lab** to run the configured repair agent, or
+copy `/canary-lab-repair-discovery <suite>` from **In your agent** into Claude or
+Codex with the Canary Lab skills and MCP connection installed.
+
+Both paths show progress in the same Tests column through the shared agent session
+viewer. External agents claim the repair and report milestones to Canary; updates
+appear without refreshing, including when the repair started outside the browser.
+After editing stops, Canary independently lists the tests. Success brings back the
+existing test list; failure brings back the error and repair actions. Repair history
+remains available. **Copy repair prompt**, **View repair prompt**, and **Retry
+discovery** also support manual recovery.
+
+Repairs preserve tests and assertions and address configuration or import failures.
+Verification runs discovery only. The previous run's counts remain execution history;
+listing cases does not run them. Lost contact with an external agent does not release
+its ownership: continue that session, or have it stop and report that it is blocked.
+
+Keep runtime credential reads and service connections in hooks or fixtures so
+discovery works before environment setup. Use persistent repository paths in suite
+configuration and envset targets, and resolve repo-owned files through
+`resolveRunRepoPath` when a run may use an isolated checkout.
+
 ## Folder layout
 
 ```text
@@ -99,7 +124,15 @@ const config = {
   repos: [{
     name: 'checkout-api',
     localPath: appDir,
+    branch: 'main',
+    track: 'upstream',
     envs: ['local'],
+    dependencyPreparation: {
+      // Backward-compatible shared mode links this checkout's dependencies.
+      mode: 'shared',
+      validateCommand: 'npm run validate:canary-deps',
+      generatorInputs: ['prisma/schema.prisma'],
+    },
     startCommands: [{
       name: 'api',
       command: 'npm run dev',
@@ -120,6 +153,39 @@ source itself ignores the injected value.
 
 Use repository- or command-level `envs: ['local']` to skip local services when
 the selected envset points Playwright at a deployed URL.
+
+`dependencyPreparation` makes dependency ownership explicit. `shared` links the
+source checkout's existing `node_modules`; Canary fingerprints its lockfile and
+the declared `generatorInputs`, runs an optional read-only `validateCommand`, and
+blocks boot only when it can confirm incompatibility. Legacy shared state that
+cannot be proven stays `unknown` in the run evidence; it is never called compatible.
+Overview displays only incompatible dependencies, inside each affected service
+card with the reason, required fix, and a log action when available. Active heal
+restart and rerun both refresh the dependency evidence before services or test
+verification; a failed preflight continues to block startup.
+Do not put a mutating `prepareCommand` in shared mode because it would mutate the
+source checkout's dependencies.
+
+Use `mode: 'isolated'` when generated clients or build artifacts must match the
+run worktree exactly. In that mode Canary does not link shared dependencies; a
+target-owned `prepareCommand` may prepare worktree-local dependencies, followed
+by `validateCommand`. Canary never invents an install command, downloads a
+dependency, or advances a checkout. The commands are owned by the target repo.
+
+A run boots the commit the repository checkout is sitting on: the per-run
+worktree is cut from `HEAD`, so a checkout nobody has pulled boots a stale
+branch. `branch` pins the branch the checkout must be on (a run refuses to start
+otherwise), and `track: 'upstream'` makes every run start with `git fetch` and
+`git merge --ff-only` against that branch's upstream first. The fast-forward
+never discards local work: a dirty, detached, diverged, or off-branch checkout
+refuses the run with a per-repo reason (`repo_update_refused`), and local commits
+the upstream lacks are left alone. Without `track`, a single run can opt in with
+`updateRepos: true` on `POST /api/runs` (`update_repos` on the MCP `start_run`
+tool); `update_repos: false` boots the checkout as-is. The run record's
+`repoBranches[]` carries the booted `sha`, and `updatedFromUpstream` when the
+start pulled to reach it. `GET /api/features/:name/repos/:repo/git` reports
+`behindUpstream` / `aheadUpstream` (add `?fetch=1` to contact the remote first),
+and `POST /api/features/:name/repos/:repo/update` fast-forwards on demand.
 
 ## Requirement coverage
 
@@ -161,6 +227,22 @@ When the suite has run, the ledger adds a separate **proven** view from the
 latest run. A mapped test can therefore claim coverage while its requirement
 remains unproven because the test failed or did not run. This latest-run overlay
 does not change the claim-based gap types or coverage percentage.
+
+The ledger's time axis places each requirement's proof against its changes.
+Three timestamps are read from the run records at request time — when a run
+last passed every mapped test, when a mapped test last changed (with the
+verification-strength verdict), and when the wording last changed — and derive
+one state:
+
+| State | Meaning |
+| --- | --- |
+| `proven-unchanged` | The proof is newer than both the tests' and the wording's last change |
+| `tests-weakened` | A mapped test was classified weaker after the proof |
+| `proof-stale` | A mapped test changed after the proof, or no run ever proved it |
+| `wording-ahead` | The wording changed after the tests and the proof |
+
+Requirements show their source document and section when available. Wording
+fingerprints track changes automatically; no requirement confirmation is needed.
 
 Coverage depth is separate from both. Canary Lab classifies the strongest
 assertion layer in each test—application log, internal state, application API or

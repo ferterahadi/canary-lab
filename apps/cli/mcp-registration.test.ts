@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { fakeMcpClients } from '../../tools/test-helpers/mcp-clients'
 
 const mocks = vi.hoisted(() => ({
   execFileSync: vi.fn(),
@@ -9,7 +10,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('child_process', () => ({ execFileSync: mocks.execFileSync }))
 
-const { registerCanaryLabMcp, resolveMcpInvocation, isEphemeralNpxInstall, isTempInstallPath } = await import('./mcp-registration')
+const { registerCanaryLabMcp: register, resolveMcpInvocation, isEphemeralNpxInstall, isTempInstallPath } = await import('./mcp-registration')
+
+let homeDir: string
+function registerCanaryLabMcp(target: 'codex' | 'claude', opts: Parameters<typeof register>[1] = {}) {
+  return register(target, { ...opts, homeDir })
+}
+afterEach(() => fs.rmSync(homeDir, { recursive: true, force: true }))
 
 const lookup = process.platform === 'win32' ? 'where' : 'which'
 
@@ -31,24 +38,86 @@ function claudeAddJsonArgs(command: string, cliPath: string): string[] {
 
 beforeEach(() => {
   mocks.execFileSync.mockReset()
+  homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-registration-'))
 })
 
 function cliAvailable(command: string, outputByGet?: string): void {
-  mocks.execFileSync.mockImplementation((cmd: string, args: string[], opts?: { encoding?: string }) => {
-    if (cmd === lookup && args[0] === command) return Buffer.from('')
-    // `mcp get` probes: only the new key may be present; any other key (incl.
-    // the legacy `canary-lab`) reports absent so migration doesn't falsely fire.
-    if (cmd === command && args[0] === 'mcp' && args[1] === 'get') {
-      if (args[2] === 'Canary_Lab' && outputByGet !== undefined) {
-        return opts?.encoding === 'utf-8' ? outputByGet : Buffer.from(outputByGet)
-      }
-      throw new Error('missing MCP server')
-    }
-    return Buffer.from('')
-  })
+  const commandValue = outputByGet?.match(/command: (.+)/i)?.[1] ?? 'other'
+  const argsValue = outputByGet?.match(/args: (.+)/i)?.[1]?.split(' ') ?? []
+  const entry = { type: 'stdio', command: commandValue, args: argsValue, alwaysLoad: true }
+  const entries = outputByGet === undefined ? {} : { Canary_Lab: command === 'codex' ? { transport: entry } : entry }
+  mocks.execFileSync.mockImplementation(fakeMcpClients(homeDir, { available: [command], [command]: entries }))
 }
 
 describe('registerCanaryLabMcp', () => {
+  it('repairs a disabled entry and stale workspace pin even when command and args match', () => {
+    mocks.execFileSync.mockImplementation(fakeMcpClients(homeDir, { codex: { Canary_Lab: {
+      enabled: false,
+      transport: { type: 'stdio', command: '/usr/bin/node', args: ['/opt/cli.js', 'mcp', '--profile', 'compact'], env: {
+        CANARY_LAB_PROJECT_ROOT: '/work/stale', CUSTOM_VALUE: 'retained',
+      } },
+    } } }))
+    const result = registerCanaryLabMcp('codex', { execPath: '/usr/bin/node', cliPath: '/opt/cli.js', force: true, log: () => {} })
+    expect(result).toEqual({ status: 'configured', invocation: {
+      command: '/usr/bin/node', args: ['/opt/cli.js', 'mcp', '--profile', 'compact'], env: { CUSTOM_VALUE: 'retained' },
+    } })
+  })
+
+  it.each(['Canary_Lab', 'canary-lab'])('preserves disabled %s during automatic refresh', (name) => {
+    mocks.execFileSync.mockImplementation(fakeMcpClients(homeDir, { codex: { [name]: {
+      enabled: false, transport: { type: 'stdio', command: 'old-node', args: ['old-cli', 'mcp'] },
+    } } }))
+    expect(registerCanaryLabMcp('codex', { force: true, refreshOnly: true, log: () => {} }).status).toBe('skipped')
+    expect(mocks.execFileSync).not.toHaveBeenCalledWith('codex', expect.arrayContaining(['remove']), expect.anything())
+    expect(mocks.execFileSync).not.toHaveBeenCalledWith('codex', expect.arrayContaining(['add']), expect.anything())
+  })
+
+  it('compares exact argument boundaries and supports paths containing spaces', () => {
+    const command = '/runtime with spaces/node'
+    const cliPath = '/package with spaces/cli.js'
+    mocks.execFileSync.mockImplementation(fakeMcpClients(homeDir, { codex: { Canary_Lab: {
+      transport: { type: 'stdio', command, args: [cliPath, 'mcp', '--profile', 'compact', '--url', 'http://wrong/mcp'] },
+    } } }))
+    expect(registerCanaryLabMcp('codex', { execPath: command, cliPath, log: () => {} }).status).toBe('conflict')
+    expect(registerCanaryLabMcp('codex', { execPath: command, cliPath, force: true, log: () => {} }).status).toBe('configured')
+    expect(registerCanaryLabMcp('codex', { execPath: command, cliPath, force: true, log: () => {} }).status).toBe('unchanged')
+  })
+
+  it.each(['Canary_Lab', 'canary-lab'])('preserves custom cwd and inherited environment settings on %s during refresh', (name) => {
+    mocks.execFileSync.mockImplementation(fakeMcpClients(homeDir, { codex: { [name]: {
+      transport: { type: 'stdio', command: 'old-node', args: ['old-cli'], cwd: '/work/custom', env_vars: ['CUSTOM_TOKEN'] },
+    } } }))
+    expect(registerCanaryLabMcp('codex', { force: true, refreshOnly: true, log: () => {} }).status).toBe('skipped')
+    expect(mocks.execFileSync).not.toHaveBeenCalledWith('codex', expect.arrayContaining(['remove']), expect.anything())
+    expect(mocks.execFileSync).not.toHaveBeenCalledWith('codex', expect.arrayContaining(['add']), expect.anything())
+  })
+
+  it('retains custom environment values when migrating a legacy entry', () => {
+    mocks.execFileSync.mockImplementation(fakeMcpClients(homeDir, { codex: { 'canary-lab': {
+      transport: { type: 'stdio', command: 'old-node', args: [], env: { CUSTOM_VALUE: 'keep' } },
+    } } }))
+    expect(registerCanaryLabMcp('codex', { force: true, log: () => {} })).toMatchObject({
+      status: 'configured', invocation: { env: { CUSTOM_VALUE: 'keep' } },
+    })
+  })
+
+  it('does not leak existing environment values in dry-run output', () => {
+    mocks.execFileSync.mockImplementation(fakeMcpClients(homeDir, { codex: { Canary_Lab: {
+      transport: { type: 'stdio', command: 'old-node', args: [], env: { CUSTOM_TOKEN: 'private-value' } },
+    } } }))
+    const lines: string[] = []
+    registerCanaryLabMcp('codex', { dryRun: true, log: (line) => lines.push(line) })
+    expect(lines.join('\n')).toContain('CUSTOM_TOKEN=<set>')
+    expect(lines.join('\n')).not.toContain('private-value')
+  })
+
+  it('rejects an add which does not persist the requested config', () => {
+    const client = fakeMcpClients(homeDir)
+    mocks.execFileSync.mockImplementation((command: string, args: string[]) =>
+      args[1] === 'add' ? Buffer.from('') : client(command, args))
+    expect(() => registerCanaryLabMcp('codex', { log: () => {} })).toThrow(/saved configuration does not match/)
+  })
+
   it('skips Codex when the CLI is missing', () => {
     const lines: string[] = []
     mocks.execFileSync.mockImplementation(() => {
@@ -71,7 +140,7 @@ describe('registerCanaryLabMcp', () => {
       cliPath: '/opt/canary-lab/dist/scripts/cli.js',
     })
 
-    expect(mocks.execFileSync).toHaveBeenCalledWith('codex', ['mcp', 'get', 'Canary_Lab'], expect.anything())
+    expect(mocks.execFileSync).toHaveBeenCalledWith('codex', ['mcp', 'get', 'Canary_Lab', '--json'], expect.anything())
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
       ['mcp', 'add', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'compact'],
@@ -279,14 +348,8 @@ describe('registerCanaryLabMcp refresh', () => {
 
 describe('registerCanaryLabMcp legacy migration', () => {
   function withServers(command: string, present: Set<string>): void {
-    mocks.execFileSync.mockImplementation((cmd: string, args: string[]) => {
-      if (cmd === lookup && args[0] === command) return Buffer.from('')
-      if (cmd === command && args[0] === 'mcp' && args[1] === 'get') {
-        if (present.has(args[2])) return Buffer.from('present')
-        throw new Error('missing MCP server')
-      }
-      return Buffer.from('')
-    })
+    const entries = Object.fromEntries([...present].map((name) => [name, { type: 'stdio', command: 'old-node', args: ['old-cli', 'mcp'] }]))
+    mocks.execFileSync.mockImplementation(fakeMcpClients(homeDir, { available: [command], [command]: entries }))
   }
 
   it('migrates a legacy canary-lab entry to Canary_Lab even under refreshOnly', () => {
@@ -378,13 +441,15 @@ describe('resolveMcpInvocation', () => {
     })
   })
 
-  it('does not attach a PATH env for the ephemeral npx fallback', () => {
+  it('attaches a PATH and workspace for the ephemeral GUI fallback', () => {
     const resolved = resolveMcpInvocation({
       execPath: '/usr/bin/node',
       cliPath: '/Users/x/.npm/_npx/abc123/node_modules/canary-lab/dist/scripts/cli.js',
       forGui: true,
+      projectRoot: '/work/canary-workspace',
     })
-    expect(resolved.env).toBeUndefined()
+    expect(resolved.env?.PATH).toContain('/usr/bin')
+    expect(resolved.env?.CANARY_LAB_PROJECT_ROOT).toBe('/work/canary-workspace')
   })
 })
 

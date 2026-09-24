@@ -531,7 +531,7 @@ describe('resolveCoverageJobModels', () => {
     const bin = path.join(projectRoot, 'claude-stub')
     fs.writeFileSync(bin, '#!/bin/sh\n', { mode: 0o755 })
     process.env.CANARY_LAB_CLAUDE_BIN = bin
-    const models = resolveCoverageJobModels(projectRoot, 'deterministic', { prd: { model: 'opus', effort: null } })
+    const models = resolveCoverageJobModels(projectRoot, 'auto', { prd: { model: 'opus', effort: null } })
     expect(models.prd?.claude).toEqual({ model: 'opus', effort: null })
   })
 

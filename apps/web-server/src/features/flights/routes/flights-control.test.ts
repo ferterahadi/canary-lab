@@ -17,6 +17,7 @@ import type { StageAdapters } from '../logic/conductor'
 import type { FlightAgentSpawner } from '../logic/stages/context'
 
 import { FLIGHT_STAGE_KEYS } from '../logic/types'
+import { issueCheckpointInput } from '../logic/checkpoint-input'
 
 import type { FlightIndexEntry, FlightManifest } from '../logic/types'
 
@@ -73,6 +74,7 @@ function throwingStore(thrown: unknown): FlightStore {
     renameFeature(): number {
       return 0
     },
+    logsDir: tmpDir,
     flightDir(flightId: string): string {
       return path.join(tmpDir, 'flights', flightId)
     },
@@ -112,9 +114,33 @@ async function waitForStatus(flightId: string, statuses: string[], timeoutMs = 3
 }
 
 describe('flights routes', () => {
+  it('allows a URL-invited human response only for the reviewed external checkpoint', async () => {
+    const adapters = allDone()
+    adapters.scout = {
+      teardown: () => null,
+      run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'missing-env', message: 'Provide environment', options: ['retry'] } }),
+      onCheckpointResponse: async () => ({ kind: 'done' }),
+    }
+    const store = new FlightRunStore(tmpDir)
+    app = await buildApp(adapters, store)
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ stageProducer: 'external' }) })
+    const flightId = started.json().flightId as string
+    await waitForStatus(flightId, ['waiting-for-approval'])
+    const manifest = store.get(flightId)!
+    const token = issueCheckpointInput(manifest)
+    const url = `/api/flights/${flightId}/respond`
+    expect((await app.inject({ method: 'POST', url, body: { response: { choice: 'retry' } } })).statusCode).toBe(409)
+    expect((await app.inject({ method: 'POST', url, headers: { 'x-canary-origin': 'mcp' }, body: { response: { choice: 'retry', expectedUpdatedAt: 'old-version' } } })).statusCode).toBe(409)
+    expect(store.get(flightId)?.status).toBe('waiting-for-approval')
+    const applied = await app.inject({ method: 'POST', url, body: { response: { choice: 'retry', elicitationToken: token } } })
+    expect(applied.statusCode).toBe(200)
+    expect((await app.inject({ method: 'POST', url, body: { response: { choice: 'retry', elicitationToken: token } } })).statusCode).toBe(409)
+  })
+
   it('releases a checkpoint via respond and refuses one when nothing waits', async () => {
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
       onCheckpointResponse: async () => ({ kind: 'done' as const }),
     }
@@ -189,6 +215,7 @@ describe('flights routes', () => {
     let fail = true
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => (fail ? { kind: 'failed', error: 'no docs' } : { kind: 'done' }),
     }
     app = await buildApp(adapters)
@@ -223,6 +250,7 @@ describe('flights routes', () => {
     let fail = true
     const adapters = allDone()
     adapters.portify = {
+      teardown: () => null,
       run: async () =>
         fail
           ? { kind: 'failed', error: 'portify start rejected (409): repo "r" has uncommitted changes — commit or stash them first' }
@@ -256,7 +284,7 @@ describe('flights routes', () => {
 
   it('remedy: null for a non-matching failure and 409 on apply', async () => {
     const adapters = allDone()
-    adapters.docs = { run: async () => ({ kind: 'failed', error: 'no docs' }) }
+    adapters.docs = { teardown: () => null, run: async () => ({ kind: 'failed', error: 'no docs' }) }
     app = await buildApp(adapters)
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
@@ -356,11 +384,7 @@ describe('flights routes', () => {
 
     expect(resp.statusCode).toBe(400)
     expect(resp.json()).toMatchObject({ type: 'stage_entry_rejected' })
-    // Label re-pinned: 98b28976 deliberately renamed the evaluation-export
-    // stage's display label from "Evaluation report" to "Report" (part of a
-    // broader FLIGHT_STAGE_LABEL unification — see shared/flights/stage-labels.ts)
-    // without updating this assertion, which predates that rename.
-    expect(resp.json().error).toMatch(/Can't start at Report:/)
+    expect(resp.json().error).toMatch(/Can't start at Evaluation report:/)
   })
 
   describe('agent-session', () => {
@@ -417,7 +441,7 @@ describe('flights routes', () => {
         feature: 'checkout',
         repoPaths: [repoDir],
         description: 'checkout flow',
-        opts: { env: 'local', yolo: false, stageProducer: 'external' },
+        opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' },
         status: 'paused',
         pauseReason: 'user',
         currentStage: 'docs',

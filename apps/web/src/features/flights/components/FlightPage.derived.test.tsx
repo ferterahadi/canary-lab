@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => ({
   getEnvsetSlot: vi.fn(),
   getEnvsetsIndex: vi.fn(),
   startPortify: vi.fn(),
-  loadPortify: vi.fn(async () => {}),
+  loadPortify: vi.fn(async (_workflowId: string) => {}),
   portifyWorkflows: vi.fn((): Array<Record<string, unknown>> => []),
   portifyWorkflow: vi.fn(),
   getFeatureCoverage: vi.fn(),

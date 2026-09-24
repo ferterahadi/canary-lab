@@ -55,7 +55,7 @@ export function EvaluationTaskOutput({ task, log }: { task: EvaluationExportTask
 }
 
 export function modeLabel(mode: EvaluationExportMode): string {
-  return mode === 'localized' ? 'Localized output' : 'Raw output'
+  return mode === 'localized' ? 'Plain-English report' : 'Evidence report'
 }
 
 export function evaluationTaskRunLabel(task: Pick<EvaluationExportTask, 'feature' | 'runId'>): string {

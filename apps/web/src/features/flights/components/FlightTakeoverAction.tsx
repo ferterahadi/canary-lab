@@ -41,8 +41,7 @@ export function FlightTakeoverAction({
           ? EXTERNAL_WORK_COPY.takeover.requestedLockTitle
           : EXTERNAL_WORK_COPY.takeover.availableBody}
         onClick={() => setConfirmOpen(true)}
-        className="cl-button shrink-0 px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
-        style={requested ? { color: 'var(--danger)' } : undefined}
+        className={`cl-button shrink-0 px-2.5 py-1 text-xs${requested ? ' cl-button-danger' : ''}`}
       >
         {requested ? EXTERNAL_WORK_COPY.takeover.forceLabel : EXTERNAL_WORK_COPY.takeover.requestLabel}
       </button>

@@ -545,6 +545,7 @@ describe('external coverage — the answer must account for every test', () => {
     // Simulate an older manifest: no roster recorded at start.
     const legacy = { ...store.get(res.manifest.jobId)! }
     delete legacy.externalTestRoster
+    delete legacy.inferenceSnapshot
     store.save(legacy)
 
     const { manifest } = submitExternalCoverage(
@@ -552,5 +553,23 @@ describe('external coverage — the answer must account for every test', () => {
       { store },
     )
     expect(manifest.status).toBe('done') // no roster to check against → applied as before
+  })
+
+  it('keeps incremental inference valid for a legacy job without a pinned roster', async () => {
+    writeFeature('f4')
+    await seedSummary('f4')
+    const store = new CoverageJobRunStore(logsDir)
+    const res = startExternalCoverage({ featuresDir, logsDir, feature: 'f4', sessionId: 's1' }, { store })
+    if (res.kind !== 'started') throw new Error('expected started')
+    const legacy = { ...store.get(res.manifest.jobId)! }
+    delete legacy.externalTestRoster
+    store.save(legacy)
+
+    const { manifest } = submitExternalCoverage(
+      { featuresDir, logsDir, jobId: res.manifest.jobId, mappings: [] },
+      { store },
+    )
+
+    expect(manifest.status).toBe('done')
   })
 })

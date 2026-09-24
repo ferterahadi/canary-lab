@@ -9,7 +9,7 @@ import type {
   TransientAction,
 } from '@/shared/api/types'
 import { deriveDisplayStatus } from '../utils/run-actions'
-import { isActiveRunStatus } from '@shared/run-state'
+import { isActiveRunStatus, isUnsettledRunStatus } from '@shared/run-state'
 import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
 import {
   errorMessage,
@@ -353,9 +353,10 @@ export interface UseGlobalActiveRunResult {
 
 export function useGlobalActiveRun(): UseGlobalActiveRunResult {
   const { state } = useRunsContext()
-  // Benchmark runs (arms + the validity-gate trial) drive the benchmark window,
-  // not the main shell — never surface one as the globally-active run.
-  const entry = state.runs.find((r) => isActiveRunStatus(r.status) && r.executionType !== 'benchmark') ?? null
+  // Benchmark runs (arms + the validity-gate trial) drive the benchmark window
+  // and historical auxiliary cells had their own owner — never surface one as the
+  // globally-active run. A boot session IS surfaced: it is the user's own.
+  const entry = state.runs.find((r) => isActiveRunStatus(r.status) && r.executionType !== 'benchmark' && r.executionType !== 'robustness') ?? null
   const detail = entry ? (state.details[entry.runId] ?? null) : null
   return { runId: entry?.runId ?? null, entry, detail }
 }
@@ -372,7 +373,7 @@ export function useGlobalActiveRun(): UseGlobalActiveRunResult {
 export function useActiveRuns(): { runs: RunIndexEntry[]; count: number } {
   const { state } = useRunsContext()
   return useMemo(() => {
-    const runs = state.runs.filter((r) => isActiveRunStatus(r.status) || r.status === 'queued')
+    const runs = state.runs.filter((r) => isUnsettledRunStatus(r.status))
     return { runs, count: runs.length }
   }, [state.runs])
 }
@@ -385,7 +386,7 @@ export function useActiveBootSessions(): { sessions: RunIndexEntry[]; count: num
   const { state } = useRunsContext()
   return useMemo(() => {
     const sessions = state.runs.filter(
-      (r) => r.executionType === 'boot' && (isActiveRunStatus(r.status) || r.status === 'queued'),
+      (r) => r.executionType === 'boot' && isUnsettledRunStatus(r.status),
     )
     return { sessions, count: sessions.length }
   }, [state.runs])
@@ -397,7 +398,7 @@ export function useActiveBootSessions(): { sessions: RunIndexEntry[]; count: num
 export function useActiveVerifyRuns(): { runs: RunIndexEntry[]; count: number } {
   const { state } = useRunsContext()
   const runs = state.runs.filter(
-    (r) => r.executionType === 'verify' && (isActiveRunStatus(r.status) || r.status === 'queued'),
+    (r) => r.executionType === 'verify' && isUnsettledRunStatus(r.status),
   )
   return { runs, count: runs.length }
 }

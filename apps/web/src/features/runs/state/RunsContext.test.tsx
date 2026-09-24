@@ -9,6 +9,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '@/shared/api/client'
 
 import type { RunDetail, RunIndexEntry } from '@/shared/api/types'
+import { RunOverviewTab } from '../components/RunOverviewTabs'
+import { deriveRunViewModel } from '../utils/run-view-model'
+import type { RunDependencyProvenance } from '@shared/dependency-provenance'
 
 import {
   RunsProvider,
@@ -175,6 +178,44 @@ function detail(overrides: Partial<RunDetail['manifest']> = {}): RunDetail {
 }
 
 describe('RunsProvider', () => {
+  it('updates dependency blockers in an open Overview from stream frames without a reload', () => {
+    function OverviewProbe() {
+      const run = useRun('r1')
+      const manifest = run.detail?.manifest
+      return manifest ? <RunOverviewTab manifest={manifest} services={manifest.services} repoBranches={[]} view={deriveRunViewModel(run.detail)} /> : null
+    }
+    act(() => root.render(
+      <RunsProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}><OverviewProbe /></RunsProvider>,
+    ))
+    const provenance: RunDependencyProvenance = {
+      repoName: 'app', sourceRevision: 'abc123', sourcePath: '/source', worktreePath: '/worktree',
+      dependencyPath: null, dependencyRealPath: null, lockfile: null, dependencyLockfile: null,
+      generatorInputs: [], dependencyGeneratorInputs: [], runtime: { node: 'v22', packageManager: 'npm' },
+      mode: 'isolated', verdict: 'incompatible', incompatibilityCause: 'prepare-failed', remediation: 'Repair local dependency preparation.',
+    }
+    const current = detail({
+      status: 'healing', dependencyProvenance: [provenance],
+      services: [{ repoName: 'app', name: 'api', safeName: 'api', command: 'start', cwd: '/worktree', logPath: '/run/api.log', status: 'timeout' }],
+    })
+    const socket = FakeWebSocket.instances[0]
+    act(() => socket.onmessage?.({ data: JSON.stringify({ type: 'snapshot', runs: [entry({ status: 'healing' })], details: { r1: current } }) }))
+    const card = container.querySelector('li')
+    expect(container.textContent).toContain('Startup blocked by dependencies')
+    expect(container.textContent).toContain('prepare command failed')
+    for (const refreshed of [
+      { ...provenance, incompatibilityCause: 'validation-failed' as const },
+      { ...provenance, verdict: 'compatible' as const },
+    ]) {
+      act(() => socket.onmessage?.({ data: JSON.stringify({
+        type: 'update', runId: 'r1', detail: { ...current, manifest: { ...current.manifest, dependencyProvenance: [refreshed] } },
+      }) }))
+      expect(container.querySelector('li')).toBe(card)
+      if (refreshed.verdict === 'incompatible') expect(container.textContent).toContain('validation command failed')
+      else expect(container.querySelector('[data-testid="service-dependency-blocker"]')).toBeNull()
+    }
+    expect(api.getRunDetail).not.toHaveBeenCalled()
+  })
+
   it('opens the run stream, applies frames, and exposes active run state', () => {
     const captured = renderProbe()
     const socket = FakeWebSocket.instances[0]
@@ -190,12 +231,21 @@ describe('RunsProvider', () => {
         data: JSON.stringify({
           type: 'snapshot',
           runs: [entry({ runId: 'r1', status: 'running' })],
-          details: { r1: detail({ runId: 'r1', status: 'running' }) },
+          details: { r1: detail({
+            runId: 'r1',
+            status: 'running',
+            bootFailure: {
+              service: 'api', safeName: 'api', reason: 'health-timeout',
+              classification: 'empty-output', detail: 'Old readiness evidence.',
+              logPath: '/runs/r1/svc-api.log', excerpt: 'retrying',
+            },
+          }) },
         }),
       })
     })
     expect(captured.runs?.runs.map((run) => run.runId)).toEqual(['r1'])
     expect(captured.run?.status).toBe('running')
+    expect(captured.run?.detail?.manifest.bootFailure?.classification).toBe('empty-output')
     expect(captured.active?.runId).toBe('r1')
 
     act(() => {
@@ -205,12 +255,27 @@ describe('RunsProvider', () => {
         data: JSON.stringify({
           type: 'update',
           runId: 'r1',
-          detail: detail({ runId: 'r1', status: 'passed' }),
+          detail: detail({
+            runId: 'r1',
+            status: 'failed',
+            bootFailure: {
+              service: 'api', safeName: 'api', reason: 'process-exited', classification: 'compiler-failure',
+              detail: 'Service exited before readiness.', logPath: '/runs/r1/svc-api.log',
+              command: 'npm run dev', cwd: '/worktree/api', exitCode: 1,
+              excerpt: 'TS2322: wrong type',
+            },
+          }),
         }),
       })
       socket.onmessage?.({ data: JSON.stringify({ type: 'unknown' }) })
     })
-    expect(captured.run?.status).toBe('passed')
+    expect(captured.run?.status).toBe('failed')
+    expect(captured.run?.detail?.manifest.bootFailure).toMatchObject({
+      classification: 'compiler-failure',
+      command: 'npm run dev',
+      exitCode: 1,
+      excerpt: 'TS2322: wrong type',
+    })
     expect(captured.active?.runId).toBeNull()
 
     act(() => {

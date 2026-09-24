@@ -50,6 +50,7 @@ const now = () => '2026-01-01T00:00:00Z'
 const OPTS: FlightOptions = { env: 'local', coverageTarget: 100, yolo: false }
 
 const doneAdapter = (calls?: FlightStageKey[]): StageAdapter => ({
+  teardown: () => null,
   run: async (ctx) => {
     calls?.push(ctx.manifest().currentStage as FlightStageKey)
     return { kind: 'done' }
@@ -99,6 +100,7 @@ describe('index row staleness (merge-upsert can update but never delete)', () =>
     let attempts = 0
     const adapters = allDone()
     adapters.portify = {
+      teardown: () => null,
       run: async () => {
         attempts += 1
         return attempts === 1 ? { kind: 'failed', error: 'repo has uncommitted changes' } : { kind: 'done' }
@@ -128,6 +130,7 @@ describe('index row staleness (merge-upsert can update but never delete)', () =>
     // the user's own agent) from a question aimed at the human.
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => ({
         kind: 'checkpoint',
         checkpoint: { kind: 'external-work', message: 'hand it off', options: ['submit', 'run-internally'] },
@@ -180,6 +183,30 @@ describe('index row staleness (merge-upsert can update but never delete)', () =>
 })
 
 describe('legacy terminal-stage repair', () => {
+  it('backfills stage evidence and timing in an older picker index', () => {
+    const flight = {
+      flightId: 'fl-index-legacy', feature: 'checkout', repoPaths: ['/repo/a'],
+      description: 'checkout flow', opts: OPTS,
+      status: 'done' as const, currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key, status: key === 'docs' ? 'skipped' as const : 'done' as const,
+        ...(key === 'docs' ? { evidence: { captured: 1 }, startedAt: now() } : {}),
+      })),
+      createdAt: now(), updatedAt: now(), endedAt: now(),
+    }
+    store.save(flight)
+    const indexPath = path.join(tmpDir, 'flights', 'index.json')
+    const index = JSON.parse(fs.readFileSync(indexPath, 'utf8')) as Array<{ stages: Array<{ key: string; status: string; startedAt?: string; hasEvidence?: boolean }> }>
+    index[0].stages = index[0].stages.map(({ key, status }) => ({ key, status }))
+    fs.writeFileSync(indexPath, JSON.stringify(index))
+
+    const reopened = new FlightRunStore(tmpDir)
+    expect(reopened.list()[0].stages?.find((stage) => stage.key === 'docs')).toMatchObject({
+      status: 'skipped', startedAt: now(), hasEvidence: true,
+    })
+    expect(reopened.get(flight.flightId)?.stages.find((stage) => stage.key === 'docs')?.evidence).toEqual({ captured: 1 })
+  })
+
   it('clears a stale live stage from a terminal record when the store reopens', () => {
     const stale = {
       flightId: 'fl-legacy',
@@ -207,6 +234,30 @@ describe('legacy terminal-stage repair', () => {
     expect(reopened.list().find((entry) => entry.flightId === stale.flightId)?.stages?.find((stage) => stage.key === 'scout')?.status).toBe('pending')
   })
 
+  it('leaves a well-formed terminal record untouched', () => {
+    const clean = {
+      flightId: 'fl-clean',
+      feature: 'checkout',
+      repoPaths: ['/repo/a'],
+      description: 'checkout flow',
+      opts: OPTS,
+      status: 'done' as const,
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+      createdAt: now(),
+      updatedAt: now(),
+      endedAt: now(),
+    }
+    store.save(clean)
+    const before = fs.statSync(path.join(tmpDir, 'flights', clean.flightId, 'flight.json')).mtimeMs
+
+    const reopened = new FlightRunStore(tmpDir)
+    expect(reopened.get(clean.flightId)!.stages).toEqual(clean.stages)
+    // Nothing to repair means no rewrite at all — the identity check, not a
+    // deep compare, is what keeps every open from churning every record.
+    expect(fs.statSync(path.join(tmpDir, 'flights', clean.flightId, 'flight.json')).mtimeMs).toBe(before)
+  })
+
   it('gives a repaired legacy stage with no timings an empty timings record', () => {
     const stale = {
       flightId: 'fl-legacy-no-timings',
@@ -231,6 +282,100 @@ describe('legacy terminal-stage repair', () => {
       status: 'pending',
       timings: {},
     })
+  })
+})
+
+describe('missing-stage backfill', () => {
+  // A flight written before a stage key existed. `evaluation-export` is an example:
+  // records from before it shipped carry every other key and not that one.
+  const withoutEvaluationExport = (overrides: Record<string, unknown> = {}) => ({
+    flightId: 'fl-pre-export',
+    feature: 'checkout',
+    repoPaths: ['/repo/a'],
+    description: 'checkout flow',
+    opts: OPTS,
+    status: 'done' as const,
+    currentStage: null,
+    stages: FLIGHT_STAGE_KEYS.filter((key) => key !== 'evaluation-export').map((key) => ({ key, status: 'done' as const })),
+    createdAt: now(),
+    updatedAt: now(),
+    endedAt: now(),
+    ...overrides,
+  })
+
+  it('inserts a stage the record predates as pending, in canonical order', () => {
+    const stale = withoutEvaluationExport()
+    store.save(stale)
+
+    const reopened = new FlightRunStore(tmpDir)
+    const repaired = reopened.get(stale.flightId)!
+    expect(repaired.stages.map((stage) => stage.key)).toEqual([...FLIGHT_STAGE_KEYS])
+    // `pending`, not `skipped`: the step genuinely never ran, and the flight's
+    // own `done` status is untouched — the backfill records a gap, it does not
+    // reopen the flight.
+    expect(repaired.stages.find((stage) => stage.key === 'evaluation-export')?.status).toBe('pending')
+    expect(repaired.status).toBe('done')
+    // The index row is rebuilt from the manifest, so the picker's mini rail
+    // sees the step without loading the record.
+    const row = reopened.list().find((entry) => entry.flightId === stale.flightId)!
+    expect(row.stages?.map((stage) => stage.key)).toEqual([...FLIGHT_STAGE_KEYS])
+  })
+
+  it('keeps every stage the record already had', () => {
+    const stale = withoutEvaluationExport({
+      stages: FLIGHT_STAGE_KEYS.filter((key) => key !== 'evaluation-export').map((key) => ({
+        key,
+        status: key === 'portify' ? 'skipped' as const : 'done' as const,
+        activeMs: 1200,
+      })),
+    })
+    store.save(stale)
+
+    const repaired = new FlightRunStore(tmpDir).get(stale.flightId)!
+    expect(repaired.stages.find((stage) => stage.key === 'portify')).toMatchObject({ status: 'skipped', activeMs: 1200 })
+    expect(repaired.stages.find((stage) => stage.key === 'run')).toMatchObject({ status: 'done', activeMs: 1200 })
+  })
+
+  it('backfills an ACTIVE flight without settling its live stage', () => {
+    const stale = withoutEvaluationExport({
+      status: 'waiting-for-approval' as const,
+      currentStage: 'scout' as const,
+      endedAt: undefined,
+      stages: FLIGHT_STAGE_KEYS.filter((key) => key !== 'evaluation-export').map((key) => ({
+        key,
+        status: key === 'scout' ? 'waiting-for-approval' as const : 'pending' as const,
+      })),
+    })
+    store.save(stale)
+
+    const repaired = new FlightRunStore(tmpDir).get(stale.flightId)!
+    expect(repaired.stages.find((stage) => stage.key === 'evaluation-export')?.status).toBe('pending')
+    // Only a TERMINAL record gets its live stage cleared; a parked flight is
+    // still answerable and must keep its checkpoint.
+    expect(repaired.stages.find((stage) => stage.key === 'scout')?.status).toBe('waiting-for-approval')
+  })
+
+  it('skips an index row whose record file is gone', () => {
+    const stale = withoutEvaluationExport()
+    store.save(stale)
+    // A half-deleted workspace: the index still lists the flight, the record
+    // it points at does not exist. Repair must step over it, not throw on open.
+    fs.rmSync(path.join(tmpDir, 'flights', stale.flightId, 'flight.json'))
+
+    const reopened = new FlightRunStore(tmpDir)
+    expect(reopened.get(stale.flightId)).toBeNull()
+    expect(reopened.list().map((entry) => entry.flightId)).toContain(stale.flightId)
+  })
+
+  it('preserves a stage key written by a newer build', () => {
+    // An older tarball installed over the same workspace reads records whose
+    // keys it has never heard of. The rewrite must not be what deletes them.
+    const future = { ...withoutEvaluationExport(), flightId: 'fl-from-the-future' }
+    future.stages = [...future.stages, { key: 'teleport' as never, status: 'done' as const }]
+    store.save(future)
+
+    const repaired = new FlightRunStore(tmpDir).get(future.flightId)!
+    expect(repaired.stages.map((stage) => stage.key)).toEqual([...FLIGHT_STAGE_KEYS, 'teleport'])
   })
 })
 
@@ -277,6 +422,7 @@ describe('FlightRunStore repo lookups', () => {
   it('activeForRepos skips an active flight whose repo set does not intersect', async () => {
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
     }
     const { manifest, completion } = startFlight(args('/repo/a'), deps(adapters))
@@ -305,6 +451,7 @@ describe('FlightRunStore repo lookups', () => {
   it('tolerates a legacy index entry with no repoPaths field', async () => {
     const adapters = allDone()
     adapters.scout = {
+      teardown: () => null,
       run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
     }
     const { manifest, completion } = startFlight(args('/repo/a'), deps(adapters))

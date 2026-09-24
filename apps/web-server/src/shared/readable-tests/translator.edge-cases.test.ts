@@ -314,7 +314,12 @@ describe('readable translator loop edges', () => {
     for (const source of sources) {
       expect(onlyNode(source)).not.toHaveProperty('count')
     }
-  })
+    // Each source is its own `translateReadableTest`, and each of those compiles
+    // a fresh semantic program — ~60ms uninstrumented, several times that under
+    // v8 coverage on a saturated machine. The loop body is synchronous, so the
+    // default 5s timer cannot interrupt it; it only marks the finished test
+    // failed. The bound is wall-clock headroom, not a weaker assertion.
+  }, 30_000)
 
   it('keeps loop controls and call conditions in canonical syntax', () => {
     const result = translate(`{

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { act } from 'react'
+import { EMPTY_COPY } from './empty-state-copy'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentSessionView, pendingWork } from './AgentSessionView'
@@ -167,7 +168,7 @@ describe('AgentSessionView lifecycle presentation', () => {
     mocks.getAgentSession.mockResolvedValueOnce(null)
     await render(true)
 
-    expect(container.textContent).toContain("Waiting for the agent's first output")
+    expect(container.textContent).toContain(EMPTY_COPY.agentWaiting.title)
     expect(container.querySelector('[data-testid="agent-session-live-tail"]')).not.toBeNull()
   })
 
@@ -177,7 +178,7 @@ describe('AgentSessionView lifecycle presentation', () => {
     mocks.getAgentSession.mockResolvedValueOnce({ absent: true, reason: 'session-log-missing' })
     await render(true)
 
-    expect(container.textContent).toContain("Waiting for the agent's first output")
+    expect(container.textContent).toContain(EMPTY_COPY.agentWaiting.title)
     expect(mocks.connectAgentSessionStream).toHaveBeenCalledOnce()
   })
 

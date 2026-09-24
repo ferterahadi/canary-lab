@@ -69,6 +69,15 @@ let container: HTMLDivElement
 let root: Root
 let rootMounted: boolean
 
+it('marks fallback wording as incomplete while keeping its source selectable', async () => {
+  const test = { ...STORY, story: { steps: STORY.story!.steps.map((step) => ({ ...step, presentation: 'syntax-fallback' as const })) } }
+  const select = vi.fn()
+  await act(async () => root.render(<ReadableTestView test={test} onSourceSelect={select} />))
+  expect(container.textContent).toContain('English incomplete ·')
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="readable-story-item-action-submit"]')!.click())
+  expect(select).toHaveBeenCalledWith({ id: 'action-submit', source: STORY.story!.steps[1].source })
+})
+
 beforeEach(() => {
   localStorage.setItem('canary-lab.theme', 'dark')
   document.documentElement.classList.add('dark')
@@ -80,8 +89,8 @@ beforeEach(() => {
   highlighter.load.mockResolvedValue({
     themeColors: (theme: string) => (
       theme === 'one-dark-pro'
-        ? { bg: '#282c34', fg: '#abb2bf' }
-        : { bg: '#fafafa', fg: '#383a42' }
+        ? { bg: '#282c34', fg: '#abb2bf', comment: '#7f848e' }
+        : { bg: '#fafafa', fg: '#383a42', comment: '#a0a1a7' }
     ),
   })
 })
@@ -99,6 +108,57 @@ async function flushHighlighter(): Promise<void> {
 }
 
 describe('ReadableTestView', () => {
+  it('labels source comments as non-executable notes using the Code mode comment colour', async () => {
+    const test: ReadableTest = { ...STORY, story: { steps: [{
+      id: 'note-context', role: 'note',
+      text: 'This helper reads only the current run log.', spans: [{ text: 'This helper reads only the current run log.' }],
+      fidelity: 'exact', source: source(4, '/** This helper reads only the current run log. */'),
+    }] } }
+    act(() => root.render(<ReadableTestView test={test} />))
+    await flushHighlighter()
+
+    const role = container.querySelector('[data-testid="readable-story-role-note-context"]') as HTMLElement
+    const text = container.querySelector('[data-story-span="text"]') as HTMLElement
+    expect(role.textContent).toBe('NOTE')
+    expect(role.style.color).toBe('var(--code-comment)')
+    expect(text.style.color).toBe('var(--code-comment)')
+    expect((container.querySelector('.cl-readable-body') as HTMLElement).style.getPropertyValue('--code-comment'))
+      .toBe('#7f848e')
+    expect(container.textContent).toContain('This helper reads only the current run log.')
+  })
+
+  it('labels a test block as TEST while preserving its nested setup, actions and checks', () => {
+    const test: ReadableTest = { ...STORY, story: { steps: [{
+      id: 'test-declaration', kind: 'flow', flowKind: 'scope', role: 'test',
+      text: 'Test: "completes checkout"', spans: [{ text: 'Test: "completes checkout"' }],
+      fidelity: 'derived', source: source(9, 'test("completes checkout", () => {})'),
+      children: STORY.story!.steps,
+    }] } }
+    act(() => root.render(<ReadableTestView test={test} />))
+    expect(Array.from(container.querySelectorAll('[data-testid^="readable-story-role-"]')).map((row) => row.textContent))
+      .toEqual(['TEST', 'SETUP', 'ACTION', 'CHECK'])
+    expect(container.querySelector('[data-testid="readable-story-item-test-declaration"]')?.textContent?.trim())
+      .toBe('01TEST"completes checkout"')
+  })
+
+  it('shows console text as OUTPUT once and keeps its highlighted text and source selectable', async () => {
+    const output = {
+      id: 'console-output', role: 'output' as const, text: 'Output "the text"',
+      spans: [{ text: 'Output ', kind: 'verb' as const }, { text: '"the text"', kind: 'literal' as const }],
+      fidelity: 'derived' as const, source: source(12, 'console.log("the text")'),
+    }
+    const test: ReadableTest = { ...STORY, story: { steps: [output, STORY.story!.steps[1]] } }
+    const select = vi.fn()
+    await act(async () => root.render(<ReadableTestView test={test} onSourceSelect={select} />))
+    const row = container.querySelector<HTMLButtonElement>('[data-testid="readable-story-item-console-output"]')!
+    expect(row.textContent).toBe('01OUTPUT"the text"')
+    expect(row.getAttribute('aria-label')).toBe('01. OUTPUT: "the text". Show checkout.spec.ts:L12')
+    expect(row.querySelector('[data-story-span="literal"]')?.textContent).toBe('"the text"')
+    expect(container.querySelector('[data-testid="readable-story-role-action-submit"]')?.textContent).toBe('ACTION')
+    await act(async () => row.click())
+    expect(select).toHaveBeenCalledWith({ id: output.id, source: output.source })
+  })
+
   it('keeps authored execution order with highlighted role keywords and variables', async () => {
     act(() => root.render(<ReadableTestView test={STORY} sourceFile="/repo/e2e/checkout.spec.ts" />))
 
@@ -113,7 +173,7 @@ describe('ReadableTestView', () => {
     expect(rows.map((row) => row.textContent?.trim())).toEqual([
       '01SETUPPrepare unique identifiers',
       '02ACTIONSubmit the checkout form',
-      '03CHECKCheck that order status equals “confirmed” // order.ts',
+      '03CHECKorder status equals “confirmed” // order.ts',
     ])
     expect((container.querySelector('[data-testid="readable-story-role-setup-identifiers"]') as HTMLElement).style.color)
       .toBe('var(--code-cyan)')
@@ -143,7 +203,7 @@ describe('ReadableTestView', () => {
 
     const changed = container.querySelector<HTMLElement>('[data-testid="readable-story-item-action-submit"]')
     expect(changed?.dataset.changedSource).toBe('true')
-    expect(changed?.getAttribute('style')).toContain('var(--danger)')
+    expect(changed?.getAttribute('style')).toContain('var(--warning)')
     expect(changed?.getAttribute('aria-label')).toContain('Modified since the committed test')
     expect(container.querySelector('[data-testid="readable-modified-action-submit"]')?.textContent).toBe('MODIFIED')
     expect(container.querySelector('[data-testid="readable-story-item-setup-identifiers"]')?.getAttribute('data-changed-source')).toBeNull()
@@ -156,10 +216,12 @@ describe('ReadableTestView', () => {
         steps: [{
           id: 'highlighted-check',
           role: 'check',
-          text: 'Check that response status is at least 200 using request, then equals “PAID”',
+          text: 'Check that refresh result for response status is at least 200 using request, then equals “PAID”',
           spans: [
             { text: 'Check', kind: 'verb' },
             { text: ' that ' },
+            { text: 'refresh', kind: 'verb' },
+            { text: ' result for ' },
             { text: 'response', kind: 'variable' },
             { text: ' status ' },
             { text: 'is at least', kind: 'operator' },
@@ -195,6 +257,8 @@ describe('ReadableTestView', () => {
     for (const [kind, color] of Object.entries(colors)) {
       expect((container.querySelector(`[data-story-span="${kind}"]`) as HTMLElement).style.color).toBe(color)
     }
+    expect(container.querySelector('[data-testid="readable-story-item-highlighted-check"]')?.textContent?.trim())
+      .toBe('01CHECKrefresh result for response status is at least 200 using request, then equals “PAID”')
   })
 
   it('renders nested callbacks, loops, retries, and error paths with hierarchical numbering', () => {
@@ -326,6 +390,68 @@ describe('ReadableTestView', () => {
       .toContain('01.1.1.1. ACTION')
     expect(container.querySelector('[data-testid="readable-story-item-query-call"]')?.getAttribute('title'))
       .toContain('Step 01.1.1.1')
+  })
+
+  it('aligns Else with its sibling If and indents only their branch steps', () => {
+    const branches: ReadableTest = {
+      ...STORY,
+      story: {
+        steps: [
+          {
+            id: 'condition-flow',
+            kind: 'flow',
+            flowKind: 'condition',
+            role: 'action',
+            text: 'If the order is ready',
+            spans: [{ text: 'If the order is ready' }],
+            fidelity: 'derived',
+            source: source(40, 'if (order.ready) submitOrder()'),
+            children: [{
+              id: 'submit-order',
+              role: 'action',
+              text: 'Submit order',
+              spans: [{ text: 'Submit order' }],
+              fidelity: 'derived',
+              source: source(40, 'submitOrder()'),
+            }],
+          },
+          {
+            id: 'else-flow',
+            kind: 'flow',
+            flowKind: 'otherwise',
+            role: 'action',
+            text: 'Else',
+            spans: [{ text: 'Else', kind: 'keyword' }],
+            fidelity: 'derived',
+            source: source(41, 'else waitForOrder()'),
+            children: [{
+              id: 'wait-order',
+              role: 'action',
+              text: 'Wait for order',
+              spans: [{ text: 'Wait for order' }],
+              fidelity: 'derived',
+              source: source(41, 'waitForOrder()'),
+            }],
+          },
+        ],
+      },
+    }
+
+    act(() => root.render(
+      <ReadableTestView
+        test={branches}
+        executionHighlight={{ kind: 'failed', nodeId: 'submit-order' }}
+      />,
+    ))
+
+    const rows = Array.from(container.querySelectorAll('[data-story-sequence]'))
+    expect(rows.map((row) => row.getAttribute('data-story-depth'))).toEqual(['0', '1', '0', '1'])
+    expect(rows.map((row) => row.querySelector('[data-testid^="readable-story-role-"]')?.textContent))
+      .toEqual(['IF', 'ACTION', 'ELSE', 'ACTION'])
+    const failedRow = container.querySelector<HTMLElement>('[data-execution-highlight="failed"]')
+    expect(failedRow?.style.marginLeft).toBe('-1.25rem')
+    expect(failedRow?.style.width).toBe('calc(100% + 1.25rem)')
+    expect(failedRow?.style.paddingLeft).toBe('calc(0.5rem + 1.25rem)')
   })
 
   it('opens the exact source for an ordered row and shows selection state', () => {

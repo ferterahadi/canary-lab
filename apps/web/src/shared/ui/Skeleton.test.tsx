@@ -106,6 +106,22 @@ describe('Skeleton primitives', () => {
     expect(container.querySelectorAll('[data-testid="skeleton-bar"]')).toHaveLength(2)
   })
 
+  it('offsets each row in the sweep, and only where something is actually being produced', () => {
+    const offsets = (): string[] =>
+      [...container.querySelectorAll<HTMLElement>('[data-testid="skeleton-bar"]')].map((el) => el.style.animationDelay)
+    // A live stack sweeps top-down rather than strobing in lockstep. The offset
+    // is negative, so row 2 starts partway through the cycle instead of sitting
+    // flat until its turn.
+    act(() => root.render(<SkeletonLines awaiting="live" rows={3} />))
+    expect(offsets()).toEqual(['', '-110ms', '-220ms'])
+    // Both bars of one row share the row's offset: a row is one thing arriving.
+    act(() => root.render(<SkeletonRows awaiting="live" rows={2} />))
+    expect(offsets()).toEqual(['', '', '-110ms', '-110ms'])
+    // Nothing else animates, so nothing else carries an offset.
+    act(() => root.render(<SkeletonLines awaiting="idle" rows={3} />))
+    expect(offsets()).toEqual(['', '', ''])
+  })
+
   it('the panel keeps the REAL kicker — naming what is coming is the point', () => {
     act(() => root.render(<SkeletonPanel kicker="Boot check" awaiting="live" testId="boot-skeleton" variant="rows" rows={3} />))
     const card = container.querySelector('[data-testid="boot-skeleton"]')

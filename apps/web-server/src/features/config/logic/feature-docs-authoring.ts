@@ -58,6 +58,8 @@ export function linkFeatureDoc(ctx: FeatureAuthoringContext, input: {
   targetPath: string
   /** Name inside docs/ — defaults to the target's basename. */
   relPath?: string
+  /** Repair an unavailable source without replacing it with a copy. */
+  relink?: boolean
 }): { ok: true; writtenPath: string; relativePath: string; linked: boolean } | { ok: false; error: string } {
   const feature = findFeature(ctx.featuresDir, input.feature)
   if (!feature?.featureDir) return { ok: false, error: 'feature not found' }
@@ -81,6 +83,29 @@ export function linkFeatureDoc(ctx: FeatureAuthoringContext, input: {
   const dest = path.join(docsDir, resolved.rel)
   if (!isWithin(docsDir, dest)) return { ok: false, error: 'relPath must not escape the docs directory' }
   if (isWithin(docsDir, real)) return { ok: false, error: 'target is already inside the docs directory' }
+  if (input.relink) {
+    try {
+      if (!fs.lstatSync(dest).isSymbolicLink() || fs.existsSync(dest)) {
+        return { ok: false, error: 'document is no longer a broken link; refresh the document list' }
+      }
+    } catch {
+      return { ok: false, error: 'broken link not found' }
+    }
+    // Stage only the link, not the document. A failed replacement keeps the
+    // old target available for another attempt and never creates a recovery copy.
+    const stagingDir = fs.mkdtempSync(path.join(path.dirname(dest), '.relink-'))
+    try {
+      const staged = path.join(stagingDir, 'link')
+      fs.symlinkSync(real, staged)
+      fs.renameSync(staged, dest)
+    } catch (error) {
+      return { ok: false, error: `could not relink document: ${error instanceof Error ? error.message : String(error)}` }
+    } finally {
+      fs.rmSync(stagingDir, { recursive: true, force: true })
+    }
+    announceDocsChanged(ctx, feature.name)
+    return { ok: true, writtenPath: dest, relativePath: path.relative(feature.featureDir, dest), linked: true }
+  }
   fs.mkdirSync(path.dirname(dest), { recursive: true })
   try {
     fs.lstatSync(dest)

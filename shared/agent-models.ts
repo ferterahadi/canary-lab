@@ -104,9 +104,9 @@ export const KNOWN_MODELS: Record<ModelAgentKind, readonly string[]> = {
 // ── Recommendation policy ────────────────────────────────────────────────────
 // The tier is explanatory UI copy; the actual provider knobs are explicit per
 // stage below because equal-capability models can need different effort levels.
-// Claude's stable aliases resolve to the latest family member. Codex resolves a
-// Sol/Terra role from the installed CLI catalog, so version releases do not
-// require a Canary update.
+// Claude's stable aliases resolve to the latest family member. Codex prefers
+// GPT-6 Terra for balanced work once available, GPT-6 Sol until then, and an
+// older Sol when the current CLI exposes neither GPT-6 choice.
 export type ModelTier = 'frontier' | 'agentic' | 'balanced'
 
 export const STAGE_TIERS: Record<ModelStageKey, ModelTier> = {
@@ -148,8 +148,8 @@ interface ModelRecommendations {
 }
 
 /** Provider-specific model selector and effort per stage. Claude selectors are
- *  stable aliases; Codex selectors are stable roles resolved to a versioned id
- *  from the runtime catalog. */
+ *  stable aliases; Codex selectors resolve to a visible id from the runtime
+ *  catalog. */
 export const RECOMMENDED_BY_STAGE: ModelRecommendations = {
   claude: {
     scout: { model: 'sonnet', effort: 'high' },
@@ -182,13 +182,18 @@ export function recommendedChoice(
 ): StageModelChoice {
   if (agent === 'claude') return RECOMMENDED_BY_STAGE.claude[stage]
 
-  // The Sol/Terra role names are stable while the version prefix changes.
-  // If a future catalog no longer exposes that role, keep the safe effort-only
-  // recommendation rather than pinning an unrelated model by list position.
+  // Prefer GPT-6 regardless of catalog order. The balanced stages use Sol
+  // until Terra joins that lineup; older CLIs can still use an installed Sol.
+  // Without a matching model, keep the safe effort-only recommendation.
   const recommendation = RECOMMENDED_BY_STAGE.codex[stage]
-  const suffix = `-${recommendation.model}`
-  const model = availableModels.find(({ value }) => value.toLowerCase().endsWith(suffix))?.value ?? null
-  return { model, effort: recommendation.effort }
+  const preferredIds = recommendation.model === 'terra' ? ['gpt-6-terra', 'gpt-6-sol'] : ['gpt-6-sol']
+  for (const id of preferredIds) {
+    const preferred = availableModels.find(({ value }) => value.toLowerCase() === id)
+    if (preferred) return { model: preferred.value, effort: recommendation.effort }
+  }
+  const fallback = availableModels.find(({ value }) => value.toLowerCase().endsWith('-sol'))
+  if (fallback) return { model: fallback.value, effort: recommendation.effort }
+  return { model: null, effort: recommendation.effort }
 }
 
 // ── Normalization (the JSON/config boundary) ─────────────────────────────────

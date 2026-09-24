@@ -1,9 +1,11 @@
 // Test runs and the heal loop: start, pause, heal, fixes, PRs, journal.
 // Split out of client.ts; see that barrel for the shared surface.
 
+import type { RunQueueDiagnostics } from '@shared/run-queue'
 import type { StageModelChoice } from '@shared/agent-models'
+import type { RunStartRequest, RunTestReview, TestReviewReceipt, TestReviewRequiredInfo } from '@shared/test-review'
 import type { AuditList, RunIndexEntry, RunDetail, JournalEntry, RunProposedPr } from './types'
-import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
+import { ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
 
 export function listRuns(
   query: { feature?: string } = {},
@@ -21,6 +23,11 @@ export function getRunDetail(runId: string, opts?: ClientOptions): Promise<RunDe
     { method: 'GET' },
     fetchImpl,
   )
+}
+
+export function getRunQueue(runId: string, opts?: ClientOptions): Promise<{ diagnostics: RunQueueDiagnostics | null }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/queue`, { method: 'GET' }, fetchImpl)
 }
 
 export function getRunAudit(runId: string, opts?: ClientOptions): Promise<AuditList> {
@@ -79,6 +86,25 @@ export function asBranchMismatch(err: unknown): RepoBranchMismatch | null {
     return err.body as RepoBranchMismatch
   }
   return null
+}
+
+export type TestReviewRequired = TestReviewRequiredInfo
+
+export function asTestReviewRequired(err: unknown): TestReviewRequired | null {
+  if (!(err instanceof ApiError) || err.status !== 409 || !err.body || typeof err.body !== 'object') return null
+  const body = err.body as Partial<TestReviewRequired>
+  return body.type === 'test_review_required' && typeof body.feature === 'string' && typeof body.runId === 'string'
+    && typeof body.review_revision === 'string' && typeof body.changedFileCount === 'number' && typeof body.reviewUrl === 'string'
+    ? body as TestReviewRequired : null
+}
+
+export function getRunStartRequest(requestId: string, opts?: ClientOptions): Promise<RunStartRequest> {
+  return requestSnapshot(`/api/run-requests/${encodeURIComponent(requestId)}`, opts)
+}
+
+export function cancelRunStartRequest(requestId: string, opts?: ClientOptions): Promise<RunStartRequest> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/run-requests/${encodeURIComponent(requestId)}/cancel`, { method: 'POST' }, fetchImpl)
 }
 
 // Re-pin every repo's configured branch to whatever it's currently checked out
@@ -288,6 +314,49 @@ export interface ProposePrResult { repoName: string; ok: boolean; pr?: RunPropos
 export function proposeRunPr(runId: string, opts?: ClientOptions): Promise<{ results: ProposePrResult[] }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<{ results: ProposePrResult[] }>(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/propose-pr`, { method: 'POST' }, fetchImpl)
+}
+
+// Test-review boundary (D9): the two human-controlled levers on an active
+// run's live suite. Adopt re-takes the run-start copy and reruns it; restore
+// rewrites the live suite from the copy the run executed. MCP reaches the same
+// boundary only after explicit human approval, and both surfaces carry the
+// reviewed revision so stale approval cannot bless newer edits.
+export function getRunTestReview(runId: string, opts?: ClientOptions): Promise<RunTestReview> {
+  return requestSnapshot(`/api/runs/${encodeURIComponent(runId)}/test-review?summary=true`, opts)
+}
+
+type TestReviewDecisionOptions = ClientOptions & { expectedRevision?: string }
+
+export function adoptSpecEdits(
+  runId: string,
+  opts?: TestReviewDecisionOptions,
+): Promise<
+  | { status: 'adopted'; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
+  | { status: 'approved-for-new-run'; review_revision: string; newRunRequired: true }
+> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/adopt-spec-edits`, {
+    method: 'POST',
+    ...(opts?.expectedRevision ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision: opts.expectedRevision }) } : {}),
+  }, fetchImpl)
+}
+
+export function acceptRunTestReview(runId: string, expectedRevision: string, opts?: ClientOptions): Promise<TestReviewReceipt> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/accept-test-review`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision }),
+  }, fetchImpl)
+}
+
+export function restoreSpecEdits(
+  runId: string,
+  opts?: TestReviewDecisionOptions,
+): Promise<{ status: 'restored'; restored: string[] } | TestReviewReceipt> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/restore-spec-edits`, {
+    method: 'POST',
+    ...(opts?.expectedRevision ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision: opts.expectedRevision }) } : {}),
+  }, fetchImpl)
 }
 
 // Abort an active run. POSTs to the abort endpoint which kills Playwright,

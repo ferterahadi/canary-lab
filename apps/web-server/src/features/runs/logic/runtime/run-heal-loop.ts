@@ -20,6 +20,7 @@ import { computeVerificationPlan, decideRunStatus, extractFailedSlugs, nonPassed
 import { healAgentCauseSuffix } from './heal-agent-text'
 import { ensureServicesRunning } from './run-service-boot'
 import { appendJournalIteration, markStoppedEarly, noteHealCycle, recordLifecycle, setStatus } from './run-manifest-writer'
+import { adoptTestHealSpecEdits } from './run-suite-snapshot'
 import type { RunOrchestrator } from './orchestrator'
 
 export { cancelHeal, continueAfterTestRun, pauseAndHeal, restartHealFromFailure } from './run-heal-controls'
@@ -86,13 +87,19 @@ export async function runManualExternalHealLoop(ctx: RunContext, host: RunLoopHo
     } catch { /* journal is best-effort */ }
     const verificationPlan = verificationPlanForSummary(ctx, readSummary(ctx.paths.summaryPath))
     setStatus(ctx, 'running')
+    // Test-heal mode only (zero editable repos): the spec IS the fix, so the
+    // agent's signal adopts its edits into the copy the rerun executes. Every
+    // other run keeps its run-start copy — a spec edit there stays inert.
+    await adoptTestHealSpecEdits(ctx)
+    let startedBecauseMissing: string[] = []
     if (signal.kind === 'restart') {
-      await host.restart(filesChanged)
+      const restart = await host.restart(filesChanged)
+      startedBecauseMissing = restart.startedBecauseMissing
     } else {
       await host.rerun()
+      startedBecauseMissing = await ensureServicesRunning(ctx)
     }
     if (ctx.stopped) return ctx.status
-    const startedBecauseMissing = await ensureServicesRunning(ctx)
     if (startedBecauseMissing.length > 0) {
       recordLifecycle(ctx, 'restarting-services', 'Started missing services', {
         detail: `Started ${startedBecauseMissing.join(', ')} before rerun.`,
@@ -109,7 +116,7 @@ export async function runManualExternalHealLoop(ctx: RunContext, host: RunLoopHo
     // exit code arrives after the abort flips the flag — don't
     // compute a finalStatus from it.
     if (ctx.stopped) return ctx.status
-    finalStatus = decideRunStatus(ctx.feature.featureDir, ctx.paths.summaryPath, exitCode)
+    finalStatus = decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
     setStatus(ctx, finalStatus)
     if (finalStatus === 'passed') break
   }
@@ -211,13 +218,13 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
           setStatus(ctx, finalStatus)
           break
         }
-        finalStatus = decideRunStatus(ctx.feature.featureDir, ctx.paths.summaryPath, exitCode)
+        finalStatus = decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
         setStatus(ctx, finalStatus)
         if (finalStatus === 'passed') break
         const afterSummary = readSummary(ctx.paths.summaryPath)
         if (
           extractFailedSlugs(afterSummary).length === 0 &&
-          nonPassedSignatureFromPlan(computeVerificationPlan(ctx.feature.featureDir, afterSummary)) === beforeSignature
+          nonPassedSignatureFromPlan(computeVerificationPlan(ctx.suiteDir, afterSummary)) === beforeSignature
         ) {
           const skippedCount = pendingPlan.kind === 'targeted' ? pendingPlan.skipped.length : 0
           recordLifecycle(ctx, 'rerunning-tests', 'Stopped: not-yet-passed tests stayed unchanged after rerun', {
@@ -420,10 +427,15 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
 
       const verificationPlan = verificationPlanForSummary(ctx, summary)
       setStatus(ctx, 'running')
+      // Same test-heal adopt as the manual loop, before either arm reruns.
+      await adoptTestHealSpecEdits(ctx)
 
       const action = heal.actionForSignal(effectiveSignal.kind === 'heal' ? 'rerun' : effectiveSignal.kind)
+      let startedBecauseMissing: string[] = []
       if (action.kind === 'restart-and-rerun') {
-        const { restarted, kept, startedBecauseMissing } = await host.restart(filesChanged)
+        const restart = await host.restart(filesChanged)
+        const { restarted, kept } = restart
+        startedBecauseMissing = restart.startedBecauseMissing
         if (ctx.stopped) return ctx.status
         ctx.healCycleHistory.push({ cycle: cycleNum, restarted, kept })
         ctx.stateSink.patchManifest(ctx.runId, {
@@ -437,9 +449,9 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
         }
       } else {
         await host.rerun()
+        startedBecauseMissing = await ensureServicesRunning(ctx)
       }
       if (ctx.stopped) return ctx.status
-      const startedBecauseMissing = await ensureServicesRunning(ctx)
       if (startedBecauseMissing.length > 0) {
         recordLifecycle(ctx, 'restarting-services', 'Started missing services', {
           detail: `Started ${startedBecauseMissing.join(', ')} before rerun.`,
@@ -460,7 +472,7 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
         setStatus(ctx, finalStatus)
         break
       }
-      finalStatus = decideRunStatus(ctx.feature.featureDir, ctx.paths.summaryPath, exitCode)
+      finalStatus = decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
       setStatus(ctx, finalStatus)
       if (finalStatus === 'passed') break
     }

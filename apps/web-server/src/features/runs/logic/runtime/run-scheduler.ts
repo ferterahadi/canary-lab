@@ -1,4 +1,5 @@
-import { decideAdmission, type AdmissionConfig, type SystemResources } from './admission'
+import type { RunQueueDiagnostics } from '../../../../../../../shared/run-queue'
+import { computeSlotBudget, decideAdmission, type AdmissionConfig, type SystemResources } from './admission'
 import { detectRepoCollision } from './repo-collision'
 import type { QueueReason } from '../../../../../../../shared/run-state'
 
@@ -68,6 +69,31 @@ export class RunScheduler {
       config: this.deps.config,
     })
     return decision.admit ? { ok: true } : { ok: false, reason: 'resources' }
+  }
+
+  /** Read the same inputs as admission without promoting or starting anything. */
+  diagnostics(runId: string): RunQueueDiagnostics | null {
+    const candidate = this.queue.find((run) => run.runId === runId)
+    if (!candidate) return null
+    const active = this.deps.listActive()
+    const resources = this.deps.readResources()
+    const config = this.deps.config
+    const collision = detectRepoCollision(candidate.repoPaths, active)
+    const decision = decideAdmission({ activeCosts: active.map((run) => run.cost), candidateCost: candidate.cost, resources, config })
+    const cpuSlots = Math.max(1, resources.cpuCount - 1)
+    const slotBudget = computeSlotBudget(resources, config)
+    const reason = collision ? 'repo-collision'
+      : decision.admit ? 'ready'
+        : config.maxConcurrentRuns != null && active.length >= config.maxConcurrentRuns ? 'run-limit'
+          : slotBudget < cpuSlots ? 'memory' : 'cpu'
+    return {
+      checkedAt: new Date().toISOString(), reason,
+      activeRuns: active.map(({ runId, feature, cost }) => ({ runId, feature, cost })),
+      ...(collision ? { conflictingRunId: collision.conflictingRunId } : {}),
+      candidateCost: candidate.cost,
+      usedSlots: active.reduce((sum, run) => sum + run.cost, 0),
+      slotBudget, maxConcurrentRuns: config.maxConcurrentRuns, freeMemBytes: resources.freeMemBytes,
+    }
   }
 
   enqueue(run: QueuedRun): void {

@@ -310,6 +310,12 @@ function functionExpressionEnglish(node: ts.FunctionExpression): EnglishNode {
   return clause('function-expression', segments, 'block')
 }
 
+/** Callback bodies belong to source-linked child rows, just like statement bodies. */
+export function callbackHeaderEnglish(node: ts.ArrowFunction | ts.FunctionExpression): EnglishNode {
+  const english = (ts.isArrowFunction(node) ? arrowFunctionEnglish(node) : functionExpressionEnglish(node)) as EnglishClause
+  return clause(english.tag, english.segments.slice(0, -1), english.layout)
+}
+
 /** Conditions read as predicates: comparison, logical, and negation forms
  *  stand alone; anything else is spelled as an explicit truthiness test. */
 function conditionEnglish(node: ts.Expression): EnglishNode {
@@ -558,7 +564,7 @@ function decoratorSegments(node: ts.HasDecorators): EnglishSegment[] {
   ]
 }
 
-function parameterEnglish(parameter: ts.ParameterDeclaration): EnglishNode {
+export function parameterEnglish(parameter: ts.ParameterDeclaration): EnglishNode {
   const words = modifierWords(ts.getModifiers(parameter))
   const kind = parameter.dotDotDotToken ? 'rest parameter' : parameter.questionToken ? 'optional parameter' : 'parameter'
   const segments: EnglishSegment[] = [
@@ -655,6 +661,7 @@ function forEnglish(node: ts.ForStatement): EnglishNode {
 function forEachEnglish(node: ts.ForOfStatement | ts.ForInStatement): EnglishNode {
   const isForOf = ts.isForOfStatement(node)
   const awaitWord = isForOf && node.awaitModifier ? 'for await each' : 'for each'
+  const declaration = ts.isVariableDeclarationList(node.initializer) ? node.initializer.declarations[0] : undefined
   const target = ts.isVariableDeclarationList(node.initializer)
     ? {
         label: joinWords([awaitWord, declarationKindWord(node.initializer)]),
@@ -665,6 +672,8 @@ function forEachEnglish(node: ts.ForOfStatement | ts.ForInStatement): EnglishNod
     isForOf ? 'for-of' : 'for-in',
     [
       target,
+      ...(declaration?.type ? [{ label: 'with type', child: typeEnglish(declaration.type) }] : []),
+      ...(declaration?.initializer ? [slot('and initialize it to', expressionEnglish(declaration.initializer))] : []),
       { label: isForOf ? 'from iterable' : 'from the enumerable keys of', child: expressionEnglish(node.expression) },
       { label: 'body', child: branchEnglish(node.statement), separate: true },
     ],
@@ -720,7 +729,7 @@ export function statementEnglish(node: ts.Statement): EnglishNode {
         { label: 'then', child: branchEnglish(statement.thenStatement), separate: true },
       ]
       if (statement.elseStatement) {
-        segments.push({ label: 'otherwise', child: branchEnglish(statement.elseStatement), separate: true })
+        segments.push({ label: 'else', child: branchEnglish(statement.elseStatement), separate: true })
       }
       return clause('if', segments, 'block')
     }
@@ -835,6 +844,7 @@ export function statementEnglish(node: ts.Statement): EnglishNode {
 
 export type ReadableStructuredStatement =
   | ts.Block
+  | ts.FunctionDeclaration
   | ts.DoStatement
   | ts.ForInStatement
   | ts.ForOfStatement
@@ -857,6 +867,9 @@ function statementClause(node: ReadableStructuredStatement): EnglishClause {
  * projected from statementEnglish's IR; this is not a second vocabulary. */
 export function statementHeaderEnglish(node: ReadableStructuredStatement): EnglishNode {
   const english = statementClause(node)
+  if (ts.isFunctionDeclaration(node)) {
+    return clause(english.tag, node.body ? english.segments.slice(0, -1) : english.segments, english.layout)
+  }
   if (ts.isIfStatement(node) || ts.isWhileStatement(node) || ts.isSwitchStatement(node)) {
     return clause(english.tag, [english.segments[0]], english.layout)
   }

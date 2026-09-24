@@ -7,6 +7,7 @@ import type { RunFixCapture, RunProposedPr } from '../../../../../../../shared/r
 import type { PrPreflight } from './pr-preflight'
 import type { RunSummaryFailedEntry } from '../run-detail'
 import { writeFixCommitMessage, type FixCommitMessage, type FixCommitMessageInput } from './commit-message-agent'
+import { prProvenanceFooter, type VerdictProvenance } from './pr-provenance'
 
 // Open a pull request from a run's captured fix, per pushable repo. Driven
 // either by the user (the Propose PR dialog) or automatically at the end of a
@@ -65,6 +66,11 @@ export async function proposeFixesForRun(opts: {
   /** Per-agent commit-message model+effort choices, passed through to the
    *  message agent (which picks its CLI by availability). */
   models?: FixCommitMessageInput['models']
+  /** Where the run's verdict came from (D9): the run-start snapshot, the live
+   *  edits it did not execute, the adopted ones, and the hints. Written into
+   *  the PR body's footer so the reviewer knows WHICH tests passed. Absent on a
+   *  run recorded before the boundary existed. */
+  verdict?: VerdictProvenance
   deps?: ProposeDeps
 }): Promise<ProposeResult[]> {
   const git = opts.deps?.git ?? realRunGit
@@ -105,7 +111,7 @@ export async function proposeFixesForRun(opts: {
       cwd: repoRoot,
     }).catch(() => null)
     try {
-      const outcome = await createPrInWorktree({ git, gh, repoRoot, wt, branch, base: pre.base, repoSlug, baseSha: fixRepo.baseSha, patchPath: fixRepo.patchPath, feature: opts.feature, runId: opts.runId, draft: opts.draft === true, ...(written ? { written } : {}) })
+      const outcome = await createPrInWorktree({ git, gh, repoRoot, wt, branch, base: pre.base, repoSlug, baseSha: fixRepo.baseSha, patchPath: fixRepo.patchPath, feature: opts.feature, runId: opts.runId, draft: opts.draft === true, ...(written ? { written } : {}), ...(opts.verdict ? { verdict: opts.verdict } : {}) })
       results.push(outcome.ok
         ? { repoName: pre.repoName, ok: true, pr: { repoName: pre.repoName, url: outcome.url, branch, base: pre.base, createdAt: now() } }
         : { repoName: pre.repoName, ok: false, reason: outcome.reason })
@@ -134,6 +140,7 @@ async function createPrInWorktree(a: {
   /** Agent-written wording for this repair. Absent when no agent could write
    *  one; the deterministic template below then stands in. */
   written?: FixCommitMessage
+  verdict?: VerdictProvenance
 }): Promise<{ ok: true; url: string } | { ok: false; reason: string }> {
   // `git push` always leads with `To <remote>` and puts the cause underneath,
   // so the first line alone tells the user nothing. Prefer the `! [rejected]`
@@ -180,11 +187,12 @@ async function createPrInWorktree(a: {
   if (existing.code === 0 && existing.stdout.trim()) return { ok: true, url: existing.stdout.trim() }
   // The provenance footer is appended rather than left to the agent: it is the
   // one part of the body that must be exact, and a written line is a claim the
-  // agent could get wrong.
-  const provenance = `\n\n---\nCaptured by Canary Lab from run \`${a.runId}\`, based on \`${a.baseSha.slice(0, 12)}\`. Review before merging.`
+  // agent could get wrong. It carries the run id + base, and — for a run with a
+  // run-start snapshot — which suite the verdict is about (pr-provenance.ts).
+  const provenance = prProvenanceFooter({ runId: a.runId, baseSha: a.baseSha, ...(a.verdict ? { verdict: a.verdict } : {}) })
   const body = a.written
-    ? `${a.written.prBody}${provenance}`
-    : `Automated fix captured by Canary Lab from run \`${a.runId}\` (based on \`${a.baseSha.slice(0, 12)}\`). Review before merging.`
+    ? `${a.written.prBody}\n\n${provenance}`
+    : `Automated fix captured by Canary Lab.\n\n${provenance}`
   const pr = await a.gh([
     'pr', 'create', '--repo', a.repoSlug, '--base', a.base, '--head', a.branch,
     '--title', a.written?.prTitle ?? `fix(${a.feature}): canary-lab heal fixes`, '--body', body,

@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
+import { ComparisonLegend, ComparisonTable } from '@/shared/ui/ComparisonTable'
 import { FieldRow, Modal, TextInput } from '@/shared/ui/atoms'
 import { FileBrowserList } from './FolderPicker'
 import { inlineSelectStyle } from './AddSlotModal'
@@ -204,6 +205,7 @@ export function CopyFromModal({
             Comparing <code style={{ fontFamily: 'var(--font-mono)' }}>{sourceLabel}</code> → <code style={{ fontFamily: 'var(--font-mono)' }}>{targetEnv}</code>. Toggle which keys to apply, then confirm. Nothing is saved to disk until you hit SAVE.
           </div>
           <div className="flex-1 overflow-y-auto scrollbar-thin px-4 pb-3">
+            <ComparisonLegend />
             <DiffSection
               title={`Matching keys (${diff?.matching.length ?? 0})`}
               hint={`Overwrite current values from ${sourceLabel}`}
@@ -212,13 +214,8 @@ export function CopyFromModal({
                 key: m.key,
                 checked: !!overwrite[m.key],
                 onToggle: () => setOverwrite((s) => ({ ...s, [m.key]: !s[m.key] })),
-                detail: (
-                  <span className="text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                    <span style={{ color: 'var(--danger)' }}>{m.currentValue || '∅'}</span>
-                    {' → '}
-                    <span style={{ color: 'var(--success)' }}>{m.sourceValue || '∅'}</span>
-                  </span>
-                ),
+                before: m.currentValue,
+                after: overwrite[m.key] ? m.sourceValue : m.currentValue,
               }))}
             />
             <DiffSection
@@ -229,11 +226,8 @@ export function CopyFromModal({
                 key: e.key,
                 checked: !!addNew[e.key],
                 onToggle: () => setAddNew((s) => ({ ...s, [e.key]: !s[e.key] })),
-                detail: (
-                  <span className="text-[10px]" style={{ color: 'var(--success)', fontFamily: 'var(--font-mono)' }}>
-                    {e.value || '∅'}
-                  </span>
-                ),
+                before: null,
+                after: addNew[e.key] ? e.value : null,
               }))}
             />
             <DiffSection
@@ -244,11 +238,8 @@ export function CopyFromModal({
                 key: e.key,
                 checked: !!keepExtra[e.key],
                 onToggle: () => setKeepExtra((s) => ({ ...s, [e.key]: !s[e.key] })),
-                detail: (
-                  <span className="text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                    {e.value || '∅'}
-                  </span>
-                ),
+                before: e.value,
+                after: keepExtra[e.key] ? e.value : null,
               }))}
             />
           </div>
@@ -285,24 +276,30 @@ export function DiffSection({
   title: string
   hint: string
   empty: string
-  rows: { key: string; checked: boolean; onToggle: () => void; detail: ReactNode }[]
+  rows: { key: string; checked: boolean; onToggle: () => void; before: string | null; after: string | null }[]
 }) {
   return (
     <div className="mt-3">
-      <div className="flex items-baseline justify-between">
+      <div className="flex flex-wrap items-baseline justify-between gap-1">
         <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{title}</span>
         <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{hint}</span>
       </div>
-      <div className="mt-1 rounded-md" style={{ border: '1px solid var(--border-default)' }}>
+      <div className="mt-1">
         {rows.length === 0 ? (
           <div className="px-3 py-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>{empty}</div>
-        ) : rows.map((r) => (
-          <label key={r.key} className="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer" style={{ borderBottom: '1px solid var(--border-default)' }}>
-            <input type="checkbox" checked={r.checked} onChange={r.onToggle} />
-            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{r.key}</span>
-            <span className="ml-auto truncate max-w-[55%]">{r.detail}</span>
-          </label>
-        ))}
+        ) : <ComparisonTable
+          ariaLabel={title}
+          beforeLabel="Before · Current"
+          afterLabel="After · Selected changes"
+          labelHeading="Key"
+          code
+          rows={rows.map((row) => ({
+            id: row.key,
+            label: <label className="flex items-start gap-2 cursor-pointer"><input type="checkbox" checked={row.checked} onChange={row.onToggle} /><span className="font-mono">{row.key}</span></label>,
+            before: row.before,
+            after: row.after,
+          }))}
+        />}
       </div>
     </div>
   )

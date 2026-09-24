@@ -1,3 +1,4 @@
+import type { RunWaitingState } from '@/features/runs'
 import type { ReactNode } from 'react'
 import type { FlightStage, FlightStageKey, FlightStageStatus, SpecsCoverageProgress } from '@/shared/api/client'
 import { capitalizeFirst } from '@/shared/lib/format'
@@ -45,14 +46,22 @@ export const FLIGHT_OVERVIEW = 'From a bare repo to tests, coverage evidence, an
  *  centred in a `DOT` -wide lane, so the smaller dot shares the run row's dot
  *  centre and every title in the card starts on `TEXT_INDENT`. */
 export const HERO_ROW = {
-  /** RunRow's `px-3`. */
-  GUTTER: '0.75rem',
   /** RunRow's StatusDot — also the lane a smaller row dot is centred in. */
   DOT: '0.55rem',
   /** RunRow's `gap-2`. */
   GAP: '0.5rem',
-  /** Where every title/meta/stats line in the hero begins. */
-  TEXT_INDENT: 'calc(0.75rem + 0.55rem + 0.5rem)',
+  /** Where every title/meta/stats line in the hero begins, measured from the
+   *  card's own text column: the dot lane plus its gap, nothing else.
+   *
+   *  Nothing in this card carries a gutter of its own any more. It used to add
+   *  RunRow's `px-3` on top of the card's padding, which put four different
+   *  left edges on one pane — card 252, kicker and stats 265, hero title 294,
+   *  previous-run titles 281 — so the one row that should anchor the stage was
+   *  the only thing on it that lined up with nothing. Cancelling that gutter
+   *  with a negative margin fixed the arithmetic and broke the look: a fill and
+   *  a hairline drawn out to the card's border turned the card into a slab
+   *  inside a slab. The rows are flush and unfilled instead. */
+  TEXT_INDENT: 'calc(0.55rem + 0.5rem)',
 } as const
 
 /** The column as a wrapper, so a panel with two render branches cannot cap one
@@ -70,17 +79,17 @@ export function StageColumn({ children }: { children: ReactNode }) {
  *  every locked row repeating the same "unlocks after the first flight" note
  *  (that lock is stated once, on the section header). */
 export const STAGE_BLURB: Record<FlightStageKey, string> = {
-  'similarity': 'Runs every step below, start to finish.',
-  'scout': 'Reads your repo to learn what it is built with and how it starts.',
-  'scaffold': 'Creates the test suite in your workspace, with settings and a start command.',
-  'env-capture': 'Copies the settings the app needs to start.',
-  'docs': 'Collects the documents that describe what the suite should do.',
-  'prd-summary': 'Turns those documents into a short list of things to test.',
-  'specs-coverage': 'Writes tests and maps them to requirements against your coverage target.',
-  'portify': 'Lets each service take its port from settings, so two runs can go at once.',
-  'run': 'Starts the app and runs the tests, fixing failures as they come up.',
-  'heal': 'Fixes failures by editing the app, then runs the tests again.',
-  'evaluation-export': 'Packs the finished run into a report you can download.',
+  'similarity': 'Checks whether the flight can start.',
+  'scout': 'Checks your repo and how to start it.',
+  'scaffold': 'Creates your test suite setup.',
+  'env-capture': 'Copies your app startup settings.',
+  'docs': 'Finds documents that describe what to test.',
+  'prd-summary': 'Lists what those documents say to test.',
+  'specs-coverage': 'Writes and maps your tests.',
+  'portify': 'Sets ports so services can run side by side.',
+  'run': 'Starts the app, runs tests, and fixes failures.',
+  'heal': 'Fixes failed tests, then runs them again.',
+  'evaluation-export': 'Creates a downloadable report.',
 }
 
 /** The single status hue map — rail, chip, mini rail, and any artifact surface
@@ -117,7 +126,12 @@ export const STAGE_STATUS_LABEL: Record<FlightStageStatus, string> = {
 /** The one stage-status treatment (R14): icon + label chip in the stage's tone,
  *  with the live dot while generating. Every surface that shows a stage's state
  *  renders this — never a hand-rolled chip. */
-export function StageStatusChip({ status }: { status: FlightStageStatus }) {
+export function stagePresentationStatus(status: FlightStageStatus, waiting?: RunWaitingState): FlightStageStatus {
+  return waiting?.kind === 'queued' ? 'pending' : waiting ? 'waiting-for-approval' : status
+}
+
+export function StageStatusChip({ status: recordedStatus, waiting }: { status: FlightStageStatus; waiting?: RunWaitingState }) {
+  const status = stagePresentationStatus(recordedStatus, waiting)
   const tone = stageStatusTone(status)
   return (
     <Chip
@@ -128,7 +142,7 @@ export function StageStatusChip({ status }: { status: FlightStageStatus }) {
       icon={status === 'running'
         ? <StatusDot state="running" className="shrink-0" />
         : <span aria-hidden="true">{STAGE_ICON[status]}</span>}
-      label={capitalizeFirst(STAGE_STATUS_LABEL[status])}
+      label={waiting?.label ?? capitalizeFirst(STAGE_STATUS_LABEL[status])}
     />
   )
 }
@@ -140,21 +154,9 @@ export function StageStatusChip({ status }: { status: FlightStageStatus }) {
 // mirroring the STAGE_LABEL pattern. An unmapped kind/option falls back to its
 // raw key, so new server checkpoints degrade readable, never blank.
 
-const CHECKPOINT_TITLE: Record<string, string> = {
-  'similarity-choice': 'Existing suite found — what should this flight do?',
-  'config-approval': 'Does this setup look right?',
-  'missing-env': 'Some settings are missing',
-  'prd-source': 'Where should requirements come from?',
-  'coverage-stuck': 'Coverage stopped short of the target',
-  'portify-gate': 'Make this suite safe to run twice at once?',
-  'portify-apply': 'Save these port changes?',
-  'run-failed': 'The test run did not pass',
-  'export-mode': 'How should the report be built?',
-  // StageDetail presents this protocol checkpoint as running Activity, not a
-  // decision card. Keep the wire vocabulary labelled for any consumer that
-  // still asks for a generic checkpoint title.
-  'external-work': 'External agent work',
-}
+// Shared with the durable notification producer so a Flight decision has the
+// same name in the page, inbox and toast.
+export { flightCheckpointTitle as checkpointTitle } from '@shared/flights/checkpoint-labels'
 
 const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
   'similarity-choice': {
@@ -216,10 +218,6 @@ const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
   },
 }
 
-export function checkpointTitle(kind: string): string {
-  return CHECKPOINT_TITLE[kind] ?? kind
-}
-
 export function checkpointOptionLabel(kind: string, option: string): string {
   return CHECKPOINT_OPTION_LABEL[kind]?.[option] ?? option
 }
@@ -260,9 +258,9 @@ export function portifyWorkflowId(stage: { key: string; evidence?: unknown; prog
   return typeof prog.workflowId === 'string' ? prog.workflowId : null
 }
 
-/** The live phase mirror the portify adapter republishes on change (see
- *  PortifyStageProgress). Empty object for settled/older flights. */
-export function portifyProgress(stage: { progress?: unknown }): Record<string, unknown> {
+/** The live progress mirror an adapter republishes on change.
+ *  Empty object for settled/older flights; the evidence twin is evidenceOf. */
+export function progressOf(stage: { progress?: unknown }): Record<string, unknown> {
   return (stage.progress ?? {}) as Record<string, unknown>
 }
 

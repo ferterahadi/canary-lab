@@ -6,7 +6,9 @@ import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useEvaluationExports } from '@/features/evaluation'
 import { isActivePortify, usePortify } from '@/features/portify'
 import { useActiveRuns, useRunDetails, useRuns } from '@/features/runs'
+import { runWaitingState, type RunWaitingState } from '@/features/runs'
 import { isActiveWizardTask, useWizardDrafts } from '@/features/wizard'
+import { isAuxiliaryExecution } from '@shared/verification'
 
 // Per-feature "what is happening right now" — the live signal behind the
 // Flight pill. Since the R6/R15/R19 consolidation absorbed the per-feature
@@ -36,6 +38,7 @@ export interface FeatureActivity {
    *  process this server spawned. Drives the stage's compact external-session
    *  Activity row and the flight view's mutation lock. */
   external?: boolean
+  waiting?: RunWaitingState
 }
 
 /** Persistent provenance for one piece of work behind a Flight step. Live
@@ -70,6 +73,8 @@ export type FeatureExternalHistory = Map<string, Partial<Record<FlightStageKey, 
 export interface FeatureWorkState {
   activity: Map<string, FeatureActivity>
   externalHistory: FeatureExternalHistory
+  coverageJobs: CoverageJobIndexEntry[]
+  portifyWorkflows: PortifyIndexEntry[]
 }
 
 /** Which flight stage a standalone activity kind maps onto — so an
@@ -170,11 +175,13 @@ export function deriveFeatureActivity(input: {
     // drive the benchmark window — neither is feature activity here. A
     // deployed-env verification IS: it's a run in verify mode, and the suite's
     // one live indicator must light for it like any other run.
-    if (r.executionType === 'boot' || r.executionType === 'benchmark') continue
+    if (isAuxiliaryExecution(r.executionType)) continue
     const kind: FeatureActivityKind = r.executionType === 'verify'
       ? 'verifying'
       : r.status === 'healing' ? 'healing' : 'running'
+    const waiting = runWaitingState(input.runDetails?.[r.runId] ?? r)
     map.set(r.feature, {
+      ...(waiting ? { waiting } : {}),
       kind,
       runId: r.runId,
       external: r.healMode === 'external' || input.runDetails?.[r.runId]?.manifest.healMode === 'external',
@@ -277,7 +284,7 @@ export function deriveFeatureExternalHistory(input: {
   }
 
   for (const run of input.runs) {
-    if (run.executionType === 'boot' || run.executionType === 'benchmark') continue
+    if (isAuxiliaryExecution(run.executionType)) continue
     const detail = input.runDetails?.[run.runId]
     remember(run.feature, {
       kind: run.executionType === 'verify'
@@ -379,9 +386,11 @@ export function useFeatureWorkState(): FeatureWorkState {
     'coverage',
     'all-jobs',
     () => api.listAllCoverageJobs(),
-    { cache: 'coverage-jobs' },
+    { cache: 'coverage-jobs', pollWhile: (jobs) => jobs === null || jobs.some((job) => job.status === 'running') },
   )
   return useMemo(() => ({
+    coverageJobs: coverageJobs ?? [],
+    portifyWorkflows: workflows,
     activity: deriveFeatureActivity({
       activeRuns: runs,
       portifyWorkflows: workflows,

@@ -10,7 +10,7 @@
  */
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { CloseIcon } from './Icons'
 import { StatusDot, StatusDotState } from './atoms'
 
@@ -67,6 +67,80 @@ export function useEscapeToClose(onClose: () => void, enabled = true): void {
   }, [enabled])
 }
 
+/** Dismiss when a mousedown lands outside every element the surface owns — the
+ *  other half of what a dropdown needs beside `useEscapeToClose`, and drifting
+ *  the same way Escape once did (five near-identical copies across the flight
+ *  controls, the token picker and the cleanup table). Takes a list of refs
+ *  rather than one, because a menu rendered through a portal is not a DOM
+ *  descendant of its trigger: both have to count as "inside". */
+export function useDismissOnOutsideMousedown(
+  onDismiss: () => void,
+  enabled: boolean,
+  refs: ReadonlyArray<RefObject<HTMLElement | null>>,
+): void {
+  const onDismissRef = useRef(onDismiss)
+  onDismissRef.current = onDismiss
+  useEffect(() => {
+    if (!enabled) return
+    const onDown = (event: MouseEvent): void => {
+      if (refs.some((ref) => ref.current?.contains(event.target as Node))) return
+      onDismissRef.current()
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+    // Callers pass a fresh array literal every render; the refs inside it are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- depend on the stable refs, not their wrapper array
+  }, [enabled, ...refs])
+}
+
+const focusLayers: HTMLElement[] = []
+let bodyOverflow = ''
+
+/** Only the top modal owns keyboard focus; nested confirmations return to the
+ * control that opened them, and the last modal restores the page scroll. */
+function useModalFocus(ref: RefObject<HTMLDivElement | null>, open: boolean): void {
+  useEffect(() => {
+    const surface = ref.current
+    if (!open || !surface) return
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    if (focusLayers.length === 0) {
+      bodyOverflow = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+    }
+    const childIndex = focusLayers.findIndex((layer) => surface.contains(layer))
+    if (childIndex < 0) focusLayers.push(surface)
+    else focusLayers.splice(childIndex, 0, surface)
+    if (focusLayers.at(-1) === surface) surface.focus()
+    const focusable = (): HTMLElement[] => [...surface.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )].filter((node) => !node.closest('[hidden], [inert], [aria-hidden="true"]') && getComputedStyle(node).display !== 'none' && getComputedStyle(node).visibility !== 'hidden')
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Tab' || focusLayers.at(-1) !== surface) return
+      const nodes = focusable()
+      const index = nodes.indexOf(document.activeElement as HTMLElement)
+      if (nodes.length === 0 || index < 0 || (event.shiftKey ? index === 0 : index === nodes.length - 1)) {
+        event.preventDefault()
+        const next = event.shiftKey ? nodes.at(-1) ?? surface : nodes[0] ?? surface
+        next.focus()
+      }
+    }
+    const onFocus = (event: FocusEvent): void => {
+      if (focusLayers.at(-1) === surface && !surface.contains(event.target as Node)) surface.focus()
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('focusin', onFocus)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('focusin', onFocus)
+      const index = focusLayers.indexOf(surface)
+      const wasTop = index === focusLayers.length - 1
+      focusLayers.splice(index, 1)
+      if (focusLayers.length === 0) document.body.style.overflow = bodyOverflow
+      if (wasTop && previous?.isConnected) previous.focus()
+    }
+  }, [open, ref])
+}
+
 export function Modal({
   open,
   onClose,
@@ -78,6 +152,7 @@ export function Modal({
   meta,
   width = 480,
   height,
+  viewportInset = 10,
   role = 'dialog',
   ariaLabel,
   testId,
@@ -85,6 +160,8 @@ export function Modal({
   subheader,
   footer,
   stableScrollGutter,
+  portal = false,
+  bodyClassName,
   children,
 }: {
   open: boolean
@@ -106,8 +183,10 @@ export function Modal({
   /** Fixed height (or a px number) instead of shrinking to fit content — for a
    *  multi-tab/paginated dialog whose body height should stay stable as the
    *  active section's content amount changes. Every dialog remains constrained
-   *  to the shared 80vh viewport cap. */
+   *  to the chosen viewport inset. */
   height?: number | string
+  /** Viewport margin in vh; dense source review can reserve more reading room. */
+  viewportInset?: 2 | 6 | 10
   /** ARIA role for the dialog surface — `alertdialog` for error/confirmation
    *  interruptions, `dialog` (default) otherwise. */
   role?: 'dialog' | 'alertdialog'
@@ -135,25 +214,35 @@ export function Modal({
    *  launcher's collapsible step list) doesn't jump sideways as the scrollbar
    *  appears and disappears. */
   stableScrollGutter?: boolean
+  /** Escape transformed/overflow-hidden status-bar ancestors. */
+  portal?: boolean
+  /** Pane layouts own their scroll regions instead of the default body. */
+  bodyClassName?: string
   children?: ReactNode
 }) {
   useEscapeToClose(onClose, open)
+  const surfaceRef = useRef<HTMLDivElement>(null)
+  useModalFocus(surfaceRef, open)
   if (!open) return null
   const hasHeader = Boolean(title || eyebrow || meta || status || icon || description)
-  return (
+  const node = (
     <div
-      className="cl-modal-backdrop fixed inset-0 z-50 flex items-center justify-center px-4 py-[10vh]"
+      className="cl-modal-backdrop fixed inset-0 z-50 flex items-center justify-center px-4"
+      style={{ paddingBlock: `${viewportInset}vh` }}
       onClick={onClose}
     >
       <div
+        ref={surfaceRef}
+        tabIndex={-1}
         role={role}
         aria-label={ariaLabel ?? title}
         aria-modal="true"
         data-testid={testId}
-        className="cl-modal relative flex max-h-[80vh] flex-col overflow-hidden rounded-lg"
+        className="cl-modal relative flex max-h-[80vh] flex-col overflow-hidden rounded-lg outline-none"
         style={{
           width,
           maxWidth: '94vw',
+          maxHeight: `${100 - 2 * viewportInset}vh`,
           ...(height ? { height } : {}),
           background: 'var(--bg-elevated)',
         }}
@@ -207,7 +296,7 @@ export function Modal({
         {subheader}
         {children != null && (
           <div
-            className="min-h-0 flex-1 overflow-y-auto scrollbar-thin"
+            className={bodyClassName ?? 'min-h-0 flex-1 overflow-y-auto scrollbar-thin'}
             style={stableScrollGutter ? { scrollbarGutter: 'stable' } : undefined}
           >
             {children}
@@ -221,6 +310,7 @@ export function Modal({
       </div>
     </div>
   )
+  return portal ? createPortal(node, document.body) : node
 }
 
 export function ConfirmModal({
@@ -234,6 +324,7 @@ export function ConfirmModal({
   onCancel,
   busy = false,
   confirmDisabled = false,
+  portal = false,
 }: {
   open: boolean
   title: string
@@ -245,10 +336,12 @@ export function ConfirmModal({
   onCancel: () => void
   busy?: boolean
   confirmDisabled?: boolean
+  portal?: boolean
 }) {
   return (
     <Modal
       open={open}
+      portal={portal}
       onClose={onCancel}
       title={title}
       status={variant === 'danger' ? 'failed' : undefined}

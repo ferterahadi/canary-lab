@@ -1,4 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { CopyField } from '@/shared/ui/CopyField'
+import { Modal, Section } from '@/shared/ui/atoms'
 
 export type McpPromoAction = 'create-feature' | 'run-test' | 'export-evaluation'
 
@@ -96,54 +98,66 @@ function McpPromoDialog({
 }) {
   const [dismiss, setDismiss] = useState(false)
 
+  // The shared `Modal` chrome, not a hand-rolled surface: this was the one
+  // dialog in the app that built its own backdrop, header and close button, so
+  // it carried a letter "X" where every other dialog shows `CloseIcon`, and a
+  // ~70-line `cl-mcp-promo-*` skin free to drift from the dialog tokens. Only
+  // the video frame needs CSS of its own now.
   return (
-    <div className="cl-modal-backdrop cl-mcp-promo-backdrop fixed inset-0 z-[70] flex items-center justify-center">
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-label="Canary Lab agent workflow"
-        className="cl-modal cl-mcp-promo-modal overflow-hidden"
-      >
-        <button
-          type="button"
-          onClick={onCancel}
-          aria-label="Not now"
-          className="cl-mcp-promo-close"
-        >
-          X
-        </button>
-        <div className="cl-mcp-promo-video-wrap">
-          <video
-            src={videoSrc}
-            autoPlay
-            muted
-            loop
-            playsInline
-            controls
-            className="cl-mcp-promo-video"
-          />
-        </div>
-        <div className="cl-mcp-promo-body">
-          <p className="cl-mcp-promo-setup">
-            To use Canary Lab from Codex or Claude, run <code>npx canary-lab setup</code> once from this
-            workspace, then restart Codex or Claude to load the tools.
+    <Modal
+      open
+      onClose={onCancel}
+      eyebrow="Agents"
+      title="Run Canary Lab from your agent"
+      description="Claude and Codex drive the same runs, repairs and reports through Canary Lab's MCP tools."
+      width={760}
+      testId="mcp-promo"
+      bodyClassName="min-h-0 flex-1 overflow-y-auto scrollbar-thin"
+      footer={(
+        <>
+          {/* The 13px accent-tinted native mark the Getting Started dialog and
+              every Project Settings choice row use — untinted it falls back to
+              the browser's own blue, the one colour here that isn't ours. */}
+          <label className="mr-auto flex cursor-pointer items-center gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+            <input
+              type="checkbox"
+              checked={dismiss}
+              onChange={(event) => setDismiss(event.currentTarget.checked)}
+              className="h-[13px] w-[13px] shrink-0"
+              style={{ accentColor: 'var(--accent)' }}
+            />
+            Don&apos;t show this again
+          </label>
+          <button type="button" onClick={() => onContinue(dismiss)} className="cl-button-primary px-3 py-1.5">
+            Continue
+          </button>
+        </>
+      )}
+    >
+      <div className="cl-mcp-promo-frame">
+        <video
+          src={videoSrc}
+          autoPlay
+          muted
+          loop
+          playsInline
+          controls
+          className="cl-mcp-promo-video"
+        />
+      </div>
+      {/* A command the reader has to run is a `CopyField` everywhere else in the
+          app (the Getting Started dialog's agent prompt, the connect steps) —
+          it was prose with an inline `<code>` here, so the one actionable
+          string in the dialog was the only one you had to retype. */}
+      <div className="p-3">
+        <Section title="One-time setup">
+          <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+            Run <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>npx canary-lab setup</code> once
+            from this workspace, then restart Codex or Claude to load the tools.
           </p>
-          <div className="cl-mcp-promo-footer">
-            <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
-              <input
-                type="checkbox"
-                checked={dismiss}
-                onChange={(event) => setDismiss(event.currentTarget.checked)}
-                className="h-3.5 w-3.5"
-              />
-              Don't show this again
-            </label>
-            <button type="button" onClick={() => onContinue(dismiss)} className="cl-button-primary px-3 py-1.5">
-              Continue
-            </button>
-          </div>
-        </div>
-      </section>
-    </div>
+          <CopyField value="npx canary-lab setup" label="setup command" testId="mcp-promo-setup-command" />
+        </Section>
+      </div>
+    </Modal>
   )
 }

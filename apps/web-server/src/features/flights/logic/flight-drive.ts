@@ -1,8 +1,8 @@
-import { FLIGHT_STAGE_KEYS, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey, type FlightStageTimingKey } from './types'
+import { FLIGHT_EXECUTION_ORDER, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey, type FlightStageTimingKey } from './types'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { FlightConductorDeps, abortFlight, drainQueuedFlights, pauseFlight, resumeFlight } from './conductor'
 import { stampSystemLine } from './flight-errors'
-import { StageContext, StageOutcome, bankAllStageTimings, bankStageActivity, bankStageTiming, buildStageContext, driveControllers, firstOpenStageIndex, startStageTiming } from './flight-stages'
+import { StageContext, StageOutcome, type BackgroundEnvJob, backgroundEnvJobs, bankAllStageTimings, bankStageActivity, bankStageTiming, buildStageContext, driveControllers, firstOpenStageIndex, startStageTiming } from './flight-stages'
 
 /** R71/W4: checkpoint kind → its safe defaults, best first. The first entry
  *  that is actually among the checkpoint's options wins, so a kind whose option
@@ -110,6 +110,57 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
   const controller = new AbortController()
   driveControllers.set(flightId, controller)
 
+  const runAdapter = async (key: FlightStageKey, signal: AbortSignal, response?: FlightCheckpointResponse): Promise<StageOutcome> => {
+    const adapter = deps.adapters[key]
+    if (!adapter) return { kind: 'failed', error: `no adapter for stage ${key}` }
+    const ctx = buildStageContext(flightId, key, signal, deps)
+    try {
+      return response && adapter.onCheckpointResponse ? await adapter.onCheckpointResponse(ctx, response) : await adapter.run(ctx)
+    } catch (err) {
+      return { kind: 'failed', error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  const requirementsOpen = (m: FlightManifest): number => m.stages.findIndex((stage) =>
+    (stage.key === 'docs' || stage.key === 'prd-summary') && stage.status !== 'done' && stage.status !== 'skipped')
+
+  // Only boot verification overlaps requirements. Keep its job across external
+  // checkpoints so a response joins the same boot before test authoring.
+  const startEnvJob = (response?: FlightCheckpointResponse): void => {
+    const background = new AbortController()
+    const job: BackgroundEnvJob = { controller: background, completion: runAdapter('env-capture', background.signal, response) }
+    backgroundEnvJobs.set(flightId, job)
+    job.completion = job.completion.then((outcome) => {
+      job.outcome = outcome
+      // A paused job may settle after a new drive has started. It must never
+      // overwrite the new invocation's evidence or remove its cancellation.
+      if (backgroundEnvJobs.get(flightId) !== job) return outcome
+      const current = store.get(flightId)
+      if (!current || (background.signal.aborted && current.status !== 'paused' && current.status !== 'aborted')) {
+        backgroundEnvJobs.delete(flightId)
+        return outcome
+      }
+      if (outcome.kind === 'done' || outcome.kind === 'skipped') {
+        patchStage('env-capture', outcome.kind === 'done'
+          ? { status: 'done', endedAt: now(), evidence: outcome.evidence, checkpoint: undefined }
+          : { status: 'skipped', endedAt: now(), skipReason: outcome.reason, checkpoint: undefined })
+        clearAskAt('env-capture')
+        backgroundEnvJobs.delete(flightId)
+      } else if (current.status === 'paused' || current.status === 'aborted') {
+        backgroundEnvJobs.delete(flightId)
+      }
+      // Failures and missing-env checkpoints are consumed by the foreground
+      // drive after Requirements. Only one answerable checkpoint is exposed.
+      return outcome
+    }).catch((err: unknown) => {
+      // Persistence can fail after the adapter resolves, including while the
+      // foreground is parked externally. Keep that failure joinable too.
+      const outcome: StageOutcome = { kind: 'failed', error: err instanceof Error ? err.message : String(err) }
+      job.outcome = outcome
+      return outcome
+    })
+  }
+
   try {
     // ELAPSED starts when work does. A queued flight is created parked and can
     // sit behind its siblings for their whole runtime; stamping here (first
@@ -123,7 +174,12 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
       // Aborted/paused out from under us (abortFlight/pauseFlight between stages).
       if (m.status === 'aborted' || m.status === 'paused') return
 
-      const idx = firstOpenStageIndex(m)
+      let idx = firstOpenStageIndex(m)
+      const envJob = backgroundEnvJobs.get(flightId)
+      if (idx >= 0 && m.stages[idx].key === 'env-capture' && envJob && !envJob.controller.signal.aborted) {
+        const requirementsIdx = requirementsOpen(m)
+        if (requirementsIdx >= 0) idx = requirementsIdx
+      }
       if (idx === -1) {
         save({ ...m, status: 'done', currentStage: null, updatedAt: now(), endedAt: now() })
         drainQueuedFlights(deps)
@@ -131,7 +187,6 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
       }
 
       const stage = m.stages[idx]
-      const adapter = deps.adapters[stage.key]
       m = {
         ...m,
         status: 'running',
@@ -154,24 +209,30 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
       }
       save(m)
 
+      // Once scaffold has settled, source-document work needs neither the
+      // booted app nor secrets. Start the boot once and advance only along the
+      // docs → summary lane while it runs. Explicit re-entry still asks here.
+      if (stage.key === 'env-capture' && (!envJob || envJob.controller.signal.aborted)
+        && requirementsOpen(m) >= 0 && m.askAtStage !== 'env-capture'
+        && m.stages.some((candidate) => candidate.key === 'scaffold' && candidate.status === 'done')) {
+        const response = pendingResponse
+        pendingResponse = undefined
+        startEnvJob(response)
+        continue
+      }
+
       // The same builder `interruptStage` uses, so a teardown writes to the stage
       // log exactly the way the stage itself does.
       const ctx: StageContext = buildStageContext(flightId, stage.key, controller.signal, deps)
 
-      let outcome: StageOutcome
-      if (!adapter) {
-        outcome = { kind: 'failed', error: `no adapter for stage ${stage.key}` }
-      } else {
-        try {
-          const response = pendingResponse
-          pendingResponse = undefined
-          outcome =
-            response && adapter.onCheckpointResponse
-              ? await adapter.onCheckpointResponse(ctx, response)
-              : await adapter.run(ctx)
-        } catch (err) {
-          outcome = { kind: 'failed', error: err instanceof Error ? err.message : String(err) }
-        }
+      const response = pendingResponse
+      pendingResponse = undefined
+      const joiningEnv = stage.key === 'env-capture' ? backgroundEnvJobs.get(flightId) : undefined
+      const outcome = joiningEnv && !joiningEnv.controller.signal.aborted
+        ? await joiningEnv.completion
+        : await runAdapter(stage.key, controller.signal, response)
+      if (joiningEnv && backgroundEnvJobs.get(flightId) === joiningEnv) {
+        backgroundEnvJobs.delete(flightId)
       }
 
       // The pause-race rule: the flight may have been paused/aborted while the
@@ -218,8 +279,9 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
       }
       if (outcome.kind === 'jump') {
         const jump = outcome
-        const targetIdx = FLIGHT_STAGE_KEYS.indexOf(jump.to)
-        if (targetIdx <= idx) {
+        const currentOrder = FLIGHT_EXECUTION_ORDER.indexOf(stage.key)
+        const targetOrder = FLIGHT_EXECUTION_ORDER.indexOf(jump.to)
+        if (targetOrder <= currentOrder) {
           patchStage(stage.key, { status: 'failed', endedAt: now(), error: `illegal jump ${stage.key} → ${jump.to}` })
           const cur = read()
           save({ ...cur, status: 'paused', updatedAt: now() })
@@ -240,7 +302,8 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
                 checkpoint: undefined,
               }
             }
-            if (i > idx && i < targetIdx) {
+            const order = FLIGHT_EXECUTION_ORDER.indexOf(s.key)
+            if (order > currentOrder && order < targetOrder) {
               return { ...s, status: 'skipped' as const, endedAt: now(), skipReason: jump.skipReason }
             }
             return s
@@ -249,8 +312,9 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
         continue
       }
       if (outcome.kind === 'rewind') {
-        const targetIdx = FLIGHT_STAGE_KEYS.indexOf(outcome.to)
-        if (targetIdx < 0 || targetIdx > idx) {
+        const currentOrder = FLIGHT_EXECUTION_ORDER.indexOf(stage.key)
+        const targetOrder = FLIGHT_EXECUTION_ORDER.indexOf(outcome.to)
+        if (targetOrder < 0 || targetOrder > currentOrder) {
           patchStage(stage.key, {
             status: 'failed',
             endedAt: now(),
@@ -267,9 +331,12 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
           ...cur,
           updatedAt: now(),
           currentStage: outcome.to,
-          stages: cur.stages.map((s, i) =>
-            i >= targetIdx && i <= idx ? { key: s.key, status: 'pending' as const } : s,
-          ),
+          stages: cur.stages.map((s) => {
+            const order = FLIGHT_EXECUTION_ORDER.indexOf(s.key)
+            return order >= targetOrder && order <= currentOrder
+              ? { key: s.key, status: 'pending' as const }
+              : s
+          }),
         })
         continue
       }
@@ -305,6 +372,9 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
       }
       // failed → park the flight resumable; the stage keeps its error and is
       // flipped back to pending by resumeFlight so the adapter re-runs.
+      // A failed Requirements pass frees the repo lock only after its
+      // overlapping boot has stopped, using the same awaited pause teardown.
+      if (backgroundEnvJobs.has(flightId)) await pauseFlight(flightId, deps)
       patchStage(stage.key, { status: 'failed', endedAt: now(), error: outcome.error, errorDetail: outcome.errorDetail })
       {
         const cur = read()
@@ -317,6 +387,7 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
     }
   } catch (err) {
     // A bug in the machine itself (not a stage outcome): fail the flight hard.
+    if (backgroundEnvJobs.has(flightId) && read().status === 'running') await pauseFlight(flightId, deps)
     const m = store.get(flightId)
     if (m) {
       save({

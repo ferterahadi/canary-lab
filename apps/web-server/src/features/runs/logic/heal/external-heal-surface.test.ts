@@ -7,8 +7,10 @@ import os from 'os'
 import path from 'path'
 
 import type { RunDetail } from '../run-store'
+import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 
 import { buildExternalFailureDetail, buildExternalHealContext, buildExternalRunSnapshot, buildExternalRunSnapshotSlim, normalizeRunCounts, slimRepeatHealContext, writeHealSignal } from './external-heal-surface'
+import { compactCounts } from './external-heal-counts'
 
 import { buildRunPaths, runDirFor } from '../runtime/run-paths'
 
@@ -80,6 +82,46 @@ function detailFor(runId: string): RunDetail {
 }
 
 describe('buildExternalHealContext', () => {
+  it('keeps every incompatible repository and all affected services actionable on repeat waits', () => {
+    const detail = detailFor('run-1')
+    const dependency = (repoName: string, verdict: RunDependencyProvenance['verdict']): RunDependencyProvenance => ({
+      repoName, verdict, mode: 'shared', sourceRevision: 'abc123', sourcePath: `/source/${repoName}`,
+      worktreePath: `/worktree/${repoName}`, dependencyPath: null, dependencyRealPath: null,
+      lockfile: null, dependencyLockfile: null, generatorInputs: [], dependencyGeneratorInputs: [],
+      runtime: { node: 'v22', packageManager: 'npm' }, incompatibilityCause: 'generator-input-mismatch',
+      remediation: 'Prepare worktree-local dependencies.', checkedAt: '2026-09-22T00:00:00Z',
+      validation: { command: 'validate', cwd: `/worktree/${repoName}`, exitCode: 1, signal: null, logPath: `/logs/${repoName}.log` },
+    })
+    detail.manifest.services = ['api', 'worker', 'web'].map((name) => ({
+      repoName: name === 'web' ? 'web' : 'app', name, safeName: name, command: 'start', cwd: '/worktree', logPath: '/log',
+    }))
+    detail.manifest.dependencyProvenance = [dependency('app', 'incompatible'), dependency('web', 'incompatible'), dependency('legacy', 'unknown'), dependency('ready', 'compatible')]
+    const context = buildExternalHealContext({ detail, logsDir })
+    expect(context.dependencyBlockers).toEqual([
+      expect.objectContaining({ repoName: 'app', services: [{ name: 'api', safeName: 'api' }, { name: 'worker', safeName: 'worker' }], cause: 'generator-input-mismatch', requiredAction: 'Prepare worktree-local dependencies.', logPath: '/logs/app.log' }),
+      expect.objectContaining({ repoName: 'web', services: [{ name: 'web', safeName: 'web' }] }),
+    ])
+    expect(context.dependencyBlockers![0].reason).toContain('generated output compatibility is unproven')
+    expect(context.dependencyProvenance).toHaveLength(2)
+    const repeat = slimRepeatHealContext(context)
+    expect(repeat.dependencyBlockers).toEqual(context.dependencyBlockers)
+    expect(repeat.guidance).toContain('Repair deterministic problems')
+    expect(repeat.guidance).toContain('Ask the user only')
+    expect(repeat.guidance).toContain('get_heal_context')
+
+    detail.manifest.dependencyProvenance = [dependency('app', 'compatible'), dependency('web', 'unknown')]
+    expect(buildExternalHealContext({ detail, logsDir }).dependencyBlockers).toBeUndefined()
+  })
+
+  it('keeps historical incompatible records actionable without inventing a cause or log', () => {
+    const detail = detailFor('run-1')
+    detail.manifest.dependencyProvenance = [{ repoName: 'old', verdict: 'incompatible', worktreePath: '/worktree' } as RunDependencyProvenance]
+    expect(buildExternalHealContext({ detail, logsDir }).dependencyBlockers).toEqual([{
+      repoName: 'old', services: [], cause: 'unclassified', reason: 'Dependency preflight rejected this repository.',
+      requiredAction: 'Repair dependencies for this worktree, then request runner verification.', worktreePath: '/worktree',
+    }])
+  })
+
   it('builds compact agent-first heal context used by MCP and HTTP routes', () => {
     const runId = 'run-1'
     const runDir = runDirFor(logsDir, runId)
@@ -161,8 +203,15 @@ describe('buildExternalHealContext', () => {
       service: 'app',
       safeName: 'app',
       reason: 'process-exited' as const,
+      classification: 'underlying-cause-not-preserved' as const,
       detail: 'Service process exited before HTTP readiness (url=http://localhost:3000/health).',
       logPath: paths.serviceLog('app'),
+      command: 'node scripts/start-stack.cjs',
+      cwd: '/worktree/app',
+      exitCode: 1,
+      signal: null,
+      excerpt: 'API failed to start',
+      nextAction: 'Canary did not observe the underlying cause, so do not guess a root cause. Update that product-repo wrapper to log and rethrow the original error, then restart.',
     }
     const detail: RunDetail = {
       runId,
@@ -189,15 +238,68 @@ describe('buildExternalHealContext', () => {
 
     const context = buildExternalHealContext({ detail, logsDir, projectRoot: tmpDir })
 
+    // The evidence reaches the agent as STRUCTURED fields, not as prose: the
+    // whole record rides the same payload, so restating it in nextSteps would
+    // spend the packet's budget twice on one fact.
     expect(context.bootFailure).toEqual(bootFailure)
     expect(context.failedTests).toEqual([])
     // nextSteps must steer the agent to the service log + a restart signal,
     // not the test-triage procedure.
     const nextSteps = (context.nextSteps ?? []).join('\n')
     expect(nextSteps).toContain(bootFailure.logPath)
+    // run-service-boot is the single author of the remediation sentence; this
+    // surface renders it verbatim rather than writing a second wording.
+    expect(nextSteps).toContain(bootFailure.nextAction)
+    expect(nextSteps).toContain('context.bootFailure')
+    expect(nextSteps).not.toContain(bootFailure.excerpt)
     expect(nextSteps).toContain('restart')
     expect(nextSteps).toContain('Do not start services or run Playwright')
     expect(nextSteps).not.toContain('failedTests[]')
+
+    const fallback = buildExternalHealContext({
+      detail: { ...detail, manifest: { ...detail.manifest, bootFailure: { ...bootFailure, nextAction: undefined } } },
+      logsDir,
+      projectRoot: tmpDir,
+    })
+    expect((fallback.nextSteps ?? []).join('\n')).toContain('Use the structured evidence and bounded redacted excerpt first')
+  })
+
+  it('omits a zero not-applicable count from compact agent output', () => {
+    expect(compactCounts({
+      totalKnown: 2,
+      passed: 2,
+      failed: 0,
+      skipped: 0,
+      notRun: 0,
+      notApplicable: 0,
+      passedNames: [],
+      passedIds: [],
+      failedNames: [],
+      failedIds: [],
+      skippedNames: [],
+      skippedIds: [],
+      notRunNames: [],
+      statusLine: '2/2 passed, 0 failed, 0 not run',
+    })).not.toHaveProperty('notApplicable')
+  })
+
+  it('retains a positive not-applicable count in compact agent output', () => {
+    expect(compactCounts({
+      totalKnown: 2,
+      passed: 1,
+      failed: 0,
+      skipped: 1,
+      notRun: 0,
+      notApplicable: 1,
+      passedNames: [],
+      passedIds: [],
+      failedNames: [],
+      failedIds: [],
+      skippedNames: [],
+      skippedIds: [],
+      notRunNames: [],
+      statusLine: '1/2 passed, 0 failed, 1 skipped (1 outside this environment), 0 not run',
+    })).toMatchObject({ notApplicable: 1 })
   })
 
   it('keeps compact counts when normalizing duplicate title names', () => {
@@ -278,7 +380,9 @@ describe('stuck-cycle escalation', () => {
   it('states no worktree rule for a run that boots its repos in place', () => {
     const context = buildExternalHealContext({ detail: detailFor('run-1'), logsDir, projectRoot: tmpDir })
     expect(context).not.toHaveProperty('worktrees')
+    expect(context).not.toHaveProperty('perturbation')
     expect((context.nextSteps ?? []).join('\n')).not.toContain('EDIT THE WORKTREE')
+    expect((context.nextSteps ?? []).join('\n')).not.toContain('PERTURBED')
   })
 
   it('omits escalation when the failing set has only repeated twice (one prior attempt)', () => {

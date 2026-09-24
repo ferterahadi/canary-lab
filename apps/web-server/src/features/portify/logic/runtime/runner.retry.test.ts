@@ -303,9 +303,10 @@ describe('createPortifyRunner (branch coverage)', () => {
     fs.writeFileSync(path.join(appRepo, 'src', 'server.js'), 'const PORT = process.env.PORT\n')
     fs.writeFileSync(path.join(appRepo, 'e2e', 'api.spec.js'), '// test\n')
     await gitInit(appRepo)
-    writeConfig(featureDir, [{ name: 'app', localPath: appRepo, slot: 'api', env: 'PORT' }])
+    writeConfig(featureDir, [{ name: 'app', localPath: appRepo, slot: 'api', env: 'PORT' }], { withPorts: false })
     // Agent modifies a tracked test file → checkTestsUntouched flags it.
     vi.mocked(runPortifyAgent).mockImplementation(async (opts: { cwd: string }) => {
+      writeConfig(featureDir, [{ name: 'app', localPath: appRepo, slot: 'api', env: 'PORT' }])
       fs.appendFileSync(path.join(opts.cwd, 'e2e', 'api.spec.js'), '\n// agent touched a test\n')
     })
     const { store, runner } = makeRunner(featuresDir, logsDir)

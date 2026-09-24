@@ -8,6 +8,8 @@ import { publishWorkspaceEvent, type WorkspaceEventPublisher } from './workspace
 export interface GitStatus {
   isGitRepo: boolean
   currentBranch: string | null
+  /** Commit HEAD points at; null on an unborn branch. What a run boots. */
+  headSha: string | null
   detached: boolean
   dirty: boolean
   dirtyFiles: string[]
@@ -22,6 +24,12 @@ export interface RepoBranchSnapshot {
   expectedBranch?: string
   detached: boolean
   dirty: boolean
+  /** Commit the checkout sat on when the run launched — the one the run's
+   *  worktree was cut from. Null on an unborn branch. */
+  sha: string | null
+  /** Set when the run fast-forwarded the checkout to its upstream before
+   *  booting (`track: 'upstream'` or the `updateRepos` start option). */
+  updatedFromUpstream?: { upstream: string; from: string; to: string }
 }
 
 export interface GitResult {
@@ -83,8 +91,9 @@ export async function getGitStatus(repoPath: string): Promise<GitStatus> {
     return emptyGitStatus()
   }
 
-  const [branch, status, locals, remotes] = await Promise.all([
+  const [branch, head, status, locals, remotes] = await Promise.all([
     runGit(target, ['branch', '--show-current']),
+    runGit(target, ['rev-parse', '--verify', '--quiet', 'HEAD']),
     runGit(target, ['status', '--porcelain']),
     runGit(target, ['for-each-ref', '--format=%(refname:short)', 'refs/heads']),
     runGit(target, ['for-each-ref', '--format=%(refname:short)', 'refs/remotes']),
@@ -95,6 +104,7 @@ export async function getGitStatus(repoPath: string): Promise<GitStatus> {
   return {
     isGitRepo: true,
     currentBranch,
+    headSha: head.code === 0 ? head.stdout.trim() : null,
     detached: currentBranch === null,
     dirty: dirtyFiles.length > 0,
     dirtyFiles,
@@ -146,7 +156,13 @@ export async function checkoutBranch(
   return next
 }
 
-export async function collectRepoBranchSnapshots(feature: FeatureConfig): Promise<RepoBranchSnapshot[]> {
+/** `updates` are the upstream fast-forwards run start performed just before
+ *  this snapshot, keyed by repo name — recorded so the run says not only which
+ *  commit it booted but that it pulled to get there. */
+export async function collectRepoBranchSnapshots(
+  feature: FeatureConfig,
+  updates: Record<string, RepoBranchSnapshot['updatedFromUpstream']> = {},
+): Promise<RepoBranchSnapshot[]> {
   const out: RepoBranchSnapshot[] = []
   for (const repo of feature.repos ?? []) {
     const localPath = repo.localPath
@@ -154,6 +170,7 @@ export async function collectRepoBranchSnapshots(feature: FeatureConfig): Promis
     const repoPath = resolveRepoPath(localPath)
     const status = await getGitStatus(repoPath)
     if (!status.isGitRepo) continue
+    const updatedFromUpstream = updates[repo.name]
     out.push({
       name: repo.name,
       path: repoPath,
@@ -161,6 +178,8 @@ export async function collectRepoBranchSnapshots(feature: FeatureConfig): Promis
       expectedBranch: repo.branch,
       detached: status.detached,
       dirty: status.dirty,
+      sha: status.headSha,
+      ...(updatedFromUpstream ? { updatedFromUpstream } : {}),
     })
   }
   return out
@@ -218,6 +237,7 @@ function emptyGitStatus(): GitStatus {
   return {
     isGitRepo: false,
     currentBranch: null,
+    headSha: null,
     detached: false,
     dirty: false,
     dirtyFiles: [],

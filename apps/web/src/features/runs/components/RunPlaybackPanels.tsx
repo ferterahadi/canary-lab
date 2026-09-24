@@ -5,6 +5,7 @@ import { formatDuration } from '@/shared/lib/format'
 import { artifactsForPlayback, playbackTests, type PlaybackTest } from '../utils/run-detail-playback'
 import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from '../utils/test-step-status'
 import { EmptyState } from '@/shared/ui/EmptyState'
+import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { DownloadIcon } from '@/shared/ui/Icons'
 import { TestIdBadge } from '@/shared/ui/TestIdBadge'
 import { buildTestNumbering, parseLocation, stripLeadingTestOrdinal, testNumberKey } from '@/shared/test-numbering'
@@ -63,7 +64,7 @@ export function PlaywrightPlayback({
 
   const tests = playbackTests(events)
   if (tests.length === 0) {
-    return <EmptyPane title="No playback events captured yet." body="Use Terminal for older runs or runs that ended before structured Playwright events were written." />
+    return <EmptyState {...EMPTY_COPY.playback} />
   }
   const activeIndex = currentPlaybackIndex(tests, summary?.running?.name)
   // Stable per-test ids, shared with the Tests column + Coverage Ledger. Number
@@ -352,18 +353,6 @@ export function ArtifactCaption({ artifact }: { artifact: PlaywrightArtifact }) 
     <div className="truncate border-t px-2 py-1 text-[10px]" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }} title={artifact.path}>
       {artifact.name}
     </div>
-  )
-}
-
-/** Run-scoped empty pane — the shared `EmptyState` on the run panes' surface. */
-export function EmptyPane({ icon, title, body, action }: { icon?: ReactNode; title: string; body: string; action?: ReactNode }) {
-  return (
-    <EmptyState
-      {...(icon ? { icon } : {})}
-      title={title}
-      body={body}
-      {...(action ? { action } : {})}
-    />
   )
 }
 

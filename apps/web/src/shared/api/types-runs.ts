@@ -6,11 +6,20 @@ import type { StageModelChoice } from '@shared/agent-models'
 import type { HealEnd, RunBootFailure, RunFixCapture, RunPrAttempt, RunProposedPr, RunLifecycleEvent, RunLifecycleSnapshot, RunStatus, ServiceStatus } from '@shared/run-state'
 import type { ExecutionType, VerificationRunMetadata } from '@shared/verification'
 import type { ClientKind } from '@shared/run-mode'
+import type { SpecDiff } from '@shared/verification-strength/types'
+import type { TestReviewDecision } from '@shared/test-review'
+import type { RunDependencyProvenance } from '@shared/dependency-provenance'
 
 export interface RunIndexEntry {
   runId: string
   executionType?: ExecutionType
   feature: string
+  /** The envset this run used, mirrored from the manifest. Spec selection is
+   *  constant across envsets, so two runs of one suite declare the same roster
+   *  and differ only in which tests the environment let execute. Without the
+   *  envset on the row, a 4-passed/41-skipped run and a 41-passed/4-skipped run
+   *  of the same suite read as one of them having gone badly. */
+  env?: string
   startedAt: string
   status: RunStatus
   endedAt?: string
@@ -23,6 +32,11 @@ export interface RunIndexEntry {
   verificationConfigName?: string
   verificationPlaywrightEnvsetId?: string
   verificationTargetUrls?: Record<string, string>
+  /** Live spec edits still pending against this run's run-start suite copy,
+   *  and the integrity hints on them — counts, mirrored from the manifest.
+   *  Absent when zero. */
+  pendingSpecEdits?: number
+  integrityHints?: number
 }
 
 export interface ServiceManifestEntry {
@@ -49,6 +63,9 @@ export interface RepoBranchSnapshot {
   expectedBranch?: string
   detached: boolean
   dirty: boolean
+  /** Commit the run booted from; absent on older records. */
+  sha?: string | null
+  updatedFromUpstream?: { upstream: string; from: string; to: string }
 }
 
 // Imported for local use below and re-exported so existing
@@ -88,6 +105,41 @@ export interface ExternalHealSession {
   cycleCount: number
 }
 
+/** The run-start copy of the suite the run executes (D9). `unavailable` means
+ *  the run fell back to the live suite dir and says so. */
+export type RunSuiteSnapshot =
+  | { kind: 'taken'; dir: string; takenAt: string; digest: string }
+  | { kind: 'unavailable'; at: string; reason: string }
+
+export interface PendingSpecEdit {
+  /** Spec path relative to the suite dir. */
+  file: string
+  change: 'modified' | 'added' | 'deleted'
+  affectedTests: string[]
+  /** The differential's reading of this edit — the whole diff, so the review
+   *  dialog can show each predicate's was/now. Advisory (D13). */
+  strength?: SpecDiff & { baseline: 'run-start' | 'head' }
+}
+
+/** Live spec edits the run has NOT executed, and who adopted the ones it did. */
+export interface RunSpecEdits {
+  checkedAt: string
+  pending: PendingSpecEdit[]
+  adopted: Array<{ at: string; by: 'human' | 'test-heal'; files: string[]; reviewRevision?: string }>
+  reviewDecisions?: TestReviewDecision[]
+}
+
+export type IntegrityHint =
+  | { kind: 'weaker'; file: string; test: string; requirements?: string[]; was: string[]; now: string[] }
+  | { kind: 'cannot-classify'; file: string; test?: string; reason: string }
+
+/** Advisory reading of `specEdits.pending` (D13); never changes a status.
+ *  `disclosure` says how the detection was checked — show it beside any hint. */
+export interface RunIntegrity {
+  hints: IntegrityHint[]
+  disclosure: string
+}
+
 export interface RunManifest {
   runId: string
   executionType?: ExecutionType
@@ -101,6 +153,7 @@ export interface RunManifest {
   services: ServiceManifestEntry[]
   repoPaths?: string[]
   repoBranches?: RepoBranchSnapshot[]
+  dependencyProvenance?: RunDependencyProvenance[]
   /** Per-run git worktrees (repo name → worktree path) when isolated. */
   worktrees?: Record<string, string>
   /** Why a queued run is waiting. Present only while status === 'queued'. */
@@ -132,6 +185,11 @@ export interface RunManifest {
    *  say why (gh not signed in, no push rights, patch no longer applies). */
   prAttempt?: RunPrAttempt
   verification?: VerificationRunMetadata
+  suiteSnapshot?: RunSuiteSnapshot
+  /** Absent until the first Playwright exit, and on runs without a snapshot. */
+  specEdits?: RunSpecEdits
+  /** Written together with `specEdits`; same absence rule. */
+  integrity?: RunIntegrity
   /** Set when the suite was cut short rather than run to completion — the
    *  `healOnFailureThreshold` trip, a user pause, or a cancelled heal. */
   stoppedEarly?: StoppedEarlyInfo
@@ -176,6 +234,8 @@ export interface RunSummaryRunningStep {
 }
 
 export interface RunSummary {
+  environment?: string
+  environmentExclusions?: import('../../../../../shared/run-applicability').EnvironmentExclusion[]
   complete: boolean
   total: number
   passed: number
@@ -184,6 +244,11 @@ export interface RunSummary {
   skipped?: number
   skippedNames?: string[]
   skippedIds?: string[]
+  /** The summary was seeded from a prior execution (a targeted heal rerun
+   *  merged untouched results forward), so its outcomes span several partial
+   *  executions rather than one clean run. Written by the reporter; read by the
+   *  certificate and the coverage ledger's proven axis. */
+  mergedFromPriorExecution?: boolean
   knownTests?: Array<{
     id?: string
     name: string

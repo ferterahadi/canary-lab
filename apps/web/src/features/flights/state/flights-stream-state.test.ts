@@ -126,7 +126,7 @@ describe('flightsStreamReducer', () => {
           status: 'waiting-for-approval',
           checkpoint: { kind: 'external-work', message: 'scan', options: ['submit'] },
         },
-        { key: 'run', status: 'pending' },
+        { key: 'run', status: 'pending', startedAt: '2026-01-01T00:00:00Z', evidence: { captured: 1 } },
       ],
     } as Partial<FlightManifest>))
     expect(row.id).toBe('fl_1')
@@ -141,7 +141,7 @@ describe('flightsStreamReducer', () => {
     // the rail between the push and the next full list read.
     expect(row.stages).toEqual([
       { key: 'scout', status: 'waiting-for-approval' },
-      { key: 'run', status: 'pending' },
+      { key: 'run', status: 'pending', startedAt: '2026-01-01T00:00:00Z', hasEvidence: true },
     ])
   })
 

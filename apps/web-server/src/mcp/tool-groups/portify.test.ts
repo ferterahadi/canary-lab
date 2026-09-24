@@ -4,6 +4,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunDetail } from '../../features/runs/logic/run-store'
 import { registerPortifyTools } from './portify'
+import { inputFingerprint } from '../elicitation'
 import { BUSY_ACTIVE, captureTools, fakeGettingStartedDemo } from './__fixtures__/tool-group-harness'
 
 // The six port-ification tools, plus the two heal reads' not-found arms.
@@ -38,6 +39,13 @@ function harness(deps: Record<string, unknown>) {
 }
 
 describe('start_external_portify', () => {
+  it('directs a verification-first start to polling without an edit or submit', async () => {
+    const { call } = harness({ startExternalPortify: async () => ({ workflowId: 'native', status: 'verifying', configPath: '/c', targets: [], instructions: 'poll' }) })
+    const out = await call('start_external_portify', { feature: 'checkout', session_id: 's', client_kind: 'codex' })
+    expect(out).toMatchObject({ workflowId: 'native', status: 'verifying', nextSteps: ['get_portify'] })
+    expect(out.next).toContain('Do not edit or submit during verification')
+    expect(out.next).toContain('verification.failureDetail')
+  })
   it('hands back the edit targets and what to do with them', async () => {
     const startExternalPortify = vi.fn(async () => ({
       workflowId: 'wf-1',
@@ -350,6 +358,25 @@ describe('cancel_portify and remove_portification', () => {
     // Removing a portification twice lands on the same state, so a retry after a
     // dropped response is safe to make.
     expect(configs.get('remove_portification')!.annotations).toMatchObject({ destructiveHint: true, idempotentHint: true })
+  })
+})
+
+// review_portify hands the agent a fingerprint of the manifest the human saw.
+// Both tools below act on that human's decision, so a manifest that has moved
+// since means the decision was about a different state: refuse before reopening
+// or discarding a verified worktree the human never looked at.
+describe('a stale review_revision blocks the tools that act on a human decision', () => {
+  it.each([
+    ['revise_external_portify', 'reviseExternalPortify', { workflowId: 'wf-1', feedback: 'use 4100' }],
+    ['cancel_portify', 'cancelPortify', { workflowId: 'wf-1', confirm: true }],
+  ])('%s refuses, leaving %s uncalled', async (tool, dep, args) => {
+    const act = vi.fn()
+    const reviewed = manifest({ status: 'ready-to-save', attempts: 1 })
+    const { text } = harness({ [dep]: act, getPortify: () => manifest({ status: 'ready-to-save', attempts: 2 }) })
+
+    expect(await text(tool, { ...args, review_revision: inputFingerprint(reviewed) }))
+      .toContain('The portification review changed. Nothing was applied.')
+    expect(act).not.toHaveBeenCalled()
   })
 })
 

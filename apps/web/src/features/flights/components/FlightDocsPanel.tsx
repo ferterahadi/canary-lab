@@ -3,9 +3,9 @@ import * as api from '@/shared/api/client'
 import type { FlightStage, FlightStageStatus } from '@/shared/api/client'
 import type { FeatureDocsListing } from '@/shared/api/types'
 import { DocPill, readAsBase64 } from '@/features/coverage/components/CoverageDocsRail'
-import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '@/shared/ui/PanelCard'
+import { useDocRelink } from '@/features/coverage/components/DocRelink'
+import { PanelCard } from '@/shared/ui/PanelCard'
 import { STAGE_COLUMN, StageStatusChip } from './stage-meta'
-import { PANEL_KICKER_CLASS } from './RepoScanPanel'
 import { agentActivityLine } from './StageStatusLines'
 import { SkeletonLines, SkeletonRows, type AwaitingState } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
@@ -43,6 +43,7 @@ export function useFlightDocs(feature: string, refreshKey?: number, onChanged?: 
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [feature, owned])
   useEffect(() => { load() }, [load, refreshKey])
+  const relinkDoc = useDocRelink(feature, () => { load(); onChanged?.() })
 
   const importFiles = useCallback(async (files: FileList) => {
     setBusy(true)
@@ -78,7 +79,7 @@ export function useFlightDocs(feature: string, refreshKey?: number, onChanged?: 
   // The distilled artifact (_prd-summary.md/.json) — the stage's actual OUTPUT.
   // Filtered out of the source list on purpose; it gets its own card.
   const generatedDocs = (listing?.docs ?? []).filter((d) => d.generated)
-  return { sourceDocs, generatedDocs, busy, error, importFiles, removeDoc, openDoc }
+  return { sourceDocs, generatedDocs, busy, error, importFiles, removeDoc, openDoc, relinkDoc }
 }
 
 /** The resting Requirements panel — a read-only lens on docs/ while the stage
@@ -124,26 +125,24 @@ export function FlightDocsPanel({
   const liveLine = summaryStage ? agentActivityLine(summaryStage) : null
   const showDistilled = summaryStatus !== undefined && summaryStatus !== 'pending'
   return (
-    <section data-testid="flight-docs-panel" className={`flex flex-col gap-2.5 ${STAGE_COLUMN}`}>
-      <div className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
-        <div className="flex items-center gap-2">
-          <div className={PANEL_KICKER_CLASS}>
-            {docs.sourceDocs.length > 0 ? `Requirement docs · ${docs.sourceDocs.length}` : 'Requirement docs'}
-          </div>
-          <div className="flex-1" />
-          {approved && (
-            <span
-              data-testid="docs-locked-chip"
-              className="mb-1 rounded border px-1.5 py-px text-[9.5px] font-medium text-muted border-line"
-            >
-              Locked — approved
-            </span>
-          )}
-        </div>
+    <section data-testid="flight-docs-panel" className={`flex flex-col gap-3 ${STAGE_COLUMN}`}>
+      <PanelCard
+        kicker="Requirement docs"
+        aside={(approved || docs.sourceDocs.length > 0) && (
+          <>
+            {approved && (
+              <span data-testid="docs-locked-chip" className="cl-badge-neutral">
+                Locked — approved
+              </span>
+            )}
+            {docs.sourceDocs.length > 0 && <span className="cl-count-chip">{docs.sourceDocs.length}</span>}
+          </>
+        )}
+      >
         {docs.sourceDocs.length === 0 ? (
           awaiting
             ? <SkeletonRows awaiting={awaiting} rows={2} sub={false} />
-            : <div className="text-[11px] text-muted">No source docs.</div>
+            : <div className="cl-type-meta text-muted">No source docs.</div>
         ) : (
           <div className="flex flex-col gap-2">
             {docs.sourceDocs.map((d) => (
@@ -156,7 +155,8 @@ export function FlightDocsPanel({
                 linked={d.linked}
                 linkTarget={d.linkTarget}
                 broken={d.broken}
-                busy={false}
+                onRelink={(targetPath) => docs.relinkDoc(d.relPath, targetPath)}
+                busy={awaiting === 'live' || summaryStatus === 'running'}
                 onOpen={() => docs.openDoc(d.absPath)}
                 removeTitle="Remove doc"
               />
@@ -164,31 +164,30 @@ export function FlightDocsPanel({
           </div>
         )}
         {approved && (
-          <p className="mt-2 text-[10.5px] text-muted">
+          <p className="mt-2 cl-type-meta text-muted">
             To change these, use Continue → From a step… → Requirements. Everything after that step is redone.
           </p>
         )}
-        {docs.error && <div className="mt-2 text-[11px] text-danger">{docs.error}</div>}
-      </div>
+        {docs.error && <div className="mt-2 cl-type-meta text-danger">{docs.error}</div>}
+      </PanelCard>
 
       {/* The output half. Rendered from `summaryStatus` alone (not from the
           artifact existing) so the running state has a card too — otherwise
           the panel is a blank gap for the whole distillation, which is the
           longest part of the stage. */}
       {(showDistilled || awaiting) && (
-        <div className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE} data-testid="flight-distilled-panel">
-          <div className="flex items-center gap-2">
-            <div className={PANEL_KICKER_CLASS}>
-              {requirementCount != null ? `Requirements found · ${requirementCount}` : 'Requirements found'}
-            </div>
-            <div className="flex-1" />
-            {summaryStatus && (
-              <span className="mb-1 flex items-center gap-1.5 text-[10px] text-muted" data-testid="docs-summary-chip">
-                Summary
-                <StageStatusChip status={summaryStatus} />
-              </span>
-            )}
-          </div>
+        <PanelCard
+          /* The count stays in the kicker here: it is the measured total the
+             summary produced, not a count of the rows this card lists. */
+          kicker={requirementCount != null ? `Requirements found · ${requirementCount}` : 'Requirements found'}
+          aside={summaryStatus && (
+            <span className="flex items-center gap-1.5 cl-type-meta text-muted" data-testid="docs-summary-chip">
+              Summary
+              <StageStatusChip status={summaryStatus} />
+            </span>
+          )}
+          testId="flight-distilled-panel"
+        >
 
           {docs.generatedDocs.length > 0 ? (
             <div className="flex flex-col gap-2">
@@ -212,7 +211,7 @@ export function FlightDocsPanel({
             <SkeletonLines awaiting={awaiting} rows={2} />
           ) : (
             <div className="flex min-w-0 flex-col gap-1">
-              <div className="text-[11px] text-muted">
+              <div className="cl-type-meta text-muted">
                 {summaryStatus === 'running'
                   // The live snapshot when there is one. The old copy pointed at
                   // Activity for progress, which is empty for the minutes the
@@ -231,7 +230,7 @@ export function FlightDocsPanel({
                   still has a home: AgentSessionView owns the history below. */}
             </div>
           )}
-        </div>
+        </PanelCard>
       )}
     </section>
   )
@@ -256,11 +255,11 @@ export function IntentRow({ description }: { description: string }) {
           sentence on the page (mono stays reserved for paths/commands). */}
       <span
         data-testid="fork-intent-text"
-        className={`min-w-0 flex-1 text-[12px] text-secondary ${open ? 'leading-relaxed' : 'truncate'}`}
+        className={`min-w-0 flex-1 cl-type-body text-secondary ${open ? 'leading-relaxed' : 'truncate'}`}
       >
         {description}
       </span>
-      <span className="shrink-0 text-[10.5px] text-accent">
+      <span className="shrink-0 cl-type-meta text-accent">
         {open ? 'Hide' : 'Show'}
       </span>
     </button>
@@ -310,7 +309,7 @@ export function ForkPathCard({ testId, title, blurb, recommended, note, selected
         {selected && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
       </span>
       <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="flex items-center gap-1.5 text-[12.5px] font-semibold">
+        <span className="flex items-center gap-1.5 cl-type-title text-primary">
           {title}
           {recommended && !selected && (
             <span className="cl-badge-accent">
@@ -320,13 +319,13 @@ export function ForkPathCard({ testId, title, blurb, recommended, note, selected
           {note && !selected && (
             <span
               data-testid={`${testId}-note`}
-              className="rounded-full border border-line px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-muted"
+              className="cl-badge-neutral"
             >
               {note}
             </span>
           )}
         </span>
-        <span className="text-[11px] leading-snug text-secondary">{blurb}</span>
+        <span className="cl-type-meta leading-snug text-secondary">{blurb}</span>
       </span>
       </button>
     </DisabledControlTooltip>

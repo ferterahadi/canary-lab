@@ -27,18 +27,22 @@ Coverage jobs are the smallest complete example — read those two files first.
 
 1. **Non-blocking.** The start endpoint validates input, creates a `running`
    manifest, kicks off the work *detached* (no `await` on the driver), and returns
-   `202` with the manifest. The driver streams progress into the manifest and
+   promptly with the manifest. Coverage returns `202`; Portify currently returns
+   `200`. The driver streams progress into the manifest and
    flips it to `done` / `failed` when it settles.
 2. **Persistent.** State lives in a file-backed store (`<logs>/<kind>/<id>/…json`
-   + an `index.json`), never only in memory. `save()` writes atomically (tmp +
-   rename) then emits a `changed` event (the WS/poll push point). Reads come
+   + an `index.json`), never only in memory. The coverage store uses the shared
+   `FileBackedTaskStore`; its `save()` writes atomically (tmp + rename) then
+   emits a `changed` event (the WS/poll push point). Reads come
    straight off disk so a fresh process sees history.
 3. **Recoverable.** On server boot, call `store.reconcileInterrupted(now)` to flip
    any job left `running` by the dead process to `aborted` — otherwise it shows as
    live forever AND wedges the single-flight lock. Wire this next to the other
    store reconciles in `server.ts`.
-4. **Re-openable.** Status is a pure read of the manifest by id (`GET …/jobs/:id`)
-   plus a per-feature list (`GET …/:name/jobs`). The dialog/pill re-attaches to a
+4. **Re-openable.** Status is a pure read of the manifest by id plus a list
+   endpoint (`GET /api/coverage/jobs/:jobId` and
+   `GET /api/features/:name/coverage/jobs` for coverage; `GET /api/portify/:workflowId`
+   and `GET /api/portify` for Portify). The dialog/pill re-attaches to a
    running job by polling that id — closing the UI never kills the work.
 5. **Server-side single-flight.** The guard is on the START path, keyed on the
    real identity (e.g. `feature + kind`): `store.activeFor(...)` → throw a typed

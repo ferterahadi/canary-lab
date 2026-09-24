@@ -18,6 +18,7 @@ export function VerticalSplit({ storageKey, defaultTopPercent, minTopPx, minBott
   const [dragging, setDragging] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const dragStartRef = useRef<{ y: number; startTop: number } | null>(null)
+  const resizedRef = useRef(false)
 
   // Initialize from localStorage or default percent of container height after mount
   useEffect(() => {
@@ -36,10 +37,12 @@ export function VerticalSplit({ storageKey, defaultTopPercent, minTopPx, minBott
     setTopHeight(initial)
   }, [storageKey, defaultTopPercent, minTopPx, minBottomPx])
 
+  // Storage writes block the drag path, so persist only after release.
   useEffect(() => {
-    if (topHeight == null) return
+    if (dragging || !resizedRef.current || topHeight == null) return
+    resizedRef.current = false
     try { localStorage.setItem(storageKey, String(topHeight)) } catch { /* ignore */ }
-  }, [storageKey, topHeight])
+  }, [dragging, storageKey, topHeight])
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -58,6 +61,7 @@ export function VerticalSplit({ storageKey, defaultTopPercent, minTopPx, minBott
       let next = ctx.startTop + dy
       if (next < minTopPx) next = minTopPx
       if (next > totalH - minBottomPx) next = totalH - minBottomPx
+      resizedRef.current = true
       setTopHeight(next)
     }
     const onMouseUp = (): void => {
@@ -75,7 +79,7 @@ export function VerticalSplit({ storageKey, defaultTopPercent, minTopPx, minBott
   return (
     <div ref={containerRef} className="flex h-full min-h-0 flex-col">
       <div
-        className="min-h-0 overflow-hidden transition-[height] duration-200"
+        className={`min-h-0 overflow-hidden${dragging ? '' : ' transition-[height] duration-200'}`}
         style={{ height: collapsed ? 0 : (topHeight ?? '45%') }}
       >
         {top}

@@ -14,6 +14,7 @@ import { extractTraceSummary } from './trace-enrichment'
 import { ExistingSummary, KnownTestEntry, idForExistingResult, knownTestFromTest, knownTestsFromExistingSummary, mergeKnownTest, readExistingSummary, stringAt } from './summary-known-tests'
 import { failureLocations, findErrorContextAttachmentPath, findHarAttachmentPath, findLastStepIndex, findTraceAttachmentPath, isErrorShape, isFailureResult, journalPathForSummary, runIdForSummary, stepToRunningStep } from './summary-locations'
 import type { PlaybackEvent, RunningStep, RunningTest, TestEntry } from './summary-types'
+import { declaredEnvironments, environmentExclusions, type EnvironmentExclusion } from '../../../../../../../shared/run-applicability'
 
 export { slugify } from './summary-types'
 export type { RunningStep, TestEntry } from './summary-types'
@@ -21,6 +22,8 @@ export type { RunningStep, TestEntry } from './summary-types'
 export { testIdFor } from './summary-known-tests'
 
 class SummaryReporter implements Reporter {
+  private readonly environment = process.env.CANARY_LAB_ENV
+  private readonly exclusionsAtStart = new Map<string, EnvironmentExclusion>()
   private readonly mergeExistingSummary = process.env.CANARY_LAB_TARGETED_RERUN === '1'
   private readonly initialSummary = readExistingSummary()
   private results: TestEntry[] = []
@@ -47,7 +50,13 @@ class SummaryReporter implements Reporter {
 
   onBegin(_config: unknown, suite: Suite): void {
     this.sawSuiteInventory = true
-    for (const test of suite.allTests()) this.rememberKnownTest(test)
+    for (const test of suite.allTests()) {
+      const known = this.rememberKnownTest(test)
+      const environments = declaredEnvironments(test.annotations ?? [])
+      if (this.environment && environments.length > 0 && !environments.includes(this.environment)) {
+        this.exclusionsAtStart.set(known.id, { id: known.id, name: known.name, environment: this.environment, environments })
+      }
+    }
     this.writeSummary(false)
   }
 
@@ -165,6 +174,8 @@ class SummaryReporter implements Reporter {
       name,
       status: result.status,
       passed,
+      ...(result.status === 'skipped' && this.exclusionsAtStart.has(known.id)
+        ? { environmentExclusion: this.exclusionsAtStart.get(known.id)! } : {}),
       ...(error ? { error } : {}),
       durationMs: result.duration,
       location: known.location ?? `${test.location.file}:${test.location.line}`,
@@ -342,6 +353,9 @@ class SummaryReporter implements Reporter {
     const spansExecutions = this.results.some((r) => r.seeded)
     const summary = {
       complete,
+      ...(this.environment ? { environment: this.environment } : {}),
+      ...(skippedResults.some((r) => r.environmentExclusion)
+        ? { environmentExclusions: skippedResults.flatMap((r) => r.environmentExclusion ? [r.environmentExclusion] : []) } : {}),
       total: includeKnownTests ? this.knownTests.length : this.results.length,
       passed: passedResults.length,
       passedNames: passedResults.map((r) => r.name),
@@ -417,13 +431,16 @@ class SummaryReporter implements Reporter {
 
     const skippedNames = Array.isArray(parsed.skippedNames) ? parsed.skippedNames : []
     const skippedIds = Array.isArray(parsed.skippedIds) ? parsed.skippedIds : []
+    const exclusions = new Map(environmentExclusions({ ...parsed, failed: Array.isArray(parsed.failed) ? parsed.failed : [], environment: this.environment }).map((entry) => [entry.id, entry]))
     for (const [index, name] of skippedNames.entries()) {
       if (typeof name !== 'string' || !name) continue
       const id = stringAt(skippedIds, index) ?? idForExistingResult({ name, knownTests: this.knownTests })
       const key = id ?? name
       if (seen.has(key)) continue
       seen.add(key)
-      this.results.push({ ...(id ? { id } : {}), name, status: 'skipped', passed: false, seeded: true })
+      this.results.push({ ...(id ? { id } : {}), name, status: 'skipped', passed: false, seeded: true,
+        ...(id && exclusions.has(id) ? { environmentExclusion: exclusions.get(id)! } : {}),
+      })
     }
 
     const failed = Array.isArray(parsed.failed) ? parsed.failed : []

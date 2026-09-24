@@ -8,9 +8,22 @@ import {
   type GeneratedFeatureFile,
 } from '../../../../../../shared/feature-scaffold'
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
+import { describeReadabilityIssue, inspectTestReadability } from '../../../../../../shared/test-readability'
 import { loadFeatures } from '../../../shared/feature-loader'
-import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
+import { loadPromptTemplate, promptPath } from '../../../shared/prompts'
+import { checkoutBranch, findRepo, resolveRepoPath } from '../../../shared/git-repo'
+import {
+  describeFastForward,
+  describeRepoCheckout,
+  fastForwardToUpstream,
+  type RepoCheckoutStatus,
+} from '../../../shared/git-upstream'
 import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
+import {
+  SPEC_SELECTION_RULE,
+  findVariableSpecSelection,
+  isPlaywrightConfigPath,
+} from '../../../shared/playwright-config'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 export { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
@@ -224,15 +237,43 @@ export function captureFeatureEnvFiles(ctx: FeatureAuthoringContext, input: {
   return { ok: true, captured, summary: summary! }
 }
 
-export async function getFeatureRepoStatus(ctx: FeatureAuthoringContext, featureName: string, repoName: string): Promise<Record<string, unknown> | null> {
+export async function getFeatureRepoStatus(
+  ctx: FeatureAuthoringContext,
+  featureName: string,
+  repoName: string,
+  opts: { fetch?: boolean } = {},
+): Promise<RepoCheckoutStatus | null> {
   const feature = findFeature(ctx.featuresDir, featureName)
   if (!feature) return null
   const repo = findRepo(feature, repoName)
   if (!repo) return null
+  return describeRepoCheckout(repo, opts)
+}
+
+/**
+ * Fast-forward a declared repo's checkout to its upstream tip. The pinned
+ * `branch` is the target when the feature has one; otherwise whatever branch is
+ * checked out. Announces on the bus only when the checkout actually moved — an
+ * up-to-date or ahead checkout changed nothing the Repos tab needs to refetch.
+ */
+export async function updateFeatureRepoBranch(ctx: FeatureAuthoringContext, input: {
+  feature: string
+  repo: string
+  confirm: true
+}): Promise<Record<string, unknown> | { error: string; statusCode: number }> {
+  const feature = findFeature(ctx.featuresDir, input.feature)
+  if (!feature) return { error: 'feature not found', statusCode: 404 }
+  const repo = findRepo(feature, input.repo)
+  if (!repo) return { error: 'repo not found', statusCode: 404 }
+  const outcome = await fastForwardToUpstream(repo.localPath, { branch: repo.branch })
+  if (outcome.kind === 'refused') {
+    return { error: `${outcome.reason}: ${outcome.message}`, statusCode: 409 }
+  }
+  if (outcome.kind === 'fast-forwarded') publishWorkspaceEvent(ctx.workspaceEvents, { type: 'features-changed' })
   return {
-    ...await getGitStatus(repo.localPath),
-    path: resolveRepoPath(repo.localPath),
-    expectedBranch: repo.branch ?? null,
+    update: outcome,
+    summary: describeFastForward(outcome),
+    ...await describeRepoCheckout(repo),
   }
 }
 
@@ -282,15 +323,48 @@ export function deleteFeature(ctx: FeatureAuthoringContext, input: {
   return { ok: true, featureDir }
 }
 
-export function applyExternalDraftFiles(input: {
+export async function applyExternalDraftFiles(input: {
   featureDir: string
   files?: GeneratedFeatureFile[]
-}): { ok: true; written: string[] } | { ok: false; error: string } {
+}): Promise<{ ok: true; written: string[]; warnings?: string[] } | { ok: false; error: string }> {
   const files = input.files ?? readExistingSpecFiles(input.featureDir)
   const validation = validateGeneratedSpecFiles(files)
   if (!validation.ok) return { ok: false, error: validation.error }
-  const written: string[] = []
+  // A draft may carry the playwright config alongside its specs. Refuse an
+  // envset-dependent roster at the door rather than at the first run: the agent
+  // that wrote it is still here to rewrite it.
   for (const file of files) {
+    if (!isPlaywrightConfigPath(file.path)) continue
+    const fields = findVariableSpecSelection(file.content)
+    if (fields.length > 0) {
+      return { ok: false, error: `${file.path} selects specs with a computed ${fields.join(', ')}. ${SPEC_SELECTION_RULE}` }
+    }
+  }
+  const originalContents = new Map(files.map((file) => {
+    const target = path.join(input.featureDir, file.path)
+    return [target, fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : undefined]
+  }))
+  const normalized: GeneratedFeatureFile[] = []
+  const warnings: string[] = []
+  // Validate the whole batch before writing any normalized source. An unsafe
+  // expression or syntax error must not leave a partially applied draft.
+  for (const file of files) {
+    if (!file.path.endsWith('.spec.ts')) {
+      normalized.push(file)
+      continue
+    }
+    const result = await inspectTestReadability(file.content, file.path)
+    const error = result.remaining.find((issue) => issue.severity === 'error')
+    if (error) return { ok: false, error: describeReadabilityIssue(file.path, error) }
+    normalized.push({ ...file, content: result.code })
+    warnings.push(...result.remaining.map((issue) => describeReadabilityIssue(file.path, issue)))
+  }
+  for (const [target, original] of originalContents) {
+    const current = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : undefined
+    if (current !== original) return { ok: false, error: `File changed during readability inspection; retry: ${target}` }
+  }
+  const written: string[] = []
+  for (const file of normalized) {
     const target = path.join(input.featureDir, file.path)
     /* v8 ignore next 3 -- validateGeneratedSpecFiles rejects escaping paths before writes. */
     if (!isWithin(input.featureDir, target)) return { ok: false, error: `file escapes feature directory: ${file.path}` }
@@ -298,13 +372,15 @@ export function applyExternalDraftFiles(input: {
     fs.writeFileSync(target, file.content, 'utf8')
     written.push(target)
   }
-  return { ok: true, written }
+  return { ok: true, written, ...(warnings.length > 0 ? { warnings } : {}) }
 }
 
 export function externalTestFileRules(): Record<string, unknown> {
   return {
     specs: 'Place Playwright specs directly under e2e/*.spec.ts.',
     requiredImport: 'canary-lab/feature-support/log-marker-fixture',
+    specSelection: SPEC_SELECTION_RULE,
+    readability: loadPromptTemplate(promptPath('test-readability.md')),
     noInternalAgentSpawn: true,
   }
 }
@@ -314,10 +390,10 @@ export function envsetSchema(feature: string): Record<string, unknown> {
     configPath: `features/${feature}/envsets/envsets.config.json`,
     valueFiles: `features/${feature}/envsets/<env>/<slot>`,
     configShape: {
-      appRoots: { REPO_VAR: '/absolute/path/to/repo' },
-      slots: { 'slot-name.ext': { description: 'human label', target: '/absolute/path/or/$APPROOT/file' } },
+      appRoots: {},
+      slots: { [`${feature}.env`]: { description: 'Suite environment', target: `$CANARY_LAB_PROJECT_ROOT/features/${feature}/.env` } },
       feature: {
-        slots: ['slot-name.ext'],
+        slots: [`${feature}.env`],
         testCommand: 'npx playwright test',
         testCwd: `$CANARY_LAB_PROJECT_ROOT/features/${feature}`,
       },

@@ -13,6 +13,7 @@
 //
 // Mutability is deliberate and mirrors the class it replaces: `readonly` marks
 // what the constructor fixed, everything else is written as the run moves.
+import fs from 'fs'
 import path from 'path'
 import { buildRunPaths, type RunPaths } from './run-paths'
 import { overlayExists } from '../../../portify/logic/runtime/overlay'
@@ -38,6 +39,8 @@ import type {
 import type { VerificationRunMetadata, ExecutionType as ExecutionType } from '../../../../../../../shared/verification'
 import type { PlaywrightSpawner } from './run-spawn'
 import type { RunModelPlan } from './run-model-plan'
+import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
+import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 
 /** The orchestrator's own `emit`, handed to the modules so they can report
  *  progress without holding a reference back to the class. */
@@ -62,6 +65,9 @@ export interface RunContext {
   readonly portMap?: Map<string, number>
   readonly worktreeHandles: WorktreeHandle[]
   readonly repoPathOverrides: Record<string, string>
+  /** Track a loaded config disappearing during repair; programmatic features
+   *  without a config file continue to use their supplied configuration. */
+  readonly dependencyConfigPath?: string
   /** Ephemeral port overlay: when the feature has a saved overlay, its captured
    *  patch is `git apply`-ed into each per-run worktree before boot and
    *  reverse-applied at teardown — the target repo is never permanently changed. */
@@ -98,13 +104,26 @@ export interface RunContext {
   readonly executionType: ExecutionType
   readonly verification?: VerificationRunMetadata
   readonly playwrightEnv: Record<string, string>
+  readonly testReviewApproval?: RunTestReviewApproval
 
   // ── run state ─────────────────────────────────────────────────────────────
+  /** The directory Playwright runs from and every verdict reader lists specs
+   *  in: the run-start snapshot once `snapshotSuite` has taken it, the live
+   *  `feature.featureDir` before that (and when the copy failed). Everything
+   *  that means *the suite as executed* reads this; `feature.featureDir` stays
+   *  for what means *the feature* — its config, envsets, overlay, the dir the
+   *  heal agent reads. */
+  suiteDir: string
+  /** Replaced by a fresh dependency preflight before each boot/recovery attempt. */
+  dependencyProvenance: RunDependencyProvenance[]
   status: RunManifest['status']
   healCycles: number
   startedAt: string
   stopped: boolean
   servicePtys: Map<string, PtyHandle>
+  /** Exit facts of the last service process, kept for the boot-failure
+   *  record. `signal` is the NAME, normalized by the producer. */
+  serviceExitEvidence: Map<string, { exitCode: number; signal: string | null }>
   logFiles: Set<string>
   signalWatcher: NodeJS.Timeout | null
   heartbeatTimer: NodeJS.Timeout | null
@@ -130,8 +149,8 @@ export interface RunContext {
   /** Set by waitForHealth (via pollUntilReady) when a service fails to come up on
    *  a normal run: the suite can't run, so runFullCycle / the heal loops treat
    *  the run as `failed` and route it into heal instead of aborting. Cleared at
-   *  the top of every ensureServicesRunning so a stale failure from a prior
-   *  cycle doesn't survive a successful reboot. */
+   *  the start of every service boot/restart attempt so a stale failure from a
+   *  prior cycle doesn't survive a successful reboot. */
   bootFailure: RunBootFailure | undefined
 
   // ── heal-agent state ──────────────────────────────────────────────────────
@@ -191,6 +210,9 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     portMap: opts.portMap,
     worktreeHandles,
     repoPathOverrides,
+    dependencyConfigPath: ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
+      .map((name) => path.join(opts.feature.featureDir, name)).find((candidate) => fs.existsSync(candidate)),
+    dependencyProvenance: opts.dependencyProvenance ?? [],
     portified: overlayExists(opts.feature.featureDir),
     services: buildServiceSpecs(opts.feature, opts.runDir, opts.env, {
       portMap: opts.portMap,
@@ -232,12 +254,18 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     executionType: opts.executionType ?? 'run',
     verification: opts.verification,
     playwrightEnv: opts.playwrightEnv ?? {},
+    testReviewApproval: opts.testReviewApproval,
 
+    // A restart builds a fresh context over the SAME run dir without calling
+    // start(); picking the existing copy up here is what keeps a restart from
+    // silently adopting whatever was edited mid-run.
+    suiteDir: fs.existsSync(paths.suiteSnapshotDir) ? paths.suiteSnapshotDir : opts.feature.featureDir,
     status: 'running',
     healCycles: opts.initialHealCycles ?? 0,
     startedAt: '',
     stopped: false,
     servicePtys: new Map(),
+    serviceExitEvidence: new Map(),
     logFiles: new Set(),
     signalWatcher: null,
     heartbeatTimer: null,

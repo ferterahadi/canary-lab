@@ -7,7 +7,7 @@ import { plural } from './StageFacts'
 import { currentStageForPair, settledStageStatus } from './stage-metrics'
 import { EXTERNAL_WORK_COPY } from '../lib/external-work'
 import { stageRowKey } from './StageRail'
-import { PORTIFY_PHASE_LINE, evidenceOf, num, portifyProgress, specsCoverageProgress, str } from './stage-meta'
+import { PORTIFY_PHASE_LINE, evidenceOf, num, progressOf, specsCoverageProgress, str } from './stage-meta'
 import { flightRailLabel } from '@shared/flights/stage-labels'
 
 // ─── Auto-repair give-up reason (R80) ───────────────────────────────────────
@@ -410,7 +410,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
         if (mappingState === 'generating') return 'Matching tests to requirements…'
         if (mappingState === 'stale') return 'Tests are written, but coverage mapping is stale — run Coverage again.'
         const of = covered != null && total != null ? ` — ${covered} of ${total} requirement${total === 1 ? '' : 's'} mapped` : ''
-        return `Tests written. Mapped coverage is ${pct ?? '?'}%${of}. Nothing has run yet.`
+        return `Tests written. Mapped coverage is ${pct ?? '?'}%${of}. Run results are tracked separately.`
       }
       return `Coverage target met${pct != null ? ` — ${pct}%` : ''}.`
     }
@@ -418,7 +418,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
       if (running) {
         // The workflow's live phase (see PortifyStageProgress) — older flights
         // have no mirror and fall back to the generic line.
-        const phase = str(portifyProgress(stage), 'status')
+        const phase = str(progressOf(stage), 'status')
         return phase && PORTIFY_PHASE_LINE[phase]
           ? PORTIFY_PHASE_LINE[phase]
           : 'Checking the services start side by side…'
@@ -439,11 +439,11 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
       return `No repair needed — run ${runStatus ?? 'settled'}.`
     }
     case 'evaluation-export': {
-      if (running) return 'Building the report…'
+      if (running) return 'Building the evaluation report…'
       // Deliberately unnamed here: the sentence used to end in `export.zip`, the
       // archive's internal filename inside the logs dir and NOT the name the
       // download hands over. The card's Archive tile carries the real one.
-      return 'Report ready.'
+      return 'Evaluation report ready.'
     }
     default:
       return running ? 'Working…' : 'Done.'

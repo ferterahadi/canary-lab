@@ -48,6 +48,18 @@ describe('connectAgentSessionStream', () => {
     expect(FakeWebSocket.instances[0].url).toBe('ws://h/ws/runs/r%2F1/agent-session')
   })
 
+  it('streams discovery repair activity through the shared session transport', () => {
+    reset()
+    const close = connectAgentSessionStream({
+      source: { kind: 'discovery-repair', taskId: 'dr_123' },
+      onEvent: () => {},
+      wsBase: 'ws://h',
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    })
+    expect(FakeWebSocket.instances[0].url).toBe('ws://h/ws/discovery-repairs/dr_123/agent-session')
+    close.close()
+  })
+
   it('opens /ws/benchmarks/:id/agent-session for benchmark sources', () => {
     reset()
     connectAgentSessionStream({

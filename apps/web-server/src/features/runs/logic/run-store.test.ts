@@ -74,6 +74,40 @@ describe('listRuns', () => {
     expect(listRuns(tmpDir)[0]).toMatchObject({ healCycles: 1, healMode: 'external' })
   })
 
+  it('backfills the envset from the manifest for entries written before it was mirrored', () => {
+    // The runs list tells two runs of one suite apart by their envset. A run
+    // recorded before the field existed would otherwise read as "no envset",
+    // which is indistinguishable from a suite that declares none — so the
+    // manifest, which is truth, fills the gap at read time.
+    writeRunsIndex(tmpDir, [
+      { runId: 'legacy', feature: 'foo', startedAt: '2026-01-02T00:00:00Z', status: 'passed' },
+      { runId: 'envless', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+    ])
+    for (const [runId, env] of [['legacy', 'meta'], ['envless', undefined]] as const) {
+      const dir = runDirFor(tmpDir, runId)
+      fs.mkdirSync(dir, { recursive: true })
+      writeManifest(path.join(dir, 'manifest.json'), {
+        runId, feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed',
+        healCycles: 0, services: [], ...(env ? { env } : {}),
+      })
+    }
+    const byId = Object.fromEntries(listRuns(tmpDir).map((e) => [e.runId, e.env]))
+    expect(byId.legacy).toBe('meta')
+    expect(byId.envless).toBeUndefined()
+  })
+
+  it('reads no manifest at all for a row that already carries every mirrored field', () => {
+    // The early return is the point of the index: the runs list renders without
+    // opening one manifest per row. A complete row survives a cleaned run dir.
+    writeRunsIndex(tmpDir, [
+      {
+        runId: 'complete', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'failed',
+        healCycles: 2, healMode: 'auto', env: 'local',
+      },
+    ])
+    expect(listRuns(tmpDir)[0]).toMatchObject({ healCycles: 2, healMode: 'auto', env: 'local' })
+  })
+
   it('leaves an already-mirrored healCycles alone instead of re-reading the manifest', () => {
     writeRunsIndex(tmpDir, [
       { runId: 'a', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'failed', healCycles: 2 },
@@ -178,7 +212,7 @@ describe('RunStore', () => {
   // Helper: create a run dir + manifest + index entry so the store has
   // something to read/mutate.
   function seedRun(runId: string, overrides: Partial<{
-    status: 'running' | 'passed' | 'failed' | 'aborted' | 'healing'
+    status: 'queued' | 'running' | 'passed' | 'failed' | 'aborted' | 'healing'
     feature: string
     healCycles: number
     healMode: 'auto' | 'manual' | 'external'
@@ -390,6 +424,35 @@ describe('RunStore', () => {
     expect(readManifest(store.manifestPath('really-dead'))?.status).toBe('aborted')
   })
 
+  it('abort finalizes an orphaned QUEUED row so Stop is not a 404 against a zombie', async () => {
+    // A queued run holds no orchestrator and no processes — its only owner is
+    // the in-memory admission queue of the process that parked it. Once that
+    // process is gone the row is undriveable, and `isActiveRunStatus` (running
+    // || healing) used to send Stop straight to `not-active`. Live case:
+    // 2026-09-08T1019-6deh sat `queued` across two days and every restart.
+    seedRun('zombie-q', { status: 'queued' })
+    const store = new RunStore(tmpDir, createRegistry())
+
+    expect(await store.abort('zombie-q')).toEqual({ ok: true })
+    expect(readManifest(store.manifestPath('zombie-q'))?.status).toBe('aborted')
+    expect(readRunsIndex(tmpDir)[0].status).toBe('aborted')
+  })
+
+  it('abortAllActiveOrStale finalizes a stale queued row but spares a freshly parked one', async () => {
+    // Same two-server guard as the healing case above: staleness is the only
+    // evidence available that no live process still holds the queue slot.
+    seedRun('stale-q', {
+      status: 'queued',
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1_000).toISOString(),
+    })
+    seedRun('fresh-q', { status: 'queued', heartbeatAt: new Date().toISOString() })
+    const store = new RunStore(tmpDir, createRegistry())
+
+    expect(await store.abortAllActiveOrStale()).toEqual({ aborted: ['stale-q'] })
+    expect(readManifest(store.manifestPath('stale-q'))?.status).toBe('aborted')
+    expect(readManifest(store.manifestPath('fresh-q'))?.status).toBe('queued')
+  })
+
   it('abortAllActiveOrStale stops a registered run even when its heartbeat is fresh', async () => {
     // The guard is scoped to rows this process does NOT own. Shutdown aborts
     // our own orchestrators, whose heartbeats are fresh by definition, so a
@@ -479,6 +542,30 @@ describe('RunStore', () => {
     expect(store.delete('done')).toEqual({ ok: true })
     expect(fs.existsSync(runDirFor(tmpDir, 'done'))).toBe(false)
     expect(events).toEqual([{ kind: 'removed', runId: 'done' }])
+  })
+
+  it('a spec-edit manifest patch emits `changed` so the runs stream pushes the new manifest', () => {
+    // The D9 record (suiteSnapshot / specEdits / integrity) is written through
+    // this sink by the orchestrator, and /ws/runs turns every `changed` into an
+    // `update` frame carrying the re-read manifest. That IS the live path for
+    // the boundary UI — no WorkspaceEvent doubles it. Removing this emit would
+    // leave the Tests panel stale until the next status flip.
+    seedRun('boundary', { status: 'running' })
+    const store = new RunStore(tmpDir, createRegistry())
+    const events: RunStoreEvent[] = []
+    store.onEvent((event) => events.push(event))
+
+    store.patchManifest('boundary', {
+      suiteSnapshot: { kind: 'taken', dir: '/logs/runs/boundary/suite', takenAt: 't', digest: 'd' },
+      specEdits: { checkedAt: 't', pending: [{ file: 'e2e/a.spec.ts', change: 'modified', affectedTests: ['a'] }], adopted: [] },
+      integrity: { hints: [], disclosure: 'd' },
+    })
+
+    expect(events).toEqual([{ kind: 'changed', runId: 'boundary' }])
+    expect(store.get('boundary')?.manifest).toMatchObject({
+      suiteSnapshot: { kind: 'taken' },
+      specEdits: { pending: [{ file: 'e2e/a.spec.ts' }] },
+    })
   })
 
   it('removeFromHistory returns false without emitting when no run is removed', () => {

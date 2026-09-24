@@ -79,7 +79,7 @@ describe('coverage api', () => {
   })
 
   it('coalesces simultaneous coverage-state reads from the same page load', async () => {
-    const states = [{ feature: 'checkout', headline: 'Covered 100%', summary: 'fresh', coverage: 'fresh', coveragePct: 100 }]
+    const states = [{ feature: 'checkout', headline: 'Mapped 100%', summary: 'fresh', coverage: 'fresh', coveragePct: 100 }]
     let settle: ((response: Response) => void) | undefined
     const fetchImpl = vi.fn(() => new Promise<Response>((resolve) => { settle = resolve }))
 
@@ -97,7 +97,7 @@ describe('coverage api', () => {
   })
 
   it('does not clear a newer coverage-state request when an older request settles', async () => {
-    const states = [{ feature: 'checkout', headline: 'Covered 100%', summary: 'fresh', coverage: 'fresh', coveragePct: 100 }]
+    const states = [{ feature: 'checkout', headline: 'Mapped 100%', summary: 'fresh', coverage: 'fresh', coveragePct: 100 }]
     let settleFirst: ((response: Response) => void) | undefined
     let settleSecond: ((response: Response) => void) | undefined
     const fetchImpl = vi.fn()
@@ -109,12 +109,47 @@ describe('coverage api', () => {
     settleFirst?.(ok(states))
     await older
 
-    // The old request's finally runs after `coverageStatesInFlight` moved to the
-    // second request. It must not erase that newer in-flight record.
+    // Settling one URL must not erase another URL's in-flight record.
     expect(listCoverageStates({ baseUrl: 'http://two', fetchImpl })).toBe(newer)
     expect(fetchImpl).toHaveBeenCalledTimes(2)
     settleSecond?.(ok(states))
     await expect(newer).resolves.toEqual(states)
+  })
+
+  it('shares ledger requests only within the same suite, client and invalidation revision', async () => {
+    const responses: Array<(response: Response) => void> = []
+    const fetchImpl = vi.fn(() => new Promise<Response>((resolve) => responses.push(resolve)))
+    const opts = { fetchImpl, readRevision: 'before-change' }
+    const first = getFeatureCoverage('shop', opts)
+    expect(getFeatureCoverage('shop', opts)).toBe(first)
+    const newer = getFeatureCoverage('shop', { ...opts, readRevision: 'after-change' })
+    const other = getFeatureCoverage('other', opts)
+    const client = getFeatureCoverage('shop', { ...opts, fetchImpl: vi.fn().mockResolvedValue(ok({ feature: 'shop' })) })
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+    responses[0](ok({ feature: 'shop', freshness: { revision: 'old' } }))
+    await first
+    expect(getFeatureCoverage('shop', { ...opts, readRevision: 'after-change' })).toBe(newer)
+    responses[1](ok({ feature: 'shop', freshness: { revision: 'new' } }))
+    responses[2](ok({ feature: 'other' }))
+    await expect(newer).resolves.toMatchObject({ freshness: { revision: 'new' } })
+    await Promise.all([other, client])
+  })
+
+  it('releases failed shared reads so the next read can recover', async () => {
+    const fetchImpl = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue(ok({ feature: 'shop' }))
+    await expect(getFeatureCoverage('shop', { fetchImpl })).rejects.toThrow('offline')
+    await expect(getFeatureCoverage('shop', { fetchImpl })).resolves.toMatchObject({ feature: 'shop' })
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('also coalesces the normal browser fetch despite per-call binding', async () => {
+    const browserFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(ok({ feature: 'shop' }))
+    try {
+      const first = getFeatureCoverage('shop')
+      expect(getFeatureCoverage('shop')).toBe(first)
+      await first
+      expect(browserFetch).toHaveBeenCalledTimes(1)
+    } finally { browserFetch.mockRestore() }
   })
 
   it('regeneratePrdSummary POSTs with adapter when provided', async () => {

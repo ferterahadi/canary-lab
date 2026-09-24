@@ -98,6 +98,94 @@ const SPEC = `
 `
 
 describe('coverage routes', () => {
+  it('returns an immediate freshness change when no monitor is installed', async () => {
+    writeFeature('checkout', SPEC)
+
+    const response = await app.inject({ method: 'GET', url: '/api/features/checkout/coverage/changes?afterRevision=older' })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ change: { feature: 'checkout', delivery: 'tool-response-and-wait' } })
+  })
+
+  it('reports the active job owner from its external session, producer, or internal fallback', async () => {
+    writeFeature('checkout', SPEC)
+    const store = coverageJobStore(logsDir)
+    const active = (jobId: string, extra: Record<string, unknown> = {}): CoverageJobManifest => ({
+      jobId, feature: 'checkout', kind: 'coverage', status: 'running', startedAt: '2026-01-01T00:00:00Z', log: '', ...extra,
+    })
+
+    store.save(active('external', { producer: 'runner', externalSessionId: 'session-1' }))
+    expect((await app.inject('/api/features/checkout/coverage/changes')).json()).toMatchObject({
+      change: { activeJobId: 'external', activeJobOwner: 'session-1' },
+    })
+    store.remove('external')
+    store.save(active('producer', { producer: 'runner' }))
+    expect((await app.inject('/api/features/checkout/coverage/changes')).json()).toMatchObject({
+      change: { activeJobId: 'producer', activeJobOwner: 'runner' },
+    })
+    store.remove('producer')
+    store.save(active('internal'))
+    expect((await app.inject('/api/features/checkout/coverage/changes')).json()).toMatchObject({
+      change: { activeJobId: 'internal', activeJobOwner: 'internal' },
+    })
+  })
+
+  it('includes the current Flight identity in a coverage change when one owns the feature', async () => {
+    writeFeature('checkout', SPEC)
+    const flightStore = {
+      latestForFeature: vi.fn(() => ({ flightId: 'fl-coverage', status: 'running' })),
+    }
+    const flightApp = Fastify()
+    await flightApp.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, flightStore: flightStore as never })
+    await flightApp.ready()
+    try {
+      expect((await flightApp.inject('/api/features/checkout/coverage/changes')).json()).toMatchObject({
+        change: { flightId: 'fl-coverage', flightStatus: 'running' },
+      })
+    } finally {
+      await flightApp.close()
+    }
+  })
+
+  it('uses the live monitor for change waits and maps every live coverage state into a headline', async () => {
+    writeFeature('checkout', SPEC)
+    const freshness = (state: string, over: Record<string, unknown> = {}) => ({
+      revision: `revision-${state}`, state, latestRunFailed: false, ...over,
+    })
+    const coverageMonitor = {
+      wait: vi.fn(async () => ({ changed: false, change: { feature: 'checkout', freshness: freshness('current'), delivery: 'tool-response-and-wait' } })),
+      readAll: () => [
+        { feature: 'failed', freshness: freshness('current', { latestRunFailed: true }), measurement: { coveragePct: 25 } },
+        { feature: 'covered', freshness: freshness('current'), measurement: { coveragePct: 99.6 } },
+        { feature: 'updating', freshness: freshness('updating'), measurement: undefined },
+        { feature: 'unavailable', freshness: freshness('unavailable'), measurement: undefined },
+        { feature: 'absent', freshness: freshness('not-measured', { nextAction: { stage: 'prd-summary' } }), measurement: undefined },
+        { feature: 'stale-summary', freshness: freshness('stale', { nextAction: { stage: 'prd-summary' } }), measurement: undefined },
+        { feature: 'stale-coverage', freshness: freshness('stale', { reasons: ['Mapping input revisions were not recorded.'] }), measurement: undefined },
+      ],
+    }
+    const monitored = Fastify()
+    await monitored.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, coverageMonitor: coverageMonitor as never })
+    await monitored.ready()
+    try {
+      const change = await monitored.inject('/api/features/checkout/coverage/changes?afterRevision=revision-current&timeoutMs=0')
+      expect(change.json()).toMatchObject({ changed: false, change: { feature: 'checkout' } })
+      expect(coverageMonitor.wait).toHaveBeenCalledWith('checkout', 'revision-current', 0)
+      const states = (await monitored.inject('/api/coverage/states')).json() as Array<{ feature: string; headline: string; summary: string; coverage: string; coveragePct: number | null }>
+      expect(states).toEqual(expect.arrayContaining([
+        expect.objectContaining({ feature: 'failed', headline: 'Mapped 25%', coveragePct: 25 }),
+        expect.objectContaining({ feature: 'covered', headline: 'Mapped 100%', coverage: 'fresh' }),
+        expect.objectContaining({ feature: 'updating', headline: 'Generating', coverage: 'generating' }),
+        expect.objectContaining({ feature: 'unavailable', headline: 'Freshness unconfirmed' }),
+        expect.objectContaining({ feature: 'absent', headline: 'No coverage', summary: 'absent', coverage: 'absent' }),
+        expect.objectContaining({ feature: 'stale-summary', summary: 'stale' }),
+        expect.objectContaining({ feature: 'stale-coverage', headline: 'Stale', coverage: 'stale', freshness: expect.objectContaining({ state: 'stale', reasons: ['Mapping input revisions were not recorded.'] }) }),
+      ]))
+    } finally {
+      await monitored.close()
+    }
+  })
+
   it('404s for an unknown feature', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/features/nope/coverage' })
     expect(res.statusCode).toBe(404)

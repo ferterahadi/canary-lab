@@ -7,7 +7,13 @@ import { buildRunPaths, runDirFor } from '../runtime/run-paths'
 import { stuckSlugsFromJournal } from '../runtime/log-enrichment'
 import { ESCALATION_THRESHOLD, buildHealEscalation, type HealEscalation } from '../runtime/heal-escalation'
 import type { HealSignalKind, RunBootFailure } from '../../../../../../../shared/run-state'
+import type { StrengthVerdict } from '../../../../../../../shared/verification-strength/types'
+import type { PendingSpecEdit } from '../dirty-specs/detect'
+import type { RunManifest } from '../runtime/manifest'
+import { INTEGRITY_HINT_DISCLOSURE, type IntegrityHint } from '../runtime/run-integrity-hints'
 import { CompactRunCounts, NormalizedRunCounts, compactCounts, normalizeRunCounts } from './external-heal-counts'
+import { dependencyIncompatibilityReason, type DependencyIncompatibilityCause } from '../../../../../../../shared/dependency-provenance'
+import { loadPromptTemplate, promptPath } from '../../../../shared/prompts'
 
 export { normalizeRunCounts } from './external-heal-counts'
 export type { CompactRunCounts, NormalizedRunCounts } from './external-heal-counts'
@@ -31,6 +37,37 @@ export interface ExternalHealFailedTest {
   artifacts: Array<{ name: string; kind: string; url: string }>
 }
 
+export interface DependencyBlocker {
+  repoName: string
+  services: Array<{ name: string; safeName: string }>
+  cause: DependencyIncompatibilityCause | 'unclassified'
+  reason: string
+  requiredAction: string
+  worktreePath: string
+  checkedAt?: string
+  logPath?: string
+}
+
+/** Derived from the durable manifest on every read, including repeat waits
+ *  and reconnects. No pending elicitation handle owns this recovery state. */
+export function buildDependencyBlockers(manifest: RunManifest): DependencyBlocker[] {
+  return (manifest.dependencyProvenance ?? [])
+    .filter((item) => item.verdict === 'incompatible')
+    .map((item) => ({
+      repoName: item.repoName,
+      services: manifest.services.filter((service) => service.repoName === item.repoName)
+        .map(({ name, safeName }) => ({ name, safeName })),
+      cause: item.incompatibilityCause ?? 'unclassified',
+      reason: dependencyIncompatibilityReason(item),
+      requiredAction: item.remediation ?? 'Repair dependencies for this worktree, then request runner verification.',
+      worktreePath: item.worktreePath,
+      ...(item.checkedAt ? { checkedAt: item.checkedAt } : {}),
+      ...(item.validation?.logPath ? { logPath: item.validation.logPath } : {}),
+    }))
+}
+
+const DEPENDENCY_RECOVERY_GUIDANCE = loadPromptTemplate(promptPath('dependency-recovery.md'))
+
 export interface ExternalHealContext {
   runId: string
   feature: string
@@ -45,6 +82,9 @@ export interface ExternalHealContext {
   // so an agent that patched only that path spent a whole heal cycle watching an
   // identical failure and concluding its correct fix had not worked.
   worktrees?: RunDetail['manifest']['worktrees']
+  /** Framework-recorded dependency ownership/coherence for each repo. */
+  dependencyProvenance?: RunDetail['manifest']['dependencyProvenance']
+  dependencyBlockers?: DependencyBlocker[]
   lifecycle: RunDetail['manifest']['lifecycle'] | null
   externalHealSession: RunDetail['manifest']['externalHealSession'] | null
   counts: CompactRunCounts
@@ -79,6 +119,52 @@ export interface ExternalHealContext {
   escalation?: HealEscalation
 }
 
+// The agent-facing reading of the D9 boundary. A run executes the run-start
+// copy of its suite, so a spec edited after that point was never tested — this
+// says so, names the edits and the hints, and offers the two honest exits:
+// restore the spec, or request human adoption of the reviewed revision.
+// Advisory by construction: no verdict reads it, and agents cannot self-approve.
+export interface SpecEditsWarning {
+  pending: Array<{
+    file: string
+    change: PendingSpecEdit['change']
+    affectedTests: string[]
+    /** The differential's file-level verdict; absent when no baseline was readable. */
+    verdict?: StrengthVerdict
+  }>
+  hints: IntegrityHint[]
+  disclosure: string
+  message: string
+  nextSteps: string[]
+}
+
+/** Nothing when the run recorded no edits (no snapshot, or none pending) —
+ *  `pending: []` would read as "no edits" on a run that cannot tell. */
+export function buildSpecEditsWarning(manifest: RunManifest): SpecEditsWarning | undefined {
+  const pending = manifest.specEdits?.pending ?? []
+  if (pending.length === 0) return undefined
+  const hints = manifest.integrity?.hints ?? []
+  const weaker = hints.filter((h) => h.kind === 'weaker')
+  const files = pending.length === 1 ? '1 test file' : `${pending.length} test files`
+  return {
+    pending: pending.map((edit) => ({
+      file: edit.file,
+      change: edit.change,
+      affectedTests: edit.affectedTests,
+      ...(edit.strength ? { verdict: edit.strength.verdict } : {}),
+    })),
+    hints,
+    disclosure: INTEGRITY_HINT_DISCLOSURE,
+    message: `⚠️ ${files} changed after this run started. The run used the recorded tests, so none of these changes was tested.`,
+    nextSteps: [
+      'Restore the test-file changes to the recorded version, or ask the human to adopt them: call get_test_review, show its exact patch, then review_test_changes with review_revision for human elicitation. Unsupported clients open the Canary review page, then call review_test_changes with wait_for_decision:true and repeat on still_waiting until the human decision arrives. Do not end the turn or click the human controls. No MCP tool can self-approve a test-file change; do not report the changed tests as passed.',
+      ...(weaker.length > 0
+        ? [`A hint marks ${weaker.map((h) => `${h.file} › ${h.test}`).join(', ')} as possibly weaker than the tests that ran. Restore it — a weaker assertion is never a repair.`]
+        : []),
+    ],
+  }
+}
+
 export interface ExternalRunSnapshot {
   runId: string
   feature: string
@@ -88,6 +174,8 @@ export interface ExternalRunSnapshot {
   repoBranches: RunDetail['manifest']['repoBranches']
   /** See ExternalHealContext.worktrees — the tree this run boots, when isolated. */
   worktrees?: RunDetail['manifest']['worktrees']
+  dependencyProvenance?: RunDetail['manifest']['dependencyProvenance']
+  dependencyBlockers?: DependencyBlocker[]
   lifecycle: RunDetail['manifest']['lifecycle'] | null
   externalHealSession: RunDetail['manifest']['externalHealSession'] | null
   summary: RunDetail['summary'] | null
@@ -98,6 +186,8 @@ export interface ExternalRunSnapshot {
   journalMarkdown: string | null
   artifactsBase: string
   healPrompt?: HealPromptMap
+  /** Present only while live spec edits are pending against this run's suite copy. */
+  specEdits?: SpecEditsWarning
 }
 
 export interface ExternalFailureDetail extends ExternalHealFailedTest {
@@ -161,7 +251,7 @@ export const EXTERNAL_HEAL_NEXT_STEPS: readonly string[] = [
   // of INSTRUCTIONS_BY_PROFILE.repair, i.e. past the CLI's 2048-char cut, so the
   // result is the only channel that delivers it.
   'Read pass counts from result.counts.statusLine / counts.passed — never total - failed. A test absent from every result list is not run, not passed; do not report it as a pass.',
-  'To re-execute, reuse the run rather than tearing it down: signal_run re-runs the failed tests in place for an active healing run; for a failed/aborted run pass its run_ref to start_run (reruns failed → skipped → pending/not-run only). The run_ref rerun already covers skipped + pending, so it is complete — do NOT force_new just to avoid "skipped" tests; force_new on a portified feature spins a fresh per-run worktree and resets THIS journal to Iteration 1. Do not abort_run then start a fresh run — a fresh start re-runs the whole suite and is only worth it when prior passes are invalidated.',
+  'Continue this run: signal_run requests verification after a fix. For a failed/aborted run pass run_ref to start_run; it preserves the recorded suite and journal. force_new cannot replace an active run, and fresh starts cannot bypass pending test review. Use get_test_review then review_test_changes for human adoption. abort_run requires human confirmation; do not abort to verify a fix.',
 ]
 
 // Where to edit, for a worktree-isolated run. Conditional because it is only true
@@ -186,8 +276,13 @@ function worktreeEditRule(worktrees: Record<string, string>): string {
 // context.bootFailure is set. Must stay in sync with the boot-failure steps in
 // the shipped SKILL.md files.
 function bootFailureNextSteps(bf: RunBootFailure): readonly string[] {
+  // The evidence itself is NOT restated here: it already ships as structured
+  // fields on context.bootFailure in the same payload, and this packet is
+  // deliberately slim. `nextAction` is rendered verbatim because run-service-boot
+  // is its single author — a second wording here would drift from the UI's.
   return [
-    `No tests ran — service "${bf.service}" failed to start (${bf.detail}). Read its log at ${bf.logPath} (page large files with offset/limit) to find why it won't serve.`,
+    `No tests ran — service "${bf.service}" failed to start (${bf.detail}). Read context.bootFailure for the structured evidence: reason, classification, command, cwd, exit/signal, and a bounded redacted excerpt.`,
+    `${bf.nextAction ?? 'Use the structured evidence and bounded redacted excerpt first; open the full log when the excerpt is insufficient.'} Full log: ${bf.logPath} (page large files with offset/limit).`,
     'This is an app/service problem, not a test failure — fix the service/app code so it boots and passes its readiness probe. Do NOT edit tests.',
     'Then signal_run ONCE with kind:"restart" (the services must restart), plus hypothesis + fixDescription.',
     RUNNER_VERIFICATION_RULE,
@@ -211,7 +306,10 @@ const REPEAT_HEAL_GUIDANCE = [
 // run is stuck, the escalation block (already on the context) is the louder, more
 // specific steer — it supersedes the generic breadcrumb.
 export function slimRepeatHealContext(context: ExternalHealContext): ExternalHealContext {
-  const { healPrompt: _healPrompt, nextSteps: _nextSteps, ...rest } = context
+  // Full fingerprints remain available through get_heal_context. The current
+  // compact blockers must survive slimming: recovery preflights replace them.
+  const { healPrompt: _healPrompt, nextSteps: _nextSteps, dependencyProvenance: _provenance, ...rest } = context
+  if (rest.dependencyBlockers?.length) return { ...rest, guidance: DEPENDENCY_RECOVERY_GUIDANCE }
   if (rest.escalation) return rest
   return { ...rest, guidance: REPEAT_HEAL_GUIDANCE }
 }
@@ -257,6 +355,11 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     healCycles: snapshot.healCycles,
     repoBranches: snapshot.repoBranches,
     ...(snapshot.worktrees ? { worktrees: snapshot.worktrees } : {}),
+    // Only the records an agent can act on: a `compatible` verdict says the
+    // preflight found nothing, which is not a repair lead.
+    ...(snapshot.dependencyBlockers?.length
+      ? { dependencyBlockers: snapshot.dependencyBlockers, dependencyProvenance: snapshot.dependencyProvenance?.filter((item) => item.verdict === 'incompatible') }
+      : {}),
     lifecycle: snapshot.lifecycle,
     externalHealSession: snapshot.externalHealSession,
     counts: compactCounts(snapshot.counts),
@@ -273,9 +376,10 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     // procedures: it governs every edit that follows, so an agent that stops
     // reading early has still seen it.
     nextSteps: withWorktreeRule(
-      snapshot.bootFailure
-        ? [...bootFailureNextSteps(snapshot.bootFailure)]
-        : [...EXTERNAL_HEAL_NEXT_STEPS],
+      [
+        ...(snapshot.dependencyBlockers?.length ? [DEPENDENCY_RECOVERY_GUIDANCE] : []),
+        ...(snapshot.bootFailure ? bootFailureNextSteps(snapshot.bootFailure) : EXTERNAL_HEAL_NEXT_STEPS),
+      ],
       snapshot.worktrees,
     ),
     ...(escalation ? { escalation } : {}),
@@ -312,6 +416,8 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
   const runDir = runDirFor(logsDir, runId)
   const paths = buildRunPaths(runDir)
   const summary = detail.summary
+  const specEdits = buildSpecEditsWarning(detail.manifest)
+  const dependencyBlockers = buildDependencyBlockers(detail.manifest)
   const context: ExternalRunSnapshot = {
     runId,
     feature: detail.manifest.feature,
@@ -322,12 +428,15 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
     ...(detail.manifest.worktrees && Object.keys(detail.manifest.worktrees).length > 0
       ? { worktrees: detail.manifest.worktrees }
       : {}),
+    ...(detail.manifest.dependencyProvenance ? { dependencyProvenance: detail.manifest.dependencyProvenance } : {}),
+    ...(dependencyBlockers.length > 0 ? { dependencyBlockers } : {}),
     lifecycle: detail.manifest.lifecycle ?? null,
     externalHealSession: detail.manifest.externalHealSession ?? null,
     summary: summary ?? null,
     counts: normalizeRunCounts(summary ?? null),
     failedTests: buildFailedTests(detail, paths.failedDir),
     ...(detail.manifest.bootFailure ? { bootFailure: detail.manifest.bootFailure } : {}),
+    ...(specEdits ? { specEdits } : {}),
     healIndexMarkdown: safeRead(paths.healIndexPath),
     journalMarkdown: safeRead(paths.diagnosisJournalPath),
     artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
@@ -435,6 +544,11 @@ export function writeHealSignal(input: WriteHealSignalInput): { kind: HealSignal
   fs.mkdirSync(path.dirname(target), { recursive: true })
   fs.writeFileSync(target, JSON.stringify(input.body))
   return { kind: input.kind, path: target }
+}
+
+export function hasPendingHealSignal(logsDir: string, runId: string): boolean {
+  const paths = buildRunPaths(runDirFor(logsDir, runId))
+  return [paths.restartSignal, paths.rerunSignal, paths.healSignal].some((file) => fs.existsSync(file))
 }
 
 function healSignalPath(paths: ReturnType<typeof buildRunPaths>, kind: HealSignalKind): string {

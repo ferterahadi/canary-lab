@@ -1,13 +1,19 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { fakeMcpClients } from '../../tools/test-helpers/mcp-clients'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ execFileSync: vi.fn() }))
 vi.mock('child_process', () => ({ execFileSync: mocks.execFileSync }))
 
-const { refreshCanaryLabMcp, findStaleCanaryLabMcp, refreshClaudeDesktopMcpQuietly } = await import('./mcp-refresh')
+const { refreshCanaryLabMcp: refresh, findStaleCanaryLabMcp, refreshClaudeDesktopMcpQuietly } = await import('./mcp-refresh')
 const { claudeDesktopConfigPath } = await import('./desktop-registration')
+
+let clientHome: string
+function refreshCanaryLabMcp(opts: Parameters<typeof refresh>[0] = {}) {
+  return refresh({ homeDir: clientHome, ...opts })
+}
 
 // A throwaway home with a Desktop config already in place, so the per-OS layout
 // comes from the resolver rather than a hardcoded macOS path.
@@ -29,6 +35,9 @@ function tmpConfig(): string {
 
 beforeEach(() => {
   mocks.execFileSync.mockReset()
+  clientHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-refresh-clients-'))
+  tmpDirs.push(clientHome)
+  mocks.execFileSync.mockImplementation(fakeMcpClients(clientHome, { available: [] }))
   delete process.env.CANARY_LAB_SKIP_CLIENT_MCP
 })
 afterEach(() => {
@@ -57,21 +66,9 @@ function claudeAddJsonArgs(): string[] {
 
 describe('refreshCanaryLabMcp', () => {
   it('heals a legacy Claude CLI config and a stale Desktop entry, leaving an absent Codex untouched', () => {
-    const lookup = process.platform === 'win32' ? 'where' : 'which'
-    mocks.execFileSync.mockImplementation((cmd: string, args: string[], opts?: { encoding?: string }) => {
-      if (cmd === lookup && args[0] === 'claude') return Buffer.from('')
-      if (cmd === lookup && args[0] === 'codex') throw new Error('missing')
-      if (cmd === 'claude' && args[0] === 'mcp' && args[1] === 'get') {
-        // Stale entry under the new key; no legacy `canary-lab` entry here.
-        if (args[2] === 'Canary_Lab') {
-          return opts?.encoding === 'utf-8'
-            ? 'Canary_Lab:\n  Type: stdio\n  Command: npx\n  Args: -y canary-lab mcp\n'
-            : Buffer.from('')
-        }
-        throw new Error('missing MCP server')
-      }
-      return Buffer.from('')
-    })
+    mocks.execFileSync.mockImplementation(fakeMcpClients(clientHome, { available: ['claude'], claude: {
+      'Canary_Lab': { type: 'stdio', command: 'npx', args: ['-y', 'canary-lab', 'mcp'] },
+    } }))
     const desktopConfigPath = tmpConfig()
     fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
     fs.writeFileSync(desktopConfigPath, JSON.stringify({
@@ -93,17 +90,9 @@ describe('refreshCanaryLabMcp', () => {
   })
 
   it('migrates legacy canary-lab entries to Canary_Lab on upgrade (CLI + Desktop)', () => {
-    const lookup = process.platform === 'win32' ? 'where' : 'which'
-    mocks.execFileSync.mockImplementation((cmd: string, args: string[] = []) => {
-      if (cmd === lookup && args[0] === 'claude') return Buffer.from('')
-      if (cmd === lookup && args[0] === 'codex') throw new Error('missing')
-      if (cmd === 'claude' && args[0] === 'mcp' && args[1] === 'get') {
-        // Only the legacy key exists; the new key is absent.
-        if (args[2] === 'canary-lab') return Buffer.from('present')
-        throw new Error('missing MCP server')
-      }
-      return Buffer.from('')
-    })
+    mocks.execFileSync.mockImplementation(fakeMcpClients(clientHome, { available: ['claude'], claude: {
+      'canary-lab': { type: 'stdio', command: 'npx', args: ['-y', 'canary-lab', 'mcp'] },
+    } }))
     const desktopConfigPath = tmpConfig()
     fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
     fs.writeFileSync(desktopConfigPath, JSON.stringify({

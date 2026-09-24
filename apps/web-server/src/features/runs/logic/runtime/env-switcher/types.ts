@@ -17,5 +17,6 @@ export type EnvSetsConfig = {
 
 export type BackupRecord = {
   originalPath: string;
-  backupPath: string;
+  // null records prior absence; teardown removes only that run-created target.
+  backupPath: string | null;
 };

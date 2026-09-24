@@ -13,10 +13,11 @@
 // (Flights pill + flight detail view), so they live in `shared/`.
 
 import type { ClientKind } from '../run-mode'
+import type { RunBootFailure } from '../run-state'
 import type { AgentStagePlans } from '../agent-models'
 
-/** Canonical stage-record order. This stays stable for persisted manifests and
- *  restart/jump semantics; normal drive priority lives in
+/** Canonical stage-record order. This stays stable for persisted manifests;
+ *  normal drive priority and restart boundaries live in
  *  `FLIGHT_EXECUTION_ORDER` below. */
 export const FLIGHT_STAGE_KEYS = [
   'similarity',
@@ -38,10 +39,8 @@ export type FlightStageKey = (typeof FLIGHT_STAGE_KEYS)[number]
  *
  *  Parallel setup is independent of the serial Test run and the Report. The
  *  report therefore becomes available first; a large app can finish or retry
- *  its 30–60 minute port-injection pass afterward without discarding that
- *  evidence. The stable record order above deliberately remains unchanged for
- *  persisted manifests; the restart helpers give independent Parallel setup
- *  its own artifact boundary. */
+ *  its port-injection pass afterward without discarding that evidence.
+ *  The stable record order above remains unchanged for persisted manifests. */
 export const FLIGHT_EXECUTION_ORDER = [
   'similarity',
   'scout',
@@ -55,6 +54,17 @@ export const FLIGHT_EXECUTION_ORDER = [
   'evaluation-export',
   'portify',
 ] as const satisfies readonly FlightStageKey[]
+
+/** Artifact boundaries for an explicit "from a step" restart. Keep this
+ *  shared so the dialog describes the same reset the conductor performs. */
+export function flightStagesResetByEntry(entry: FlightStageKey): readonly FlightStageKey[] {
+  if (entry === 'portify') return ['portify']
+  if (entry === 'evaluation-export') return ['evaluation-export']
+  const resetsPortify = entry === 'similarity' || entry === 'scout'
+    || entry === 'scaffold' || entry === 'env-capture'
+  return FLIGHT_STAGE_KEYS.slice(FLIGHT_STAGE_KEYS.indexOf(entry))
+    .filter((key) => key !== 'portify' || resetsPortify)
+}
 
 /** Which stages produce the artifacts a stage actually READS — the real
  *  dependency graph, not the list order.
@@ -212,6 +222,10 @@ export interface PrdSourceCheckpointData {
 /** The client's answer to a checkpoint. `choice` addresses `options`; `values`
  *  carries user-supplied env values for `missing-env`. */
 export interface FlightCheckpointResponse {
+  /** Scoped URL-mode invitation, verified by the HTTP respond route. */
+  elicitationToken?: string
+  /** Elicitation answers apply only to the flight revision that was reviewed. */
+  expectedUpdatedAt?: string
   choice?: string
   values?: Record<string, string>
   data?: unknown
@@ -231,11 +245,11 @@ export interface FlightCheckpointResponse {
  *  failed — the verdict distinguishes a crash from an unhealthy service, and
  *  the log tail puts the actual cause on the stage instead of a bare verdict
  *  line the user has to go digging for. */
-export interface FlightStageErrorDetail {
-  service: string
-  /** From the run's bootFailure: `process-exited` = crashed before healthy;
-   *  `health-timeout` = up but never answered its readiness probe. */
-  reason: 'process-exited' | 'health-timeout'
+export interface FlightStageErrorDetail
+  extends Pick<
+    RunBootFailure,
+    'service' | 'reason' | 'classification' | 'command' | 'cwd' | 'exitCode' | 'signal' | 'nextAction'
+  > {
   logPath: string
   /** Last lines of the service log at failure time. */
   logTail: string
@@ -523,11 +537,18 @@ export interface FlightIndexEntry {
    *  user a checkpoint is waiting for them. Absent = internal. */
   stageProducer?: 'internal' | 'external'
   currentStage: FlightStageKey | null
-  /** Slim per-stage status summary (feeds the UI's mini progress rail). */
-  stages?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
+  /** Slim per-stage summary: enough to present the same status as the detail
+   * rail and to ignore coverage jobs older than a recorded stage attempt. */
+  stages?: Array<{ key: FlightStageKey; status: FlightStageStatus; startedAt?: string; hasEvidence?: boolean }>
   updatedAt: string
   endedAt?: string
   [key: string]: unknown
+}
+
+export function stageHasEvidence(evidence: unknown): boolean {
+  return evidence !== null
+    && typeof evidence === 'object'
+    && Object.keys(evidence as object).length > 0
 }
 
 /** What a stage's spawned agent is doing between the rows that reach
@@ -653,6 +674,10 @@ export interface FlightEntryOptions {
    *  block to the matching stage of its client-only pseudo-manifest. Absent keys
    *  simply have no artifact to report. Never persisted. */
   evidence?: Partial<Record<FlightStageKey, Record<string, unknown>>>
+  /** First evidence-invalid stage for a feature-only Flight invocation. The
+   *  server computes this from live workspace artifacts and the requested
+   *  coverage target; null means the complete Flight outcome already exists. */
+  continuation?: { fromStage: FlightStageKey; reason: string } | null
 }
 
 /** Flight statuses that hold the single-flight lock for their repo set. */

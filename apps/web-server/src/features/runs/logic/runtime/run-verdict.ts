@@ -13,11 +13,12 @@ import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { type RunLifecyclePhase, type RunManifest, type StoppedEarlyReason } from './manifest'
 import { loadFeatures } from '../../../../shared/feature-loader'
 import { KnownSummaryTest, PlaywrightRerunSelection, computeRerunTargetsOrdered, expandForSerialSpecs, grepForKnownTests, isSpecLocation, knownTestsFromSummary, passedNameSet, serialSpecFiles, skippedNameSet, testListForKnownTests, uniqueByName } from './rerun-targets'
+import { environmentExclusions, type ApplicabilitySummary } from '../../../../../../../shared/run-applicability'
 
 export { computeNonPassedTargets, computeRerunTargetsOrdered, nonPassedSignatureFromPlan, normalizeRerunSelection, selectionForPlan, summaryHasPassingEvidence } from './rerun-targets'
 export type { NonPassedTargetsResult, PlaywrightRerunSelection, RerunTargetsOrderedResult } from './rerun-targets'
 
-export interface SummaryShape {
+export interface SummaryShape extends ApplicabilitySummary {
   failed?: Array<{ name?: unknown; endTime?: unknown; location?: unknown }>
   passed?: unknown
   passedNames?: unknown
@@ -108,6 +109,7 @@ export function computeVerificationPlan(
   if (knownTests.length > 0) {
     const passed = passedNameSet(summary)
     const skippedSet = skippedNameSet(summary)
+    const excluded = new Set(environmentExclusions(summary).map((entry) => entry.name))
     const failedSlugs = extractFailedSlugs(summary).filter((slug) => !passed.has(slug))
     const failedSet = new Set(failedSlugs)
     const knownByName = new Map(knownTests.map((test) => [test.name, test] as const))
@@ -115,16 +117,21 @@ export function computeVerificationPlan(
     const failedFirst = uniqueByName(failedSlugs
       .map((slug) => knownByName.get(slug))
       .filter((test): test is KnownSummaryTest => Boolean(test)))
-    const skipped = knownTests.filter((test) => !passed.has(test.name) && !failedSet.has(test.name) && skippedSet.has(test.name))
+    const skipped = knownTests.filter((test) => !passed.has(test.name) && !failedSet.has(test.name) && skippedSet.has(test.name) && !excluded.has(test.name))
     const pending = knownTests.filter((test) => !passed.has(test.name) && !failedSet.has(test.name) && !skippedSet.has(test.name))
     const selected = [...failedFirst, ...skipped, ...pending]
-    if (selected.length === 0) return { kind: 'all-passed', total: knownTests.length }
     if (missingFailed.length > 0) {
       return {
         kind: 'full-suite',
         total: knownTests.length,
         reason: `Post-heal rerun could not match ${missingFailed.length} failed test${missingFailed.length === 1 ? '' : 's'} in the known Playwright inventory; running the full suite with the configured failure threshold.`,
       }
+    }
+    if (selected.length === 0) {
+      if (excluded.size > 0 && !knownTests.some((test) => passed.has(test.name))) {
+        return { kind: 'full-suite', total: knownTests.length, reason: 'No applicable tests passed in this environment. Check the environment and suite declarations.' }
+      }
+      return { kind: 'all-passed', total: knownTests.length }
     }
     // A serial group can only be re-run intact when every selected test's file
     // is known. Summaries written before the reporter captured locations can't
@@ -297,7 +304,9 @@ export function readLatestHealOnFailureThreshold(feature: FeatureConfig): number
 }
 
 // PASSED only when (a) Playwright exited 0 AND (b) every known test is in
-// summary.passedNames. The reporter's runtime `knownTests` inventory is the
+// summary.passedNames or has a reporter-observed environment exclusion.
+// Exclusions remain skipped, and cannot by themselves make a run pass.
+// The reporter's runtime `knownTests` inventory is the
 // first source of truth so helper/factory-generated tests count; static spec
 // extraction remains only as a legacy fallback.
 export function decideRunStatus(

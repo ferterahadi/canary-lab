@@ -9,8 +9,9 @@ import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import type { TestReviewGitReceipt } from '../../../../../../../shared/test-review'
 import { type RunPaths } from './run-paths'
-import { type RunManifest } from './manifest'
+import { readManifest, type RunManifest } from './manifest'
 import type { RunnerLog } from './runner-log'
 import { planRestart } from './restart-planner'
 import { releasePorts } from './port-allocator'
@@ -22,7 +23,9 @@ import { removeWorktree } from './repo-worktree'
 import { decideRunStatus, finalLifecyclePhase, readSummary, restartPlanDetail, selectionForPlan, summaryHasPassingEvidence } from './run-verdict'
 import { killTree, scheduleSigkillFallback } from './run-spawn'
 import type { PlaywrightSpawner } from './run-spawn'
-import { ensureServicesRunning, spawnService, waitForHealth } from './run-service-boot'
+import { ensureServicesRunning } from './run-service-boot'
+import { adoptSpecEdits, refreshSpecEdits, restoreSpecEdits, snapshotSuite } from './run-suite-snapshot'
+import { materializeSuiteRuntimeInputs, prepareSuiteRuntimeInputs, removeSuiteRuntimeInputs } from './suite-runtime-inputs'
 import { captureDirtySpecBaseline, markStoppedEarly, noteHealCycle, prepareRun, recordLifecycle, setStatus, stopHeartbeat } from './run-manifest-writer'
 import type { InterjectResult, OrchestratorEventMap, OrchestratorOptions, ServiceSpec } from './run-orchestrator-types'
 
@@ -99,6 +102,22 @@ export class RunOrchestrator extends EventEmitter {
     return cancelHeal(this.ctx, this)
   }
 
+  async adoptSpecEdits(expectedRevision?: string, git?: TestReviewGitReceipt): ReturnType<typeof adoptSpecEdits> {
+    return adoptSpecEdits(this.ctx, expectedRevision, git)
+  }
+
+  isWaitingForHealSignal(): boolean {
+    return this.ctx.signalGate.isReadyForSignal()
+  }
+
+  restoreSpecEdits(expectedRevision?: string): ReturnType<typeof restoreSpecEdits> {
+    return restoreSpecEdits(this.ctx, expectedRevision)
+  }
+
+  refreshSpecEdits(feature: string): void {
+    refreshSpecEdits(this.ctx, feature)
+  }
+
   async restartHealFromFailure(guidance = ''): ReturnType<typeof restartHealFromFailure> {
     return restartHealFromFailure(this.ctx, this, guidance)
   }
@@ -145,12 +164,25 @@ export class RunOrchestrator extends EventEmitter {
   // signals to the consumer. Does NOT block on Playwright by itself — the
   // caller drives Playwright via runPlaywright(), which lets the future
   // server show "services up" before tests start.
-  async start(): Promise<void> {
-    prepareRun(this.ctx, 'starting')
-    // Capture the pre-heal spec baseline before any service (and therefore any
-    // heal agent) can touch a test file. This is the run-start fallback baseline
-    // and the reference the green promotion compares against. Best-effort —
-    // integrity tracking must never block a run from booting.
+  async start({ resume = false }: { resume?: boolean } = {}): Promise<void> {
+    const previous = resume ? readManifest(this.ctx.paths.manifestPath) : null
+    if (previous?.suiteSnapshot?.kind === 'taken' && !fs.existsSync(this.ctx.paths.suiteSnapshotDir)) {
+      throw new Error('Cannot resume: the recorded suite snapshot is missing. Restore it before continuing this run.')
+    }
+    prepareRun(this.ctx, 'starting', previous ?? undefined)
+    // Copy the suite before any service (and therefore any heal agent) can
+    // touch a test file: Playwright runs from the copy, so a mid-run spec edit
+    // is inert until a human adopts it (D9). Then hash that copy as the
+    // pre-heal baseline — the run-start fallback baseline and the reference the
+    // green promotion compares against. Both are best-effort: integrity
+    // tracking must never block a run from booting, and a failed copy is
+    // recorded on the manifest rather than hidden.
+    if (!resume || !fs.existsSync(this.ctx.paths.suiteSnapshotDir)) snapshotSuite(this.ctx)
+    else {
+      prepareSuiteRuntimeInputs(this.ctx)
+      materializeSuiteRuntimeInputs(this.ctx)
+      refreshSpecEdits(this.ctx, this.ctx.feature.name)
+    }
     await captureDirtySpecBaseline(this.ctx)
     // Apply the ephemeral port overlay BEFORE any service spawns. A failure
     // here throws out of start() so the caller's `.catch` runs stop('aborted')
@@ -168,8 +200,7 @@ export class RunOrchestrator extends EventEmitter {
     // Snapshot each worktree NOW — after overlay + envset + WIP hydration, before
     // any service (and therefore any heal agent) can touch it. The diff against
     // this baseline at teardown is exactly the heal agent's fix (R80).
-    await captureFixBaseline(this.ctx)
-    await ensureServicesRunning(this.ctx)
+    await ensureServicesRunning(this.ctx, () => captureFixBaseline(this.ctx))
   }
 
   // Manually fire a restart. When `filesChanged` is supplied and non-empty,
@@ -200,14 +231,6 @@ export class RunOrchestrator extends EventEmitter {
       },
     })
 
-    if (plan.noMatch) {
-      // Non-empty filesChanged but nothing matched: keep all services warm.
-      for (const svc of this.ctx.services) {
-        this.emit('service-restart-skipped', { service: svc, reason: 'no-files-changed-here' })
-      }
-      return { restarted: [], kept: plan.toKeep, startedBecauseMissing }
-    }
-
     const filesProvided = (filesChanged ?? []).length > 0
     const restartSet = new Set(plan.toRestart)
     const targets: ServiceSpec[] = []
@@ -229,12 +252,12 @@ export class RunOrchestrator extends EventEmitter {
       const p = this.ctx.paths.serviceLog(svc.safeName)
       try { fs.writeFileSync(p, '') } catch { /* may not exist yet */ }
     }
-    for (const svc of targets) {
-      this.ctx.stateSink.setServiceStatus(this.ctx.runId, svc.safeName, 'starting')
-      spawnService(this.ctx, svc)
+    const started = new Set(await ensureServicesRunning(this.ctx))
+    return {
+      restarted: plan.toRestart.filter((safeName) => started.has(safeName)),
+      kept: plan.toKeep,
+      startedBecauseMissing: startedBecauseMissing.filter((safeName) => started.has(safeName)),
     }
-    if (targets.length > 0) await waitForHealth(this.ctx)
-    return { restarted: plan.toRestart, kept: plan.toKeep, startedBecauseMissing }
   }
 
   // Re-run is a no-op at the orchestrator level beyond truncating logs — the
@@ -318,7 +341,7 @@ export class RunOrchestrator extends EventEmitter {
     //   - Targeted re-runs that complete cleanly while earlier failures or
     //     pending tests are still recorded in the summary.
     let finalStatus: RunManifest['status'] = decideRunStatus(
-      this.ctx.feature.featureDir,
+      this.ctx.suiteDir,
       this.ctx.paths.summaryPath,
       exitCode,
     )
@@ -354,7 +377,7 @@ export class RunOrchestrator extends EventEmitter {
   }
 
   async restartTerminalRun(userGuidance?: string): Promise<RunManifest['status']> {
-    await this.start()
+    await this.start({ resume: true })
     if (this.ctx.stopped) return this.ctx.status
     if (this.ctx.bootFailure) return await this.failRunForBootFailure()
     if (userGuidance) {
@@ -377,7 +400,7 @@ export class RunOrchestrator extends EventEmitter {
     setStatus(this.ctx, 'running')
     const exitCode = await runPlaywright(this.ctx, selection)
     if (this.ctx.stopped) return this.ctx.status
-    const finalStatus = decideRunStatus(this.ctx.feature.featureDir, this.ctx.paths.summaryPath, exitCode)
+    const finalStatus = decideRunStatus(this.ctx.suiteDir, this.ctx.paths.summaryPath, exitCode)
     setStatus(this.ctx, finalStatus)
     return await continueAfterTestRun(this.ctx, this, finalStatus)
   }
@@ -431,11 +454,21 @@ export class RunOrchestrator extends EventEmitter {
       scheduleSigkillFallback(this.ctx.healAgentPty)
       this.ctx.healAgentPty = null
     }
+    // Shims before services: a request held for a restart is released rather
+    // than left hanging on a socket whose upstream is about to die.
     for (const [name, pty] of this.ctx.servicePtys) {
       killTree(pty, 'SIGTERM')
       this.ctx.servicePtys.delete(name)
     }
     this.ctx.logFiles.clear()
+    // Runtime env targets are copied into the otherwise immutable suite only
+    // while Playwright can execute it. Remove them before the retained run
+    // artifact becomes historical evidence.
+    try {
+      removeSuiteRuntimeInputs(this.ctx)
+    } catch (err) {
+      this.ctx.runnerLog?.warn(`Suite runtime input cleanup failed: ${(err as Error).message}`)
+    }
     // Capture the heal agent's fix diff from each worktree BEFORE the overlay is
     // reversed or the worktree is removed — the baseline was taken after overlay
     // + envset + WIP, so this diff is exactly the repair (R80). Best-effort:

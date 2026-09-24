@@ -1,7 +1,8 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { resolveMcpInvocation, resolveCliPath, LEGACY_SERVER_NAMES, type ResolvedMcpInvocation } from './mcp-registration'
+import { resolveMcpInvocation, resolveCliPath, LEGACY_SERVER_NAMES, parseSavedMcpEntry, savedMcpMatches, type ResolvedMcpInvocation, type SavedMcpEntry } from './mcp-registration'
+import { readMcpConfig, writeMcpConfig } from './mcp-config'
 
 // Claude Desktop shows this mcpServers key verbatim; keep it aligned with the
 // CLI registration display key (mcp-registration.ts SERVER_NAME).
@@ -61,7 +62,13 @@ export type DesktopRegistrationResult = 'configured' | 'unchanged' | 'skipped'
 export function registeredDesktopCliPath(
   configPath: string = claudeDesktopConfigPath(),
 ): string | null {
-  const servers = readConfig(configPath).mcpServers
+  let servers: unknown
+  try {
+    servers = readMcpConfig(configPath).mcpServers
+  } catch {
+    // This best-effort diagnostic never writes; setup uses the strict reader.
+    return null
+  }
   if (!servers || typeof servers !== 'object') return null
   const entry = (servers as Record<string, unknown>)[SERVER_NAME]
   if (!entry || typeof entry !== 'object') return null
@@ -70,26 +77,34 @@ export function registeredDesktopCliPath(
   return args.find((arg): arg is string => typeof arg === 'string' && /[/\\]cli\.js$/.test(arg)) ?? null
 }
 
+export function readDesktopMcp(configPath: string): SavedMcpEntry | null {
+  const servers = readMcpConfig(configPath).mcpServers as Record<string, unknown> | undefined
+  return servers && SERVER_NAME in servers ? parseSavedMcpEntry(servers[SERVER_NAME]) : null
+}
+
 export function registerClaudeDesktopMcp(opts: DesktopRegistrationOptions = {}): DesktopRegistrationResult {
   const log = opts.log ?? console.log
   const configPath = opts.configPath ?? claudeDesktopConfigPath()
+  const config = readMcpConfig(configPath)
+  const servers = (config.mcpServers ?? {}) as Record<string, unknown>
+  const previous = parseSavedMcpEntry(servers[SERVER_NAME] ?? servers[LEGACY_SERVER_NAMES[0]])
+  const projectRoot = opts.projectRoot ?? (opts.refreshOnly ? previous.invocation?.env?.CANARY_LAB_PROJECT_ROOT : undefined)
   const invocation = resolveMcpInvocation({
     execPath: opts.execPath ?? process.execPath,
     cliPath: opts.cliPath ?? resolveCliPath(),
     forGui: true,
     pathEnv: opts.pathEnv,
-    ...(opts.projectRoot ? { projectRoot: opts.projectRoot } : {}),
+    ...(projectRoot ? { projectRoot } : {}),
   })
+  invocation.env = { ...previous.invocation?.env, ...invocation.env }
+  if (!projectRoot) delete invocation.env.CANARY_LAB_PROJECT_ROOT
+
+  if (opts.refreshOnly && !previous.enabled) return 'skipped'
 
   if (opts.dryRun) {
     log(`[dry-run] configure Claude Desktop MCP: ${configPath} -> ${invocation.command} ${invocation.args.join(' ')}`)
     return 'skipped'
   }
-
-  const config = readConfig(configPath)
-  const servers = config.mcpServers && typeof config.mcpServers === 'object'
-    ? config.mcpServers as Record<string, unknown>
-    : {}
 
   // Migrate any legacy-named entry to SERVER_NAME so existing Desktop users pick
   // up the rename automatically. A legacy entry counts as "already configured",
@@ -101,12 +116,12 @@ export function registerClaudeDesktopMcp(opts: DesktopRegistrationOptions = {}):
 
   const existing = servers[SERVER_NAME]
 
-  if (existing !== undefined && sameEntry(existing, invocation)) {
+  if (existing !== undefined && savedMcpMatches(parseSavedMcpEntry(existing), invocation, true)) {
     // New key already correct — but if we removed a legacy duplicate we still
     // have to persist that deletion.
     if (migratedLegacy) {
       config.mcpServers = servers
-      writeConfig(configPath, config)
+      writeMcpConfig(configPath, config)
       log(migrateLog)
       return 'configured'
     }
@@ -125,7 +140,7 @@ export function registerClaudeDesktopMcp(opts: DesktopRegistrationOptions = {}):
 
   servers[SERVER_NAME] = invocationEntry(invocation)
   config.mcpServers = servers
-  writeConfig(configPath, config)
+  writeMcpConfig(configPath, config)
   log(migratedLegacy ? migrateLog : 'Claude Desktop MCP configured')
   return 'configured'
 }
@@ -134,36 +149,4 @@ function invocationEntry(invocation: ResolvedMcpInvocation): Record<string, unkn
   return invocation.env
     ? { command: invocation.command, args: invocation.args, env: invocation.env, alwaysLoad: true }
     : { command: invocation.command, args: invocation.args, alwaysLoad: true }
-}
-
-function sameEntry(value: unknown, desired: ResolvedMcpInvocation): boolean {
-  if (!value || typeof value !== 'object') return false
-  const entry = value as {
-    command?: unknown
-    args?: unknown
-    alwaysLoad?: unknown
-    env?: { PATH?: unknown; CANARY_LAB_PROJECT_ROOT?: unknown }
-  }
-  return entry.command === desired.command &&
-    JSON.stringify(entry.args) === JSON.stringify(desired.args) &&
-    entry.alwaysLoad === true &&
-    (entry.env?.PATH ?? undefined) === (desired.env?.PATH ?? undefined) &&
-    // Compared so moving the pin re-points the entry instead of reading as
-    // "already configured" — a Desktop pinned to a workspace that is gone is the
-    // exact failure this pin exists to prevent.
-    (entry.env?.CANARY_LAB_PROJECT_ROOT ?? undefined) === (desired.env?.CANARY_LAB_PROJECT_ROOT ?? undefined)
-}
-
-function readConfig(configPath: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
-  } catch {
-    return {}
-  }
-}
-
-function writeConfig(configPath: string, config: Record<string, unknown>): void {
-  fs.mkdirSync(path.dirname(configPath), { recursive: true })
-  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`)
 }

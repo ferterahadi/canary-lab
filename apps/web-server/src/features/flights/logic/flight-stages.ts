@@ -1,7 +1,7 @@
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, type AgentActivity, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightStage, type FlightStageAgentSession, type FlightStageErrorDetail, type FlightStageKey, type FlightStageTimingKey } from './types'
+import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, flightStagesResetByEntry, type AgentActivity, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightStage, type FlightStageAgentSession, type FlightStageErrorDetail, type FlightStageKey, type FlightStageTimingKey } from './types'
 import { FlightConductorDeps, StartFlightArgs, redoFlight, startFlight } from './conductor'
 import { drive } from './flight-drive'
 import { FlightStageEntryError, stampSystemLine } from './flight-errors'
@@ -117,6 +117,23 @@ export function defaultFlightId(): string {
  *  stops promptly. In-memory by design — after a restart there is nothing to
  *  cancel (store reconcile already parked the flight). */
 export const driveControllers = new Map<string, AbortController>()
+
+/** Boot verification may outlive a Requirements checkpoint. Its controller is
+ * owned separately so returning that checkpoint does not orphan the boot. */
+export interface BackgroundEnvJob {
+  controller: AbortController
+  completion: Promise<StageOutcome>
+  outcome?: StageOutcome
+}
+export const backgroundEnvJobs = new Map<string, BackgroundEnvJob>()
+
+export function abortFlightWork(flightId: string): void {
+  driveControllers.get(flightId)?.abort()
+  const background = backgroundEnvJobs.get(flightId)
+  background?.controller.abort()
+  // A completed but deferred checkpoint has no producer left to unwind.
+  if (background?.outcome) backgroundEnvJobs.delete(flightId)
+}
 
 export function bankStageTiming(
   stage: FlightStage,
@@ -271,15 +288,10 @@ export function stageSidecarDirs(key: FlightStageKey): string[] {
 }
 
 /** Which stage records and artifacts an explicit re-entry invalidates.
- *
- * Most entries retain the historical positional boundary: changing an earlier
- * artifact can invalidate everything recorded after it. Parallel setup is the
- * one independent terminal task. It reads suite/env configuration but neither
- * Test run nor Report reads its output, so retrying it must not erase evidence
- * the user already received. */
+ * Parallel setup reads the suite and envset, but Test run and Report do not
+ * read its output. The Report is an immutable snapshot. */
 export function stagesResetByEntry(entry: FlightStageKey): readonly FlightStageKey[] {
-  if (entry === 'portify') return ['portify']
-  return FLIGHT_STAGE_KEYS.slice(FLIGHT_STAGE_KEYS.indexOf(entry))
+  return flightStagesResetByEntry(entry)
 }
 
 /** R78: rewind the feature to the state just before `entry` ran — invoke each
@@ -344,12 +356,12 @@ export function sameRepoSet(a: string[], b: string[]): boolean {
   return norm(a) === norm(b)
 }
 
-/** Fresh stage array; with `fromStage`, everything before it is pre-skipped
- *  (the stage-entry path — prerequisites were validated by the caller). */
+/** Fresh stage array; with `fromStage`, earlier execution-priority stages are
+ *  pre-skipped (the stage-entry path — prerequisites were validated). */
 export function freshStages(fromStage: FlightStageKey | undefined, now: () => string): FlightStage[] {
-  const startIdx = fromStage ? FLIGHT_STAGE_KEYS.indexOf(fromStage) : 0
-  return FLIGHT_STAGE_KEYS.map((key, i) =>
-    i < startIdx
+  const startIdx = fromStage ? FLIGHT_EXECUTION_ORDER.indexOf(fromStage) : 0
+  return FLIGHT_STAGE_KEYS.map((key) =>
+    FLIGHT_EXECUTION_ORDER.indexOf(key) < startIdx
       ? {
           key,
           status: 'skipped' as const,
@@ -361,10 +373,9 @@ export function freshStages(fromStage: FlightStageKey | undefined, now: () => st
 }
 
 /** Jump re-entry on an EXISTING record: unaffected stages keep their prior
- *  records verbatim, and the entry's invalidation set resets to pending. Most
- *  entries rewind the chosen step and every later stable-record stage;
- *  independent Parallel setup rewinds only itself. resetStagesForRestart wipes
- *  that same set on disk. The preserved steps already ran in THIS flight, so their
+ *  records verbatim, and the entry's artifact invalidation set resets to
+ *  pending. resetStagesForRestart wipes that same set on disk. The preserved
+ *  steps already ran in THIS flight, so their
  *  `done` status, evidence, log and agent-session refs stay true and the UI can
  *  still show their history. Contrast `freshStages(fromStage)`, which pre-skips
  *  earlier stages as `stage-entry` — correct only for a brand-new flight that
@@ -402,11 +413,17 @@ export function bankStageActivity(stage: FlightStage, nowIso: string): FlightSta
 
 export function firstOpenStageIndex(m: FlightManifest): number {
   const settled = (stage: FlightStage): boolean => stage.status === 'done' || stage.status === 'skipped'
+  // Historical manifests can still carry the retired Lab stage. Preserve its
+  // record, but never select it now that its adapter has been removed.
+  const retired = (stage: FlightStage): boolean => String(stage.key) === 'robustness'
   // A live/checkpointed stage owns the next call even when its key is later in
   // normal priority. Otherwise a checkpoint response could be delivered to
   // Test run while an older Flight is still parked in Parallel setup.
+  const foreground = m.stages.findIndex((stage) => !retired(stage) && stage.key === m.currentStage
+    && (stage.status === 'running' || stage.status === 'waiting-for-approval'))
+  if (foreground >= 0) return foreground
   const active = m.stages.findIndex((stage) =>
-    stage.status === 'running' || stage.status === 'waiting-for-approval',
+    !retired(stage) && (stage.status === 'running' || stage.status === 'waiting-for-approval'),
   )
   if (active >= 0) return active
 
@@ -414,7 +431,7 @@ export function firstOpenStageIndex(m: FlightManifest): number {
   // what preserves “From Parallel setup” while fresh linear progression
   // takes the faster Test Run-first path below.
   const current = m.currentStage
-    ? m.stages.findIndex((stage) => stage.key === m.currentStage && !settled(stage))
+    ? m.stages.findIndex((stage) => !retired(stage) && stage.key === m.currentStage && !settled(stage))
     : -1
   if (current >= 0) return current
 

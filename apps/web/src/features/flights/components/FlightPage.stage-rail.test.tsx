@@ -4,6 +4,7 @@ import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlightManifest, FlightStageKey } from '@/shared/api/client'
+import type { EvaluationExportTask } from '@/shared/api/types'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
 
@@ -45,7 +46,7 @@ const mocks = vi.hoisted(() => ({
   restartRun: vi.fn(),
   taskById: vi.fn(),
   taskForRun: vi.fn(),
-  evaluationTasks: vi.fn(() => []),
+  evaluationTasks: vi.fn((): EvaluationExportTask[] => []),
   evaluationLogs: vi.fn((): Record<string, string> => ({})),
   watchEvaluationTask: vi.fn(),
 }))
@@ -267,6 +268,41 @@ async function render(flightId: string, extraProps: Record<string, unknown> = {}
 }
 
 describe('trailer model (R14–R18)', () => {
+  it('keeps Follow on a queued run while every visible stage chip says Queued', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'done', currentStage: null, stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })) }))
+    await render('fl_1', { activity: new Map([['checkout', { kind: 'running', runId: 'q', waiting: { kind: 'queued', label: 'Queued', shortLabel: 'queued', detail: 'Services have not started.' } }]]) })
+    expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toContain('Queued')
+    expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toContain('Queued')
+    expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).not.toContain('Running')
+    const rail = container.querySelector('[data-testid="stage-rail-run"]')
+    expect(rail?.getAttribute('aria-current')).toBe('true')
+    expect(rail?.textContent).toContain('Queued')
+    expect(rail?.querySelector('.animate-pulse')).toBeNull()
+  })
+
+  it.each([
+    ['authoring', 'specs-coverage', 'Writing'],
+    ['mapping', 'specs-coverage', 'Mapping'],
+    ['condensing', 'docs', 'Condensing'],
+    ['exporting', 'evaluation-export', 'Exporting'],
+  ])('follows live %s over completed flight evidence', async (kind, rowKey, label) => {
+    // A completed report must not hide a new standalone pass over this suite.
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+    }))
+    await render('fl_1', { activity: new Map([['checkout', { kind, external: true }]]) })
+    expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toContain(label)
+    expect(container.querySelector(`[data-testid="stage-rail-${rowKey}"]`)?.getAttribute('aria-current')).toBe('true')
+    expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toBe('Running')
+
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scout"]')?.click() })
+    expect(container.querySelector('[data-testid="stage-rail-scout"]')?.getAttribute('aria-current')).toBe('true')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="rail-resume-follow"]')?.click() })
+    expect(container.querySelector(`[data-testid="stage-rail-${rowKey}"]`)?.getAttribute('aria-current')).toBe('true')
+  })
+
   it('R20: a live agent stage shows the timeline; a settled one answers with facts', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       currentStage: 'prd-summary',
@@ -309,23 +345,29 @@ describe('trailer model (R14–R18)', () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'done',
       currentStage: null,
-      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+      stages: [
+        ...FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+        { key: 'robustness', status: 'done' } as unknown as FlightManifest['stages'][number],
+      ],
     }))
     const onSelectStage = vi.fn()
     await render('fl_1', { stage: null, onSelectStage })
-    // Follow-mode: Report remains the foreground deliverable even though
-    // Parallel setup is the final persisted row.
+    // Follow-mode: Report remains the foreground deliverable while the
+    // independent work sits below it in the rail.
     expect(container.querySelector('[data-testid="stage-rail-evaluation-export"]')?.getAttribute('aria-current')).toBe('true')
     const railIds = [...container.querySelectorAll<HTMLElement>('[data-testid^="stage-rail-"]')]
       .map((row) => row.dataset.testid)
     expect(railIds.indexOf('stage-rail-evaluation-export'))
       .toBeLessThan(railIds.indexOf('stage-rail-portify'))
     const report = container.querySelector('[data-testid="stage-rail-evaluation-export"]')
-    const divider = container.querySelector('[data-testid="parallel-setup-divider"]')
+    const divider = container.querySelector('[data-testid="flight-rail-section-independent"]')
     const parallelSetup = container.querySelector('[data-testid="stage-rail-portify"]')
-    expect(divider?.textContent).toContain('Independent')
+    expect(divider?.textContent).toContain('Run separately')
     expect(report?.nextElementSibling).toBe(divider)
     expect(divider?.nextElementSibling).toBe(parallelSetup)
+    expect(container.querySelector('[data-testid="flight-rail-section-setup"]')?.textContent).toContain('Setup')
+    expect(container.querySelector('[data-testid="flight-rail-section-verification"]')?.textContent).toContain('Verification cycle')
+    expect(railIds).not.toContain('stage-rail-robustness')
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')?.click()
@@ -341,7 +383,7 @@ describe('trailer model (R14–R18)', () => {
     expect(onSelectStage).not.toHaveBeenCalledWith(null)
   })
 
-  it('keeps the completed Report in front while final Parallel setup runs in the rail', async () => {
+  it('keeps the completed Report in front while Parallel setup runs in the rail', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'running',
       currentStage: 'portify',
@@ -590,7 +632,8 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="repo-scan-output"]')).toBeNull()
     const intentCard = container.querySelector<HTMLElement>('[data-testid="flight-intent-card"]')
     const repoScanCard = container.querySelector<HTMLElement>('[data-testid="repo-scan-card"]')
-    expect(repoScanCard?.textContent).toContain('Repos · 2 scanned')
+    expect(repoScanCard?.textContent).toContain('Repos scanned')
+    expect(repoScanCard?.querySelector('.cl-count-chip')?.textContent).toBe('2')
     expect(repoScanCard?.className).toBe(intentCard?.className)
     // R73: the panel fills the shared STAGE_COLUMN so the repo cards and a
     // failed stage's error card line up as one column (no shrink-wrap
@@ -722,6 +765,10 @@ describe('trailer model (R14–R18)', () => {
 // changed, only who was credited for it.
 describe('a skipped stage that HAS evidence keeps its settled mark', () => {
   it('renders the resumed flight\'s earlier steps as done, not skipped', async () => {
+    const { LEDGER } = await import('@/features/coverage/components/__fixtures__/CoverageLedgerPage.part2-fixtures')
+    // A done marker now also requires confirmed coverage; this case tests the
+    // resumed-stage evidence rule, not an unavailable freshness read.
+    mocks.getFeatureCoverage.mockResolvedValue({ ...LEDGER, freshness: { ...LEDGER.freshness!, state: 'current', reasons: [], nextAction: undefined } })
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'running',
       currentStage: 'run',

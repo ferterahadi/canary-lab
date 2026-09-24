@@ -12,22 +12,29 @@ import { useEffect } from 'react'
 import { CloseIcon } from './Icons'
 
 // ─── Toast (R51) ────────────────────────────────────────────────────────────
-// Minimal in-app notification for "a background thing needs you" moments —
-// today: a flight parking on a checkpoint or pausing on a stage failure.
-// Token-styled card stack, bottom-right, amber accent, auto-dismiss; clicking
-// navigates (the caller supplies onClick) and dismisses. Deliberately NOT
-// routed — transient by definition (cl_route-every-surface's cold-load test).
+// Minimal in-app notification for transient attention and completion moments.
+// The caller chooses a status tone and either makes the whole toast actionable
+// or requires its explicit action button. Deliberately NOT routed — transient
+// by definition (cl_route-every-surface's cold-load test).
 
 export interface ToastItem {
   id: string
   title: string
   body?: string
-  /** Navigate to the thing that needs attention (also dismisses). */
+  /** Open or perform the toast's action (also dismisses by default). */
   onClick?: () => void
   /** R68: a toast that demands input — it NEVER auto-dismisses (no timer) and
-   *  reads slightly stronger (warning-tinted border + a "needs input" eyebrow).
+   *  carries a warning-toned "Needs input" rubric above its title.
    *  Non-sticky toasts keep the 8s auto-dismiss. */
   sticky?: boolean
+  /** Durable notifications are read on open, and deleted only by dismissal. */
+  dismissOnOpen?: boolean
+  actionLabel?: string
+  dismissLabel?: string
+  /** Status hue; warning remains the default for existing attention toasts. */
+  tone?: 'warning' | 'success'
+  /** Keep the card inert so only its labelled action can invoke `onClick`. */
+  actionOnly?: boolean
 }
 
 export const TOAST_MS = 8000
@@ -56,41 +63,37 @@ export function ToastHost({ toasts, onDismiss }: { toasts: ToastItem[]; onDismis
           role="status"
           data-testid={`toast-${t.id}`}
           data-sticky={t.sticky ? 'true' : undefined}
-          className="flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 shadow-lg transition-opacity"
-          style={{
-            background: 'var(--bg-surface)',
-            // Sticky toasts wear a fuller warning border; informational toasts
-            // keep the subtler blend.
-            borderColor: t.sticky
-              ? 'var(--warning)'
-              : 'color-mix(in srgb, var(--warning) 45%, var(--border-default))',
-          }}
+          // Popover chrome with a neutral edge: the status dot is the toast's
+          // one hue, and the primary action (success only) its one accent.
+          className={`cl-popover relative py-2.5 pl-3 pr-9 ${t.actionOnly ? '' : 'cl-card-hover cursor-pointer'}`}
           onClick={() => {
+            if (t.actionOnly) return
             t.onClick?.()
-            onDismiss(t.id)
+            if (t.dismissOnOpen !== false) onDismiss(t.id)
           }}
         >
-          <span
-            aria-hidden="true"
-            className="mt-0.5 h-2 w-2 shrink-0 rounded-full"
-            style={{ background: 'var(--warning)' }}
-          />
-          <div className="min-w-0 flex-1">
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2">
             {t.sticky && (
-              <div
-                className="mb-0.5 text-[9px] font-semibold uppercase tracking-wider"
-                style={{ color: 'var(--warning)' }}
-              >
-                Needs input
+              <div className="cl-rubric col-start-2 mb-0.5" style={{ color: 'var(--warning)' }}>Needs input</div>
+            )}
+            <span aria-hidden="true" className={`cl-status-dot ${t.tone === 'success' ? 'bg-success' : 'bg-warning'}`} />
+            <div className="cl-type-title truncate text-primary">{t.title}</div>
+            {t.body && <div className="cl-type-body col-start-2 mt-1 text-secondary">{t.body}</div>}
+            {t.actionLabel && (
+              <div className="col-start-2 mt-2.5">
+                <button type="button" className={`${t.tone === 'success' ? 'cl-button-primary' : 'cl-button'} px-3 py-1`} onClick={(event) => {
+                  if (!t.actionOnly) return
+                  event.stopPropagation()
+                  if (t.dismissOnOpen !== false) onDismiss(t.id)
+                  t.onClick?.()
+                }}>{t.actionLabel}</button>
               </div>
             )}
-            <div className="truncate text-[12px] font-medium" style={{ color: 'var(--text-primary)' }}>{t.title}</div>
-            {t.body && <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{t.body}</div>}
           </div>
           <button
             type="button"
-            aria-label="Dismiss"
-            className="cl-icon-button h-5 w-5 shrink-0 text-[11px]"
+            aria-label={t.dismissLabel ?? 'Dismiss'}
+            className="cl-icon-button absolute right-2 top-2 h-5 w-5"
             onClick={(e) => {
               e.stopPropagation()
               onDismiss(t.id)

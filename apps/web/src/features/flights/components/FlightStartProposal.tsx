@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useState, type CSSProperties, type ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import type { PlanFeaturesTask, PlannedFeature } from '@/shared/api/client'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
@@ -71,8 +71,7 @@ export function PlanningView({
               data-testid="flight-plan-cancel"
               disabled={busy}
               onClick={() => onCancel(task.taskId)}
-              className="cl-button shrink-0 px-2.5 py-1 text-xs"
-              style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
+              className="cl-button cl-button-danger shrink-0 px-2.5 py-1 text-xs"
             >
               {busy ? 'Stopping…' : 'Stop planning'}
             </button>
@@ -218,7 +217,7 @@ export function ProposalView({
                           type="button"
                           data-testid={`flight-proposal-cancel-${i}`}
                           onClick={() => closeEdit(i, true)}
-                          className="cl-button px-2.5 py-1 text-[11px]"
+                          className="cl-button px-2.5 py-1"
                         >
                           Cancel
                         </button>
@@ -227,7 +226,7 @@ export function ProposalView({
                           data-testid={`flight-proposal-done-${i}`}
                           disabled={!f.name.trim() || !f.description.trim()}
                           onClick={() => closeEdit(i, false)}
-                          className="cl-button-primary px-3 py-1 text-[11px]"
+                          className="cl-button-primary px-3 py-1"
                         >
                           Save
                         </button>
@@ -328,12 +327,12 @@ export function StageRow({
     <>
       <span
         aria-hidden="true"
-        className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[9.5px] font-semibold"
-        style={{
-          borderColor: `color-mix(in srgb, ${badgeTone} 70%, var(--border-default))`,
-          color: badgeTone,
-          background: 'transparent',
-        }}
+        className="cl-bead mt-px"
+        /* Hollow mono bead from the ledger layer; the tone is the only thing a
+           caller sets, and only a MEANINGFUL mark (a status glyph, ▸) tints its
+           edge — a bare pipeline number keeps the neutral hairline. */
+        data-toned={icon !== '·' ? 'true' : undefined}
+        style={{ '--cl-bead-tone': badgeTone } as CSSProperties}
       >
         {badge}
       </span>

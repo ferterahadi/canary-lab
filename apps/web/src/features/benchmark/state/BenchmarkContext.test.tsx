@@ -59,7 +59,7 @@ function manifest(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
     benchmarkId: 'bm-1',
     feature: 'checkout',
     skill: 'canary-lab-run',
-    level: 'light',
+    level: 'med',
     iterations: 1,
     agent: 'claude',
     status: 'running',
@@ -248,12 +248,12 @@ describe('BenchmarkProvider — actions', () => {
     let id: string | undefined
     await act(async () => {
       id = await benchmarks.startBenchmark({
-        feature: 'checkout', skill: 'canary-lab-run', level: 'light', iterations: 3, agent: 'claude',
+        feature: 'checkout', skill: 'canary-lab-run', level: 'med', iterations: 3, agent: 'claude',
       })
     })
 
     expect(api.startBenchmark).toHaveBeenCalledWith({
-      feature: 'checkout', skill: 'canary-lab-run', level: 'light', iterations: 3, agent: 'claude',
+      feature: 'checkout', skill: 'canary-lab-run', level: 'med', iterations: 3, agent: 'claude',
     })
     expect(id).toBe('bm-new')
   })
@@ -267,13 +267,13 @@ describe('BenchmarkProvider — actions', () => {
   })
 
   it('hydrates a terminal benchmark the snapshot left out', async () => {
-    vi.mocked(api.getBenchmark).mockResolvedValue(manifest({ benchmarkId: 'bm-old', status: 'completed' }) as never)
+    vi.mocked(api.getBenchmark).mockResolvedValue(manifest({ benchmarkId: 'bm-old', status: 'done' }) as never)
     mount({ wsUrl: 'ws://test/ws/benchmark', detailId: 'bm-old' })
     expect(detail).toBeUndefined()
 
     await act(async () => { await benchmarks.loadBenchmark('bm-old') })
 
-    expect(detail?.status).toBe('completed')
+    expect(detail?.status).toBe('done')
   })
 
   it('leaves the detail unhydrated when the fetch fails', async () => {

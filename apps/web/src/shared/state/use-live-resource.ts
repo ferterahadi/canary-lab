@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useInvalidationKey } from './invalidation'
 import type { InvalidationTopic } from './invalidation-bus'
 
@@ -32,11 +32,16 @@ import type { InvalidationTopic } from './invalidation-bus'
 export interface LiveResource<T> {
   /** The last resolved value; `null` before the first resolve, when `key` is
    *  null, or when the fetch failed. A failure reads the same as absent, which
-   *  is what every current caller renders — a missing card, not an error. */
+   *  is what ordinary reads render. Polling tasks retain their last snapshot
+   *  through failed reads so a network error cannot erase a running task. */
   value: T | null
   /** True while a fetch is in flight, including refetches. Lets a caller hold a
    *  skeleton in place instead of flashing an empty state mid-refresh. */
   loading: boolean
+  error: string | null
+  /** A current successful read, not a remount cache or an expired lease. */
+  confirmed: boolean
+  refresh: () => void
 }
 
 /**
@@ -62,7 +67,7 @@ const lastResolved = new Map<string, unknown>()
 export function useLiveResource<T>(
   topic: InvalidationTopic,
   key: string | null,
-  fetcher: (key: string) => Promise<T | null>,
+  fetcher: (key: string, opts?: { readRevision: string }) => Promise<T | null>,
   opts: {
     scope?: string
     /** Opt IN to the stale-then-fresh remount cache with a tag naming WHAT is
@@ -72,6 +77,14 @@ export function useLiveResource<T>(
      *  inferred key would hand one resource the other's value. Omit for a
      *  resource that must never paint stale. */
     cache?: string
+    /** Reconcile an active task when a workspace event is missed. Failed reads
+     *  retain the last snapshot and retry; terminal values stop the reads. */
+    pollWhile?: (value: T | null) => boolean
+    /** Event delivery is not durable. Accuracy-sensitive reads reconcile even
+     * when settled, and stop certifying old values when the read lease expires. */
+    reconcileMs?: number
+    leaseMs?: number
+    refreshKey?: string | number
   } = {},
 ): LiveResource<T> {
   const cacheKey = opts.cache !== undefined && key !== null ? `${opts.cache}:${key}` : null
@@ -79,34 +92,99 @@ export function useLiveResource<T>(
     cacheKey !== null ? (lastResolved.get(cacheKey) as T | undefined) ?? null : null
   ))
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [confirmed, setConfirmed] = useState(false)
+  const [refreshVersion, setRefreshVersion] = useState(0)
+  const refresh = useCallback(() => setRefreshVersion((version) => version + 1), [])
   const version = useInvalidationKey(topic, opts.scope)
   const fetcherRef = useRef(fetcher)
   fetcherRef.current = fetcher
   const cacheTag = opts.cache
+  const pollWhileRef = useRef(opts.pollWhile)
+  pollWhileRef.current = opts.pollWhile
+  const polling = opts.pollWhile !== undefined || opts.reconcileMs !== undefined
+  const { reconcileMs, leaseMs, refreshKey } = opts
+  const readKey = JSON.stringify([key, version, refreshKey, refreshVersion])
+  const [confirmedReadKey, setConfirmedReadKey] = useState<string | null>(null)
+  const [valueKey, setValueKey] = useState(key)
+  const retained = useRef<{ key: string; value: T | null } | null>(null)
 
   useEffect(() => {
+    setValueKey(key)
     if (key === null) {
       setValue(null)
       setLoading(false)
+      setConfirmed(false)
+      setError(null)
       return
     }
     let alive = true
     // A key CHANGE (not a remount) paints the new key's cached value — or
     // nothing — immediately, so the pane never shows one stage's figures under
     // another stage's labels while the fetch is in flight.
-    setValue(cacheTag !== undefined ? (lastResolved.get(`${cacheTag}:${key}`) as T | undefined) ?? null : null)
+    let current = reconcileMs && retained.current?.key === key ? retained.current.value
+      : cacheTag !== undefined ? (lastResolved.get(`${cacheTag}:${key}`) as T | undefined) ?? null : null
+    setValue(current)
     setLoading(true)
-    fetcherRef.current(key)
-      .then((next) => {
-        if (cacheTag !== undefined) lastResolved.set(`${cacheTag}:${key}`, next ?? null)
-        if (alive) setValue(next ?? null)
-      })
-      .catch(() => { if (alive) setValue(null) })
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
+    setConfirmed(false)
+    setError(null)
+    let requested = 0
+    let lease: ReturnType<typeof setTimeout> | undefined
+    const fetch = (event?: Event) => {
+      const request = ++requested
+      // Join sibling readers, never a previous reconciliation round or a read
+      // started before reconnect/focus. A hung HTTP request cannot stall recovery.
+      const readRevision = JSON.stringify([readKey, reconcileMs ? Math.floor(Date.now() / reconcileMs) : 0, event?.type, event?.timeStamp])
+      Promise.resolve().then(() => reconcileMs ? fetcherRef.current(key, { readRevision }) : fetcherRef.current(key))
+        .then((next) => {
+          if (!alive || request !== requested) return
+          current = next ?? null
+          retained.current = { key, value: current }
+          if (cacheTag !== undefined) lastResolved.set(`${cacheTag}:${key}`, next ?? null)
+          setValue(current)
+          setError(null)
+          setConfirmed(true)
+          setConfirmedReadKey(readKey)
+          clearTimeout(lease)
+          if (leaseMs) lease = setTimeout(() => { if (alive) setConfirmed(false) }, leaseMs)
+        })
+        .catch((error: unknown) => {
+          // A failed task read is not evidence that the task disappeared.
+          if (!alive || request !== requested) return
+          if (!polling) setValue(null)
+          setConfirmed(false)
+          setError(error instanceof Error ? error.message : String(error))
+        })
+        .finally(() => { if (alive && request === requested) setLoading(false) })
+    }
+    fetch()
+    const timer = polling ? setInterval(() => {
+      if (reconcileMs || pollWhileRef.current?.(current)) fetch()
+    }, reconcileMs ?? 2500) : undefined
+    const offline = () => { requested++; setConfirmed(false); setError('Connection lost; freshness is unconfirmed.') }
+    const visible = (event: Event) => {
+      if (document.visibilityState === 'visible') { setConfirmed(false); fetch(event) }
+    }
+    if (reconcileMs) {
+      window.addEventListener('focus', fetch)
+      window.addEventListener('online', fetch)
+      window.addEventListener('offline', offline)
+      document.addEventListener('visibilitychange', visible)
+    }
+    return () => {
+      alive = false
+      clearInterval(timer)
+      clearTimeout(lease)
+      window.removeEventListener('focus', fetch)
+      window.removeEventListener('online', fetch)
+      window.removeEventListener('offline', offline)
+      document.removeEventListener('visibilitychange', visible)
+    }
     // `cacheTag` is constant per call site (a literal), so it needs no dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, version])
+  }, [key, version, polling, reconcileMs, leaseMs, refreshKey, refreshVersion])
 
-  return { value, loading }
+  // Withdraw trust during the render receiving an invalidation/key change,
+  // not one paint later when its replacement request starts.
+  return { value: valueKey === key ? value : null, loading, error, confirmed: confirmed && confirmedReadKey === readKey, refresh }
 }

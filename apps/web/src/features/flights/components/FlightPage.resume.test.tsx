@@ -272,16 +272,39 @@ describe('FlightPage', () => {
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')?.click() })
     expect(container.querySelector('[data-testid="flight-resume"]')).toBeNull()
     expect(container.querySelector('[data-testid="flight-redo-scout"]')?.textContent).toContain('Repo scan')
+    expect(container.querySelector('[data-testid="flight-redo-section-setup"]')?.textContent).toContain('Setup')
+    expect(container.querySelector('[data-testid="flight-redo-section-verification"]')?.textContent).toContain('Verification cycle')
+    expect(container.querySelector('[data-testid="flight-redo-section-independent"]')?.textContent).toContain('Run separately')
     // Server-invalid step: disabled, with the validator's reason on the row.
     const runRow = container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-run"]')!
     const parallelSetupRow = container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-portify"]')!
     expectBefore(runRow, parallelSetupRow)
     expect(runRow.disabled).toBe(true)
     expect(runRow.textContent).toContain('no specs authored yet')
-    // Nothing selected yet → the primary is disabled.
-    expect(container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-submit"]')?.disabled).toBe(true)
+    // The impact is split in two: a ↻ mark on every row that resets (a row
+    // without one stays) and a count in the footer, beside the button.
+    const markedRows = () => Array.from(container.querySelectorAll('[data-testid="flight-redo-reset-mark"]'))
+      .map((mark) => mark.closest('[role="radio"]')?.getAttribute('data-testid'))
+    const effects = () => container.querySelector('[data-testid="flight-redo-effects"]')?.textContent
+    expect(markedRows()).toEqual([])
+    expect(effects()).toBe('')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-portify"]')?.click() })
+    expect(markedRows()).toEqual(['flight-redo-portify'])
+    expect(effects()).toBe('↻ Resets 1 step')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-specs-coverage"]')?.click() })
+    // Parallel setup (portify) is the one later row left unmarked — it stays.
+    expect(markedRows()).toEqual([
+      'flight-redo-specs-coverage',
+      'flight-redo-run',
+      'flight-redo-evaluation-export',
+    ])
+    expect(effects()).toBe('↻ Resets 3 steps')
+    // Choosing another row updates the impact before the call is sent.
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-docs"]')?.click() })
     const note = container.querySelector<HTMLTextAreaElement>('[data-testid="flight-redo-feedback"]')!
+    // The helper line under the field is its description, not part of its name.
+    expect(document.getElementById(note.getAttribute('aria-describedby') ?? '')?.textContent)
+      .toBe("Optional — added to the agent's prompt.")
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
       setter.call(note, 'collected the wrong docs — focus on OAuth')

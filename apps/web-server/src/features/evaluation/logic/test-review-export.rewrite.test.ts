@@ -97,6 +97,12 @@ describe('test review export', () => {
     expect(body).toContain('Generated flow step')
   })
 
+  it('shows an explicit fallback when a recorded test has no readable source', async () => {
+    const body = await createEvaluationHtml(detail({ featureDir: tmpDir }))
+
+    expect(body.match(/Source unavailable\./g)).toHaveLength(2)
+  })
+
   it('covers internal rewrite parsing and audience wording branches', () => {
     const packet = buildTestReviewPacket(detail({ featureDir: tmpDir }))
 

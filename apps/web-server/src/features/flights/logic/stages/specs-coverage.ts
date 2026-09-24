@@ -5,6 +5,7 @@ import { createHash } from 'crypto'
 import { applyExternalCoverageMappings, buildCoverageMappingContext, computeFeatureCoverage, LEGACY_MAPPINGS_JSON, runCoverageEngine } from '../../../coverage/logic/coverage/service'
 import { IncompleteCoverageAnswerError, missingFromRoster, parseMappingSubmission } from '../../../coverage/logic/coverage/external-submissions'
 import { COVERAGE_STATE_JSON } from '../../../coverage/logic/coverage/run-state'
+import type { MappingInferenceSnapshot } from '../../../coverage/logic/coverage/mapping-cache'
 import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary'
 import { applyExternalDraftFiles } from '../../../config/logic/feature-authoring'
 import { listPlaywrightTests } from '../../../runs/logic/playwright-list'
@@ -135,9 +136,10 @@ export function buildSpecsPrompt(args: {
     iterationNote: args.iteration > 1 ? ` (iteration ${args.iteration} — previous specs did not close these)` : '',
     gaps: JSON.stringify(args.gaps, null, 1),
     featureDir: args.featureDir,
+    testReadability: renderPrompt('test-readability.md', {}),
     validationErrors: errors
       ? [
-          'The previous iteration\'s specs failed to compile/list — fix these errors before adding coverage:',
+          'The previous iteration\'s specs failed validation — fix these errors before adding coverage:',
           '```',
           errors.slice(0, MAX_VALIDATION_ERROR_CHARS),
           '```',
@@ -197,16 +199,20 @@ export function tscErrorsForFeature(projectRoot: string, featureDir: string, tim
 export const defaultValidateSpecs: FlightSpecsValidator = async ({ featureDir, projectRoot }) => {
   const problems: string[] = []
   let listDiagnostics = ''
-  const entries = await listPlaywrightTests(featureDir, {
-    timeoutMs: PLAYWRIGHT_LIST_TIMEOUT_MS,
-    onDiagnostics: (text) => { listDiagnostics += text },
-  })
+  // Both checks only read the authored batch. Wait for both so a failed list
+  // cannot leave a compiler running while the next authoring pass edits it.
+  const [entries, tscErrors] = await Promise.all([
+    listPlaywrightTests(featureDir, {
+      timeoutMs: PLAYWRIGHT_LIST_TIMEOUT_MS,
+      onDiagnostics: (text) => { listDiagnostics += text },
+    }),
+    tscErrorsForFeature(projectRoot, featureDir),
+  ])
   if (entries === null) {
     // listPlaywrightTests calls onDiagnostics with real content on every path
     // that returns null (timeout, spawn error, non-zero exit, bad JSON).
     problems.push(listDiagnostics.trim())
   }
-  const tscErrors = await tscErrorsForFeature(projectRoot, featureDir)
   if (tscErrors) problems.push(tscErrors)
   if (problems.length > 0) return { ok: false, errors: problems.join('\n\n') }
   return { ok: true }
@@ -348,6 +354,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       logsDir: deps.logsDir,
       feature: m.feature,
       requirementIds,
+      incremental: true,
       adapter: m.opts.agent,
       cwd: deps.projectRoot,
       // The mapping half spawns its OWN agent, so it needs the signal as much as
@@ -383,17 +390,21 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
    *  at park time (the standalone job's externalTestRoster rule): the answer is
    *  judged against what the client was HANDED, never a suite that moved while
    *  it worked. */
-  const mappingHandOff = (
+  const mappingHandOff = async (
     ctx: StageContext,
     prep: Extract<Prep, { ok: true }>,
     state: PassState,
     requirementIds: string[],
-  ): StageOutcome => {
-    const mappingContext = buildCoverageMappingContext({ featuresDir: deps.featuresDir, feature: ctx.manifest().feature, requirementIds })
+  ): Promise<StageOutcome> => {
+    const mappingContext = buildCoverageMappingContext({ featuresDir: deps.featuresDir, feature: ctx.manifest().feature, requirementIds, incremental: true })
+    if (mappingContext.tests.length === 0 || mappingContext.requirements.length === 0) {
+      ctx.appendLog('[specs] mapping inputs unchanged — reusing the examined pairs\n')
+      return settleMapped(ctx, prep, state)
+    }
     ctx.appendLog(`[specs] pass ${state.iteration} mapping handed off to the external agent session\n`)
     return externalWorkCheckpoint(ctx, 'specs-coverage', mappingContext.prompt, {
       message: `Map the tests onto the requirements in your own client (pass ${state.iteration}), then respond with { mappings[], unmappable[] } on \`data\` — every roster test must appear in one of them. Canary writes the tags itself and recomputes the ledger.`,
-      context: { phase: 'mapping', pass: state, roster: mappingContext.tests.map((t) => t.testName), target: prep.target },
+      context: { phase: 'mapping', pass: state, roster: mappingContext.tests.map((t) => t.testName), inferenceSnapshot: mappingContext.inferenceSnapshot, target: prep.target },
     })
   }
 
@@ -427,12 +438,13 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     // landed on disk and gate it through the same draft validation as the
     // old JSON-proposal path (fixture import, e2e/ placement, no traversal).
     publishProgress(ctx, ledger, prep.target, state, 'validating')
-    const applied = applyExternalDraftFiles({ featureDir: prep.featureDir })
+    const applied = await applyExternalDraftFiles({ featureDir: prep.featureDir })
     if (!applied.ok) {
       ctx.appendLog(`[specs] spec files rejected: ${applied.error}\n`)
       return runPass(ctx, bumpPass(state, { validationErrors: applied.error, passes: [...state.passes, { pass: state.iteration, note: 'spec files rejected' }] }), ledger)
     }
     ctx.appendLog(`[specs] validated ${applied.written.length} file(s)\n`)
+    for (const warning of applied.warnings ?? []) ctx.appendLog(`[specs] readability review: ${warning}\n`)
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: m.feature })
 
     // Deterministic dry-run: specs that don't compile/list can't raise
@@ -545,7 +557,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
         const prep = prepare(ctx)
         if (!prep.ok) return prep.outcome
         const checkpoint = ctx.manifest().stages.find((s) => s.key === 'specs-coverage')?.checkpoint
-        const handOff = (checkpoint?.data as { context?: { phase?: string; pass?: PassState; roster?: string[] } } | undefined)?.context
+        const handOff = (checkpoint?.data as { context?: { phase?: string; pass?: PassState; roster?: string[]; inferenceSnapshot?: MappingInferenceSnapshot } } | undefined)?.context
         const state = handOff?.pass ?? FIRST_PASS
 
         // A pre-phase park carried no `phase` and can only be an authoring one.
@@ -574,12 +586,19 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
           // Write the tags through the canonical tag-writer (unknown ids / test
           // names dropped) — then the pass verdict is settleMapped's recompute,
           // exactly as it is for the internal mapper.
-          applyExternalCoverageMappings({
-            featuresDir: deps.featuresDir,
-            logsDir: deps.logsDir,
-            feature: ctx.manifest().feature,
-            mappings: parsed.submission.mappings,
-          })
+          try {
+            applyExternalCoverageMappings({
+              featuresDir: deps.featuresDir,
+              logsDir: deps.logsDir,
+              feature: ctx.manifest().feature,
+              mappings: parsed.submission.mappings.filter((mapping) => roster.includes(mapping.testName)),
+              ...(handOff.inferenceSnapshot ? { inference: { snapshot: handOff.inferenceSnapshot, roster } } : {}),
+            })
+          } catch (err) {
+            if ((err as { statusCode?: number }).statusCode !== 409) throw err
+            ctx.appendLog('[specs] mapping inputs changed — issuing a fresh handoff\n')
+            return mappingHandOff(ctx, prep, state, gapRows(compute(ctx.manifest().feature)).map((gap) => gap.id))
+          }
           return settleMapped(ctx, prep, state)
         }
 

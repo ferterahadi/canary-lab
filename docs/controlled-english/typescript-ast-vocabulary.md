@@ -195,7 +195,7 @@ so a TypeScript upgrade that adds a modifier fails compilation.
 | `ExpressionStatement` | statement | the expression itself |
 | `Block` | statement | block |
 | `EmptyStatement` | statement | an empty statement |
-| `IfStatement` | statement | if / then / otherwise |
+| `IfStatement` | statement | if / then / else |
 | `WhileStatement` | statement | while |
 | `DoStatement` | statement | do / then repeat while |
 | `ForStatement` | statement | for loop |
@@ -2164,8 +2164,8 @@ an empty statement
 - **Node interface:** `ts.IfStatement`
 - **Category:** statement
 - **TypeScript-only:** no
-- **Canonical English:** if / then / otherwise
-- **Template:** if {condition} / then: {statements} [/ otherwise: {statements}]
+- **Canonical English:** if / then / else
+- **Template:** if {condition} / then: {statements} [/ else: {statements}]
 - **Children:** expression, thenStatement, elseStatement
 - **Evaluation order:** condition, then exactly one branch
 - **Semantic info required:** none
@@ -2185,7 +2185,7 @@ if (ready) {
 if `ready` is truthy
 then:
     call `start` with no arguments
-otherwise:
+else:
     call `waitMore` with no arguments
 ```
 

@@ -50,6 +50,7 @@ const now = () => '2026-01-01T00:00:00Z'
 const OPTS: FlightOptions = { env: 'local', coverageTarget: 100, yolo: false }
 
 const doneAdapter = (calls?: FlightStageKey[]): StageAdapter => ({
+  teardown: () => null,
   run: async (ctx) => {
     calls?.push(ctx.manifest().currentStage as FlightStageKey)
     return { kind: 'done' }
@@ -73,6 +74,7 @@ describe('failure + resume', () => {
     let attempts = 0
     const adapters = allDone()
     adapters['env-capture'] = {
+      teardown: () => null,
       run: async () => {
         attempts += 1
         return attempts === 1 ? { kind: 'failed', error: 'missing .env' } : { kind: 'done' }
@@ -120,7 +122,7 @@ describe('skipped outcome', () => {
   it('marks a stage skipped and continues to the next stage', async () => {
     const calls: FlightStageKey[] = []
     const adapters = allDone(calls)
-    adapters.docs = { run: async () => ({ kind: 'skipped', reason: 'no docs requested' }) }
+    adapters.docs = { teardown: () => null, run: async () => ({ kind: 'skipped', reason: 'no docs requested' }) }
     const { manifest, completion } = startFlight(args(), deps(adapters))
     await completion
     const final = store.get(manifest.flightId)!
@@ -137,6 +139,7 @@ describe('adapter throws', () => {
   it('treats a thrown/rejected adapter as a failed outcome and pauses the flight', async () => {
     const adapters = allDone()
     adapters.scaffold = {
+      teardown: () => null,
       run: async () => {
         throw new Error('adapter blew up')
       },
@@ -152,6 +155,7 @@ describe('adapter throws', () => {
   it('stringifies a non-Error throw from an adapter', async () => {
     const adapters = allDone()
     adapters.scaffold = {
+      teardown: () => null,
       run: async () => {
         throw 'plain string boom'
       },
@@ -167,6 +171,7 @@ describe('machine bug (outer catch)', () => {
   it('fails the flight hard when the manifest disappears mid-drive', async () => {
     const adapters = allDone()
     adapters.scaffold = {
+      teardown: () => null,
       run: async () => {
         store.remove('fl-1')
         return { kind: 'done' }
@@ -180,6 +185,7 @@ describe('machine bug (outer catch)', () => {
   it('records a non-Error thrown by the machine itself as a string', async () => {
     let throwOnce = true
     const badStore: FlightStore = {
+      logsDir: store.logsDir,
       list: (...a) => store.list(...a),
       get: (id: string) => {
         const m = store.get(id)
@@ -211,6 +217,7 @@ describe('machine bug (outer catch)', () => {
   it('records a real Error thrown by the machine itself via its message', async () => {
     let throwOnce = true
     const badStore: FlightStore = {
+      logsDir: store.logsDir,
       list: (...a) => store.list(...a),
       get: (id: string) => {
         const m = store.get(id)
@@ -247,7 +254,7 @@ describe('crash recovery', () => {
       store,
       now,
       newFlightId: ids,
-      adapters: { similarity: { run: () => new Promise(() => {}) } }, // hangs forever
+      adapters: { similarity: { teardown: () => null, run: () => new Promise(() => {}) } }, // hangs forever
     })
     const live = store.get(manifest.flightId)!
     expect(live.status).toBe('running')
@@ -271,7 +278,7 @@ describe('crash recovery', () => {
       store,
       now,
       newFlightId: ids,
-      adapters: { similarity: { run: () => new Promise(() => {}) } },
+      adapters: { similarity: { teardown: () => null, run: () => new Promise(() => {}) } },
     })
     expect(store.activeForRepos(['/repo/a'])?.flightId).toBe(manifest.flightId)
     store.reconcileInterrupted(now)
@@ -286,6 +293,7 @@ describe('resume replays the in-flight answer (R78: resume is seamless, never a 
     const responses: Array<Record<string, unknown>> = []
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => {
         runCalls.push('run')
         return {
@@ -336,6 +344,7 @@ describe('resume replays the in-flight answer (R78: resume is seamless, never a 
     const responses: string[] = []
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => {
         runCalls.push('run')
         return {

@@ -36,6 +36,7 @@ import { portifyStage } from './portify'
 import { runStage, healStage } from './run'
 
 import { evaluationExportStage } from './evaluation-export'
+import { createEvaluationExportTask } from '../../../evaluation/logic/evaluation-export-store'
 
 import type { FlightInject, FlightStageDeps } from './context'
 
@@ -308,6 +309,30 @@ describe('stage reset (R78 restart wipe)', () => {
   })
 
   describe('evaluation-export.reset', () => {
+    it('keeps a completed report downloadable when a refreshed export starts', async () => {
+      createEvaluationExportTask(logsDir, {
+        taskId: 'eval-ready',
+        runId: 'r1',
+        feature: 'checkout',
+        mode: 'raw',
+        status: 'completed',
+        createdAt: '2026-09-23T00:00:00.000Z',
+        updatedAt: '2026-09-23T00:01:00.000Z',
+        downloadReady: true,
+        archiveBase: 'checkout-report',
+      })
+      const zip = path.join(logsDir, 'evaluation-exports', 'eval-ready', 'export.zip')
+      fs.writeFileSync(zip, 'historical report')
+      const calls: InjectCall[] = []
+
+      await evaluationExportStage(deps({ inject: makeInject(() => undefined, calls) })).reset!(
+        ctxFor(manifest({ links: { runId: 'r1', evaluationTaskId: 'eval-ready' } })).ctx,
+      )
+
+      expect(calls).toEqual([])
+      expect(fs.readFileSync(zip, 'utf8')).toBe('historical report')
+    })
+
     it('deletes the export task through the evaluation route', async () => {
       const calls: InjectCall[] = []
       const inject = makeInject((c) => {

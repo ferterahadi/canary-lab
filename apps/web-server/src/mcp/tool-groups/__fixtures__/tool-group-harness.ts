@@ -1,4 +1,5 @@
 import { CLIENT_KIND, type ToolGroupContext } from '../../tool-support'
+import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import type { McpClientFacts } from '../../client-surface'
 import type { GettingStartedBusyActive, GettingStartedDemoClaim, GettingStartedDemoTarget } from '../../tool-schemas'
 
@@ -7,7 +8,7 @@ import type { GettingStartedBusyActive, GettingStartedDemoClaim, GettingStartedD
 // DEPENDENCY's answer, not the transport, so an MCP client over HTTP would add
 // a server boot and a port per assertion and prove nothing extra.
 
-type Handler = (args: Record<string, unknown>) => Promise<{ content?: Array<{ text?: string }> }>
+type Handler = (args: Record<string, unknown>, ctx?: ServerContext) => Promise<CallToolResult | InputRequiredResult>
 
 export interface ToolConfig {
   inputSchema?: Record<string, unknown>
@@ -15,6 +16,7 @@ export interface ToolConfig {
 }
 
 export interface CapturedTools {
+  raw: (tool: string, args: Record<string, unknown>, ctx?: ServerContext) => Promise<CallToolResult | InputRequiredResult>
   /** Call a tool and parse its JSON result — what `asJsonResult` returns. */
   call: (tool: string, args?: Record<string, unknown>) => Promise<Record<string, unknown>>
   /** Call a tool and read its raw text — `errorResult` returns plain prose. */
@@ -92,13 +94,21 @@ export function captureTools(
   } as unknown as ToolGroupContext
   register(ctx)
 
+  const raw: CapturedTools['raw'] = async (tool, args, context) => {
+    const handler = handlers.get(tool)
+    if (!handler) throw new Error(`tool-group harness: no such tool "${tool}"`)
+    return handler(args, context)
+  }
+
   const text = async (tool: string, args: Record<string, unknown> = {}): Promise<string> => {
     const handler = handlers.get(tool)
     if (!handler) throw new Error(`tool-group harness: no such tool "${tool}"`)
     const result = await handler(args)
-    return result.content?.[0]?.text ?? ''
+    const content = result.content as CallToolResult['content'] | undefined
+    return content?.[0]?.type === 'text' ? content[0].text : ''
   }
   return {
+    raw,
     text,
     call: async (tool, args) => JSON.parse(await text(tool, args)) as Record<string, unknown>,
     configs,

@@ -1,6 +1,12 @@
+import { useState } from 'react'
 import type { RepoBranchSnapshot, ServiceManifestEntry, ServiceStatus } from '@/shared/api/types'
+import { runBootPhase, type RunBootFailure } from '@shared/run-state'
+import { bootEvidenceLabel, bootFailureSummary, bootProcessLabel, UNPRESERVED_CAUSE } from '@/shared/ui/BootEvidence'
+import { alertClass } from './RunDiagnosticsPanels'
 import { branchTooltip } from '../utils/run-detail-playback'
 import { servicePrimaryLabel, serviceTabLabelParts } from './RunOverviewTabs'
+import { dependencyIncompatibilityReason, type RunDependencyProvenance } from '@shared/dependency-provenance'
+import { openEditor } from '@/shared/api/client'
 
 export const STATUS_COLOR: Record<ServiceStatus, string> = {
   queued: 'var(--text-muted)',
@@ -8,6 +14,25 @@ export const STATUS_COLOR: Record<ServiceStatus, string> = {
   starting: 'var(--warning)',
   timeout: 'var(--danger)',
   stopped: 'var(--text-muted)',
+}
+
+const EVIDENCE_LINE = /\b(error|failed|failure|exception|unauthorized|refused|denied|fatal)\b/i
+
+/** A small verbatim window for the first reading layer. The full bounded,
+ * redacted excerpt remains behind Diagnostics and in the MCP heal context. */
+export function bootEvidencePreview(excerpt: string | undefined, maxLines = 3): string | null {
+  const lines = (excerpt ?? '').split(/\r?\n/).map((line) => line.trimEnd()).filter((line) => line.trim())
+  if (lines.length === 0) return null
+  const evidenceIndex = lines.findIndex((line) => EVIDENCE_LINE.test(line))
+  const start = evidenceIndex >= 0 ? evidenceIndex : Math.max(0, lines.length - maxLines)
+  return lines.slice(start, start + maxLines).join('\n')
+}
+
+function hasSpecificNextAction(failure: RunBootFailure): boolean {
+  if (!failure.nextAction) return false
+  return failure.reason !== 'process-exited'
+    || failure.classification === 'underlying-cause-not-preserved'
+    || failure.classification === 'empty-output'
 }
 
 export function ServiceTabButton({
@@ -70,13 +95,18 @@ export function ServiceCard({
   service,
   branch,
   siblings = 1,
+  bootFailure,
+  dependency,
 }: {
   service: ServiceManifestEntry
   branch: RepoBranchSnapshot | null
   /** Services sharing this one's repo, including itself. */
   siblings?: number
+  bootFailure?: RunBootFailure
+  dependency?: RunDependencyProvenance
 }) {
   const primaryLabel = servicePrimaryLabel(service, branch?.name, siblings)
+  const dependencyLogPath = dependency?.validation?.logPath
   return (
     <li className="cl-card group/card p-3">
       {/* The title starts on the card's own left edge — flush with the label
@@ -99,7 +129,78 @@ export function ServiceCard({
         <BranchRow branch={branch} />
         <ServiceField label="url" value={service.healthUrl ?? ''} href={service.healthUrl ?? undefined} />
       </div>
+      {dependency?.verdict === 'incompatible' && (
+        <div data-testid="service-dependency-blocker" className={`mt-2.5 rounded border px-2 py-1.5 text-[11px] ${alertClass('error')}`}>
+          <div>Startup blocked by dependencies · {dependency.repoName}</div>
+          <p className="mt-0.5 text-secondary">{dependencyIncompatibilityReason(dependency)}</p>
+          <p className="mt-1 text-secondary">{dependency.remediation ?? 'Repair dependencies for this worktree, then request runner verification.'}</p>
+          {dependencyLogPath && (
+            <button type="button" className="cl-button mt-2 min-h-6 px-2 py-0.5" onClick={() => { void openEditor({ file: dependencyLogPath }).catch(() => {}) }}>
+              Open dependency log
+            </button>
+          )}
+        </div>
+      )}
+      {bootFailure && bootFailure.reason !== 'dependency-incompatible' && <ServiceBootFailure service={service} failure={bootFailure} />}
     </li>
+  )
+}
+
+function ServiceBootFailure({ service, failure }: { service: ServiceManifestEntry; failure: RunBootFailure }) {
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+  const preview = bootEvidencePreview(failure.excerpt)
+  const differentCommand = failure.command && failure.command !== service.command ? failure.command : null
+  const differentCwd = failure.cwd && failure.cwd !== service.cwd ? failure.cwd : null
+  return (
+    <section data-testid="service-boot-failure" className={`mt-2.5 rounded border px-2.5 py-2 text-[11px] ${alertClass('error')}`}>
+      <div className="font-medium">{bootFailureSummary(failure)}</div>
+      {failure.excerpt && <div className="mt-0.5 text-secondary">Canary preserved the last service output.</div>}
+      {failure.classification === 'underlying-cause-not-preserved' && (
+        <div className="mt-1 text-secondary">{UNPRESERVED_CAUSE}.</div>
+      )}
+      {preview && !diagnosticsOpen && (
+        <div className="mt-2 border-l-2 border-danger/40 bg-canvas px-2 py-1.5">
+          <div className="cl-rubric mb-1">Failure excerpt</div>
+          <pre className="whitespace-pre-wrap break-words font-mono text-secondary">{preview}</pre>
+        </div>
+      )}
+      {hasSpecificNextAction(failure) && <p className="mt-2 text-secondary">{failure.nextAction}</p>}
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <button type="button" className="cl-button min-h-6 px-2 py-0.5" onClick={() => { void openEditor({ file: failure.logPath }).catch(() => {}) }}>
+          Open service log
+        </button>
+        <button
+          type="button"
+          className="cl-button inline-flex min-h-6 items-center gap-1 bg-transparent px-2 py-0.5 text-secondary"
+          aria-expanded={diagnosticsOpen}
+          aria-controls={`boot-diagnostics-${service.safeName}`}
+          onClick={() => setDiagnosticsOpen((open) => !open)}
+        >
+          <span aria-hidden="true" className="text-muted">{diagnosticsOpen ? '▾' : '▸'}</span>
+          Diagnostics
+        </button>
+      </div>
+      {diagnosticsOpen && (
+        <div id={`boot-diagnostics-${service.safeName}`} data-testid="service-boot-diagnostics" className="mt-2 border-t border-danger/30 pt-2 text-secondary">
+          <dl className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-2.5 gap-y-1">
+            <dt className="cl-rubric">Detail</dt><dd>{failure.detail}</dd>
+            <dt className="cl-rubric">Phase</dt><dd>{runBootPhase(failure.reason)}</dd>
+            {failure.classification && <><dt className="cl-rubric">Evidence</dt><dd className="font-mono">{bootEvidenceLabel(failure)}</dd></>}
+            <dt className="cl-rubric">Process</dt><dd>{bootProcessLabel(failure)}</dd>
+            {differentCommand && <><dt className="cl-rubric">Command</dt><dd className="break-all font-mono">{differentCommand}</dd></>}
+            {differentCwd && <><dt className="cl-rubric">Directory</dt><dd className="break-all font-mono">{differentCwd}</dd></>}
+          </dl>
+          {failure.excerpt && (
+            <div className="mt-2">
+              <div className="cl-rubric mb-1">Preserved output</div>
+              <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded border border-line bg-canvas p-2 font-mono text-secondary scrollbar-thin">
+                {failure.excerpt}{failure.excerptTruncated ? '\n… excerpt truncated; open the service log for the full output' : ''}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
 

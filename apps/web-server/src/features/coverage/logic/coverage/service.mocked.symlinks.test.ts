@@ -10,12 +10,12 @@ vi.mock('../../../../shared/ast-extractor', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../../../shared/ast-extractor')>()
   return {
     ...original,
-    extractTestsFromSource: vi.fn(original.extractTestsFromSource),
+    extractCoverageTestsFromSource: vi.fn(original.extractCoverageTestsFromSource),
   }
 })
 
 import { runCoverageEngine as runCoverageEngineReal, regeneratePrdSummary as regeneratePrdSummaryReal, listFeatureDocs } from './service'
-import { extractTestsFromSource } from '../../../../shared/ast-extractor'
+import { extractCoverageTestsFromSource } from '../../../../shared/ast-extractor'
 import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
 
 // Coverage generation is LLM-only; inject the fake agent via the dep seams.
@@ -37,7 +37,7 @@ beforeEach(() => {
   logsDir = path.join(tmpDir, 'logs')
   fs.mkdirSync(featuresDir, { recursive: true })
   fs.mkdirSync(logsDir, { recursive: true })
-  vi.mocked(extractTestsFromSource).mockReset()
+  vi.mocked(extractCoverageTestsFromSource).mockReset()
 })
 
 afterEach(() => {

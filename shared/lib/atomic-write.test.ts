@@ -38,4 +38,17 @@ describe('atomicWrite', () => {
     expect(fs.existsSync(`${file}.tmp`)).toBe(false)
     expect(fs.readdirSync(dir)).toEqual(['out.txt'])
   })
+
+  it('creates private configuration files with the requested mode', () => {
+    const file = path.join(dir, 'private.json')
+    atomicWrite(file, '{}', 0o600)
+    if (process.platform !== 'win32') expect(fs.statSync(file).mode & 0o777).toBe(0o600)
+  })
+
+  it('restricts a leftover temporary file before writing private configuration', () => {
+    const file = path.join(dir, 'private.json')
+    fs.writeFileSync(`${file}.tmp`, 'interrupted write', { mode: 0o644 })
+    atomicWrite(file, '{}', 0o600)
+    if (process.platform !== 'win32') expect(fs.statSync(file).mode & 0o777).toBe(0o600)
+  })
 })

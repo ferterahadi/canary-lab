@@ -133,12 +133,14 @@ describe('deriveFeatureStages', () => {
 })
 
 describe('latestTerminalRunByFeature', () => {
-  it('keeps the newest settled test run per feature, skipping active/boot/benchmark/verify runs', () => {
+  it('keeps the newest settled test run per feature, skipping active/boot/benchmark/robustness/verify runs', () => {
     const map = latestTerminalRunByFeature([
       run({ runId: 'old-pass', startedAt: '2026-01-01T00:00:00Z', status: 'passed' }),
       run({ runId: 'new-fail', startedAt: '2026-01-02T00:00:00Z', status: 'failed' }),
       run({ runId: 'active', startedAt: '2026-01-03T00:00:00Z', status: 'running' }),
       run({ runId: 'boot', startedAt: '2026-01-04T00:00:00Z', executionType: 'boot' }),
+      run({ runId: 'bench', startedAt: '2026-01-04T06:00:00Z', executionType: 'benchmark' }),
+      run({ runId: 'cell', startedAt: '2026-01-04T12:00:00Z', status: 'failed', executionType: 'robustness' }),
       run({ runId: 'verify', startedAt: '2026-01-05T00:00:00Z', executionType: 'verify' }),
       run({ runId: 'other', feature: 'g', startedAt: '2026-01-01T00:00:00Z', status: 'passed' }),
     ])

@@ -1,24 +1,43 @@
-import { type KeyboardEvent as ReactKeyboardEvent, useState } from 'react'
-import type { CoverageLedger, CoverageStatus, ExtractedTest, GapType, RequirementCoverage, TestCoverage, TestStrength } from '@/shared/api/types'
+import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useState } from 'react'
+import type { CoverageLedger, CoverageStatus, EnforcementState, ExtractedTest, GapType, PathType, RequirementCoverage, RequirementEnforcement, TestCoverage, TestStrength } from '@/shared/api/types'
 import { TestPresentation } from '@/shared/ui/TestPresentation'
 import { TestIdBadge } from '@/shared/ui/TestIdBadge'
+import { Tooltip } from '@/shared/ui/Tooltip'
 import { stripLeadingTestOrdinal } from '@/shared/test-numbering'
 
 // Each gap class gets a stable label + colour. Coverage is semantic (run-free):
 // `untested` (no test maps to it) is the gap; `path-incomplete` (some declared
 // paths unclaimed) is partial; `covered` (every path claimed) is the good state.
-// `abbr` is the single-letter form the card status chips collapse to when the card
-// is too narrow for the full label (container query); the colour dot + a hover title
-// keep it decipherable.
-export const GAP_META: Record<GapType, { label: string; abbr: string; color: string }> = {
-  covered: { label: 'Covered', abbr: 'C', color: 'var(--success)' },
-  // Short labels keep the legend + card status from crushing the layout at narrow
-  // widths; the glossary `i` still spells out the full meaning.
-  'path-incomplete': { label: 'Path gap', abbr: 'P', color: 'var(--accent)' },
+// The label is the legend's word and the row tooltip's first word; the row itself
+// shows the gap as segments (one per path, or per path×variant cell) + a fraction.
+export const GAP_META: Record<GapType, { label: string; color: string }> = {
+  // Sky, not green: `covered` means every path has a TEST, which is a claim, and
+  // sky is this system's hue for in-progress. Green stays reserved for "a run
+  // passed it" — the distinction the product exists to make, and one this legend
+  // used to erase by wearing the passing hue. Bleaching it to grey was the
+  // over-correction: it removed the good state from a measure whose whole job is
+  // to report claim completeness.
+  covered: { label: 'Covered', color: 'var(--running)' },
+  // Short labels keep the legend from crushing the layout at narrow widths; the
+  // glossary `i` still spells out the full meaning.
+  //
+  // Amber leaning to rose — the hotter of the two gap hues, because a path gap is
+  // the worse gap: a declared behaviour (happy/sad/edge) has NO test at all, where
+  // a variant gap only means the test it has is narrow. Both gaps wore the exact
+  // same `--warning` before, on the theory that one `partial` tier should read as
+  // one colour; in a suite whose gaps are lopsided (2 path vs 21 variant) that made
+  // the bar a single undifferentiated amber run — the legend named the two kinds,
+  // but the shape could not. A derived shade, not a new hue: the design system's
+  // rule is that a hue means one thing, and this stays inside warning→danger,
+  // which is exactly the direction of the extra severity. It held `--accent` before
+  // that, which the design system reserves for "you can click this, never a status".
+  'path-incomplete': { label: 'Path gap', color: 'color-mix(in srgb, var(--warning) 50%, var(--danger))' },
   // A requirement that spans a variant dimension (channel/tenant/…) but is only
-  // tested on some values. Amber = the breadth warning: it claims more than it proves.
-  'variant-incomplete': { label: 'Variant gap', abbr: 'V', color: 'var(--warning)' },
-  untested: { label: 'Untested', abbr: 'U', color: 'var(--text-muted)' },
+  // tested on some values. Plain amber — the token's own stated meaning is
+  // "stale / shallow", and a variant gap is precisely shallowness: it claims more
+  // breadth than it proves, but every declared path does have a test.
+  'variant-incomplete': { label: 'Variant gap', color: 'var(--warning)' },
+  untested: { label: 'Untested', color: 'var(--text-muted)' },
 }
 
 // Per-test coverage strength — graded off the strongest stack layer a test's
@@ -45,18 +64,163 @@ export const STRENGTH_META: Record<TestStrength, { label: string; color: string;
 // Worst-first: the weakest tests sort to the front of the filter.
 export const STRENGTH_ORDER: TestStrength[] = ['shallow', 'basic', 'solid', 'strong']
 
-// Plain-language gloss for the `@path-*` tags on a test card (tooltip only — the
-// tag itself stays terse). These mirror a requirement's declared happy/sad/edge.
+// Plain-language gloss for the path a test row claims (tooltip only — the row
+// itself stays terse). These mirror a requirement's declared happy/sad/edge.
 export const PATH_DESC: Record<string, string> = { happy: 'happy', sad: 'failure', edge: 'edge-case' }
+
+/** The segment strip's hover label: the verdict and the count, then the strip
+ *  itself KEYED — one line per square, in the same order, naming the case that
+ *  square stands for. The mark mirrors the square's own fill, so the reader maps
+ *  line to square by position and by shape; nothing has to explain the symbols,
+ *  because the only thing missing from an anonymous square was its name. */
+const SEGMENT_MARK: Record<SegmentState, string> = { off: '□', claimed: '■', failed: '▨', proven: '▣' }
+function segmentTooltip(verdict: string, segments: CoverageSegment[]): string {
+  const claimed = segments.filter((s) => s.covered).length
+  const proven = segments.filter((s) => s.proven).length
+  const failing = segments.filter((s) => segmentState(s) === 'failed').length
+  const key = segments.map((s) => `${SEGMENT_MARK[segmentState(s)]} ${s.label} — ${SEGMENT_WORD[segmentState(s)]}`)
+  // Both numbers, because they are the two different questions the strip answers.
+  // "mapped" rather than "covered": the good state's verdict word IS "Covered", and
+  // "Covered — 3 of 3 covered" reads as a stutter. Mapped is the ledger's own verb.
+  // A failing count only appears when there is one: it is news, not a standing field.
+  const counts = `${claimed} of ${segments.length} mapped, ${proven} proven${failing > 0 ? `, ${failing} failing` : ''}`
+  return [`${verdict} — ${counts}`, ...key].join('\n')
+}
 
 // Requirements list is ordered worst-first (uncovered → partial → covered) so the
 // gaps that need work sit at the top — the whole point of the ledger.
 export const STATUS_RANK: Record<CoverageStatus, number> = { uncovered: 0, partial: 1, covered: 2 }
 
-// Golden-angle hue rotation gives each test a distinct, stable colour regardless
-// of how many there are. Mid lightness reads on both light and dark themes.
-export function testColor(index: number): string {
-  return `hsl(${Math.round((index * 137.508) % 360)}, 65%, 55%)`
+// The time axis (D11) as a SORT key. The four state ids are the derivation and
+// stay verbatim on the agent surfaces (docs/FEATURES.md); what a human reads is
+// `verdictView`, which branches on facts the id cannot carry. Worst-first.
+export const ENFORCEMENT_RANK: Record<EnforcementState, number> = {
+  'tests-weakened': 0,
+  'proof-stale': 1,
+  'wording-ahead': 2,
+  'proven-unchanged': 3,
+}
+
+/** Worst-first row order: a weakened test outranks any claim status (the proof
+ *  is undermined, whatever the tags claim), then claim status, then the time
+ *  axis. Stable within a rank; a ledger without the axis sorts by claim alone. */
+export function compareRequirements(a: RequirementCoverage, b: RequirementCoverage): number {
+  const weakened = (rc: RequirementCoverage): number => (rc.enforcement?.state === 'tests-weakened' ? 0 : 1)
+  const axis = (rc: RequirementCoverage): number => (rc.enforcement ? ENFORCEMENT_RANK[rc.enforcement.state] : 0)
+  return weakened(a) - weakened(b)
+    || STATUS_RANK[statusOf(a)] - STATUS_RANK[statusOf(b)]
+    || axis(a) - axis(b)
+}
+
+/** ISO instant → calendar day; the axis is about ORDER, and a day is the grain a
+ *  reader compares by (three full timestamps on one line are noise). */
+const day = (iso: string): string => iso.slice(0, 10)
+
+/** What the reader is told, as opposed to what the state machine computed.
+ *
+ *  The four `EnforcementState` ids are a DERIVATION over three timestamps and
+ *  they do not change here — the agent-facing payload keeps them verbatim. What
+ *  changes is the sentence: a requirement that has never been proven has no
+ *  proof to be "ahead of", so the −∞ rule that makes `wording-ahead` the default
+ *  was putting "Wording ahead of tests" on the screen for every requirement in a
+ *  suite that had simply never run (41 of 41 on cns-wa-merchant), inviting the
+ *  entirely reasonable question "what wording changed?" — when nothing had. The
+ *  display branches on the two things the state id cannot see: whether a proof
+ *  exists at all, and whether the requirement is even claimable yet. */
+export interface VerdictView {
+  /** Takeaway first — the situation, not the derivation that produced it. */
+  label: string
+  /** What to do about it, or why there is nothing to do. */
+  detail: string
+  color: string
+  /** A requirement nothing claims yet gets a hollow mark: there is no verdict to
+   *  report, only a reason there isn't one. */
+  hollow?: boolean
+}
+
+export function verdictView(rc: RequirementCoverage, e: RequirementEnforcement): VerdictView {
+  const proof = e.provenAt
+  const changed = e.testsChangedAt
+  const run = proof ? `run ${proof.runId} (${day(proof.at)})` : ''
+  // Nothing claims it, so nothing can prove it. Naming the missing cases beats
+  // any status word: the grid above already shows which, this says why.
+  if (rc.coverageStatus !== 'covered') {
+    const missing = [...new Set(coverageSegments(rc).filter((seg) => !seg.covered).map((seg) => seg.variant ?? seg.path))]
+    return {
+      label: 'Not provable yet',
+      detail: missing.length > 0 ? `${joinNatural(missing)} ${missing.length === 1 ? 'has' : 'have'} no test.` : 'No test maps to this requirement.',
+      color: 'var(--text-muted)',
+      hollow: true,
+    }
+  }
+  if (e.state === 'tests-weakened' && changed) {
+    return {
+      label: 'A test was weakened after the proof',
+      detail: `${joinNatural(changed.tests)} changed ${day(changed.at)}${proof ? `; ${run} never saw the weaker test` : ''}. Restore the assertion — rerunning won't fix this.`,
+      color: 'var(--danger)',
+    }
+  }
+  // A red square in the strip outranks every time-axis reading below it. The axis
+  // measures the newest run that passed EVERYTHING, which can be an older run than
+  // the latest — so a requirement proved in run 5 and broken in run 7 still derives
+  // `proven-unchanged`, and without this branch the panel would say "Proven" over a
+  // row of rose squares. Latest-run truth wins.
+  const failing = coverageSegments(rc).filter((seg) => segmentState(seg) === 'failed')
+  if (failing.length > 0) {
+    const cases = [...new Set(failing.map((seg) => seg.variant ?? seg.path))]
+    return {
+      label: failing.length === 1 ? 'A test is failing' : 'Tests are failing',
+      detail: `${joinNatural(cases)} ${cases.length === 1 ? 'has a test that' : 'have tests that'} failed in the latest run. Fix the app — never the test.`,
+      color: 'var(--danger)',
+    }
+  }
+  // Every remaining state needs a proof to be measured against. Without one the
+  // honest reading is simply that nothing has proved it yet — and that is what the
+  // sky squares above already say, so the dot takes their hue rather than amber.
+  // Amber is reserved here for the two verdicts the squares CANNOT show: a proof
+  // that has gone out of date, and wording that moved after it.
+  if (!proof) {
+    return {
+      label: 'Not proven yet',
+      detail: 'No run has passed every test mapped to this requirement.',
+      color: 'var(--running)',
+    }
+  }
+  if (e.state === 'proven-unchanged') {
+    return { label: 'Proven', detail: `Every test passed in ${run}, and nothing has changed since.`, color: 'var(--success)' }
+  }
+  if (e.state === 'wording-ahead') {
+    return {
+      label: `${rc.requirement.id} was rewritten after the proof`,
+      detail: `Reworded ${day(e.wordingChangedAt)}; ${run} proved the earlier wording. Check the tests still match, then rerun.`,
+      color: 'var(--warning)',
+    }
+  }
+  return {
+    label: 'Proof out of date',
+    detail: changed
+      ? `${joinNatural(changed.tests)} changed ${day(changed.at)}, after ${run} proved this. Rerun to re-prove.`
+      : `${run} no longer covers the current tests. Rerun to re-prove.`,
+    color: 'var(--warning)',
+  }
+}
+
+/** "a", "a and b", "a, b and c" — a list the way a sentence writes one. */
+function joinNatural(items: string[]): string {
+  if (items.length < 2) return items.join('')
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}
+
+// The dot has no words of its own, so the tooltip leads with the verdict.
+function enforcementTooltip(rc: RequirementCoverage, e: RequirementEnforcement): string {
+  const v = verdictView(rc, e)
+  return [
+    v.label,
+    v.detail,
+    e.provenAt ? `Proven in run ${e.provenAt.runId} · ${day(e.provenAt.at)}` : 'Never proven — no run has passed every mapped test',
+    e.testsChangedAt ? `Tests changed ${day(e.testsChangedAt.at)} (${e.testsChangedAt.verdict})` : 'No recorded test change',
+    `Wording changed ${day(e.wordingChangedAt)}`,
+  ].join('\n')
 }
 
 export interface Hovered {
@@ -90,231 +254,431 @@ export function countFor(ledger: CoverageLedger, g: GapType): number {
   }
 }
 
-export function RequirementCard({ rc, colors, active, focused, dimmed, onHover }: {
+// The time axis inside a requirement's detail: the proof run, the last test
+// change with its verdict, the last wording change, where the wording came from,
+// and the Accept lever. Facts as a `·`-separated strip in the muted hue — the
+// row's dot already carries the verdict colour, so the strip stays neutral.
+
+/** The four things a square can say, in the order they improve. One vocabulary
+ *  for the resting strip, the per-channel grid and the band marks, so the reader
+ *  learns ONE mark: hollow = nothing claims this, sky = a test claims it, rose =
+ *  a test claims it and FAILED, green = a run passed it. The filled states are
+ *  the product's whole thesis, so they take hues from the documented status
+ *  vocabulary — sky is "in progress", which is precisely a claim awaiting its
+ *  proof; rose is the failure hue everywhere else; and green stays the only hue
+ *  that means evidence.
+ *
+ *  `failed` exists because sky was carrying three different realities at once —
+ *  a test that ran and failed, a test skipped or absent from the last run, and a
+ *  suite that has never run — so a broken promise and an unkept one drew the
+ *  identical square. A pass still wins the cell: `proven` is checked first, and
+ *  the ledger only sets `failed` where nothing passed. */
+export type SegmentState = 'off' | 'claimed' | 'failed' | 'proven'
+export const segmentState = (seg: { covered: boolean; proven: boolean; failed?: boolean }): SegmentState =>
+  seg.proven ? 'proven' : seg.failed ? 'failed' : seg.covered ? 'claimed' : 'off'
+export const SEGMENT_WORD: Record<SegmentState, string> = {
+  off: 'no test',
+  claimed: 'has a test · no result yet',
+  failed: 'has a test · it failed',
+  proven: 'passed',
+}
+
+/** A named unit of coverage the row promises. The NAME is what makes the strip
+ *  readable: a square on its own is an anonymous mark, and the only thing worth
+ *  saying about it is which case it stands for. */
+export interface CoverageSegment {
+  /** `happy`, or `happy · email` once a variant dimension is in play. */
+  label: string
+  /** The path this segment stands for. Carried so the behaviour bands can
+   *  PARTITION the segments the row strip already counted, instead of walking
+   *  the cells a second time — one denominator, two readings of it. */
+  path: PathType
+  /** The variant cell, when a variant dimension is in play. */
+  variant?: string
+  /** A test CLAIMS this unit — an `@requirement` tag points at it. Says nothing
+   *  about whether anything ran. */
+  covered: boolean
+  /** A claiming test also PASSED in the feature's latest run. The distinction
+   *  claim-vs-proof is the product's whole thesis, and until this landed the
+   *  strip painted a claim in `--success` — the hue that means "passed"
+   *  everywhere else — under a panel that said "Last proved: never". */
+  proven: boolean
+  /** Nothing claiming this unit passed, and something claiming it FAILED. */
+  failed: boolean
+}
+
+/** One segment per unit of coverage the row promises: the declared paths, or —
+ *  for a variant requirement — every APPLICABLE path×variant cell (a variant the
+ *  ledger marked not-applicable anywhere is left out, matching VariantCoverage's
+ *  per-variant N/A rule, so the row and the accordion agree on the denominator).
+ *  Declared order, not worst-first: the segments are a map, not a queue — which is
+ *  also what lets the strip's hover label name them square by square. */
+export function coverageSegments(rc: RequirementCoverage): CoverageSegment[] {
+  const cells = rc.variantCoverage ?? []
+  if (cells.length === 0) {
+    return rc.pathCoverage.map((p) => ({ label: p.path, path: p.path, covered: p.covered, proven: p.proven === true, failed: p.failed === true }))
+  }
+  const na = new Set(cells.filter((c) => c.applicable === false).map((c) => c.variant))
+  return cells
+    .filter((c) => !na.has(c.variant))
+    .map((c) => ({ label: `${c.path} · ${c.variant}`, path: c.path, variant: c.variant, covered: c.covered, proven: c.proven === true, failed: c.failed === true }))
+}
+/** The panel's conclusion, drawn under the marks it is drawn FROM. One line: a
+ *  mark and the situation. The coverage bands above already name the missing
+ *  cases; the three underlying dates stay on the mark's hover. */
+function VerdictLine({ rc, enforcement: e }: { rc: RequirementCoverage; enforcement: RequirementEnforcement }) {
+  const v = verdictView(rc, e)
+  const dates = [
+    e.provenAt ? `Last proved ${day(e.provenAt.at)} · run ${e.provenAt.runId}` : 'Never proved',
+    e.testsChangedAt ? `Tests changed ${day(e.testsChangedAt.at)} (${e.testsChangedAt.verdict})` : 'No recorded test change',
+    `Wording last written ${day(e.wordingChangedAt)}`,
+  ].join('\n')
+  // The dot repeats the sentence's own hue, so what it explains on hover is the
+  // EVIDENCE behind that sentence — the three dates the state is derived from —
+  // under the verdict itself, so a reader who hovers the mark never has to hold
+  // the label in their head to make sense of the dates.
+  return (
+    <p className="clcov-verdict" data-testid={`proof-verdict-${rc.requirement.id}`}>
+      <Tooltip label={[v.label, v.detail, '', dates].join('\n')} placement="top">
+        <span
+          className="clcov-verdict-dot"
+          data-hollow={v.hollow ? 'true' : 'false'}
+          style={v.hollow ? { boxShadow: `inset 0 0 0 1px ${v.color}` } : { background: v.color }}
+        />
+      </Tooltip>
+      <span className="clcov-verdict-label">{v.label}</span>
+    </p>
+  )
+}
+
+
+/** One promise the requirement makes, and the sentence that states it. `sad` and
+ *  `edge` share ONE prose field (`unhappyPath`), so they read as one promise with
+ *  two test surfaces — never as two promises whose sentence happens to be
+ *  identical. Which is also why a bucket carries no marks: the cases it stands for
+ *  are two different paths, and the grid below names them one row each. */
+export interface BehaviourBucket {
+  key: 'happy' | 'unhappy'
+  label: string
+  text: string
+}
+
+/** The requirement's declared behaviour, in the reader's order: what it promises
+ *  on the happy path, then what it promises when things go wrong. A promise with
+ *  no stated prose contributes nothing — its coverage is named in the grid below,
+ *  under the path it belongs to. */
+export function behaviourBuckets(happyText: string | null, unhappyText: string | null): BehaviourBucket[] {
+  return [
+    { key: 'happy' as const, label: 'Happy path', text: happyText },
+    { key: 'unhappy' as const, label: 'Unhappy path', text: unhappyText },
+  ].filter((b): b is BehaviourBucket => b.text !== null)
+}
+
+/** One promise: its name and its sentence. The marks live in the grid below —
+ *  never here as well. They used to hang off the band head as a right-floated
+ *  cluster, so a requirement WITHOUT channels drew its coverage one way and a
+ *  requirement WITH channels drew the identical fact another way, in a table. */
+function BehaviourBand({ rc, bucket }: { rc: RequirementCoverage; bucket: BehaviourBucket }) {
+  return (
+    <div className="cl-band" data-testid={`behaviour-${bucket.key}-${rc.requirement.id}`}>
+      <span className="cl-rubric-strong">{bucket.label}</span>
+      <p className="clcov-path-text">{bucket.text}</p>
+    </div>
+  )
+}
+
+/** The reading a row of marks adds up to: one bad cell makes the whole promise
+ *  unproven, so the WORST state is the honest summary word. A missing test beats
+ *  a failing one beats an unproven claim — the same order the squares improve in. */
+export function worstState(segments: CoverageSegment[]): SegmentState {
+  if (segments.some((seg) => !seg.covered)) return 'off'
+  if (segments.some((seg) => segmentState(seg) === 'failed')) return 'failed'
+  return segments.every((seg) => seg.proven) ? 'proven' : 'claimed'
+}
+
+/** One line of a coverage table: a named thing, the marks that stand for it, and
+ *  the word they add up to. */
+interface GridRow {
+  key: string
+  testId: string
+  /** The row's own axis value — a channel (`whatsapp`) or a path (`sad`). */
+  name: string
+  na: boolean
+  marks: { key: string; state: SegmentState | 'na'; title: string }[]
+  word: string
+  wordTitle?: string
+}
+
+/** THE coverage table. Both readings of a requirement's marks render through it,
+ *  so a reader who has learned one block has learned the other: the channel grid
+ *  (channels down, paths across) and the path grid (paths down, one mark lane).
+ *
+ *  ONE grid, not one per line. The head and the rows used to be separate grid
+ *  containers sharing a template whose first track is auto-sized, so each resolved
+ *  that track from its OWN first cell — the kicker in the head, a name in a row —
+ *  and the column labels sat a dozen pixels right of the marks they name. The head
+ *  and rows are subgrids of this container, so every line resolves the name column
+ *  once.
+ *
+ *  The mark tracks are sized from their own content, never a fixed width: at a
+ *  22px track a label as ordinary as `happy` (29px of mono) overflowed its column
+ *  and ran into the next one — the head read `happyedge`, and no label sat over
+ *  the marks it names. `minmax(22px,auto)` keeps a bare mark column from
+ *  collapsing while letting the widest declared label set the column. A table with
+ *  no column names still gets one track, for its single lane of marks. */
+function CoverageGrid({ testId, kicker, columns, rows }: { testId: string; kicker: string; columns: string[]; rows: GridRow[] }) {
+  return (
+    <div
+      className="clcov-grid"
+      data-testid={testId}
+      style={{ gridTemplateColumns: `minmax(64px,auto) repeat(${Math.max(columns.length, 1)},minmax(22px,auto)) minmax(0,1fr)` }}
+    >
+      <div className="clcov-grid-head">
+        <span className="clcov-grid-kicker">{kicker}</span>
+        {columns.map((col) => <span key={col} className="clcov-grid-col">{col}</span>)}
+        {columns.length === 0 && <span />}
+        <span />
+      </div>
+      {rows.map((row) => (
+        <div key={row.key} className="clcov-grid-row" data-testid={row.testId} data-na={row.na ? 'true' : 'false'}>
+          <span className="clcov-grid-name">{row.name}</span>
+          {row.marks.map((mark) => <span key={mark.key} className="clcov-cellmark" data-seg={mark.state} title={mark.title} />)}
+          {/* The trailing word is what makes a two-row grid readable as a list: at
+              that size an axis lookup costs more than the sentence. */}
+          <span className="clcov-grid-word" title={row.wordTitle}>{row.word}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** The declared paths as rows, one mark each. This is what a requirement without a
+ *  channel dimension gets, and it is deliberately the SAME table the channelled
+ *  one gets: sentences first, then the marks in a named table below them.
+ *
+ *  Paths down rather than across, even though the channel grid reads them across:
+ *  there is no second axis here, so a row per path is dense where a column per
+ *  path would be one row of marks under three headings — or, if the bands became
+ *  the rows, a staircase of blanks, since Happy path can only ever own `happy` and
+ *  Unhappy path can only ever own `sad` and `edge`.
+ *
+ *  Declared order, not the channel grid's worst-first: these rows are the same
+ *  squares the closed row's strip already draws, in the same order, so sorting
+ *  them would break the one mapping a reader can make between the two. */
+function PathGrid({ rc }: { rc: RequirementCoverage }) {
+  const id = rc.requirement.id
+  const rows = rc.pathCoverage.map((p) => {
+    const state = segmentState({ covered: p.covered, proven: p.proven === true, failed: p.failed === true })
+    return {
+      key: p.path,
+      testId: `path-${id}-${p.path}`,
+      name: p.path,
+      na: false,
+      marks: [{ key: p.path, state, title: `${p.path} — ${SEGMENT_WORD[state]}` }],
+      word: SEGMENT_WORD[state],
+    }
+  })
+  return <CoverageGrid testId={`path-grid-${id}`} kicker="Per path" columns={[]} rows={rows} />
+}
+
+/** Channel coverage as the matrix it actually is: channels down, paths across.
+ *
+ *  It used to be a chip row repeated UNDER EACH promise — the same channel names
+ *  printed twice in two disconnected lists, so "is `line` tested anywhere?" meant
+ *  scanning both and holding the answer in your head. A channel is a property of
+ *  the REQUIREMENT ("must hold across whatsapp and line"), not of one promise, so
+ *  it belongs at that altitude and is read down a column instead. Paths are
+ *  bounded (three declared at most) so the columns can never overflow the pane;
+ *  channels are unbounded and grow downward, where there is room.
+ *
+ *  Rendered open, with no caret: the reader already opened the row, and "which
+ *  channel" is the question that brought them here. */
+function ChannelGrid({ rc }: { rc: RequirementCoverage }) {
+  const id = rc.requirement.id
+  const cells = rc.variantCoverage ?? []
+  const paths = [...new Set(cells.map((c) => c.path))]
+  const naReason = (variant: string) => cells.find((c) => c.variant === variant && c.applicable === false)?.reason
+  const rows = [...new Set(cells.map((c) => c.variant))].map((variant) => {
+    const reason = naReason(variant)
+    const segments = paths.map((path) => {
+      const cell = cells.find((c) => c.path === path && c.variant === variant)
+      return { label: `${path} · ${variant}`, path, variant, covered: cell?.covered ?? false, proven: cell?.proven === true, failed: cell?.failed === true }
+    })
+    return { variant, reason, segments }
+  })
+  // Worst-first: the channel with the most missing tests leads, then the least
+  // proven; N/A sinks last — it is never a gap, so it never competes for the top.
+  const rank = (r: typeof rows[number]) =>
+    r.reason ? [2, 0, 0] : [0, -r.segments.filter((seg) => !seg.covered).length, -r.segments.filter((seg) => !seg.proven).length]
+  rows.sort((x, y) => { const a = rank(x); const b = rank(y); return a[0] - b[0] || a[1] - b[1] || a[2] - b[2] })
+  const gridRows: GridRow[] = rows.map((row) => ({
+    key: row.variant,
+    testId: `channel-${id}-${row.variant}`,
+    name: row.variant,
+    na: row.reason !== undefined,
+    marks: row.reason !== undefined
+      ? paths.map((path) => ({ key: path, state: 'na' as const, title: `${row.variant}: N/A — ${row.reason}` }))
+      : row.segments.map((seg) => ({ key: seg.path, state: segmentState(seg), title: `${seg.label} — ${SEGMENT_WORD[segmentState(seg)]}` })),
+    word: row.reason !== undefined ? `n/a — ${row.reason}` : SEGMENT_WORD[worstState(row.segments)],
+    wordTitle: row.reason,
+  }))
+  return <CoverageGrid testId={`channel-grid-${id}`} kicker="Per channel" columns={paths} rows={gridRows} />
+}
+
+/** True while the two-line clamp is actually cutting this title. Read at hover time
+ *  rather than tracked as state: at mount the pane may not have its final width (the
+ *  Docs rail can take a third of it), and a later web-font swap re-cuts a title
+ *  without changing any box a ResizeObserver would report. */
+export const titleIsClamped = (el: Element) => el.scrollHeight > el.clientHeight + 1
+
+// A row title: the text, clamped to two lines so every row keeps one height, plus
+// whatever notes the row hangs off it. Hovering a title the clamp has CUT floats the
+// whole thing — through the shared Tooltip, which portals and clamps to the viewport,
+// so a row at the pane's edge isn't cut a second time by the pane's own scroller. A
+// title that fits reveals nothing, which is why the slow native `title` is gone: it
+// only ever repeated text already on screen.
+function RowTitle({ text, children }: { text: string; children?: ReactNode }) {
+  return (
+    <Tooltip label={text} showIf={titleIsClamped}>
+      <span className="clcov-rowtitle">
+        {text}
+        {children}
+      </span>
+    </Tooltip>
+  )
+}
+
+export function RequirementCard({ rc, active, focused, dimmed, onHover }: {
   rc: RequirementCoverage
-  colors: string[]
   active: boolean
   focused: boolean
   dimmed: boolean
   onHover: (on: boolean) => void
 }) {
+  const { id, title, text, kind, happyPath, unhappyPath, deprecated } = rc.requirement
   const meta = GAP_META[rc.gapType]
-  // The which-paths / which-variants detail is no longer crammed into the gap pill —
-  // the path chips (1-axis) or the path×variant matrix below name the exact gaps,
-  // so the status reads as just a dot + short label and never crushes the title.
-  const hasVariants = Boolean(rc.variantCoverage && rc.variantCoverage.length > 0)
-  const { kind, happyPath, unhappyPath } = rc.requirement
-  const happyText = meaningfulPath(happyPath)
-  const unhappyText = meaningfulPath(unhappyPath)
-  // Only offer expansion when the summary carried meaningful path prose. `kind` is now
-  // shown in the always-visible header, so it no longer makes a card disclosable alone.
-  const hasDetail = Boolean(happyText || unhappyText)
+  const enf = rc.enforcement
+  const segments = coverageSegments(rc)
+  const claimed = segments.filter((s) => s.covered).length
+  // The bands say what the requirement promises; a grid below says what is tested.
+  // Which grid is the only thing a channel dimension changes.
+  const bands = behaviourBuckets(meaningfulPath(happyPath), meaningfulPath(unhappyPath))
+  const hasChannels = (rc.variantCoverage ?? []).length > 0
+  // The row at rest is id · title · segments · a dot only when the proof is
+  // unhealthy. Everything else — the requirement text, the per-path detail, the
+  // history line, the happy/unhappy prose — waits behind the caret, so every
+  // requirement is disclosable (the text alone earns it).
   const [expanded, setExpanded] = useState(false)
-  const toggle = () => { if (hasDetail) setExpanded((c) => !c) }
+  const toggle = () => setExpanded((c) => !c)
+  // The dot says ONE thing: the goalpost moved after this requirement was proved.
+  // Nothing else — the squares already report the state, and a mark that repeats
+  // them is noise. That rule was half-applied before: it spared untested rows
+  // ("an untested requirement's hollow squares ARE the gap") but still fired amber
+  // for every never-proven row, which its sky squares already say. Across five
+  // live suites all 17 dots were that case, so the dot carried no information at
+  // all. It now needs an actual proof to have moved away from:
+  //   • a mapped test was weakened — news whether or not a proof exists, and the
+  //     one thing no square can show (a weaker test still passes)
+  //   • a proof exists and something has changed since it (`provenAt` is only ever
+  //     set on a covered requirement, so that guard is implied)
+  // A failing test gets no dot: its square is already rose.
+  const moved = enf && enf.state !== 'proven-unchanged'
+    && (enf.state === 'tests-weakened' || enf.provenAt !== undefined) ? enf : null
   return (
     <div
-      className="clcov-card"
-      data-testid={`req-${rc.requirement.id}`}
+      className="clcov-row"
+      data-testid={`req-${id}`}
       data-active={active ? 'true' : 'false'}
       data-focus={focused ? 'true' : 'false'}
+      data-dimmed={dimmed ? 'true' : 'false'}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
-      style={{
-        position: 'relative',
-        marginBottom: 8,
-        padding: '11px 13px 11px 15px',
-        borderRadius: 'var(--radius-md)',
-        background: active ? 'var(--bg-selected)' : 'var(--bg-surface)',
-        border: '1px solid var(--border-default)',
-        borderLeft: `3px solid ${colors[0] ?? 'var(--border-default)'}`,
-        opacity: dimmed ? 0.4 : 1,
-        transition: 'opacity 120ms, background 120ms, border-color 140ms, box-shadow 140ms',
-      }}
     >
-      {/* Header is ONE inline-flow line: caret · id · title · kind · gap status all
-          flow and wrap together as a single run, so the tags read as part of the
-          title and tuck after its last word instead of reserving a column or
-          block-stacking below it. */}
       <div
-        className={hasDetail ? 'clcov-disclose clcov-reqhead' : 'clcov-reqhead'}
-        style={{ marginBottom: 5 }}
-        {...(hasDetail
-          ? {
-              role: 'button' as const,
-              tabIndex: 0,
-              'aria-expanded': expanded,
-              'data-testid': `req-toggle-${rc.requirement.id}`,
-              onClick: toggle,
-              onKeyDown: (e: ReactKeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } },
-            }
-          : {})}
+        className="clcov-rowhead"
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        data-testid={`req-toggle-${id}`}
+        onClick={toggle}
+        onKeyDown={(e: ReactKeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
       >
-        {hasDetail && <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>}
-        <span className="clcov-reqid">{rc.requirement.id}</span>
-        <strong className="clcov-req-title">{rc.requirement.title}</strong>
-        {rc.requirement.deprecated && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}> (deprecated)</span>}
-        {kind && (
-          <span className="clcov-kind-tag" data-testid={`kind-${rc.requirement.id}`} title={kind === 'non-functional' ? 'Non-functional' : 'Functional'}>
-            <span className="clcov-cq-full">{kind === 'non-functional' ? 'Non-functional' : 'Functional'}</span>
-            <span className="clcov-cq-abbr" aria-hidden="true">{kind === 'non-functional' ? 'N' : 'F'}</span>
+        <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>
+        <span className="clcov-rowid">{id}</span>
+        <RowTitle text={title}>
+          {deprecated && <span className="clcov-rownote">(deprecated)</span>}
+          {/* Functional is the default and says nothing; only the exception earns a word. */}
+          {kind === 'non-functional' && <span className="clcov-rownote" data-testid={`kind-${id}`}>Non-functional</span>}
+        </RowTitle>
+        {/* Through the shared Tooltip, not a native `title`: the strip is the row's
+            only coverage reading and its squares are unnamed, so the key naming them
+            has to arrive on hover, not after a second of waiting. */}
+        <Tooltip label={segmentTooltip(meta.label, segments)}>
+          <span className="clcov-segs" data-testid={`cov-${id}`}>
+            {segments.map((s) => <span key={s.label} className="clcov-seg" data-seg={segmentState(s)} />)}
+            <span className="clcov-segn">{claimed}/{segments.length}</span>
           </span>
+        </Tooltip>
+        {/* Through the shared Tooltip, like the strip beside it: a 6px dot is the
+            most cryptic mark on the row, so its explanation has to arrive on hover
+            rather than after the ~1s a native `title` waits. */}
+        {moved ? (
+          <Tooltip label={enforcementTooltip(rc, moved)} placement="top">
+            <span className="clcov-alert" data-testid={`enf-${id}`} style={{ background: verdictView(rc, moved).color }} />
+          </Tooltip>
+        ) : (
+          <span className="clcov-alert" aria-hidden="true" />
         )}
-        <span className="clcov-gap" data-testid={`gap-${rc.requirement.id}`} title={meta.label} style={{ color: meta.color }}>
-          <span className="clcov-gap-dot" style={{ background: meta.color }} />
-          <span className="clcov-cq-full">{meta.label}</span>
-          <span className="clcov-cq-abbr" aria-hidden="true">{meta.abbr}</span>
-        </span>
       </div>
-      <div className="clcov-req-text">{rc.requirement.text}</div>
-      {hasVariants ? (
-        // Variant requirement: the path×variant matrix (or a single inline row when
-        // there's one path) is the source of truth — the 1-axis path chips would
-        // only duplicate it, so they're dropped here.
-        <VariantCoverage rc={rc} />
-      ) : (
-        <div className="flex flex-wrap items-center gap-2" style={{ marginTop: 7 }}>
-          {rc.pathCoverage.map((p) => (
-            p.covered ? (
-              <span key={p.path} data-testid={`path-${rc.requirement.id}-${p.path}`} title={`${p.path} path has a mapped test`} className="clcov-vchip clcov-vchip-on">
-                {p.path} ✓
-              </span>
-            ) : (
-              // No test for this path — the dashed/muted treatment carries that.
-              <span key={p.path} data-testid={`path-${rc.requirement.id}-${p.path}`} title={`No test maps to the ${p.path} path`} className="clcov-vchip">
-                {p.path}
-              </span>
-            )
-          ))}
-        </div>
-      )}
-      {hasDetail && expanded && (
-        <div className="clcov-reqdetail" data-testid={`req-detail-${rc.requirement.id}`}>
-          {happyText && (
-            <div className="clcov-path-block">
-              <span className="clcov-path-label clcov-path-happy">Happy path</span>
-              <p className="clcov-path-text">{happyText}</p>
+      {expanded && (
+        // Three named bands under the wording, in the order a reader asks for them:
+        // what it says → what it promises → what is tested → whether it is proven.
+        // The declared behaviour used to sit BELOW the proof dates, so the pane opened
+        // with an audit trail and buried the prose that explains the requirement.
+        <div className="clcov-rowdetail" data-testid={`req-detail-${id}`}>
+          <p className="clcov-req-text">{text}</p>
+          {bands.length > 0 && (
+            <div className="cl-bands clcov-bands" data-testid={`behaviour-${id}`}>
+              {bands.map((b) => <BehaviourBand key={b.key} rc={rc} bucket={b} />)}
             </div>
           )}
-          {unhappyText && (
-            <div className="clcov-path-block">
-              <span className="clcov-path-label clcov-path-unhappy">Unhappy path</span>
-              <p className="clcov-path-text">{unhappyText}</p>
-            </div>
-          )}
+          {hasChannels && <ChannelGrid rc={rc} />}
+          {!hasChannels && rc.pathCoverage.length > 0 && <PathGrid rc={rc} />}
+          {enf && <VerdictLine rc={rc} enforcement={enf} />}
         </div>
       )}
     </div>
   )
 }
 
-// Variant coverage for a variant-bearing requirement, as an accordion: a compact row
-// of clickable path pills (`happy 1/4` = covered/total variants, count coloured by
-// state), and — for the one pill you click — its per-variant chips below. Only one
-// path's variants show at a time, so a requirement spanning many paths/variants stays
-// scannable: you read the gap per path on demand instead of all cells at once.
-export function VariantCoverage({ rc }: { rc: RequirementCoverage }) {
-  const cells = rc.variantCoverage ?? []
-  const paths = [...new Set(cells.map((c) => c.path))]
-  const variants = [...new Set(cells.map((c) => c.variant))]
-  const covered = (path: string, variant: string) =>
-    cells.find((c) => c.path === path && c.variant === variant)?.covered ?? false
-  // A variant is Not-Applicable when it has no testable surface (ledger marked
-  // every cell applicable:false). N/A is excluded from the counts/gaps and shown
-  // with its reason — an impossible cell is N/A, never a phantom gap.
-  const isNA = (variant: string) =>
-    cells.some((c) => c.variant === variant && c.applicable === false)
-  const naReason = (variant: string) =>
-    cells.find((c) => c.variant === variant && c.applicable === false)?.reason ?? 'not applicable'
-  const applicable = (variant: string) => !isNA(variant)
-  // Worst-first: most-uncovered applicable variant leads; N/A sinks to the bottom.
-  const vGaps = (v: string) => (isNA(v) ? -1 : paths.filter((p) => !covered(p, v)).length)
-  const variantOrder = [...variants].sort((a, b) => vGaps(b) - vGaps(a))
-  const pGaps = (p: string) => variants.filter((v) => applicable(v) && !covered(p, v)).length
-  const pathOrder = [...paths].sort((a, b) => pGaps(b) - pGaps(a))
-  const naCount = variants.filter(isNA).length
-  const applicableCount = variants.length - naCount
-  const [open, setOpen] = useState<string | null>(null)
+
+// Requirement tags shown on a test row at rest before the remainder folds into "+N".
+// One, so a test that claims several requirements reads the same way as one that
+// claims several paths — a count, opened by the same hover. The resting row is then
+// one id and one path word wide, which is what lets the title have the rest.
+const MAX_REST_TAGS = 1
+
+// A requirement id as a jump link. One home: the resting cell and the hover reveal
+// render the same tag, so a folded id behaves exactly like a shown one.
+function ReqTag({ id, testId, onReqClick }: { id: string; testId: string; onReqClick: (id: string) => void }) {
   return (
-    <div data-testid={`variant-grid-${rc.requirement.id}`} className="clcov-vgrid">
-      <div className="clcov-vpaths">
-        {pathOrder.map((path) => {
-          // Counts are over APPLICABLE variants only; N/A never adds to the denominator.
-          const missing = variantOrder.filter((v) => applicable(v) && !covered(path, v))
-          const coveredCount = applicableCount - missing.length
-          const complete = missing.length === 0
-          const active = open === path
-          const naNote = naCount ? `, ${naCount} N/A` : ''
-          return (
-            <button
-              key={path}
-              type="button"
-              data-testid={`variant-path-${rc.requirement.id}-${path}`}
-              className="clcov-vpath"
-              data-on={active ? 'true' : 'false'}
-              aria-expanded={active}
-              title={complete ? `${path}: all ${applicableCount} applicable variants covered${naNote}` : `${path}: missing ${missing.join(', ')}${naNote}`}
-              onClick={(e) => { e.stopPropagation(); setOpen(active ? null : path) }}
-            >
-              <span aria-hidden="true" className="clcov-vpath-caret">{active ? '▾' : '▸'}</span>
-              <span className="clcov-vpath-name">{path}</span>
-              <span className="clcov-vpath-n" style={{ color: complete ? 'var(--success)' : GAP_META['variant-incomplete'].color }}>{coveredCount}/{applicableCount}</span>
-            </button>
-          )
-        })}
-      </div>
-      {open && (() => {
-        // The tray is a contained panel headed by its path, so the chips read as the
-        // detail of the pill you clicked — not as belonging to whatever pill happens
-        // to sit above-left of them in the wrapped row.
-        const openCovered = variantOrder.filter((v) => applicable(v) && covered(open, v)).length
-        return (
-          <div className="clcov-vtray" data-testid={`variant-cells-${rc.requirement.id}-${open}`}>
-            <div className="clcov-vtray-head">
-              <span className="clcov-vtray-path">{open}</span> · {openCovered}/{applicableCount} variants covered{naCount ? ` · ${naCount} N/A` : ''}
-            </div>
-            <div className="clcov-vtray-chips">
-              {variantOrder.map((v) => {
-                if (isNA(v)) {
-                  return (
-                    <span
-                      key={v}
-                      data-testid={`cell-${rc.requirement.id}-${open}-${v}`}
-                      data-covered="na"
-                      title={`${v}: N/A — ${naReason(v)}`}
-                      className="clcov-vchip clcov-vchip-na"
-                    >
-                      {v} n/a
-                    </span>
-                  )
-                }
-                const on = covered(open, v)
-                return (
-                  <span
-                    key={v}
-                    data-testid={`cell-${rc.requirement.id}-${open}-${v}`}
-                    data-covered={on ? 'true' : 'false'}
-                    title={on ? `${open} · ${v} has a mapped test` : `No test maps to ${open} · ${v}`}
-                    className={on ? 'clcov-vchip clcov-vchip-on' : 'clcov-vchip'}
-                  >
-                    {v}{on ? ' ✓' : ''}
-                  </span>
-                )
-              })}
-            </div>
-          </div>
-        )
-      })()}
-    </div>
+    <button
+      type="button"
+      className="clcov-reqtag"
+      data-testid={testId}
+      title={`Jump to requirement ${id}`}
+      onClick={(e) => { e.stopPropagation(); onReqClick(id) }}
+    >{id}</button>
   )
 }
 
-// The test's strength chip + `@req-*` / `@path-*` tags carry the meaning — no
-// decorative accent border, and no run-coupled "verified" dot (coverage is semantic).
-// Click the header to disclose the actual test source (lazily fetched by the parent).
-export function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, source, sourceLoading, sourceError, onReqClick }: {
+// A test row at rest: caret · #N · name · the requirement and path it claims (mono,
+// muted; the requirement id is the jump link) · a dot in the strength hue. No
+// decorative accent, no run-coupled "verified" dot (coverage is semantic). Click
+// the row to disclose the actual test source (lazily fetched by the parent).
+export function TestCard({ test, testNumber, active, dimmed, onHover, onExpand, source, sourceLoading, sourceError, onReqClick }: {
   test: TestCoverage
   testNumber?: number
-  color: string
   active: boolean
   dimmed: boolean
   onHover: (on: boolean) => void
@@ -324,83 +688,103 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
   sourceError: string | null
   onReqClick: (id: string) => void
 }) {
+  const cardName = source?.test.name ?? test.name
   const [expanded, setExpanded] = useState(false)
+  const shownReqs = test.requirements.slice(0, MAX_REST_TAGS)
+  const hiddenReqs = test.requirements.slice(MAX_REST_TAGS)
+  const paths = test.pathTypes
+  // "3 paths" is a fold, not a fact of its own: the row claims three of the declared
+  // path kinds and has no column to name them in. The reveal spells them out.
+  const pathWord = paths.length === 1 ? paths[0] : `${paths.length} paths`
+  const pathGloss = paths.map((p) => PATH_DESC[p] ?? p).join(', ')
+  const pathTitle = `Exercises the ${pathGloss} path${paths.length === 1 ? '' : 's'}`
+  // Only a cell that is actually hiding something earns a reveal.
+  const folded = hiddenReqs.length > 0 || paths.length > 1
   const toggle = () => {
     setExpanded((cur) => {
       if (!cur) onExpand() // trigger the lazy source fetch on first open
       return !cur
     })
   }
+  const strength = test.strength ? STRENGTH_META[test.strength] : null
   return (
     <div
-      className="clcov-card"
-      data-testid={`test-${test.name}`}
+      className="clcov-row clcov-row--test"
+      data-testid={`test-${cardName}`}
       data-active={active ? 'true' : 'false'}
+      data-dimmed={dimmed ? 'true' : 'false'}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
-      style={{
-        marginBottom: 8,
-        padding: '11px 13px',
-        borderRadius: 'var(--radius-md)',
-        background: active ? 'var(--bg-selected)' : 'var(--bg-surface)',
-        border: '1px solid var(--border-default)',
-        boxShadow: active ? `inset 3px 0 0 ${color}` : 'none',
-        opacity: dimmed ? 0.4 : 1,
-        transition: 'opacity 120ms, background 120ms, box-shadow 120ms, border-color 140ms',
-      }}
     >
-      {/* One inline-flow header (same as the requirement card): caret · #N · name
-          flow and wrap together instead of the badge sitting in its own flex cell. */}
       <div
-        className="clcov-disclose clcov-reqhead"
+        className="clcov-rowhead"
         role="button"
         tabIndex={0}
         aria-expanded={expanded}
-        data-testid={`test-toggle-${test.name}`}
+        data-testid={`test-toggle-${cardName}`}
         onClick={toggle}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
       >
         <span aria-hidden="true" className="clcov-caret">{expanded ? '▾' : '▸'}</span>
-        <span className="clcov-testid"><TestIdBadge n={testNumber} /></span>
+        <span className="clcov-rowid"><TestIdBadge n={testNumber} /></span>
         {/* Name is the identity; the expanded shared presentation owns the
             file:line locator and Code mode's editor action. */}
-        <strong className="clcov-req-title">{stripLeadingTestOrdinal(test.name)}</strong>
-      </div>
-      {/* One compact meta row: strength (what the test IS) + the requirement links it
-          COVERS + the @path tags. Click a @req chip to jump to that requirement. */}
-      <div className="flex flex-wrap items-center gap-1.5" style={{ marginTop: 7 }}>
-        {test.strength && (
-          <span
-            data-testid={`strength-${test.name}`}
-            title={STRENGTH_META[test.strength].title}
-            className="flex items-center gap-1"
-            style={{ fontSize: 10, fontWeight: 600, color: STRENGTH_META[test.strength].color, background: `color-mix(in srgb, ${STRENGTH_META[test.strength].color} 14%, transparent)`, border: `1px solid color-mix(in srgb, ${STRENGTH_META[test.strength].color} 45%, transparent)`, borderRadius: 999, padding: '1px 8px' }}
-          >
-            <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: STRENGTH_META[test.strength].color }} />
-            {STRENGTH_META[test.strength].label}
+        <RowTitle text={stripLeadingTestOrdinal(cardName)} />
+        {/* Two fixed sub-columns — the requirement tags, then the path — so the tags of
+            every row end on one edge and the paths on another. Past the second tag (and
+            past one path) the cell folds to a count; hovering it floats the unfolded
+            strip over the row rather than widening the cell into the title. */}
+        <span className="clcov-rowfacts">
+          <span className="clcov-rowreqs">
+            {test.requirements.length === 0 ? (
+              <span data-testid={`orphan-${cardName}`} className="clcov-orphan" title="No requirement tag — regenerate coverage to map this test">orphan</span>
+            ) : (
+              <>
+                {shownReqs.map((id, i) => (
+                  <span key={id} className="clcov-rowfact">
+                    {i > 0 && <span className="clcov-rowsep" aria-hidden="true">·</span>}
+                    <ReqTag id={id} testId={`reqtag-${cardName}-${id}`} onReqClick={onReqClick} />
+                  </span>
+                ))}
+                {hiddenReqs.length > 0 && (
+                  <span className="clcov-rowfact">
+                    <span className="clcov-rowsep" aria-hidden="true">·</span>
+                    <span className="clcov-more" data-testid={`reqtag-more-${cardName}`} title={`Also ${hiddenReqs.join(', ')} — hover to show`}>+{hiddenReqs.length}</span>
+                  </span>
+                )}
+              </>
+            )}
           </span>
-        )}
-        {test.requirements.length === 0 ? (
-          <span data-testid={`orphan-${test.name}`} style={{ fontSize: 10, fontWeight: 600, color: 'var(--warning)', background: 'color-mix(in srgb, var(--warning) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
+          <span className="clcov-rowpath">
+            {paths.length > 0 && (
+              <span data-testid={`paths-${cardName}`} title={pathTitle}>{pathWord}</span>
+            )}
+          </span>
+          {folded && (
+            <span className="clcov-facts-pop" data-testid={`facts-full-${cardName}`} role="group" aria-label={`Claims ${test.requirements.join(', ')} on the ${pathGloss} path${paths.length === 1 ? '' : 's'}`}>
+              {test.requirements.map((id, i) => (
+                <span key={id} className="clcov-rowfact">
+                  {i > 0 && <span className="clcov-rowsep" aria-hidden="true">·</span>}
+                  <ReqTag id={id} testId={`reqtag-full-${cardName}-${id}`} onReqClick={onReqClick} />
+                </span>
+              ))}
+              {paths.map((pathType) => (
+                <span key={pathType} className="clcov-rowfact">
+                  <span className="clcov-rowsep" aria-hidden="true">·</span>
+                  <span title={`The ${PATH_DESC[pathType] ?? pathType} path`}>{pathType}</span>
+                </span>
+              ))}
+            </span>
+          )}
+        </span>
+        {strength ? (
+          <span className="clcov-alert" data-testid={`strength-${cardName}`} title={strength.title} style={{ background: strength.color }} />
         ) : (
-          test.requirements.map((id) => (
-            <button
-              key={id}
-              type="button"
-              className="clcov-reqtag"
-              data-testid={`reqtag-${test.name}-${id}`}
-              title={`Jump to requirement ${id}`}
-              onClick={(e) => { e.stopPropagation(); onReqClick(id) }}
-              style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 11%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 30%, var(--border-default))`, color: 'var(--text-primary)' }}
-            >@req-{id}</button>
-          ))
+          <span className="clcov-alert" aria-hidden="true" />
         )}
-        {test.pathTypes.map((p) => (
-          <span key={p} title={`Exercises the ${PATH_DESC[p] ?? p} path`} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
-        ))}
       </div>
       {expanded && (
-        <div className="clcov-source" data-testid={`test-source-${test.name}`}>
+        <div className="clcov-rowdetail clcov-source" data-testid={`test-source-${cardName}`}>
           {source ? (
             <TestPresentation
               test={source.test}
@@ -419,37 +803,22 @@ export function TestCard({ test, testNumber, color, active, dimmed, onHover, onE
   )
 }
 
-// Placeholder card shown in the Tests pane while a coverage job runs. Same shell as
-// TestCard (so it resolves into the real card in place), but every meaningful bit —
-// dot, id badge, name, file, mapping chips — is a skeleton: the pane is honestly
-// loading, not half-revealing the test set against the middle pane's "Mapping…".
-// Widths vary per index so the column reads as a list of real cards, not a grid.
+// Placeholder row shown in the Tests pane while a coverage job runs. Same shell as
+// TestCard (so it resolves into the real row in place), but every meaningful bit —
+// caret, id, name, facts, dot — is a skeleton: the pane is honestly loading, not
+// half-revealing the test set against the middle pane's "Mapping…". Widths vary
+// per index so the column reads as a list of real rows, not a grid.
 export const SKEL_NAME_W = [172, 132, 198, 150, 116, 184, 142, 164]
 
 export function TestCardSkeleton({ index }: { index: number }) {
   return (
-    <div
-      className="clcov-card"
-      data-testid="test-skeleton"
-      aria-hidden="true"
-      style={{
-        marginBottom: 8,
-        padding: '11px 13px',
-        borderRadius: 'var(--radius-md)',
-        background: 'var(--bg-surface)',
-        border: '1px solid var(--border-default)',
-      }}
-    >
-      <div className="flex items-center gap-2">
-        <span className="clcov-skel cl-skeleton" style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0 }} />
-        <span className="clcov-skel cl-skeleton" style={{ width: 22, height: 16, borderRadius: 5 }} />
-        <span className="clcov-skel cl-skeleton" style={{ width: SKEL_NAME_W[index % SKEL_NAME_W.length], height: 13 }} />
-        <span className="clcov-skel cl-skeleton" style={{ marginLeft: 'auto', width: 84, height: 10 }} />
-      </div>
-      <div className="flex items-center gap-1.5" style={{ marginTop: 7 }}>
-        <span className="clcov-skel cl-skeleton" style={{ width: 56, height: 15 }} />
-        <span className="clcov-skel cl-skeleton" style={{ width: 42, height: 15 }} />
-        <span className="clcov-skel cl-skeleton" style={{ width: 68, height: 15 }} />
+    <div className="clcov-row" data-testid="test-skeleton" aria-hidden="true">
+      <div className="clcov-rowhead" style={{ cursor: 'default' }}>
+        <span className="clcov-skel cl-skeleton" style={{ width: 10, height: 10 }} />
+        <span className="clcov-skel cl-skeleton" style={{ width: 22, height: 12 }} />
+        <span className="clcov-skel cl-skeleton" style={{ width: SKEL_NAME_W[index % SKEL_NAME_W.length], height: 12 }} />
+        <span className="clcov-skel cl-skeleton" style={{ marginLeft: 'auto', width: 64, height: 10 }} />
+        <span className="clcov-skel cl-skeleton" style={{ width: 6, height: 6, borderRadius: '50%' }} />
       </div>
     </div>
   )

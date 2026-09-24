@@ -72,8 +72,24 @@ describe('buildEvaluationExportArchive — coverage attachment', () => {
   })
 })
 
+describe('buildEvaluationExportArchive — the behavior certificate', () => {
+  it('returns the certificate as a sidecar while the download contains only evaluation.html', async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-cert-'))
+    const logsDir = path.join(tmpDir, 'logs')
+    fs.mkdirSync(logsDir, { recursive: true })
+
+    const built = await buildEvaluationExportArchive(detail(), { logsDir })
+
+    const names = zipEntries(built.zip).map((e) => e.filename)
+    expect(names).toEqual(['evaluation.html'])
+    expect(built.certificate.format).toBe('canary-lab/behavior-certificate@2')
+    expect(built.certificate.run.runId).toBe(detail().runId)
+    expect(built.contents.assets).toBe(0)
+  })
+})
+
 describe('buildEvaluationExportArchive', () => {
-  it('includes videos retained in the keep dir and skips unsafe or missing artifacts', async () => {
+  it('includes retained videos, links them in the report, and skips unsafe or missing artifacts', async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-eval-archive-'))
     const logsDir = path.join(tmpDir, 'logs')
     const runId = 'run id'
@@ -103,10 +119,6 @@ describe('buildEvaluationExportArchive', () => {
     expect(entries.map((entry) => entry.filename)).toEqual(['evaluation.html', 'run-id.mp4'])
     expect(entries.find((entry) => entry.filename === 'run-id.mp4')?.data.toString('utf8')).toBe('kept-video')
     expect(entries.find((entry) => entry.filename === 'evaluation.html')?.data.toString('utf8')).toContain('run-id.mp4')
-    // Contents count what LANDED in the zip, not what the run declared: three
-    // video artifacts were offered and only the retained one resolved, and the
-    // trace is not an archive member at all. Reporting 3 videos here would
-    // promise the reader files the download does not contain.
     expect(built.contents).toEqual({ bytes: built.zip.length, videos: 1, assets: 0 })
   })
 })

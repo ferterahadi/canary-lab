@@ -5,6 +5,8 @@ import { formatBytes, formatDuration } from '@/shared/lib/format'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { SkeletonBar, type AwaitingState } from '@/shared/ui/Skeleton'
 import { Tooltip, TOOLTIP_ANCHOR_ATTR } from '@/shared/ui/Tooltip'
+import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
+import { AlertCircleIcon } from '@/shared/ui/Icons'
 import { STAGE_COLUMN, evidenceOf, num, specsCoverageProgress, str } from './stage-meta'
 import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, overlayDiffStat, runHistoryStats, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
 
@@ -38,6 +40,7 @@ export interface StageFact {
    *  from every other tile carrying the same label. Nothing needs it yet — the
    *  labels that repeat (`Requirements`, `Env files`) repeat the same concept. */
   help?: string
+  warning?: string
 }
 
 import { plural } from '@shared/lib/plural'
@@ -49,6 +52,7 @@ export { plural }
  *  leaves its frontend-owned slot as a skeleton rather than becoming zero or
  *  changing the band's shape. */
 export interface StageBandData {
+  ledgerConfirmed?: boolean
   /** A source below is being fetched for the FIRST time. Settling is about what
    *  the STAGE produced; this is about what the PANE has read, and the two are
    *  a REST round-trip apart — so a settled stage holds its placeholders until
@@ -377,7 +381,7 @@ function measuredStageFacts(
       // Evidence lands when the stage settles; while the loop runs the same
       // facts come from the live progress shape.
       const evPct = num(ev, 'coveragePct')
-      const pct = evPct ?? p?.coveragePct ?? null
+      const pct = band.ledger?.coveragePct ?? evPct ?? p?.coveragePct ?? null
       // The mapper runs at the END of a pass, so while the authoring agent works
       // `progress.coveragePct` is still the ledger the pass STARTED from. On a
       // first flight that start is 0 — and rendering it as an amber "0%" for the
@@ -444,6 +448,7 @@ function measuredStageFacts(
               value: `${pct}%`,
               big: true as const,
               tone: pct >= target ? 'good' as const : 'warn' as const,
+              warning: band.ledger ? coverageWarning(band.ledger.freshness, band.ledgerConfirmed === true) : undefined,
             }]
           : []),
         // How many requirements exist at all — the denominator the percentage
@@ -772,8 +777,8 @@ export const FACT_HELP: Record<string, string> = {
   'Requirements': 'One thing the app must do, small enough to test. Everything later is scored against these.',
   'Distilled to': 'The short summary agents read instead of the full files. Tokens are a rough estimate.',
   // Test authoring
-  'Mapped coverage': 'Counted from requirement labels in the test files. Nothing was run, so every test could still be failing.',
-  'Tests written': 'All test cases found in the suite’s spec files. They can exist before coverage mapping links them to requirements.',
+  'Mapped coverage': 'Counted from requirement labels in the test files. This shows declared coverage, not whether those tests passed.',
+  'Tests written': 'All test cases found in the suite’s test files. They can exist before coverage mapping links them to requirements.',
   // Parallel readiness
   'Parallel': 'Can two runs of this suite start at once without fighting over a port? Checked once.',
   'Services injectable': 'The service reads its port from settings instead of having it fixed in the code.',
@@ -784,7 +789,7 @@ export const FACT_HELP: Record<string, string> = {
   'Succeeded': 'Runs where every test passed. A stopped run counts as neither a pass nor a fail.',
   'Avg duration': 'Average time a finished run took, startup included. Runs still going are left out.',
   // Evaluation report
-  'Requirements with tests': 'Counted from labels in the test files. Nothing was run to check they work.',
+  'Requirements with tests': 'Counted from labels in the test files. Run results are shown separately under tests passed and requirements proven.',
   // All four tiers defined where the words are shown — the same definitions the
   // Composition card's hover titles carry (STRENGTH_TIER_HELP). The strong tier
   // needs a non-local URL, so a local-only suite genuinely tops out at solid;
@@ -819,7 +824,7 @@ export const FACT_GLOSS: Record<string, string> = {
   'Distilled to': 'the short version agents read',
   'Test depth': 'how much each test checks',
   'Requirements': 'what the documents asked for',
-  'Mapped coverage': 'linked to a test — nothing has run yet',
+  'Mapped coverage': 'requirements linked to tests',
   'Tests written': 'found in the suite',
   'Services injectable': 'each gets its port from the run',
   'Files edited': 'fixed ports swapped out',
@@ -827,6 +832,9 @@ export const FACT_GLOSS: Record<string, string> = {
   'Requirements with tests': 'claimed by a test’s label',
   'Tests that passed': 'in the run this report reads',
   'Requirements proven': 'a passing test backs every path',
+  'Cells run': 'test files × disturbances',
+  'Findings': 'held in the green run, broke here',
+  'Confirmed': 'reproduced 3 of 3',
   'Runs performed': 'this suite’s whole history',
   'Succeeded': 'every test passed',
   'Avg duration': 'finished runs only',
@@ -905,7 +913,7 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
   awaiting?: AwaitingState
 }) {
   const toneColor = f.tone ? FACT_TONE[f.tone] : null
-  const help = f.help ?? FACT_HELP[f.label]
+  const help = f.warning ?? f.help ?? FACT_HELP[f.label]
   // The static gloss stands in for a missing `sub` on a placeholder too: it is
   // true before the figure lands and after it, so the tile keeps its height and
   // nothing shifts when the stage settles. A failed placeholder overrides it:
@@ -918,15 +926,15 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
       : undefined
   const sub = f.awaiting && emptySub ? emptySub : f.sub ?? FACT_GLOSS[f.label]
   const tile = (
-    <div className="group/fact min-w-0 rounded-md px-3 py-2.5 bg-elevated" data-testid="fact-tile">
+    <div className="group/fact min-w-0 rounded-md px-3 py-2.5 bg-elevated" data-testid="fact-tile" tabIndex={f.warning ? 0 : undefined}>
       {/* Sentence case, NOT the uppercase `.cl-rubric` the card kickers use. A
           tile label is read alongside a 22px number, and at that pairing the
           letter-spaced caps compete with the figure instead of labelling it. The
           kicker above the grid still carries the rubric voice, so the card keeps
           its register — this is the tile's own label, one level down. */}
-      <div className="flex min-w-0 items-center gap-1 text-[11.5px] text-muted">
+      <div className="flex min-w-0 items-center gap-1 cl-type-data text-muted">
         <span className="min-w-0 truncate">{f.label}</span>
-        {help ? <FactHelpMark /> : null}
+        {f.warning ? <span {...{ [TOOLTIP_ANCHOR_ATTR]: '' }} role="img" aria-label={f.warning} className="inline-flex text-warning"><AlertCircleIcon /></span> : help ? <FactHelpMark /> : null}
       </div>
       {help ? <span className="sr-only">{help}</span> : null}
       {f.awaiting ? (
@@ -937,14 +945,14 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
         </div>
       ) : (
         <div
-          className="mt-1 min-w-0 truncate text-[11.5px]"
+          className="mt-1 min-w-0 truncate cl-type-data"
           title={f.title ?? f.value}
           style={{ color: toneColor ?? 'var(--text-secondary)', ...(f.mono ? { fontFamily: 'var(--font-mono)' } : {}) }}
         >
           {f.value}
         </div>
       )}
-      {sub ? <div data-testid="fact-sub" className="mt-1.5 text-[10.5px] text-secondary">{sub}</div> : null}
+      {sub ? <div data-testid="fact-sub" className="mt-1.5 cl-type-meta text-secondary">{sub}</div> : null}
     </div>
   )
   return help ? <Tooltip label={help}>{tile}</Tooltip> : tile

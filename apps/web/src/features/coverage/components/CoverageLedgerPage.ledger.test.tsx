@@ -17,6 +17,7 @@ import { ABSENT_LEDGER, LEDGER, fire } from './__fixtures__/CoverageLedgerPage.p
 // deterministically with line spans instead of loading the real wasm.
 vi.mock('shiki/core', () => ({
   createHighlighterCore: async () => ({
+    getTheme: () => ({}),
     codeToHtml: (code: string) => (
       `<pre class="shiki one-dark-pro"><code>${
         code.split('\n').map((line) => `<span class="line">${line}</span>`).join('\n')
@@ -51,6 +52,7 @@ vi.mock('@/shared/api/client', async () => {
   }
 })
 
+const openGeneration = vi.fn()
 let container: HTMLDivElement
 
 export let root: Root
@@ -97,8 +99,8 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-async function mount(): Promise<void> {
-  await act(async () => { root.render(<CoverageLedgerPage feature="checkout" onClose={() => {}} />) })
+async function mount(coverageJobs: import('@/shared/api/types').CoverageJobIndexEntry[] = []): Promise<void> {
+  await act(async () => { root.render(<CoverageLedgerPage onOpenGeneration={openGeneration} coverageJobs={coverageJobs} feature="checkout" onClose={() => {}} />) })
   await act(async () => { await Promise.resolve() })
 }
 
@@ -110,11 +112,11 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
   })
 
-  it('surfaces a Mapped breadth ratio (concrete, no redundant %)', async () => {
+  it('surfaces a linked-requirements ratio without conflating it with mapped coverage', async () => {
     await mount()
     const mapped = container.querySelector('[data-testid="mapped-stat"]')
-    // LEDGER: 3 reqs, 1 untested → 2 mapped. Ratio only — the % restated it.
-    expect(mapped?.textContent).toContain('2/3 mapped')
+    // LEDGER: 3 reqs, 1 untested → 2 linked. The headline owns the fully-mapped %.
+    expect(mapped?.textContent).toContain('2/3 linked')
     expect(mapped?.textContent).not.toContain('%')
   })
 
@@ -123,22 +125,25 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
   })
 
-  it('shows the coverage % as a ring left of the bar', async () => {
+  it('keeps the familiar ring and percentage with an explicit stale-warning icon', async () => {
     await mount()
     const ring = container.querySelector('[data-testid="coverage-ring"]')
-    expect(ring?.getAttribute('aria-label')).toBe('33.3% covered')
-    expect(container.querySelector('[data-testid="coverage-hero"]')).toBeNull() // hero number gone
+    expect(ring).toBeTruthy()
+    expect(container.querySelector('[data-testid="coverage-freshness-warning"]')?.getAttribute('aria-label')).toContain('Coverage out of date')
+    // The headline block carries the big % beside the ring; the ring itself stays label-free.
+    expect(container.querySelector('[data-testid="coverage-hero"] [data-testid="coverage-pct"]')?.textContent).toBe('Mapped 33%')
     expect(container.querySelector('[data-testid="coverage-breakdown"]')).toBeTruthy()
   })
 
-  it('suppresses the state pill in the covered state (the ring owns the %)', async () => {
+  it('suppresses the state pill in the mapped state (the ring owns the %)', async () => {
     const led = structuredClone(LEDGER)
-    led.state = { ...led.state!, summary: 'fresh', headline: 'Covered 36.7%' }
+    led.state = { ...led.state!, summary: 'fresh', headline: 'Mapped 36.7%' }
+    led.freshness = { ...led.freshness!, state: 'current', reasons: [] }
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
     await mount()
-    // Covered → no redundant pill; the ring carries it.
+    // Mapped → no redundant pill; the ring carries it.
     expect(container.querySelector('[data-testid="coverage-state-headline"]')).toBeNull()
-    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('33.3% covered')
+    expect(container.querySelector('[data-testid="coverage-ring"]')?.getAttribute('aria-label')).toBe('33.3% mapped')
   })
 
   it('places the strength filter in the stat header, above the tests column (not in the tests pane)', async () => {
@@ -147,17 +152,25 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="tests-pane"] [data-testid="strength-filter"]')).toBeNull()
   })
 
-  it('shows a terse gap status and names the missing path via the chips (not the pill)', async () => {
+  it('shows the gap as segments + a fraction at rest, and names the missing path via the chips once expanded', async () => {
     await mount()
-    // R1: happy claimed, sad declared but unclaimed. The status pill is now just the
-    // short label (no "· sad" note) — the path chips below name the exact gap.
-    const gap = container.querySelector('[data-testid="gap-R1"]')
-    expect(gap?.textContent).toContain('Path gap')
-    expect(gap?.textContent).not.toContain('· sad')
-    // The path chips are just the path name (the dashed/muted style carries "no test"):
-    // covered shows a ✓, uncovered shows neither "✓" nor the old "· no test".
-    expect(container.querySelector('[data-testid="path-R1-happy"]')?.textContent?.trim()).toBe('happy ✓')
-    expect(container.querySelector('[data-testid="path-R1-sad"]')?.textContent?.trim()).toBe('sad')
+    // R1: happy claimed, sad declared but unclaimed. At rest that is two segments
+    // (one filled) and "1/2"; the gap class is the tooltip, not a chip.
+    const cov = container.querySelector('[data-testid="cov-R1"]')
+    expect([...cov!.querySelectorAll('[data-seg]')].map((el) => el.getAttribute('data-seg'))).toEqual(['claimed', 'off'])
+    expect(cov?.textContent).toContain('1/2')
+    act(() => { cov?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toContain('Path gap')
+    expect(container.querySelector('[data-testid="gap-R1"]')).toBeNull()
+    // The detail names the missing path on its own row, marked and worded — the
+    // same square the strip uses, so nothing has to be translated across the caret.
+    expect(container.querySelector('[data-testid="path-grid-R1"]')).toBeNull()
+    act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
+    expect(container.querySelector('[data-testid="path-R1-happy"]')?.textContent).toContain('has a test · no result yet')
+    expect(container.querySelector('[data-testid="path-R1-sad"]')?.textContent).toContain('no test')
+    // One table per requirement, never both: a channel-less requirement gets the
+    // per-path reading of exactly the squares its resting strip drew.
+    expect(container.querySelector('[data-testid="channel-grid-R1"]')).toBeNull()
   })
 
   it('clicking a @req tag on a test card focuses + scrolls to that requirement', async () => {
@@ -201,8 +214,8 @@ describe('CoverageLedgerPage', () => {
   it('shows the derived state headline and names the changed docs (R22 — drift in the rail)', async () => {
     await mount()
     expect(container.querySelector('[data-testid="coverage-state-headline"]')?.textContent).toBe('Stale')
-    expect(container.querySelector('[data-testid="docs-rail-drift"]')?.textContent).toContain('prd.md changed')
-    expect(container.querySelector('[data-testid="docs-rail-drift"]')?.textContent).toContain('PRD summary + coverage ledger')
+    expect(container.querySelector('[data-testid="docs-rail-drift"]')?.textContent)
+      .toBe('prd.md has changed, so the PRD summary and coverage ledger no longer match your docs.')
   })
 
   it('renders the unified layout: docs rail + requirements + tests, no tabs (R22)', async () => {
@@ -219,10 +232,15 @@ describe('CoverageLedgerPage', () => {
     expect(cards[0]?.getAttribute('data-testid')).toBe('req-R3') // untested/uncovered first
   })
 
-  it('shows a per-test strength chip', async () => {
+  it('shows a per-test strength dot whose tooltip names the tier', async () => {
     await mount()
-    expect(container.querySelector('[data-testid="strength-adds item"]')?.textContent).toContain('Solid')
-    expect(container.querySelector('[data-testid="strength-sends receipt"]')?.textContent).toContain('Shallow')
+    const solid = container.querySelector<HTMLElement>('[data-testid="strength-adds item"]')
+    const shallow = container.querySelector<HTMLElement>('[data-testid="strength-sends receipt"]')
+    expect(solid?.title).toContain('Solid')
+    expect(shallow?.title).toContain('Shallow')
+    expect(solid?.textContent).toBe('')
+    expect(solid?.style.background).toBe('var(--accent)')
+    expect(shallow?.style.background).toBe('var(--danger)')
   })
 
   it('filters the tests pane by strength', async () => {
@@ -239,10 +257,13 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="test-adds item"]')).toBeTruthy()
   })
 
-  it('surfaces covers tags on the test card (R9)', async () => {
+  it('surfaces the requirement + path a test claims as one mono strip, without the @ annotation syntax (R9)', async () => {
     await mount()
-    expect(container.querySelector('[data-testid="test-adds item"]')?.textContent).toContain('@req-R1')
-    expect(container.querySelector('[data-testid="test-adds item"]')?.textContent).toContain('@path-happy')
+    const row = container.querySelector('[data-testid="test-adds item"]')
+    expect(row?.querySelector('[data-testid="reqtag-adds item-R1"]')?.textContent).toBe('R1')
+    expect(row?.textContent).toContain('happy')
+    expect(row?.textContent).not.toContain('@req-')
+    expect(row?.textContent).not.toContain('@path-')
   })
 
   it('hovering a test lights its requirement and dims the rest (two-way highlight)', async () => {
@@ -282,115 +303,96 @@ describe('CoverageLedgerPage', () => {
     expect(api.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary', undefined)
   })
 
-  it('shows the dedicated Generating screen while a job runs, not the ledger (R13)', async () => {
-    let resolveJob: (m: import('@/shared/api/types').CoverageJobManifest) => void = () => {}
+  it('Generate starts one summary job and hands its durable identity to Flight', async () => {
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
-    vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: 'summarizing…' })
-    vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
+    const job = { jobId: 'j1', feature: 'checkout', kind: 'summary' as const, status: 'running' as const, startedAt: 'now', log: '' }
+    vi.mocked(api.startCoverageJob).mockResolvedValue(job)
     await mount()
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.click()
-      await Promise.resolve()
-    })
-    // The generating pane owns the screen; the ledger panes are gone.
-    expect(container.querySelector('[data-testid="coverage-generating"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
-    expect(container.querySelector('[data-testid="generating-phases"]')).toBeTruthy()
-    // Avoid leaking the pending getCoverageJob promise.
-    resolveJob({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')!.click() })
+    expect(api.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary', undefined)
+    expect(openGeneration).toHaveBeenCalledWith(job)
+    expect(container.querySelector('[data-testid="coverage-generating"]')).toBeNull()
+    expect(api.getCoverageJob).not.toHaveBeenCalled()
   })
 
-  it('puts the Tests pane (3rd column) in a loading state while generating — skeleton cards, no real test cases', async () => {
-    let resolveJob: (m: import('@/shared/api/types').CoverageJobManifest) => void = () => {}
+  it('preserves the model confirmation before handing the launched job to Flight', async () => {
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
-    vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: 'summarizing…' })
-    vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
+    vi.mocked(api.getProjectConfig).mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null, askModelsOnLaunch: true })
+    const job = { jobId: 'gated', feature: 'checkout', kind: 'summary' as const, status: 'running' as const, startedAt: 'now', log: '' }
+    vi.mocked(api.startCoverageJob).mockResolvedValue(job)
     await mount()
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.click()
-      await Promise.resolve()
-    })
-    // Tests pane stays mounted, but the whole mapping is being recomputed, so the
-    // test cards are held back entirely: a mapping note + placeholder skeleton
-    // cards, NOT the real test names/chips that would read as "already done".
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')!.click() })
+    expect(api.startCoverageJob).not.toHaveBeenCalled()
+    expect(openGeneration).not.toHaveBeenCalled()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="gate-confirm"]')!.click() })
+    expect(api.startCoverageJob).toHaveBeenCalledWith('checkout', 'summary', undefined)
+    expect(openGeneration).toHaveBeenCalledWith(job)
+  })
+
+  it('shows the Flight link when reopening results during generation, without a second progress viewer', async () => {
+    const job = { jobId: 'j1', feature: 'checkout', kind: 'summary' as const, status: 'running' as const, startedAt: 'now' }
+    await mount([job])
+    expect(container.querySelector('[data-testid="coverage-generating"]')).toBeNull()
+    expect(container.querySelector('[data-testid="prd-pane"]')).toBeTruthy()
+    const banner = container.querySelector('[data-testid="coverage-job-running"]')!
+    await act(async () => { banner.querySelector('button')!.click() })
+    expect(openGeneration).toHaveBeenCalledWith(job)
+  })
+
+  it('keeps test mappings in a loading state while the shared Flight job is running', async () => {
+    await mount([{ jobId: 'j1', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: 'now' }])
     expect(container.querySelector('[data-testid="tests-pane"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="tests-remapping-note"]')).toBeTruthy()
     expect(container.querySelectorAll('[data-testid="test-skeleton"]').length).toBeGreaterThan(0)
     expect(container.querySelector('[data-testid="test-adds item"]')).toBeNull()
-    expect(container.querySelector('[data-testid="orphan-tests-note"]')).toBeNull()
-    // Avoid leaking the pending getCoverageJob promise.
-    resolveJob({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
   })
 
-  it('re-lists the rail docs when generation completes so the generated PRD doc appears (items 1+2)', async () => {
-    // A summary job that completes and chains a coverage job, which also completes.
-    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
-    vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: '' })
-    vi.mocked(api.getCoverageJob).mockImplementation(async (id: string) => (
-      id === 'j1'
-        ? { jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', chainedJobId: 'j2', startedAt: 'now', log: 'summary done' }
-        : { jobId: 'j2', feature: 'checkout', kind: 'coverage', status: 'done', startedAt: 'now', log: 'coverage done' }
-    ))
-    await mount()
-    await act(async () => { await Promise.resolve() })
+  it('refreshes source docs and results when the shared job completes without a workspace event', async () => {
+    const job = { jobId: 'j1', feature: 'checkout', kind: 'coverage' as const, status: 'running' as const, startedAt: 'now' }
+    await mount([job])
     const before = vi.mocked(api.listFeatureDocs).mock.calls.length
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')?.click()
-      await Promise.resolve()
-    })
-    // Flush the pollJob chain + the rail's reload effect.
-    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve() })
-    // The rail re-fetched its doc list on completion — no manual refresh needed,
-    // so the generated _prd-summary.md pill shows up live.
+    await mount([{ ...job, status: 'done' }])
     expect(vi.mocked(api.listFeatureDocs).mock.calls.length).toBeGreaterThan(before)
+    expect(container.querySelector('[data-testid="test-adds item"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="coverage-job-running"]')).toBeNull()
   })
 
-  it('rehydrates a running job on mount so a refresh restores the Generating screen (R18)', async () => {
-    // Server says a coverage job is still running for this feature.
-    vi.mocked(api.listCoverageJobs).mockResolvedValue([
-      { jobId: 'jX', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: '2026-01-01T00:00:01Z' },
-    ])
-    let resolveJob: (m: import('@/shared/api/types').CoverageJobManifest) => void = () => {}
-    vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
+  it('restores a running job from the shared index after a cold mount', async () => {
+    await mount([{ jobId: 'jX', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: 'now' }])
+    expect(container.querySelector('[data-testid="coverage-job-running"]')).toBeTruthy()
+    expect(api.startCoverageJob).not.toHaveBeenCalled()
+    expect(api.listCoverageJobs).not.toHaveBeenCalled()
+  })
+
+  it('attaches to an existing job on conflict instead of creating another lifecycle', async () => {
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
+    const job = { jobId: 'existing', feature: 'checkout', kind: 'summary' as const, status: 'running' as const, startedAt: 'now', log: '' }
+    vi.mocked(api.startCoverageJob).mockRejectedValue(new api.ApiError(409, { existingJobId: job.jobId }, 'already running'))
+    vi.mocked(api.getCoverageJob).mockResolvedValue(job)
     await mount()
-    await act(async () => { await Promise.resolve(); await Promise.resolve() })
-    // Without any click, the Generating screen is restored from the running job.
-    expect(api.listCoverageJobs).toHaveBeenCalledWith('checkout')
-    expect(container.querySelector('[data-testid="coverage-generating"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
-    resolveJob({ jobId: 'jX', feature: 'checkout', kind: 'coverage', status: 'done', startedAt: '2026-01-01T00:00:01Z', log: 'done' })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')!.click() })
+    expect(openGeneration).toHaveBeenCalledWith(job)
+    expect(api.getCoverageJob).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('[data-testid="coverage-action-error"]')).toBeNull()
   })
 
-  it('self-heals a wedged poll: a hung getCoverageJob never leaves the Generating screen stuck', async () => {
-    vi.useFakeTimers()
-    try {
-      // Rehydrate finds a running job; the per-job poll then HANGS forever (the real
-      // bug: a getCoverageJob fetch that never resolves wedges the setTimeout chain).
-      // Meanwhile the authoritative job index shows the job actually finished.
-      vi.mocked(api.listCoverageJobs)
-        .mockResolvedValueOnce([{ jobId: 'jW', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: '2026-01-01T00:00:01Z' }])
-        .mockResolvedValue([{ jobId: 'jW', feature: 'checkout', kind: 'coverage', status: 'done', startedAt: '2026-01-01T00:00:01Z', endedAt: '2026-01-01T00:01:00Z' }])
-      vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise(() => {})) // never resolves → wedge
-      await act(async () => { root.render(<CoverageLedgerPage feature="checkout" onClose={() => {}} />) })
-      await act(async () => { await Promise.resolve(); await Promise.resolve() })
-      // Generating screen is up and the poll is wedged.
-      expect(container.querySelector('[data-testid="coverage-generating"]')).toBeTruthy()
-      expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
-      // The reconcile backstop (3s interval) sees "no running job" on two consecutive
-      // checks and clears the screen — without the wedged poll ever resolving.
-      await act(async () => { await vi.advanceTimersByTimeAsync(7000) })
-      expect(container.querySelector('[data-testid="coverage-generating"]')).toBeNull()
-      expect(container.querySelector('[data-testid="prd-pane"]')).toBeTruthy()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('shows the requirement kind without expanding the card', async () => {
+  it('keeps the documents and reports a failed start without navigating', async () => {
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
+    vi.mocked(api.startCoverageJob).mockRejectedValue(new Error('agent unavailable'))
     await mount()
-    // Kind lives on the always-visible header, not behind the disclosure.
-    expect(container.querySelector('[data-testid="req-detail-R1"]')).toBeNull()
-    expect(container.querySelector('[data-testid="kind-R1"]')?.textContent).toContain('Functional')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')!.click() })
+    expect(container.querySelector('[data-testid="coverage-action-error"]')?.textContent).toContain('agent unavailable')
+    expect(openGeneration).not.toHaveBeenCalled()
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="generate-summary"]')!.disabled).toBe(false)
+  })
+
+  it('spends no word on a functional requirement — only Non-functional earns a tag', async () => {
+    const led = structuredClone(LEDGER)
+    led.requirements[1].requirement.kind = 'non-functional'
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
+    await mount()
+    expect(container.querySelector('[data-testid="kind-R1"]')).toBeNull()
+    expect(container.querySelector('[data-testid="kind-R2"]')?.textContent).toBe('Non-functional')
   })
 
   it('expands a requirement to reveal its happy/unhappy paths', async () => {
@@ -401,14 +403,18 @@ describe('CoverageLedgerPage', () => {
     const detail = container.querySelector('[data-testid="req-detail-R1"]')
     expect(detail?.textContent).toContain('item appears in the cart')
     expect(detail?.textContent).toContain('out-of-stock item is rejected')
-    // Kind is no longer duplicated inside the detail (it's on the header now).
+    // The detail also carries the requirement text the row keeps behind the caret.
+    expect(detail?.textContent).toContain(LEDGER.requirements[0].requirement.text)
     expect(detail?.textContent).not.toContain('Functional')
     // Toggling again collapses it.
     act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
     expect(container.querySelector('[data-testid="req-detail-R1"]')).toBeNull()
   })
 
-  it('hides an N/A path block instead of rendering a hollow "N/A"', async () => {
+  // A hollow "N/A" is never rendered as prose, and a band is now nothing BUT its
+  // prose — so the band goes with it, and the coverage it used to carry is read
+  // off the per-path table, which never depended on the prose in the first place.
+  it('drops an N/A band entirely and still reports that path in the table', async () => {
     const led = structuredClone(LEDGER)
     led.requirements[0].requirement.happyPath = 'token matches the pattern'
     led.requirements[0].requirement.unhappyPath = 'N/A — internal bug, format tests catch it'
@@ -418,22 +424,62 @@ describe('CoverageLedgerPage', () => {
     const detail = container.querySelector('[data-testid="req-detail-R1"]')
     expect(detail?.textContent).toContain('token matches the pattern')
     expect(detail?.textContent).not.toContain('N/A')
-    expect(detail?.textContent).not.toContain('Unhappy path')
+    expect(container.querySelector('[data-testid="behaviour-unhappy-R1"]')).toBeNull()
+    expect(container.querySelector('[data-testid="path-R1-sad"]')?.textContent).toContain('no test')
   })
 
-  it('does not make a card expandable when every path prose is N/A', async () => {
+  it('drops the band stack entirely when every path prose is N/A, keeping the table', async () => {
     const led = structuredClone(LEDGER)
     led.requirements[0].requirement.happyPath = 'N/A'
     led.requirements[0].requirement.unhappyPath = 'n/a — nothing to assert'
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
     await mount()
-    expect(container.querySelector('[data-testid="req-toggle-R1"]')).toBeNull()
+    act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
+    const detail = container.querySelector('[data-testid="req-detail-R1"]')
+    expect(detail?.textContent).toContain(led.requirements[0].requirement.text)
+    expect(detail?.textContent).not.toContain('N/A')
+    expect(detail?.querySelectorAll('.clcov-path-text').length).toBe(0)
+    expect(container.querySelector('[data-testid="behaviour-R1"]')).toBeNull()
+    expect(container.querySelector('[data-testid="path-grid-R1"]')).toBeTruthy()
   })
 
-  it('offers no expand toggle for a requirement with no extra detail', async () => {
+  it('shows every discovered channel title at one declaration and keeps its requirement link', async () => {
+    const ledger = structuredClone(LEDGER)
+    const template = '${channel}: a new app can read its own empty conversation scope'
+    ledger.tests = [{ ...ledger.tests[0], name: template, line: 75 }]
+    ledger.requirements[0].annotatedTestNames = [template]
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(ledger)
+    const title = (channel: string) => `${channel}: a new app can read its own empty conversation scope`
+    vi.mocked(api.getFeatureTests).mockResolvedValue([{
+      file: '/repo/features/checkout/e2e/cart.spec.ts',
+      tests: ['whatsapp', 'line'].map((channel) => ({
+        name: title(channel), line: 75, bodyLine: 75,
+        bodySource: '{ expect(response.status()).toBe(200) }', steps: [],
+        readable: readableTest(title(channel), []),
+      })),
+    }])
     await mount()
-    // R3 has no kind/happyPath/unhappyPath → not disclosable.
-    expect(container.querySelector('[data-testid="req-toggle-R3"]')).toBeNull()
+    expect(api.getFeatureTests).toHaveBeenCalledOnce()
+    const pane = container.querySelector('[data-testid="tests-pane"]')!
+    expect(pane.textContent).not.toContain('${channel}')
+    for (const channel of ['whatsapp', 'line']) {
+      const card = pane.querySelector(`[data-testid="test-${title(channel)}"]`)!
+      expect(card).toBeTruthy()
+      expect(card.querySelector('.clcov-reqtag')?.textContent).toBe('R1')
+      await act(async () => { card.querySelector<HTMLElement>('[role="button"]')!.click() })
+      expect(card.querySelector('[data-testid="test-presentation"]')).toBeTruthy()
+      act(() => { card.querySelector<HTMLButtonElement>('.clcov-reqtag')!.click() })
+      expect(container.querySelector('[data-testid="req-R1"]')?.getAttribute('data-focus')).toBe('true')
+    }
+  })
+
+  it('every requirement expands — its text and path chips always wait behind the caret', async () => {
+    await mount()
+    // R3 has no kind/happyPath/unhappyPath, but its text and paths still live in the detail.
+    act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R3"]')?.click() })
+    const detail = container.querySelector('[data-testid="req-detail-R3"]')
+    expect(detail?.textContent).toContain(LEDGER.requirements[2].requirement.text)
+    expect(detail?.querySelector('[data-testid^="path-R3-"]')).toBeTruthy()
   })
 
   it('expands a test to fetch its shared English presentation lazily, with Code one action away', async () => {
@@ -508,4 +554,18 @@ describe('CoverageLedgerPage', () => {
     })
     expect(container.querySelector('[data-testid="test-source-sends receipt"]')?.textContent).toContain('Source not found')
   })
+
+  // --- The time axis (D11) on the page: worst-first sort. ---
+
+  it('sorts a requirement whose tests were weakened since the proof above every other row', async () => {
+    const led = structuredClone(LEDGER)
+    led.requirements[1].enforcement = { state: 'tests-weakened', provenAt: { runId: 'run-1', at: '2026-09-02T00:00:00.000Z' }, testsChangedAt: { at: '2026-09-03T00:00:00.000Z', tests: ['sends receipt'], verdict: 'weaker' }, wordingChangedAt: '2026-09-01T00:00:00.000Z' }
+    vi.mocked(api.getFeatureCoverage).mockResolvedValue(led)
+    await mount()
+    const ids = [...container.querySelectorAll('[data-testid^="req-R"]')].map((el) => el.getAttribute('data-testid'))
+    // R2 is covered — it would sink to the bottom on claim status alone.
+    expect(ids[0]).toBe('req-R2')
+  })
+
+
 })

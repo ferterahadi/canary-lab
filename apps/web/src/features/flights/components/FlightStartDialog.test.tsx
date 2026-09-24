@@ -39,7 +39,7 @@ vi.mock('@/shared/ui/AgentSessionView', () => ({
 }))
 
 import { ApiError } from '@/shared/api/client'
-import { FlightStartDialog } from './FlightStartDialog'
+import { FlightStartDialog, START_FRESH_LABEL } from './FlightStartDialog'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -287,6 +287,15 @@ describe('FlightStartDialog — fresh intent (R76)', () => {
     expect(later.getAttribute('style')).not.toContain('var(--bg-selected)')
   })
 
+  // R84 counterpart: the lead row drops the restart name only on a FIRST
+  // flight. Here a record exists, so re-entering there really is a restart and
+  // the row keeps the one name both dialogs use for that act (R76).
+  it('R84: keeps the restart name on the lead row once there is something to restart', async () => {
+    mocks.getFlightEntryOptions.mockResolvedValue(paused())
+    await render({ intent: 'fresh' })
+    expect(byTestId('flight-start-stage-similarity')!.textContent).toContain(START_FRESH_LABEL)
+  })
+
   it('shows bare step numbers, never the wiped flight\'s status glyphs', async () => {
     mocks.getFlightEntryOptions.mockResolvedValue(paused())
     await render({ intent: 'fresh' })
@@ -334,7 +343,8 @@ describe('FlightStartDialog — fresh intent (R76)', () => {
   it('states what a fresh start costs', async () => {
     mocks.getFlightEntryOptions.mockResolvedValue(paused())
     await render({ intent: 'fresh' })
-    expect(byTestId('flight-start-reset-note')!.textContent).toContain('wiped')
+    expect(byTestId('flight-start-reset-note')!.textContent).toContain('stage evidence resets')
+    expect(byTestId('flight-start-reset-note')!.textContent).toContain('report downloads stay in history')
   })
 
   it('leaves the re-fly intent alone — the stage menu still preselects Continue', async () => {

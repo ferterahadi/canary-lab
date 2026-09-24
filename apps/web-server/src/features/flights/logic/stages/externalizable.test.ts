@@ -58,6 +58,7 @@ function ctxFor(m: FlightManifest, flightDir?: string): { ctx: StageContext; log
 function innerAdapter(over: Partial<StageAdapter> = {}): { inner: StageAdapter; calls: string[] } {
   const calls: string[] = []
   const inner: StageAdapter = {
+    teardown: () => null,
     run: async () => { calls.push('run'); return { kind: 'done', evidence: 'inner-ran' } },
     ...over,
   }

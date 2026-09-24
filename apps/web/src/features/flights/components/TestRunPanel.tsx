@@ -2,12 +2,14 @@ import { useMemo, type ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import type { HealEnd, RunDetail, RunIndexEntry, RunStatus } from '@/shared/api/types'
 import { PanelCard } from '@/shared/ui/PanelCard'
+import { shortRunRef } from '@/shared/lib/format'
 import type { RunOpenTarget } from '@/shared/lib/workspace-view-state'
 import { RunRow, useRun, useRuns } from '@/features/runs'
 import { FailingTests } from './FailingTests'
 import { FactsGrid, HERO_ROW, STAGE_COLUMN, healEndShort, plural, runHistoryFacts } from './stage-meta'
 import { SkeletonBar, SkeletonBead, type AwaitingState } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { isAuxiliaryExecution } from '@shared/verification'
 
 // R80 — the Test Run hero. Before this, the run stage rendered the SAME run
 // three-to-four times: the "At a glance" facts card, the RunRepairSummary's own
@@ -53,6 +55,7 @@ export function TestRunPanel({
   live,
   evidence,
   onOpenRun,
+  onOpenSpecReview,
   onError,
   awaiting,
   pausedNotice,
@@ -70,6 +73,10 @@ export function TestRunPanel({
    *  detail lands on the Playwright tab, scrolled to that test (R82);
    *  `target.tab` names a pane (the captured fixes go to Changes). */
   onOpenRun?: (feature: string, runId: string, target?: RunOpenTarget) => void
+  /** Opens the changed-tests review (?dialog=tests-review) — where the run's
+   *  pending spec edits get adopted or restored. Without it the hero still
+   *  states where the verdict came from, just not as a link. */
+  onOpenSpecReview?: () => void
   onError?: (msg: string) => void
   /** Why any missing run-history value is a skeleton. Required so a completed
    *  run with old/incomplete evidence reads as unavailable, not idle. */
@@ -92,7 +99,7 @@ export function TestRunPanel({
   // The feature's real test runs, newest first (boot/benchmark/verify are
   // plumbing, not test runs). The current run's ordinal reads off this list.
   const featureRuns = useMemo(
-    () => runs.filter((r) => r.feature === feature && r.executionType !== 'boot' && r.executionType !== 'benchmark' && r.executionType !== 'verify'),
+    () => runs.filter((r) => r.feature === feature && !isAuxiliaryExecution(r.executionType) && r.executionType !== 'verify'),
     [runs, feature],
   )
   const idx = runId ? featureRuns.findIndex((r) => r.runId === runId) : -1
@@ -120,6 +127,13 @@ export function TestRunPanel({
     services: manifest?.services,
     fixCapture: manifest?.fixCapture,
     ...(runId && onOpenRun ? { onOpenFixes: () => onOpenRun(feature, runId, { tab: 'changes' }) } : {}),
+    suiteSnapshot: manifest?.suiteSnapshot,
+    // The manifest's list is the record; the index count is what `/ws/runs`
+    // pushes between manifest reads, so a fresh edit shows before the detail
+    // catches up. Either way it is the run's own number, not the dirty store's.
+    pendingSpecEdits: manifest?.specEdits?.pending.length ?? currentEntry.pendingSpecEdits ?? 0,
+    integrityHints: manifest?.integrity?.hints.length ?? currentEntry.integrityHints ?? 0,
+    onOpenSpecReview,
   })
   const failing = summary?.failed ?? []
   const active = live && (status === 'running' || status === 'healing')
@@ -156,6 +170,11 @@ export function TestRunPanel({
                chip, or in the meta line) printed the same fraction twice, a
                hand's width apart. */
             passCount="hidden"
+            /* The card's opening line, not an item in a list: no gutter, no
+               fill. Its title, the stats line under it and the failure rows all
+               start on the card's own left edge — and on the same column as the
+               Previous runs titles below. */
+            chrome="headline"
             /* Guarded on `runId` like the `onOpenFixes` wiring above: the hero
                also renders from a synthesized entry before the run list
                resolves, and this used to hand `onOpenRun` an undefined id in
@@ -172,7 +191,14 @@ export function TestRunPanel({
         <FailingTests
           failing={failing}
           knownTests={summary?.knownTests}
-          {...(onOpenRun && runId ? { onOpenTest: (name: string) => onOpenRun(feature, runId, { test: name }) } : {})}
+          {...(onOpenRun && runId
+            ? {
+                onOpenTest: (name: string) => onOpenRun(feature, runId, { test: name }),
+                /* The remainder past the sixth goes to the same place a row
+                   does, minus the per-test landing. */
+                onOpenAll: () => onOpenRun(feature, runId),
+              }
+            : {})}
         />
 
         {/* No run id means there is no run to control — the surrounding branch
@@ -182,20 +208,23 @@ export function TestRunPanel({
         )}
       </PanelCard>
 
-      {/* The runs before this one (R82). Same rubric + dashed-rule + count-chip
-          header the Failing tests band uses, so the two lists on this stage read
-          as one family instead of a card and a stray `<h3>`. Each row is labelled
-          by its run REF and ordinal — the old list repeated the feature name on
+      {/* The runs before this one (R82), as a card like every other block on
+          the stage. It used to be a bare dashed-rule band on the pane's own
+          background — the one block with no surface, its rubric 12px left of
+          every card kicker and its rows carrying RunRow's own gutter — so it
+          read as spill-over from the card above. The rows now sit flush on the
+          card's text column, the same edge the Latest run title uses, with no
+          dividers or fill, like the Failing tests rows. Each row is labelled by
+          its run REF and ordinal — the old list repeated the feature name on
           every row, which is the one thing every row shares — and carries its own
           open action rather than relying on the row being secretly clickable. */}
       {previous.length > 0 && (
-        <section data-testid="previous-runs" className="min-w-0">
-          <div className="mb-1 flex items-center gap-2">
-            <span className="cl-rubric">Previous runs</span>
-            <span className="h-px flex-1 border-t border-dashed border-line" />
-            <span className="cl-count-chip">{previous.length}</span>
-          </div>
-          <ul className="m-0 flex list-none flex-col divide-y divide-line-subtle p-0">
+        <PanelCard
+          kicker="Previous runs"
+          aside={<span className="cl-count-chip">{previous.length}</span>}
+          testId="previous-runs"
+        >
+          <ul className="m-0 flex list-none flex-col p-0">
             {previous.map(({ run, ordinal: n }) => (
               <RunRow
                 key={run.runId}
@@ -204,6 +233,7 @@ export function TestRunPanel({
                 primaryLabel={`Run ${shortRunRef(run.runId)}`}
                 marker={`run ${n} of ${featureRuns.length}`}
                 showPorts={false}
+                chrome="item"
                 /* The row IS the open action — its trailing arrow stops being
                    hover-only here so the affordance is visible at rest. */
                 arrow="always"
@@ -211,7 +241,7 @@ export function TestRunPanel({
               />
             ))}
           </ul>
-        </section>
+        </PanelCard>
       )}
     </div>
   )
@@ -235,9 +265,11 @@ interface RunStat {
   testId?: string
 }
 
-/** The latest run's numbers, in the identity row's own register: 11px, muted
- *  label + neutral value, `·` separated — the same vocabulary RunRow's meta line
- *  uses, one line under it and aligned to the same text column.
+/** The latest run's numbers as a quiet ladder under the identity row: each
+ *  fact is a muted 11px label over its value, set in the data step, on the same
+ *  text column as the title. Facts stand a column apart instead of running as
+ *  one `·`-separated sentence — five label/value pairs in a wrapping line read
+ *  as a single cramped string, and the eye had to find the labels inside it.
  *
  *  These three facts used to render as `FactTile`s — boxed on `bg-elevated`,
  *  22px figures, with a progress bar and a ten-segment stepper. That is the
@@ -270,8 +302,8 @@ interface RunStat {
 function RunHeroSkeleton({ awaiting }: { awaiting: AwaitingState }) {
   return (
     <div data-testid="test-run-hero-skeleton" className="flex flex-col">
-      {/* Identity row — RunRow's gutter, dot size and two-line text column. */}
-      <div className="flex items-center gap-2 py-2" style={{ paddingInline: HERO_ROW.GUTTER }}>
+      {/* Identity row — RunRow's dot size and two-line text column, flush. */}
+      <div className="flex items-center gap-2 pb-0.5">
         <SkeletonBead awaiting={awaiting} size={8.8} />
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
           <SkeletonBar awaiting={awaiting} width="28%" height={10} />
@@ -279,18 +311,23 @@ function RunHeroSkeleton({ awaiting }: { awaiting: AwaitingState }) {
         </div>
       </div>
 
-      {/* Tests · Repairs · Services land on this bar, not beside it. */}
-      <div style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}>
-        <SkeletonBar awaiting={awaiting} width="40%" height={8} />
+      {/* Tests · Repairs · Services land in these rungs: a short label over a
+          shorter value, a column apart, exactly where RunStatsLine puts them. */}
+      <div className="mt-3 flex gap-x-7" style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}>
+        {[64, 72, 80].map((w) => (
+          <div key={w} className="flex flex-col gap-1.5">
+            <SkeletonBar awaiting={awaiting} width={`${w}px`} height={7} />
+            <SkeletonBar awaiting={awaiting} width={`${Math.round(w * 0.6)}px`} height={9} />
+          </div>
+        ))}
       </div>
 
-      {/* The per-test rows, in FailureRow's dot lane and hairline dividers. */}
-      <ul className="m-0 mt-3 flex list-none flex-col p-0">
+      {/* The per-test rows, in FailureRow's dot lane. */}
+      <ul className="m-0 mt-4 flex list-none flex-col p-0">
         {['64%', '46%'].map((width) => (
           <li
             key={width}
-            className="flex items-start gap-2 border-t border-line-subtle py-2 first:border-t-0"
-            style={{ paddingInline: HERO_ROW.GUTTER }}
+            className="flex items-start gap-2 py-1.5"
           >
             <span className="mt-[5px] flex shrink-0 items-center justify-center" style={{ width: HERO_ROW.DOT }}>
               <SkeletonBead awaiting={awaiting} size={6} />
@@ -308,39 +345,39 @@ function RunHeroSkeleton({ awaiting }: { awaiting: AwaitingState }) {
 
 function RunStatsLine({ stats }: { stats: RunStat[] }) {
   return (
-    <div
+    <dl
       data-testid="run-hero-stats"
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 pr-3 text-[11px] leading-tight"
+      className="m-0 mt-3 flex flex-wrap gap-x-7 gap-y-2.5"
       style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}
     >
-      {stats.map((s, i) => (
-        <span key={s.label} className="flex items-center gap-1.5" {...(s.title ? { title: s.title } : {})}>
-          {i > 0 && <span aria-hidden="true" className="select-none text-muted opacity-50">·</span>}
-          {s.onClick ? (
-            // The line's one interactive segment. It stays in the line's register
-            // (11px, muted label) and takes the accent only on the value + arrow —
-            // accent MEANS "click me" here, which is exactly what this is, and the
-            // neutral numbers beside it stay reference data.
-            <button
-              type="button"
-              onClick={s.onClick}
-              {...(s.testId ? { 'data-testid': s.testId } : {})}
-              className="flex items-center gap-1.5 rounded text-[11px] hover:underline"
-            >
-              <span className="text-muted">{s.label}</span>
-              <span className="tabular-nums text-accent">{s.value}</span>
-              <span aria-hidden="true" className="text-accent">→</span>
-            </button>
-          ) : (
-            <>
-              <span className="text-muted">{s.label}</span>
-              <span className={`tabular-nums ${s.bad ? 'text-danger' : 'text-secondary'}`}>{s.value}</span>
-              {s.note ? <span className="text-muted">({s.note})</span> : null}
-            </>
-          )}
-        </span>
+      {stats.map((s) => (
+        <div key={s.label} className="flex min-w-0 flex-col gap-0.5" {...(s.title ? { title: s.title } : {})}>
+          <dt className="cl-type-meta whitespace-nowrap text-muted">{s.label}</dt>
+          <dd className="m-0 flex items-baseline gap-1.5 cl-type-data">
+            {s.onClick ? (
+              // The ladder's one interactive rung. It stays in the ladder's
+              // register and takes the accent only on the value + arrow —
+              // accent MEANS "click me" here, which is exactly what this is, and
+              // the neutral numbers beside it stay reference data.
+              <button
+                type="button"
+                onClick={s.onClick}
+                {...(s.testId ? { 'data-testid': s.testId } : {})}
+                className="flex items-baseline gap-1 rounded cl-type-data hover:underline"
+              >
+                <span className="tabular-nums font-medium text-accent">{s.value}</span>
+                <span aria-hidden="true" className="text-accent">→</span>
+              </button>
+            ) : (
+              <>
+                <span className={`tabular-nums font-medium ${s.bad ? 'text-danger' : 'text-primary'}`}>{s.value}</span>
+                {s.note ? <span className="cl-type-meta text-muted">{s.note}</span> : null}
+              </>
+            )}
+          </dd>
+        </div>
       ))}
-    </div>
+    </dl>
   )
 }
 
@@ -355,6 +392,10 @@ function runStats({
   services,
   fixCapture,
   onOpenFixes,
+  suiteSnapshot,
+  pendingSpecEdits,
+  integrityHints,
+  onOpenSpecReview,
 }: {
   summary: RunDetail['summary'] | undefined
   healCycles: number
@@ -366,6 +407,14 @@ function runStats({
    *  (no drill-through wired), and the fixes then aren't reported here at all —
    *  a count the user can't act on is worse than silence. */
   onOpenFixes?: () => void
+  /** The run-start copy of the suite (D9). Absent on runs recorded before the
+   *  boundary existed — those say nothing rather than guess. */
+  suiteSnapshot?: RunDetail['manifest']['suiteSnapshot']
+  /** Live spec edits the run has not executed, and the advisory hints on them. */
+  pendingSpecEdits?: number
+  integrityHints?: number
+  /** Opens the changed-tests review, where those edits are adopted/restored. */
+  onOpenSpecReview?: () => void
 }): RunStat[] {
   const stats: RunStat[] = []
   if (summary && summary.total > 0) {
@@ -416,6 +465,36 @@ function runStats({
       testId: 'run-hero-fixes',
     })
   }
+  // Where the verdict came from (D9). A run executes the suite as it was at
+  // run start, so a spec edited mid-run did NOT change this verdict — the count
+  // says how many edits are waiting, and the link goes where they are adopted
+  // or restored. Pending edits with nowhere to go still get named (unlike the
+  // fixes above, the fact matters even when the reader can't act here: it is
+  // the difference between "the tests passed" and "the tests I'm looking at
+  // passed"). A run that fell back to the live suite says so too — the reader
+  // then knows a mid-run edit COULD have moved the result.
+  if (suiteSnapshot?.kind === 'taken') {
+    const pending = pendingSpecEdits ?? 0
+    const hints = integrityHints ?? 0
+    const qualifier = pending > 0
+      ? ` · ${plural(pending, 'pending test-file change')}${hints > 0 ? ` · ${plural(hints, 'hint')}` : ''}`
+      : ''
+    stats.push({
+      label: 'Verdict from',
+      value: `recorded tests${qualifier}`,
+      title: pending > 0
+        ? `${plural(pending, 'test-file change')} made since the run started ${pending > 1 ? 'were' : 'was'} not run. This run result is based on the recorded tests. Review, then adopt or restore the changes.`
+        : `Tests were recorded when the run started (${suiteSnapshot.digest.slice(0, 12)}). No test files have changed since.`,
+      ...(pending > 0 && onOpenSpecReview ? { onClick: onOpenSpecReview, testId: 'run-hero-spec-edits' } : {}),
+    })
+  } else if (suiteSnapshot?.kind === 'unavailable') {
+    stats.push({
+      label: 'Verdict from',
+      value: 'live tests (not recorded)',
+      title: `Canary Lab could not record the tests when this run started: ${suiteSnapshot.reason}. A test-file change during the run may have changed what was tested.`,
+      bad: true,
+    })
+  }
   return stats
 }
 
@@ -455,7 +534,7 @@ function RunControls({
             data-testid="run-stage-cancel-heal"
             disabled={mutationLockedReason != null}
             onClick={() => { api.cancelHealRun(runId).catch(onError) }}
-            className="cl-button px-2 py-0.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-45"
+            className="cl-button px-2 py-0.5 disabled:cursor-not-allowed disabled:opacity-45"
             title={mutationLockedReason ?? 'Stops the repair and keeps the failing result. The flight will ask what to do next.'}
           >
             Cancel repair
@@ -469,7 +548,7 @@ function RunControls({
             data-testid="run-stage-stop"
             disabled={mutationLockedReason != null}
             onClick={() => { api.stopRun(runId).catch(onError) }}
-            className="cl-button px-2 py-0.5 text-[11px] text-danger disabled:cursor-not-allowed disabled:opacity-45"
+            className="cl-button px-2 py-0.5 disabled:cursor-not-allowed disabled:opacity-45"
             title={mutationLockedReason ?? 'Ends this run only — the flight keeps going and asks what to do next. Pause stops everything.'}
           >
             ⏹ Stop run
@@ -478,11 +557,4 @@ function RunControls({
       )}
     </div>
   )
-}
-
-/** Short, stable run reference for the identity line — the trailing token of
- *  the run id (`…-z6kc` → `z6kc`), falling back to the whole id. */
-function shortRunRef(runId: string): string {
-  const tail = runId.split(/[-_]/).pop()
-  return tail && tail.length >= 3 ? tail : runId
 }

@@ -4,7 +4,7 @@ import {
   appendEvaluationExportLog,
   createEvaluationExportTask,
   patchEvaluationExportTask,
-  writeEvaluationExportZip,
+  writeEvaluationExportBuild,
   type EvaluationExportTaskRecord,
 } from './evaluation-export-store'
 import { buildEvaluationExportArchive } from './evaluation-export-archive'
@@ -80,13 +80,17 @@ export async function completeExternalEvaluationExport(args: {
   detail: RunDetail
   taskId: string
   rewrite: EvaluationRewrite
+  /** Feature root; when set the report and certificate carry the requirement
+   *  ledger's wording, exactly as the UI route's export does. */
+  featuresDir?: string
 }): Promise<CompleteExternalEvaluationResult> {
   const built = await buildEvaluationExportArchive(args.detail, {
     logsDir: args.logsDir,
+    ...(args.featuresDir ? { featuresDir: args.featuresDir } : {}),
     audienceAdapter: 'deterministic',
     rewrite: args.rewrite,
   })
-  writeEvaluationExportZip(args.logsDir, args.taskId, built.zip)
+  writeEvaluationExportBuild(args.logsDir, args.taskId, built)
   appendEvaluationExportLog(args.logsDir, args.taskId, '[evaluation] external report submitted\n')
   const next = patchEvaluationExportTask(args.logsDir, args.taskId, {
     archiveBase: built.archiveBase,

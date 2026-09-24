@@ -96,6 +96,18 @@ function buildDeps(feature: string): { deps: FlightConductorDeps; spawnAgent: Re
     logsDir,
     projectRoot: tmpDir,
     spawnAgent,
+    // This fixture lives outside the package tree, so `npx --no-install`
+    // cannot resolve Canary's local Playwright binary from the feature's cwd.
+    // The default validator's real command behavior is exercised in
+    // stages.specs-coverage.validate.test.ts; here, keep the real flight
+    // pipeline deterministic while asserting the authored spec reached it.
+    validateSpecs: async ({ featureDir }) => {
+      const specPath = path.join(featureDir, 'e2e', 'todos.spec.ts')
+      if (!fs.existsSync(specPath)) return { ok: false, errors: 'authored spec is missing' }
+      return fs.readFileSync(specPath, 'utf-8') === SPEC
+        ? { ok: true }
+        : { ok: false, errors: 'authored spec differs from the submitted draft' }
+    },
     coverage: {
       regenerate: (async (args: { featuresDir: string; feature: string }) => {
         const docsDir = path.join(args.featuresDir, args.feature, 'docs')

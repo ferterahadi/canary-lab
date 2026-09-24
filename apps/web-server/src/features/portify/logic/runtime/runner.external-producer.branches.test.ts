@@ -53,7 +53,7 @@ it('submitExternalPortify 409s when workflow is not in editing state', async () 
       const { featuresDir, logsDir } = await singleFixture()
       const { store, runner } = makeRunner(featuresDir, logsDir)
       const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
-      await waitForStatus(store, result.workflowId, ['editing'])
+      await waitForStatus(store, result.workflowId, ['ready-to-save'])
       // Simulate verification already completed by manually patching the manifest
       const m = store.get(result.workflowId)!
       store.save({ ...m, status: 'ready-to-save' })
@@ -67,7 +67,7 @@ it('submitExternalPortify 409s with polling instructions while a canary-started 
       const { featuresDir, logsDir } = await singleFixture()
       const { store, runner } = makeRunner(featuresDir, logsDir)
       const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
-      await waitForStatus(store, result.workflowId, ['editing'])
+      await waitForStatus(store, result.workflowId, ['ready-to-save'])
       store.save({ ...store.get(result.workflowId)!, status: 'verifying' })
       await expect(runner.submitExternalPortify(result.workflowId)).rejects.toThrow(/poll get_portify/)
       await runner.cancel(result.workflowId)
@@ -76,11 +76,12 @@ it('submitExternalPortify 409s when there is no active orchestrator (server rest
       const { featuresDir, logsDir } = await singleFixture()
       const { store, runner: runner1 } = makeRunner(featuresDir, logsDir)
       const result = await runner1.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
-      await waitForStatus(store, result.workflowId, ['editing'])
+      await waitForStatus(store, result.workflowId, ['ready-to-save'])
+      await runner1.reviseExternalPortify(result.workflowId, 'make an additional port edit')
 
       // Create a second runner instance (simulates server restart) — no active orchestrators
       const { runner: runner2 } = makeRunner(featuresDir, logsDir)
-      await expect(runner2.submitExternalPortify(result.workflowId)).rejects.toMatchObject({ statusCode: 409 })
+      await expect(runner2.submitExternalPortify(result.workflowId)).rejects.toThrow('worktree is no longer available')
       await runner1.cancel(result.workflowId)
     })
 it('buildSiblingOverlayIndex skips siblings with no overlay, empty patch, missing repos decl, or bad git root; sort comparator is non-zero on SHA-match diff; applyOverlay non-ok is a no-op', async () => {
@@ -223,8 +224,9 @@ it('submitExternalPortify returns the in-flight manifest when the post-fire stor
       const { featuresDir, logsDir } = await singleFixture()
       const { store, runner } = makeRunner(featuresDir, logsDir)
       const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
-      await waitForStatus(store, result.workflowId, ['editing'])
+      await waitForStatus(store, result.workflowId, ['ready-to-save'])
 
+      runner.reviseExternalPortify(result.workflowId, 'adjust port wiring')
       const real = store.get(result.workflowId)!
       const realGet = store.get.bind(store)
       vi.spyOn(store, 'get')
@@ -278,6 +280,8 @@ it("envset hydration: save()'s overlay patch carries the agent's edits but ZERO 
       const { store, runner } = makeRunner(featuresDir, logsDir)
 
       const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+      expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
+      await runner.revise(workflowId, 'adjust the port wiring')
       expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
       await runner.save(workflowId)
 

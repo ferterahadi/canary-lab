@@ -59,6 +59,25 @@ function buildGitRepo(name: string): string {
   return dir
 }
 
+/** A clone of a bare origin whose `main` has moved one commit past the clone. */
+function buildTrackedRepo(name: string): { repo: string; seed: string } {
+  const originDir = path.join(tmpDir, `${name}-origin.git`)
+  const seed = buildGitRepo(`${name}-seed`)
+  const repo = path.join(tmpDir, name)
+  const git = (cwd: string, args: string[]): void => { execFileSync('git', args, { cwd, stdio: 'ignore' }) }
+  git(tmpDir, ['init', '-q', '--bare', '-b', 'main', originDir])
+  git(seed, ['remote', 'add', 'origin', originDir])
+  git(seed, ['push', '-q', '-u', 'origin', 'main'])
+  git(tmpDir, ['clone', '-q', originDir, repo])
+  git(seed, ['commit', '-q', '--allow-empty', '-m', 'upstream'])
+  git(seed, ['push', '-q', 'origin', 'main'])
+  return { repo, seed }
+}
+
+function headOf(dir: string): string {
+  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+}
+
 async function makeApp(opts: {
   isRepoActive?: (feature: string, repo: string) => boolean
   events?: WorkspaceEvent[]
@@ -184,6 +203,87 @@ describe('feature.config endpoints', () => {
         dirty: false,
       })
       expect(r.json().localBranches).toContain('feature/demo')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('reads the upstream standing locally unless ?fetch asks for the remote tip', async () => {
+    const { repo, seed } = buildTrackedRepo('repo-up')
+    buildFeature('upstreamy', {
+      config: `module.exports = { config: { name: 'upstreamy', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(repo)}, branch: 'main', track: 'upstream' }], featureDir: __dirname } }`,
+    })
+    const app = await makeApp()
+    try {
+      const stale = await app.inject({ method: 'GET', url: '/api/features/upstreamy/repos/app/git' })
+      expect(stale.json()).toMatchObject({ upstream: 'origin/main', behindUpstream: 0, trackUpstream: true })
+
+      const fresh = await app.inject({ method: 'GET', url: '/api/features/upstreamy/repos/app/git?fetch=1' })
+      expect(fresh.json()).toMatchObject({ behindUpstream: 1, upstreamSha: headOf(seed) })
+
+      const alsoFresh = await app.inject({ method: 'GET', url: '/api/features/upstreamy/repos/app/git?fetch=true' })
+      expect(alsoFresh.json()).toMatchObject({ behindUpstream: 1 })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('fast-forwards a configured repo on POST update and announces the move', async () => {
+    const { repo, seed } = buildTrackedRepo('repo-ff')
+    buildFeature('ffy', {
+      config: `module.exports = { config: { name: 'ffy', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(repo)}, branch: 'main' }], featureDir: __dirname } }`,
+    })
+    const events: WorkspaceEvent[] = []
+    const app = await makeApp({ events })
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/features/ffy/repos/app/update' })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toMatchObject({
+        update: { kind: 'fast-forwarded', to: headOf(seed), behind: 1 },
+        summary: expect.stringContaining('fast-forwarded main'),
+        headSha: headOf(seed),
+        behindUpstream: 0,
+      })
+      expect(headOf(repo)).toBe(headOf(seed))
+      expect(events).toEqual([{ type: 'features-changed' }])
+
+      // A second update has nothing to do, and says so without an announcement.
+      const again = await app.inject({ method: 'POST', url: '/api/features/ffy/repos/app/update' })
+      expect(again.statusCode).toBe(200)
+      expect(again.json()).toMatchObject({ update: { kind: 'up-to-date' } })
+      expect(events).toHaveLength(1)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('refuses POST update for unknown targets, an active run, or a checkout it cannot move safely', async () => {
+    const { repo } = buildTrackedRepo('repo-refuse')
+    fs.writeFileSync(path.join(repo, 'README.md'), 'edited\n')
+    buildFeature('refusy', {
+      config: `module.exports = { config: { name: 'refusy', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(repo)}, branch: 'main' }], featureDir: __dirname } }`,
+    })
+    const events: WorkspaceEvent[] = []
+    const busy = await makeApp({ events, isRepoActive: () => true })
+    try {
+      expect((await busy.inject({ method: 'POST', url: '/api/features/missing/repos/app/update' })).statusCode).toBe(404)
+      expect((await busy.inject({ method: 'POST', url: '/api/features/refusy/repos/nope/update' })).statusCode).toBe(404)
+      const held = await busy.inject({ method: 'POST', url: '/api/features/refusy/repos/app/update' })
+      expect(held.statusCode).toBe(409)
+      expect(held.json()).toEqual({ error: 'repo has an active service run' })
+    } finally {
+      await busy.close()
+    }
+    const app = await makeApp({ events })
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/features/refusy/repos/app/update' })
+      expect(r.statusCode).toBe(409)
+      expect(r.json()).toEqual({
+        reason: 'dirty',
+        error: 'dirty: checkout has uncommitted changes (1 file(s)) — commit or stash them first',
+      })
+      expect(fs.readFileSync(path.join(repo, 'README.md'), 'utf8')).toBe('edited\n')
+      expect(events).toEqual([])
     } finally {
       await app.close()
     }

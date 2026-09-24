@@ -11,6 +11,8 @@ import path from 'path'
 // which case callers should fall back to the AST extractor.
 
 export interface PlaywrightListEntry {
+  /** A syntax-only declaration whose generated titles need reporter enrichment. */
+  unresolvedTitle?: boolean
   // Absolute path to the *entry-point* spec file Playwright loaded — i.e.
   // the top-level suite's file. For direct `test(...)` calls this equals
   // `originFile`. For tests defined inside a helper (e.g. a factory imported
@@ -58,7 +60,7 @@ export type PlaywrightListSpawner = (featureDir: string) => PlaywrightListSpawn
 
 export const defaultPlaywrightListSpawner: PlaywrightListSpawner = (featureDir) => ({
   command: 'npx',
-  args: ['playwright', 'test', '--list', '--reporter=json'],
+  args: ['--no-install', 'playwright', 'test', '--list', '--reporter=json'],
   cwd: featureDir,
 })
 
@@ -120,7 +122,24 @@ function collectSpecs(
   }
 }
 
+/** Playwright puts discovery errors after its full config in JSON stdout.
+ *  Surface those messages first so a missing import is not buried in settings. */
+export function discoveryFailureOutput(stdout: string, stderr: string): string {
+  try {
+    const report: unknown = JSON.parse(stdout)
+    if (report && typeof report === 'object' && 'errors' in report && Array.isArray(report.errors)) {
+      const messages = report.errors.flatMap((error: unknown) => (
+        error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' ? [error.message] : []
+      ))
+      if (messages.length) return messages.join('\n\n').slice(0, 8000)
+    }
+  } catch { /* Non-JSON compile errors still carry useful stdout/stderr. */ }
+  return `${stderr}\n${stdout}`.trim().slice(0, 8000)
+}
+
 export interface ListPlaywrightTestsOpts {
+  /** Repair verification must execute Playwright even when spec timestamps match. */
+  fresh?: boolean
   spawner?: PlaywrightListSpawner
   timeoutMs?: number
   env?: NodeJS.ProcessEnv
@@ -134,6 +153,7 @@ export async function listPlaywrightTests(
   featureDir: string,
   opts: ListPlaywrightTestsOpts = {},
 ): Promise<PlaywrightListEntry[] | null> {
+  if (opts.fresh) cache.delete(featureDir)
   const signature = cacheSignature(featureDir)
   const cached = cache.get(featureDir)
   if (cached && cached.signature === signature) return cached.entries
@@ -177,9 +197,18 @@ export async function listPlaywrightTests(
       // `--list` exits 0 when discovery succeeded; any non-zero indicates a
       // discovery failure and stdout may not be valid JSON.
       if (code === 0) { settle(out); return }
-      // Attach stderr to help debugging; consumers ignore the value but logs help.
-      if (settle(null, `playwright test --list exited with code ${code}\n${err}\n${out}`.trim()) && err) {
-        process.stderr.write(`[playwright-list] exit ${code}: ${err.slice(0, 500)}\n`)
+      // The UI needs the actual discovery error, not the preceding config dump.
+      const failure = discoveryFailureOutput(out, err)
+      // Both the gate and the payload read `failure`, never `err`: Playwright
+      // reports discovery errors inside its JSON stdout and leaves stderr to
+      // the package runner, which on npm 12 always writes a `npm notice run`
+      // banner there. Echoing `err` printed that banner in place of the
+      // failure, and gating on it made the banner itself the trigger. The
+      // console is the only place a human sees this — the server runs
+      // `logger: false`, so the callers' `app.log.warn` is a no-op — so the
+      // line names the directory, since one process lists every feature.
+      if (settle(null, `playwright test --list exited with code ${code}\n${failure}`.trim()) && failure) {
+        process.stderr.write(`[playwright-list] exit ${code} in ${inv.cwd}: ${failure.slice(0, 500)}\n`)
       }
     })
   })

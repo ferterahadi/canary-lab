@@ -67,14 +67,14 @@ export function registerHealFlowTools(ctx: ToolGroupContext): void {
 
   registerTool('wait_for_heal_task', {
     description:
-      'Wait until a claimed run needs code fixes or reaches a terminal result. Use after start_run/claim_heal and again after signal_run. Blocks for a short bounded window and heartbeats for you. If still active when the window elapses it returns type:"still_waiting" (NOT terminal) — immediately call wait_for_heal_task again with the same runId + session_id. Loop on still_waiting until needs_heal / passed / failed. Never poll get_run_snapshot or get_run to wait. A needs_heal task may be a service that failed to boot (no tests ran): context.failedTests is empty and context.bootFailure points at the service log — fix the service/app code, then signal_run kind:"restart".',
+      'Wait until a claimed run needs code fixes or reaches a terminal result. Use after start_run/claim_heal and again after signal_run. Blocks for a short bounded window and heartbeats for you. If still active when the window elapses it returns type:"still_waiting" (NOT terminal) — immediately call wait_for_heal_task again with the same runId + session_id. Loop on still_waiting until needs_heal / passed / failed. Never poll get_run_snapshot or get_run to wait. A needs_heal task may be a service that failed to boot (no tests ran): context.failedTests is empty and context.bootFailure carries reason/classification, command/cwd, exit/signal, a bounded redacted excerpt, and full log path. classification:"underlying-cause-not-preserved" means an outer wrapper did not preserve the underlying failure — do not guess it; fix that product wrapper to log and rethrow, then signal_run kind:"restart".',
     inputSchema: {
       runId: z.string(),
       session_id: z.string().describe('External heal session id that owns this run.'),
       client_kind: clientKindInput,
       timeout_ms: z.number().int().positive().max(WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS)
         .default(WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS)
-        .describe('Per-call block budget in ms (default 90s). A single call blocks at most ~2 minutes regardless; larger values are clamped, then you get still_waiting to loop on. This is not the overall heal budget — that is unbounded across re-calls.'),
+        .describe('Per-call block budget in ms (default 45s). A single call blocks at most 45 seconds regardless; larger values are clamped, then you get still_waiting to loop on. This is not the overall heal budget — that is unbounded across re-calls.'),
     },
   }, async ({ runId, session_id, client_kind, timeout_ms }) => {
     const result = await waitForHealTask(deps, runId, session_id, client_kind, timeout_ms)
@@ -83,7 +83,7 @@ export function registerHealFlowTools(ctx: ToolGroupContext): void {
 
   registerTool('signal_run', {
     description:
-      'Write a heal-cycle signal. The orchestrator picks it up via its existing poll loop and writes the diagnosis journal from this signal plus runner-observed git diff. Use `rerun` for test-only fixes (no service restart) and `restart` when services need to be restarted.',
+      'Write a heal-cycle signal. The orchestrator picks it up via its existing poll loop and writes the diagnosis journal from this signal plus runner-observed git diff. Use `rerun` for test-only fixes (no service restart) and `restart` when services need to be restarted. Both paths recheck dependencies and persist fresh evidence before service spawn or test verification. A dependency block remains in context.dependencyBlockers on repeat waits and get_heal_context; repair its requiredAction, asking only for a genuine user choice or missing authority.',
     inputSchema: {
       runId: z.string(),
       kind: SIGNAL_KIND,

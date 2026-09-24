@@ -108,12 +108,43 @@ variant is needed for colour**. Opacity modifiers (`bg-danger/10`) compile to
 ## 2. Typography
 
 ```
---font-sans: 'Inter Tight', 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif
---font-mono: 'JetBrains Mono', ui-monospace, monospace
+--font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif
+--font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace
 ```
 
-**Mono is semantic, not decorative** — it marks machine identity: run ids, test
-ids, tags, file paths, ports, branch names, counts.
+**Two families, split by meaning — not by screen region.** Proportional means
+*written by a human*: titles, labels, prose, buttons. Fixed-width means
+*produced by a machine*: run ids, test ids, tags, file paths, ports, branch
+names, counts, code, and the xterm run pane.
+
+That is the whole rule, and it is the differentiator the UI leans on. A reader
+can tell which kind of thing they are looking at before reading a word, and the
+rule keeps holding as surfaces are added. Assigning fonts per screen region
+instead — one for the sidebar, another for the main pane — drifts the moment
+someone adds a panel.
+
+**Do not collapse the two.** It has been tried: one family for everything reads
+flat and removes the only signal that separates a requirement's prose title from
+its id. If a new surface needs a third face, it almost certainly needs a weight
+or a size instead.
+
+`index.html` loads exactly these two, each as a `400..700` variable range. A
+family named in a stack but not loaded there is a ghost that renders only on
+machines that happen to have it installed — which is how this file once
+documented Geist while the app actually rendered Inter Tight.
+
+**Why Inter.** The app runs at 10–13px. Inter was drawn for dense screen UI and
+keeps its x-height and aperture at that size; most faces muddy. **Why JetBrains
+Mono.** It is the editor face the run terminal already carried, so the terminal
+is consistent by construction rather than by exception.
+
+Numeric columns stay aligned through `font-variant-numeric: tabular-nums`, set
+once on `body`. It covers the ~30 mono rules that never declared it themselves,
+and stops live-updating numbers (elapsed timers, pass counts) twitching as they
+tick.
+
+Prose titles wrap at spaces (`overflow-wrap: break-word`), not mid-word.
+Reserve `anywhere` for source lines and unbreakable identifiers.
 
 ### Size scale (as built)
 
@@ -133,13 +164,41 @@ no `--font-size-*` token yet, so sizes appear as Tailwind arbitrary values.
 | 13.5 | — | Wordmark only |
 | 22 | `text-[22px]` | The one outlier — `StageFact`'s `big` metric value |
 
+### Named steps (the migration target)
+
+Four steps named by ROLE, plus `.cl-rubric` as the kicker above a card — five in
+all. A surface on the steps picks a role, not a number, and re-tuning the role
+re-tunes every surface on it. **Adopted by the flight-detail stage panes**
+(`features/flights/components/**`); the rest of the app still spells sizes
+inline, so a raw `text-[Npx]` elsewhere is un-migrated, not a sixth step.
+
+| Class | px | Role |
+| --- | --- | --- |
+| `.cl-type-title` | 12.5/600 | Titles one card |
+| `.cl-type-body` | 12 | A sentence a person reads — panel blurbs, a checkpoint's explanation |
+| `.cl-type-data` | 11.5 | A value the machine produced — config values, service rows, file paths, test titles, matrix cells |
+| `.cl-type-meta` | 11 | Supporting text subordinate to the row it sits with — ports, timestamps, counts, inline errors, footnotes |
+| `.cl-rubric` | mono 10 caps | The kicker naming a card |
+
+Each step declares **font-size and line-height only, never colour** — so
+`text-secondary` / `text-muted` / `text-danger` still work beside it. That is
+deliberate: every `.cl-*` rule sits outside `@layer` and therefore beats
+Tailwind's layered utilities, which is why `.cl-button`'s own `color` silently
+swallowed a `text-accent` written next to it for years (see the audit below).
+
+A raw `text-[Npx]` is still correct for **glyph geometry** — an icon sized to
+its box (a 3×3 help mark, a `▾` caret, an icon button's arrow) is not type.
+
 ### Named voices
 
 | Class | Spec | Use |
 | --- | --- | --- |
 | `.cl-kicker` | sans 13px/600, `-0.005em` | Section heading |
-| `.cl-frame-heading` | sans 12.5px/600 | Heading inside a framed section |
+| `.cl-frame-heading` | sans 12.5px/600 | Older twin of `.cl-type-title` that also bakes in `--text-primary` — fine where the title is never toned; a status-hued title needs the step instead |
 | `.cl-rubric` | **mono 10px/500 caps, `.08em`** | Sub-caption under a title, `PanelCard` kicker. Mono caps because it reads as data, not literature. |
+| `.cl-rubric-strong` | same register, `--text-secondary` | The same caps register one tone up: the NAME of a band or section (the coverage detail's `Happy path` / `Unhappy path`), as opposed to a caption read after it |
+| `.cl-aside` | **mono 10.5px/1.6 muted, tabular** | Small print about the mechanism — what a number derives from, what a step costs, where a value came from. The ledger's footnote voice |
+| `.cl-badge-accent` / `.cl-badge-neutral` | 10px/600 caps, 1px 6px | The two tones of a small badge beside a card title. Same metrics, so two badges on one line are one object in two tones |
 | `.cl-wordmark` | sans 13.5px/600 | App wordmark |
 | `.cl-italic-affix` | sans 10.5px caps muted | Legacy — renders as a quiet label, no italics |
 
@@ -149,6 +208,12 @@ no `--font-size-*` token yet, so sizes appear as Tailwind arbitrary values.
 
 **Spacing** — no token scale; Tailwind's 4px-based utilities. Vertical rhythm is
 tight: **8–12px gaps** (`gap-2` / `gap-2.5` / `gap-3`), panel padding `px-3 py-2.5`.
+
+A stage pane runs on **two levels only**: card-to-card is `gap-3` (12px), and
+blocks inside a card are `gap-2` (8px). Sub-blocks inside a block (a label+value
+pair, a control group) stay content-tuned at 4–6px. Panels used to stack their
+own cards at `gap-2.5` while the stage column stacked them at `gap-3`, so a
+card's spacing depended on which component happened to emit it.
 
 **Radius**
 
@@ -218,9 +283,10 @@ Pills / dots / halos use `9999px` (`rounded-full`).
 | --- | --- |
 | `.cl-button` | default · hover (raised border) · focus-visible · `:disabled` (0.5 opacity, `not-allowed`) |
 | `.cl-button-primary` | Accent fill + glow; dark mode adds a gradient + inset highlight |
+| `.cl-button-danger` | Worn beside `.cl-button` for a destructive action: danger ink + danger-leaning border, kept through hover/focus so only the slab lifts |
 | `.cl-icon-button` | Muted → primary on hover, `--bg-hover` fill |
 | `.cl-run-menu-button` (+ `-compact`) | Primary launcher; `[aria-expanded="true"]` reads as hover |
-| `.cl-mode-toggle` / `-btn` | Segmented control; `[data-active="true"]` lifts to surface + shadow; `[data-mode="boot"]` colours teal, `verify` accent |
+| `.cl-mode-toggle` / `-btn` | Segmented control; `[data-active="true"]` wears the thumb + shadow. The ground is a pair of variables — `--cl-toggle-track` / `--cl-toggle-thumb`, defaulting to `--bg-elevated` / `--bg-surface` — because a surface whose own background equals the track (the launch popover on dark) otherwise loses the inset and renders the picked segment darker than the rest. Such a surface re-points the pair; no hue, mode identity rides on the segment icon |
 | `.cl-input` | Focus = `--border-focus` + 3px `--accent-soft` ring |
 | `.themed-select` / `.numeric-input` | Native controls, chrome stripped |
 | `.cl-tab` / `.cl-tab-active` | Muted label → primary; 2px accent underline (dark adds a glow) |
@@ -238,17 +304,46 @@ Pills / dots / halos use `9999px` (`rounded-full`).
 | `.cl-badge-accent` | 10px uppercase accent badge ("Recommended") |
 | `.cl-status-dot` (+ `--running`) | 0.55rem circle; dark mode adds a soft halo per hue |
 
-### Row-state stack — precedence matters
+### Ledger style — the coverage pane's vocabulary, shared
 
-Live rows tint their background and animate an inset `::after` ring. Declared in
-this order so the later rule wins when a row is in two states at once:
+The coverage ledger is the reference surface for this app's look, so its four
+shapes live in `styles.css` rather than in `coverage-ledger-css.ts`, and any
+surface can reach for them. None of them spends a hue: meaning arrives via a
+status dot, a bead tone or a mark, never a tinted slab.
 
-| Class | Tint | Edge | Meaning |
+| Class | What it is |
+| --- | --- |
+| `.cl-bands` / `.cl-band` | A stack of NAMED facts: hairlines between them, no box around them. Name each band with `.cl-rubric-strong`. Use when a card per fact would turn four related facts into four objects |
+| `.cl-ladder` / `.cl-ladder-step` / `.cl-ladder-body` | The same hairline rhythm, ordered, with a bead column — a sequence rather than a set |
+| `.cl-bead` | The hollow mono mark leading a step or row: a position, a count, or a settled verdict. Tone is a variable, not a variant — set `--cl-bead-tone` to a status hue and `data-toned="true"` to tint its edge; the default is a quiet numeral. Metrics are baked in, so a `text-[Npx]` beside it is dead |
+| `.cl-ledger` | A list as a ledger: transparent rows, one hairline between them and one above/below the group. Replaces a rounded border drawn around rows that already divide themselves — a second frame inside a dialog that is already a frame |
+| `.cl-quote-rail` | Disclosed or quoted detail belonging to the thing above it: a 2px NEUTRAL rail + a half-step-deeper ground. Structure, not status, so it never takes a hue |
+
+Adopted by the coverage pane (`features/coverage/**`, which keeps only its own
+placement on top) and the two flight launchers (`FlightStartDialog`,
+`FlightControls`' re-run picker).
+
+### Suite row states
+
+The suite list uses row colour for its primary state and a compact label when
+colour or motion cannot name the state by itself. A run cue owns the row colour;
+modified tests remain visible through the amber Review action instead of
+replacing execution state:
+
+| State / class | Tint | Edge or label | Meaning |
 | --- | --- | --- | --- |
-| `.cl-list-row-running` | accent 16% | breathe 3s | test run in flight |
-| `.cl-list-row-healing` | warning 18% | breathe 3s | heal loop active |
-| `.cl-list-row-booted` | boot 14% | **steady** 0.7 | services up, idle — calmer on purpose |
-| `.cl-list-row-dirty` | danger 14% | breathe **4s** | test files modified — **wins over all of the above**; an integrity warning outranks activity. Slower breathe because the cue is held until resolved. |
+| selected / `.cl-list-row-selected` | neutral selected background | none | suite currently open |
+| flight active / `.cl-list-row-inflight` | running 6% | stage chip | authoring or another flight stage is moving, but tests are not executing |
+| flight attention / `.cl-list-row-inflight-attention` | warning 10% | stage chip | flight is waiting for the user |
+| queued | none | neutral `QUEUED` label | services and tests have not started |
+| running / `.cl-list-row-running` | running 16% | breathe 3s | test run in flight |
+| healing / `.cl-list-row-healing` | warning 18% | breathe 3s | heal loop actively working |
+| waiting / `.cl-list-row-waiting` | warning 10% | **steady** 0.7 plus `WAITING` or `TO REVIEW` | heal loop is paused for an agent or test review |
+| booted / `.cl-list-row-booted` | boot 14% | **steady** 0.7 | services up, idle — calmer on purpose |
+| changed / `.cl-list-row-changed` | text-muted 10% | amber Review action | modified tests while no execution state owns the row |
+
+`.cl-list-row-dirty` remains as a legacy danger 14% treatment for callers
+outside the suite list; `FeatureRow` does not use it for modified tests.
 
 All motion is opacity on a fully-inset `::after`, so nothing spills into row
 gaps. The running/healing edge keeps animating under `prefers-reduced-motion`
@@ -274,7 +369,48 @@ set `scrollbar-gutter: stable` so the appearing bar doesn't jump the layout.
 | **`OptionRow`** | The one pickable-row look: `OPTION_ROW_CLASS` + `optionRowStyle({ selected, disabled })` — neutral surface, selection = `--bg-selected` and nothing else (no accent: every row in a picker is clickable, so accent-tinting the picked one inverts what accent means), locked rows carry a cursor not an opacity. Class + style rather than a component so the caller picks the element: a `<button>` for a plain pick (`StageRow`), a `role="radio"` `<div>` when the row owns a control (the heal modes carry a stepper). |
 | **`StepList` / `StepRow`** | Vertical rail + beads. States `done · active · pending · warn · failed`; 15px indicator cell masks the rail. |
 | **`TestIdBadge`** | `#N` mono badge on `--bg-selected` — source-order identity, rendered identically in every view. |
-| **`Tooltip`**, **`DiffView`**, **`TestCodeBlock`** (Shiki), **`ResizablePanels`** / **`VerticalSplit`**, **`ThemeToggle`** | |
+| **`ComparisonTable` / `ComparisonLegend`** | Shared before/after table for test names, assertions, patches, and configuration values. Changed words use red `del` / green `ins` highlights with − / + markers; unchanged text stays neutral. `null` means absent; an empty string stays an empty value. Section rows group related changes. |
+| **`DiffView`** | Adapts captured unified patches to `ComparisonTable`, retaining file/hunk metadata and context. |
+| **`SourceComparisonTable`** | Whole-file aligned source comparison using the cards' `ReadableStoryText` and Shiki source tokens. Source edits use line-level removed/added highlights; `ComparisonTable` keeps its default word comparison for other consumers. |
+| **`TestLanguageSwitch`** | Shared Aa / </> English/Code tabs for test cards and source review, with accessible English and Code labels. |
+| **`Tooltip`**, **`TestCodeBlock`** (Shiki), **`ResizablePanels`** / **`VerticalSplit`**, **`ThemeToggle`** | |
+
+In comparison tables, red and green mean removed and added, respectively. They
+describe edits, not pass/fail results or the strength of an assertion. Keep any
+weakening hint separate. Label both comparison baselines explicitly when known.
+
+Test review uses two equal Before/After columns for complete source, with source
+line gutters and a sticky header. English and Code share the selected test or source change;
+English labels multiline statements with source ranges (for example, `2–18`) and
+compacts continuation rows when neither side has independent content. Edits inside
+a range mark its English row even when the wording is unchanged. Code retains every
+source line, and format switching follows the source range rather than a pixel offset.
+Against a recorded run, the footer navigates new, changed, or removed `test(...)`
+declarations across the suite using the same source comparison and totals as the
+Tests header. Each step selects one declaration; a loop counts once regardless of
+how many cases it generates. The comparison reads both source trees, not the run
+result roster. Changed means the title or executable declaration changed; tags,
+annotations, comments, formatting, imports and setup outside it do not increase
+that count. Unambiguous renames retain their recorded counterpart and count once
+as changed. Next keeps the loaded file mounted and
+jumps immediately to the start of the next declaration.
+Each selection compares only that test's paired declarations, without highlighting
+unchanged rows as a selection. Statement fingerprints suppress tag, comment and
+formatting-only highlights even when meaningful edits occur in the same test.
+Added and removed tests show their complete declaration
+on the relevant side and an explicit absence message on the other. The category,
+file, test name, and line survive refresh in the review URL. Against Git HEAD,
+imports and setup remain visible and Previous/Next still navigates
+consecutive blocks of source edits within the selected file.
+A fixed assessment area explains the selected test or source change only after source loads;
+loading or unavailable source never implies no changes. The dialog is up to
+2560px wide (94vw maximum) and 96vh high, with a compact 184px suite/file rail,
+one toolbar, and a suite-scoped footer. The toolbar contains the explicit baseline
+selector, shared English/Code tabs, and selected test name. Navigation lives in the
+footer; each file's editor action lives in the rail. On narrow screens the rail moves above
+the review and the source table scrolls horizontally. Edited test cards stay neutral;
+amber denotes an advisory weakening hint.
+Red and green inside code describe removed and added content only.
 
 **Chip vs Pill:** `Chip` is read-only, `StatusPill` is a clickable action with a
 count. Different interaction models — don't merge them.
@@ -324,7 +460,8 @@ command that produced it — re-run before trusting a number.
 | Radius / fonts | ✅ | Token names match Tailwind's theme vars, so the utilities resolve to them automatically |
 | Shadow / overlay | ✅ | Two shadow levels, one backdrop |
 | **Status hues** | ✅ | **Was 210 raw palette classes; all rewritten to token utilities.** Zero remain outside the xterm theme |
-| Typography size | 🔥 None | **457** arbitrary `text-[Npx]` uses across 12 distinct sizes; no named type scale |
+| Typography size | ➖ Partial | Named steps exist (`.cl-type-*`) and the flight-detail stage panes are on them; the rest of the app still spells sizes inline. Re-run the count below before trusting a number |
+| **Cascade layer** | 🔥 Broken | Every `.cl-*` rule sits **outside `@layer`**, so it beats Tailwind's layered utilities. A `text-[11px]` or `text-accent` written beside `.cl-button` (which declares its own `font-size` and `color`) never rendered — 24 such utilities were dead in the flight components alone |
 | Spacing | ➖ Tailwind only | A handful of arbitrary `p-[…]` / `gap-[…]` escapes; everything else is on Tailwind's 4px scale |
 | Hardcoded hex | ✅ Contained | Literal colors remain only in token declarations, terminal rendering, two external-client brand colors, and CSS mask values |
 
@@ -335,7 +472,22 @@ rg -o '(bg|text|border)-(rose|amber|emerald|sky|violet|blue|red|green|slate|zinc
 
 ### Remaining work
 
-**Replace arbitrary font sizes with named steps.** Twelve sizes are more than the design needs. Reduce them to about five roles. Tailwind reserves `--text-*` for font sizes, while this project currently uses `--text-primary`, `--text-secondary`, and `--text-muted` for colors. Rename or avoid those color variables before adding type tokens.
+**Finish the migration to named steps.** The five roles exist and the
+flight-detail panes are on them; every other surface still spells sizes inline.
+Migrate a surface at a time, folding its sizes into title → body → data → meta
+(+ `.cl-rubric`) and leaving raw values only for glyph geometry. Note that
+Tailwind reserves `--text-*` for font sizes while this project uses
+`--text-primary` / `-secondary` / `-muted` for colours, so the steps are plain
+classes rather than theme tokens — rename those colour variables before
+attempting real `--font-size-*` tokens.
+
+**Decide what to do about the unlayered `.cl-*` rules.** They currently win over
+every Tailwind utility, which silently defeats a per-instance override. Wrapping
+them in `@layer components` is the correct cascade and would let a utility win —
+but it also brings every currently-dead utility in the app to life at once, so it
+needs its own pass with visual verification, not a drive-by change. Until then,
+a `.cl-*` class that declares a property owns it: override by adding a variant
+class (the way `.cl-button-primary` does), never by a utility beside it.
 
 Spacing is intentionally left on Tailwind's own 4px scale — there is no
 competing project scale for it to drift from.

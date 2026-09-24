@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { evaluationTaskId, portifyWorkflowId, stageStateLine, stageFacts, runHistoryFacts, healEndLine, healEndShort, formatStageDuration, stageWorkMs } from './stage-meta'
 import { agentActivityLine } from './StageStatusLines'
+import type { StageBandData } from './StageFacts'
 
 import type { FlightManifest, FlightStage, FlightStageStatus } from '@/shared/api/client'
 import type { CoverageLedger, EvaluationExportTask, HealEnd, RunIndexEntry } from '@/shared/api/types'
@@ -630,7 +631,7 @@ describe('stageStateLine — read-time (workspace-probed) evidence never asserts
       evidenceSource: 'workspace',
     } as FlightStage
     const line = stageStateLine(stage, flight({ stages: [stage] }))
-    expect(line).toBe('Tests written. Mapped coverage is 36% — 5 of 14 requirements mapped. Nothing has run yet.')
+    expect(line).toBe('Tests written. Mapped coverage is 36% — 5 of 14 requirements mapped. Run results are tracked separately.')
     expect(line).not.toMatch(/target met/)
   })
 
@@ -976,7 +977,7 @@ describe('probed coverage with no requirements is undefined, not zero', () => {
       evidenceSource: 'workspace',
     } as FlightStage
     expect(stageStateLine(withReqs, flight({ stages: [withReqs] })))
-      .toBe('Tests written. Mapped coverage is 35.7% — 5 of 14 requirements mapped. Nothing has run yet.')
+      .toBe('Tests written. Mapped coverage is 35.7% — 5 of 14 requirements mapped. Run results are tracked separately.')
     expect(stageFacts(withReqs, flight())[0]).toMatchObject({ label: 'Mapped coverage', value: '35.7%' })
   })
 })

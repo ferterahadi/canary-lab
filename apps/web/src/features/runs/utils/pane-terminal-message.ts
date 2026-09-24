@@ -3,19 +3,20 @@ export interface PaneTerminalNotice {
   lines: string[]
 }
 
-export function paneTerminalNotice(paneId: string, rawMessage: string): PaneTerminalNotice {
+/**
+ * "The log isn't there" is not a transport message — it is the pane's empty
+ * state, and it renders as one. Writing it into the xterm buffer (as this file
+ * used to) both painted it in a different idiom from every other empty pane and
+ * marked the pane as having produced output, which suppressed the real
+ * placeholder underneath. `PaneTerminal` reads this and swaps its overlay copy.
+ */
+export function isMissingLogError(rawMessage: string): boolean {
+  return rawMessage.trim().toLowerCase() === 'log not available'
+}
+
+export function paneTerminalNotice(rawMessage: string): PaneTerminalNotice {
   const message = rawMessage.trim()
   const normalized = message.toLowerCase()
-
-  if (normalized === 'log not available') {
-    return {
-      key: `missing-log:${paneId}`,
-      lines: [
-        missingLogTitle(paneId),
-        'This run may have ended before this pane wrote output.',
-      ],
-    }
-  }
 
   if (normalized === 'socket error') {
     return {
@@ -28,13 +29,6 @@ export function paneTerminalNotice(paneId: string, rawMessage: string): PaneTerm
     key: `pane-message:${normalized || 'unknown'}`,
     lines: [`Pane message: ${softenMessage(message || 'unknown issue')}`],
   }
-}
-
-function missingLogTitle(paneId: string): string {
-  if (paneId === 'playwright') return 'No Playwright log captured yet.'
-  if (paneId === 'agent') return 'No heal-agent transcript captured yet.'
-  if (paneId.startsWith('service:')) return 'No service log captured yet.'
-  return 'No log captured yet.'
 }
 
 function softenMessage(message: string): string {

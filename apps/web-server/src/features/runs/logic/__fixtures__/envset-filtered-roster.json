@@ -1,0 +1,350 @@
+{
+  "runId": "2026-09-14T0850-myy1",
+  "source": [
+    {
+      "file": "e2e/01-connection.local.spec.ts",
+      "line": 5,
+      "title": "A merchant can provision a server once and read its health without receiving credentials",
+      "originFile": "e2e/01-connection.local.spec.ts",
+      "originLine": 5
+    },
+    {
+      "file": "e2e/01-connection.local.spec.ts",
+      "line": 36,
+      "title": "A sender reaches verified state and retirement preserves its history and other senders on that number",
+      "originFile": "e2e/01-connection.local.spec.ts",
+      "originLine": 36
+    },
+    {
+      "file": "e2e/01-connection.local.spec.ts",
+      "line": 59,
+      "title": "Invalid template submissions are rejected before any provider creation attempt",
+      "originFile": "e2e/01-connection.local.spec.ts",
+      "originLine": 59
+    },
+    {
+      "file": "e2e/01-connection.local.spec.ts",
+      "line": 69,
+      "title": "Concurrent binding edits have one winner and preserve the selected language and parameter mapping",
+      "originFile": "e2e/01-connection.local.spec.ts",
+      "originLine": 69
+    },
+    {
+      "file": "e2e/02-templates.local.spec.ts",
+      "line": 18,
+      "title": "Two numbers on one owned WhatsApp account share discovered languages without exposing another merchant’s templates",
+      "originFile": "e2e/02-templates.local.spec.ts",
+      "originLine": 18
+    },
+    {
+      "file": "e2e/02-templates.local.spec.ts",
+      "line": 68,
+      "title": "A failed discovery page never publishes a partial template list",
+      "originFile": "e2e/02-templates.local.spec.ts",
+      "originLine": 68
+    },
+    {
+      "file": "e2e/02-templates.local.spec.ts",
+      "line": 97,
+      "title": "An ambiguous template submission returns its provider identity without posting twice",
+      "originFile": "e2e/02-templates.local.spec.ts",
+      "originLine": 97
+    },
+    {
+      "file": "e2e/02-templates.local.spec.ts",
+      "line": 145,
+      "title": "Signed status hints invalidate discovery while Meta decides the outcome of an already bound template send",
+      "originFile": "e2e/02-templates.local.spec.ts",
+      "originLine": 145
+    },
+    {
+      "file": "e2e/02-templates.local.spec.ts",
+      "line": 235,
+      "title": "Rejected templates expose the provider reason while an invalid signature cannot invalidate the cache",
+      "originFile": "e2e/02-templates.local.spec.ts",
+      "originLine": 235
+    },
+    {
+      "file": "e2e/02-templates.local.spec.ts",
+      "line": 281,
+      "title": "A missed callback is repaired when the bounded template cache expires",
+      "originFile": "e2e/02-templates.local.spec.ts",
+      "originLine": 281
+    },
+    {
+      "file": "e2e/02-templates.local.spec.ts",
+      "line": 306,
+      "title": "A provider outage returns a synchronous failure and the next refresh can recover",
+      "originFile": "e2e/02-templates.local.spec.ts",
+      "originLine": 306
+    },
+    {
+      "file": "e2e/03-deletion.local.spec.ts",
+      "line": 6,
+      "title": "A merchant deletes only its selected template language while foreign requests have no provider effect",
+      "originFile": "e2e/03-deletion.local.spec.ts",
+      "originLine": 6
+    },
+    {
+      "file": "e2e/03-deletion.local.spec.ts",
+      "line": 56,
+      "title": "An accepted pending deletion preserves binding history but cannot be bound or sent as an approved template",
+      "originFile": "e2e/03-deletion.local.spec.ts",
+      "originLine": 56
+    },
+    {
+      "file": "e2e/03-deletion.local.spec.ts",
+      "line": 76,
+      "title": "A rejected deletion remains visible and retry targets the same exact template",
+      "originFile": "e2e/03-deletion.local.spec.ts",
+      "originLine": 76
+    },
+    {
+      "file": "e2e/03-deletion.local.spec.ts",
+      "line": 93,
+      "title": "An uncertain deletion is reported as unknown and fresh discovery prevents a blind repeat",
+      "originFile": "e2e/03-deletion.local.spec.ts",
+      "originLine": 93
+    },
+    {
+      "file": "e2e/04-connection-completeness.local.spec.ts",
+      "line": 61,
+      "title": "Invalid server configuration and foreign provisioning create no durable row",
+      "originFile": "e2e/04-connection-completeness.local.spec.ts",
+      "originLine": 61
+    },
+    {
+      "file": "e2e/04-connection-completeness.local.spec.ts",
+      "line": 88,
+      "title": "A rejected provider credential leaves its asynchronously created sender failed and unverified",
+      "originFile": "e2e/04-connection-completeness.local.spec.ts",
+      "originLine": 88
+    },
+    {
+      "file": "e2e/04-connection-completeness.local.spec.ts",
+      "line": 119,
+      "title": "An unverified phone with no registration PIN cannot become a verified sender",
+      "originFile": "e2e/04-connection-completeness.local.spec.ts",
+      "originLine": 119
+    },
+    {
+      "file": "e2e/04-connection-completeness.local.spec.ts",
+      "line": 143,
+      "title": "Retirement refuses new sends, preserves prior message reads and leaves its sibling usable",
+      "originFile": "e2e/04-connection-completeness.local.spec.ts",
+      "originLine": 143
+    },
+    {
+      "file": "e2e/04-connection-completeness.local.spec.ts",
+      "line": 182,
+      "title": "A scoped template wins first and its removal exposes only an explicitly granted global fallback",
+      "originFile": "e2e/04-connection-completeness.local.spec.ts",
+      "originLine": 182
+    },
+    {
+      "file": "e2e/04-connection-completeness.local.spec.ts",
+      "line": 233,
+      "title": "A concurrent binding winner remains durable after the losing and foreign edits",
+      "originFile": "e2e/04-connection-completeness.local.spec.ts",
+      "originLine": 233
+    },
+    {
+      "file": "e2e/05-template-completeness.local.spec.ts",
+      "line": 24,
+      "title": "A MARKETING submission returns inline identity and complete redacted provider facts with bounded freshness",
+      "originFile": "e2e/05-template-completeness.local.spec.ts",
+      "originLine": 24
+    },
+    {
+      "file": "e2e/05-template-completeness.local.spec.ts",
+      "line": 50,
+      "title": "A binding preserves HEADER BODY and dynamic URL parameter order independently of metadata property order",
+      "originFile": "e2e/05-template-completeness.local.spec.ts",
+      "originLine": 50
+    },
+    {
+      "file": "e2e/05-template-completeness.local.spec.ts",
+      "line": 78,
+      "title": "Concurrent identical submissions share one identity while another language remains independent",
+      "originFile": "e2e/05-template-completeness.local.spec.ts",
+      "originLine": 78
+    },
+    {
+      "file": "e2e/05-template-completeness.local.spec.ts",
+      "line": 100,
+      "title": "A failed create reports an unknown outcome and a same-name retry recovers after the provider returns",
+      "originFile": "e2e/05-template-completeness.local.spec.ts",
+      "originLine": 100
+    },
+    {
+      "file": "e2e/05-template-completeness.local.spec.ts",
+      "line": 122,
+      "title": "Missing provider templates cannot be bound and an unconfigured alias cannot reach the provider",
+      "originFile": "e2e/05-template-completeness.local.spec.ts",
+      "originLine": 122
+    },
+    {
+      "file": "e2e/05-template-completeness.local.spec.ts",
+      "line": 135,
+      "title": "One new merchant server and sender complete creation discovery approval and binding with the same identities",
+      "originFile": "e2e/05-template-completeness.local.spec.ts",
+      "originLine": 135
+    },
+    {
+      "file": "e2e/06-template-boundaries.local.spec.ts",
+      "line": 5,
+      "title": "Catalog pagination visits every variant and rejects malformed filter and obsolete generation cursors",
+      "originFile": "e2e/06-template-boundaries.local.spec.ts",
+      "originLine": 5
+    },
+    {
+      "file": "e2e/06-template-boundaries.local.spec.ts",
+      "line": 24,
+      "title": "Unsupported bodies parameters examples and buttons are rejected before template creation",
+      "originFile": "e2e/06-template-boundaries.local.spec.ts",
+      "originLine": 24
+    },
+    {
+      "file": "e2e/07-health.local.spec.ts",
+      "line": 70,
+      "title": "Real health sweeps report fresh facts, retain failed observations and never freshen empty responses",
+      "originFile": "e2e/07-health.local.spec.ts",
+      "originLine": 70
+    },
+    {
+      "file": "e2e/08-bird-compatibility.local.spec.ts",
+      "line": 53,
+      "title": "Bird selects the owned scoped template before a granted global template and preserves its native payload",
+      "originFile": "e2e/08-bird-compatibility.local.spec.ts",
+      "originLine": 53
+    },
+    {
+      "file": "e2e/08-bird-compatibility.local.spec.ts",
+      "line": 59,
+      "title": "Bird falls back to the explicitly granted global template when the merchant has no scoped row",
+      "originFile": "e2e/08-bird-compatibility.local.spec.ts",
+      "originLine": 59
+    },
+    {
+      "file": "e2e/08-bird-compatibility.local.spec.ts",
+      "line": 64,
+      "title": "A revoked global template grant and a foreign Bird sender are refused before provider effects",
+      "originFile": "e2e/08-bird-compatibility.local.spec.ts",
+      "originLine": 64
+    },
+    {
+      "file": "e2e/10-provider.meta.spec.ts",
+      "line": 11,
+      "title": "The local merchant connection matches the real Meta phone and template account",
+      "originFile": "e2e/10-provider.meta.spec.ts",
+      "originLine": 11
+    },
+    {
+      "file": "e2e/10-provider.meta.spec.ts",
+      "line": 30,
+      "title": "Real Meta creates one permitted template and CNS resolves the duplicate to the same identity",
+      "originFile": "e2e/10-provider.meta.spec.ts",
+      "originLine": 30
+    },
+    {
+      "file": "e2e/10-provider.meta.spec.ts",
+      "line": 43,
+      "title": "A genuine signed approval callback and current Meta state agree with CNS discovery",
+      "originFile": "e2e/10-provider.meta.spec.ts",
+      "originLine": 43
+    },
+    {
+      "file": "e2e/10-provider.meta.spec.ts",
+      "line": 57,
+      "title": "Real Meta accepts deletion of this attempts exact disposable template without deleting its namesake variant",
+      "originFile": "e2e/10-provider.meta.spec.ts",
+      "originLine": 57
+    },
+    {
+      "file": "e2e/98-authorization-completeness.local.spec.ts",
+      "line": 25,
+      "title": "Primary capability and machine-grant changes fence the next admitted request",
+      "originFile": "e2e/98-authorization-completeness.local.spec.ts",
+      "originLine": 25
+    },
+    {
+      "file": "e2e/98-authorization-completeness.local.spec.ts",
+      "line": 62,
+      "title": "Machine proof cannot widen its exact entity grants or operation capabilities",
+      "originFile": "e2e/98-authorization-completeness.local.spec.ts",
+      "originLine": 62
+    },
+    {
+      "file": "e2e/98-authorization-completeness.local.spec.ts",
+      "line": 89,
+      "title": "Foreign template creation, refresh and binding attempts have no provider effects",
+      "originFile": "e2e/98-authorization-completeness.local.spec.ts",
+      "originLine": 89
+    },
+    {
+      "file": "e2e/98-authorization-completeness.local.spec.ts",
+      "line": 109,
+      "title": "Every pooled sender, server and template grant must remain live for an exact tenant send",
+      "originFile": "e2e/98-authorization-completeness.local.spec.ts",
+      "originLine": 109
+    },
+    {
+      "file": "e2e/99-authorization.local.spec.ts",
+      "line": 16,
+      "title": "An owner and an exact machine grant can read a template list while a service key alone cannot",
+      "originFile": "e2e/99-authorization.local.spec.ts",
+      "originLine": 16
+    },
+    {
+      "file": "e2e/99-authorization.local.spec.ts",
+      "line": 40,
+      "title": "A different merchant using the same service key cannot read or mutate the owner’s template list",
+      "originFile": "e2e/99-authorization.local.spec.ts",
+      "originLine": 40
+    },
+    {
+      "file": "e2e/99-authorization.local.spec.ts",
+      "line": 50,
+      "title": "Revoked Merchant Pass proof is refused within the bounded admission cache window",
+      "originFile": "e2e/99-authorization.local.spec.ts",
+      "originLine": 50
+    },
+    {
+      "file": "e2e/zz-subject-expiry.local.spec.ts",
+      "line": 3,
+      "title": "Expired Merchant Pass proof stops authorizing within the admission cache lifetime",
+      "originFile": "e2e/zz-subject-expiry.local.spec.ts",
+      "originLine": 3
+    }
+  ],
+  "recorded": [
+    {
+      "file": "e2e/10-provider.meta.spec.ts",
+      "originFile": "e2e/10-provider.meta.spec.ts",
+      "line": 11,
+      "originLine": 11,
+      "title": "The local merchant connection matches the real Meta phone and template account"
+    },
+    {
+      "file": "e2e/10-provider.meta.spec.ts",
+      "originFile": "e2e/10-provider.meta.spec.ts",
+      "line": 23,
+      "originLine": 23,
+      "title": "Real Meta creates one permitted template and CNS resolves the duplicate to the same identity"
+    },
+    {
+      "file": "e2e/10-provider.meta.spec.ts",
+      "originFile": "e2e/10-provider.meta.spec.ts",
+      "line": 43,
+      "originLine": 43,
+      "title": "A genuine signed approval callback and current Meta state agree with CNS discovery"
+    },
+    {
+      "file": "e2e/10-provider.meta.spec.ts",
+      "originFile": "e2e/10-provider.meta.spec.ts",
+      "line": 50,
+      "originLine": 50,
+      "title": "Real Meta accepts deletion of this attempts exact disposable template without deleting its namesake variant"
+    }
+  ]
+}

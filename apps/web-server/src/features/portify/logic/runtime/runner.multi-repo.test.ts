@@ -201,6 +201,8 @@ describe('createPortifyRunner (integration)', () => {
       const ready = store.get(workflowId)!
       const wts = new Set(ready.repos.map((r) => r.worktreePath))
       expect(wts.size).toBe(2)
+      await runner.revise(workflowId, 'adjust the port wiring')
+      expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
       const saved = await runner.save(workflowId)
       expect(saved.status).toBe('saved')
       // The overlay records both repos; the edited group's patch is non-empty.

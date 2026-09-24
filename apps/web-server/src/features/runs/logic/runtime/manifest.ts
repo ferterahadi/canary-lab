@@ -19,6 +19,11 @@ import type {
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 import type { ExternalSessionMeta } from '../../../../../../../shared/run-mode'
 import type { RunModelPlan } from './run-model-plan'
+import type { PendingSpecEdit } from '../dirty-specs/detect'
+import type { IntegrityHint } from './run-integrity-hints'
+import type { TestReviewDecision } from '../../../../../../../shared/test-review'
+import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
+import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 export type {
   HealEnd,
   QueueReason,
@@ -74,6 +79,11 @@ export interface RepoBranchSnapshot {
   expectedBranch?: string
   detached: boolean
   dirty: boolean
+  /** Commit the checkout sat on when the run launched — what the run booted.
+   *  Absent on records written before it was recorded; null on an unborn branch. */
+  sha?: string | null
+  /** Set when run start fast-forwarded the checkout to its upstream first. */
+  updatedFromUpstream?: { upstream: string; from: string; to: string }
 }
 
 // Imported for local use below and re-exported so existing `from './manifest'`
@@ -97,6 +107,51 @@ export interface StoppedEarlyInfo {
   reason: StoppedEarlyReason
   failuresAtStop: number
   suiteTotal: number
+}
+
+/** Whether this run executes a run-start copy of its suite (D9). `taken` names
+ *  the copy and a digest of the spec content it held; `unavailable` means the
+ *  copy failed and the run fell back to the live feature dir — said out loud so
+ *  no surface claims a boundary that was never there. */
+export type RunSuiteSnapshot =
+  | { kind: 'taken'; dir: string; takenAt: string; digest: string }
+  | { kind: 'unavailable'; at: string; reason: string }
+
+/** Who took a live spec edit into the run. `human`: the adopt route in Canary
+ *  Lab. `test-heal`: the runner itself, only for a run with zero editable repos
+ *  — there the spec is the only fixable code and Canary told the agent to edit
+ *  it, so its own signal is the adopt. Never a verdict, never an MCP tool. */
+export type SpecEditsAdoptedBy = 'human' | 'test-heal'
+
+/** Live spec edits measured against the run-start copy. `pending` is what the
+ *  run has NOT executed; adopting an edit re-takes the snapshot and appends to
+ *  `adopted`. Re-checked after every Playwright exit, and whenever a live spec
+ *  of the feature changes while the run is waiting between executions. */
+export interface RunSpecEdits {
+  checkedAt: string
+  pending: PendingSpecEdit[]
+  adopted: Array<{ at: string; by: SpecEditsAdoptedBy; files: string[]; reviewRevision?: string }>
+  reviewDecisions?: TestReviewDecision[]
+}
+
+/** What the strength differential says about `specEdits.pending` (D13).
+ *  Advisory: a hint informs whoever reads the run, it never changes a status.
+ *  `disclosure` travels with the hints so no surface quotes the detection
+ *  without saying how it was checked. */
+export interface RunIntegrity {
+  hints: IntegrityHint[]
+  disclosure: string
+}
+
+/** The directory a READER of this run should take the suite's content from: the
+ *  run-start copy while it exists (the verdict executed it — D9), else the live
+ *  feature dir. One resolver for every after-the-fact reader (the evaluation
+ *  report, the certificate) so none of them renders live source against a
+ *  verdict that ran the copy. `undefined` when the run recorded no feature dir. */
+export function suiteDirForReading(manifest: Pick<RunManifest, 'featureDir' | 'suiteSnapshot'>): string | undefined {
+  const snapshot = manifest.suiteSnapshot
+  if (snapshot?.kind === 'taken' && fs.existsSync(snapshot.dir)) return snapshot.dir
+  return manifest.featureDir
 }
 
 export type LocalHealAgent = 'claude' | 'codex'
@@ -137,6 +192,8 @@ export interface RunManifest {
   services: ServiceManifestEntry[]
   repoPaths?: string[]
   repoBranches?: RepoBranchSnapshot[]
+  /** Dependency paths and compatibility evidence captured before service boot. */
+  dependencyProvenance?: RunDependencyProvenance[]
   /** When this run isolated one or more repos in a per-run git worktree
    *  (opted in after a same-repo collision), maps repo name → worktree path.
    *  Omitted/empty when the run uses repos in place. */
@@ -147,6 +204,18 @@ export interface RunManifest {
   queueReason?: QueueReason
   playwrightArtifacts?: PlaywrightArtifactPolicy
   stoppedEarly?: StoppedEarlyInfo
+  /** The run-start suite copy the verdict rests on. Absent on runs recorded
+   *  before the snapshot boundary existed and on boot-only sessions. */
+  suiteSnapshot?: RunSuiteSnapshot
+  /** Absent until the first Playwright exit, and on runs without a snapshot —
+   *  no copy means no boundary to measure against, and `pending: []` would
+   *  then read as "no edits" when the truth is "cannot tell". */
+  specEdits?: RunSpecEdits
+  /** A terminal run approved this exact suite revision for this new run. The
+   * approval is provenance only; the new run still needs its own verdict. */
+  testReviewApproval?: RunTestReviewApproval
+  /** Written together with `specEdits`; same absence rule. */
+  integrity?: RunIntegrity
   /**
    * Per heal-cycle record of which services were restarted vs kept warm.
    * Populated when the orchestrator processes a `.restart` signal whose body
@@ -201,6 +270,11 @@ export interface RunManifest {
    *  but opened nothing can say why. */
   prAttempt?: RunPrAttempt
   verification?: VerificationRunMetadata
+}
+
+/** Older Lab runs cannot be replayed after the perturbation runtime is retired. */
+export function hasRetiredPerturbation(manifest: RunManifest): boolean {
+  return Object.prototype.hasOwnProperty.call(manifest, 'perturbation')
 }
 
 export function writeManifest(manifestPath: string, manifest: RunManifest): void {
@@ -272,6 +346,15 @@ export interface RunIndexEntry {
   runId: string
   executionType?: ExecutionType
   feature: string
+  /** The envset this run used, mirrored from the manifest. Spec selection is
+   *  constant across envsets, so two runs of one suite declare the SAME roster
+   *  and differ only in which tests the environment let execute — 41 passed / 4
+   *  skipped under one envset, 4 passed / 41 skipped under another. Without the
+   *  envset on the row those read as one run having gone badly. Carried on the
+   *  index so the runs list needs no manifest read per row; absent on entries
+   *  written before the field existed (backfilled read-time) and on runs that
+   *  named no envset. */
+  env?: string
   startedAt: string
   status: RunStatus
   endedAt?: string
@@ -287,6 +370,12 @@ export interface RunIndexEntry {
   verificationConfigName?: string
   verificationPlaywrightEnvsetId?: string
   verificationTargetUrls?: Record<string, string>
+  /** Live spec edits still pending against this run's suite copy, and the
+   *  integrity hints on them — counts only, so `list_runs` can flag a run
+   *  without a manifest read. Mirrored on every status write; absent when
+   *  zero, and on entries written before the fields existed. */
+  pendingSpecEdits?: number
+  integrityHints?: number
 }
 
 export function readRunsIndex(logsDir: string): RunIndexEntry[] {
@@ -303,16 +392,24 @@ export function writeRunsIndex(logsDir: string, entries: RunIndexEntry[]): void 
   atomicWrite(runsIndexPath(logsDir), JSON.stringify(entries, null, 2) + '\n')
 }
 
+/** Merge `entry` over the run's existing row (a caller rarely knows every
+ *  field). Merging keeps a key the new entry omits, which is right for
+ *  `endedAt` and wrong for a count that legitimately went to nothing — name
+ *  those in `clear` and they are dropped before the merge, so an absent key
+ *  means absent. */
 export function upsertRunsIndexEntry(
   logsDir: string,
   entry: RunIndexEntry,
+  opts: { clear?: Array<keyof RunIndexEntry> } = {},
 ): RunIndexEntry[] {
   const entries = readRunsIndex(logsDir)
   const idx = entries.findIndex((e) => e.runId === entry.runId)
   if (idx === -1) {
     entries.push(entry)
   } else {
-    entries[idx] = { ...entries[idx], ...entry }
+    const existing = { ...entries[idx] }
+    for (const key of opts.clear ?? []) delete existing[key]
+    entries[idx] = { ...existing, ...entry }
   }
   writeRunsIndex(logsDir, entries)
   return entries

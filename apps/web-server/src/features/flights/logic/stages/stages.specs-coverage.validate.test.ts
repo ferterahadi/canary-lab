@@ -213,6 +213,33 @@ describe('specs-coverage stage', () => {
       expect(result).toEqual({ ok: true })
     })
 
+    it('starts both checks before either settles and retains both diagnostics', async () => {
+      fs.writeFileSync(path.join(tmpDir, 'tsconfig.json'), '{}')
+      const featureDir = path.join(featuresDir, 'checkout')
+      const children: Array<EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: ReturnType<typeof vi.fn> }> = []
+      setMockSpawn(() => {
+        const child = Object.assign(new EventEmitter(), {
+          stdout: new EventEmitter(), stderr: new EventEmitter(), kill: vi.fn(),
+        })
+        children.push(child)
+        return child
+      })
+      try {
+        const pending = defaultValidateSpecs({ featureDir, projectRoot: tmpDir })
+        expect(children).toHaveLength(2)
+        children[0].emit('close', 1)
+        children[1].stdout.emit('data', `${featureDir}/e2e/checkout.spec.ts(1,1): error TS2304: Missing name.\n`)
+        children[1].emit('close', 2)
+        const result = await pending
+        expect(result).toEqual({
+          ok: false,
+          errors: expect.stringMatching(/playwright test --list exited with code 1[\s\S]*TS2304/),
+        })
+      } finally {
+        setMockSpawn(null)
+      }
+    })
+
     it('surfaces feature-scoped tsc errors and ignores errors outside the feature dir', async () => {
       fs.writeFileSync(path.join(tmpDir, 'tsconfig.json'), '{}')
       const featureDir = path.join(featuresDir, 'checkout')
@@ -388,12 +415,12 @@ describe('specs-coverage stage', () => {
     const clean = buildSpecsPrompt(base)
     expect(clean).toContain('/abs/features/checkout/e2e')
     expect(clean).toContain('Do NOT reply with JSON')
-    expect(clean).not.toContain('failed to compile/list')
+    expect(clean).not.toContain('failed validation')
     expect(clean).not.toContain('{{')
 
     const huge = 'x'.repeat(5000) + 'OVERFLOW-MARKER'
     const withErrors = buildSpecsPrompt({ ...base, iteration: 2, validationErrors: huge })
-    expect(withErrors).toContain('failed to compile/list')
+    expect(withErrors).toContain('failed validation')
     expect(withErrors).toContain('xxxx')
     expect(withErrors).not.toContain('OVERFLOW-MARKER')
   })

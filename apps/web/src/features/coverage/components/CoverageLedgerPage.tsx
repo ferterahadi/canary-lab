@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { CoverageJobKind, CoverageJobManifest, CoverageLedger, ExtractedTest, FeatureTests, GapType, TestCoverage, TestStrength } from '@/shared/api/types'
+import type { CoverageJobIndexEntry, CoverageJobKind, CoverageLedger, FeatureTests, GapType, TestCoverage, TestStrength } from '@/shared/api/types'
 import type { AgentModelsConfig, AgentStagePlans, FlightStageKey, FlightStageStatus, ModelAgentKind, ModelStageKey } from '@/shared/api/client'
 import { EMPTY_AGENT_MODELS } from '@shared/agent-models'
 import { ModelLaunchGate } from '@/features/config'
 import { StageStatusChip, stageLabel } from '@/features/flights/components/stage-meta'
 import { CoverageDocsRail } from './CoverageDocsRail'
-import { CoverageGeneratingPane } from './CoverageGeneratingPane'
 import { buildTestNumbering, testNumberKey } from '@/shared/test-numbering'
 import { useInvalidationKey } from '@/shared/state/invalidation'
-import { Hovered, RequirementCard, STATUS_RANK, TestCard, TestCardSkeleton, statusOf, testColor } from './CoverageCards'
+import { Hovered, RequirementCard, TestCard, TestCardSkeleton, compareRequirements } from './CoverageCards'
 import { CoverageEmptyMain, CoverageHeader, HeadlinePill, readRailPref, writeRailPref } from './CoverageHeader'
 import { COVERAGE_CSS } from './coverage-ledger-css'
+import { coverageTestSources, type CoverageTestSource } from './coverage-test-sources'
+import { useLiveCoverage } from '@/shared/state/use-live-coverage'
+import type { CoverageRecoveryStage } from '@shared/coverage/freshness'
 
 // The two stages a coverage generation spawns (the summary job chains the
 // mapping engine) — the models gate scopes its rows to them.
@@ -27,16 +29,18 @@ interface Props {
   // `job` takeover below can't know about them.
   generatingFlight?: { flightId: string; stage: FlightStageKey; stageStatus: FlightStageStatus } | null
   onOpenFlight?: (flightId: string) => void
+  onOpenRecovery?: (stage: CoverageRecoveryStage) => void
+  onOpenGeneration: (job: CoverageJobIndexEntry) => void
+  coverageJobs?: CoverageJobIndexEntry[]
 }
 
-export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, onOpenFlight }: Props) {
-  // Re-attach to a coverage job that started after the ledger opened (an
-  // external agent mapping coverage) without a manual refresh — bumps on every
-  // `coverage-changed` workspace event (cl_ws-driven-state).
+export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, onOpenFlight, onOpenRecovery, onOpenGeneration, coverageJobs = [] }: Props) {
+  // Documents and results refresh when either an agent or another view writes
+  // coverage evidence. Execution stays on Flight.
   const coverageRefreshKey = useInvalidationKey('coverage')
-  const [ledger, setLedger] = useState<CoverageLedger | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const testsRefreshKey = useInvalidationKey('tests')
+  const jobsKey = coverageJobs.filter((job) => job.feature === feature).map((job) => `${job.jobId}:${job.status}`).join('|')
+  const { value: ledger, loading, error, confirmed, refresh } = useLiveCoverage(feature, jobsKey)
   const [hovered, setHovered] = useState<Hovered | null>(null)
   const [gapFilter, setGapFilter] = useState<GapType | null>(null)
   const [strengthFilter, setStrengthFilter] = useState<TestStrength | null>(null)
@@ -50,35 +54,14 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   // open/closed state persists across refresh (R12).
   const [railOpen, setRailOpen] = useState<boolean>(() => readRailPref())
 
-  // Async generation (R4 jobs). Summary + Coverage are ONE exercise (R14): a
-  // summary job auto-chains a coverage job, and we follow that chain so the
-  // single `job` here represents whichever phase is live. ONE owner of the job
-  // lifecycle for the whole dialog (R20) — rail + columns + takeover all read it.
-  // While a job runs the view is a full-screen Generating takeover (R13).
-  const [job, setJob] = useState<CoverageJobManifest | null>(null)
-  // Mirror of `job` for effect closures that must read the latest value WITHOUT
-  // re-running on every poll tick (the re-attach effect below uses it to avoid
-  // double-polling a job it's already following).
-  const jobRef = useRef<CoverageJobManifest | null>(null)
-  useEffect(() => { jobRef.current = job }, [job])
+  // Flight owns execution and its live jobs. The ledger only launches work
+  // and displays the documents/results when the user returns.
+  const [launching, setLaunching] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  // Bumped when a generation job completes so the Docs rail re-lists itself and
-  // the generated _prd-summary.md pill shows up live (items 1+2). Driven off the
-  // reliable pollJob completion, not a best-effort broadcast (cl_live-state-sync).
   const [docsReloadKey, setDocsReloadKey] = useState(0)
-  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const activeJob = coverageJobs.find((job) => job.feature === feature && job.status === 'running')
 
   const toggleRail = useCallback(() => setRailOpen((v) => { writeRailPref(!v); return !v }), [])
-
-  const refresh = useCallback(() => {
-    setLoading(true)
-    api.getFeatureCoverage(feature)
-      .then((data) => { setLedger(data); setError(null) })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false))
-  }, [feature])
-
-  useEffect(() => { refresh() }, [refresh])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -87,41 +70,8 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   }, [onClose])
 
   useEffect(() => () => {
-    if (pollRef.current) clearTimeout(pollRef.current)
     if (focusClearRef.current) clearTimeout(focusClearRef.current)
   }, [])
-
-  const pollJob = useCallback((jobId: string) => {
-    const tick = () => {
-      api.getCoverageJob(jobId)
-        .then((m) => {
-          setJob(m)
-          if (m.status === 'running') {
-            pollRef.current = setTimeout(tick, 800)
-          } else if (m.status === 'done' && m.chainedJobId) {
-            // Summary done → the generated _prd-summary.md now exists; re-list the
-            // rail so its pill appears immediately (items 1+2), then follow the
-            // auto-chained coverage job (R14) — Generating screen stays up.
-            refresh()
-            setDocsReloadKey((k) => k + 1)
-            pollJob(m.chainedJobId)
-          } else {
-            if (m.status === 'failed') setActionError(m.error ?? 'generation failed')
-            setJob(null)
-            refresh()
-            setDocsReloadKey((k) => k + 1)
-          }
-        })
-        .catch(() => {
-          // Transient fetch error (network blip, server restart) — do NOT assume the
-          // job ended (setJob(null) here would flip to a stale ledger) and do NOT
-          // leave the chain dead. Re-arm so the poll recovers; the reconcile backstop
-          // below owns the authoritative "is it actually over" decision.
-          pollRef.current = setTimeout(tick, 1500)
-        })
-    }
-    tick()
-  }, [refresh])
 
   // The models gate (2.2.0): Generate parks on "use defaults or customize?"
   // when the workspace armed askModelsOnLaunch. Holds the parked kind plus the
@@ -130,28 +80,34 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
 
   const beginJob = useCallback((kind: CoverageJobKind, launch?: { agent: ModelAgentKind; models: AgentStagePlans }) => {
     setActionError(null)
+    setLaunching(true)
     // A customized launch pins `adapter` to the agent the gate showed, so the
     // server resolves the override for the same agent's vocabulary.
     api.startCoverageJob(feature, kind, launch ? { adapter: launch.agent, models: launch.models } : undefined)
-      .then((m) => { setJob(m); pollJob(m.jobId) })
-      .catch((e: unknown) => {
+      .then(onOpenGeneration)
+      .catch(async (e: unknown) => {
         // A 409 means a job is already running (e.g. started from another tab/
         // session) — ATTACH to it instead of surfacing a raw error (R20).
         if (e instanceof api.ApiError && e.status === 409) {
           const existing = (e.body as { existingJobId?: string } | null)?.existingJobId
-          if (existing) { pollJob(existing); return }
+          if (existing) { onOpenGeneration(await api.getCoverageJob(existing)); return }
         }
         setActionError(e instanceof Error ? e.message : String(e))
       })
-  }, [feature, pollJob])
+      .catch((e: unknown) => setActionError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLaunching(false))
+  }, [feature, onOpenGeneration])
 
   const startJob = useCallback((kind: CoverageJobKind) => {
+    if (launching) return
+    setLaunching(true)
     setActionError(null)
     // Config unreachable → generate with defaults rather than dead-ending the
     // button on a settings probe (the gate is best-effort, launching is not).
     api.getProjectConfig()
       .then((config) => {
         if (config.askModelsOnLaunch === true) {
+          setLaunching(false)
           setModelsGate({
             kind,
             agent: config.healAgent === 'codex' ? 'codex' : 'claude',
@@ -162,85 +118,16 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
         beginJob(kind)
       })
       .catch(() => beginJob(kind))
-  }, [beginJob])
+  }, [beginJob, launching])
 
-  // R18: a generation job is durable server-side, so on mount (incl. after a
-  // refresh) re-attach to the newest running job and resume the Generating
-  // screen + chain-following. The in-memory flag alone lost this on reload.
-  //
-  // Also re-runs on every `coverage-changed` event (via coverageRefreshKey): if a
-  // job STARTS after the ledger is already open — e.g. an external agent is
-  // summoned to map coverage — this picks it up and flips to the Generating
-  // screen live, no refresh (cl_ws-driven-state). The jobRef guard makes the
-  // re-run a no-op when we're already following a job, so the running poll isn't
-  // duplicated and the completion bump doesn't re-attach a finished job.
-  useEffect(() => {
-    let cancelled = false
-    api.listCoverageJobs(feature)
-      .then((jobs) => {
-        if (cancelled || jobRef.current) return
-        const running = jobs
-          .filter((j) => j.status === 'running')
-          .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))[0]
-        if (running) {
-          // Show the Generating screen immediately from the index entry (no flash
-          // of the ledger), then the poller refines it with the live log + chain.
-          setJob({ ...running, log: '' })
-          pollJob(running.jobId)
-        }
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [feature, pollJob, coverageRefreshKey])
-
-  // A non-job `coverage-changed` event (clear summary, doc add/delete via MCP or
-  // another tab, external coverage map) bumps coverageRefreshKey. The job-attach
-  // effect above only catches NEW jobs; here we re-pull the ledger AND re-list the
-  // Docs rail so the open page reflects the change live — no manual refresh
-  // (cl_ws-driven-state). Skip the initial mount (the refresh() effect already did
-  // the first load).
+  // Refresh results on workspace events and on authoritative job transitions.
+  // The shared jobs read reconciles missed completion events without leaving a
+  // second lifecycle or poller in the ledger.
   const coverageKeyMounted = useRef(false)
   useEffect(() => {
     if (!coverageKeyMounted.current) { coverageKeyMounted.current = true; return }
-    refresh()
     setDocsReloadKey((k) => k + 1)
-  }, [coverageRefreshKey, refresh])
-
-  // Self-healing backstop for the Generating screen. The per-job poll above is an
-  // in-memory setTimeout chain: if a single getCoverageJob fetch HANGS (a server
-  // restart from a redeploy, a suspended tab, a throttled-network stall) the chain
-  // wedges and the screen shows GENERATING forever even though the job finished long
-  // ago. A lost completion can't be tolerated, so independently reconcile against the
-  // authoritative, file-backed job index on a fixed interval (setInterval — a hung
-  // fetch just skips a tick, the next still fires). Once the server reports no running
-  // job for this feature on two consecutive checks (the 2nd guards the brief
-  // summary→coverage chain-handoff window so we don't clear mid-chain), the job is
-  // over: drop the Generating screen and pull the fresh ledger. Self-limiting — the
-  // effect only exists while generating and tears down the moment the screen clears.
-  const isGenerating = job !== null
-  useEffect(() => {
-    if (!isGenerating) return
-    let stop = false
-    let idleChecks = 0
-    const id = setInterval(() => {
-      api.listCoverageJobs(feature)
-        .then((jobs) => {
-          if (stop) return
-          if (jobs.some((j) => j.status === 'running')) { idleChecks = 0; return }
-          idleChecks += 1
-          if (idleChecks >= 2) { setJob(null); refresh(); setDocsReloadKey((k) => k + 1) }
-        })
-        .catch(() => {})
-    }, 3000)
-    return () => { stop = true; clearInterval(id) }
-  }, [isGenerating, feature, refresh])
-
-  // Stable colour per test name (by position in the ledger's test list).
-  const colorByTest = useMemo(() => {
-    const map = new Map<string, string>()
-    ledger?.tests.forEach((t, i) => map.set(t.name, testColor(i)))
-    return map
-  }, [ledger])
+  }, [coverageRefreshKey, jobsKey, ledger?.freshness?.revision])
 
   // Canonical per-test ids, shared with the Tests column + Playback.
   const testNumbering = useMemo(
@@ -255,46 +142,35 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   const [specSource, setSpecSource] = useState<FeatureTests | null>(null)
   const [specSourceLoading, setSpecSourceLoading] = useState(false)
   const [specSourceError, setSpecSourceError] = useState<string | null>(null)
-  const specSourceReq = useRef(false)
-  const ensureSpecSource = useCallback(() => {
-    if (specSourceReq.current) return
-    specSourceReq.current = true
+  const [specSourceRequested, setSpecSourceRequested] = useState(false)
+  const ensureSpecSource = useCallback(() => setSpecSourceRequested(true), [])
+  useEffect(() => {
+    if (!specSourceRequested) return
+    let cancelled = false
+    setSpecSource(null)
     setSpecSourceLoading(true)
+    setSpecSourceError(null)
     api.getFeatureTests(feature)
-      .then((r) => { setSpecSource(r); setSpecSourceError(null) })
-      .catch((e: unknown) => setSpecSourceError(e instanceof Error ? e.message : 'Failed to load test source'))
-      .finally(() => setSpecSourceLoading(false))
-  }, [feature])
+      .then((result) => { if (!cancelled) setSpecSource(result) })
+      .catch((error: unknown) => {
+        if (!cancelled) setSpecSourceError(error instanceof Error ? error.message : 'Failed to load test source')
+      })
+      .finally(() => { if (!cancelled) setSpecSourceLoading(false) })
+    return () => { cancelled = true }
+  }, [feature, specSourceRequested, testsRefreshKey, coverageRefreshKey, ledger?.freshness?.revision])
 
-  // Match a ledger test to its extracted body. The ledger's `file` is relative
-  // and prefers a helper `sourceFile` (so does the route via `sourceFile ?? file`),
-  // so key on (basename, line) — identical AST line on both sides — with an exact
-  // name as a secondary fallback. Each entry keeps the ABSOLUTE file for open-in-editor.
-  const sourceByTest = useMemo(() => {
-    const base = (p: string) => p.split(/[\\/]/).pop() ?? p
-    const byLoc = new Map<string, { test: ExtractedTest; absFile: string }>()
-    const byName = new Map<string, { test: ExtractedTest; absFile: string }>()
-    for (const sf of specSource ?? []) {
-      for (const t of sf.tests) {
-        const absFile = t.sourceFile ?? sf.file
-        const entry = { test: t, absFile }
-        byLoc.set(`${base(absFile)}:${t.line}`, entry)
-        if (!byName.has(t.name)) byName.set(t.name, entry)
-      }
-    }
-    return { base, byLoc, byName }
-  }, [specSource])
+  // Generated titles need discovery before expansion; literal titles keep the
+  // existing lazy source load. Never substitute a guessed loop value.
+  useEffect(() => {
+    if (ledger?.tests.some((test) => test.name.includes('${'))) ensureSpecSource()
+  }, [ledger, ensureSpecSource])
 
-  const lookupSource = useCallback(
-    (t: TestCoverage) => {
-      if (t.file && t.line != null) {
-        const hit = sourceByTest.byLoc.get(`${sourceByTest.base(t.file)}:${t.line}`)
-        if (hit) return hit
-      }
-      return sourceByTest.byName.get(t.name) ?? null
-    },
-    [sourceByTest],
-  )
+  const testRows = useMemo(() => (ledger?.tests ?? []).flatMap<{ test: TestCoverage; source: CoverageTestSource | null }>((test) => {
+    const sources = coverageTestSources(specSource ?? [], test)
+    return sources.length
+      ? sources.map((source) => ({ test, source }))
+      : [{ test, source: null }]
+  }), [ledger, specSource])
 
   // The two-way highlight relation: a hovered test lights its requirements; a
   // hovered requirement lights its tests.
@@ -319,8 +195,8 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   const visibleReqs = useMemo(() => {
     if (!ledger) return []
     const filtered = gapFilter ? ledger.requirements.filter((r) => r.gapType === gapFilter) : ledger.requirements
-    // Worst-first: uncovered → partial → covered, stable within a rank.
-    return [...filtered].sort((a, b) => STATUS_RANK[statusOf(a)] - STATUS_RANK[statusOf(b)])
+    // Worst-first: weakened tests → uncovered → partial → covered → the time axis.
+    return [...filtered].sort(compareRequirements)
   }, [ledger, gapFilter])
 
   const orphanTests = useMemo(
@@ -349,7 +225,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
     el?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
   }, [focusReq, visibleReqs])
 
-  const generating = Boolean(job)
+  const generating = launching || Boolean(activeJob) || Boolean(generatingFlight)
 
   const state = ledger?.state
   const summaryAbsent = state?.summary === 'absent'
@@ -377,24 +253,30 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
           {ledger.tests.length === 0 && (
             <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No tests found in this suite&apos;s specs.</div>
           )}
+          {(specSourceError || specSource?.some((spec) => spec.discoveryError)) && (
+            <div className="clcov-source-note" role="status">
+              Couldn’t load discovered cases. Showing source definitions; generated titles may be unresolved.
+              {specSourceError && ` ${specSourceError}`}
+            </div>
+          )}
           {orphanTests.length > 0 && (
-            <div data-testid="orphan-tests-note" style={{ marginBottom: 10, fontSize: 11, color: 'var(--warning)' }}>
-              {orphanTests.length} orphan test{orphanTests.length > 1 ? 's' : ''} (no requirement) — regenerate coverage to map them.
+            <div data-testid="orphan-tests-note" className="cl-aside clcov-note">
+              <span className="clcov-alert" aria-hidden="true" style={{ background: 'var(--warning)', marginLeft: 0 }} />
+              {orphanTests.length} orphan test{orphanTests.length > 1 ? 's' : ''} · no requirement tag — regenerate coverage to map them
             </div>
           )}
           {/* The strength summary/filter moved up to the stat header (above the
               tests column), mirroring the gap legend above the requirements column. */}
-          {(strengthFilter ? ledger.tests.filter((t) => (t.strength ?? 'shallow') === strengthFilter) : ledger.tests).map((t) => (
+          {(strengthFilter ? testRows.filter(({ test }) => (test.strength ?? 'shallow') === strengthFilter) : testRows).map(({ test: t, source }) => (
             <TestCard
-              key={t.name}
+              key={`${t.name}:${source?.test.name ?? t.name}`}
               test={t}
               testNumber={testNumbering.get(testNumberKey(t.file, t.line))}
-              color={colorByTest.get(t.name)!}
               active={activeTestNames.has(t.name)}
               dimmed={Boolean(hovered) && !activeTestNames.has(t.name)}
               onHover={(on) => setHovered(on ? { kind: 'test', key: t.name } : null)}
               onExpand={ensureSpecSource}
-              source={lookupSource(t)}
+              source={source}
               sourceLoading={specSourceLoading}
               sourceError={specSourceError}
               onReqClick={focusRequirement}
@@ -425,19 +307,17 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
       )}
       <header className="clcov-head" data-generating={generating ? 'true' : 'false'}>
         <div className="clcov-title">
-          <span className="clcov-eyebrow">Semantic Coverage</span>
+          <span className="cl-rubric">Semantic Coverage</span>
           <span className="clcov-feature">{feature}</span>
         </div>
-        {state && <HeadlinePill headline={state.headline} />}
+        {state && <HeadlinePill headline={confirmed ? state.headline : 'Freshness unconfirmed'} />}
         <button type="button" onClick={onClose} className="clcov-close ml-auto" aria-label="Close coverage">
           Close <span aria-hidden="true">✕</span>
         </button>
       </header>
 
-      {/* R14: a flight (not a coverage job) is generating this ledger — say so
-          with the shared stage-status treatment instead of sitting silently
-          empty. The coverage-job takeover keeps priority when it owns the view. */}
-      {generatingFlight && !job && (
+      {/* Execution stays on Flight; the ledger remains a results surface. */}
+      {generatingFlight && !activeJob && (
         <div data-testid="coverage-flight-generating" className="flex shrink-0 items-center gap-2.5 border-b px-5 py-2" style={{ borderColor: 'var(--border-default)' }}>
           <StageStatusChip status={generatingFlight.stageStatus} />
           <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
@@ -459,13 +339,23 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
         </div>
       )}
 
+      {activeJob && (
+        <div data-testid="coverage-job-running" className="flex shrink-0 items-center gap-2.5 border-b border-line px-5 py-2">
+          <StageStatusChip status="running" />
+          <span className="text-[12px] text-secondary">Generation is running in Flight.</span>
+          <button type="button" className="cl-button ml-auto" onClick={() => onOpenGeneration(activeJob)}>
+            Open flight →
+          </button>
+        </div>
+      )}
+
       {loading && !ledger && <div className="p-6" style={{ color: 'var(--text-secondary)' }}>Loading coverage…</div>}
       {error && <div className="p-6" style={{ color: 'var(--danger)' }}>Failed to load coverage: {error}</div>}
 
       {/* Unified view (R22): Docs rail + main, always one screen. The rail is
           ALWAYS present (even while generating, with destructive actions disabled);
           only the main area changes by state — no tabs, nothing unmounts. */}
-      {!error && ledger && (
+      {ledger && (
         <div className="flex min-h-0 flex-1">
           <CoverageDocsRail
             feature={feature}
@@ -479,6 +369,11 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
             onGenerate={startJob}
             onDocsChanged={refresh}
             reloadKey={docsReloadKey}
+            recovery={onOpenRecovery && ledger.freshness?.nextAction && ledger.freshness.nextAction.stage !== 'run' ? {
+              onClick: () => onOpenRecovery(ledger.freshness!.nextAction!.stage),
+              disabledReason: !confirmed ? 'Checking coverage freshness before starting work.'
+                : generating ? 'Coverage work is already active. Open its Flight to follow progress.' : undefined,
+            } : undefined}
           />
           <div className="flex min-h-0 flex-1 flex-col">
             {actionError && (
@@ -486,21 +381,13 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
                 {actionError}
               </div>
             )}
-            {job ? (
-              /* Generating: the middle column shows the progress + agent activity;
-                 Tests stays beside it (generation doesn't change the test set). */
-              <div className="flex min-h-0 flex-1">
-                <div className="min-h-0 flex-1 overflow-hidden border-r" style={{ borderColor: 'var(--border-default)' }}>
-                  <CoverageGeneratingPane feature={feature} job={job} />
-                </div>
-                {testsPaneEl}
-              </div>
-            ) : summaryAbsent ? (
-              <CoverageEmptyMain railOpen={railOpen} />
+            {summaryAbsent ? (
+              <CoverageEmptyMain railOpen={railOpen} onOpenRail={toggleRail} />
             ) : (
               <>
                 <CoverageHeader
                   ledger={ledger}
+                  confirmed={confirmed}
                   gapFilter={gapFilter}
                   onToggleGap={(g) => setGapFilter((cur) => (cur === g ? null : g))}
                   strengthFilter={strengthFilter}
@@ -518,7 +405,6 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
                       <RequirementCard
                         key={rc.requirement.id}
                         rc={rc}
-                        colors={(ledger.tests.filter((t) => t.requirements.includes(rc.requirement.id)).map((t) => colorByTest.get(t.name)!))}
                         active={activeReqIds.has(rc.requirement.id)}
                         focused={focusReq?.id === rc.requirement.id}
                         dimmed={Boolean(hovered) && !activeReqIds.has(rc.requirement.id)}

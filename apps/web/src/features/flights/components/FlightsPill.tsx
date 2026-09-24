@@ -1,35 +1,28 @@
 import { useState } from 'react'
 import type { FlightIndexEntry, FlightStageKey, FlightStageStatus, PlanFeaturesTask } from '@/shared/api/client'
+import type { PortifyIndexEntry } from '@/shared/api/client'
+import type { CoverageJobIndexEntry } from '@/shared/api/types'
 import type { FeatureActivity } from '../state/feature-activity'
 import { StatusPill } from '@/shared/ui/StatusPill'
-import { FLIGHT_STATUS_TONE, featureActivityRows, featureChipState, preFlightChipState } from './FlightChipState'
+import { FLIGHT_STATUS_TONE, featureActivityRows, featureChipState, preFlightChipState, summarizeFlightActivity } from './FlightChipState'
 import { FlightsPickerDialog } from './FlightPickerRows'
 import { flightAwaitsUser } from '../lib/external-work'
 import { FLIGHT_OVERVIEW } from './stage-meta'
 
-export { FLIGHT_STATUS_TONE, FeatureChipBadge, FlightStatusChip, activityStages, featureActivityRows, featureChipState, flightStatusLabel, groupPickerRows, preFlightChipState, resolveFeatureFlightAction } from './FlightChipState'
+export { FLIGHT_STATUS_TONE, FeatureChipBadge, FlightStatusChip, activityStages, featureActivityRows, featureChipState, flightStatusLabel, groupPickerRows, preFlightChipState, resolveFeatureFlightAction, resolveFeatureFlightTarget, summarizeFlightActivity } from './FlightChipState'
 export type { FeatureActivityRow, FeatureChipState, FeatureFlightAction, FeatureRef, PickerGroup } from './FlightChipState'
 export { ActivityOnlyRow, NotFlownRow, PreFlightRow, StageMiniRail } from './FlightPickerRows'
 export { EXTERNAL_WORK_COPY, externalMutationTooltip, externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark, isExternallyDriven, presentedIndexStages } from '../lib/external-work'
 
-export function FlightsPill({
-  flights,
-  preFlights = [],
-  activity = new Map(),
-  features = [],
-  open: controlledOpen,
-  onOpenChange,
-  onOpenFlight,
-  onOpenActivity,
-  onStartFlight,
-  onOpenPreFlight,
-}: {
+export interface FlightsPillProps {
   flights: FlightIndexEntry[]
   /** Pre-flight (plan-features) tasks in progress / awaiting review — rendered
    *  as their own rows above the feature rows (they precede any feature). */
   preFlights?: PlanFeaturesTask[]
   /** Per-feature live activity (runs / portify / authoring) from useFeatureActivity — App owns it. */
   activity?: Map<string, FeatureActivity>
+  coverageJobs?: CoverageJobIndexEntry[]
+  portifyWorkflows?: PortifyIndexEntry[]
   /** Every workspace feature — the picker lists them 1:1 (R49) and groups those
    *  that declare a `group` under a disclosure (R55). `stages` is the feature's
    *  evidence-derived rail (derived-stages.ts) for flightless rows. */
@@ -47,7 +40,22 @@ export function FlightsPill({
   onStartFlight?: (feature: string) => void
   /** Reopen the new-flight dialog attached to a running/awaiting pre-flight. */
   onOpenPreFlight?: (taskId: string) => void
-}) {
+}
+
+export function FlightsPill({
+  flights,
+  preFlights = [],
+  activity = new Map(),
+  features = [],
+  coverageJobs = [],
+  portifyWorkflows = [],
+  open: controlledOpen,
+  onOpenChange,
+  onOpenFlight,
+  onOpenActivity,
+  onStartFlight,
+  onOpenPreFlight,
+}: FlightsPillProps) {
   const [internalOpen, setInternalOpen] = useState(false)
   const open = controlledOpen ?? internalOpen
   const setOpen = (next: boolean): void => {
@@ -56,7 +64,7 @@ export function FlightsPill({
   }
   // Defensive: the server list is already scoped to running/done, but a stale
   // frame shouldn't render launched/failed rows.
-  const preFlightRows = preFlights.filter((t) => t.status === 'running' || t.status === 'done')
+  const { activeFeatures: attention, preFlightRows, activeCount } = summarizeFlightActivity(flights, preFlights, activity)
   const preFlightReview = preFlightRows.filter((t) => t.status === 'done')
   // A flight parked on an external-work hand-off is BUSY, not blocked — the
   // step is running in the user's own agent. It keeps its place in the active
@@ -66,25 +74,23 @@ export function FlightsPill({
   // Everything alive right now, deduped by feature: active flights AND live
   // activity on the absorbed surfaces (a flight's run stage and its run count
   // once, not twice).
-  const attention = new Set<string>([
-    ...flights.filter((f) => f.status === 'running' || f.status === 'waiting-for-approval').map((f) => f.feature),
-    ...activity.keys(),
-  ])
   // Pre-flights are pre-feature (no feature key yet) — they add to the count
   // on their own, above the feature rows.
-  const activeCount = attention.size + preFlightRows.length
 
   // R68: a persistent amber dot on the trigger whenever the human is the
   // blocker — a flight parked on a checkpoint / paused for a non-user,
   // non-queued reason, OR a pre-flight settled and awaiting review. Independent
   // of any toast — it stays until the underlying state resolves.
-  const needsAttention = preFlightReview.length > 0 || flights.some((f) =>
+  const waitingForReview = [...activity.values()].some((a) => a.waiting?.kind === 'test-review')
+  const needsAttention = waitingForReview || preFlightReview.length > 0 || flights.some((f) =>
     flightAwaitsUser(f)
     || (f.status === 'paused' && f.pauseReason !== 'user' && f.pauseReason !== 'queued'))
 
-  const needsHuman = waiting.length > 0 || preFlightReview.length > 0
+  const needsHuman = waitingForReview || waiting.length > 0 || preFlightReview.length > 0
   const tone = needsHuman ? FLIGHT_STATUS_TONE['waiting-for-approval'] : activeCount > 0 ? 'var(--accent)' : undefined
-  const label = needsHuman
+  const label = waitingForReview
+    ? 'Flights · review needed'
+    : needsHuman
     ? `Flights · approval needed`
     : activeCount > 0
       ? `Flights · ${activeCount} active`
@@ -129,6 +135,8 @@ export function FlightsPill({
           preFlights={preFlightRows}
           activity={activity}
           features={features}
+          coverageJobs={coverageJobs}
+          portifyWorkflows={portifyWorkflows}
           onPick={(id) => { setOpen(false); onOpenFlight(id) }}
           onPickActivity={(feature, act) => { setOpen(false); onOpenActivity?.(feature, act) }}
           onStartFlight={(feature) => { setOpen(false); onStartFlight?.(feature) }}

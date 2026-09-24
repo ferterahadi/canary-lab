@@ -88,6 +88,13 @@ async function build(opts: {
 }
 
 describe('POST /api/runs', () => {
+  it('400s when the request has no body', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs' })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ error: 'feature required' })
+  })
+
   it('400s when feature missing from body', async () => {
     const { app } = await build()
     const res = await app.inject({ method: 'POST', url: '/api/runs', payload: {} })
@@ -108,6 +115,19 @@ describe('POST /api/runs', () => {
     expect(res.statusCode).toBe(201)
     expect(res.json()).toEqual({ runId: 'run-1' })
     expect(registry.get('run-1')).toBe(stub)
+  })
+
+  it('rejects a retired perturbation input instead of starting an ordinary run', async () => {
+    writeFeature('foo')
+    const startRun = vi.fn()
+    const { app } = await build({ startRun })
+    const res = await app.inject({
+      method: 'POST', url: '/api/runs',
+      payload: { feature: 'foo', perturbation: { latency: { ms: 300 } } },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ error: 'perturbation runs are no longer supported' })
+    expect(startRun).not.toHaveBeenCalled()
   })
 
   it('claims and links a Getting Started run before returning its owner page id', async () => {
@@ -309,6 +329,65 @@ describe('POST /api/runs', () => {
     })
     // Human message preserved for REST/MCP callers that don't parse the type.
     expect(res.json().error).toContain('Repo branch check failed')
+  })
+
+  it('surfaces a refused upstream update as a typed 409 with per-repo rows', async () => {
+    writeFeature('foo')
+    const repoUpdate = [
+      { name: 'app', path: '/repo', branch: 'main', reason: 'dirty', message: 'checkout has uncommitted changes (1 file(s))' },
+    ]
+    const { app } = await build({
+      startRun: async () => {
+        throw Object.assign(new Error('Repo upstream update refused:\napp: checkout has uncommitted changes (1 file(s))'), {
+          statusCode: 409,
+          repoUpdate,
+        })
+      },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({ type: 'repo_update_refused', feature: 'foo', repos: repoUpdate })
+    expect(res.json().error).toContain('Repo upstream update refused')
+  })
+
+  it('forwards a boolean updateRepos as the start option, and nothing when it is absent or malformed', async () => {
+    writeFeature('foo')
+    const startRun = vi.fn(async () => ({ kind: 'started' as const, orch: makeStub('run-u') }))
+    const { app } = await build({ startRun })
+
+    await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', updateRepos: true } })
+    expect(startRun.mock.calls[0]?.[6]).toEqual({ updateRepos: true })
+
+    await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', updateRepos: false } })
+    expect(startRun.mock.calls[1]?.[6]).toEqual({ updateRepos: false })
+
+    // A string is not a choice: the feature's own `track` setting decides.
+    await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', updateRepos: 'yes' } })
+    expect(startRun.mock.calls[2]?.[6]).toBeUndefined()
+  })
+
+  it('surfaces an envset-dependent spec selection as a typed 409 naming the fields', async () => {
+    writeFeature('foo')
+    const { app } = await build({
+      startRun: async () => {
+        throw Object.assign(new Error('foo: playwright.config.ts selects specs with a computed testMatch'), {
+          statusCode: 409,
+          specSelection: { feature: 'foo', config: '/w/features/foo/playwright.config.ts', fields: ['testMatch'], rule: 'the rule' },
+        })
+      },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
+    expect(res.statusCode).toBe(409)
+    // The agent reads `fields` + `rule` and rewrites the config; a bare 409 would
+    // leave it guessing which of five selection fields to look at.
+    expect(res.json()).toMatchObject({
+      type: 'envset_dependent_spec_selection',
+      feature: 'foo',
+      config: '/w/features/foo/playwright.config.ts',
+      fields: ['testMatch'],
+      rule: 'the rule',
+    })
+    expect(res.json().error).toContain('computed testMatch')
   })
 
   it('400s when env is not in feature.envs', async () => {

@@ -1,8 +1,10 @@
 import { useState } from 'react'
+import { isElicitationReview, checkpointInputToken } from '@/shared/lib/workspace-view-state'
 import * as api from '@/shared/api/client'
 import type { FlightCheckpoint, FlightManifest, FlightStage } from '@/shared/api/client'
 import { evaluationArchiveFilename } from '@/shared/lib/format'
 import { DiffView } from '@/shared/ui/DiffView'
+import { panelCardClass, panelCardStyle } from '@/shared/ui/PanelCard'
 import { useEvaluationExports } from '@/features/evaluation'
 import { checkpointOptionLabel, checkpointTitle, evaluationTaskId, STAGE_COLUMN } from './stage-meta'
 import { externalMutationTooltip, isExternallyDriven } from '../lib/external-work'
@@ -63,12 +65,12 @@ export function DownloadEvaluationAction({
       data-testid={testId}
       onClick={download}
       title={title}
-      className={`${primary ? 'cl-button-primary' : 'cl-button'} shrink-0 px-2.5 py-1 text-xs`}
+      className={`${primary ? 'cl-button-primary' : 'cl-button'} shrink-0 px-2.5 py-1`}
       style={primary ? undefined : { color: failed ? 'var(--danger)' : 'var(--success)' }}
     >
       {/* One label for one file: the header, this card and the reports list all
-          say "report". */}
-      {failed ? 'Download failed — retry' : '⬇ Download report'}
+          say "evaluation report". */}
+      {failed ? 'Download failed — retry' : '⬇ Download evaluation report'}
     </button>
   )
 }
@@ -102,7 +104,8 @@ export function CheckpointControls({
       .finally(() => setBusy(false))
   }
   const respond = (response: { choice?: string; values?: Record<string, string>; data?: unknown; feedback?: string; token?: string }): void => {
-    mutate(() => api.respondFlightCheckpoint(flightId, response))
+    const elicitationToken = checkpointInputToken(flightId, checkpoint.kind)
+    mutate(() => api.respondFlightCheckpoint(flightId, { ...response, ...(elicitationToken ? { elicitationToken } : {}) }))
   }
 
   const data = (checkpoint.data ?? {}) as Record<string, unknown>
@@ -113,7 +116,7 @@ export function CheckpointControls({
   // A genuine question on an externally driven flight still belongs to the MCP
   // client that started it. The external-work hand-off itself never reaches
   // this component: running work lives in the stage Activity rail, not in a decision card.
-  const readOnly = isExternallyDriven(flight)
+  const readOnly = isExternallyDriven(flight) && !isElicitationReview(flightId, checkpoint.kind)
   const lockedTitle = readOnly
     ? externalMutationTooltip('flight', 'answer this checkpoint')
     : undefined
@@ -129,23 +132,24 @@ export function CheckpointControls({
   return (
     <section
       data-testid="checkpoint-controls"
-      className={`flex flex-col gap-2.5 rounded-lg border border-warning/45 bg-surface p-3 ${STAGE_COLUMN}`}
+      className={`flex flex-col gap-2 ${panelCardClass('warning')} ${STAGE_COLUMN}`}
+      style={panelCardStyle('warning')}
       >
       <div className="flex items-center gap-2">
         <span aria-hidden="true" className="text-warning">⏸</span>
         <span
           data-testid="checkpoint-title"
-          className="text-[12.5px] font-semibold"
+          className="cl-type-title text-primary"
         >
           {checkpointTitle(checkpoint.kind)}
         </span>
       </div>
-      <p className="text-[12px] text-secondary">
+      <p className="cl-type-body text-secondary">
         {checkpoint.message}
       </p>
 
       {checkpoint.kind === 'config-approval' && configError && (
-        <p data-testid="checkpoint-config-error" className="text-[11px] text-danger font-mono">
+        <p data-testid="checkpoint-config-error" className="cl-type-meta text-danger font-mono">
           {configError}
         </p>
       )}
@@ -157,7 +161,7 @@ export function CheckpointControls({
 
       {checkpoint.kind === 'missing-env' && (
         <div className="flex flex-col gap-1.5">
-          <div className="text-[11px] text-muted">
+          <div className="cl-type-meta text-muted">
             Missing: {missing.join(', ')}
           </div>
           <DisabledControlTooltip wrapperClassName="flex w-full">
@@ -170,7 +174,7 @@ export function CheckpointControls({
               rows={4}
               disabled={readOnly}
               title={lockedTitle}
-              className="cl-input w-full p-2 text-[11px] font-mono disabled:cursor-not-allowed disabled:opacity-45"
+              className="cl-input w-full cl-type-meta p-2 font-mono disabled:cursor-not-allowed disabled:opacity-45"
             />
           </DisabledControlTooltip>
           <DisabledControlTooltip wrapperClassName="inline-flex self-start">
@@ -187,7 +191,7 @@ export function CheckpointControls({
                 }
                 respond({ values })
               }}
-              className="cl-button self-start px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+              className="cl-button self-start px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-45"
             >
               Save these settings
             </button>
@@ -206,7 +210,7 @@ export function CheckpointControls({
               onClick={() => (option === 'revise'
                 ? setReviseOpen((v) => !v)
                 : respond({ choice: option }))}
-              className="cl-button inline-flex items-center gap-1.5 px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+              className="cl-button inline-flex items-center gap-1.5 px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-45"
               style={i === 0
                 ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' }
                 : undefined}
@@ -232,7 +236,7 @@ export function CheckpointControls({
               disabled={readOnly || busy}
               title={lockedTitle}
               onClick={() => setShowAllOptions(true)}
-              className="cl-button px-2.5 py-1 text-xs text-muted disabled:cursor-not-allowed disabled:opacity-45"
+              className="cl-button px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-45"
             >
               More options ▾
             </button>
@@ -249,21 +253,21 @@ export function CheckpointControls({
             placeholder="What should the agent change? It starts two copies again to re-check."
             spellCheck={false}
             rows={3}
-            className="cl-input w-full p-2 text-[11px] font-mono"
+            className="cl-input w-full cl-type-meta p-2 font-mono"
           />
           <button
             type="button"
             data-testid="checkpoint-revise-submit"
             disabled={busy || !reviseText.trim()}
             onClick={() => respond({ choice: 'revise', feedback: reviseText.trim() })}
-            className="cl-button self-start px-2.5 py-1 text-xs"
+            className="cl-button self-start px-2.5 py-1"
           >
             Send feedback
           </button>
         </div>
       )}
 
-      {failure && <div className="text-[11px] text-danger">{failure}</div>}
+      {failure && <div className="cl-type-meta text-danger">{failure}</div>}
     </section>
   )
 }

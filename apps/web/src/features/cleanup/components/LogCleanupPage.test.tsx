@@ -85,6 +85,11 @@ describe('LogCleanupPage', () => {
     expect(container.textContent).toContain('2026-05-01T1000-aaaa')
     expect(container.textContent).toContain('ORPHAN')
     expect(container.textContent).toContain('839 MB') // 880_000_000 bytes, binary MB
+    const totals = buttonByText('Refresh')?.parentElement
+    expect(totals?.textContent).toContain('On disk: 859 MB')
+    expect(totals?.textContent).toContain('Trimmable: 839 MB')
+    expect(totals?.textContent).toContain('Deletable: 858 MB')
+    expect(totals?.querySelector('.cl-rubric')).toBeNull()
   })
 
   it('disables the checkbox for an active run', async () => {

@@ -24,6 +24,7 @@ import type { ClientKind } from '../../../../shared/run-mode'
 export type McpClientSurface = 'claude-code' | 'claude-desktop-chat' | 'codex' | 'other'
 
 export interface McpClientFacts {
+  elicitation?: { form: boolean; url: boolean }
   name?: string
   version?: string
   surface: McpClientSurface
@@ -47,6 +48,7 @@ export interface RawClientInfo {
 
 export interface RawClientCapabilities {
   sampling?: unknown
+  elicitation?: { form?: unknown; url?: unknown }
 }
 
 export function classifyMcpClient(
@@ -63,7 +65,7 @@ export function classifyMcpClient(
   // `local-agent-mode-Canary_Lab`. Matching only on `claude-code` classified the
   // one capable Desktop surface as unknown and told it to read serially, which is
   // the exact mistake this module exists to stop.
-  const surface: McpClientSurface = lower.includes('claude-code') || lower.includes('local-agent-mode')
+  const surface: McpClientSurface = lower.includes('claude-code') || isDesktopLocalAgent(lower)
     ? 'claude-code'
     : lower.includes('claude-ai') || lower === 'claude' || lower.includes('desktop')
       ? 'claude-desktop-chat'
@@ -76,6 +78,10 @@ export function classifyMcpClient(
     surface,
     canFanOut: surface === 'claude-code',
     sampling: caps?.sampling !== undefined && caps.sampling !== null,
+    ...(caps?.elicitation ? { elicitation: {
+      form: caps.elicitation.form !== undefined || caps.elicitation.url === undefined,
+      url: caps.elicitation.url !== undefined,
+    } } : {}),
   }
 }
 
@@ -90,6 +96,36 @@ export function fanOutAdviceFor(facts: McpClientFacts): string {
     return 'This Claude Desktop chat client has no subagent primitive, so ignore the prompt\'s fan-out rule and read serially — it still works, it is just not parallel. For a parallel run, drive the same flight from Claude Code (Desktop\'s local-agent mode counts) instead.'
   }
   return 'This client does not advertise a subagent primitive, so read serially rather than trying to fan out; the prompt\'s fan-out rule is advisory and skipping it changes nothing about the result.'
+}
+
+/** Desktop constructs its local-agent-mode (Code tab) MCP client as
+ *  `local-agent-mode-<serverName>`, observed live as `local-agent-mode-Canary_Lab`.
+ *  The classifier and the elicitation advice both key on that literal, so it
+ *  lives in one place. */
+function isDesktopLocalAgent(name: string | undefined): boolean {
+  return (name ?? '').toLowerCase().includes('local-agent-mode')
+}
+
+/** One sentence group about the CLIENT for a `needs-input` fallback, so every
+ *  tool that could not open an MCP question describes the same limitation the
+ *  same way. Deliberately no action verbs: what to do next (ask in chat, open
+ *  the Canary UI, wait for the browser decision) differs per question, and an
+ *  approval must never become a chat answer because a shared sentence said
+ *  "ask". Desktop's local agent mode is named because it is the one shipped
+ *  client that runs the repair loop and declares no elicitation at all
+ *  (Desktop 2.2553.1: `local-agent-mode-*` declares roots + the UI extension,
+ *  no `elicitation`). The capability check comes first, so the sentence stops
+ *  naming Desktop the day Desktop starts declaring it. */
+export function elicitationAdviceFor(facts: McpClientFacts, mode: 'form' | 'url'): string {
+  const label = mode === 'url' ? 'URL prompts' : 'forms'
+  if (facts.elicitation?.[mode]) return `Your client declares MCP ${label}, but none was presented in this call.`
+  const report = 'Report that limitation, not that the human declined or has not decided.'
+  if (facts.elicitation) return `This client declares elicitation but not MCP ${label}, so nothing was shown to the human. ${report}`
+  const where = mode === 'url' ? 'Codex declares URL elicitation.' : 'The Claude Code CLI and Codex declare form elicitation.'
+  if (isDesktopLocalAgent(facts.name)) {
+    return `Claude Desktop's local agent mode (Code tab) presents no MCP ${label}: its MCP client declares no elicitation capability, so nothing was shown to the human. ${report} ${where}`
+  }
+  return `This client declares no MCP elicitation, so nothing was shown to the human. ${report} ${where}`
 }
 
 /** Branding fallback for a session whose connect URL carried no `client_kind`.

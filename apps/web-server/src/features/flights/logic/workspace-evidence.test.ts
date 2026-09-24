@@ -358,9 +358,10 @@ describe('workspaceStageEvidence probes', () => {
       JSON.stringify([
         { runId: '2026-06-01T0100-old0', feature: FEATURE, startedAt: '2026-06-01T01:00:00.000Z', status: 'failed' },
         { runId, feature: FEATURE, startedAt: '2026-07-01T02:45:00.000Z', status: 'passed' },
-        // None of these three are a feature test run, however recent they are.
+        // None of these four are a feature test run, however recent they are.
         { runId: 'boot-1', feature: FEATURE, startedAt: '2026-07-02T00:00:00.000Z', status: 'passed', executionType: 'boot' },
         { runId: 'bench-1', feature: FEATURE, startedAt: '2026-07-03T00:00:00.000Z', status: 'passed', executionType: 'benchmark' },
+        { runId: 'cell-1', feature: FEATURE, startedAt: '2026-07-03T12:00:00.000Z', status: 'failed', executionType: 'robustness' },
         { runId: 'verify-1', feature: FEATURE, startedAt: '2026-07-04T00:00:00.000Z', status: 'passed', executionType: 'verify' },
         { runId: 'other-feature', feature: 'somebody_else', startedAt: '2026-07-05T00:00:00.000Z', status: 'passed' },
       ]),

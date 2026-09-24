@@ -14,6 +14,13 @@ import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectS
 import { agentProgressSink } from './agent-progress'
 import { recordStageAgentSession } from './stage-agent-sessions'
 import { CHECKPOINT_OPTIONS } from '../types'
+import { prepareRequirementsDraft, saveRequirementsDraft, type RequirementsDraftInput } from './requirements-draft'
+import { documentResolutionInput, type DocumentResolution } from '../../../coverage/logic/coverage/document-resolution'
+
+/** A discovery answer the producer could not settle — the only shapes the
+ *  parked checkpoint can carry back to the user. */
+type UnresolvedDocuments = Exclude<DocumentResolution, { status: 'resolved' }>
+import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 
 // Populate features/<f>/docs/ — the prd-source checkpoint is a two-path FORK:
 //   manual — the user supplies docs (UI drop zone / MCP write_feature_doc),
@@ -242,7 +249,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
    *  recommendation away from the path that just failed — if it can tell an
    *  empty-handed retry from a first visit. `message` still carries the prose
    *  form for the CLI/MCP surfaces and older clients. */
-  const park = (ctx: StageContext, linked: string[], attempt?: PrdSourceAttempt): StageOutcome => {
+  const park = (ctx: StageContext, linked: string[], attempt?: PrdSourceAttempt, documentResolution?: DocumentResolution): StageOutcome => {
     const m = ctx.manifest()
     const docs = userDocs(featureDirFor(deps, m.feature))
     const hasDocs = docs.length > 0
@@ -259,7 +266,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
         // with no docs present there is nothing for `continue` to continue
         // with, so the option is withheld rather than shown and then rejected.
         options: [...CHECKPOINT_OPTIONS['prd-source']].filter((o) => hasDocs || o !== 'continue'),
-        data: { docs, linked, intent: m.description, lastAttempt: attempt },
+        data: { docs, linked, intent: m.description, lastAttempt: attempt, ...(documentResolution ? { documentResolution } : {}) },
       },
     }
   }
@@ -274,10 +281,23 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
   const settleCollected = (
     ctx: StageContext,
     mode: 'collect-repo-docs' | 'infer-from-diff',
-    plan: { outName: string; outPath: string },
+    plan: { outName: string; outPath: string; draftInput?: RequirementsDraftInput },
     reply: string,
   ): StageOutcome => {
     const m = ctx.manifest()
+    const unresolved = extractJsonCandidates(reply)
+      .map((candidate) => documentResolutionInput.safeParse((candidate as { document_resolution?: unknown } | null)?.document_resolution))
+      .find((parsed): parsed is { success: true; data: UnresolvedDocuments } => parsed.success && parsed.data.status !== 'resolved')
+    if (unresolved?.success) {
+      const resolution = unresolved.data
+      // Every unsettled shape explains itself: `missing` carries the reason and
+      // the candidate shapes carry the question. `resolved` is narrowed away
+      // above, so there is no third shape left to default for.
+      const reason = resolution.status === 'missing' ? resolution.reason : resolution.question
+      const attempt: PrdSourceAttempt = { mode, outcome: 'empty', reason }
+      ctx.appendLog(attemptLogLine(attempt))
+      return park(ctx, [], attempt, resolution)
+    }
     const wrote = fs.existsSync(plan.outPath) && fs.statSync(plan.outPath).size > 0
     if (!wrote) {
       const reason = /NOTHING_FOUND:?\s*(.*)/.exec(reply)?.[1]?.trim()
@@ -294,6 +314,9 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     // Symmetric with attemptLogLine: the accepted attempt says so, so the band
     // reads as a sequence of verdicts rather than undifferentiated noise.
     ctx.appendLog(`[docs] agent attempt (${MODE_LABEL[mode]}) succeeded — wrote docs/${plan.outName}\n`)
+    if (saveRequirementsDraft(featureDirFor(deps, m.feature), ctx.flightDir, plan.outName, plan.draftInput, reply)) {
+      ctx.appendLog('[docs] requirements draft saved for summary validation\n')
+    }
     return {
       kind: 'done',
       evidence: {
@@ -340,6 +363,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     // follows should still carry the note).
     const note = feedback ?? stageFeedback(m, 'docs')
     const feedbackNote = note ? `Feedback on the previous attempt — take it into account: ${note}` : ''
+    const draft = prepareRequirementsDraft(featureDir, ctx.flightDir, outName)
     const prompt =
       mode === 'collect-repo-docs'
         ? renderPrompt('flight-collect-docs.md', {
@@ -348,6 +372,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
             repoPaths: m.repoPaths.map((p) => `- ${p}`).join('\n'),
             outPath,
             feedbackNote,
+            summaryPrompt: draft.prompt,
           })
         : renderPrompt('flight-infer-diff.md', {
             feature: m.feature,
@@ -355,8 +380,9 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
             repoTargets,
             outPath,
             feedbackNote,
+            summaryPrompt: draft.prompt,
           })
-    const plan = { outName, outPath }
+    const plan = { outName, outPath, draftInput: draft.input }
 
     // Hand off unless the caller forced the local path (the client answered
     // `run-internally`). The client gets the SAME rendered prompt — including its
@@ -365,8 +391,8 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     if (forceInternal !== true && handsOffToClient(ctx)) {
       ctx.appendLog(`[docs] handed the ${MODE_LABEL[mode]} step to the external agent session…\n`)
       return externalWorkCheckpoint(ctx, 'docs', prompt, {
-        message: `Ask your user first: if they have a PRD/spec to supply, write THAT to ${outPath} instead of gathering — never invent one. Otherwise gather requirement docs (${MODE_LABEL[mode]}) in your own client and write the doc to the same path, then respond. Reply NOTHING_FOUND on \`data\` if there is nothing relevant.`,
-        context: { mode, outPath, outName, intent: m.description },
+        message: `Discover and use clearly relevant, authorized requirement documents (${MODE_LABEL[mode]}) in your own client. If material is missing, ambiguous, or conflicting, call respond_flight_checkpoint with document_resolution and no choice for MCP 2.0 elicitation; otherwise write ${outPath} and draft its summary in this session. Return { requirements[], variantDimension? } on \`data\`. Never invent requirements or ask again for an existing user choice.`,
+        context: { mode, ...plan, intent: m.description },
       })
     }
 
@@ -438,7 +464,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
         // all read `.context`; this was the odd one out, and its unit test hid
         // it by hand-building a flat fixture the parker never writes.
         const handOff = (m.stages.find((s) => s.key === 'docs')?.checkpoint?.data as
-          | { context?: { mode?: 'collect-repo-docs' | 'infer-from-diff'; outPath?: string; outName?: string } }
+          | { context?: { mode?: 'collect-repo-docs' | 'infer-from-diff'; outPath?: string; outName?: string; draftInput?: RequirementsDraftInput } }
           | undefined)?.context
         const mode = handOff?.mode ?? 'collect-repo-docs'
         if (choice === 'run-internally') {
@@ -460,7 +486,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
         // Same on-disk check the local agent's result goes through. `data` is only
         // mined for a NOTHING_FOUND reason — it never decides the verdict.
         const reply = typeof response.data === 'string' ? response.data : JSON.stringify(response.data ?? '')
-        return settleCollected(ctx, mode, { outName: handOff.outName, outPath: handOff.outPath }, reply)
+        return settleCollected(ctx, mode, { outName: handOff.outName, outPath: handOff.outPath, draftInput: handOff.draftInput }, reply)
       }
       if (choice === 'continue') {
         if (existing.length > 0) {

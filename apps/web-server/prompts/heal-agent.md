@@ -7,6 +7,7 @@ Start here:
 - `{{healIndexPath}}` — first file to read when present. It lists failed tests, assertion errors, editable repos, and exact per-failure slice paths.
 - `{{summaryPath}}` — raw Playwright summary. Use only if `heal-index.md` is missing or incomplete.
 - If neither `heal-index.md` nor the summary exists or lists failures, read the newest `*.log` in the run directory, note the missing index in your hypothesis, and proceed from raw logs.
+- For a dependency startup block, read `{{runDir}}/manifest.json`: `dependencyProvenance` records the incompatible repository, `incompatibilityCause`, remediation, and validation log path. Apply deterministic in-scope app/dependency repairs without asking; ask only for a genuine choice or missing authority. Never weaken tests or the validator, bypass the gate, or infer generated-output differences from generator-input mismatch alone. Signal restart on this run after repair; both restart and rerun recheck dependencies and persist fresh evidence before services or test verification.
 
 Useful only when needed:
 {{traceExtractHint}}

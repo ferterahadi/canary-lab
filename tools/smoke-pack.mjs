@@ -2,6 +2,7 @@ import { spawnSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { smokeTestReadability } from './smoke-test-readability.mjs'
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-lab-smoke-'))
@@ -90,6 +91,7 @@ run('node', ['tools/check-feature-boundaries.mjs'], repoRoot)
 // ESLint covers only what needs a type checker or the React plugin (see
 // eslint.config.mjs); 3.7s, so it belongs in the same local gate.
 run('npx', ['eslint', '.'], repoRoot)
+run('npm', ['run', 'check:test-readability'], repoRoot)
 
 run('npm', ['run', 'build'], repoRoot)
 run('npm', ['pack', '--pack-destination', tempRoot], repoRoot)
@@ -245,7 +247,7 @@ for (const client of ['codex', 'claude']) {
   const packaged = childDirectories(
     path.join(upgradeProjectDir, 'node_modules', 'canary-lab', 'dist', 'agent-integrations', client, 'skills'),
   )
-  const installed = childDirectories(path.join(upgradeHomeDir, `.${client}`, 'skills'))
+  const installed = childDirectories(path.join(upgradeHomeDir, client === 'codex' ? '.agents' : '.claude', 'skills'))
     .filter((name) => name.startsWith('canary-lab'))
   if (JSON.stringify(installed) !== JSON.stringify(packaged)) {
     throw new Error(`Smoke test failed: ${client} skills did not refresh from ${upgradeFromVersion} to ${releaseVersion}`)
@@ -265,6 +267,7 @@ const projectDir = path.join(tempRoot, 'smoke-project')
 
 run('npm', ['init', '-y'], tempRoot)
 run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `file:${tarballPath}`], tempRoot)
+smokeTestReadability(path.join(tempRoot, 'node_modules/canary-lab/dist/apps/cli/cli.js'), tempRoot)
 run(
   'npx',
   // --no-install: the smoke run installs deps itself below (and never needs the
@@ -287,6 +290,12 @@ const scaffoldPaths = [
   'demo-app/catalog-service/server.ts',
   'demo-app/inventory-service/server.ts',
   'demo-app/checkout-service/server.ts',
+  // The durable-state + idempotency module the three services share, and the
+  // ignore rule for the state files it writes. `gitignore` ships undotted (npm
+  // strips `.gitignore`) and init restores the dot, so the dotted name is what
+  // the scaffold must show.
+  'demo-app/shared/durable.ts',
+  'demo-app/.gitignore',
   'features/storefront-journey/feature.config.cjs',
   'features/storefront-journey/playwright.config.ts',
   'features/storefront-journey/e2e/storefront.spec.ts',
@@ -353,6 +362,7 @@ const installedPackagePaths = [
   'node_modules/canary-lab/dist/shared/readable-tests/types.d.ts',
   'node_modules/canary-lab/dist/apps/web-server/prompts/scout.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/specs-coverage.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/test-readability.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/portify.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/prd-summary.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/heal-agent.md',
@@ -368,6 +378,7 @@ const installedPackagePaths = [
   'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-flight-instructions.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-portify-instructions.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-compact-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-lifecycle-instructions.md',
 ]
 
 for (const relPath of scaffoldPaths) {

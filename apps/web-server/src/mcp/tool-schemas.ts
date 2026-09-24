@@ -5,13 +5,17 @@
 // it without importing tools.ts back — tools.ts imports the groups, so anything
 // they share has to live below both of them.
 
-import type { CallToolResult } from '@modelcontextprotocol/server'
+import type { CallToolResult, InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import { z } from 'zod'
+
+export type CanaryLabToolHandler = (args: Record<string, unknown>, ctx: ServerContext) =>
+  CallToolResult | InputRequiredResult | Promise<CallToolResult | InputRequiredResult>
 import type { RunStore } from '../features/runs/logic/run-store'
 import type { RunDetail } from '../features/runs/logic/run-store'
 import type { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import type { ClientKind } from '../../../../shared/run-mode'
 import type { DirtySpecStore } from '../features/runs/logic/dirty-specs/store'
+import type { RepoUpdateRefusal } from '../features/runs/logic/runtime/repo-upstream-update'
 import { type ResolveVerificationInput } from '../features/coverage/logic/verification'
 import { buildTestReviewPacket, deterministicEvaluationRewrite, evaluationTextSlots } from '../features/evaluation/logic/test-review-export'
 import { type WorkspaceEventPublisher } from '../shared/workspace-events'
@@ -25,9 +29,9 @@ import type {
 // helper or REST handler. The translation pattern: validate input via zod,
 // call the helper, format the result as a CallToolResult.
 //
-// Confirmation gates: destructive tools (abort_run, delete_run, etc.) require
-// `confirm: true` literally in the input schema so a misbehaving model can't
-// invoke them by accident.
+// Destructive tools require confirm:true as an accidental-call guard. It is
+// not human authorization: abort_run additionally uses the shared elicitation
+// gate, and suite adoption binds that gate to the reviewed revision.
 
 export const evaluationTextSlotInput = z.object({
   id: z.string(),
@@ -93,6 +97,13 @@ export type McpStartRunOutcome =
       message: string
     }
   | {
+      /** A tracked repo could not be fast-forwarded to its upstream — nothing
+       *  started; `repos` says per repo why (dirty, diverged, in use). */
+      kind: 'repo-update-refused'
+      repos: RepoUpdateRefusal[]
+      message: string
+    }
+  | {
       kind: 'collision'
       conflictingRunId: string
       conflictingFeature: string
@@ -102,6 +113,10 @@ export type McpStartRunOutcome =
     }
 
 export interface CanaryLabMcpDeps {
+  coverageRequest?: (opts: { method: 'GET'; url: string }) => Promise<{ statusCode: number; body: unknown }>
+  testReviewRequest?: (opts: { method: 'GET' | 'POST'; url: string; payload?: unknown }) => Promise<{ statusCode: number; body: unknown }>
+  getUiUrl?: () => string | undefined
+  discoveryRepairRequest?: (opts: { method: 'GET' | 'POST'; url: string; payload?: unknown }) => Promise<{ statusCode: number; body: unknown }>
   store: RunStore
   broker: ExternalHealBroker
   featuresDir: string
@@ -119,6 +134,9 @@ export interface CanaryLabMcpDeps {
     },
     isolation?: 'worktree' | 'queue',
     executionType?: 'run' | 'boot',
+    /** Fast-forward the repo checkouts to their upstream tips before booting;
+     *  unset defers to each repo's `track: 'upstream'` config. */
+    updateRepos?: boolean,
   ) => Promise<McpStartRunOutcome>
   restartExternalRun?: (
     runId: string,
@@ -194,7 +212,8 @@ export interface CanaryLabMcpDeps {
   }
   workspaceEvents?: WorkspaceEventPublisher
   /** Test-file integrity store. When present, terminal/needs_heal run results
-   *  carry a `dirtyTests` warning the agent relays verbatim. Read-only here —
+   *  carry a `dirtyTests` warning the agent relays verbatim (the run-level
+   *  `specEdits` warning is read off the manifest, not this store). Read-only here —
    *  the MCP surface never approves or gates on it (awareness, not enforcement). */
   dirtySpecStore?: DirtySpecStore
   /** R76: deleting a feature deletes its flight history with it — guards

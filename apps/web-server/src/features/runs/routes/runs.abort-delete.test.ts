@@ -141,6 +141,59 @@ describe('POST /api/runs/:runId/abort', () => {
     expect(readRunsIndex(logsDir)[0].status).toBe('aborted')
   })
 
+  it('cancels a run still in the admission queue through the scheduler, not the store', async () => {
+    // Ordering is load-bearing. `store.abort` can finalize a persisted `queued`
+    // manifest on its own, so if it ran first it would answer 204 for a run this
+    // process still holds in memory — leaving a terminal row in the queue for
+    // `promote()` to launch later. The scheduler is asked first because only it
+    // can actually remove the slot.
+    const dir = runDirFor(logsDir, 'q-live')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'q-live',
+      feature: 'foo',
+      startedAt: 'now',
+      status: 'queued',
+      healCycles: 0,
+      services: [],
+      queueReason: 'resources',
+    })
+    writeRunsIndex(logsDir, [{ runId: 'q-live', feature: 'foo', startedAt: 'now', status: 'queued' }])
+    const cancelled: string[] = []
+    const { app } = await build({ cancelQueuedRun: (runId) => { cancelled.push(runId); return true } })
+
+    const res = await app.inject({ method: 'POST', url: '/api/runs/q-live/abort' })
+
+    expect(res.statusCode).toBe(204)
+    expect(cancelled).toEqual(['q-live'])
+  })
+
+  it('aborts an orphaned QUEUED run the scheduler no longer knows about', async () => {
+    // The reported bug: run 2026-09-08T1019-6deh was parked `queued`, the server
+    // restarted, and the new process's queue was empty — so `cancelQueuedRun`
+    // said no and Stop answered "run not active" while the UI still counted it
+    // as one active flight.
+    const dir = runDirFor(logsDir, 'q-orphan')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'q-orphan',
+      feature: 'foo',
+      startedAt: 'now',
+      status: 'queued',
+      healCycles: 0,
+      services: [{ name: 'api', safeName: 'api', command: 'x', cwd: '/', status: 'queued', logPath: '/x.log' }],
+      queueReason: 'resources',
+    })
+    writeRunsIndex(logsDir, [{ runId: 'q-orphan', feature: 'foo', startedAt: 'now', status: 'queued' }])
+    const { app } = await build({ cancelQueuedRun: () => false })
+
+    const res = await app.inject({ method: 'POST', url: '/api/runs/q-orphan/abort' })
+
+    expect(res.statusCode).toBe(204)
+    expect(readManifest(path.join(dir, 'manifest.json'))?.status).toBe('aborted')
+    expect(readRunsIndex(logsDir)[0].status).toBe('aborted')
+  })
+
   it('still 204s if stop() throws (best-effort)', async () => {
     const failing: OrchestratorLike = {
       runId: 'r4',

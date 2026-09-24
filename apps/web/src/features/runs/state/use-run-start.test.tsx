@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   checkoutRepoBranch: vi.fn(),
   pinFeatureBranchesToCurrent: vi.fn(),
   getProjectConfig: vi.fn(),
+  asTestReviewRequired: vi.fn(),
 }))
 vi.mock('@/shared/api/client', () => ({
   asRepoCollision: mocks.asRepoCollision,
@@ -20,6 +21,7 @@ vi.mock('@/shared/api/client', () => ({
   checkoutRepoBranch: mocks.checkoutRepoBranch,
   pinFeatureBranchesToCurrent: mocks.pinFeatureBranchesToCurrent,
   getProjectConfig: mocks.getProjectConfig,
+  asTestReviewRequired: mocks.asTestReviewRequired,
 }))
 
 let hook: UseRunStart
@@ -55,6 +57,8 @@ beforeEach(() => {
   onRunStarted = vi.fn<UseRunStartDeps['onRunStarted']>()
   mocks.asRepoCollision.mockReset().mockReturnValue(null)
   mocks.asBranchMismatch.mockReset().mockReturnValue(null)
+  mocks.asTestReviewRequired.mockReset().mockReturnValue(null)
+  sessionStorage.clear()
   mocks.benchmarkPreflight.mockReset().mockResolvedValue({ portsConfigured: true })
   mocks.checkoutRepoBranch.mockReset().mockResolvedValue(undefined)
   mocks.pinFeatureBranchesToCurrent.mockReset().mockResolvedValue(undefined)
@@ -67,6 +71,55 @@ afterEach(() => {
 })
 
 describe('handleStartRun', () => {
+  it('deduplicates a blocked boot request and clears only its matching error when dismissed', async () => {
+    const error = new Error('review required')
+    mocks.asTestReviewRequired.mockReturnValue({ request: { requestId: 'request-1', feature: 'checkout' } })
+    startRun.mockRejectedValue(error)
+    mount()
+    await act(async () => { await hook.handleStartRun('local', 'boot') })
+    await act(async () => { await hook.handleStartRun('local', 'boot') })
+
+    expect(hook.pendingStarts).toEqual([{ requestId: 'request-1', feature: 'checkout', mode: 'boot' }])
+    act(() => { hook.dismissPendingStart('unrelated-request') })
+    expect(hook.pendingStarts).toHaveLength(1)
+    expect(hook.startError?.error).toBe(error)
+
+    act(() => { hook.dismissPendingStart('request-1') })
+    expect(hook.pendingStarts).toEqual([])
+    expect(hook.startError).toBeNull()
+    expect(startRun).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([null, {}])('retains an unrelated start error when dismissing a request (review detail %j)', async (review) => {
+    const error = new Error('service unavailable')
+    startRun.mockRejectedValue(error)
+    mocks.asTestReviewRequired.mockReturnValue(review)
+    mount()
+    await act(async () => { await hook.handleStartRun('local') })
+
+    act(() => { hook.dismissPendingStart('request-1') })
+
+    expect(hook.startError?.error).toBe(error)
+    expect(hook.pendingStarts).toEqual([])
+  })
+
+  it('remembers a review-blocked request across refresh without replaying it from this tab', async () => {
+    const request = { requestId: 'request-1', feature: 'checkout', owner: { kind: 'internal' } }
+    mocks.asTestReviewRequired.mockReturnValue({ request })
+    startRun.mockRejectedValueOnce(new Error('review required'))
+    mount()
+    await act(async () => { await hook.handleStartRun('local') })
+    expect(hook.pendingStarts).toEqual([{ requestId: 'request-1', feature: 'checkout', mode: 'test' }])
+    act(() => { hook.setStartError(null) })
+    expect(startRun).toHaveBeenCalledOnce()
+    act(() => { root.unmount(); root = createRoot(container) })
+    mount()
+    expect(hook.pendingStarts).toEqual([{ requestId: 'request-1', feature: 'checkout', mode: 'test' }])
+    expect(startRun).toHaveBeenCalledOnce()
+    act(() => { hook.dismissPendingStart('request-1') })
+    expect(hook.pendingStarts).toEqual([])
+  })
+
   it('selects the started run on success', async () => {
     mount()
     await act(async () => { await hook.handleStartRun('local') })
@@ -121,6 +174,23 @@ describe('handleStartRun', () => {
 })
 
 describe('resolveCollision', () => {
+  it('remembers a review request encountered after the boot isolation choice', async () => {
+    startRun.mockRejectedValueOnce(new Error('collision'))
+    mocks.asRepoCollision.mockReturnValue({ repo: 'shop' })
+    mount()
+    await act(async () => { await hook.handleStartRun('local', 'boot') })
+    const error = new Error('review required')
+    startRun.mockRejectedValueOnce(error)
+    mocks.asTestReviewRequired.mockReturnValue({ request: { requestId: 'after-collision', feature: 'checkout' } })
+
+    await act(async () => { await hook.resolveCollision('worktree') })
+
+    expect(hook.pendingStarts).toEqual([{ requestId: 'after-collision', feature: 'checkout', mode: 'boot' }])
+    expect(hook.startError?.error).toBe(error)
+    expect(hook.collisionPrompt).toBeNull()
+    expect(onRunStarted).not.toHaveBeenCalled()
+  })
+
   it('re-issues the start with the chosen isolation and clears the prompt', async () => {
     startRun.mockRejectedValueOnce(new Error('409'))
     mocks.asRepoCollision.mockReturnValue({ repo: 'shop' })

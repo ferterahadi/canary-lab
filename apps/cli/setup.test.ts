@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { fakeMcpClients } from '../../tools/test-helpers/mcp-clients'
 import { readWorkspaceRegistry } from '../../shared/runtime/workspace-registry'
 
 const mocks = vi.hoisted(() => ({
@@ -27,17 +28,8 @@ function mkWorkspace(parent = mkTmp()): string {
   return workspace
 }
 
-function cliAvailable(command: string): void {
-  const lookup = process.platform === 'win32' ? 'where' : 'which'
-  mocks.execFileSync.mockImplementation((cmd: string, args: string[]) => {
-    if (cmd === lookup && args[0] === command) return Buffer.from('')
-    // No server configured under any key (incl. legacy `canary-lab`) → migration
-    // stays inert and registration takes the add path.
-    if (cmd === command && args[0] === 'mcp' && args[1] === 'get') {
-      throw new Error('missing MCP server')
-    }
-    return Buffer.from('')
-  })
+function cliAvailable(command: string, homeDir: string): void {
+  mocks.execFileSync.mockImplementation(fakeMcpClients(homeDir, { available: [command] }))
 }
 
 function claudeAddJsonArgs(command: string, cliPath: string): string[] {
@@ -56,7 +48,7 @@ function claudeAddJsonArgs(command: string, cliPath: string): string[] {
   ]
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   mocks.execFileSync.mockReset()
   mocks.execFileSync.mockImplementation(() => {
     throw new Error('missing command')
@@ -65,7 +57,7 @@ beforeEach(() => {
   delete process.env.CANARY_LAB_SKIP_CLIENT_MCP
 })
 
-afterEach(() => {
+afterEach(async () => {
   if (originalCodeHome === undefined) delete process.env.CODEX_HOME
   else process.env.CODEX_HOME = originalCodeHome
   while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true })
@@ -73,7 +65,7 @@ afterEach(() => {
 })
 
 describe('parseArgs', () => {
-  it('parses setup flags', () => {
+  it('parses setup flags', async () => {
     expect(parseArgs(['--workspace', '/tmp/x', '--agent', 'codex', '--dry-run', '--force'])).toEqual({
       ok: true,
       value: {
@@ -85,14 +77,14 @@ describe('parseArgs', () => {
     })
   })
 
-  it('rejects unknown flags and invalid agents', () => {
+  it('rejects unknown flags and invalid agents', async () => {
     expect(parseArgs(['--agent', 'bogus']).ok).toBe(false)
     expect(parseArgs(['--wat']).ok).toBe(false)
   })
 })
 
 describe('detectAgents', () => {
-  it('detects Codex and Claude from home folders and CODEX_HOME', () => {
+  it('detects Codex and Claude from home folders and CODEX_HOME', async () => {
     const home = mkTmp()
     fs.mkdirSync(path.join(home, '.claude'))
     process.env.CODEX_HOME = path.join(home, 'codex-home')
@@ -100,7 +92,7 @@ describe('detectAgents', () => {
     expect(detectAgents(home)).toEqual(['codex', 'claude'])
   })
 
-  it('detects command availability on PATH', () => {
+  it('detects command availability on PATH', async () => {
     const home = mkTmp()
     const lookup = process.platform === 'win32' ? 'where' : 'which'
     mocks.execFileSync.mockImplementation((command: string, args: string[]) => {
@@ -113,12 +105,63 @@ describe('detectAgents', () => {
 })
 
 describe('setup', () => {
-  it('registers the workspace and skips agent setup when no agent is detected', () => {
+  it('validates Desktop JSON before changing workspace registration or skills', async () => {
+    const home = mkTmp()
+    const workspace = mkWorkspace()
+    const desktop = path.join(home, 'desktop', 'config.json')
+    fs.mkdirSync(path.dirname(desktop), { recursive: true })
+    fs.writeFileSync(desktop, '{invalid')
+    await expect(setup({ workspace, agent: 'codex', dryRun: false, force: true }, {
+      homeDir: home, claudeDesktopConfigPath: desktop, log: () => {},
+    })).rejects.toThrow(/Invalid JSON/)
+    expect(fs.readFileSync(desktop, 'utf-8')).toBe('{invalid')
+    expect(readWorkspaceRegistry(home).workspaces).toEqual([])
+    expect(fs.existsSync(path.join(home, '.agents'))).toBe(false)
+  })
+
+  it('reports each client separately and verifies the saved Desktop environment', async () => {
+    const home = mkTmp()
+    const workspace = mkWorkspace()
+    const desktop = path.join(home, 'desktop', 'config.json')
+    fs.mkdirSync(path.dirname(desktop), { recursive: true })
+    mocks.execFileSync.mockImplementation(fakeMcpClients(home))
+    const verifyMcp = vi.fn(() => ({ status: 'verified' as const, message: 'connected' }))
+    const lines: string[] = []
+    await setup({ workspace, agent: 'all', dryRun: false, force: true }, {
+      homeDir: home, claudeDesktopConfigPath: desktop, verifyMcp, log: (line) => lines.push(line),
+    })
+    expect(verifyMcp).toHaveBeenCalledTimes(3)
+    expect(verifyMcp.mock.calls[2][0]).toEqual(expect.objectContaining({
+      env: expect.objectContaining({ CANARY_LAB_PROJECT_ROOT: workspace, PATH: expect.any(String) }),
+    }))
+    for (const name of ['Codex', 'Claude Code', 'Claude Desktop']) expect(lines).toContain(`${name} MCP verified: connected`)
+  })
+
+  it('returns nonzero for broken verification but distinguishes a stopped UI', async () => {
+    const home = mkTmp()
+    const workspace = mkWorkspace()
+    mocks.execFileSync.mockImplementation(fakeMcpClients(home))
+    const exit = vi.fn()
+    const log = vi.fn()
+    const options = { homeDir: home, exit, log, error: () => {} }
+    await main(['--workspace', workspace, '--agent', 'codex', '--force'], {
+      ...options, verifyMcp: () => ({ status: 'broken', message: 'bad command' }),
+    })
+    expect(exit).toHaveBeenCalledWith(1)
+    exit.mockClear()
+    await main(['--workspace', workspace, '--agent', 'codex', '--force'], {
+      ...options, verifyMcp: () => ({ status: 'server-down', message: 'Start the UI.' }),
+    })
+    expect(exit).not.toHaveBeenCalled()
+    expect(log).toHaveBeenCalledWith('Codex MCP configured; connection unverified. Start the UI.')
+  })
+
+  it('registers the workspace and skips agent setup when no agent is detected', async () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
     const lines: string[] = []
 
-    setup({ workspace, agent: 'auto', dryRun: false, force: false }, {
+    await setup({ workspace, agent: 'auto', dryRun: false, force: false }, {
       homeDir: home,
       log: (line) => { lines.push(line) },
     })
@@ -129,29 +172,29 @@ describe('setup', () => {
     expect(lines.join('\n')).toContain('Skipping agent integration setup')
   })
 
-  it('installs matching agent integrations', () => {
+  it('installs matching agent integrations', async () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
     fs.mkdirSync(path.join(home, '.codex'), { recursive: true })
 
-    setup({ workspace, agent: 'auto', dryRun: false, force: false }, {
+    await setup({ workspace, agent: 'auto', dryRun: false, force: false }, {
       homeDir: home,
       log: () => {},
     })
 
-    expect(fs.existsSync(path.join(home, '.codex', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
+    expect(fs.existsSync(path.join(home, '.agents', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
     expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(false)
     expect(fs.existsSync(path.join(home, '.canary-lab', 'agent-integrations', 'canary-lab-plugin', '.mcp.json'))).toBe(true)
   })
 
   const verifiedStub = () => ({ status: 'verified' as const, message: '' })
 
-  it('setup --agent codex installs the skill and configures Codex MCP', () => {
+  it('setup --agent codex installs the skill and configures Codex MCP', async () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
-    cliAvailable('codex')
+    cliAvailable('codex', home)
 
-    setup({ workspace, agent: 'codex', dryRun: false, force: false }, {
+    await setup({ workspace, agent: 'codex', dryRun: false, force: false }, {
       homeDir: home,
       log: () => {},
       execPath: '/usr/bin/node',
@@ -159,7 +202,7 @@ describe('setup', () => {
       verifyMcp: verifiedStub,
     })
 
-    expect(fs.existsSync(path.join(home, '.codex', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
+    expect(fs.existsSync(path.join(home, '.agents', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
       ['mcp', 'add', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'compact'],
@@ -167,12 +210,12 @@ describe('setup', () => {
     )
   })
 
-  it('setup --agent claude installs the skill and configures Claude MCP', () => {
+  it('setup --agent claude installs the skill and configures Claude MCP', async () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
-    cliAvailable('claude')
+    cliAvailable('claude', home)
 
-    setup({ workspace, agent: 'claude', dryRun: false, force: false }, {
+    await setup({ workspace, agent: 'claude', dryRun: false, force: false }, {
       homeDir: home,
       log: () => {},
       execPath: '/usr/bin/node',
@@ -188,19 +231,12 @@ describe('setup', () => {
     )
   })
 
-  it('setup --agent all configures both MCP clients', () => {
+  it('setup --agent all configures both MCP clients', async () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
-    const lookup = process.platform === 'win32' ? 'where' : 'which'
-    mocks.execFileSync.mockImplementation((cmd: string, args: string[]) => {
-      if (cmd === lookup && (args[0] === 'codex' || args[0] === 'claude')) return Buffer.from('')
-      if ((cmd === 'codex' || cmd === 'claude') && args[0] === 'mcp' && args[1] === 'get') {
-        throw new Error('missing MCP server')
-      }
-      return Buffer.from('')
-    })
+    mocks.execFileSync.mockImplementation(fakeMcpClients(home))
 
-    setup({ workspace, agent: 'all', dryRun: false, force: false }, {
+    await setup({ workspace, agent: 'all', dryRun: false, force: false }, {
       homeDir: home,
       log: () => {},
       execPath: '/usr/bin/node',
@@ -220,13 +256,13 @@ describe('setup', () => {
     )
   })
 
-  it('configures Claude Desktop when its config directory exists', () => {
+  it('configures Claude Desktop when its config directory exists', async () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
     const desktopConfigPath = path.join(mkTmp(), 'Claude', 'claude_desktop_config.json')
     fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
 
-    setup({ workspace, agent: 'auto', dryRun: false, force: false }, {
+    await setup({ workspace, agent: 'auto', dryRun: false, force: false }, {
       homeDir: home,
       log: () => {},
       execPath: '/usr/bin/node',
@@ -246,12 +282,12 @@ describe('setup', () => {
     expect(cfg.mcpServers['Canary_Lab'].env.CANARY_LAB_PROJECT_ROOT).toBe(workspace)
   })
 
-  it('does not touch Claude Desktop when its config directory is absent', () => {
+  it('does not touch Claude Desktop when its config directory is absent', async () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
     const desktopConfigPath = path.join(mkTmp(), 'Claude', 'claude_desktop_config.json')
 
-    setup({ workspace, agent: 'auto', dryRun: false, force: false }, {
+    await setup({ workspace, agent: 'auto', dryRun: false, force: false }, {
       homeDir: home,
       log: () => {},
       claudeDesktopConfigPath: desktopConfigPath,
@@ -261,16 +297,16 @@ describe('setup', () => {
     expect(fs.existsSync(desktopConfigPath)).toBe(false)
   })
 
-  it('CANARY_LAB_SKIP_CLIENT_MCP installs the skill but never touches client configs', () => {
+  it('CANARY_LAB_SKIP_CLIENT_MCP installs the skill but never touches client configs', async () => {
     process.env.CANARY_LAB_SKIP_CLIENT_MCP = '1'
     const home = mkTmp()
     const workspace = mkWorkspace()
-    cliAvailable('claude')
+    cliAvailable('claude', home)
     const desktopConfigPath = path.join(mkTmp(), 'Claude', 'claude_desktop_config.json')
     fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
     const lines: string[] = []
 
-    setup({ workspace, agent: 'claude', dryRun: false, force: false }, {
+    await setup({ workspace, agent: 'claude', dryRun: false, force: false }, {
       homeDir: home,
       log: (line) => { lines.push(line) },
       execPath: '/usr/bin/node',
@@ -292,10 +328,10 @@ describe('setup', () => {
   // registers into the user's global config dies with the next temp sweep. Observed
   // live as a global Canary_Lab entry aimed at a canary-lab-demo-* temp path.
   // Implicit runs only: an explicit `setup` in a temp workspace registers (below).
-  it('never registers a client when an implicit setup runs under the temp dir', () => {
+  it('never registers a client when an implicit setup runs under the temp dir', async () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
-    cliAvailable('claude')
+    cliAvailable('claude', home)
     const desktopConfigPath = path.join(mkTmp(), 'Claude', 'claude_desktop_config.json')
     fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
     const lines: string[] = []
@@ -304,7 +340,7 @@ describe('setup', () => {
       'canary-lab-demo-x', 'demo-project', 'node_modules', 'canary-lab', 'dist', 'apps', 'cli', 'cli.js',
     )
 
-    setup({ workspace, agent: 'claude', dryRun: false, force: false, implicit: true }, {
+    await setup({ workspace, agent: 'claude', dryRun: false, force: false, implicit: true }, {
       homeDir: home,
       log: (line) => { lines.push(line) },
       execPath: '/usr/bin/node',
@@ -328,10 +364,10 @@ describe('setup', () => {
   // has stated exactly what they want, so the structural guard must not turn the
   // instruction into a silent no-op — the entry registers, with a warning that it
   // dies with the workspace.
-  it('registers a client for an explicit setup under the temp dir, and warns the entry rots', () => {
+  it('registers a client for an explicit setup under the temp dir, and warns the entry rots', async () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
-    cliAvailable('claude')
+    cliAvailable('claude', home)
     const desktopConfigPath = path.join(mkTmp(), 'Claude', 'claude_desktop_config.json')
     fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
     const lines: string[] = []
@@ -340,7 +376,7 @@ describe('setup', () => {
       'canary-lab-demo-x', 'demo-project', 'node_modules', 'canary-lab', 'dist', 'apps', 'cli', 'cli.js',
     )
 
-    setup({ workspace, agent: 'claude', dryRun: false, force: true }, {
+    await setup({ workspace, agent: 'claude', dryRun: false, force: true }, {
       homeDir: home,
       log: (line) => { lines.push(line) },
       execPath: '/usr/bin/node',
@@ -363,14 +399,14 @@ describe('setup', () => {
 
   // Implicit + durable: a normal `init` in a real folder must still register —
   // the guard keys on the temp path, not on who called setup.
-  it('registers a client for an implicit setup outside the temp dir', () => {
+  it('registers a client for an implicit setup outside the temp dir', async () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
-    cliAvailable('claude')
+    cliAvailable('claude', home)
     const desktopConfigPath = path.join(mkTmp(), 'Claude', 'claude_desktop_config.json')
     fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
 
-    setup({ workspace, agent: 'claude', dryRun: false, force: false, implicit: true }, {
+    await setup({ workspace, agent: 'claude', dryRun: false, force: false, implicit: true }, {
       homeDir: home,
       log: () => {},
       execPath: '/usr/bin/node',
@@ -385,14 +421,14 @@ describe('setup', () => {
 
   // Negative control for the guard above: a DURABLE install must still register,
   // which is the supported way to move these pointers.
-  it('still registers a client for an install outside the temp dir', () => {
+  it('still registers a client for an install outside the temp dir', async () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
-    cliAvailable('claude')
+    cliAvailable('claude', home)
     const desktopConfigPath = path.join(mkTmp(), 'Claude', 'claude_desktop_config.json')
     fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
 
-    setup({ workspace, agent: 'claude', dryRun: false, force: false }, {
+    await setup({ workspace, agent: 'claude', dryRun: false, force: false }, {
       homeDir: home,
       log: () => {},
       execPath: '/usr/bin/node',
@@ -404,14 +440,14 @@ describe('setup', () => {
     expect(mocks.execFileSync).toHaveBeenCalledWith('claude', expect.arrayContaining(['add-json']), expect.anything())
   })
 
-  it('verifies the registration and warns when the command is broken', () => {
+  it('verifies the saved registration and rejects a broken command', async () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
-    cliAvailable('codex')
+    cliAvailable('codex', home)
     const lines: string[] = []
     const seen: string[] = []
 
-    setup({ workspace, agent: 'codex', dryRun: false, force: false }, {
+    await expect(setup({ workspace, agent: 'codex', dryRun: false, force: false }, {
       homeDir: home,
       log: (line) => lines.push(line),
       execPath: '/usr/bin/node',
@@ -420,33 +456,33 @@ describe('setup', () => {
         seen.push(invocation.command)
         return { status: 'broken', message: 'version mismatch' }
       },
-    })
+    })).rejects.toThrow('version mismatch')
 
     expect(seen).toEqual(['/usr/bin/node'])
-    expect(lines.join('\n')).toContain('WARNING: Canary Lab MCP verification failed')
+    expect(lines.join('\n')).toContain('Codex MCP verification failed')
   })
 
-  it('dry-run does not write the registry or integrations', () => {
+  it('dry-run does not write the registry or integrations', async () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
     fs.mkdirSync(path.join(home, '.codex'), { recursive: true })
 
-    setup({ workspace, agent: 'auto', dryRun: true, force: false }, {
+    await setup({ workspace, agent: 'auto', dryRun: true, force: false }, {
       homeDir: home,
       log: () => {},
     })
 
     expect(readWorkspaceRegistry(home).workspaces).toHaveLength(0)
-    expect(fs.existsSync(path.join(home, '.codex', 'skills', 'canary-lab'))).toBe(false)
+    expect(fs.existsSync(path.join(home, '.agents', 'skills', 'canary-lab'))).toBe(false)
   })
 
-  it('dry-run prints MCP registration intent without add/remove calls', () => {
+  it('dry-run prints MCP registration intent without add/remove calls', async () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
     const lines: string[] = []
-    cliAvailable('codex')
+    cliAvailable('codex', home)
 
-    setup({ workspace, agent: 'codex', dryRun: true, force: false }, {
+    await setup({ workspace, agent: 'codex', dryRun: true, force: false }, {
       homeDir: home,
       log: (line) => { lines.push(line) },
     })

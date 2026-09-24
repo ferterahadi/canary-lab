@@ -6,6 +6,18 @@ type: skill
 
 # Canary Lab — Environment Verification
 
+## User input through MCP 2.0
+
+Let the owning MCP command request missing input with SDK 2.0 elicitation
+(`input_required`). The client collects the response and retries the command.
+Do not answer a user form yourself or ask the same question in chat first.
+Existing user instructions and autopilot choices still apply without another ask.
+On `needs-input`, leave work pending after decline/cancel, stale input, or an
+unfinished UI action; never retry or repeat the question automatically. Chat is
+only the fallback when elicitation is unavailable. Never collect passwords, API
+keys, or access tokens in chat or form elicitation: use the returned Canary UI URL.
+Setup and reconnection questions still use chat while MCP is unavailable.
+
 ## MCP Invocation
 
 Setup and the plugin expose one public Canary Lab MCP tool: `exec` (usually
@@ -59,12 +71,12 @@ in the connected workspace. Use it directly, then choose the **Local app** or
 **Deployed environment** (staging/production URLs):
 
 1. `list_verification_configs` (optionally filtered by feature) shows the saved configs; `get_verification_config` reads one. In the UI, "Playwright" names which env file the specs run with and "Services" names the health-check targets — keep those domain labels when relaying. A config whose URLs contain `replace.invalid` is a scaffolded placeholder — never execute it as-is; update it with real URLs first (or use the Local app flow above).
-2. Create or adjust a config with `create_verification_config` / `update_verification_config` — a config binds a feature to a target environment (base URLs, env set, health-check expectations). Ask the user for the target URLs rather than inventing them.
+2. Create or adjust a config with `create_verification_config` / `update_verification_config` — a config binds a feature to a target environment (base URLs, env set, health-check expectations). If target URLs are missing, omit `targetUrls` from the create/update call: it requests them through elicitation before saving. Only ask in chat when the tool reports elicitation unavailable. Never invent target URLs.
 3. `execute_verification` starts the verification run. `featureId` is required; pass either a saved `configId`, or ad-hoc `targetUrls` + `playwrightEnvsetId`. It returns an `executionId`.
 
 **Both flows**: if `execute_verification` returns `type: "getting_started_busy"`, a Getting Started demo already owns the workspace — follow the active target it returns; do not start another workflow. While the verification runs, the user can watch it live in the Canary Lab UI on the suite's Flight page (Test Run stage, in verify mode) — that view is read-only while this client drives.
 
-**Both flows end the same way**: poll `get_verification_result(executionId)` for the outcome; if it is still running, wait ~10s and call it again — stop once it reaches a terminal status. Report the result's `status`, and on failure the pass/fail counts in the result (`diagnostics.summary` / `diagnostics.failedTests` — there is no `counts` field on a verify result). There is no heal claim here — a failure is a finding to report (and possibly a `canary-lab-run` follow-up locally), not something to fix against the target environment. Only `abort_run` a held boot session with the user's confirmation (the `bootRunId` hand-off above tears it down automatically).
+**Both flows end the same way**: poll `get_verification_result(executionId)` for the outcome; if it is still running, wait ~10s and call it again — stop once it reaches a terminal status. Report the result's `status`, and on failure the pass/fail counts in the result (`diagnostics.summary` / `diagnostics.failedTests` — there is no `counts` field on a verify result). There is no heal claim here — a failure is a finding to report (and possibly a `canary-lab-run` follow-up locally), not something to fix against the target environment. Only request `abort_run` for a held boot session when the user asks; its human confirmation form must be accepted (without forms, use Stop in the Run panel) (the `bootRunId` hand-off above tears it down automatically).
 
 ## Guardrails
 

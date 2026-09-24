@@ -106,17 +106,17 @@ export function registerExternalDraftTools(ctx: ToolGroupContext): void {
     if (!current.featureName) return errorResult('external draft has no featureName')
     const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === current.featureName)
     if (!feature?.featureDir) return errorResult(`feature not found: ${current.featureName}`)
-    const applied = applyExternalDraftFiles({
+    const applied = await applyExternalDraftFiles({
       featureDir: feature.featureDir,
       files: files?.map((file) => ({ path: file.path, content: file.content })),
     })
     if (!applied.ok) return errorResult(applied.error)
     const p = draftPaths(deps.store.logsDir, draftId)
     fs.mkdirSync(p.generatedDir, { recursive: true })
-    for (const file of files ?? []) {
-      const target = path.join(p.generatedDir, file.path)
+    for (const file of applied.written) {
+      const target = path.join(p.generatedDir, path.relative(feature.featureDir, file))
       fs.mkdirSync(path.dirname(target), { recursive: true })
-      fs.writeFileSync(target, file.content, 'utf8')
+      fs.copyFileSync(file, target)
     }
     const next: DraftRecord = {
       ...current,
@@ -132,6 +132,7 @@ export function registerExternalDraftTools(ctx: ToolGroupContext): void {
       feature: current.featureName,
       status: 'applied',
       written: applied.written,
+      ...(applied.warnings ? { warnings: applied.warnings } : {}),
     })
   })
 }

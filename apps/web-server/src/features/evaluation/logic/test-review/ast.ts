@@ -20,6 +20,13 @@ export function sourceKey(location: string): string {
   return match ? `${match[1]}:${match[2]}` : location
 }
 
+/** The spec file of a `file:line[:col]` location — the part of a test's
+ *  position that survives a heal edit moving it to another line. */
+export function specFileOf(location: string): string {
+  const match = location.match(/^(.*):\d+(?::\d+)?$/)
+  return match ? match[1] : location
+}
+
 export function isPlaywrightTestCall(node: ts.CallExpression): boolean {
   const chain = calleeChain(node.expression)
   if (chain[0] !== 'test') return false

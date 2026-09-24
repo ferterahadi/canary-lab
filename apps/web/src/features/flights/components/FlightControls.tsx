@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import * as api from '@/shared/api/client'
 import type { FlightManifest, FlightStageKey, FlightStageStatus } from '@/shared/api/client'
 import { Modal, useEscapeToClose } from '@/shared/ui/atoms'
@@ -8,27 +8,18 @@ import { DeleteSuiteConfirm, ModelLaunchGate } from '@/features/config'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import { START_FRESH_BLURB, START_FRESH_LABEL } from './FlightStartDialog'
 import { STAGE_BLURB, STAGE_ICON, stageRowKey, stageStatusTone } from './stage-meta'
-import { FLIGHT_EXECUTION_ORDER } from '@shared/flights/types'
+import { FLIGHT_EXECUTION_ORDER, flightStagesResetByEntry } from '@shared/flights/types'
 import { flightRailLabel } from '@shared/flights/stage-labels'
+import { FLIGHT_SECTION_ROW_KEYS, FLIGHT_STAGE_SECTIONS } from './flight-sections'
 import { EMPTY_AGENT_MODELS, MODEL_STAGE_KEYS } from '@shared/agent-models'
 import { externalMutationTooltip, type ExternalMutationOwner } from '../lib/external-work'
 
 /** The stages Continue → "from a step…" offers — the user-facing rail rows
  *  (merged-pair primaries), labeled the way the rail labels them. The server
  *  validates prerequisites (checkStageEntry) and 400s an invalid target. */
-const REDO_STAGE_KEY_SET = new Set<FlightStageKey>([
-  'scout',
-  'scaffold',
-  'docs',
-  'specs-coverage',
-  'run',
-  'portify',
-  'evaluation-export',
-])
+const REDO_STAGE_KEY_SET = new Set<FlightStageKey>(FLIGHT_SECTION_ROW_KEYS)
 
-const REDO_STAGE_KEYS = FLIGHT_EXECUTION_ORDER.filter((key) => REDO_STAGE_KEY_SET.has(key))
-
-export const REDO_STAGES: Array<{ key: FlightStageKey; label: string }> = REDO_STAGE_KEYS.map((key) => ({
+export const REDO_STAGES: Array<{ key: FlightStageKey; label: string }> = FLIGHT_SECTION_ROW_KEYS.map((key) => ({
   key,
   label: flightRailLabel(key),
 }))
@@ -40,7 +31,7 @@ export const REDO_STAGES: Array<{ key: FlightStageKey; label: string }> = REDO_S
  *  so a `done` primary (docs) made the row look finished and the label named the
  *  NEXT row while resume in fact re-entered this one. Scan every stage in
  *  execution order instead, then fold the companion back onto its row. */
-export function resumeTargetLabel(flight: FlightManifest): string | null {
+function resumeTargetStage(flight: FlightManifest): FlightStageKey | null {
   const settled = new Set<FlightStageStatus>(['done', 'skipped'])
   const unsettled = (stage: FlightManifest['stages'][number] | undefined): boolean =>
     stage != null && !settled.has(stage.status)
@@ -55,7 +46,12 @@ export function resumeTargetLabel(flight: FlightManifest): string | null {
     .find(unsettled)
   if (!open) return null
   const rowKey = stageRowKey(open.key)
-  return REDO_STAGES.find(({ key }) => key === rowKey)?.label ?? null
+  return REDO_STAGE_KEY_SET.has(rowKey) ? rowKey : null
+}
+
+export function resumeTargetLabel(flight: FlightManifest): string | null {
+  const target = resumeTargetStage(flight)
+  return REDO_STAGES.find(({ key }) => key === target)?.label ?? null
 }
 
 /** R74/R81: ONE Continue control for a resumable flight. A persisted pause and
@@ -67,6 +63,7 @@ export function ContinueMenu({
   onStartFlight,
   externalMutationOwner,
   recordlessEntry,
+  coverageRecovery,
 }: {
   flight: FlightManifest
   onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
@@ -77,9 +74,11 @@ export function ContinueMenu({
   /** A derived flight has evidence but no persisted record. Resume mints that
    *  first record directly at this stage instead of reopening the launcher. */
   recordlessEntry?: FlightStageKey
+  coverageRecovery?: { stage: FlightStageKey; warning: string }
 }) {
   const [open, setOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [redoFrom, setRedoFrom] = useState<FlightStageKey | null>(null)
   const [preparing, setPreparing] = useState(false)
   const [modelsGate, setModelsGate] = useState<{
     body: api.StartFlightBody
@@ -87,8 +86,15 @@ export function ContinueMenu({
     config: api.ProjectConfig
   } | null>(null)
   const ref = useRef<HTMLDivElement | null>(null)
-  const menuMode = flight.status === 'paused' || recordlessEntry !== undefined
-  const resumeTarget = resumeTargetLabel(flight)
+  const menuMode = flight.status === 'paused' || recordlessEntry !== undefined || coverageRecovery !== undefined
+  const resumeStage = resumeTargetStage(flight)
+  const resumeTarget = REDO_STAGES.find(({ key }) => key === resumeStage)?.label ?? null
+  const recoveryStage = coverageRecovery ? stageRowKey(coverageRecovery.stage) : undefined
+  const recoveryLabel = REDO_STAGES.find(({ key }) => key === recoveryStage)?.label
+  // A stale-coverage shortcut replaces Resume only when both enter the same
+  // user-facing stage. Which rail row happens to be selected does not change
+  // the available actions.
+  const replacesResume = recoveryStage !== undefined && (recoveryStage === resumeStage || resumeStage === null)
 
   const startRecordless = (fromStage: FlightStageKey, feedback?: string): void => {
     if (preparing) return
@@ -159,7 +165,7 @@ export function ContinueMenu({
           role="menu"
           className="cl-popover absolute right-0 top-full z-20 mt-1 flex w-[260px] flex-col gap-1 p-1.5"
         >
-          <button
+          {!replacesResume && <button
             type="button"
             role="menuitem"
             data-testid="flight-resume"
@@ -176,12 +182,21 @@ export function ContinueMenu({
             <span className="block text-[10.5px] text-muted">
               Keeps every finished step and retries the first unfinished one
             </span>
-          </button>
+          </button>}
+          {coverageRecovery && recoveryStage && (
+            <button type="button" role="menuitem" data-testid="flight-coverage-recover"
+              onClick={() => { setOpen(false); setRedoFrom(recoveryStage); setDialogOpen(true) }}
+              title={coverageRecovery.warning}
+              className="cl-hover-row rounded px-2 py-1.5 text-left transition-colors">
+              <span className="block text-xs font-medium">↻ Run from {recoveryLabel}</span>
+              <span className="block text-[10.5px] text-muted">Update the out-of-date coverage from this step</span>
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
             data-testid="flight-redo-open"
-            onClick={() => { setOpen(false); setDialogOpen(true) }}
+            onClick={() => { setOpen(false); setRedoFrom(null); setDialogOpen(true) }}
             className="cl-hover-row rounded px-2 py-1.5 text-left transition-colors"
           >
             <span className="block text-xs font-medium">↻ From a step…</span>
@@ -198,6 +213,7 @@ export function ContinueMenu({
           onClose={() => setDialogOpen(false)}
           onStartFresh={onStartFlight ? () => { setDialogOpen(false); onStartFlight(flight.feature, 'fresh') } : undefined}
           onRedo={recordlessEntry ? startRecordless : undefined}
+          initialStage={redoFrom}
         />
       )}
       {modelsGate && (
@@ -232,6 +248,7 @@ export function RedoFlightDialog({
   onClose,
   onStartFresh,
   onRedo,
+  initialStage = null,
 }: {
   flight: FlightManifest
   onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
@@ -242,11 +259,13 @@ export function RedoFlightDialog({
   /** A recordless flight starts through POST /api/flights; recorded flights
    *  keep using their id-scoped redo endpoint. */
   onRedo?: (fromStage: FlightStageKey, feedback?: string) => void
+  initialStage?: FlightStageKey | null
 }) {
   const [entry, setEntry] = useState<Awaited<ReturnType<typeof api.getFlightEntryOptions>> | null>(null)
   const [entryFailed, setEntryFailed] = useState(false)
-  const [fromStage, setFromStage] = useState<FlightStageKey | null>(null)
+  const [fromStage, setFromStage] = useState<FlightStageKey | null>(initialStage)
   const [feedback, setFeedback] = useState('')
+  const feedbackHintId = useId()
 
   useEffect(() => {
     let alive = true
@@ -265,6 +284,12 @@ export function RedoFlightDialog({
     return option ?? { allowed: true }
   }
   const selectedLabel = REDO_STAGES.find((s) => s.key === fromStage)?.label
+  const affected = fromStage
+    ? REDO_STAGES.filter((stage) => flightStagesResetByEntry(fromStage)
+      .some((key) => stageRowKey(key) === stage.key))
+    : []
+  // The rows' ↻ marks and the footer count show which steps reset. Rows
+  // without a mark keep their work.
 
   return (
     <Modal
@@ -272,16 +297,24 @@ export function RedoFlightDialog({
       onClose={onClose}
       width={560}
       title="Re-run from a step"
-      description="Pick where the flight restarts. Results from that step on are thrown away; files already written stay."
+      description="Pick where to start again. Finished reports stay downloadable."
       footer={
-        <div className="flex items-center justify-end gap-2">
+        <>
+          {/* The consequence sits beside the button that causes it. The body
+              scrolls, so a note under the list was out of view at the moment
+              of the click; the rows' marks say which steps, this says how many. */}
+          <span data-testid="flight-redo-effects" aria-live="polite" className="cl-type-meta mr-auto text-secondary">
+            {affected.length > 0 && (
+              <><span aria-hidden="true">↻ </span>Resets {affected.length} {affected.length === 1 ? 'step' : 'steps'}</>
+            )}
+          </span>
           <button type="button" onClick={onClose} className="cl-button px-3 py-1.5 text-xs">
             Cancel
           </button>
           <button
             type="button"
             data-testid="flight-redo-submit"
-            disabled={fromStage === null}
+            disabled={fromStage === null || !entryFor(fromStage).allowed}
             onClick={() => {
               const stage = fromStage
               if (!stage) return
@@ -294,7 +327,7 @@ export function RedoFlightDialog({
           >
             {selectedLabel ? `Re-run from ${selectedLabel}` : 'Re-run'}
           </button>
-        </div>
+        </>
       }
     >
       <div className="flex flex-col gap-4 p-4">
@@ -310,14 +343,11 @@ export function RedoFlightDialog({
             onClick={onStartFresh}
             className="cl-hover-row -mb-2 flex items-start gap-3 rounded-md px-3.5 py-2 text-left transition-colors"
           >
-            <span
-              aria-hidden="true"
-              className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[10px] border-line text-muted"
-            >
+            <span aria-hidden="true" className="cl-bead mt-px">
               ✎
             </span>
             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="text-[12.5px] font-medium text-secondary">
+              <span className="cl-type-title text-secondary">
                 {START_FRESH_LABEL}
               </span>
               <span className="text-[10.5px] leading-snug text-muted">
@@ -328,7 +358,7 @@ export function RedoFlightDialog({
           </button>
         )}
 
-        {/* One connected pipeline the eye reads top-to-bottom. Each row's
+        {/* The same groups and order as the rail. Each row's
             badge carries the LAST record's verdict for that step (✓ done,
             number = never reached); its sub-line says what the step does — or
             the server's full reason when the step can't be an entry point
@@ -336,9 +366,10 @@ export function RedoFlightDialog({
         <div
           role="radiogroup"
           aria-label="Step to re-run from"
-          className="flex flex-col overflow-hidden rounded-md border border-line"
+          className="cl-ledger"
         >
           {REDO_STAGES.map((s, index) => {
+            const section = FLIGHT_STAGE_SECTIONS.find((group) => group.keys[0] === s.key)
             const { allowed, reason } = entryFor(s.key)
             const selected = fromStage === s.key
             const lastStatus = flight.stages.find((st) => st.key === s.key)?.status
@@ -347,9 +378,18 @@ export function RedoFlightDialog({
             // which one is picked, so the badge is free to keep saying what the
             // stage's last run did.
             const badgeTone = settled ? stageStatusTone(lastStatus) : 'var(--text-muted)'
+            const resets = affected.some((stage) => stage.key === s.key)
             return (
-              <button
-                key={s.key}
+              <Fragment key={s.key}>
+                {/* `px-3.5` puts the rubric on the bead column. The band's dashed
+                    rule is the group divider, so `.cl-ledger-band` drops the
+                    ledger hairline on it and on the row it opens; the space
+                    above instead keeps each group with the rows below it. */}
+                {section && <div data-testid={`flight-redo-section-${section.id}`} className="cl-ledger-band flex items-center gap-2 px-3.5 pb-0.5 pt-3 first:pt-1">
+                  <span className="cl-rubric shrink-0">{section.label}</span>
+                  <span className="h-px flex-1 border-t border-dashed border-line" />
+                </div>}
+                <button
                 type="button"
                 role="radio"
                 aria-checked={selected}
@@ -374,18 +414,14 @@ export function RedoFlightDialog({
                 className={[
                   OPTION_ROW_CLASS,
                   allowed ? 'cl-hover-row' : '',
-                  index > 0 ? 'border-t' : '',
                 ].filter(Boolean).join(' ')}
                 style={optionRowStyle({ selected, disabled: !allowed, interactive: true })}
               >
                 <span
                   aria-hidden="true"
-                  className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[9.5px] font-semibold"
-                  style={{
-                    borderColor: `color-mix(in srgb, ${badgeTone} 55%, var(--border-default))`,
-                    color: badgeTone,
-                    background: 'transparent',
-                  }}
+                  className="cl-bead mt-px"
+                  data-toned={settled ? 'true' : undefined}
+                  style={{ '--cl-bead-tone': badgeTone } as CSSProperties}
                 >
                   {settled ? STAGE_ICON[lastStatus] : index + 1}
                 </span>
@@ -397,23 +433,35 @@ export function RedoFlightDialog({
                     {!allowed && reason ? reason : STAGE_BLURB[s.key]}
                   </span>
                 </span>
-              </button>
+                {/* The same ↻ the Continue menu spends on "run again". */}
+                {resets && (
+                  <span data-testid="flight-redo-reset-mark" className="shrink-0 self-center text-[12px] text-secondary">
+                    <span aria-hidden="true">↻</span>
+                    <span className="sr-only">Resets</span>
+                  </span>
+                )}
+                </button>
+              </Fragment>
             )
           })}
         </div>
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-medium text-secondary">
-            What went wrong last time? <span className="font-normal text-muted">(optional — added to the agent's prompt)</span>
-          </span>
-          <textarea
-            data-testid="flight-redo-feedback"
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            placeholder="e.g. it collected docs for the wrong part of the app"
-            rows={2}
-            className="cl-input w-full px-2.5 py-2 text-[11.5px]"
-          />
-        </label>
+        {/* Sans helper line under the field, as Project Settings writes one — a
+            mono aside inside the label switched register mid-sentence. */}
+        <div className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1.5">
+            <span className="cl-type-data font-medium text-secondary">What went wrong last time?</span>
+            <textarea
+              data-testid="flight-redo-feedback"
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              placeholder="e.g. it collected docs for the wrong part of the app"
+              rows={2}
+              aria-describedby={feedbackHintId}
+              className="cl-input w-full px-2.5 py-2 text-[11.5px]"
+            />
+          </label>
+          <span id={feedbackHintId} className="cl-type-meta text-muted">Optional — added to the agent's prompt.</span>
+        </div>
       </div>
     </Modal>
   )

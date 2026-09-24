@@ -84,12 +84,12 @@ describe('compact MCP exec dispatcher', () => {
     })
   })
 
-  it('lists the three discovery commands plus all 63 atomic commands', async () => {
+  it('lists the three discovery commands plus all 72 atomic commands', async () => {
     const exec = createCompactExecHandler(new Map())
     const result = await exec({ command: 'list_tools' }, ctx) as CallToolResult
     const parsed = JSON.parse(resultText(result)) as { commands: string[]; count: number }
 
-    expect(parsed.count).toBe(66)
+    expect(parsed.count).toBe(75)
     expect(parsed.commands.slice(0, 3)).toEqual(['list_tools', 'search_tools', 'describe_tool'])
     expect(parsed.commands).toContain('get_feature_coverage')
   })
@@ -235,7 +235,7 @@ describe('compact MCP exec dispatcher', () => {
   })
 
   it('bounds oversized schemas while retaining their top-level field names', async () => {
-    const inputSchema: z.ZodRawShape = {}
+    const inputSchema: Record<string, z.ZodTypeAny> = {}
     for (let index = 0; index < 30; index += 1) {
       inputSchema[`field_${index}`] = z.string().describe('x'.repeat(500))
     }

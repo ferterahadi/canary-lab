@@ -8,8 +8,9 @@ export type WorkspaceEvent =
   | { type: 'feature-renamed'; from: string; to: string }
   | { type: 'features-changed' }
   | { type: 'tests-changed'; feature: string }
+  | { type: 'discovery-repair-changed'; feature: string }
   | { type: 'envsets-changed'; feature: string }
-  | { type: 'coverage-changed'; feature: string }
+  | { type: 'coverage-changed'; feature: string; revision?: string }
   | { type: 'tests-dirty-changed'; feature: string }
   | { type: 'verification-config-changed'; feature: string }
   | { type: 'journal-changed'; runId: string }
@@ -21,6 +22,7 @@ export type WorkspaceEvent =
   | { type: 'evaluation-export-deleted'; taskId: string }
   | { type: 'version-changed' }
   | { type: 'flights-changed' }
+  | { type: 'notifications-changed' }
   // A spawned-agent record changed — started, ended, stopped, or reconciled to
   // `orphaned` on boot. Bumps the `agent-jobs` slot so a stage band's stop control
   // appears and disappears with the agent instead of on a poll.

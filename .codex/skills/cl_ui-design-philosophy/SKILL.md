@@ -37,24 +37,26 @@ Terminal/CLI output styling is out of scope.
 | Status-bar launcher | the `*Pill` components in `GlobalStatusBar` |
 | Background-task surface | `FlightsPill` + `FlightPage` (`features/flights/components/`) (see `cl_async-task-ux`) |
 | Long async generation | the Coverage **Generating** screen — a dedicated full pane (phase stepper + the agent timeline via `AgentSessionView`, always on) that OWNS the view while a job runs; not a banner over a dimmed result |
-| Live agent progress / CLI output | **`AgentSessionView`** — never a raw log `<pre>` |
+| Server-spawned agent with a structured session log | **`AgentSessionView`**; external clients use the shared external-agent card |
 
 ## Principles that make it feel designed
 
-- **One agent timeline everywhere.** Any surface that shows an agent's progress —
-  run heal, draft planning/generating, coverage, portify, benchmark, evaluation
-  export — renders through `AgentSessionView`, never a hand-rolled raw-log `<pre>`.
-  Reaching for `AgentSessionView` means the producer must pin a session ref (claude
-  `--session-id`; codex located by cwd + start) and expose the REST snapshot +
-  `/ws/.../agent-session` tail, exactly like the coverage job (see `cl_async-task-ux`).
-  A new `kind` on `AgentSessionSource` is the whole UI cost; the win is structured
-  thinking/tool/result rows, collapse, model+session header, and live tail for free.
+- **One structured timeline for agentic work.** Server-spawned work with a
+  readable CLI session log — run heal, coverage, portify, benchmark, flight
+  stages, localized evaluation rewrite — uses `AgentSessionView` rather than a
+  second home-grown session viewer. The producer pins a session ref (Claude
+  `--session-id`; Codex located by cwd + start) and exposes a REST snapshot +
+  `/ws/.../agent-session` tail, as coverage does (see `cl_async-task-ux`).
+  External-client work has no server-owned JSONL; use the shared
+  `ExternalAgentCard`. Raw/cached tasks may have only progress text. Classify
+  the producer before promising a thinking/tool timeline (see
+  `cl_surfacing-agent-work`).
 - **A live UI transition needs a reliable trigger, not just a push.** A panel that
   must flip state mid-job may not depend solely on a best-effort broadcast — back it
   off the per-task stream you already hold. Pattern, worked example, and the
   "only updates after I refresh" fingerprint: [[cl_live-state-sync]].
 - **Meaning carries the style, not decoration.** Prefer a status dot, a coloured
-  border-inset, or a typed chip over a heavy accent. (R9 dropped the TestCard's
+  border-inset, or a typed chip over a heavy accent. (The TestCard has no
   decorative left-accent — the verified dot + `@req-*` chips already say it.)
 - **Worst-first ordering.** Lists of work (gaps, failures) sort the items that need
   attention to the top; "all good" sinks to the bottom.
@@ -66,12 +68,12 @@ Terminal/CLI output styling is out of scope.
   (PRD summary → coverage mapping), present one flow with chained progress and one
   set of actions (Regenerate summary / Regenerate coverage) — don't leak the
   internal two-job boundary or a per-item review gate the user must babysit.
-- **Durable selection survives refresh + tabs.** UI selection the user would expect
-  to persist (which feature, which full-screen view, which sub-tab) lives in the URL
-  (source of truth) + `localStorage`, NOT only React state — so a refresh restores
-  it and a second tab reflects it. Broadcast cross-tab changes via `storage` events;
-  see `shared/lib/workspace-view-state.ts`. Ephemeral UI (hover, transient filters) stays
-  in React state.
+- **Route the selection that should survive refresh.** Top-level view and
+  feature live in the URL + `localStorage` and sync across tabs. Run, dialog,
+  flight, stage, and config tab live in the URL only, so two tabs can inspect
+  different details without moving each other. See
+  `apps/web/src/shared/lib/workspace-view-state.ts` and `cl_route-every-surface`.
+  Ephemeral UI (hover, transient filters) stays in React state.
 - **One owner for a long-lived lifecycle; don't split it across views.** A background
   job (or any cross-view live state) must be owned ONCE at the screen level — one
   poller, rehydrated on open — and every panel reads from it. The Coverage dialog's

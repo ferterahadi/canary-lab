@@ -159,6 +159,16 @@ describe('declared-test roster', () => {
     expect(packet.tests.find((test) => test.name === 'test-case-failed-by-name')?.status).toBe('failed')
   })
 
+  it('lists a test the roster recorded twice once', () => {
+    const twice = rosterDetail()
+    // Same id, same location: one test written twice, not two tests.
+    twice.summary!.knownTests = [twice.summary!.knownTests![0], twice.summary!.knownTests![0], ...twice.summary!.knownTests!.slice(1)]
+    const packet = buildTestReviewPacket(twice)
+
+    expect(packet.tests.filter((test) => test.name === 'test-case-ran-and-passed')).toHaveLength(1)
+    expect(packet.tests).toHaveLength(12)
+  })
+
   it('keeps reported tests the roster somehow missed', () => {
     const withExtra = rosterDetail()
     withExtra.summary!.knownTests = withExtra.summary!.knownTests!.slice(0, 1)
@@ -333,5 +343,187 @@ describe('status buckets', () => {
     // failure — never as a pass.
     expect(statusBucket('timedOut')).toBe('failed')
     expect(statusBucket('failed')).toBe('failed')
+  })
+})
+
+// A heal cycle may edit the spec (the agent's "the test is provably wrong"
+// exception), which moves every later test onto a new line — and the reporter
+// mints a fresh id from that line, so one test carries two ids inside one run.
+// The fixture is the recorded evidence of run 2026-09-04T0638-7rcl: the third
+// test failed twice at :192, the spec grew by ten lines, and it passed at :202;
+// the first two tests only ever ran at :149/:178 and a targeted rerun never
+// re-listed them. The report has to say what the run summary and the Playwright
+// tab say — three tests, three passed — not four tests with a phantom failure.
+describe('a test that moved lines between heal cycles', () => {
+  const fixtureDir = path.join(__dirname, '__fixtures__', 'heal-line-shift')
+  const warmName = 'test-case-warm-inbounds-stay-inside-the-budget-across-five-samples'
+
+  function readFixture<T>(name: string): T {
+    return JSON.parse(fs.readFileSync(path.join(fixtureDir, name), 'utf-8').replaceAll('<featureDir>', tmpDir)) as T
+  }
+
+  function lineShiftDetail(): RunDetail {
+    return {
+      runId: '2026-09-04T0638-7rcl',
+      manifest: {
+        runId: '2026-09-04T0638-7rcl',
+        feature: 'cns_inbound_latency_budget',
+        featureDir: tmpDir,
+        startedAt: '2026-09-04T06:38:01.526Z',
+        endedAt: '2026-09-04T06:42:45.417Z',
+        status: 'passed',
+        healCycles: 2,
+        services: [],
+      },
+      summary: readFixture<RunDetail['summary']>('e2e-summary.json'),
+      playbackEvents: readFixture<PlaywrightPlaybackEvent[]>('playwright-events.json'),
+    } as RunDetail
+  }
+
+  beforeEach(() => {
+    const e2e = path.join(tmpDir, 'e2e')
+    fs.mkdirSync(e2e, { recursive: true })
+    // Every test here sits on a line the run never recorded (149, 178, 192,
+    // 202), so a body can only be found by title — which is the point.
+    fs.writeFileSync(path.join(e2e, 'cns-inbound-latency-budget.spec.ts'), [
+      "import { test, expect } from '@playwright/test'",
+      '',
+      "test.describe('inbound-to-Host latency budget', () => {",
+      "  test('the budget is declared before anything is measured', async () => {",
+      '    expect(500).toBeGreaterThan(0)',
+      '  })',
+      "  test('a COLD inbound reaches the Host inside the budget', async () => {",
+      '    expect(1).toBeLessThanOrEqual(10_000)',
+      '  })',
+      "  test('warm inbounds stay inside the budget across five samples', async () => {",
+      '    expect(493).toBeLessThanOrEqual(500)',
+      '  })',
+      '})',
+      '',
+    ].join('\n'))
+  })
+
+  it('folds every attempt onto the one declared test and keeps the last verdict', () => {
+    const packet = buildTestReviewPacket(lineShiftDetail())
+
+    expect(packet.tests.map((test) => [test.title, test.status])).toEqual([
+      ['the budget is declared before anything is measured', 'passed'],
+      ['a COLD inbound reaches the Host inside the budget', 'passed'],
+      ['warm inbounds stay inside the budget across five samples', 'passed'],
+    ])
+    expect(testStatusCounts(packet.tests)).toEqual({ passed: 3, failed: 0, interrupted: 0, skipped: 0, notRun: 0 })
+    // The surviving attempt is the last one to end, not the first key seen.
+    const warm = packet.tests[2]
+    expect(warm.location?.endsWith('cns-inbound-latency-budget.spec.ts:202')).toBe(true)
+    expect(warm.durationMs).toBe(1492)
+    expect(warm.error).toBeUndefined()
+  })
+
+  it('finds each test body by title when the recorded line is stale', () => {
+    const packet = buildTestReviewPacket(lineShiftDetail())
+
+    expect(packet.tests.map((test) => test.testBody.includes('expect('))).toEqual([true, true, true])
+    expect(packet.tests.map((test) => test.assertions[0]?.rationale)).not.toContain(
+      'No playback event or source match was available for this passed test.',
+    )
+  })
+
+  it('keeps two declared tests that share a title in one file apart by line', () => {
+    const dup = path.join(tmpDir, 'e2e', 'dup.spec.ts')
+    fs.writeFileSync(dup, [
+      "import { test, expect } from '@playwright/test'",
+      '',
+      "test.describe('guest', () => {",
+      "  test('renders', async () => {",
+      '    expect(1).toBe(1)',
+      '  })',
+      '})',
+      '',
+      "test.describe('host', () => {",
+      "  test('renders', async () => {",
+      '    expect(2).toBe(2)',
+      '  })',
+      '})',
+      '',
+    ].join('\n'))
+    const detail = lineShiftDetail()
+    detail.summary = {
+      complete: true,
+      total: 2,
+      passed: 1,
+      passedNames: ['test-case-renders'],
+      passedIds: ['id-guest'],
+      failed: [{ id: 'id-host', name: 'test-case-renders', location: `${dup}:10` }],
+      knownTests: [
+        { id: 'id-guest', name: 'test-case-renders', title: 'renders', location: `${dup}:4` },
+        { id: 'id-host', name: 'test-case-renders', title: 'renders', location: `${dup}:10` },
+      ],
+    }
+    detail.playbackEvents = [
+      { type: 'test-end', time: '2026-01-01T00:00:01.000Z', test: { name: 'test-case-renders', title: 'renders', location: `${dup}:4` }, status: 'passed', passed: true, durationMs: 5, retry: 0 },
+      { type: 'test-end', time: '2026-01-01T00:00:02.000Z', test: { name: 'test-case-renders', title: 'renders', location: `${dup}:10` }, status: 'failed', passed: false, durationMs: 6, retry: 0 },
+      // A third 'renders' at a line neither declared test owns: with two
+      // candidates the line has to decide, and it matches neither, so this is
+      // reported evidence the roster lacks — appended, never folded into one
+      // of the two.
+      { type: 'test-end', time: '2026-01-01T00:00:03.000Z', test: { name: 'test-case-renders', title: 'renders', location: `${dup}:16` }, status: 'passed', passed: true, durationMs: 7, retry: 0 },
+    ]
+
+    const packet = buildTestReviewPacket(detail)
+
+    expect(packet.tests.map((test) => [test.location, test.status, test.testBody.includes('expect(1)'), test.testBody.includes('expect(2)')])).toEqual([
+      [`${dup}:4`, 'passed', true, false],
+      [`${dup}:10`, 'failed', false, true],
+      [`${dup}:16`, 'passed', false, false],
+    ])
+  })
+
+  it('keeps the attempt that ended last, not the line that was reported last', () => {
+    // A heal that reverts a spec edit moves the test back to its old line, so the
+    // old line's key is refreshed after the new line's: :192 fails, :202 passes,
+    // then :192 passes again. Key order says :202 is newest; the clock says :192.
+    const spec = path.join(tmpDir, 'e2e', 'cns-inbound-latency-budget.spec.ts')
+    const detail = lineShiftDetail()
+    const attempt = (line: number, time: string, passed: boolean): PlaywrightPlaybackEvent => ({
+      type: 'test-end',
+      time,
+      test: { name: warmName, title: 'warm inbounds stay inside the budget across five samples', location: `${spec}:${line}` },
+      status: passed ? 'passed' : 'failed',
+      passed,
+      durationMs: 1,
+      retry: 0,
+    })
+    detail.playbackEvents = [
+      attempt(192, '2026-09-04T06:38:21.739Z', false),
+      attempt(202, '2026-09-04T06:40:38.914Z', true),
+      attempt(192, '2026-09-04T06:42:45.032Z', true),
+    ]
+
+    const packet = buildTestReviewPacket(detail)
+
+    expect(packet.tests.filter((test) => test.name === warmName).map((test) => [test.status, test.location?.slice(-4)])).toEqual([['passed', ':192']])
+  })
+
+  it('keeps roster-less attempts apart when the spec no longer says how many tests share the title', () => {
+    const detail = lineShiftDetail()
+    detail.summary = { complete: true, total: 1, passed: 1, passedNames: [warmName], failed: [] }
+    detail.playbackEvents = detail.playbackEvents!.filter((event) => event.type === 'test-end' && event.test.name === warmName)
+    fs.rmSync(path.join(tmpDir, 'e2e', 'cns-inbound-latency-budget.spec.ts'))
+
+    const packet = buildTestReviewPacket(detail)
+
+    // Two lines could be one moved test or two same-titled tests; with nothing
+    // to count against, neither is dropped.
+    expect(packet.tests.map((test) => [test.status, test.location?.slice(-4)])).toEqual([['failed', ':192'], ['passed', ':202']])
+  })
+
+  it('folds a moved test on a run recorded before the roster existed', () => {
+    const detail = lineShiftDetail()
+    detail.summary = { complete: true, total: 1, passed: 1, passedNames: [warmName], failed: [] }
+    detail.playbackEvents = detail.playbackEvents!.filter((event) => event.type === 'test-end' && event.test.name === warmName)
+
+    const packet = buildTestReviewPacket(detail)
+
+    expect(packet.tests.map((test) => [test.status, test.location?.slice(-4)])).toEqual([['passed', ':202']])
   })
 })

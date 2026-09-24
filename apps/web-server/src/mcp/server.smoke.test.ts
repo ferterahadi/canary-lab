@@ -4,7 +4,7 @@ import path from 'path'
 import type { FastifyInstance } from 'fastify'
 
 import { createServer } from '../server'
-import { mcpErrorLogger, mcpRequestUrl } from './server'
+import { mcpErrorLogger, mcpRequestUrl, uiUrlFromAddress } from './server'
 
 import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
@@ -28,6 +28,13 @@ const inertPtyFactory: PtyFactory = () => ({
 const uniqueSorted = (values: string[]): string[] => Array.from(new Set(values)).sort()
 
 const REPAIR_TOOLS = uniqueSorted([
+  'wait_for_feature_change',
+  'get_test_review',
+  'review_test_changes',
+  'start_discovery_repair',
+  'get_discovery_repair',
+  'update_discovery_repair',
+  'get_workflow_guide',
   'abort_run',
   'boot_services',
   'cancel_heal',
@@ -46,6 +53,8 @@ const REPAIR_TOOLS = uniqueSorted([
 ])
 
 const VERIFY_TOOLS = uniqueSorted([
+  'wait_for_feature_change',
+  'get_workflow_guide',
   'abort_run',
   'boot_services',
   'create_verification_config',
@@ -60,6 +69,8 @@ const VERIFY_TOOLS = uniqueSorted([
 ])
 
 const AUTHOR_TOOLS = uniqueSorted([
+  'wait_for_feature_change',
+  'get_workflow_guide',
   'apply_external_draft',
   'capture_feature_env_files',
   'checkout_feature_repo_branch',
@@ -75,10 +86,13 @@ const AUTHOR_TOOLS = uniqueSorted([
   'list_runs',
   'start_external_draft',
   'update_external_draft_stage',
+  'update_feature_repo_branch',
   'write_envset',
 ])
 
 const COVERAGE_TOOLS = uniqueSorted([
+  'wait_for_feature_change',
+  'get_workflow_guide',
   'clear_prd_summary',
   'delete_feature_doc',
   'get_feature_coverage',
@@ -92,6 +106,8 @@ const COVERAGE_TOOLS = uniqueSorted([
 ])
 
 const EXPORT_TOOLS = uniqueSorted([
+  'wait_for_feature_change',
+  'get_workflow_guide',
   'delete_evaluation_export',
   'download_evaluation_export',
   'get_evaluation_export',
@@ -104,6 +120,10 @@ const EXPORT_TOOLS = uniqueSorted([
 ])
 
 const FLIGHT_TOOLS = uniqueSorted([
+  'wait_for_feature_change',
+  'get_test_review',
+  'review_test_changes',
+  'get_workflow_guide',
   'abort_flight',
   'get_flight',
   // The skills' bootstrap liveness probe; see FLIGHT_TOOLS in tool-profiles.ts.
@@ -126,12 +146,14 @@ const FLIGHT_TOOLS = uniqueSorted([
 ])
 
 const PORTIFY_TOOLS = uniqueSorted([
+  'get_workflow_guide',
   'list_features',
   'list_runs',
   'start_external_portify',
   'submit_external_portify',
   'revise_external_portify',
   'get_portify',
+  'review_portify',
   'save_portify',
   'cancel_portify',
   'remove_portification',
@@ -171,6 +193,8 @@ const FULL_ONLY_TOOLS = [
 // appears in another array; the first repair-only tool would have broken the count
 // with no hint as to why.
 const LIFECYCLE_TOOLS = uniqueSorted([
+  'get_test_review',
+  'review_test_changes',
   ...REPAIR_TOOLS,
   ...VERIFY_TOOLS,
   ...AUTHOR_TOOLS,
@@ -219,6 +243,17 @@ describe('MCP HTTP server (smoke)', () => {
     const cause = new Error('broken adapter')
     mcpErrorLogger({ log }, 'adapter failed')(cause)
     expect(error).toHaveBeenCalledWith({ err: cause }, 'adapter failed')
+  })
+
+  // The UI origin handed to agents comes from the live bind, so the port in a
+  // tool result is the port something is actually serving even after a fallback.
+  // Non-TCP binds have no origin to offer: `address()` is null until `listen`
+  // resolves, and a unix socket reports its path. Both must stay absent rather
+  // than become a link to a guessed host.
+  it('derives the UI origin from a TCP bind only', () => {
+    expect(uiUrlFromAddress({ address: '127.0.0.1', family: 'IPv4', port: 7420 })).toBe('http://127.0.0.1:7420')
+    expect(uiUrlFromAddress(null)).toBeUndefined()
+    expect(uiUrlFromAddress('/tmp/canary-lab.sock')).toBeUndefined()
   })
 
   // These E2E tests exercise claim flows across interactive client kinds
@@ -496,6 +531,17 @@ describe('MCP HTTP server (smoke)', () => {
       })
       expect((refusedAbort as { isError?: boolean }).isError).toBe(true)
       expect(toolText(refusedAbort)).toContain('confirm')
+
+      // The full workflow guide is reachable from the one-tool surface too — the
+      // compact initialize text is only the envelope, so this is where a
+      // skill-less compact client learns a loop.
+      const guide = await compactClient.callTool({
+        name: 'exec',
+        arguments: { command: 'get_workflow_guide', arguments: { workflow: 'flight' } },
+      })
+      expect(toolText(guide)).toContain('start_flight')
+      expect(toolText(guide)).toContain('respond_flight_checkpoint')
+      expect(toolText(guide)).not.toContain('<!-- initialize-cut -->')
     } finally {
       if (compactClient) await compactClient.close().catch(() => undefined)
       if (directClient) await directClient.close().catch(() => undefined)

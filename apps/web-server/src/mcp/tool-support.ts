@@ -11,7 +11,7 @@ import type { RunDetail } from '../features/runs/logic/run-store'
 import type { ClientKind } from '../../../../shared/run-mode'
 import type { SummaryState } from '../../../../shared/coverage/types'
 import { type DraftRecord, type ExternalDraftStage } from '../features/wizard/logic/draft-store'
-import { isTerminalRunStatus } from '../../../../shared/run-state'
+import { isActiveRunStatus, isTerminalRunStatus } from '../../../../shared/run-state'
 import { encodeToonTable } from '../shared/toon'
 import type { McpClientFacts } from './client-surface'
 import type { CanaryLabMcpDeps, GettingStartedBusyActive } from './tool-schemas'
@@ -47,9 +47,8 @@ export const EXTERNAL_DRAFT_STAGE = z.enum(['scaffolding', 'authoring-tests', 'v
 export const CLAIM_SUPPRESSED_MESSAGE =
   'Heal claiming is blocked for runner-spawned agents (the benchmark/portify PTY sessions Canary Lab launches itself), so this run was started without a heal claim. It still runs — drive heal from an interactive Claude/Codex client or the web UI.'
 
-/** Recovery steering for a BLOCKED coverage ledger. The no-source-doc case is the only
- *  one that needs the user: grounded coverage must come from a real PRD/spec, so ASK for
- *  it — never invent one or silently pull an external file. */
+/** Recovery steering preserves grounded requirements: discover authorized
+ * sources first, and elicit only the unresolved material. */
 export function coverageBlockedNext(feature: string, summary: SummaryState, sourceDocCount: number): string {
   if (summary === 'generating') {
     return `A summary/coverage job is already running for "${feature}" (single-flight). Wait for it to finish, then get_feature_coverage("${feature}").`
@@ -59,7 +58,7 @@ export function coverageBlockedNext(feature: string, summary: SummaryState, sour
   }
   // summary 'absent'
   if (sourceDocCount === 0) {
-    return `No source doc on file for "${feature}", so there is nothing to ground coverage on. ASK THE USER to attach or paste the PRD/spec in the chat (do NOT invent one or pull an external file). Once they provide it, write_feature_doc("${feature}", "<name>.md", <content>), then call start_external_summary with feature "${feature}" and a stable session_id — read the docs yourself and submit_external_summary.`
+    return `No source doc on file for "${feature}". Call start_external_summary with feature "${feature}" and a stable session_id for document discovery. Search authorized repositories and user-provided references before asking; return document_resolution with source evidence or a missing/ambiguous/conflicting issue. Only unresolved material triggers MCP 2.0 elicitation. Never invent requirements or infer them from code without authorization. Only if elicitation is unavailable, ASK THE USER to attach or paste the PRD or resolve the specific source question, then write_feature_doc and retry.`
   }
   return `Source docs exist for "${feature}" but no PRD summary yet. YOU author it: call start_external_summary with feature "${feature}" and a stable session_id, read the source docs in the returned prompt, submit_external_summary, then call start_external_coverage with the same session_id and submit_external_coverage to map tests → requirements.`
 }
@@ -104,16 +103,16 @@ export function claimRun(
     : { accepted: false, reason: result.reason }
 }
 
-export function findHealingRunForFeature(
+export function findContinuingRunForFeature(
   deps: CanaryLabMcpDeps,
   feature: string,
   env: string | undefined,
 ): RunDetail | null {
   const candidates: Array<{ detail: RunDetail; startedAt: string }> = []
   for (const entry of deps.store.list({ feature })) {
-    if (entry.status !== 'healing') continue
+    if (!isActiveRunStatus(entry.status)) continue
     const detail = deps.store.get(entry.runId)
-    if (!detail) continue
+    if (!detail || detail.manifest.executionType === 'boot') continue
     if (env && detail.manifest.env !== env) continue
     candidates.push({ detail, startedAt: entry.startedAt })
   }

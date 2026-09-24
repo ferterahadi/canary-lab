@@ -19,6 +19,10 @@ describe('classifyDoctorOutput', () => {
   it('reports broken on an unexpected failure', () => {
     expect(classifyDoctorOutput(127, 'command not found: node').status).toBe('broken')
   })
+
+  it('does not mistake a protocol failure with the UI hint for an offline server', () => {
+    expect(classifyDoctorOutput(1, 'Canary Lab MCP doctor failed: exec is missing\nStart the UI first: canary-lab ui').status).toBe('broken')
+  })
 })
 
 describe('verifyMcpRegistration', () => {

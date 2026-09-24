@@ -32,13 +32,23 @@ const EDGE = 8
  *  the pointer already entered. */
 export const TOOLTIP_ANCHOR_ATTR = 'data-tooltip-anchor'
 
+/** Gates the tip on something only the live layout knows — the caller's case is a
+ *  row title clamped to two lines, where the full text is worth floating ONLY when
+ *  the clamp actually cuts it. Measured at hover time, against the element the
+ *  pointer entered, because that is the one moment the answer is reliable: at mount
+ *  the pane may not have its final width, and a later web-font swap can re-cut a
+ *  title without resizing anything an observer would see. */
+export type TooltipGate = (el: Element) => boolean
+
 export function Tooltip({
   label,
   placement = 'bottom',
+  showIf,
   children,
 }: {
   label: string
   placement?: 'top' | 'bottom'
+  showIf?: TooltipGate
   children: ReactElement
 }) {
   const [anchor, setAnchor] = useState<{ top: number; bottom: number; centerX: number } | null>(null)
@@ -46,6 +56,7 @@ export function Tooltip({
   const tipRef = useRef<HTMLDivElement>(null)
 
   const show = (el: Element) => {
+    if (showIf && !showIf(el)) return
     // Position against the marked sub-element when the child names one; the
     // hover target stays whatever the caller wrapped.
     const r = (el.querySelector(`[${TOOLTIP_ANCHOR_ATTR}]`) ?? el).getBoundingClientRect()
@@ -98,7 +109,10 @@ export function Tooltip({
             borderRadius: 6,
             fontSize: 11.5,
             lineHeight: 1.35,
-            whiteSpace: 'normal',
+            // `pre-line`, not `normal`, so a label can be a short legend: a verdict
+            // line plus one line per symbol it explains. Newlines in the label are
+            // kept, everything else still wraps exactly as before.
+            whiteSpace: 'pre-line',
             background: 'var(--bg-elevated)',
             color: 'var(--text-primary)',
             border: '1px solid var(--border-default)',

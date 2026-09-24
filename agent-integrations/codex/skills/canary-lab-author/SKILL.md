@@ -56,6 +56,14 @@ and never rename it to dodge a collision.
    - **Creating a NEW feature**: call `create_feature` directly with a unique feature name. It creates the skeleton files and returns test-file rules, envset schema, and next-step tool hints. Do not call `list_features` just to avoid collisions; if the name you INVENTED already exists, retry `create_feature` with a different unique name — but never rename away from a feature the user asked for (that is the extending path above).
 2. If the user asks to preserve existing `.env`, `.env.dev`, `application.properties`, or similar repo config files, inspect the source repo enough to identify the files, then call `capture_feature_env_files`. Do not paste secret values into chat; Canary Lab returns redacted previews only. `write_envset` fills in or corrects individual envset values (it is confirm-gated).
 3. Author or edit specs under `<workspace>/features/<feature>/e2e/` — the Canary Lab WORKSPACE, not the product repo under test.
+   **Spec selection never depends on the envset.** In the suite's
+   `playwright.config.*`, keep `testDir`, `testMatch`, `testIgnore`, `grep` and
+   `grepInvert` as constant literals — never derived from
+   `CANARY_LAB_MANIFEST_PATH`, `process.env`, or the recorded env. A test that
+   must not execute in some environment skips ITSELF at runtime:
+   `test.skip(process.env.VERIFICATION_ENV !== 'meta', 'needs the Meta sandbox')`,
+   reading the env from the envset's own values rather than the manifest. See
+   Guardrails for why.
 4. Specs must import:
    ```ts
    import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
@@ -63,10 +71,51 @@ and never rename it to dodge a collision.
 5. Call `start_external_draft` with a stable `session_id` and a useful `conversation_name` (do not pass `client_kind` — the bridge auto-detects it). This only creates a visible Canary Lab task so the user sees that this external agent session is authoring tests; it does not start an internal wizard agent. Carry the `draftId` it returns into every subsequent `update_external_draft_stage` / `apply_external_draft` call for this draft. If it returns `type: "getting_started_busy"`, a Getting Started demo already owns the workspace — follow the active target it returns; do not start another workflow.
 6. After `start_external_draft` returns, tell the user you are authoring tests and they can follow along live in the Canary Lab UI: the suite's Flight page shows this work on its Test authoring & coverage stage (that view is read-only while this client drives — it monitors, you act here). Continue writing specs locally, then call `update_external_draft_stage(draftId, stage)` as work progresses: `scaffolding`, `authoring-tests`, `validating`, `ready`, `applied`, or `error`.
 7. Call `apply_external_draft` with `draftId`, `confirm: true`, and `files: [{path, content}, …]` for the externally authored files (omit `files` if you already wrote them directly under `<workspace>/features/<feature>/e2e/` — it then validates what's on disk), so Canary Lab validates and records the applied draft. Do not ask Canary Lab to spawn another Claude/Codex agent for MCP-created authoring. On a validation error, fix the named file and re-call `apply_external_draft`.
-8. `get_feature_repo_status` / `checkout_feature_repo_branch` inspect and switch the feature's bound repo branches when the user asks to test a different branch.
+8. `get_feature_repo_status` / `checkout_feature_repo_branch` inspect and switch the feature's bound repo branches when the user asks to test a different branch. The status also reports where the pinned branch stands against its upstream (`upstreamSha`, `behindUpstream`, `aheadUpstream`); when it is behind, `update_feature_repo_branch(feature, repo, confirm: true)` fast-forwards the checkout to the upstream tip so the next run boots the latest commit. It refuses — and changes nothing — when the checkout is dirty, detached, on another branch, or has diverged; report the reason and let the user reconcile rather than discarding their work. A repo declared with `track: 'upstream'` in `feature.config.cjs` is fast-forwarded automatically at every run start.
+
+## Envset source and target
+
+Store actual values in the selected workspace at
+`features/<feature>/envsets/<env>/<slot>`. A suite that reads `.env` normally uses
+`envsets/local/<feature>.env` with target
+`$CANARY_LAB_PROJECT_ROOT/features/<feature>/.env`. The envset file is the durable
+source; the target is the temporary file the launcher and Playwright consume.
+The runner applies it before startup and restores backed-up targets at teardown.
+Verify that teardown also removes targets absent before the run, keeping new
+suite `.env` targets absent at rest. If it does not, report or fix the lifecycle
+gap within the authorized scope; preserve pre-existing user files.
+
+Inspect each consumer before choosing a target. Never target `.runtime/envsets`,
+the envset source directory itself, or a personal source checkout merely because
+an existing environment variable points there. `capture_feature_env_files`
+defaults an omitted target to `sourcePath`; pass an explicit consumer target when
+importing values from elsewhere. Existing paths are evidence, not authority.
+
+Never create pointer-only envsets that outsource their values to an unmanaged env
+file. Capture the actual values and update their launcher/configuration together.
+Keep separate slots for genuine file inputs (certificates, binary bundles, JSON)
+when their consumer requires that format; verify reference and target together.
+Do not flatten every suite into one slot or encode files as environment variables
+just for uniformity. For an all-suites request, inspect every suite and correct
+only bad mappings, preserving the working variants and existing values.
+
+Verify source → target → consumer and teardown before declaring a migration done.
+Keep secrets out of chat, logs, and commits. Do not invent `.recovery` trees or
+duplicate credentials as a precaution; retain the original until its replacement
+works, and let the runner manage its existing backup/restore lifecycle. The full
+contract is also available through `get_workflow_guide(workflow:"author")`.
 
 ## Guardrails
 
+- Write one variable declaration per statement, use descriptive names, and clearly
+  separate setup, action, and assertions. Avoid comma expressions and nested
+  conditionals. Draft acceptance splits ordinary grouped declarations and formats
+  specs; it rejects syntax errors and comma expressions and reports nested
+  conditionals for review. Preserve behavior while resolving any finding.
+- Audit existing tests with `canary-lab test-readability <file-or-directory>`;
+  add `--fix` for safe declaration fixes and formatting, or `--rules-only` to keep
+  existing layout. Review the diff and rerun affected tests. Never weaken assertions
+  or rewrite recorded run artifacts during cleanup.
 - Keep the same `session_id` for the whole conversation.
 - Test titles are read by non-engineers in the coverage ledger and exported
   reports: write each as a plain-English sentence naming the user-visible
@@ -75,4 +124,13 @@ and never rename it to dodge a collision.
   the requirement's own vocabulary (an endpoint name in an API-contract
   requirement stays technical).
 - Canary Lab never writes the test body for external authoring — this client does.
+- **A suite declares ONE roster of tests, and every run of it declares the same
+  one.** Playwright builds that roster by walking the suite with the config's
+  selection fields applied, before the first test starts, and that walk is the
+  run's evidence. A config that narrows it by environment does not hide tests
+  from a run — it deletes them from the record: a `meta` run of a 45-test suite
+  reports a 4-test suite, the other 41 absent rather than "not run", and two runs
+  of one suite can no longer be compared. `test.skip(condition, reason)` keeps
+  the roster whole; a `testMatch` filter destroys it at the source. Canary Lab
+  refuses both the draft that carries such a config and any run of the suite.
 - After authoring, the natural next steps live in sibling skills: map coverage (`canary-lab-coverage`), run + heal (`canary-lab-run`), export the evaluation (`canary-lab-export`). **Running the new test** needs `start_run`: on the setup/plugin `compact` connection, invoke it as the `exec` command and follow `canary-lab-run`. On an intentionally narrow direct `--profile author` connection it is unavailable; reconnect with `npx canary-lab mcp --profile compact` and then run.

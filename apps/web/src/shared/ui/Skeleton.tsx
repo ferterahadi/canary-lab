@@ -32,6 +32,17 @@ export function awaitingFor(status: string, live: boolean): AwaitingState {
 
 const SKELETON_COLOR = 'var(--border-strong)'
 
+/** How far apart consecutive rows sit in the sweep cycle. A stack of bars that
+ *  all sweep in lockstep reads as one block strobing; offsetting each row by a
+ *  fraction of the 1.5s cycle makes the SAME animation read as a list being
+ *  filled in from the top. The offset is NEGATIVE, so a row starts partway
+ *  through the cycle rather than sitting flat until its turn comes round.
+ *
+ *  Only the `live` bar animates, so this is inert in every other state, and
+ *  `prefers-reduced-motion` drops the animation (and with it the offset)
+ *  wholesale in `.cl-skeleton`. */
+const SWEEP_STAGGER_MS = 110
+
 const SKELETON_OUTLINE: CSSProperties = {
   borderColor: SKELETON_COLOR,
   borderStyle: 'solid',
@@ -62,11 +73,14 @@ const BAR_CLASS: Record<AwaitingState, string> = {
 /** One placeholder bar. Widths are given per site rather than randomized —
  *  `Math.random` would reshuffle the card on every render, which reads as
  *  activity that isn't happening. */
-export function SkeletonBar({ awaiting, width = '62%', height = 10, className = '' }: {
+export function SkeletonBar({ awaiting, width = '62%', height = 10, className = '', row = 0 }: {
   awaiting: AwaitingState
   width?: string
   height?: number
   className?: string
+  /** This bar's position in its stack. Bars belonging to the same row share one
+   *  value so the row sweeps as a unit; see `SWEEP_STAGGER_MS`. */
+  row?: number
 }) {
   return (
     <span
@@ -74,7 +88,12 @@ export function SkeletonBar({ awaiting, width = '62%', height = 10, className = 
       data-testid="skeleton-bar"
       data-awaiting={awaiting}
       className={`block rounded-full${BAR_CLASS[awaiting]}${className ? ` ${className}` : ''}`}
-      style={{ width, height, ...BAR_STYLE[awaiting] }}
+      style={{
+        width,
+        height,
+        ...BAR_STYLE[awaiting],
+        ...(awaiting === 'live' && row > 0 ? { animationDelay: `-${row * SWEEP_STAGGER_MS}ms` } : {}),
+      }}
     />
   )
 }
@@ -92,7 +111,7 @@ export function SkeletonLines({ awaiting, rows = 2, height = 9 }: {
   return (
     <div className="flex flex-col gap-1.5" data-testid="skeleton-lines">
       {Array.from({ length: rows }, (_, i) => (
-        <SkeletonBar key={i} awaiting={awaiting} width={LINE_WIDTHS[i % LINE_WIDTHS.length]} height={height} />
+        <SkeletonBar key={i} awaiting={awaiting} row={i} width={LINE_WIDTHS[i % LINE_WIDTHS.length]} height={height} />
       ))}
     </div>
   )
@@ -128,13 +147,15 @@ export function SkeletonBead({ awaiting, size = 9, className = '' }: {
 /** A list row's shape: the leading indicator every row-list on a stage carries
  *  plus a title bar and a quieter sub-line, so a skeleton list reads as the list
  *  it will become. */
-export function SkeletonRow({ awaiting, sub = true }: { awaiting: AwaitingState; sub?: boolean }) {
+export function SkeletonRow({ awaiting, sub = true, row = 0 }: { awaiting: AwaitingState; sub?: boolean; row?: number }) {
   return (
     <li className="flex items-start gap-2.5 py-1.5" data-testid="skeleton-row">
       <SkeletonBead awaiting={awaiting} className="mt-[3px]" />
+      {/* Both bars carry the ROW's offset, not their own — a row is one thing
+          arriving, so its title and sub-line sweep together. */}
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <SkeletonBar awaiting={awaiting} width="46%" height={9} />
-        {sub && <SkeletonBar awaiting={awaiting} width="72%" height={7} />}
+        <SkeletonBar awaiting={awaiting} row={row} width="46%" height={9} />
+        {sub && <SkeletonBar awaiting={awaiting} row={row} width="72%" height={7} />}
       </div>
     </li>
   )
@@ -147,7 +168,7 @@ export function SkeletonRows({ awaiting, rows = 2, sub = true }: {
 }) {
   return (
     <ul className="m-0 flex list-none flex-col p-0">
-      {Array.from({ length: rows }, (_, i) => <SkeletonRow key={i} awaiting={awaiting} sub={sub} />)}
+      {Array.from({ length: rows }, (_, i) => <SkeletonRow key={i} awaiting={awaiting} row={i} sub={sub} />)}
     </ul>
   )
 }

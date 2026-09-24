@@ -81,13 +81,17 @@ export async function addWorktree(opts: {
 // node_modules — services (`npx tsx ...`) and Playwright can't resolve. Symlink
 // the source repo's node_modules into the worktree root so resolution works.
 // Best-effort: boot surfaces a clearer error if deps are genuinely missing.
-export function linkNodeModules(handle: Pick<WorktreeHandle, 'sourceRoot' | 'worktreeRoot'>): void {
+// Returns the failure message when the symlink was attempted and failed, so a
+// caller recording dependency provenance can report it. Callers that only need
+// the best-effort behaviour ignore the return value.
+export function linkNodeModules(handle: Pick<WorktreeHandle, 'sourceRoot' | 'worktreeRoot'>): { error?: string } {
   const src = path.join(handle.sourceRoot, 'node_modules')
   const dst = path.join(handle.worktreeRoot, 'node_modules')
   try {
     if (fs.existsSync(src) && !fs.existsSync(dst)) fs.symlinkSync(src, dst, 'dir')
-  } catch {
-    /* best-effort */
+    return {}
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) }
   }
 }
 

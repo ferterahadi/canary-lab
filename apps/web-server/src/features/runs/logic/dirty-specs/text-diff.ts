@@ -25,7 +25,15 @@ function parseAddedLines(diffOutput: string): Set<number> {
 }
 
 export async function diffChangedLines(oldText: string, newText: string): Promise<Set<number>> {
-  if (oldText === newText) return new Set()
+  try { return parseAddedLines(await diffSourceText(oldText, newText)) } catch {
+    // Legacy line-only callers have no error channel; full review uses the
+    // throwing diffSourceText API so a failed comparison cannot look clean.
+    return new Set()
+  }
+}
+
+export async function diffSourceText(oldText: string, newText: string, context = 0, normalizeNewline = true): Promise<string> {
+  if (oldText === newText) return ''
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-text-diff-'))
   try {
     const oldPath = path.join(dir, 'old')
@@ -33,14 +41,14 @@ export async function diffChangedLines(oldText: string, newText: string): Promis
     // A missing trailing newline makes git treat the last line as "changed"
     // purely because of the EOF marker, even when its content is identical —
     // normalize so that artifact never shows up as a phantom changed line.
-    const withTrailingNewline = (s: string) => (s.endsWith('\n') ? s : `${s}\n`)
-    fs.writeFileSync(oldPath, withTrailingNewline(oldText))
-    fs.writeFileSync(newPath, withTrailingNewline(newText))
+    const withTrailingNewline = (s: string) => (!s || s.endsWith('\n') ? s : `${s}\n`)
+    fs.writeFileSync(oldPath, normalizeNewline ? withTrailingNewline(oldText) : oldText)
+    fs.writeFileSync(newPath, normalizeNewline ? withTrailingNewline(newText) : newText)
     // Exit code is 1 when the files differ (not an error) and 0 when they
     // don't — only treat other codes (bad invocation) as "nothing to report".
-    const res = await runGit(dir, ['diff', '--no-index', '--unified=0', oldPath, newPath])
-    if (res.code > 1) return new Set()
-    return parseAddedLines(res.stdout)
+    const res = await runGit(dir, ['diff', '--no-index', `--unified=${context}`, oldPath, newPath])
+    if (res.code > 1) throw new Error('Could not compare test source')
+    return res.stdout
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }

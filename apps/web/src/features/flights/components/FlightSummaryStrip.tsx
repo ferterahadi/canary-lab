@@ -119,11 +119,11 @@ export function FlightSummaryStrip({
     })
   } else if (coveragePct != null) {
     items.push({
-      label: 'Coverage',
+      label: 'Coverage at this flight',
       value: `${coveragePct}%`,
       // Gaps open is what the loop reports; without it, a full 100% is the same
       // statement — every requirement claimed by some spec.
-      tone: (lastMapped ? lastMapped.gapsOpen === 0 : coveragePct >= 100) ? 'var(--success)' : 'var(--warning)',
+      tone: 'var(--text-muted)',
       stage: 'specs-coverage',
       // This figure is the flight's record; the stage tiles read the LIVE
       // ledger, which moves the moment a requirement or test changes. Saying so
@@ -151,7 +151,7 @@ export function FlightSummaryStrip({
   // "no report" up here.
   const exportEv = asRecord(flight.stages.find((s) => s.key === 'evaluation-export')?.evidence)
   if (flight.links?.evaluationZip || typeof exportEv?.taskId === 'string') {
-    items.push({ label: 'Report', value: 'ready', tone: 'var(--success)', stage: 'evaluation-export' })
+    items.push({ label: 'Evaluation report', value: 'ready', tone: 'var(--success)', stage: 'evaluation-export' })
   }
 
   const autopilotOn = flight.opts.autopilot !== false

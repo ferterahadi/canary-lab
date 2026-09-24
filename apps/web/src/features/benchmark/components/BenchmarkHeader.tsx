@@ -149,8 +149,8 @@ export function BenchmarkHeader({
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {onStop && (
             <button
-              className="cl-button"
-              style={{ padding: '6px 12px', color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
+              className="cl-button cl-button-danger"
+              style={{ padding: '6px 12px' }}
               onClick={onStop}
             >
               ■ Stop

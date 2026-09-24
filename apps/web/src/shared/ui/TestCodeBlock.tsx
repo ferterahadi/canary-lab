@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { FormattedDisplayLine } from '@shared/code-display-format'
-import { useTheme } from '../lib/theme'
 import type { ExtractedStep } from '../api/types'
 import * as api from '../api/client'
-import { getCodeHighlighter, codeThemeFor } from './code-highlighter'
+import { useCodeHighlight } from './use-code-highlight'
 import type { StoryCodeLineNumber } from './readable-story-sequence'
 import {
   colorClassForStatus,
@@ -61,21 +60,7 @@ export function ShikiCode({
    *  highlight when both refer to the same row. */
   changedLines?: Set<number>
 }) {
-  const { resolved } = useTheme()
-  const [html, setHtml] = useState<string | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    const themeName = codeThemeFor(resolved)
-    getCodeHighlighter().then((hl) => {
-      if (cancelled) return
-      try {
-        setHtml(hl.codeToHtml(source, { lang: 'typescript', theme: themeName }))
-      } catch {
-        setHtml(null)
-      }
-    }).catch(() => { if (!cancelled) setHtml(null) })
-    return () => { cancelled = true }
-  }, [source, resolved])
+  const html = useCodeHighlight(source)?.html ?? null
 
   const openClickedLine = (target: EventTarget | null, openAt: OpenSourceAtLine): void => {
     const line = (target as HTMLElement | null)?.closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine
@@ -150,10 +135,11 @@ function FallbackCodeLines({
     const changed = changedLines?.has(lineNumber) === true
     const active = lineHighlight?.lines.has(lineNumber) === true
     const highlightColors = lineHighlight ? codeLineHighlightColors(lineHighlight.kind) : undefined
-    const style = changed
-      ? { background: 'color-mix(in srgb, var(--danger) 16%, transparent)', boxShadow: 'inset 2px 0 0 var(--danger)' }
-      : active && highlightColors
-        ? { background: highlightColors.background, boxShadow: `inset 2px 0 0 ${highlightColors.bar}` }
+    const executionLabel = active && lineHighlight?.kind === 'failed' ? 'FAILED HERE' : undefined
+    const style = active && highlightColors
+      ? { background: highlightColors.background, boxShadow: `inset 2px 0 0 ${highlightColors.bar}` }
+      : changed
+        ? { background: 'color-mix(in srgb, var(--warning) 16%, transparent)', boxShadow: 'inset 2px 0 0 var(--warning)' }
         : selected
           ? { background: 'color-mix(in srgb, var(--accent) 14%, transparent)', boxShadow: 'inset 2px 0 0 var(--accent)' }
           : undefined
@@ -172,7 +158,10 @@ function FallbackCodeLines({
         title={number.title}
         style={style}
       >
-        <span className="cl-code-line-content">{line}</span>
+        <span className="cl-code-line-content">
+          {line}
+          {executionLabel && <span className="cl-execution-label cl-execution-label-failed">{executionLabel}</span>}
+        </span>
       </span>
     )
   })
@@ -246,12 +235,13 @@ function decorateShikiLines(
     const number = codeLineNumber(lineNo, mapped.sourceLines, storyLineNumbers, shownStorySequences)
     const selected = sourceRangeIncludesAny(selectedSourceRange, mapped.sourceLines)
     const attrs = ` data-code-line="${number.physical}" data-code-sequence="${number.sequence}" data-code-sequence-label="${number.label}"${number.title ? ` title="${number.title}"` : ''}${mapped.sourceLine !== null ? ` data-source-line="${mapped.sourceLine}"` : ''}${selected ? ' data-selected-line="true"' : ''}`
-    if (changedLines?.has(lineNo)) {
-      return `<span class="line"${attrs} data-changed-line="true" style="background:color-mix(in srgb, var(--danger) 16%, transparent);box-shadow:inset 2px 0 0 var(--danger)"`
-    }
     if (lineHighlight?.lines.has(lineNo)) {
       const colors = codeLineHighlightColors(lineHighlight.kind)
-      return `<span class="line"${attrs} data-active-line="true" data-execution-highlight="${lineHighlight.kind}" style="background:${colors.background};box-shadow:inset 2px 0 0 ${colors.bar}"`
+      const executionLabel = lineHighlight.kind === 'failed' ? ' data-execution-label="FAILED HERE"' : ''
+      return `<span class="line"${attrs} ${changedLines?.has(lineNo) ? 'data-changed-line="true" ' : ''}data-active-line="true" data-execution-highlight="${lineHighlight.kind}"${executionLabel} style="background:${colors.background};box-shadow:inset 2px 0 0 ${colors.bar}"`
+    }
+    if (changedLines?.has(lineNo)) {
+      return `<span class="line"${attrs} data-changed-line="true" style="background:color-mix(in srgb, var(--warning) 16%, transparent);box-shadow:inset 2px 0 0 var(--warning)"`
     }
     if (selected) {
       return `<span class="line"${attrs} style="background:color-mix(in srgb, var(--accent) 14%, transparent);box-shadow:inset 2px 0 0 var(--accent)"`
@@ -262,7 +252,12 @@ function decorateShikiLines(
   // gutter. Shiki keeps each source line on one HTML line, so the final closing
   // span before its newline (or </code>) is the line wrapper, not a token span.
   return decorated
-    .replace(/(<span class="line"[^>]*>)(.*)(<\/span>)(?=\n|<\/code>)/g, '$1<span class="cl-code-line-content">$2</span>$3')
+    .replace(/(<span class="line"[^>]*>)(.*)(<\/span>)(?=\n|<\/code>)/g, (_match, opening: string, content: string, closing: string) => {
+      const executionLabel = opening.includes('data-execution-label="FAILED HERE"')
+        ? '<span class="cl-execution-label cl-execution-label-failed">FAILED HERE</span>'
+        : ''
+      return `${opening}<span class="cl-code-line-content">${content}${executionLabel}</span>${closing}`
+    })
     // Grid rows make Shiki's separator newlines visible under pre-wrap; the
     // source rows themselves already preserve every authored newline.
     .replace(/\n(?=<span class="line")/g, '')
@@ -322,13 +317,13 @@ function sourceRangeIncludesAny(
   )
 }
 
-export function StepStatusBadge({ status }: { status: StepStatus }) {
+export function StepStatusBadge({ status, label }: { status: StepStatus; label?: string }) {
   return (
     <span
       className={`inline-flex shrink-0 items-center justify-center rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${statusPillClassForStatus(status)}`}
       style={{ fontFamily: 'var(--font-mono)', minWidth: '3.5rem' }}
     >
-      {statusLabel(status)}
+      {label ?? statusLabel(status)}
     </span>
   )
 }
@@ -394,4 +389,13 @@ function bodyLineForSourceLine(startLine: number, source: string, sourceLine?: n
   const line = sourceLine - startLine + 1
   if (line < 1 || line > source.split('\n').length) return null
   return line
+}
+
+/** A row from the same escaped Shiki output used by ShikiCode. Tokenization
+ * happens on the whole file, never independently on a diff fragment. */
+export function ShikiSourceLine({ source, html }: { source: string; html?: string }) {
+  return html === undefined ? <span>{source || '\u00a0'}</span>
+    // Shiki escapes source before producing these token spans.
+    // eslint-disable-next-line no-restricted-syntax
+    : <span dangerouslySetInnerHTML={{ __html: html || '&nbsp;' }} />
 }

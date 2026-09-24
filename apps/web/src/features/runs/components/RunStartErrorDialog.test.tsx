@@ -63,6 +63,26 @@ describe('describeRunStartError', () => {
 })
 
 describe('RunStartErrorDialog', () => {
+  it('replaces technical review errors and Retry with the exact review action', async () => {
+    const review = { type: 'test_review_required' as const, error: 'test_review_required: private technical detail', feature: 'checkout', runId: 'recorded-run', review_revision: 'rev', changedFileCount: 7, reviewUrl: '/?feature=checkout&run=recorded-run&dialog=tests-review&reviewBase=run&reviewMode=code' }
+    const onReviewTests = vi.fn()
+    const { onRetry } = await render({ error: new ApiError(409, review), onReviewTests })
+    expect(container.textContent).toContain('Review test changes before starting')
+    expect(container.textContent).toContain('7 suite files changed for checkout')
+    expect(container.textContent).not.toContain('private technical detail')
+    expect(button('Retry')).toBeNull()
+    click(button('Review test changes'))
+    expect(onReviewTests).toHaveBeenCalledExactlyOnceWith(review)
+    expect(onRetry).not.toHaveBeenCalled()
+  })
+
+  it('retains the exact review URL when no in-app navigation handler is supplied', async () => {
+    const reviewUrl = '/?feature=checkout&run=recorded-run&dialog=tests-review&reviewBase=run&reviewMode=code'
+    await render({ error: new ApiError(409, { type: 'test_review_required', feature: 'checkout', runId: 'recorded-run', review_revision: 'rev', changedFileCount: 1, reviewUrl }) })
+    expect(container.querySelector('a')?.getAttribute('href')).toBe(reviewUrl)
+    expect(container.textContent).toContain('1 suite file changed')
+  })
+
   it('renders headline + server reason and fires Retry / Close', async () => {
     const { onRetry, onClose } = await render({ error: new ApiError(404, { error: 'feature not found' }) })
     expect(container.textContent).toContain('Couldn’t start checkout')

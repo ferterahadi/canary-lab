@@ -1,3 +1,4 @@
+import { recordManagedSkill } from './agent-skill-ownership'
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -299,11 +300,13 @@ describe("main (upgrade orchestration)", () => {
 
     const staleSkill = path.join(home, '.codex', 'skills', 'canary-lab', 'SKILL.md')
     fs.mkdirSync(path.dirname(staleSkill), { recursive: true })
-    fs.writeFileSync(staleSkill, 'stale prompt')
+    fs.writeFileSync(staleSkill, fs.readFileSync(path.join(__dirname, 'fixtures', 'legacy-canary-skill.md'), 'utf-8'))
+    recordManagedSkill(path.dirname(staleSkill), home)
 
     await main([])
 
-    expect(fs.readFileSync(staleSkill, 'utf-8')).toContain('start_flight')
+    expect(fs.existsSync(staleSkill)).toBe(false)
+    expect(fs.readFileSync(path.join(home, '.agents', 'skills', 'canary-lab', 'SKILL.md'), 'utf-8')).toContain('start_flight')
     expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(false)
     expect(fs.existsSync(path.join(home, '.canary-lab', 'agent-integrations', 'canary-lab-plugin', '.mcp.json'))).toBe(false)
   })

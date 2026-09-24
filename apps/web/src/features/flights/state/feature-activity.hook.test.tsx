@@ -25,7 +25,8 @@ const stores = {
   coverageJobs: null as CoverageJobIndexEntry[] | null,
 }
 
-vi.mock('@/features/runs', () => ({
+vi.mock('@/features/runs', async () => ({
+  runWaitingState: (await import('../../runs/utils/run-waiting-state')).runWaitingState,
   useActiveRuns: () => ({ runs: stores.runs }),
   useRuns: () => ({ runs: stores.allRuns }),
   useRunDetails: () => stores.runDetails,
@@ -39,14 +40,19 @@ vi.mock('@/features/wizard', async () => ({
   useWizardDrafts: () => ({ drafts: stores.drafts, records: stores.records }),
   isActiveWizardTask: (status: string) => status === 'generating',
 }))
-// The coverage-jobs read rides useLiveResource (WS-invalidated fetch) — the
-// same un-unit-testable edge as the stores, so it's stubbed the same way. The
-// stub RUNS the fetcher it is handed (against a mocked API client), so the
-// hook's wiring to the all-jobs endpoint is asserted, not assumed.
+// The coverage-jobs read rides useLiveResource
+// (WS-invalidated fetch) — the same un-unit-testable edge as the stores, so
+// it is stubbed the same way. The stub RUNS the fetcher it is handed
+// (against a mocked API client), so the endpoint wiring is asserted.
 const liveReads: Array<{ topic: string; key: string; cache?: string }> = []
+// Captured per topic so the poll predicate can be driven directly: the real
+// hook only calls it once a fetch has resolved, which the stub replaces.
+const pollPredicates = new Map<string, (value: unknown) => boolean>()
 vi.mock('@/shared/state/use-live-resource', () => ({
-  useLiveResource: (topic: string, key: string, fetcher: () => Promise<unknown>, opts?: { cache?: string }) => {
+  useLiveResource: (topic: string, key: string, fetcher: () => Promise<unknown>,
+    opts?: { cache?: string; pollWhile?: (value: unknown) => boolean }) => {
     liveReads.push({ topic, key, ...(opts?.cache ? { cache: opts.cache } : {}) })
+    if (opts?.pollWhile) pollPredicates.set(topic, opts.pollWhile)
     void fetcher()
     return { value: stores.coverageJobs }
   },
@@ -95,11 +101,27 @@ describe('useFeatureActivity', () => {
     expect(seen.size).toBe(0)
   })
 
-  it('wires the coverage-jobs read to the all-jobs endpoint on the coverage topic', () => {
+  it('wires the coverage-jobs read to its all-jobs endpoint', () => {
     liveReads.length = 0
     render()
-    expect(liveReads).toEqual([{ topic: 'coverage', key: 'all-jobs', cache: 'coverage-jobs' }])
+    expect(liveReads).toEqual([
+      { topic: 'coverage', key: 'all-jobs', cache: 'coverage-jobs' },
+    ])
     expect(listAllCoverageJobs).toHaveBeenCalled()
+  })
+
+  // A coverage job that finishes server-side without its `coverage-changed`
+  // event reaching this client would otherwise stay "running" in the pill
+  // forever, so the coverage read polls until nothing is in flight.
+  it('polls the coverage jobs while any is unfinished, and stops once they all settle', () => {
+    pollPredicates.clear()
+    render()
+    const pollWhile = pollPredicates.get('coverage')
+    expect(pollWhile).toBeTypeOf('function')
+    expect(pollWhile!(null)).toBe(true)
+    expect(pollWhile!([{ status: 'done' }, { status: 'running' }])).toBe(true)
+    expect(pollWhile!([{ status: 'done' }, { status: 'error' }])).toBe(false)
+    expect(pollWhile!([])).toBe(false)
   })
 
   it('composes all the stores into one verb per feature', () => {

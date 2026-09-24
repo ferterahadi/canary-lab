@@ -13,8 +13,10 @@ import { writeOverlay } from './overlay'
 import { buildPortifyPrompt, buildPortifyFeedbackPrompt, buildPortifyRetryPrompt } from './prompt'
 import type { PortifyManifest, PortifyProducer, PortifyExternalSession, StartPortifyInput, StartPortifyResult, StartExternalPortifyInput, StartExternalPortifyResult, ExternalPortifyEditTarget } from './types'
 import { captureOverlayRepos, readPendingOverlay, restoreConfig } from './portify-overlay-capture'
-import { RepoGroup, SeededFrom, SEEDED_AUTO_VERIFY_NOTE, buildSeededNote, portifyConcurrencyCap, seededSlotsAlreadyDeclared } from './portify-worktree-borrow'
+import { RepoGroup, SeededFrom, buildSeededNote, portifyConcurrencyCap, seededSlotsAlreadyDeclared } from './portify-worktree-borrow'
 import { collectPortSlots } from '../../../runs/logic/runtime/service-specs'
+import { hasDeclaredPortInjection } from './verify'
+import { renderPrompt } from '../../../../shared/prompts'
 
 export { canonicalConfigDiff, captureOverlayRepos, declaredPortsForRepo, readFileOrNull, realpathOrSelf, restoreConfig } from './portify-overlay-capture'
 export { buildSeededNote, buildSiblingOverlayIndex, describeSeededSlots, pickBorrowable, portifyConcurrencyCap, safeKey } from './portify-worktree-borrow'
@@ -175,11 +177,16 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     // double-boot here instead — the gate is unchanged, it simply begins now.
     // Fire-and-forget like startPortify's run(): verifyExternalEdits handles all
     // its own errors internally (re-parking at `editing`), so it never rejects.
-    const autoVerifying = seededSlotsAlreadyDeclared(state.seededFrom, collectPortSlots(feature, m.env))
+    const autoVerifying = hasDeclaredPortInjection(feature, m.env)
+      || seededSlotsAlreadyDeclared(state.seededFrom, collectPortSlots(feature, m.env))
     if (autoVerifying) void state.orchestrator!.verifyExternalEdits(m)
-    const seededNote = autoVerifying ? SEEDED_AUTO_VERIFY_NOTE : buildSeededNote(state.seededFrom)
+    const seededNote = [
+      ...(autoVerifying ? [renderPrompt('portify-auto-verify.md', {})] : []),
+      buildSeededNote(state.seededFrom),
+    ].filter(Boolean).join('\n\n')
     return {
       workflowId,
+      status: autoVerifying ? 'verifying' : 'editing',
       targets,
       configPath: path.join(feature.featureDir, 'feature.config.cjs'),
       instructions: buildPortifyPrompt(feature, targets.map((t) => ({ name: t.name, editPath: t.editPath })), seededNote),

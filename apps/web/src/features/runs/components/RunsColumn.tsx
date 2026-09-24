@@ -2,8 +2,10 @@ import * as api from '@/shared/api/client'
 import type { RunIndexEntry } from '@/shared/api/types'
 import { formatDuration, durationBetween, shortTime } from '@/shared/lib/format'
 import { deriveRunViewModel } from '../utils/run-view-model'
+import { useRunDetails } from '../state/RunsContext'
 import { useRunsColumn } from './use-runs-column'
 import { RunStatusIndicator } from './RunStatusIndicator'
+import { EmptyState } from '@/shared/ui/EmptyState'
 import { VerificationDialog } from '@/features/coverage'
 import { ActionButton, ConfirmDialog, DeleteIconButton, ExecutionTypeBadge, RetestIconButton, RunActionsKebab } from './RunActionsKebab'
 import { ICON_PAUSE, ICON_STOP, RunLaunchControl } from './RunLaunchControl'
@@ -73,9 +75,11 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
     confirmDelete,
   } = useRunsColumn({ runs, selectedRunId, onSelectRun, verifyOpen, onVerifyOpenChange })
 
+  const details = useRunDetails()
+
   return (
     <div ref={containerRef} className="cl-panel flex h-full flex-col">
-      <div className="cl-panel-header flex items-center gap-3 px-4 py-3">
+      <div className="cl-panel-header cl-column-header flex items-center gap-3 px-4">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span className="cl-kicker shrink-0">Runs</span>
           {feature && runs.length > 0 && <span className="cl-count-chip">{runs.length}</span>}
@@ -106,9 +110,13 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
       </div>
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         {!feature ? (
-          <div className="px-4 py-6 text-xs" style={{ color: 'var(--text-muted)' }}>Select a suite.</div>
+          // Compact for both, and for the same reason the Tests column beside
+          // this one is: the title is the whole message, and the control that
+          // resolves it is never inside this scroller — it is the Suites column
+          // to the left, or the Run button in this column's own header.
+          <EmptyState compact reason="not-yet" title="No suite selected" testId="runs-no-suite" />
         ) : runs.length === 0 ? (
-          <div className="px-4 py-6 text-xs" style={{ color: 'var(--text-muted)' }}>No runs yet for this suite.</div>
+          <EmptyState compact reason="not-yet" title="No runs yet for this suite" testId="runs-none" />
         ) : (
           <ul className="flex flex-col gap-1 px-2 py-2">
             {runs.map((r) => {
@@ -127,7 +135,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
               const isCancellingHeal = transient === 'cancelling-heal'
               const isRestarting = restartingIds.has(r.runId)
               const rowError = errors[r.runId] ?? restartErrors[r.runId] ?? null
-              const view = deriveRunViewModel(r, transient)
+              const view = deriveRunViewModel(details[r.runId] ?? r, transient)
               const displayStatus = view.displayStatus
               const executionType = r.executionType ?? 'run'
               const typeLabel = executionType === 'verify' ? 'Verify' : 'Run'
@@ -137,6 +145,15 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                     r.verificationPlaywrightEnvsetId,
                   ].filter(Boolean).join(' · ')
                 : null
+              // The envset belongs on the row, not just in the run detail: spec
+              // selection is constant across envsets, so two runs of one suite
+              // declare the SAME roster and differ only in which tests the
+              // environment let execute (41 passed / 4 skipped here, 4 passed /
+              // 41 skipped there). With no envset on the row, the second reads
+              // as a run that went badly. A verify row already carries it —
+              // a verify run's `env` IS its config's playwrightEnvsetId
+              // (features/coverage/index.ts) — so only a plain row adds it.
+              const runMeta = [r.runId, r.env].filter(Boolean).join(' · ')
               if (isDeleting) {
                 return (
                   <li key={r.runId}>
@@ -164,7 +181,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                           </span>
                           <ExecutionTypeBadge type={executionType} />
                         </div>
-                        <RunStatusIndicator status={displayStatus} executionType={executionType} />
+                        <RunStatusIndicator status={displayStatus} executionType={executionType} waitingLabel={view.waiting?.label} />
                       </div>
                       <div
                         className="flex w-full min-w-0 items-center justify-between gap-2"
@@ -174,7 +191,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                           fontSize: 10.5,
                         }}
                       >
-                        <span className="min-w-0 flex-1 truncate">{verifySummary || `${typeLabel} ${r.runId}`}</span>
+                        <span className="min-w-0 flex-1 truncate">{verifySummary || `${typeLabel} ${runMeta}`}</span>
                         {dur != null && <span className="shrink-0 opacity-60">{formatDuration(dur)}</span>}
                       </div>
                     </div>
@@ -261,7 +278,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                               />
                             )}
                             <span className="ml-1 inline-flex items-center">
-                              <RunStatusIndicator status={displayStatus} executionType={executionType} />
+                              <RunStatusIndicator status={displayStatus} executionType={executionType} waitingLabel={view.waiting?.label} />
                             </span>
                           </>
                         )}
@@ -309,7 +326,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                         fontSize: 10.5,
                       }}
                     >
-                      <span className="min-w-0 flex-1 truncate" title={verifySummary || r.runId}>{verifySummary || r.runId}</span>
+                      <span className="min-w-0 flex-1 truncate" title={verifySummary || runMeta}>{verifySummary || runMeta}</span>
                       {dur != null && <span className="shrink-0">{formatDuration(dur)}</span>}
                     </div>
                     {rowError && (

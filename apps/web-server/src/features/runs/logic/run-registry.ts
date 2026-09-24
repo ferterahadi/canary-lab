@@ -2,6 +2,7 @@ import { type RunManifest } from './runtime/manifest'
 import { reapStaleRuns, removeRunFromHistory } from './run-cleanup'
 import { getRunDetail, readRunSummary } from './run-detail'
 import { RunStore, listRuns } from './run-store'
+import type { TestReviewGitReceipt } from '../../../../../../shared/test-review'
 
 // `RunStore` is the single mutator for everything the runs feature persists:
 // `logs/runs/<runId>/manifest.json`, `logs/runs/index.json`, and the per-run
@@ -26,6 +27,16 @@ export type OrchestratorCancelHealResult =
   | { ok: true }
   | { ok: false; reason: 'not-healing' | 'no-agent-running' }
 
+/** Mirrors `AdoptSpecEditsResult` in `runtime/run-suite-snapshot.ts` for the
+ *  same reason the pause/cancel results are duplicated here. */
+export type OrchestratorAdoptSpecEditsResult =
+  | { ok: true; adopted: string[]; rerun: 'signalled' | 'not-waiting-for-signal' | 'signal-already-pending' }
+  | { ok: false; reason: 'tests-running' | 'nothing-to-adopt' | 'snapshot-failed' | 'review-changed' }
+
+export type OrchestratorRestoreSpecEditsResult =
+  | { ok: true; restored: string[] }
+  | { ok: false; reason: 'tests-running' | 'nothing-to-restore' | 'restore-failed' | 'review-changed' }
+
 export type OrchestratorInterjectResult =
   | { ok: true }
   | { ok: false; reason: 'no-agent-running' }
@@ -43,6 +54,20 @@ export interface OrchestratorLike {
   stop(finalStatus?: RunManifest['status']): Promise<void>
   pauseAndHeal(): Promise<OrchestratorPauseResult>
   cancelHeal(): Promise<OrchestratorCancelHealResult>
+  /** A human adopts the live spec edits into the run: re-snapshot, re-baseline,
+   *  rerun. Human-only by construction — reached from the HTTP route alone. */
+  adoptSpecEdits?(expectedRevision?: string, git?: TestReviewGitReceipt): Promise<OrchestratorAdoptSpecEditsResult>
+  /** Includes in-memory approval signals, not just files awaiting the watcher. */
+  isWaitingForHealSignal?(): boolean
+  /** A human puts the live specs back to what the run executed. Human-only by
+   *  construction, the same way as adopt. */
+  restoreSpecEdits?(expectedRevision?: string): OrchestratorRestoreSpecEditsResult
+  /** A live spec of `feature` changed on disk: re-measure the run's pending
+   *  edits now rather than at the next Playwright exit, so the run's own count
+   *  (hero, chip, review) says what is pending while the run waits on a heal.
+   *  A no-op for another feature's run, and while Playwright is executing (the
+   *  exit handler records then). Never moves the boundary. */
+  refreshSpecEdits?(feature: string): void
   /** Interject — drop the user's text into the live REPL's stdin (Esc-then-
    *  text-then-Enter). Used by the HTTP fallback route. The bidirectional
    *  pane bypasses this and goes through `writeToHealAgent` instead. */

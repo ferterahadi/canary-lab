@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import type { CoverageFreshnessMonitor } from '../logic/coverage/freshness-monitor'
 import {
   FeatureNotFoundError,
   clearPrdSummary,
@@ -33,6 +34,7 @@ import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../sh
 import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
 export interface CoverageRouteDeps {
+  coverageMonitor?: CoverageFreshnessMonitor
   featuresDir: string
   logsDir: string
   projectRoot: string
@@ -69,11 +71,13 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
 
   app.get<{ Params: { name: string } }>('/api/features/:name/coverage', async (req, reply) => {
     try {
-      return computeFeatureCoverage({
+      if (deps.coverageMonitor) return deps.coverageMonitor.ledger(req.params.name)
+      const ledger = computeFeatureCoverage({
         featuresDir: deps.featuresDir,
         logsDir: deps.logsDir,
         feature: req.params.name,
       })
+      return ledger
     } catch (err) {
       if (err instanceof FeatureNotFoundError) {
         reply.code(404)
@@ -81,6 +85,22 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
       }
       throw err
     }
+  })
+
+  app.get<{ Params: { name: string }; Querystring: { afterRevision?: string; timeoutMs?: string } }>('/api/features/:name/coverage/changes', async (req) => {
+    if (!featureExists(deps.featuresDir, req.params.name)) throw Object.assign(new Error('feature not found'), { statusCode: 404 })
+    const timeout = Number(req.query.timeoutMs ?? 0)
+    if (!Number.isFinite(timeout) || timeout < 0 || timeout > 30_000) throw Object.assign(new Error('timeoutMs must be between 0 and 30000'), { statusCode: 400 })
+    const result = deps.coverageMonitor
+      ? await deps.coverageMonitor.wait(req.params.name, req.query.afterRevision, timeout)
+      : (() => {
+          const ledger = computeFeatureCoverage({ ...deps, feature: req.params.name })
+          return { changed: ledger.freshness!.revision !== req.query.afterRevision, change: { feature: req.params.name, freshness: ledger.freshness!, delivery: 'tool-response-and-wait' as const } }
+        })()
+    const flight = deps.flightStore?.latestForFeature(req.params.name)
+    const job = jobStore.activeFor(req.params.name, 'summary') ?? jobStore.activeFor(req.params.name, 'coverage')
+    const owner = job ? jobStore.get(job.jobId)?.externalSessionId ?? job.producer ?? 'internal' : undefined
+    return { ...result, change: { ...result.change, ...(flight ? { flightId: flight.flightId, flightStatus: flight.status } : {}), ...(job ? { activeJobId: job.jobId, activeJobOwner: owner } : {}) } }
   })
 
   app.get<{ Params: { name: string } }>('/api/features/:name/docs', async (req, reply) => {
@@ -156,7 +176,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
   // Requirements stage's "add local path" input and MCP write_feature_doc's
   // link_path both land here (same lib), so the user's original stays the
   // live source.
-  app.post<{ Params: { name: string }; Body: { path?: string; relPath?: string } | undefined }>(
+  app.post<{ Params: { name: string }; Body: { path?: string; relPath?: string; relink?: boolean } | undefined }>(
     '/api/features/:name/docs/link',
     async (req, reply) => {
       const targetPath = req.body?.path
@@ -170,6 +190,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
           feature: req.params.name,
           targetPath: targetPath.trim(),
           ...(typeof req.body?.relPath === 'string' ? { relPath: req.body.relPath } : {}),
+          ...(req.body?.relink === true ? { relink: true } : {}),
         },
       )
       if (!result.ok) {
@@ -260,11 +281,21 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
     return [...jobStore.list()].sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))
   })
 
-  // Per-feature coverage headline + axes — feeds the feature-column action's
-  // state-aware icon (R8). This is deliberately a manifest scan: summaries,
-  // coverage-run markers, source-doc hashes and the job index. It never opens a
-  // spec or invokes the TypeScript parser; the selected ledger route owns that.
+  // Production badges share the authoritative observer with the ledger, inbox
+  // and agents. The manifest-only fallback is retained for isolated embedders.
   app.get('/api/coverage/states', async () => {
+    if (deps.coverageMonitor) {
+      return deps.coverageMonitor.readAll().map(({ feature, freshness: fresh, measurement }) => {
+        const measured = fresh.state === 'current' && measurement
+        return { feature, freshness: fresh,
+          headline: measured ? `Mapped ${Math.round(measurement.coveragePct)}%`
+            : fresh.state === 'updating' ? 'Generating' : fresh.state === 'unavailable' ? 'Freshness unconfirmed' : fresh.state === 'not-measured' ? 'No coverage' : 'Stale',
+          summary: fresh.nextAction?.stage === 'prd-summary' ? fresh.state === 'not-measured' ? 'absent' : 'stale' : 'fresh',
+          coverage: measured ? 'fresh' : fresh.state === 'updating' ? 'generating' : fresh.state === 'not-measured' ? 'absent' : 'stale',
+          coveragePct: measured ? measurement.coveragePct : null,
+        }
+      })
+    }
     const out: Array<{ feature: string; headline: string | null; summary: string | null; coverage: string | null; coveragePct: number | null }> = []
     const activeJobs = new Map<string, CoverageJobKind>()
     for (const job of jobStore.list()) {
@@ -302,7 +333,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
           activeJob: activeJobs.get(f.name) ?? null,
         })
         const headline = state.coverage === 'fresh' && coveragePct === null
-          ? 'Covered'
+          ? 'Mapped'
           : state.headline
         out.push({
           feature: f.name,

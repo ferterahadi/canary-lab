@@ -1,5 +1,5 @@
 import type { FlightManifest, FlightStageStatus } from '@/shared/api/client'
-import { PANEL_CARD_CLASS, PANEL_CARD_STYLE, PANEL_KICKER_CLASS as SHARED_KICKER_CLASS } from '@/shared/ui/PanelCard'
+import { PanelCard } from '@/shared/ui/PanelCard'
 import { StepList, StepRow, type StepState } from '@/shared/ui/StepList'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { STAGE_COLUMN } from './stage-meta'
@@ -18,10 +18,6 @@ import { distinctRepoPaths } from './stage-metrics'
 export function repoBaseName(p: string): string {
   return p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? p
 }
-
-// Card chrome + kicker come from the shared primitive (shared/ui/PanelCard) so
-// these panels and the stage facts card are literally the same surface.
-export const PANEL_KICKER_CLASS = `mb-1 ${SHARED_KICKER_CLASS}`
 
 /** Each repo row reports the SCAN's state, not the repo's existence (R83). The
  *  rows used to be hard-coded `done`, so a flight parked before the scan showed
@@ -66,53 +62,48 @@ export function RepoScanPanel({
   return (
     <section
       data-testid="repo-scan-panel"
-      className={`flex flex-col gap-2.5 ${STAGE_COLUMN}`}
+      className={`flex flex-col gap-3 ${STAGE_COLUMN}`}
       title="Repos and intent froze when this flight started. Change… reopens them and re-flies from the start."
     >
-      <div
-        data-testid="flight-intent-card"
-        className={PANEL_CARD_CLASS}
-        style={PANEL_CARD_STYLE}
+      {/* Both cards are PanelCard, so their kicker line sits on the same 6px
+          rhythm as every other card on the stage — they used to hand-compose it
+          at 4px, the one pair of cards whose content started higher. */}
+      <PanelCard
+        kicker="Flight input"
+        testId="flight-intent-card"
+        aside={onChangeInputs && (
+          <DisabledControlTooltip>
+            <button
+              type="button"
+              data-testid="flight-inputs-change"
+              onClick={onChangeInputs}
+              disabled={mutationLockedReason != null}
+              // The negative margin grows the HIT area to ~24px without moving
+              // the text — a bare 14px link was the pane's smallest target.
+              className="-my-1.5 py-1.5 cl-type-meta underline-offset-2 transition-colors hover:underline text-accent disabled:cursor-not-allowed disabled:opacity-45"
+              title={mutationLockedReason ?? 'Change what this flight tests — reopens intent and repos prefilled, then re-flies from the start'}
+            >
+              Change…
+            </button>
+          </DisabledControlTooltip>
+        )}
       >
-        <div className="flex items-baseline gap-2">
-          <div className={PANEL_KICKER_CLASS}>
-            Flight input
-          </div>
-          <div className="flex-1" />
-          {onChangeInputs && (
-            <DisabledControlTooltip>
-              <button
-                type="button"
-                data-testid="flight-inputs-change"
-                onClick={onChangeInputs}
-                disabled={mutationLockedReason != null}
-                // The negative margin grows the HIT area to ~24px without moving
-                // the text — a bare 14px link was the pane's smallest target.
-                className="-my-1.5 py-1.5 text-[10.5px] underline-offset-2 transition-colors hover:underline text-accent disabled:cursor-not-allowed disabled:opacity-45"
-                title={mutationLockedReason ?? 'Change what this flight tests — reopens intent and repos prefilled, then re-flies from the start'}
-              >
-                Change…
-              </button>
-            </DisabledControlTooltip>
-          )}
-        </div>
-        <h3 className="mb-1.5 text-[12.5px] font-semibold">Intent · what to test</h3>
+        <h3 className="mb-1.5 cl-type-title text-primary">Intent · what to test</h3>
         <p
           data-testid="flight-intent"
-          className="m-0 max-w-[76ch] text-[12px] leading-relaxed text-secondary"
+          className="m-0 cl-type-body leading-relaxed text-secondary"
         >
           {flight.description}
         </p>
-      </div>
+      </PanelCard>
 
-      <div
-        data-testid="repo-scan-card"
-        className={PANEL_CARD_CLASS}
-        style={PANEL_CARD_STYLE}
+      {/* The count rides the kicker line as a chip, like every other card that
+          lists things (Previous runs, All reports, Passes). */}
+      <PanelCard
+        kicker={repos.length === 1 ? 'Repo scanned' : 'Repos scanned'}
+        aside={<span className="cl-count-chip">{repos.length}</span>}
+        testId="repo-scan-card"
       >
-        <div className={PANEL_KICKER_CLASS}>
-          {repos.length === 1 ? 'Repo · scanned' : `Repos · ${repos.length} scanned`}
-        </div>
         <StepList>
           {repos.map((p) => {
             const envs = envsFor(p)
@@ -125,13 +116,13 @@ export function RepoScanPanel({
                 sub={
                   <span className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-2 gap-y-0.5">
                     <span className="cl-rubric">Location</span>
-                    <span className="max-w-[340px] truncate text-[10px] text-secondary font-mono" title={p}>
+                    <span className="max-w-[340px] truncate cl-type-meta text-secondary font-mono" title={p}>
                       {p}
                     </span>
                     {envs.length > 0 && (
                       <>
                         <span className="cl-rubric">Env</span>
-                        <span className="max-w-[340px] truncate text-[10px] text-secondary font-mono" title={envs.join('\n')}>
+                        <span className="max-w-[340px] truncate cl-type-meta text-secondary font-mono" title={envs.join('\n')}>
                           {envs.join(' · ')}
                         </span>
                       </>
@@ -143,11 +134,11 @@ export function RepoScanPanel({
           })}
         </StepList>
         {orphans.length > 0 && (
-          <div className="mt-2 border-t pt-2 text-[10px] border-line text-muted font-mono" title={orphans.join('\n')}>
+          <div className="mt-2 border-t pt-2 cl-type-meta border-line text-muted font-mono" title={orphans.join('\n')}>
             env outside repos: {orphans.map(repoBaseName).join(' · ')}
           </div>
         )}
-      </div>
+      </PanelCard>
     </section>
   )
 }

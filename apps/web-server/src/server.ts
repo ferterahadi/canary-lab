@@ -11,11 +11,13 @@ import { registerMcpRoutes } from './mcp/server'
 import { register as registerAgentSessions } from './features/agent-sessions/index'
 import { workspaceStreamRoutes } from './shared/ws/workspace-stream'
 import { createRegistry, RunStore, type OrchestratorRegistry } from './features/runs/logic/run-store'
+import { bridgeDirtySpecsToActiveRuns } from './features/runs/logic/runtime/run-spec-edits-bridge'
 import { BenchmarkRunStore } from './features/benchmark/logic/runtime/store'
 import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './features/benchmark/logic/runtime/skills'
 import { register as registerPortify } from './features/portify/index'
 import { register as registerConfig } from './features/config/index'
 import { register as registerCoverage } from './features/coverage/index'
+import { register as registerNotifications } from './features/notifications/index'
 import { register as registerFlights } from './features/flights/index'
 import { register as registerRuns } from './features/runs/index'
 import { register as registerWizard } from './features/wizard/index'
@@ -36,6 +38,7 @@ import {
   resolveWorkflowAgentRef,
 } from './features/agent-sessions/logic/agent-session-log'
 import { WorkspaceEventBus } from './shared/workspace-events'
+import { CoverageFreshnessMonitor } from './features/coverage/logic/coverage/freshness-monitor'
 import { GettingStartedBusyError, GettingStartedSessionStore, isGettingStartedRunActive } from './features/config/logic/getting-started-session'
 import { WORKBENCH_SUITE, gettingStartedRunWorkflow, isGettingStartedFlightStart } from './features/config/routes/onboarding'
 import type { ServerContext } from './server-context'
@@ -55,6 +58,7 @@ import { RunScheduler, type SchedulerActiveRun } from './features/runs/logic/run
 import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './features/runs/logic/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from './features/runs/logic/runtime/repo-collision'
 import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from './features/runs/logic/runtime/repo-worktree'
+import type { RepoUpdateRefusal } from './features/runs/logic/runtime/repo-upstream-update'
 import { overlayExists as portifyOverlayExists } from './features/portify/logic/runtime/overlay'
 import { revertPortification } from './features/portify/logic/runtime/unportify'
 import {
@@ -157,6 +161,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // process's session and are deliberately left alone.
   reconcileInterruptedDrafts(logsDir, () => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
+  const coverageMonitor = new CoverageFreshnessMonitor({ featuresDir, logsDir }, workspaceEvents, (error) => app.log.warn({ error }, 'Coverage freshness reconciliation failed'))
+  const refreshRunCoverage = () => coverageMonitor.schedule()
+  runStore.onEvent(refreshRunCoverage)
+  app.addHook('onListen', () => coverageMonitor.start())
+  app.addHook('onClose', async () => { runStore.offEvent(refreshRunCoverage); coverageMonitor.close() })
   const gettingStarted = new GettingStartedSessionStore(logsDir, {
     status: (target) => {
       switch (target.kind) {
@@ -206,6 +215,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   dirtySpecStore.onEvent((e) => {
     if (e.featureId) workspaceEvents.publish({ type: 'tests-dirty-changed', feature: e.featureId })
   })
+  // The same change re-measures an active run's pending edits (D9), so the
+  // run's own count moves with the file rather than at its next Playwright exit.
+  bridgeDirtySpecsToActiveRuns(dirtySpecStore, registry)
   const dirtySpecWatcher = startDirtySpecWatcher({
     featuresDir,
     store: dirtySpecStore,
@@ -307,6 +319,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     benchmarkStore,
     portifyStore,
     coverageJobStore,
+    coverageMonitor,
     flightStore,
     planStore,
     dirtySpecStore,
@@ -325,6 +338,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // from `ctx` — adding or removing one should not touch anything else here.
   await registerConfig(app, ctx)
   await registerFlights(app, ctx)
+  await registerNotifications(app, ctx)
   await registerVersion(app, ctx)
   // `runs` hands back the three primitives other features legitimately share:
   // the scheduler and stream attacher benchmark reuses, and the external-run
@@ -350,6 +364,18 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // registered above; for `start_run` we reuse `app.inject()` rather than
   // duplicating the 270-line orchestrator-construction code.
   await app.register(registerMcpRoutes, {
+    coverageRequest: async (request) => {
+      const response = await app.inject(request)
+      return { statusCode: response.statusCode, body: response.json() }
+    },
+    testReviewRequest: async (request) => {
+      const response = await app.inject({ method: request.method, url: request.url, payload: request.payload as Record<string, unknown> | undefined, headers: { [MCP_ORIGIN_HEADER]: 'mcp' } })
+      return { statusCode: response.statusCode, body: response.json() }
+    },
+    discoveryRepairRequest: async (request) => {
+      const response = await app.inject({ method: request.method, url: request.url, payload: request.payload as Record<string, unknown> | undefined })
+      return { statusCode: response.statusCode, body: response.json() }
+    },
     store: runStore,
     broker: externalHealBroker,
     featuresDir,
@@ -382,7 +408,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })() as unknown
       return { statusCode: resp.statusCode, body }
     },
-	    startRun: async (feature, env, healAgent, isolation, executionType) => {
+	    startRun: async (feature, env, healAgent, isolation, executionType, updateRepos) => {
 	      const demoWorkflow = executionType === 'boot' ? null : gettingStartedRunWorkflow(feature)
 	      const resp = await app.inject({
 	        method: 'POST',
@@ -393,6 +419,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
             ...(healAgent ? { healAgent } : {}),
             ...(isolation ? { isolation } : {}),
             ...(executionType === 'boot' ? { mode: 'boot' } : {}),
+            ...(updateRepos !== undefined ? { updateRepos } : {}),
             ...(demoWorkflow
               ? { gettingStartedSource: 'external', gettingStartedWorkflow: demoWorkflow }
               : {}),
@@ -415,6 +442,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 	          message: String(body.message ?? 'Same-app collision.'),
 	        }
 	      }
+	      if (resp.statusCode === 409 && body.type === 'repo_update_refused') {
+	        return {
+	          kind: 'repo-update-refused',
+	          repos: Array.isArray(body.repos) ? body.repos as RepoUpdateRefusal[] : [],
+	          message: String(body.error ?? 'Repo upstream update refused.'),
+	        }
+	      }
 	      if (resp.statusCode === 409 && body.type === 'getting_started_busy') {
           return {
             kind: 'getting-started-busy',
@@ -428,6 +462,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           }
         }
 	      const message = body && 'error' in body ? String(body.error) : String(resp.payload)
+	      if (body.type === 'test_review_required') throw Object.assign(new Error(message), { testReviewRequired: body })
 	      throw new Error(`start_run failed (${resp.statusCode}): ${message}`)
 	    },
     restartExternalRun: async (runId, healAgent, guidance) => {

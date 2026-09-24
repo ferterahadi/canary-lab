@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import * as api from '../api/client'
 import type { ExecutionType, Feature, RunStatus, VersionStatus } from '../api/types'
 import { useMcpPromo } from './McpPromoContext'
-import { FeatureConfigEditor, SettingsModal } from '@/features/config'
+import { SettingsModal } from '@/features/config'
 import { FeatureChipBadge, FlightStatusChip, flightAwaitsUser, readGroupOpen, writeGroupOpen, type FeatureFlightAction } from '@/features/flights'
+import { SPEC_TONE, featureTone, type RunWaitingState } from '@/features/runs'
 import { ThemeToggle } from '../ui/ThemeToggle'
+import { Chip } from '../ui/StatusChip'
 import { VersionUpdateButton } from './VersionUpdateButton'
 import { ChevronRightIcon } from '@/shared/ui/atoms'
 import { Tooltip } from '../ui/Tooltip'
-import { useInvalidationKey } from '../state/invalidation'
+import { useLiveCoverageStates } from '../state/use-live-coverage'
 import type { ModelsAgent } from '../lib/workspace-view-state'
 
 interface Props {
@@ -21,9 +23,11 @@ interface Props {
   /** Execution type of that active run — a `boot` run gets the teal
    *  "services up" treatment instead of the running/healing tint. */
   activeRunExecutionType?: ExecutionType | null
+  activeRunWaiting?: RunWaitingState
+  onReviewFeature?: (name: string) => void
   onSelectFeature: (name: string) => void
-  onFeaturesChanged?: (preferredFeature?: string | null) => void
-  /** Opens the Requirement Coverage ledger for a feature (R8 column entry point). */
+  onOpenConfig: (feature: string) => void
+  /** Opens the Requirement Coverage ledger when generation is not active in Flight. */
   onOpenCoverage?: (feature: string) => void
   /** Opens the new-flight dialog (intent + repo picker) — the "+ New" action.
    *  Flight is the only GUI path to a new feature (R40/R50). */
@@ -39,8 +43,6 @@ interface Props {
   /** Current-vs-latest version + self-update job state. Drives the footer
    *  "update available" indicator; null until the registry check resolves. */
   versionStatus?: VersionStatus | null
-  /** Open the feature's Flight at Parallel setup (config dialog → Ports tab). */
-  onOpenPortify?: (feature: string) => void
   /** Project Settings is route-driven (`?dialog=settings`) when these are
    *  supplied — controlled by App. Omitted (e.g. in unit tests) → the column
    *  falls back to its own internal open-state. Same hybrid the runs column's
@@ -55,11 +57,12 @@ interface Props {
 
 // Colour the Coverage icon by the derived headline (R8). Neutral (inherit) for
 // setup-needed / no-coverage / unknown so the column stays calm until there's
-// real signal; green when covered, sky while generating, amber when stale.
+// real signal; green when mapped, amber when stale. Generating belongs to the
+// Flight shortcut, so the Coverage action is absent in that state.
 function coverageHeadlineColor(headline: string | null | undefined): string | undefined {
   if (!headline) return undefined
-  if (headline.startsWith('Covered')) return 'var(--success)'
-  if (headline === 'Generating') return 'var(--running)'
+  if (headline.startsWith('Mapped') || headline.startsWith('Covered')) return 'var(--success)'
+  if (headline === 'Freshness unconfirmed') return 'var(--warning)'
   if (headline === 'Stale') return 'var(--warning)'
   return undefined
 }
@@ -127,23 +130,21 @@ export function FeaturesColumn({
   activeRunFeature,
   activeRunStatus,
   activeRunExecutionType,
+  activeRunWaiting,
   onSelectFeature,
-  onFeaturesChanged,
+  onReviewFeature,
+  onOpenConfig,
   onOpenCoverage,
   onStartNewFlight,
   onOpenFlight,
   flightAction,
   versionStatus,
-  onOpenPortify,
   settingsOpen,
   onSettingsOpenChange,
   modelsFor,
   onModelsFor,
 }: Props) {
   const { gatePromo } = useMcpPromo()
-  // Coverage headlines re-fetch when a coverage job finishes (`coverage-changed`).
-  const coverageRefreshKey = useInvalidationKey('coverage')
-  const [configFor, setConfigFor] = useState<string | null>(null)
   // Controlled when App drives it from the route; uncontrolled otherwise.
   const [settingsOpenInternal, setSettingsOpenInternal] = useState(false)
   const settingsDialogOpen = settingsOpen ?? settingsOpenInternal
@@ -152,38 +153,43 @@ export function FeaturesColumn({
     else setSettingsOpenInternal(open)
   }, [onSettingsOpenChange])
   // Per-feature coverage headline → colours the column's Coverage icon (R8).
-  // Fetched on mount + when the feature set changes (not polled — generating
-  // state is surfaced by the status-bar pill instead, which avoids recomputing
-  // every feature's coverage on a tight loop).
-  const [coverageHeadlines, setCoverageHeadlines] = useState<Record<string, string | null>>({})
-  const featureKey = features.map((f) => f.name).join(',')
+  // Workspace events plus bounded reconciliation keep source changes live.
+  // Failed reads or an expired freshness lease withdraw the previous badge.
   // The effect only asks *whether* coverage is reachable, never calls the handler.
   // Depending on the callback itself made every App re-render refetch the same
   // workspace status index — App passes a fresh arrow each render. The server
   // scan is lightweight now, but duplicate requests are still needless work.
   const canOpenCoverage = Boolean(onOpenCoverage)
-  useEffect(() => {
-    if (!canOpenCoverage || features.length === 0) return
-    let alive = true
-    api.listCoverageStates()
-      .then((states) => {
-        if (!alive) return
-        const map: Record<string, string | null> = {}
-        for (const s of states) map[s.feature] = s.headline
-        setCoverageHeadlines(map)
-      })
-      .catch(() => {})
-    return () => { alive = false }
-  }, [featureKey, canOpenCoverage, features.length, coverageRefreshKey])
+  const coverage = useLiveCoverageStates(canOpenCoverage ? features.map((feature) => feature.name) : null)
+  const coverageHeadlines = useMemo(() => Object.fromEntries((coverage.value ?? []).map((state) => [state.feature,
+    coverage.confirmed ? state.headline : 'Freshness unconfirmed'])), [coverage.value, coverage.confirmed])
 
   // R55: features declaring a `group` collapse under an accordion; the rest
   // stay flat. Sections order worst-first (a group with a running/dirty
   // feature above a calm one).
   const { ungrouped, groups } = groupFeatures(features, activeRunFeature)
+  const renderFeatureRow = (feature: Feature): ReactNode => (
+    <FeatureRow
+      key={feature.name}
+      feature={feature}
+      selectedFeature={selectedFeature}
+      activeRunFeature={activeRunFeature}
+      activeRunStatus={activeRunStatus}
+      activeRunExecutionType={activeRunExecutionType}
+      activeRunWaiting={activeRunWaiting}
+      coverageHeadline={coverageHeadlines[feature.name]}
+      onSelectFeature={onSelectFeature}
+      onReviewFeature={onReviewFeature}
+      onOpenCoverage={onOpenCoverage}
+      onOpenFlight={onOpenFlight}
+      flightAction={flightAction}
+      onConfigure={onOpenConfig}
+    />
+  )
 
   return (
     <div className="cl-panel flex h-full flex-col">
-      <div className="cl-panel-header flex items-center justify-between gap-2 px-4 py-3">
+      <div className="cl-panel-header cl-column-header flex items-center justify-between gap-2 px-4">
         <div className="flex min-w-0 items-center gap-2">
           <span className="cl-kicker">Suites</span>
           {features.length > 0 && <span className="cl-count-chip">{features.length}</span>}
@@ -191,7 +197,7 @@ export function FeaturesColumn({
         <button
           type="button"
           onClick={() => gatePromo('create-feature', () => onStartNewFlight?.())}
-          className="cl-button shrink-0 whitespace-nowrap px-2.5 py-1"
+          className="cl-button shrink-0 whitespace-nowrap px-2.5"
           title="Start a flight on new repos"
         >
           + New
@@ -204,38 +210,14 @@ export function FeaturesColumn({
           <div className="flex flex-col gap-1">
             {ungrouped.length > 0 && (
               <ul className="flex flex-col gap-1">
-                {ungrouped.map((f) => (
-                  <FeatureRow
-                    key={f.name}
-                    feature={f}
-                    selectedFeature={selectedFeature}
-                    activeRunFeature={activeRunFeature}
-                    activeRunStatus={activeRunStatus}
-                    activeRunExecutionType={activeRunExecutionType}
-                    coverageHeadline={coverageHeadlines[f.name]}
-                    onSelectFeature={onSelectFeature}
-                    onOpenCoverage={onOpenCoverage}
-                    onOpenFlight={onOpenFlight}
-                    flightAction={flightAction}
-                    onConfigure={setConfigFor}
-                  />
-                ))}
+                {ungrouped.map(renderFeatureRow)}
               </ul>
             )}
             {groups.map((section) => (
               <FeatureGroupAccordion
                 key={section.group}
                 section={section}
-                selectedFeature={selectedFeature}
-                activeRunFeature={activeRunFeature}
-                activeRunStatus={activeRunStatus}
-                activeRunExecutionType={activeRunExecutionType}
-                coverageHeadlines={coverageHeadlines}
-                onSelectFeature={onSelectFeature}
-                onOpenCoverage={onOpenCoverage}
-                onOpenFlight={onOpenFlight}
-                flightAction={flightAction}
-                onConfigure={setConfigFor}
+                renderRow={renderFeatureRow}
               />
             ))}
           </div>
@@ -267,22 +249,6 @@ export function FeaturesColumn({
         />
       )}
 
-      {configFor && (
-        <FeatureConfigEditor
-          feature={configFor}
-          portified={features.find((f) => f.name === configFor)?.portified ?? false}
-          onOpenPortify={onOpenPortify}
-          onClose={() => setConfigFor(null)}
-          onRenamed={(_, nextFeature) => {
-            setConfigFor(nextFeature)
-            onFeaturesChanged?.(nextFeature)
-          }}
-          onDeleted={(deletedFeature) => {
-            setConfigFor(null)
-            onFeaturesChanged?.(selectedFeature === deletedFeature ? null : selectedFeature)
-          }}
-        />
-      )}
     </div>
   )
 }
@@ -296,8 +262,10 @@ function FeatureRow({
   activeRunFeature,
   activeRunStatus,
   activeRunExecutionType,
+  activeRunWaiting,
   coverageHeadline,
   onSelectFeature,
+  onReviewFeature,
   onOpenCoverage,
   onOpenFlight,
   flightAction,
@@ -308,7 +276,9 @@ function FeatureRow({
   activeRunFeature?: string | null
   activeRunStatus?: RunStatus | null
   activeRunExecutionType?: ExecutionType | null
+  activeRunWaiting?: RunWaitingState
   coverageHeadline?: string | null
+  onReviewFeature?: (name: string) => void
   onSelectFeature: (name: string) => void
   onOpenCoverage?: (feature: string) => void
   onOpenFlight?: (flightId: string) => void
@@ -320,13 +290,22 @@ function FeatureRow({
   // clicking the row resumes the flight.
   if (f.pending) return <PendingFeatureRow feature={f} onOpenFlight={onOpenFlight} />
   const isSelected = f.name === selectedFeature
-  const isDirty = f.dirty?.status === 'dirty'
+  const tone = featureTone(f)
   const isActive = Boolean(activeRunFeature) && f.name === activeRunFeature
   const runState = isActive
-    ? (activeRunExecutionType === 'boot'
+    ? (activeRunStatus === 'queued' ? 'queued' : activeRunExecutionType === 'boot'
         ? 'booted'
         : activeRunStatus === 'healing' ? 'healing' : 'running')
     : null
+  const runCue = !runState || runState === 'queued'
+    ? ''
+    : activeRunWaiting
+      ? ' cl-list-row-waiting'
+      : runState ? ` cl-list-row-${runState}` : ''
+  // The Review action carries modified-test attention while an execution cue
+  // owns the row colour. Without this guard the later neutral CSS wash masks a
+  // live or waiting run and makes the suite read as idle.
+  const rowCue = tone && !runCue ? ' cl-list-row-changed' : ''
   // The hover shortcut to this suite's flight — absent for a suite nothing has
   // touched yet (starting stays with "+ New" / the picker, per R40), and absent
   // without a destination handler. Resolved once so the reserved width below
@@ -338,51 +317,58 @@ function FeatureRow({
   // A resting/finished flight gets nothing — every flown suite carrying a
   // permanent tint would make the column noise again.
   const inFlight = Boolean(flight?.live || flight?.attention)
+  const showFlightChip = inFlight || flight?.queued === true
+  const showRunWaitingChip = isActive && activeRunWaiting != null
+  // The Coverage shortcut is for the resting ledger. While its job runs, Flight
+  // owns the live work and is already the adjacent shortcut. Hiding this action
+  // avoids two icons that describe the same work but open different surfaces.
+  const coverageAction = coverageHeadline === 'Generating' ? undefined : onOpenCoverage
   // The action cluster FLOATS over the row's right edge instead of sitting in
   // flow, so three icons cost the suite name zero width at rest — in a column
   // of long `cns_*` names that width is the column's actual content. The name
   // only makes room (padding-right) while the row is hovered/focused, so
   // nothing ever moves: the ellipsis just lands earlier. Width is computed from
   // the visible count so a 1-action row doesn't reserve space for three.
-  const actionCount = 1 + (onOpenCoverage ? 1 : 0) + (flight ? 1 : 0)
-  // The at-rest flight chip already sits in flow at that same right edge, so it
+  const actionCount = 1 + (coverageAction ? 1 : 0) + (flight ? 1 : 0)
+  // The at-rest status chip already sits in flow at that same right edge, so it
   // has ALREADY cost the name its width — reserving the full cluster on top of it
   // left an in-flight row with ~18px of readable name on hover (204px row − 72px
   // chip − 100px reservation). Subtract what the chip yields; the cluster floats
   // over the chip's box as it fades, so the icons still land clear of the text.
-  const chipWidth = inFlight ? 72 + 6 : 0
+  const chipWidth = showRunWaitingChip || showFlightChip ? 72 + 6 : 0
   const actionsWidth = Math.max(0, actionCount * 28 + (actionCount - 1) * 2 + 12 - chipWidth)
   return (
     <li
-      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${inFlight ? (flight?.attention ? ' cl-list-row-inflight-attention' : ' cl-list-row-inflight') : ''}${runState ? ` cl-list-row-${runState}` : ''}${isDirty ? ' cl-list-row-dirty' : ''}`}
+      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${inFlight ? (flight?.attention ? ' cl-list-row-inflight-attention' : ' cl-list-row-inflight') : ''}${runCue}${rowCue}`}
       style={{
         // An in-flight suite reads at full text contrast like a selected one: at 6%
         // the wash alone is nearly invisible on the dark theme, so the brighter
         // name does as much of the work as the tint.
-        color: isSelected || inFlight ? 'var(--text-primary)' : 'var(--text-secondary)',
+        color: isSelected || inFlight || Boolean(runCue) ? 'var(--text-primary)' : 'var(--text-secondary)',
         fontWeight: isSelected ? 500 : 400,
         ['--feature-row-actions' as string]: `${actionsWidth}px`,
       }}
-      title={runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : inFlight ? flight?.title : undefined}
+      title={isActive && activeRunWaiting ? activeRunWaiting.label : runState ? (runState === 'queued' ? 'Queued' : runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : inFlight ? flight?.title : undefined}
     >
-      {isDirty && (
-        <Tooltip label="Test files modified — review in the status bar">
-          <span
-            aria-label="Tests modified"
+      {tone && (
+        <Tooltip label={`${SPEC_TONE[tone].title} Click to review.`}>
+          <button type="button" onClick={() => { onSelectFeature(f.name); onReviewFeature?.(f.name) }}
+            aria-label={`Review test changes in ${f.name}`}
             data-testid={`dirty-badge-${f.name}`}
-            className="ml-1.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded text-[11px] font-semibold leading-none"
+            data-tone={tone}
+            className="ml-1.5 flex shrink-0 items-center justify-center self-center rounded px-1 py-1 text-[10px] leading-none"
             style={{
-              color: 'var(--danger)',
-              background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
-              border: '1px solid color-mix(in srgb, var(--danger) 35%, transparent)',
+              color: 'var(--warning)',
+              background: 'color-mix(in srgb, var(--warning) 14%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--warning) 35%, transparent)',
             }}
           >
-            !
-          </span>
+            Review
+          </button>
         </Tooltip>
       )}
       {f.portified && (
-        <Tooltip label="Portified">
+        <Tooltip label="Ready for parallel runs.">
           <span
             aria-label="Portified"
             data-testid={`portified-badge-${f.name}`}
@@ -406,13 +392,26 @@ function FeatureRow({
       >
         {f.name}
       </button>
-      {runState && (
-        <span className="sr-only">{runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
+      {runState && !showRunWaitingChip && (
+        <span className="sr-only">{runState === 'queued' ? 'Queued' : runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
       )}
-      {inFlight && flight && (
+      {showRunWaitingChip && activeRunWaiting && (
+        <span className="feature-row__status-chip mr-1.5 shrink-0 self-center" aria-label={activeRunWaiting.label}>
+          <Chip
+            tone={activeRunWaiting.kind === 'queued' ? 'var(--text-muted)' : 'var(--warning)'}
+            background={activeRunWaiting.kind === 'queued' ? 'var(--bg-elevated)' : undefined}
+            chrome="fill"
+            label={activeRunWaiting.shortLabel}
+            uppercase
+            fontSize={10}
+            testId={`run-waiting-${f.name}`}
+          />
+        </span>
+      )}
+      {!showRunWaitingChip && showFlightChip && flight && (
         /* In flow, not floating — it keeps its box while fading under the hover
            action cluster, so the row can't reflow as the pointer arrives. */
-        <span className="feature-row__flight-chip mr-1.5 shrink-0 self-center" data-testid={`flight-chip-${f.name}`}>
+        <span className="feature-row__status-chip mr-1.5 shrink-0 self-center" data-testid={`flight-chip-${f.name}`}>
           <FeatureChipBadge chip={flight} />
         </span>
       )}
@@ -441,11 +440,11 @@ function FeatureRow({
             </button>
           </Tooltip>
         )}
-        {onOpenCoverage && (
+        {coverageAction && (
           <Tooltip label="Coverage">
             <button
               type="button"
-              onClick={() => { onSelectFeature(f.name); onOpenCoverage(f.name) }}
+              onClick={() => { onSelectFeature(f.name); coverageAction(f.name) }}
               aria-label={`Open coverage for ${f.name}`}
               data-testid={`coverage-action-${f.name}`}
               data-headline={coverageHeadline ?? ''}
@@ -484,28 +483,10 @@ function FeatureRow({
  *  disclosure. */
 function FeatureGroupAccordion({
   section,
-  selectedFeature,
-  activeRunFeature,
-  activeRunStatus,
-  activeRunExecutionType,
-  coverageHeadlines,
-  onSelectFeature,
-  onOpenCoverage,
-  onOpenFlight,
-  flightAction,
-  onConfigure,
+  renderRow,
 }: {
   section: FeatureGroupSection
-  selectedFeature: string | null
-  activeRunFeature?: string | null
-  activeRunStatus?: RunStatus | null
-  activeRunExecutionType?: ExecutionType | null
-  coverageHeadlines: Record<string, string | null>
-  onSelectFeature: (name: string) => void
-  onOpenCoverage?: (feature: string) => void
-  onOpenFlight?: (flightId: string) => void
-  flightAction?: (feature: string) => FeatureFlightAction | null
-  onConfigure: (feature: string) => void
+  renderRow: (feature: Feature) => ReactNode
 }) {
   const { group } = section
   const [open, setOpen] = useState(() => readGroupOpen(FEATURE_GROUPS_OPEN_STORAGE_KEY, group))
@@ -533,22 +514,7 @@ function FeatureGroupAccordion({
       </button>
       {open && (
         <ul className="mt-1 flex flex-col gap-1 pl-4">
-          {section.features.map((f) => (
-            <FeatureRow
-              key={f.name}
-              feature={f}
-              selectedFeature={selectedFeature}
-              activeRunFeature={activeRunFeature}
-              activeRunStatus={activeRunStatus}
-              activeRunExecutionType={activeRunExecutionType}
-              coverageHeadline={coverageHeadlines[f.name]}
-              onSelectFeature={onSelectFeature}
-              onOpenCoverage={onOpenCoverage}
-              onOpenFlight={onOpenFlight}
-              flightAction={flightAction}
-              onConfigure={onConfigure}
-            />
-          ))}
+          {section.features.map(renderRow)}
         </ul>
       )}
     </section>

@@ -15,7 +15,7 @@ function manifest(
     feature: 'checkout',
     repoPaths: ['/repo'],
     description: 'checkout flow',
-    opts: { env: 'local', yolo: false, ...(stageProducer ? { stageProducer } : {}) },
+    opts: { env: 'local', coverageTarget: 100, yolo: false, ...(stageProducer ? { stageProducer } : {}) },
     status,
     currentStage: 'docs',
     stages: [],

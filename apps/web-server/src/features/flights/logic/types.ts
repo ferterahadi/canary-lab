@@ -7,6 +7,7 @@ export {
   CHECKPOINT_OPTIONS,
   FLIGHT_EXECUTION_ORDER,
   FLIGHT_STAGE_KEYS,
+  flightStagesResetByEntry,
   STAGE_DEPENDS_ON,
   ACTIVE_FLIGHT_STATUSES,
   isActiveFlightStatus,

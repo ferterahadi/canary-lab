@@ -153,7 +153,7 @@ afterEach(() => {
 
 // ─── fixtures ────────────────────────────────────────────────────────────────
 
-interface RepoSpec { name: string; localPath: string; branch?: string }
+interface RepoSpec { name: string; localPath: string; branch?: string; track?: 'upstream'; startCommands?: Array<{ name: string; command: string; ports?: Array<{ name: string; env: string }> }> }
 interface FeatureSpec { envs?: string[]; repos?: RepoSpec[] }
 
 /** Real on-disk feature config — `loadFeatures` requires and re-reads it. */
@@ -234,6 +234,28 @@ function initRepo(dir: string): string {
   git(dir, ['add', '-A'])
   git(dir, ['commit', '-q', '-m', 'init'])
   return dir
+}
+
+/**
+ * A checkout whose `main` tracks a bare origin that is one commit ahead of it —
+ * the state a pinned feature repo drifts into as teammates merge. Returns the
+ * two commits so a test can say which one the run booted.
+ */
+function initBehindClone(dir: string): { from: string; to: string } {
+  const originDir = path.join(tmpDir, 'origin.git')
+  const seedDir = initRepo(path.join(tmpDir, 'seed'))
+  git(tmpDir, ['init', '-q', '--bare', '-b', 'main', originDir])
+  git(seedDir, ['remote', 'add', 'origin', originDir])
+  git(seedDir, ['push', '-q', '-u', 'origin', 'main'])
+  git(tmpDir, ['clone', '-q', originDir, dir])
+  git(dir, ['config', 'user.email', 'test@example.com'])
+  git(dir, ['config', 'user.name', 'Test'])
+  const from = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+  fs.writeFileSync(path.join(seedDir, 'server.ts'), 'export const port = 5000\n')
+  git(seedDir, ['commit', '-qam', 'bump port'])
+  git(seedDir, ['push', '-q', 'origin', 'main'])
+  const to = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: seedDir, encoding: 'utf8' }).trim()
+  return { from, to }
 }
 
 function seedRun(store: RunStore, runId: string, patch: Partial<RunManifest> = {}): void {
@@ -439,6 +461,40 @@ describe('startRun — refusals', () => {
     expect(h.runStore.list()).toEqual([])
     expect(orchHarness.options).toEqual([])
   })
+
+  it('refuses a suite whose config picks specs by envset', async () => {
+    // The roster Playwright declares before the first test IS the run's record
+    // of what the suite contains; a config that narrows it per envset makes two
+    // runs of one suite incomparable and the unselected tests simply absent.
+    const dir = writeFeature('demo')
+    fs.writeFileSync(
+      path.join(dir, 'playwright.config.ts'),
+      "import { defineConfig } from '@playwright/test'\nexport default defineConfig({ testMatch: mode ? a : b })\n",
+    )
+    const h = harness()
+
+    await expect(h.deps.startRun('demo')).rejects.toMatchObject({
+      statusCode: 409,
+      specSelection: { feature: 'demo', fields: ['testMatch'] },
+    })
+    expect(h.runStore.list()).toEqual([])
+    expect(orchHarness.options).toEqual([])
+  })
+
+  it('lets a boot through — it runs no tests, so it declares no roster to corrupt', async () => {
+    // Refusing the boot would block the very services someone needs up to debug
+    // the config this rule is asking them to fix.
+    const dir = writeFeature('demo')
+    fs.writeFileSync(
+      path.join(dir, 'playwright.config.ts'),
+      "import { defineConfig } from '@playwright/test'\nexport default defineConfig({ testMatch: mode ? a : b })\n",
+    )
+    const h = harness()
+
+    const outcome = await h.deps.startRun('demo', undefined, undefined, undefined, 'boot')
+
+    expect(outcome.kind).toBe('started')
+  })
 })
 
 // ─── startRun: collision + queueing ──────────────────────────────────────────
@@ -477,6 +533,7 @@ describe('startRun — same-repo collision', () => {
     const queued = h.runStore.get(runId)!.manifest
     expect(queued.status).toBe('queued')
     expect(queued.queueReason).toBe('repo-collision')
+    expect(h.deps.queueDiagnostics?.(runId)).toMatchObject({ reason: 'repo-collision', conflictingRunId: 'active-1', activeRuns: [expect.objectContaining({ feature: 'other' })] })
     expect(h.scheduling.scheduler.isQueued(runId)).toBe(true)
     expect(orchHarness.options).toEqual([])
 
@@ -575,7 +632,7 @@ describe('startRun — resource admission', () => {
 // ─── startRun: worktree isolation ────────────────────────────────────────────
 
 describe('startRun — worktree isolation', () => {
-  it('isolates every repo, links its deps in and reproduces the uncommitted working tree', async () => {
+  it('isolates every repo and reproduces WIP before the orchestrator owns dependency preparation', async () => {
     initRepo(repoDir)
     fs.writeFileSync(path.join(repoDir, 'server.ts'), 'export const port = 4000\n')
     fs.writeFileSync(path.join(repoDir, 'scratch.ts'), 'export const wip = true\n')
@@ -599,12 +656,12 @@ describe('startRun — worktree isolation', () => {
       .toBe('export const port = 4000\n')
     expect(fs.readFileSync(path.join(worktrees[0].localPath, 'scratch.ts'), 'utf-8'))
       .toBe('export const wip = true\n')
-    // A symlink, not a copy: the run must resolve the SOURCE repo's installed
-    // deps, and a per-run copy of node_modules would be unusable on disk.
+    // The mocked orchestrator has not booted. Its shared preflight must own
+    // linking/validation on initial boot AND recovery, after env hydration.
+    // The real boot/link assertion lives in orchestrator.dependency-recovery.
     const linkedDeps = path.join(worktrees[0].worktreeRoot, 'node_modules')
-    expect(fs.lstatSync(linkedDeps).isSymbolicLink()).toBe(true)
-    expect(fs.realpathSync(linkedDeps)).toBe(fs.realpathSync(path.join(repoDir, 'node_modules')))
-    expect(fs.existsSync(path.join(linkedDeps, '.bin', 'concurrently'))).toBe(true)
+    expect(fs.existsSync(linkedDeps)).toBe(false)
+    expect(lastOpts().dependencyProvenance).toBeUndefined()
     const log = runnerLogText(runId)
     expect(log).toContain('Hydrated uncommitted changes into "app" worktree (1 untracked file(s)).')
     expect(log).toContain('Isolated repo "app" in a per-run worktree.')
@@ -667,6 +724,96 @@ describe('startRun — worktree isolation', () => {
 })
 
 // ─── startRun: portified runs ────────────────────────────────────────────────
+
+describe('startRun — upstream tracking', () => {
+  const startWith = (h: Harness, updateRepos: boolean | undefined) =>
+    h.deps.startRun('demo', undefined, undefined, undefined, undefined, undefined, { updateRepos })
+
+  it('fast-forwards a tracked repo before the worktree is cut, and records the pull', async () => {
+    const { from, to } = initBehindClone(repoDir)
+    writeFeature('demo', { repos: [{ name: 'app', localPath: repoDir, branch: 'main', track: 'upstream' }] })
+    const h = harness()
+
+    const runId = await startOk(h, 'demo')
+
+    // The checkout moved, and the worktree was cut from the NEW tip — the whole
+    // point: without the pull the run would have booted `from`.
+    expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf8' }).trim()).toBe(to)
+    const worktrees = lastOpts().worktrees as { localPath: string }[]
+    expect(fs.readFileSync(path.join(worktrees[0].localPath, 'server.ts'), 'utf-8')).toBe('export const port = 5000\n')
+    expect(lastOpts().repoBranchSnapshots).toEqual([{
+      name: 'app',
+      path: repoDir,
+      branch: 'main',
+      expectedBranch: 'main',
+      detached: false,
+      dirty: false,
+      sha: to,
+      updatedFromUpstream: { upstream: 'origin/main', from, to },
+    }])
+    expect(runnerLogText(runId)).toContain(
+      `Upstream update for "app": fast-forwarded main ${from.slice(0, 7)} → ${to.slice(0, 7)} (1 commit(s) from origin/main)`,
+    )
+  })
+
+  it('refuses a dirty tracked repo before allocating anything, and never discards the edits', async () => {
+    const { from } = initBehindClone(repoDir)
+    fs.writeFileSync(path.join(repoDir, 'server.ts'), 'export const port = 4000\n')
+    writeFeature('demo', { repos: [{ name: 'app', localPath: repoDir, branch: 'main', track: 'upstream' }] })
+    const h = harness()
+
+    const err = await h.deps.startRun('demo').catch((e: unknown) => e) as Error & { statusCode: number; repoUpdate: unknown[] }
+
+    expect(err.message).toContain('Repo upstream update refused')
+    expect(err.statusCode).toBe(409)
+    expect(err.repoUpdate).toEqual([expect.objectContaining({ name: 'app', path: repoDir, branch: 'main', reason: 'dirty' })])
+    expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf8' }).trim()).toBe(from)
+    expect(fs.readFileSync(path.join(repoDir, 'server.ts'), 'utf-8')).toBe('export const port = 4000\n')
+    expect(h.runStore.list()).toEqual([])
+    expect(orchHarness.options).toEqual([])
+  })
+
+  it('refuses to move a checkout an in-place run is booted from', async () => {
+    initBehindClone(repoDir)
+    writeFeature('demo', { repos: [{ name: 'app', localPath: repoDir, track: 'upstream' }] })
+    const h = harness()
+    seedRun(h.runStore, 'active-1', { status: 'running', feature: 'other' })
+
+    const err = await h.deps.startRun('demo').catch((e: unknown) => e) as Error & { repoUpdate: unknown[] }
+
+    expect(err.repoUpdate).toEqual([expect.objectContaining({ name: 'app', branch: null, reason: 'in-use' })])
+    expect(err.message).toContain('run active-1 is booted from this checkout in place')
+    expect(orchHarness.options).toEqual([])
+  })
+
+  it('boots the checked-out commit as-is when the start declines the update', async () => {
+    const { from } = initBehindClone(repoDir)
+    writeFeature('demo', { repos: [{ name: 'app', localPath: repoDir, branch: 'main', track: 'upstream' }] })
+    const h = harness()
+
+    const outcome = await startWith(h, false)
+
+    if (outcome.kind !== 'started') throw new Error(`expected a started run, got ${outcome.kind}`)
+    const snapshots = lastOpts().repoBranchSnapshots as Array<Record<string, unknown>>
+    expect(snapshots[0]).toMatchObject({ name: 'app', sha: from })
+    expect(snapshots[0]).not.toHaveProperty('updatedFromUpstream')
+    expect(runnerLogText(outcome.orch.runId)).not.toContain('Upstream update')
+  })
+
+  it('updates an untracked repo when the start asks for it explicitly', async () => {
+    const { from, to } = initBehindClone(repoDir)
+    writeFeature('demo', { repos: [{ name: 'app', localPath: repoDir, branch: 'main' }] })
+    const h = harness()
+
+    const outcome = await startWith(h, true)
+
+    expect(outcome.kind).toBe('started')
+    expect((lastOpts().repoBranchSnapshots as Array<Record<string, unknown>>)[0]).toMatchObject({
+      sha: to,
+      updatedFromUpstream: { upstream: 'origin/main', from, to },
+    })
+  })
+})
 
 describe('startRun — portified feature', () => {
   it('never raises the collision prompt, because its injected ports are disjoint', async () => {
@@ -1007,8 +1154,6 @@ describe('startRun — external heal origin', () => {
   })
 })
 
-// ─── startRun: boot-only sessions ────────────────────────────────────────────
-
 describe('startRun — boot-only session', () => {
   it('holds the services up with every heal mode forced off', async () => {
     writeProjectConfig('claude')
@@ -1131,6 +1276,16 @@ describe('restartRun — refusals', () => {
     const h = harness()
 
     expect(await h.deps.restartRun!('ghost')).toEqual({ ok: false, reason: 'run-not-found' })
+  })
+
+  it('refuses a legacy perturbation run before constructing an orchestrator', async () => {
+    const h = harness()
+    writeFeature('demo')
+    const retiredFields = { perturbation: {} }
+    seedRun(h.runStore, 'legacy', { status: 'failed', ...retiredFields })
+
+    expect(await h.deps.restartRun!('legacy')).toEqual({ ok: false, reason: 'not-restartable' })
+    expect(orchHarness.options).toEqual([])
   })
 
   it('refuses a verification execution, which is re-run from its own surface', async () => {

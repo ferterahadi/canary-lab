@@ -1,0 +1,4 @@
+# Each service's durable state — one JSON file per service, written under the
+# working directory of whichever per-run worktree the service boots in.
+.state/
+node_modules/

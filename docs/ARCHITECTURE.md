@@ -76,8 +76,8 @@ entry. The three places that must agree for the web aliases are
 | --- | --- |
 | `apps/cli/` | CLI entry, scaffold/setup/upgrade/env commands, MCP bridge (`apps/cli/mcp.ts` includes `inferMcpClientKind` client-kind detection) |
 | `apps/web-server/src/server.ts` | Fastify app: UI assets, REST routes, WebSocket streams, the `startRun` factory, scheduler wiring |
-| `apps/web-server/src/mcp/` | MCP HTTP server and tool registration. `server.ts` owns transports and profile instructions; `tools.ts` applies the profile gate and calls the `reads`, `authoring`, `run-lifecycle`, and `heal-flow` registrars. `authoring.ts` composes feature, envset, draft, coverage, export, Flight, and Portify tool groups. `tool-profiles.ts` is the source of truth for profile membership. |
-| `apps/web-server/src/features/` | Server features. `runs` owns execution and repair; `coverage` owns the ledger and deployed verification; `flights` owns the conducted pipeline; `wizard` stores external test-authoring drafts; `evaluation` owns exports; `config` owns suite and project configuration; `portify` owns port overlays; `benchmark` owns the preview harness; `agent-sessions` owns process and transcript state; `version` owns update checks. |
+| `apps/web-server/src/mcp/` | MCP HTTP server and tool registration. `server.ts` owns transports; `instructions.ts` owns the profile instructions and the workflow guides; `tools.ts` applies the profile gate and calls the `reads`, `authoring`, `run-lifecycle`, and `heal-flow` registrars. `authoring.ts` composes feature, envset, draft, coverage, export, Flight, and Portify tool groups. `tool-profiles.ts` is the source of truth for profile membership. |
+| `apps/web-server/src/features/` | Server features. `runs` owns execution and repair; `coverage` owns the ledger and deployed verification; `flights` owns the conducted pipeline; `wizard` stores external test-authoring drafts; `evaluation` owns exports; `config` owns suite and project configuration; `portify` owns port overlays; `benchmark` owns the preview harness; `agent-sessions` owns process and transcript state; `version` owns update checks; `notifications` owns the durable inbox. |
 | `apps/web-server/src/shared/` | Web-server-local shared infra: `git-repo`, `gh-cli`, `ring-buffer`, `simple-zip`, `toon`, `workspace-events`, `editor-launch`, `open-browser`, `prompts` (the `.md` template loader), `feature-loader`, `launcher-startup` (service startup + health probes), `config-ast`, `ast-extractor` (the Playwright parser that attaches coverage tags, assertions, and source-linked Readable Tests), `controlled-english`, `readable-tests`, and `ws/workspace-stream` |
 | `apps/web-server/src/features/runs/logic/runtime/` | The run orchestrator and its modules (see [Run Lifecycle](#run-lifecycle) and below) |
 | `apps/web/` | React UI (Vite, Tailwind) |
@@ -162,6 +162,182 @@ components with no state or api layer, and that is correct. A feature with no
 realtime surface should **not** carry an empty `ws/`.
 
 **When a module belongs in `shared/`, not a feature.** If several features use a module and it imports no feature code, treat it as shared infrastructure. Shared agent views, sockets, atoms, and client branding already follow this rule. Two recorded cross-feature exemptions remain; `npm run check:boundaries` is the source of truth. Moving code into `apps/web/src/shared/api/**` or `shared/lib/**` also brings it into the 100% coverage gate.
+
+## Coverage freshness
+
+The coverage observer owns one content-derived revision per suite for the ledger,
+suite badges, Flights, and connected agents. It compares source
+documents (including linked files), the requirement summary, mapping input
+fingerprints (tests, helpers, configuration), and the latest execution evidence.
+Filesystem and workspace events trigger reconciliation; a five-second content
+scan recovers dropped events and changes made while disconnected. Coverage reads
+use the syntax-only assertion/tag extractor, not readable-test prose compilation.
+
+The observer owns a shared in-memory ledger snapshot per suite. Reads and the
+fallback compare input bytes, directory membership, dependency-resolution
+candidates, configuration, and suite-scoped run/job evidence; unchanged inputs
+reuse that snapshot without reparsing tests or rebuilding coverage. A workspace
+pass shares file checks across suites. Missing inputs and linked targets are
+checked too; timestamps alone never certify freshness. Changes during calculation
+fail closed and retry. Browser requests coalesce within the same invalidation and
+reconciliation round; a newer event or recovery round never joins an older request.
+
+Mapping percentage remains requirement coverage, not a pass rate. A stale,
+unreadable, updating, or unconfirmed snapshot never displays its old percentage
+as current. Coverage pages and Flight metric tiles retain the last figures with
+an adjacent warning icon; its hover/focus tooltip explains freshness and provenance.
+Flight rail warnings replace the completed tick on affected steps, rather than
+adding a page banner. Continue offers targeted recovery, replacing Resume when
+the affected step is selected. The ledger's Recalculate Coverage action sits above
+Redo from the start and opens the Flight launcher at the affected step.
+UI readers reconcile every
+five seconds, withdraw confirmation on failed reads or connection loss, and expire
+their freshness lease after fifteen seconds without a successful read. Late
+responses cannot replace newer reads. Latest-run failures remain visible; a newer
+attempt without results cannot borrow an older pass. Remapping changed inputs
+requires subsequent verification before old results can count as current proof.
+
+Recovery starts at the earliest invalid Flight stage: Requirements for changed
+documents, Coverage for changed test/mapping inputs, Run for missing/currently
+failing execution evidence. Inline recovery actions only open that stage. Its normal
+launch, ownership, and permission controls still govern regeneration/execution.
+Summary and mapping submissions carry input revisions; a concurrent edit rejects
+old work and provides refreshed context instead of certifying stale inputs.
+
+MCP tools append suite-scoped freshness and recovery actions to relevant replies.
+`wait_for_feature_change` accepts the last revision for bounded waits and catch-up
+after reconnect/restart. This delivers into tool responses in compact and direct
+profiles; it does not claim to wake an idle Claude/Codex host. Agents act only
+within their existing task authority and respect active jobs/Flight ownership.
+
+## Notifications
+
+The Notifications inbox stores messages and source-transition history together in
+`logs/notifications/state.json` inside each workspace. The notification store uses
+the shared atomic writer so a crash cannot persist a message without its deduplication
+state. The server owns writes; client tabs subscribe to `notifications-changed` and
+refetch on reconnect, with a bounded reconciliation for a dropped event that does
+not disconnect the socket. The dialog is addressable as `?dialog=notifications`.
+
+Flight attention transitions and test changes that block an active run or a fresh
+start after an ended run create messages even when the browser is closed. Terminal
+blockers use the same byte-level review gate as run start, including exact-revision
+approval and restoration, rather than relying on a pending-file count in the run
+index. Each inbox read also reconciles these sources; the open client's ten-second
+reconciliation repairs missed events. An unavailable suite or historical snapshot
+preserves its existing review alert without preventing other features from updating.
+A possible test weakening also stays
+in the inbox as an advisory integrity review after the run ends. Ordinary edits,
+coverage freshness, verification readiness, and failed-run evidence remain on
+their owning suite, Coverage, Flight, and run surfaces instead of creating inbox
+messages. A Flight parked on the `run-failed` decision still notifies because the
+user must choose rerun or report; that is a blocked-work alert, not a duplicate
+failure report. Test-review actions open the comparison dialog; a blocked run supplies
+its exact review target, and a weakening hint escalates the same topic.
+Reading a message preserves it. Deleting one removes its content permanently while
+retaining the source signature, so refreshing or restarting cannot recreate it. A
+later quiet-to-attention transition creates a new message. Recovery marks retained
+messages resolved and moves them from the default Needs attention view into History.
+One feature-level identity owns test review across run transitions, so target or
+severity updates do not create a second active message. Manual note creation is not available.
+Notification actions navigate to the relevant flight or test
+review; they never change the run verdict or adopt test edits themselves.
+
+Inbox eligibility and toast eligibility are separate. A blocked Flight or pending
+run review, including a terminal review that gates a fresh start, can raise the sticky toast; an advisory weakening hint remains in the
+durable inbox without interrupting the user. A retained item becomes toast-eligible
+again when the same issue starts blocking work, which re-arms it as unread. Every
+toast therefore represents work that cannot continue without the user.
+
+The run detail keeps a visible review banner above its tabs while it awaits test
+review. Its button opens the existing changed-tests dialog with that run first.
+
+Notifications, Flights, Services, and test review use the shared centered `Modal`
+with task-specific widths, keyboard focus containment, and a pinned header/footer.
+Flights adds search and an attention filter. Test review keeps suite/file selection
+in a rail and presents complete source in two fixed before/after columns. The
+read-only test-review API reads Git HEAD or the explicitly selected run snapshot,
+then derives English, source alignment, and advisory checks from those same
+versions. English and Code share source-based change navigation across the whole
+file, including imports and shared setup; the selected change's assessment appears
+below the source. File review uses `translateReadableSource` to include imports,
+declarations, lifecycle hooks, test registrations, and loops around generated tests.
+Function declarations have a signature row and individually translated body statements.
+Arrow callbacks use the same natural grammar as ordinary statements, with block
+bodies explicitly described as running when called. Calls with callback arguments list those arguments in order, while
+spread lists describe item inclusion and conditional inclusion explicitly.
+Polling assertions show the required result, the callback evaluated on each attempt,
+and the authored polling options on separate lines. Optional and indexed access,
+nullish fallbacks, and type assertions use compact expressions while preserving
+grouping, negation, and whether the check is awaited.
+Multiline loop headers carry their ending source line so English suppresses
+already-described continuation lines and opens the complete header in Code mode.
+It reuses the story walker and falls back to the exhaustive syntax grammar for
+constructs without concise wording. Conditions contain their actions directly;
+the redundant `then` story row is omitted, and `Else` aligns with its sibling `If`.
+`SourceComparisonTable` retains aligned source rows while sharing
+`ReadableStoryText`, `useCodeHighlight` (full-source Shiki tokenization), and
+`TestLanguageSwitch` with the ordinary test cards.
+English sentences open Code mode at their source range, highlighting and focusing
+the chosen Before or After side. Clicking that code range returns to the saved
+English sentence, scroll position, and change cursor, even after browsing other
+code changes. The English tab uses the same return action.
+The compact baseline selector
+and one editor action leave the wide dialog primarily for the comparison.
+Missing snapshots are disclosed rather than replaced with a different baseline.
+`ComparisonTable` also serves configuration previews and captured patches through
+`DiffView`. Red means removed and green means added, independently of execution.
+The Tests header and suite review buttons open this dialog directly; its file, source line,
+language, and comparison baseline survive refresh in the URL. Modified cards show
+a small amber dot beside their title and keep their execution styling; review stays
+in the Tests header instead of repeating a message and button on each card. Modified source lines and their labels use amber in both
+English and Code; actual failure highlights take precedence. Source markers travel
+with the current tests response so they cannot lag behind the displayed code.
+Inline markers use syntax metadata and a source diff, without translating the
+baseline or computing assessments. Run difference indicators request only a boolean;
+full before/after context is loaded when Review opens. Suite-list coverage presence
+and requirement labels also read syntax metadata, without translating test bodies.
+The English viewer compiles shared helpers once per source extraction and rebuilds
+them on the next edit. Possible weakening also uses
+an amber advisory cue.
+The footer has two human decisions only: **Restore recorded files** and
+**Accept & commit**. It adds no lifecycle explanation, tooltip, or confirmation.
+Both the browser and MCP call the same revision-bound server operation. Acceptance
+commits exactly the disclosed files and stores a durable receipt containing the
+review revision, file scope, commit, and execution consequence. For an active run
+it also adopts the revision and requests a rerun; for a terminal passed, failed,
+or aborted run it authorizes those bytes for a new run without changing the old
+snapshot or verdict. Suite-only acceptance records no run action. A failed step
+stays visible for recovery. An arbitrary Git commit can clear file dirtiness but
+never creates this human approval receipt. MCP clients can call
+`get_test_review` to display the exact snapshot comparison, then
+`review_test_changes` to request either decision through human elicitation
+inside the agent session. The UI is optional inspection, not a required control
+surface. The comparison includes fixtures and supporting files without counting
+them as changed test declarations. The review
+includes every copied suite file; envsets, dependencies and Git metadata are
+excluded exactly as in the snapshot. Engine-owned coverage state is excluded as
+runtime metadata. Approval is bound to both trees by SHA-256.
+A staged copy is checked before replacing the snapshot, so stale answers and
+copy failures cannot silently adopt a different revision. Cancellation leaves
+work pending. A call with `wait_for_decision:true` but no valid wait token still
+elicits instead of silently waiting for a question that was never presented.
+`get_test_review` supplies a session/run/revision-bound `browser_wait_token` to
+every client, including clients that support forms. When the human decides in
+the browser, the original client can observe that decision with the token and
+`wait_for_decision:true`. Unsupported clients receive an explicit capability
+limitation rather than a claim that a question was presented. This read-only, bounded wait
+subscribes to run-store events and returns the persisted human decision for the
+review revision. Clients repeat `still_waiting` until the browser decision arrives;
+a reconnect reads the same receipt. The normal elicited path returns that receipt
+without any browser click; retries do not apply the decision twice. Restoration
+checks the reviewed revision before changing files and rejects symlink paths.
+A clean Git tree is never treated as approval.
+Active acceptance signals a rerun. Terminal acceptance is carried into fresh-run
+snapshot capture, rechecked before and during the copy, and recorded as provenance
+on the new run. Neither decision changes a verdict into a pass. Editing opens the existing
+editor; validation uses the existing Run flow. Closing Services leaves sessions
+running; stopping is a separate action.
 
 ## Run Lifecycle
 
@@ -267,15 +443,43 @@ reimplementing coverage, Portify, runs, or export.
 
 One suite has one Flight manifest, keyed internally by `feature`. The conductor
 persists stage evidence and
-typed checkpoints. It always finishes the active or explicitly re-entered stage,
+typed checkpoints. Boot verification overlaps docs and summary after scaffold.
+Tests join both results. The boot keeps its own cancellation owner across an
+external Requirements handoff; pause/abort await both owners. A boot failure or
+missing-env checkpoint is exposed after the Requirements lane, so there is only
+one answerable checkpoint. Outside that overlap, it finishes the active or explicitly re-entered stage,
 then selects the first unfinished stage in `FLIGHT_EXECUTION_ORDER`. That priority
 runs the serial Test run, its repair mirror, and Report before independent
-Parallel setup, so a large Portify pass cannot delay either evidence surface.
+Parallel setup. Parallel setup does not delay the first Report.
 `FLIGHT_STAGE_KEYS` remains the stable persisted order for existing manifests.
-A plain resume preserves artifacts. Most stage jumps reset that stage and all
-later record stages after checking `STAGE_DEPENDS_ON`; a Parallel-setup jump
-resets only Portify because neither the run nor Report consumes its output. A
-full redo resets the entire pipeline.
+A plain resume preserves artifacts. Explicit stage jumps reset the chosen
+stage and its artifact dependents. Repeating Tests & coverage or Test run keeps
+Parallel setup; repeating Parallel setup resets only itself while keeping
+the run and Report. Completed archives
+remain in history. A full redo
+resets every stage.
+
+The docs collector can return the structured requirements draft in the same
+session. Canary fingerprints the accepted documents and prior summary, then the
+summary stage validates and assembles that draft through the normal stable-ID
+reconciler. Changed inputs, invalid drafts and older handoffs use the separate
+summary producer. Before accepting authored specs, the shared
+`shared/test-readability.ts` policy splits ordinary grouped declarations and
+formats source, rejects unresolved syntax/comma-expression errors, and reports
+nested conditionals for review. External drafts and internal Flight authoring
+share this acceptance path; the `test-readability` CLI applies the same policy
+to existing source without modifying recorded run artifacts. Playwright listing
+and TypeScript validation run concurrently;
+both finish before mapping or another authoring pass. Flight mapping caches
+examined test/requirement pairs, including unmappable answers, and invalidates
+reuse when test bodies, shared helpers, support files, configuration, dependency
+lockfiles or requirement meanings change. It still recomputes the ledger.
+
+Parallel setup verifies declared port injection before starting an agent, using
+the same attempt-zero path as borrowed overlays. Both concurrent boots must pass;
+a failed verification feeds its diagnostics into the first repair prompt. External
+Portify starts return their actual `editing` or `verifying` state so clients poll
+instead of editing while the harness boots.
 
 ### Stage producers
 
@@ -285,9 +489,9 @@ full redo resets the entire pipeline.
 - `external` is available to MCP-started Flights. Scout, docs, PRD summary,
   spec authoring and mapping, run repair, and localized export park on
   `external-work` checkpoints. The connected client performs those tasks and
-  submits their results. Final Parallel setup is deliberately excluded: once
-  the Report exists, Canary Lab owns the persistent Portify workflow so the
-  client can surface the Report and release the foreground conversation.
+  submits their results. Parallel setup are deliberately
+  excluded: once the Report exists, Canary Lab owns these background stages so
+  the client can surface the Report and release the foreground conversation.
 
 The producer does not own the verdict. Every adapter re-reads or recomputes its
 artifact before settling: configs must parse and boot, requirement submissions
@@ -349,9 +553,48 @@ switching path passes no resolver, so it stays a verbatim copy.
 
 Every regular `executionType: 'run'` **attempts** to isolate each configured repo
 in a per-run Git worktree under `<runDir>/worktrees/`. Each worktree starts from
-`HEAD`, links the source repo's `node_modules`, and replays the user's tracked and
-untracked work in progress through `hydrateWorkingTreeDiff`, so the run normally
-tests the checkout's current state rather than committed state alone.
+`HEAD` and replays the user's tracked and untracked work in progress through
+`hydrateWorkingTreeDiff`, so the run normally tests the checkout's current state
+rather than committed state alone.
+
+Before every boot and active heal restart/rerun, `preflightServiceBoot` calls
+`prepareWorktreeDependencies` with the repo's
+`dependencyPreparation` configuration and writes `manifest.dependencyProvenance[]`:
+source revision, dependency owner, lockfile and generator-input fingerprints,
+runtime/package-manager metadata, validation command result, check timestamp, and a
+`compatible | incompatible | unknown` verdict. Shared mode links the source
+repo's existing `node_modules`; legacy/unprovable state remains `unknown` and
+boots without an Overview warning, while a confirmed fingerprint or validation mismatch is a
+pre-boot failure. Isolated mode never links the source dependency tree and may
+run only the target-owned prepare/validate commands declared in the feature.
+Canary does not choose an install command or rewrite either checkout.
+The shared boot gate replaces the previous manifest evidence before any service
+spawn, even when a rerun keeps every service running. Command logs have a separate
+directory per attempt. Each preflight reloads only dependency preparation for the
+run's existing repositories; missing or malformed configuration blocks recovery.
+The run's original validator, generator inputs, and isolated mode cannot be
+removed or downgraded to bypass that gate; command repairs and stronger proof
+configuration may be adopted.
+Service commands, paths, and recorded tests remain pinned to the run. Switching
+to isolated mode cannot run preparation through an existing external dependency
+link. A generator-input mismatch records differing inputs, not
+proof of differing generated output. Overview shows only incompatible state inside
+the affected service cards. External heal waits and context recovery derive compact
+`dependencyBlockers` from the manifest on every cycle, including after reconnect;
+deterministic in-scope repairs do not require an elicitation choice.
+
+`HEAD` is whatever commit the checkout was left on, so a pinned branch nobody has
+pulled boots stale. Before anything is allocated, `startRun` runs
+`updateReposToUpstream` (`apps/web-server/src/features/runs/logic/runtime/repo-upstream-update.ts`): each repo
+declared `track: 'upstream'` — or every repo when the start carries
+`updateRepos: true` — is fetched and fast-forwarded to its upstream by
+`fastForwardToUpstream` (`apps/web-server/src/shared/git-upstream.ts`). The move is ff-only and never
+discards work: a dirty, detached, off-branch or diverged checkout, a failed fetch,
+or a checkout an in-place run is booted from refuses the start with a typed
+`repo_update_refused` 409 (sibling of `repo_branch_mismatch`), which the MCP
+`start_run` / `boot_services` tools relay with the per-repo rows. The snapshot in
+`manifest.repoBranches[]` then records the booted `sha` and, when the start
+pulled, `updatedFromUpstream: { upstream, from, to }`.
 
 Isolation is best-effort for a non-portified repo. If `git worktree add` fails,
 the run logs the failure and uses the source checkout in place. That fallback
@@ -393,7 +636,20 @@ Runs beyond a CPU/free-RAM heuristic are parked as `queued` (status `queued`, wi
 `CANARY_MAX_CONCURRENT_RUNS`. The scheduler is
 `apps/web-server/src/features/runs/logic/runtime/run-scheduler.ts` (decision logic in `admission.ts`);
 it's wired into the `startRun` factory in `server.ts` and promotes on the RunStore
-`finalized` event.
+`finalized` event. `GET /api/runs/:runId/queue` reads the scheduler's current
+admission inputs without starting work: run limit, resource budget, or repository
+conflict, with the active runs consuming capacity. The run banner refreshes this
+snapshot when the runs stream changes or the user requests it, and displays its
+check time. Queued chips and flight steps remain neutral; they never imply that
+services or tests are executing.
+
+The queue itself is in-memory, so a `queued` row that outlives its server process
+can be neither promoted nor cancelled. Recovery therefore treats `queued` like the
+active statuses: `isUnsettledRunStatus` (`shared/run-state.ts`) is what boot
+reconcile, `reapStaleRuns`, and `RunStore.abort` gate on, so an orphaned queued row
+is finalized at the next boot and its Stop button works in the meantime. The abort
+route asks the scheduler before the store — only the scheduler can free a queue slot
+this process still holds.
 
 ### Getting Started ownership
 
@@ -565,12 +821,41 @@ link, or the per-repo reason there is none.
   keeps the sessionful 2025 handler behind the same endpoint so older clients can
   initialize and reconnect without a flag. The SDK classifies each request from
   its protocol envelope; both paths build tools from the same profile factory.
+- **User input** uses the MCP TypeScript SDK 2.0 `inputRequired(...)` flow in
+  `apps/web-server/src/mcp/elicitation.ts`. The SDK adapts the same handler for
+  legacy peers. Missing requirements, run/boot isolation, verification URLs,
+  standalone portify review and unanswered flight checkpoints can elicit input.
+  Existing explicit inputs and autopilot decisions bypass the ask. Unsupported
+  clients receive chat or UI-link recovery instructions; decline/cancel leaves
+  work pending. Form responses are validated and bound to their operation and
+  reviewed revision; in-process receipts prevent duplicate application on retry.
+  Open requests expire after 30 minutes and across server restarts. URL-mode
+  document input uses the coverage document rail. Secret entry uses a scoped,
+  expiring invitation to the existing flight checkpoint UI; secrets do not
+  traverse MCP. Status reads never open a question.
+- **Broken document links** pause coverage/Flight document resolution before
+  discovery. `apps/web-server/src/mcp/document-relink.ts` asks for the new server-local
+  path through form elicitation and repairs the existing symlink. It preserves
+  document names and baselines; `document-relinked` tells the caller to retry the
+  original command. Cancellation and invalid/stale answers do not replace the link.
+  Unsupported clients receive the Relink UI URL. No recovery copies are created.
+- **Document discovery** precedes missing-document elicitation in coverage and
+  flight MCP tools. The calling agent searches authorized sources and returns
+  `document_resolution`; the shared `mcp/document-resolution.ts` gate validates
+  source paths and SHA-256 evidence. Clear sources are imported automatically;
+  missing, ambiguous, or conflicting material uses the existing SDK 2.0 helper.
+  Source choices persist in `features/<feature>/docs/_document-selection.json`,
+  with provenance and content-bound exclusions. Rejected originals stay visible
+  in the Docs rail while the shared docs collection excludes them from summaries.
+  Changed documents invalidate the review; prior unchanged choices are reused.
+  A flight collector can return an unresolved document question on its existing
+  checkpoint, preserving the flight and avoiding a second summary job.
 - **Profiles** pick the tool surface via `?profile=`. There are seven workflow profiles, two composed direct-tool profiles, and one compact dispatcher profile: `repair` (heal loop), `verify` (verification configs), `author`
   (suite/envset/draft authoring), `coverage` (docs → PRD summary → ledger), `export`
   (evaluation archives), `flight` (the conducted pipeline), `portify` (port-injection
   workflow), then `lifecycle` (repair + verify + author + coverage + export + flight,
   no portify), `full` (lifecycle + portify), and `compact` (**the bare-server and
-  setup-installed default**: one always-loaded `exec` tool dispatching all 63 atomic
+  setup-installed default**: one always-loaded `exec` tool dispatching all 70 atomic
   handlers). `lifecycle` and `full` remain direct-tool rollback/debug surfaces. `coverage`, `export`
   and `flight` were carved out of what used to be one oversized `author` array; the
   composed unions absorbed the split, so nothing had to move twice. Optional
@@ -601,12 +886,33 @@ link, or the per-repo reason there is none.
 - Each legacy MCP session gets its own transport (`mcp/server.ts`) — a singleton
   would reject the 2nd client with `-32600 Server already initialized`. Modern
   MCP requests are stateless and do not enter that session map.
-- Destructive tools gate on `confirm: z.literal(true)` in their input schema
-  (e.g. `abort_run`, `write_envset`).
+- Destructive tools retain `confirm: z.literal(true)` as an accidental-call guard.
+  `abort_run` also requires human elicitation; the flag alone cannot stop a run.
+  `start_run` reuses a matching active run even with `force_new`. Terminal resumes
+  preserve the original suite snapshot and review history; fresh starts cannot
+  bypass outstanding test review.
+- A blocked fresh start returns structured `test_review_required` metadata and a
+  durable request under `logs/run-requests/`, separate from the revision-bound
+  review receipt on the source run. The request preserves launch arguments and
+  internal/external ownership. Acceptance or restoration makes it ready; Canary
+  dispatches internal requests, while `start_run(request_id, session_id)` resumes
+  an external request only through its original client. The review surface never
+  chooses execution ownership. Repeated consumption returns the same run, and a
+  reserved run ID supports crash readback without speculative duplicate starts.
+  Run events provide the fast path; bounded reconciliation recovers missed
+  receipt events. Every client can obtain a read-only review wait token, including
+  clients with elicitation forms; a reconnect refreshes that token against the
+  persisted decision. Closing the viewer leaves the request pending; cancelling
+  the request prevents continuation without undoing the shared review decision.
 - **Steering skill-less clients**: external clients act on the initialize/discovery
   instructions + tool *results*, not the Canary Lab skill. The source text lives in
-  `apps/web-server/prompts/mcp-*-instructions.md`; `mcp/server.ts` loads and composes it
-  into `INSTRUCTIONS_BY_PROFILE`. The `repair`
+  `apps/web-server/prompts/mcp-*-instructions.md`; `mcp/instructions.ts` loads it into
+  `INSTRUCTIONS_BY_PROFILE` (the initialize lead) and `WORKFLOW_GUIDES` (the whole
+  file, served by the `get_workflow_guide` tool). The Claude Code CLI keeps only the
+  first 2048 characters of a server's instructions, so each long file's lead ends at
+  an `<!-- initialize-cut -->` marker and `mcp/instructions.test.ts` pins every profile
+  inside that window; `lifecycle`/`full` deliver a one-line-per-workflow index
+  (`mcp-lifecycle-instructions.md`) instead of a concatenation. The `repair` lead
   carries the External Run Loop. `start_run`/`signal_run` results add
   `nextSteps: ['wait_for_heal_task']` (`healWaitNext`, `mcp/heal-task-wait.ts`) so a
   result-driven agent blocks on `wait_for_heal_task` instead of polling
@@ -718,8 +1024,9 @@ self-report:
 - **Depth (strictness)** — how strict each covering test is. `strength.ts` classifies every
   assertion snippet (collected by `ast-extractor.ts`) into a stack-layer tier (log → 1,
   DB/state → 2, app API/UI → 3, browser-at-real-destination → 4) by structural heuristics
-  (no agent), grades the test `shallow` / `basic` / `solid` / `strong`, and surfaces a
-  `suggestedStrongerCheck`.
+  (no agent — a `.status` read compared against an HTTP code counts as the API layer, so a
+  helper-wrapped API suite is not graded `shallow`), grades the test `shallow` / `basic` /
+  `solid` / `strong`, and surfaces a `suggestedStrongerCheck`.
 - **Latest-run proof** — `service.ts` reads the suite's latest run outcomes
   and joins them to tests by title. `ledger.ts` then adds per-path or
   path-by-variant `proven` flags, `totals.proven`, and `provenPct`. A test that
@@ -745,7 +1052,12 @@ client the prompt/context (`buildSummaryAuthoringContext` / `buildCoverageMappin
 reusing the internal prompts), and canary writes the result through the canonical writers
 (`applyExternalSummary` via the shared `assembleSummary`; `applyExternalCoverageMappings`
 via the tag-writer) and recomputes. Such jobs carry `producer: 'external'`, have no
-`sessionRef`, and render monitor-only (`ExternalAgentCard`) in the Generating pane. Both
+`sessionRef`, and render as external-session rows in Flight Activity. GUI Generate
+opens the recorded or evidence-derived Flight in follow-mode. The shared coverage-job
+index drives Requirements and Tests & coverage; each Activity segment tails its own
+`kind: 'coverage'` job source, including completed sessions. Active jobs also reconcile
+through REST so a missed broadcast cannot strand the stage transition. The ledger
+remains the input and results surface. Both
 models feed the *same* deterministic ledger recompute, which is producer-agnostic (it
 only reads on-disk tags). The single
 highest-risk invariant is **requirement-id stability across PRD regeneration** —
@@ -770,23 +1082,61 @@ The active pipeline is:
    wording plus conservative semantic classifications. Semantic categories come from compiler
    symbols, known fixtures, or explicit `feature.config.cjs` semantic rules — never
    from an identifier guess or an LLM.
-3. `apps/web-server/src/shared/readable-tests/` builds the source-ordered story,
+3. `apps/web-server/src/shared/readable-tests/` builds the complete source-ordered story,
    preserves branches, loops, retries, helpers, and evaluation order, and keeps an
    exact file, line range, and snippet on every story item. Unsupported or unresolved
    syntax remains visible and makes the test `partial` instead of disappearing.
+   The optional `summary` preserves the compact description but is never used as
+   evidence of complete representation. Cards and file comparison both render
+   the complete `story`. Syntax-only wording is explicitly marked incomplete;
+   missing English links to code instead of silently displaying code as English.
 4. `shared/readable-tests/types.ts` is the single server/web contract. The
    `/api/features/:name/tests` route sends `ExtractedTest.readable`; `TestPresentation` and
    `ReadableTestView` provide English-by-default and exact-source navigation in both
    ledgers. Evaluation flowcharts reuse the same translator rather than inventing a
-   second parser.
+   second parser. Exports also include the full English explanation, without the
+   diagram's step limit.
+
+The development-only `tools/check-english.ts` selects the local workspace and
+audits its current source without executing it. `tools/english-audit.ts` builds
+an independent syntax inventory and checks both candidate ownership and the
+actual translated story; a parent range never counts for its missing children.
+The audit and comparison view share `shared/readable-tests/source-lines.ts`, so
+missing header or continuation mappings also fail the check.
+It rejects syntax-only fallback wording as well as missing output. Neither the
+build nor the runtime starts this audit. See the [command contract](COMMANDS.md#contributor-english-audit).
 
 Nothing is persisted as a translated sidecar: the server derives the view from the
-current source when it extracts tests. TypeScript is pinned to 5.9.3 because its AST
+selected source when it extracts tests. For a selected run, `GET /api/features/:name/tests?runId=...` lists the full saved suite independently of envset selection, then merges reporter identities and results without executing historical spec modules. New snapshots save a syntax inventory in `.canary-suite-tests.json`; older snapshots recover that inventory from their own source. Literal parameterised cases are expanded; unresolved generated titles are enriched from the reporter. Tests without execution evidence remain visible as “not run”, distinct from an explicit skip. Older runs without a snapshot still show recorded tests and verdicts, with an explicit source-unavailable notice; they never read current source as historical evidence. A run without reporter results still lists its saved suite. If neither source nor a recorded roster exists, it shows an empty or waiting state, not a discovery failure. The Tests column defaults to current workspace source, independently of run selection. The Tests header keeps Source and Run tabs together with the current count and recorded pass/total count. The Run tab opens historical tests explicitly (`tests=recorded`, URL-only and restored on refresh; older `tests=current` links remain supported). Current-source cards say “Not verified” or “Changed since run” and never inherit historical result badges; the file comparison is not proof that the entire executed suite matches. Recorded-source browsing is scoped to its suite and run, so selecting another run returns to current source. Compact new, changed, and removed indicators compare test identities across both lists, never the difference between totals or pass counts. Each indicator opens the existing comparison dialog at an affected file and line; the compare icon opens it directly even when source matches. Missing or incomplete source keeps change counts unknown. The dialog lists files from both versions, including committed and removed files. Current workspace changes also remain available through test review. Unmatched workspace tests say “no matching result” instead of “pending”. TypeScript is pinned to 5.9.3 because its AST
 is the input language; `compiler-context.ts` and the syntax inventory tests force a
 deliberate vocabulary audit before that compiler version can change. The detailed
 contracts live in the [controlled-English grammar](controlled-english/controlled-english-grammar.md),
 [semantic boundaries](controlled-english/semantic-boundaries.md), and
 [coverage report](controlled-english/coverage-report.md).
+
+## Discovery Repair
+
+Discovery repair is owned by the config feature's `DiscoveryRepairService` and
+`FileBackedTaskStore`, under `<logsDir>/discovery-repairs/<id>/`. It does not create
+or update a test run. One agent owns each suite repair until editing stops.
+Internal agents use the shared `runAgentProcess`; external agents use
+`start_discovery_repair`, `get_discovery_repair`, and `update_discovery_repair`
+through MCP. Both paths receive the same discovery-repair prompt template.
+
+The Tests column has a discovery-error state and a repairing state. The latter
+uses `AgentSessionView` for internal session activity or external milestone
+reports. `/ws/features/:name/discovery-repairs` subscribes before a repair exists
+and replays the durable snapshot on every reconnect. Store writes also broadcast
+`discovery-repair-changed`; successful verification broadcasts `tests-changed`.
+
+Canary verifies with fresh Playwright discovery, bypassing the previous cache.
+Empty rosters and missing cases from a previous successful repair roster fail
+verification. Success restores the existing test list automatically; failure
+restores the error and repair actions. Discovery does not execute test bodies or
+change previous run verdicts. Restart reconciles internal work and interrupted
+verification to failure; an external editor with ready instructions retains its
+ownership until it explicitly stops. Lost contact alone cannot authorize another
+writer.
 
 ## Keep-in-Sync Invariants
 
@@ -797,23 +1147,25 @@ procedure.
 | Invariant | Files involved | Enforced by | Owning skill |
 | --- | --- | --- | --- |
 | MCP tool ↔ profile membership | `apps/web-server/src/mcp/tool-profiles.ts` workflow arrays and composed unions ↔ mirror arrays in `apps/web-server/src/mcp/server.smoke.test.ts` | `npx vitest run apps/web-server/src/mcp/server.smoke.test.ts` | `cl_add-mcp-tool` |
-| Run-loop semantics across agent surfaces | MCP instruction sources (`apps/web-server/prompts/mcp-*-instructions.md`) composed by `INSTRUCTIONS_BY_PROFILE` (`apps/web-server/src/mcp/server.ts`) ↔ result steering (`healWaitNext`, `bootSessionValue` in `mcp/heal-task-wait.ts`) ↔ the shipped run-loop skills — **enumerate them, don't assume** (`find agent-integrations -name SKILL.md`; the loop lives in `canary-lab-run/`, not the umbrella `canary-lab/`) | prompt-loading + guardrail tests; cross-surface wording remains discipline | `cl_sync-agent-surfaces` |
+| Run-loop semantics across agent surfaces | MCP instruction sources (`apps/web-server/prompts/mcp-*-instructions.md`) loaded into `INSTRUCTIONS_BY_PROFILE` + `WORKFLOW_GUIDES` (`apps/web-server/src/mcp/instructions.ts`) ↔ result steering (`healWaitNext`, `bootSessionValue` in `mcp/heal-task-wait.ts`) ↔ the shipped run-loop skills — **enumerate them, don't assume** (`find agent-integrations -name SKILL.md`; the loop lives in `canary-lab-run/`, not the umbrella `canary-lab/`) | prompt-loading + guardrail tests; cross-surface wording remains discipline | `cl_sync-agent-surfaces` |
+| Initialize instructions fit the client window | every `INSTRUCTIONS_BY_PROFILE` entry (`apps/web-server/src/mcp/instructions.ts`) ↔ the `<!-- initialize-cut -->` marker in `apps/web-server/prompts/mcp-*-instructions.md` ↔ `get_workflow_guide` (`apps/web-server/src/mcp/tool-groups/guides.ts`) | `npx vitest run apps/web-server/src/mcp/instructions.test.ts` — ≤ 2048 chars per profile, and a cut lead must name its guide | `cl_manage-prompts` |
 | Boot-session / collision / queue / claim semantics | `start_run` + `wait_for_heal_task` result shapes (`mcp/tool-groups/`) ↔ instructions ↔ the same discovered skill set | partial: tool unit tests | `cl_sync-agent-surfaces` |
-| **Repair rule + honest counts on every agent surface** | `MODE_COPY` (`runs/logic/runtime/auto-heal.ts`) ↔ `mcp-repair-instructions.md` loaded as `REPAIR_INSTRUCTIONS` (`mcp/server.ts`) ↔ `EXTERNAL_HEAL_NEXT_STEPS` (`runs/logic/heal/external-heal-surface.ts`) ↔ every shipped `canary-lab-run/SKILL.md` — "fix app/service code, not tests, unless provably wrong"; counts from `statusLine`, never `total - failed`. **Presence in `instructions` is not delivery**: the Claude Code CLI truncates a server's `instructions` at 2048 chars, so a rule must sit inside that window OR ride a tool result (results and tool descriptions are not truncated). The pass-count rule and the test-failure repair rule ride the heal result for exactly this reason. | `mcp/repair-guardrail.test.ts` (asserts POSITION, not just presence) + `auto-heal.test.ts` | `cl_run-evidence-invariants` |
+| **Repair rule + honest counts on every agent surface** | `MODE_COPY` (`runs/logic/runtime/auto-heal.ts`) ↔ the `mcp-repair-instructions.md` lead (`INSTRUCTIONS_BY_PROFILE.repair`, `mcp/instructions.ts`) ↔ `EXTERNAL_HEAL_NEXT_STEPS` (`runs/logic/heal/external-heal-surface.ts`) ↔ every shipped `canary-lab-run/SKILL.md` — "fix app/service code, not tests, unless provably wrong"; counts from `statusLine`, never `total - failed`. **Presence in `instructions` is not delivery**: the Claude Code CLI truncates a server's `instructions` at 2048 chars, so a rule must sit inside that window OR ride a tool result (results and tool descriptions are not truncated). The pass-count rule and the test-failure repair rule ride the heal result for exactly this reason. | `mcp/repair-guardrail.test.ts` (asserts POSITION, not just presence) + `auto-heal.test.ts` | `cl_run-evidence-invariants` |
 | Auto-PR on a healed green run | `shouldAutoPropose` gate (`runs/logic/pr/auto-propose.ts`) ↔ `autoProposePr` default + parse (`runs/logic/runtime/launcher/project-config.ts`) + write validator (`config/routes/project-config.ts`) ↔ `RunPrAttempt` / `proposedPrs` on the manifest (`shared/run-state.ts`) ↔ the `fix` block on the `passed` result (`healFixOutcome`, `mcp/heal-task-wait.ts`) ↔ every shipped `canary-lab-run/SKILL.md` — "the run opens the draft PR; the agent reports it and opens none of its own". The rule is **not** in `REPAIR_INSTRUCTIONS`, so it reaches skill-less clients through the tool result alone: loosen the gate and the result text has to move with it, or an agent pushes a duplicate branch onto the one the run just opened. | `pr/auto-propose.test.ts` (gate + manifest writes) + `mcp/heal-fix-outcome.test.ts` (result shape); the skill prose is discipline only | `cl_sync-agent-surfaces` |
 | Read-only agent spawns keep both arms in step | the codex arm's `--sandbox read-only` ↔ the claude arm's `readOnly: true` (`buildClaudeAgenticArgs` → `--tools Read,Glob,Grep`, `agent-sessions/logic/agent-process.ts`) at all three read-only spawns: `coverage/logic/coverage/prd-summary.ts`, `coverage/logic/coverage/annotate-engine.ts`, `evaluation/logic/test-review/rewrite-agent.ts`. Headless agents must bypass permission prompts — `-p` has nobody to answer one — so the bound has to be a capability allowlist, not an approval; `--tools` and `--disallowedTools` are both evaluated ahead of the bypass. The resolver prefers claude, so an unflagged claude arm is the one that actually runs. **Still open:** the write-capable unattended spawns (flight `scout`/`docs`/`specs-coverage`, portify, benchmark sabotage) hold full filesystem and network reach for their whole window. | `agent-sessions/logic/agent-read-only-parity.test.ts` (fails when either arm drops its flag) | `cl_reuse-shared-logic` |
 | Heal workspace trust ↔ the folder-trust prompt | `healWorkspaceTrustRoot` + `ensureHealWorkspaceTrusted` (`runs/logic/runtime/run-heal-agent.ts`) ↔ Claude's persistent seed (`agent-sessions/logic/agent-workspace-trust.ts`) ↔ Codex's invocation-scoped whole-map `projects={...}` override plus `--disable hooks` (`runs/logic/runtime/heal-agent-spawn.ts`) ↔ the `trust-prompt` fingerprint (`runs/logic/runtime/heal-failure-classifier.ts`) ↔ `agentCause` (`shared/run-state.ts`) ↔ `healAgentCauseSuffix` + `HEAL_CAUSE_PHRASE` (`apps/web/.../StageStatusLines.tsx`). The heal REPL is the only agent spawned on an interactive TTY, so it is the only spawn either CLI's folder-trust prompt can stop. Claude trust inherits from the project root; Codex receives the same root only for that invocation, does not mutate `config.toml`, and cannot run unreviewed hooks. `CANARY_LAB_NO_WORKSPACE_TRUST=1` disables both paths. If trust setup ever stops running, the classifier keeps the stall from reading as "the agent tried and failed". | `agent-workspace-trust.test.ts` + `heal-workspace-trust.test.ts` + Codex command tests in `auto-heal.test.ts` + the real-tail cases in `heal-failure-classifier.test.ts` | `cl_locate-agent-session-logs` |
-| Flight stage hand-off (`stage_producer: "external"`) | `externalizable.ts` (`flights/logic/stages/`) ↔ the six wired adapters (`scout.ts`, `docs.ts`, `prd-summary.ts`, `specs-coverage.ts` — which parks twice per pass: authoring, then mapping — `run.ts`, which parks ONCE while the client drives the standalone heal tools (`run.ts` starts the run external-heal UNCLAIMED via the runs route's `healAgent.claimable:false` hook), and `evaluation-export.ts`, whose localized mode is the external default) ↔ server-owned final Parallel setup plus the legacy external-work consumer in `portify.ts` ↔ `'external-work'` + `ExternalWorkCheckpointData` in `shared/flights/types.ts` ↔ `flightNext` steering + the oversized-payload fallback + immediate Report handoff (`mcp/tool-groups/flight.ts`) ↔ the umbrella `canary-lab/SKILL.md` plus the nested run skill in all three channels ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`) | `stages.external-producer.test.ts` + `stages.portify.test.ts` + `externalizable.test.ts` + `flight.stand-down.test.ts` + `flight.pipeline.test.ts` | `cl_sync-agent-surfaces` |
-| **An externally driven flight is read-only in the web UI, with one cooperative takeover path** | `isExternallyDriven` + `flightAwaitsUser` + `EXTERNAL_WORK_COPY` (`apps/web/.../flights/lib/external-work.ts`) ↔ the controls that consult them (`FlightDetail.tsx` header + Pause, `FlightControls.tsx` Continue/Abort, `CheckpointControls.tsx`, `RequirementsFork.tsx`, `FlightSummaryStrip.tsx` autopilot) ↔ `flightNeedsAttention` (`state/flight-toasts.ts`) and the slim consumers (pill, picker, `FeaturesColumn`) ↔ `stageProducer` mirrored onto `FlightIndexEntry` (`shared/flights/types.ts`, written in `flights/logic/store.ts`) ↔ the SERVER half, `rejectForeignFlightDecision` + `MCP_ORIGIN_HEADER` (`flights/routes/flight-decision-origin.ts`, wired into `flights-lifecycle.ts` and stamped by the `flightsRequest` inject in `server.ts`) ↔ the takeover request/force routes and conductor guard (`flights-lifecycle.ts`, `conductor.ts`) ↔ MCP result steering + the umbrella `canary-lab/SKILL.md` in all three channels. Hiding buttons is not enough: MCP drives the flight through the SAME `/api/flights/:id/*` routes the browser posts to, so only the origin header separates the driver from a bystander. The line is decisions vs unblocking — respond, pause, resume, redo and autopilot are the agent's; Abort, dirty-repo remedy, and the cooperative takeover handshake stay with the user. Force is confirm-gated because the external process cannot be interrupted. Live-only: once the flight settles the record is the UI's again. | `flight-decision-origin.test.ts` + takeover wiring in `flights-control.test.ts` + `flight.stand-down.test.ts` + `external-work.test.ts` + `FlightPage.checkpoints.test.tsx` + `FlightPage.controls.test.tsx` | `cl_sync-agent-surfaces` |
+| Flight stage hand-off (`stage_producer: "external"`) | `externalizable.ts` (`flights/logic/stages/`) ↔ the six wired adapters (`scout.ts`, `docs.ts`, `prd-summary.ts`, `specs-coverage.ts` — which parks twice per pass: authoring, then mapping — `run.ts`, which parks ONCE while the client drives the standalone heal tools (`run.ts` starts the run external-heal UNCLAIMED via the runs route's `healAgent.claimable:false` hook), and `evaluation-export.ts`, whose localized mode is the external default) ↔ server-owned Parallel setup after the Report, plus the legacy external-work consumer in `portify.ts` ↔ `'external-work'` + `ExternalWorkCheckpointData` in `shared/flights/types.ts` ↔ `flightNext` steering + the oversized-payload fallback + immediate Report handoff (`mcp/tool-groups/flight.ts`) ↔ the umbrella `canary-lab/SKILL.md` plus the nested run skill in all three channels ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`) | `stages.external-producer.test.ts` + `stages.portify.test.ts` + `externalizable.test.ts` + `flight.stand-down.test.ts` + `flight.pipeline.test.ts` | `cl_sync-agent-surfaces` |
+| **An externally driven flight is read-only in the web UI, with one cooperative takeover path** | `isExternallyDriven` + `flightAwaitsUser` + `EXTERNAL_WORK_COPY` (`apps/web/.../flights/lib/external-work.ts`) ↔ the controls that consult them (`FlightDetail.tsx` header + Pause, `FlightControls.tsx` Continue/Abort, `CheckpointControls.tsx`, `RequirementsFork.tsx`, `FlightSummaryStrip.tsx` autopilot) ↔ `flightNeedsAttention` (`shared/flights/attention.ts`) and the slim consumers (pill, picker, `FeaturesColumn`) ↔ `stageProducer` mirrored onto `FlightIndexEntry` (`shared/flights/types.ts`, written in `flights/logic/store.ts`) ↔ the SERVER half, `rejectForeignFlightDecision` + `MCP_ORIGIN_HEADER` (`flights/routes/flight-decision-origin.ts`, wired into `flights-lifecycle.ts` and stamped by the `flightsRequest` inject in `server.ts`) ↔ the takeover request/force routes and conductor guard (`flights-lifecycle.ts`, `conductor.ts`) ↔ MCP result steering + the umbrella `canary-lab/SKILL.md` in all three channels. Hiding buttons is not enough: MCP drives the flight through the SAME `/api/flights/:id/*` routes the browser posts to, so only the origin header separates the driver from a bystander. The line is decisions vs unblocking — respond, pause, resume, redo and autopilot are the agent's; Abort, dirty-repo remedy, and the cooperative takeover handshake stay with the user. Force is confirm-gated because the external process cannot be interrupted. Live-only: once the flight settles the record is the UI's again. | `flight-decision-origin.test.ts` + takeover wiring in `flights-control.test.ts` + `flight.stand-down.test.ts` + `external-work.test.ts` + `FlightPage.checkpoints.test.tsx` + `FlightPage.controls.test.tsx` | `cl_sync-agent-surfaces` |
 | **A stage's work is stoppable — every stage, one contract** | `StageAdapter.teardown(ctx): StageJob \| null` (REQUIRED, `flights/logic/flight-stages.ts`) ↔ the four job factories (`flights/logic/stages/stage-jobs.ts`) ↔ `interruptStage` (awaited by `pauseFlight`/`abortFlight`) ↔ `stopAgentProcesses` scopes threaded through `stages/context.ts`, `coverage/.../feature-docs.ts` + `prd-summary.ts`, `coverage/.../coverage-engine.ts` + `annotate-engine.ts`. It replaced an OPTIONAL `interrupt?` hook that was silently skipped when absent, so ten of eleven adapters opted out with no compile error — a pause stopped the flight's *waiting* while the portify agent kept editing the user's repo. Required-ness is the invariant: a new stage cannot compile without answering. Portify's stop is deliberately state-aware (a verified `ready-to-save` review survives a pause, because resume re-adopts it). | `stage-jobs.test.ts` (incl. a table asserting all 11 adapters answer) + `conductor.pause.test.ts` (awaited order, live teardown ctx) | `cl_run-evidence-invariants` |
 | Stop reaches every surface, and says the same thing | `pause_flight` / `abort_flight` / `stop_flight_agent` (`mcp/tool-groups/flight.ts`) ↔ the routes the web UI calls (`flights-lifecycle.ts`, `flights-plan.ts`, `agent-sessions/routes/agent-jobs.ts`) ↔ `flightNext` steering, split by `pauseReason` so a USER pause says stand down instead of offering the resume ↔ the umbrella `canary-lab/SKILL.md` in all three channels. An external client cannot be interrupted mid-turn (tools-only server, no `sampling`, work happens BETWEEN calls), so the guarantee is "nothing lands after a stop, and the agent learns within one tool call" — never "it stops instantly". A late `submit` is refused with a typed `flight_not_parked` body, and a superseded one is caught by the `handOffId` token (`externalizable.ts` `rejectStaleSubmit`, shared by every hand-off stage). | `flight.stand-down.test.ts` + `externalizable.test.ts` (the resume→stale-submit race) + `server.smoke.test.ts` mirrors | `cl_sync-agent-surfaces` |
 | Spawned agents leave a durable record | `agent-jobs` store (`agent-sessions/logic/agent-jobs/`) ↔ the record written by the RUNNER itself (`runAgentProcess`, one lifecycle for every agent feature) ↔ boot reconcile in `server.ts` (`running` → `orphaned`, an honest tombstone: an in-process child cannot be re-attached, but its `sessionId` keeps the transcript readable) ↔ the feature-rename fan-out (`config/index.ts`) ↔ flight delete (`flight-queue.ts`) + the R78 restart wipe (`flight-stages.ts`, alongside the sidecar dir) ↔ `agentJob` on the MCP flight view. The standalone coverage job deliberately passes NO descriptor — its own manifest is already the durable, reconciled, surfaced record. | `agent-jobs/store.test.ts` + the record-lifecycle cases in `agent-process.test.ts` + `routes/agent-jobs.test.ts` | `cl_async-task-ux` |
 | Heal-claim policy | `apps/web-server/src/features/runs/logic/heal/heal-claim-policy.ts` ↔ `broker.claim()` backstop ↔ `start_run`/`POST /api/runs` suppression ↔ skill prose | policy + broker unit tests | `cl_sync-agent-surfaces` |
 | Templates ↔ shipped package | `templates/project/**` ↔ `dist/templates/` copy (`tools/prepare-assets.mjs`) ↔ consumer `canary-lab upgrade` | `npm run smoke:pack` | `cl_add-sample-feature` |
-| Coverage ledger single computation layer | `apps/web-server/src/features/coverage/logic/coverage/service.ts` joins requirements + tags + `run-outcomes.ts` ↔ `ledger.ts` computes claim and proof axes ↔ `routes/coverage.ts` and `get_feature_coverage` return that result without recomputing it | service, ledger, route, and MCP tests | `cl_run-evidence-invariants` |
+| Coverage ledger single computation layer | `apps/web-server/src/features/coverage/logic/coverage/service.ts` joins requirements + tags + `run-outcomes.ts` ↔ `ledger.ts` computes claim and proof axes ↔ `requirement-history.ts` reads run records (index, summaries, manifests, dirty-specs) and `enforcement.ts` derives the D11 time axis (proven-unchanged / tests-weakened / proof-stale / wording-ahead) ↔ `routes/coverage.ts` and `get_feature_coverage` return that result without recomputing it; the states are read-time derivations, never stored | service, ledger, enforcement, requirement-history, route, and MCP tests | `cl_run-evidence-invariants` |
 | Requirement-id stability | `reconcileRequirementIds` (`apps/web-server/src/features/coverage/logic/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
 | Readable Test compiler ↔ source links ↔ consumers | TypeScript 5.9.3 in `package.json` ↔ `controlled-english/compiler-context.ts` and syntax inventories ↔ `readable-tests/translator.ts` ↔ `ast-extractor.ts` ↔ `shared/readable-tests/types.ts` ↔ `TestPresentation` / `ReadableTestView` and the evaluation flowchart adapter. The story stays deterministic and source-linked; runner verdicts stay at test level. | controlled-English, readable-tests, extractor, presentation, and `npm run check:wire` tests | `cl_run-evidence-invariants` |
 | Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ generated `AGENTS.md` ↔ `docs/ARCHITECTURE.md` (mechanisms) ↔ `docs/PRD.md` (intent) ↔ `docs/GUIDE.md` / `docs/FEATURES.md` (user-facing operation) ↔ the skill index in `CLAUDE.md` | contributor-doc audit in `cl_verify-changes` | `cl_verify-changes` |
 | **Web↔server wire contract** | Server response types ↔ hand-written mirrors in `apps/web/src/shared/api/**` ↔ the `WorkspaceEvent` union on both sides. The web app cannot import server code, so this contract needs a dedicated comparison gate. | `npm run check:wire` (`tools/check-wire-contracts.mjs`) | — |
 | **Checkpoint option vocabulary** | `CHECKPOINT_OPTIONS` (`shared/flights/types.ts`) ↔ checkpoint emitters under `flights/logic/stages/` ↔ `respond_flight_checkpoint` ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`). Option keys are wire values. `prd-source` may offer a subset. `external-work` renders its normal `submit` / `run-internally` options visibly but disabled in the web viewer; the separate takeover control requests a safe release instead of posting either answer on the external client's behalf. | `stage-meta.checkpoints.test.ts` (every kind titled, every rendered option labelled, fallback intact) + `FlightPage.checkpoints.test.tsx` + `satisfies Record<FlightCheckpointKind, …>` | `cl_sync-agent-surfaces` |
+| **Behavior certificate sidecar** | `buildBehaviorCertificate` (`evaluation/logic/behavior-certificate.ts`) records run-start suite hashes, assertions, verdicts, and limits in a sidecar outside the downloadable ZIP. `get_evaluation_export` exposes a digest and `download_evaluation_export` may return the full sidecar through MCP. The ZIP contains `evaluation.html` and captured videos. | `behavior-certificate.test.ts` + `evaluation-export-archive.test.ts` + `authoring-export.test.ts` | `cl_run-evidence-invariants` |
 | **Import-cycle ceiling** | `tools/check-import-cycles.mjs` records ceilings for cycle count and largest cycle across `apps/**` and `shared/**`. Lower a ceiling when refactoring removes cycles; review any increase instead of accepting it silently. | `npm run check:cycles` | — |

@@ -160,7 +160,7 @@ describe('deleteFlight', () => {
 
     // Active → error, nothing removed.
     const adapters = allDone()
-    adapters.scout = { run: () => new Promise(() => {}) }
+    adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
     const live = startFlight(args(), deps(adapters))
     await new Promise((r) => setTimeout(r, 10))
     const blocked = removeFlightRecordsForFeature(store, 'checkout')
@@ -171,7 +171,7 @@ describe('deleteFlight', () => {
 
   it('rejects deleting an active flight — stop it first', async () => {
     const adapters = allDone()
-    adapters.scout = { run: () => new Promise(() => {}) }
+    adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
     const { manifest } = startFlight(args(), deps(adapters))
     await new Promise((r) => setTimeout(r, 10))
     expect(() => deleteFlight(manifest.flightId, deps(allDone()))).toThrow(/stop it before deleting/)
@@ -200,6 +200,7 @@ describe('enqueueFlight + drainQueuedFlights (R54)', () => {
     const started: string[] = []
     const adapters = allDone()
     adapters.similarity = {
+      teardown: () => null,
       run: async (ctx) => {
         started.push(ctx.manifest().feature)
         return { kind: 'done' }
@@ -218,7 +219,7 @@ describe('enqueueFlight + drainQueuedFlights (R54)', () => {
 
   it('drain skips queued flights whose repos are held by an active flight', async () => {
     const adapters = allDone()
-    adapters.scout = { run: () => new Promise(() => {}) }
+    adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
     startFlight({ ...args(), feature: 'holder' }, deps(adapters))
     await new Promise((r) => setTimeout(r, 10))
     const d = deps(allDone())
@@ -230,7 +231,7 @@ describe('enqueueFlight + drainQueuedFlights (R54)', () => {
 
   it('a queued flight on a FREE repo drains even while another repo is busy', async () => {
     const adapters = allDone()
-    adapters.scout = { run: () => new Promise(() => {}) }
+    adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
     startFlight({ ...args('/repo/busy'), feature: 'holder' }, deps(adapters))
     await new Promise((r) => setTimeout(r, 10))
     const d = deps(allDone())
@@ -242,7 +243,7 @@ describe('enqueueFlight + drainQueuedFlights (R54)', () => {
 
   it('abort drains the queue too — the repo is freed', async () => {
     const adapters = allDone()
-    adapters.scout = { run: () => new Promise(() => {}) }
+    adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
     const d = deps(adapters)
     const { manifest } = startFlight({ ...args(), feature: 'holder' }, d)
     await new Promise((r) => setTimeout(r, 10))
@@ -263,6 +264,7 @@ describe('enqueueFlight + drainQueuedFlights (R54)', () => {
     // resumeFlight's own status guard throws for it — the underlying record
     // is untouched.
     const racingStore: FlightStore = {
+      logsDir: store.logsDir,
       list: (...a) => store.list(...a),
       get: (id: string) => {
         const m = store.get(id)

@@ -21,7 +21,7 @@ linked to.
 |---|---|
 | Pages/views (coverage, cleanup, flights) | Collision-confirm (fires off a live run event) |
 | Selected run | Services / Runs-list / Portify-picker (transient pickers) |
-| Config / settings panels | Any modal that reacts to a momentary event you can't reconstruct |
+| Config / settings panels; changed-tests review and notifications | Any modal that reacts to a momentary event you can't reconstruct |
 | Wizards (open-state, not per-step) | Confirmation prompts |
 | Verification, flight-start, flight-new | |
 
@@ -33,10 +33,11 @@ on live in-memory state, leave it ephemeral.
 
 All route serialization lives in **one module**:
 `apps/web/src/shared/lib/workspace-view-state.ts` (`readPersistedView` /
-`persistView` / `onViewChangedInOtherTab`). Adding a routed surface means adding a
-field/param there and hydrating it in `App.tsx` — **never** a second URL-writing
-mechanism, and **never** react-router (deliberate: query-param style, no router
-dependency). See [[cl_reuse-shared-logic]].
+`persistView` / `onViewChangedInOtherTab`). Navigation state and dialog
+precedence live in `apps/web/src/shared/state/nav-state.ts`; the
+`use-workspace-navigation.ts` hook hydrates and persists them. Add a param in
+that path — **never** a second URL-writing mechanism, and **never** react-router
+(deliberate: query-param style, no router dependency). See [[cl_reuse-shared-logic]].
 
 The server already serves `index.html` for any deep link (catch-all in
 `apps/web-server/src/server.ts`) — refreshing `/?...` never 404s. No server change is
@@ -47,7 +48,7 @@ needed for new routes.
 | Tier | Params | Channels | Use for |
 |---|---|---|---|
 | **Durable nav** | `view`, `feature` | URL + localStorage + cross-tab `storage` | top-level location shared across tabs |
-| **URL-only** | `run`, `dialog`, `flight` | URL only | run selection (two tabs may compare runs) + dialog open-state (a dialog open in one tab must NOT pop open in another) + view qualifiers (`flight`) |
+| **URL-only** | `run`, `dialog`, `flight`, and their qualifiers | URL only | run selection (two tabs may compare runs) + dialog open-state (a dialog open in one tab must NOT pop open in another) + stage, tab, review, and drill-through context |
 
 A new dialog is almost always **URL-only** (the `dialog` param). Do not mirror
 dialog open-state to localStorage or broadcast it cross-tab.
@@ -61,38 +62,41 @@ dialog open-state to localStorage or broadcast it cross-tab.
 ?feature=checkout&dialog=config&tab=ports           → feature config, on a named tab
 ?feature=checkout&dialog=verification               → Verify-config dialog
 ?feature=checkout&dialog=flight-start               → flight stage-entry launcher (feature-scoped)
-?feature=checkout&dialog=flight-fresh               → same launcher in START-FRESH intent (R76)
+?feature=checkout&dialog=flight-fresh               → same launcher in START-FRESH intent
 ?dialog=flight-new                                  → new-flight launcher (intent + repo picker)
-?dialog=draft&draft=dr_9                            → external authoring draft, by id
 ?dialog=demo                                        → demo chooser (needs only GET /api/onboarding)
 ?dialog=settings                                    → Project Settings (needs only GET /api/project-config)
 ?view=flights&flight=fl_abc                         → flight detail (omit flight = flights list)
 ?view=flights&flight=fl_abc&stage=docs              → that flight, on a named stage (omit = follow-mode)
+?dialog=notifications                               → notifications center
+?dialog=tests-review&reviewFile=e2e/cart.spec.ts    → changed-tests review focused on a file
+?dialog=settings&models=codex                      → Project Settings with Codex models open
+?feature=checkout&run=7cvh&test=cart%20fails        → run detail focused on a failure
+?feature=checkout&run=7cvh&tests=recorded           → recorded tests for that run
+?feature=checkout&run=7cvh&runtab=changes           → run detail arrival on Changes
 ```
 
 `RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' |
-'flight-new' | 'draft' | 'demo' | 'settings'`.
-`flight`, `draft` and `tab` are the live id/name qualifiers, each gated to its own
-view/dialog in `persistView`/`readPersistedView`: `flight` only qualifies
-`view=flights` (absent = the flights landing list), `draft` only `dialog=draft`,
-`tab` only `dialog=config` (`ConfigTab`; an unknown name reads as null so the
-mount's own default wins). Because the config dialog is qualified by the DURABLE
-`feature` param, any opener that opens it for a feature other than the selected
-one must `setSelectedFeature` too — otherwise the deep link names the wrong
-suite (this bit the flight's Ports drill-through).
-`wf` (old portify-revisit id) and `task` (old evaluation-dialog id) are
-tombstoned — `persistView` force-deletes both on every write so no stale deep
-link carries them forward; never reuse either name for a new qualifier. Unknown
+'flight-new' | 'demo' | 'settings' | 'tests-review' | 'notifications'`.
+`flight` only qualifies `view=flights` (absent = the flights landing list), and
+`stage` only qualifies an open flight. `tab` only qualifies `dialog=config`;
+`models` only qualifies `dialog=settings`; `review*` params only qualify
+`dialog=tests-review`; `test`, `runtab`, and `tests` qualify a selected run.
+`from` records the flight a workspace/coverage drill-through came from and is
+dropped on the flights view. `persistView`/`readPersistedView` own these gates.
+Because the config dialog is qualified by the DURABLE `feature` param, any opener
+that opens it for a feature other than the selected one must `setSelectedFeature`
+too — otherwise the deep link names the wrong suite.
+`wf`, `task` and `draft` are tombstoned qualifiers (see Gotchas). Unknown
 dialog values are ignored on read.
 
 ## Checklist — adding a new page
 
 1. Add the value to the `WorkspaceView` union in `workspace-view-state.ts` and the
    `VIEWS` array.
-2. In `App.tsx`, render it off `view` (the `view === 'cleanup' ? … : view ===
-   'coverage' ? … : <workspace>` ladder) and add the nav entry that calls
-   `setView(...)`.
-3. The persist effect already serializes `view` — nothing else to wire.
+2. Render it from `App.tsx` and add the nav entry that calls `setView(...)` from
+   `use-workspace-navigation.ts`.
+3. The hook's persist effect already serializes `view` — nothing else to wire.
 4. Confirm refresh restores it (it reads from the URL on load).
 
 ## Checklist — adding a new routed dialog
@@ -101,44 +105,44 @@ dialog values are ignored on read.
    `workspace-view-state.ts`. If it needs an id qualifier, follow the live
    precedent — `flight` qualifying `view=flights` — add a param and gate it in
    `persistView`/`readPersistedView` so it's dropped unless your dialog/view is
-   active. Don't reuse `wf` or `task` — both are tombstoned (see Gotchas).
-2. **Hydrate on mount in `App.tsx`** — seed the dialog's open-state from
-   `PERSISTED_VIEW.dialog` in the relevant `useState` initializer.
-3. **Derive it into the route** — add it to the `routedDialog` ternary
-   (precedence = z-order: full-screen overlays above in-column dialogs), so the
-   persist effect writes the `dialog` param when it's open.
+   active. Don't reuse `wf`, `task` or `draft` — all three are tombstoned (see Gotchas).
+2. **Hydrate on mount** — add the dialog to `initialNavState` in `nav-state.ts`
+   and seed its open-state from `SEED` in `use-workspace-navigation.ts`.
+3. **Derive it into the route** — add it to `routedDialog` in `nav-state.ts`
+   (precedence = z-order), and expose its setter from the hook so the persist
+   effect writes the `dialog` param when it is open.
 4. **Where does the open-state live?**
-   - **App-level** (rendered directly in `App.tsx`, like config/portify): seed its
-     `useState` from `PERSISTED_VIEW` and you're done.
-   - **In a context** (like the Add-Test wizard's `WizardDraftContext`): add a
-     mount `useEffect` that calls the context's open fn when
-     `PERSISTED_VIEW.dialog === '<yours>'`.
+   - **Navigation-owned** (like config and settings): seed it in the navigation
+     hook and render from `App.tsx`.
+   - **In a context:** hydrate the navigation state first, then pass its open
+     flag to the context instead of adding a second URL writer.
    - **In a child component** (like the Verify dialog in `RunsColumn`): make the
      child's open-state a **controlled/uncontrolled hybrid** — accept
      `open?`/`onOpenChange?` props, fall back to internal state when absent (keeps
-     the child's own unit tests working), and have App own the state + drive the
-     route. Lift, don't duplicate.
+     the child's own unit tests working), and have the navigation hook own the
+     state + drive the route. Lift, don't duplicate.
 5. **Add a round-trip test** to `workspace-view-state.test.ts` (URL round-trip +
    the URL-only/localStorage-exclusion assertion).
 
-## Gotchas (each one bit during the 1.4.0 build)
+## Gotchas
 
-- **TDZ / hook order** — the persist effect reads values from context hooks
-  (`useWizardDrafts`, etc.). Declare those hooks **above** the persist effect, or
-  you get a use-before-declaration error.
+- **Hook order** — keep any state the persist effect reads in
+  `use-workspace-navigation.ts` before that effect and include its primitive
+  fields in the dependency list. A dialog can stay open while a qualifier
+  changes, so depending only on `dialog` leaves its URL stale.
 - **Stale-run guard wipes a hydrated run** — the run-selection reconciliation
   effect clears `selectedRunId` to "latest" before runs arrive over the WS. Seed
-  `pendingRunSelectionRef` with `PERSISTED_VIEW.run` so the hydrated run survives
+  `pendingRunSelectionRef` with the persisted run so the hydrated run survives
   until its run loads.
 - **Cross-tab scope** — `onViewChangedInOtherTab` emits the **durable tier only**
   (view/feature). Never push run/dialog through it.
 - **Qualifiers belong to their dialog/view only** — `persistView` drops `flight`
   unless `view === 'flights'` (the live precedent to copy — same
-  drop-unless-active gate). `wf` (old portify-revisit id) and `task` (old
-  evaluation-dialog id) are tombstoned: `persistView` force-deletes both on
-  every write regardless of state, so stale deep links don't carry them
-  forward. If your dialog needs its own id, add a new param with the
-  flight-style gate; never reuse `wf` or `task`.
+  drop-unless-active gate). `wf` (old portify-revisit id), `task` (old
+  evaluation-dialog id) and `draft` (old external-authoring id) are tombstoned:
+  `persistView` force-deletes all three on every write regardless of state, so
+  stale deep links don't carry them forward. If your dialog needs its own id,
+  add a new param with the flight-style gate; never reuse `wf`, `task` or `draft`.
 
 ## Deliberately NOT done (don't "fix" these without a reason)
 

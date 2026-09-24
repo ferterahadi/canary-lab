@@ -42,11 +42,12 @@ default dotdir silently breaks lookup when a user relocates it.
 | claude | `CLAUDE_CONFIG_DIR` | `claudeConfigDir(homeDir)` |
 | codex | `CODEX_HOME` | `codexConfigDir(homeDir)` |
 
-Both live in `agent-session-log.ts` and return the override (trimmed, non-empty)
+Both live in `agent-session-paths.ts` (re-exported by `agent-session-log.ts`)
+and return the override (trimmed, non-empty)
 else `path.join(homeDir, '.claude' | '.codex')`.
 
-(All basenames in this skill — `agent-session-log.ts`, `agent-config-env.ts`,
-`agent-session-tailer.ts`, their tests — live under
+(All basenames in this skill — `agent-session-paths.ts`, `agent-session-log.ts`,
+`agent-config-env.ts`, `agent-session-tailer.ts`, their tests — live under
 `apps/web-server/src/features/agent-sessions/logic/` unless a path prefix says
 otherwise.)
 
@@ -64,9 +65,7 @@ otherwise.)
 - **The slug is not `/`→`-`, and it has already changed once.** claude 2.1.220
   folds **every** non-alphanumeric character to `-` (`/var/folders/s_/x` →
   `-var-folders-s--x`); older builds folded only `/`, leaving `.` and `_`
-  intact. Measured 2026-08-04: 118 of 119 dirs in `~/.claude/projects` are pure
-  `[A-Za-z0-9-]`, and the lone underscore-preserving dir was last written
-  2026-04-08. Treat the slug as a **guess at someone else's private format**:
+  intact. Treat the slug as a **guess at someone else's private format**:
   - **Prefer the session id whenever you have one.** It's ours, pinned via
     `--session-id`, globally unique, and encoding-proof.
     `locateClaudeSessionLog` falls back to `findClaudeLogBySessionId` for
@@ -74,15 +73,13 @@ otherwise.)
   - **When you have no id**, try `claudeProjectDirCandidates(cwd)` (current slug
     then legacy) rather than one encoding — a run straddling a CLI upgrade has
     logs under both.
-  - The failure mode is the usual one: log on disk, viewer blank. It hid for
-    months because workspace run dirs have no `_`, while every macOS temp dir
-    (`/var/folders/s_/…`) does — so it only bit demo, smoke, and temp-dir
-    flight runs.
+  - The failure mode is the usual one: log on disk, viewer blank. Workspace run
+    dirs have no `_`, while every macOS temp dir (`/var/folders/s_/…`) does —
+    so it bites demo, smoke, and temp-dir flight runs first.
 - **In session-log / config-dir path code, the `.claude` / `.codex` string
   literals belong in exactly two places** — the fallback inside the two
   resolvers. If a literal appears anywhere else on a path that will be *read
-  back* to find a log, it's a stray; fold it into the resolver. (Two such
-  strays existed: `portify/agent.ts` and `agent-session-tailer.ts`.)
+  back* to find a log, it's a stray; fold it into the resolver.
   Known occurrences *outside* this rule's scope: the skill-install destination
   paths in `apps/cli/agent.ts` (`path.join(home, '.codex'|'.claude', 'skills',
   …)`) and the CLI-presence detection checks in `apps/cli/setup.ts`
@@ -98,7 +95,7 @@ The spawn side and the read side must agree on the config dir. They do because
 **both resolve from `process.env`**, and the server process that reads a log is
 the same process that spawned the agent:
 
-- **headless agents** (coverage / wizard / portify / benchmark) inherit
+- **headless agents** (coverage / portify / benchmark / flight stages) inherit
   `process.env` directly via `child_process`.
 - **the PTY heal agent** runs under `$SHELL -i -c`, which sources the rc file
   (.zshrc/.bashrc).
@@ -143,8 +140,9 @@ env already carries the vars (the common case — no shell spawned).
    cwd symlink mismatch or a clock/timezone skew drops the match.
 
 ## Verify
-- `agent-session-log.test.ts` and `agent-config-env.test.ts` cover the resolvers
-  + hydration; run them plus `apps/cli/ui-command.test.ts` for the boot wiring.
+- `agent-session-paths.test.ts`, `agent-session-paths.codex.test.ts`, and
+  `agent-config-env.test.ts` cover the resolvers + hydration; run them plus
+  `apps/cli/ui-command.test.ts` for the boot wiring.
 - `agent-session-log.ts` / `ui-command.ts` are `apps/web-server/**` + `apps/cli/`
   changes → only take effect after the `canary-apply` cycle (`cl_verify-changes`
   Tier 3).

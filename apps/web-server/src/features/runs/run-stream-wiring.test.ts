@@ -325,6 +325,19 @@ describe('makeAttachRunStreams — envset revert on run-complete', () => {
     expect(readRunnerLog('r-1')).toContain('Reverted envset for foo')
   })
 
+  it.each(['passed', 'failed', 'aborted'])('removes a newly materialized target on %s completion', (status) => {
+    const original = path.join(tmpDir, '.env')
+    fs.writeFileSync(original, 'FROM SET\n')
+    const orch = fakeOrch('r-1')
+    makeAttachRunStreams(makeCtx())(orch.asOrch, newRunnerLog('r-1'), 'foo', [
+      { originalPath: original, backupPath: null },
+    ])
+    orch.emit('run-complete', { status })
+    expect(fs.existsSync(original)).toBe(false)
+    expect(activeEnvsets.has('r-1')).toBe(false)
+    expect(readRunnerLog('r-1')).toContain('Reverted envset for foo')
+  })
+
   it('warns and still drops the records when the revert cannot be written', () => {
     const backup = path.join(tmpDir, 'orphan.env.bak.1')
     fs.writeFileSync(backup, 'ORIGINAL\n')
@@ -369,6 +382,18 @@ describe('makeRestartExternalRun — rejections', () => {
       message: 'run-not-found',
       statusCode: 404,
     })
+  })
+
+  it('409s a legacy perturbation run without claiming an external heal session', async () => {
+    const retiredFields = { perturbation: {} }
+    writeRunManifest({ runId: 'legacy', ...retiredFields })
+
+    await expect(build()('legacy', healReq())).rejects.toMatchObject({
+      message: 'This run used a retired perturbation and cannot be restarted; start a new run.',
+      statusCode: 409,
+    })
+    expect(claims).toEqual([])
+    expect(orchHarness.options).toEqual([])
   })
 
   it('409s a run that is still active', async () => {

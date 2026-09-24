@@ -11,8 +11,9 @@ export type WorkspaceEvent =
   | { type: 'feature-renamed'; from: string; to: string }
   | { type: 'features-changed' }
   | { type: 'tests-changed'; feature: string }
+  | { type: 'discovery-repair-changed'; feature: string }
   | { type: 'envsets-changed'; feature: string }
-  | { type: 'coverage-changed'; feature: string }
+  | { type: 'coverage-changed'; feature: string; revision?: string }
   | { type: 'tests-dirty-changed'; feature: string }
   | { type: 'verification-config-changed'; feature: string }
   | { type: 'journal-changed'; runId: string }
@@ -28,6 +29,7 @@ export type WorkspaceEvent =
   // A Flight manifest changed (stage transition, checkpoint, settle).
   // The client refetches the flight list / the open flight detail view.
   | { type: 'flights-changed' }
+  | { type: 'notifications-changed' }
   // A spawned-agent record changed — started, ended, stopped, or reconciled to
   // `orphaned` on boot. The client refetches the agent jobs for the flight it has
   // open, so a live agent's stop control and a tombstone row appear without a

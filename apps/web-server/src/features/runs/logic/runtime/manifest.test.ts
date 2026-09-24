@@ -4,7 +4,9 @@ import os from 'os'
 import path from 'path'
 import {
   readManifest,
+  hasRetiredPerturbation,
   readRunsIndex,
+  suiteDirForReading,
   updateManifest,
   updateServiceStatus,
   upsertRunsIndexEntry,
@@ -32,6 +34,11 @@ function makeManifest(over: Partial<RunManifest> = {}): RunManifest {
 }
 
 describe('writeManifest / readManifest', () => {
+  it('identifies historical faulted runs so they cannot restart without their runtime', () => {
+    expect(hasRetiredPerturbation(makeManifest())).toBe(false)
+    expect(hasRetiredPerturbation({ ...makeManifest(), perturbation: { envelope: {} } } as unknown as RunManifest)).toBe(true)
+  })
+
   it('round-trips through atomic write', () => {
     const file = path.join(tmpDir, 'manifest.json')
     const m = makeManifest({ services: [{ name: 'api', safeName: 'api', command: 'go run', cwd: '/x', logPath: '/x/api.log' }] })
@@ -76,6 +83,18 @@ describe('runs index', () => {
       { runId: 'a', feature: 'f', startedAt: 't', status: 'running' },
     ])
     expect(readRunsIndex(tmpDir)).toHaveLength(1)
+  })
+
+  it('upsertRunsIndexEntry drops the keys named in `clear` before merging, so an omitted count means none', () => {
+    upsertRunsIndexEntry(tmpDir, { runId: 'rc', feature: 'f', startedAt: 't', status: 'running', pendingSpecEdits: 2, integrityHints: 1 })
+    upsertRunsIndexEntry(tmpDir, { runId: 'rc', feature: 'f', startedAt: 't', status: 'running' }, { clear: ['pendingSpecEdits', 'integrityHints'] })
+    const row = readRunsIndex(tmpDir).find((e) => e.runId === 'rc')!
+    expect(row).not.toHaveProperty('pendingSpecEdits')
+    expect(row).not.toHaveProperty('integrityHints')
+    // Without `clear`, the merge keeps what the new entry omits (the endedAt rule).
+    upsertRunsIndexEntry(tmpDir, { runId: 'rc', feature: 'f', startedAt: 't', status: 'running', pendingSpecEdits: 3 })
+    upsertRunsIndexEntry(tmpDir, { runId: 'rc', feature: 'f', startedAt: 't', status: 'passed' })
+    expect(readRunsIndex(tmpDir).find((e) => e.runId === 'rc')).toMatchObject({ status: 'passed', pendingSpecEdits: 3 })
   })
 
   it('upsertRunsIndexEntry inserts new and merges existing', () => {
@@ -150,5 +169,21 @@ describe('service status updates', () => {
     const after = readManifest(manifestPath)!.services[0]!
     expect(after.startingAt).toBe(first.startingAt)
     expect(after.readyAt).toBe(first.readyAt)
+  })
+})
+
+describe('suiteDirForReading', () => {
+  it('prefers the run-start copy while it exists, else the live feature dir, else nothing', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-suite-dir-'))
+    try {
+      const taken = { kind: 'taken' as const, dir, takenAt: 'x', digest: 'd' }
+      expect(suiteDirForReading({ featureDir: '/live', suiteSnapshot: taken })).toBe(dir)
+      expect(suiteDirForReading({ featureDir: '/live', suiteSnapshot: { ...taken, dir: path.join(dir, 'gone') } })).toBe('/live')
+      expect(suiteDirForReading({ featureDir: '/live', suiteSnapshot: { kind: 'unavailable', at: 'x', reason: 'r' } })).toBe('/live')
+      expect(suiteDirForReading({ featureDir: '/live' })).toBe('/live')
+      expect(suiteDirForReading({})).toBeUndefined()
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

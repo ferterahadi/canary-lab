@@ -7,6 +7,7 @@ import { pickConfiguredHealAgent } from './pick-heal-agent'
 import path from 'path'
 import { isRestartableRunStatus } from '../../../../../shared/run-state'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
+import { hasRetiredPerturbation } from './logic/runtime/manifest'
 import type { ServerContext } from '../../server-context'
 import { loadFeatures } from '../../shared/feature-loader'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
@@ -48,6 +49,7 @@ export function makeRestartLocalHeal(
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
       const manifest = detail.manifest
+      if (hasRetiredPerturbation(manifest)) return { ok: false, reason: 'not-restartable' as const }
       if ((manifest.executionType ?? 'run') === 'verify') return { ok: false, reason: 'not-restartable' as const }
       if (!isRestartableRunStatus(manifest.status)) return { ok: false, reason: 'not-restartable' as const }
       if (manifest.healMode === 'manual') return { ok: false, reason: 'manual-mode' as const }

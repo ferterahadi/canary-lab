@@ -478,8 +478,11 @@ function renderCallFreeStatement(statement: ts.Statement, sourceFile: ts.SourceF
       if (!ts.isIdentifier(declaration.name)) return undefined
       if (!declaration.initializer) return `declare ${humanizeIdentifier(declaration.name.text)} without an initial value`
       const value = safeExpression(declaration.initializer, sourceFile, true)
-      return !value || value.fidelity === 'unresolved'
-        ? undefined
+      if (!value || value.fidelity === 'unresolved') return undefined
+      const booleanCollectionResult = value.text.startsWith('every item ')
+        || value.text.startsWith('at least one item ')
+      return booleanCollectionResult
+        ? `${humanizeIdentifier(declaration.name.text)} based on whether ${value.text}`
         : `${humanizeIdentifier(declaration.name.text)} to ${value.text}`
     })
     if (declarations.some((declaration) => !declaration)) return undefined

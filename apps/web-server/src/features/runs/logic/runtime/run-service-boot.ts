@@ -3,24 +3,145 @@ import type { ServiceSpec } from './run-orchestrator-types'
 // Bringing a run's services up: one pty per service spec, the log tee, and the
 // health poll that decides whether the suite can run at all. A failed probe
 // records a boot failure on the context rather than throwing, because the run
-// loop routes that into heal instead of aborting. Split out of orchestrator.ts;
-// the bodies are unchanged.
+// loop routes that into heal instead of aborting.
 import { type RunContext } from './run-context'
 import fs from 'fs'
 import path from 'path'
 import type { HttpProbe, TcpProbe } from '../../../../../../../shared/launcher/types'
 import { coerceTcpPort, isHealthy, isTcpListening } from '../../../../shared/launcher-startup'
 import { type RunBootFailure } from './manifest'
+import type { RunBootEvidence } from '../../../../../../../shared/run-state'
+import { classifyBootEvidence, diagnosticExcerpt, redactDiagnosticText } from './diagnostic-redaction'
+import type { PtyHandle } from './pty-spawner'
+import os from 'os'
+import { randomUUID } from 'crypto'
+import { prepareWorktreeDependencies } from './dependency-provenance'
+import { dependencyIncompatibilityReason } from '../../../../../../../shared/dependency-provenance'
+import { loadFeatures } from '../../../../shared/feature-loader'
 
-export async function ensureServicesRunning(ctx: RunContext): Promise<string[]> {
-  // Fresh boot attempt — drop any health failure recorded by a prior cycle so
-  // a service that comes up cleanly this time clears the failed state.
+// node-pty reports the raw signal number; spawnSync reports the name. The
+// manifest stores names only, so one record can never read "signal 15" where
+// another reads "signal SIGTERM".
+function signalName(signal: number | undefined): string | null {
+  if (signal == null) return null
+  const match = Object.entries(os.constants.signals).find(([, value]) => value === signal)
+  return match ? match[0] : String(signal)
+}
+
+// The redacted, byte-bounded log evidence every boot failure carries. Kept in
+// one place so a new evidence field doesn't mean editing three object literals.
+function bootEvidence(logPath: string): Pick<RunBootFailure, 'logPath' | 'excerpt' | 'excerptTruncated'> {
+  const { excerpt, truncated } = diagnosticExcerpt(logPath)
+  return { logPath, ...(excerpt ? { excerpt } : {}), excerptTruncated: truncated }
+}
+
+// Record the FIRST boot failure of an attempt and publish it, so every open
+// view and the heal packet see the same record. Later services failing in the
+// same attempt don't overwrite the original cause.
+function recordBootFailure(ctx: RunContext, failure: RunBootFailure, lifecycleLabel: string): void {
+  ctx.bootFailure ??= failure
+  ctx.stateSink.setServiceStatus(ctx.runId, failure.safeName, 'timeout')
+  ctx.stateSink.patchManifest(ctx.runId, { bootFailure: ctx.bootFailure })
+  recordLifecycle(ctx, 'starting-services', lifecycleLabel, {
+    detail: [ctx.bootFailure.detail, ctx.bootFailure.nextAction].filter(Boolean).join(' '),
+    severity: 'error',
+  })
+}
+
+// What the evidence added decides the action; the reason only breaks the tie
+// when the evidence added nothing. A nested-ternary ladder here had a trailing
+// arm that would silently absorb every future classification value.
+const UNPRESERVED_CAUSE_ACTION = 'Canary did not observe the underlying cause: the outer startup wrapper did not preserve the original rejection or child-process failure, so do not guess a root cause. Update that product-repo wrapper to log and rethrow the original error, then restart so Canary can capture it.'
+const EMPTY_OUTPUT_ACTION = 'The process exited without captured output. Verify the command and wrapper forwarding, then restart to collect the original error.'
+const HEALTH_TIMEOUT_ACTION = 'The process remained alive but readiness never passed. Inspect the full service log and verify the readiness target, listen address, and startup progress, then restart.'
+
+function readinessNextAction(reason: 'health-timeout' | 'process-exited', evidence: RunBootEvidence | null): string {
+  if (evidence === 'underlying-cause-not-preserved') return UNPRESERVED_CAUSE_ACTION
+  if (reason === 'health-timeout') return HEALTH_TIMEOUT_ACTION
+  if (evidence === 'empty-output') return EMPTY_OUTPUT_ACTION
+  return 'Fix the failure shown in the preserved process evidence, then restart the run.'
+}
+
+/** Drop a prior attempt's boot failure from the context AND the manifest, so a
+ *  service that comes up cleanly this time clears the failed state everywhere
+ *  it was published — not just in memory. */
+export function clearBootFailure(ctx: RunContext): void {
   ctx.bootFailure = undefined
+  ctx.stateSink.patchManifest(ctx.runId, { bootFailure: undefined })
+}
+
+/** Every service-spawning path shares this gate. Persist the newly measured
+ *  evidence before a process can start so UI and reconnected agents never
+ *  act on the previous attempt's verdict. Unknown remains the legacy allow. */
+export async function preflightServiceBoot(ctx: RunContext): Promise<boolean> {
+  if (ctx.worktreeHandles.length > 0) {
+    const provenance = []
+    const evidenceDir = path.join(ctx.runDir, 'dependency-preflight', randomUUID())
+    // Only preparation is live configuration. Service paths, commands and the
+    // recorded test suite remain pinned to this run's original topology.
+    let latest: RunContext['feature'] | undefined
+    try {
+      if (ctx.dependencyConfigPath && fs.existsSync(ctx.dependencyConfigPath)) {
+        latest = loadFeatures(path.dirname(ctx.feature.featureDir)).find((feature) => feature.name === ctx.feature.name)
+      }
+    } catch {
+      // An unreadable configuration becomes a durable blocker below, never a
+      // fallback to stale preparation commands or an unstructured run abort.
+    }
+    for (const handle of ctx.worktreeHandles) {
+      const repo = (ctx.dependencyConfigPath ? latest : ctx.feature)?.repos?.find((candidate) => candidate.name === handle.repoName)
+      const configurationError = ctx.dependencyConfigPath && !repo
+        ? `Restore a valid ${ctx.dependencyConfigPath} with repository "${handle.repoName}" and its dependencyPreparation, then request runner verification.`
+        : undefined
+      const item = await prepareWorktreeDependencies({
+        handle,
+        config: repo?.dependencyPreparation,
+        requiredConfig: ctx.feature.repos?.find((candidate) => candidate.name === handle.repoName)?.dependencyPreparation,
+        configurationError,
+        runDir: evidenceDir,
+      })
+      provenance.push({ ...item, checkedAt: new Date().toISOString() })
+    }
+    if (ctx.stopped) return false
+    ctx.dependencyProvenance = provenance
+    ctx.stateSink.patchManifest(ctx.runId, { dependencyProvenance: provenance })
+  }
+  clearBootFailure(ctx)
+  const incompatibleRepos = ctx.dependencyProvenance.filter((item) => item.verdict === 'incompatible')
+  for (const incompatible of incompatibleRepos) {
+    const validation = incompatible.validation
+    const services = ctx.services.filter((candidate) => candidate.repoName === incompatible.repoName)
+    const service = services[0]
+    recordBootFailure(ctx, {
+      service: service?.name ?? incompatible.repoName,
+      safeName: service?.safeName ?? incompatible.repoName,
+      reason: 'dependency-incompatible',
+      detail: dependencyIncompatibilityReason(incompatible),
+      ...bootEvidence(validation?.logPath ?? ctx.paths.runnerLogPath),
+      command: validation?.command,
+      cwd: validation?.cwd ?? incompatible.worktreePath,
+      exitCode: validation?.exitCode,
+      signal: validation?.signal,
+      nextAction: incompatible.remediation ?? 'Prepare coherent dependencies for this source revision, then restart the run.',
+    }, `Dependency preflight failed: ${incompatible.repoName}`)
+    for (const affected of services.slice(1)) ctx.stateSink.setServiceStatus(ctx.runId, affected.safeName, 'timeout')
+  }
+  return !ctx.stopped && incompatibleRepos.length === 0
+}
+
+export async function ensureServicesRunning(ctx: RunContext, afterPreflight?: () => Promise<void>): Promise<string[]> {
+  const allowed = await preflightServiceBoot(ctx)
+  // Initial fix capture includes target-owned preparation, but precedes every
+  // service/agent edit. Recovery attempts retain that original baseline.
+  if (!ctx.stopped) await afterPreflight?.()
+  if (!allowed || ctx.stopped) return []
   const toStart = ctx.services.filter((svc) => !ctx.servicePtys.has(svc.name))
   for (const svc of toStart) {
     ctx.stateSink.setServiceStatus(ctx.runId, svc.safeName, 'starting')
     spawnService(ctx, svc)
+    if (ctx.bootFailure) break
   }
+  if (ctx.bootFailure) return []
   if (ctx.services.length > 0) await waitForHealth(ctx)
   return toStart.map((svc) => svc.safeName)
 }
@@ -40,8 +161,9 @@ export function testPortEnvKey(slot: string): string {
 export function testPortEnv(ctx: RunContext): Record<string, string> {
   const out: Record<string, string> = {}
   const owners = new Map<string, string>()
-  if (ctx.portMap) {
-    for (const [slot, port] of ctx.portMap) {
+  const ports = ctx.portMap
+  if (ports) {
+    for (const [slot, port] of ports) {
       const key = testPortEnvKey(slot)
       const owner = owners.get(key)
       if (owner && owner !== slot) {
@@ -64,12 +186,32 @@ export function ensureLogFile(ctx: RunContext, target: string): void {
 export function spawnService(ctx: RunContext, svc: ServiceSpec): void {
   const logPath = ctx.paths.serviceLog(svc.safeName)
   ensureLogFile(ctx, logPath)
-  const pty = ctx.ptyFactory({
-    command: `LOG_MODE=plain ${svc.command}`,
-    cwd: svc.cwd,
-    env: { LOG_MODE: 'plain', ...(svc.env ?? {}) },
-  })
+  let pty: PtyHandle
+  try {
+    pty = ctx.ptyFactory({
+      command: `LOG_MODE=plain ${svc.command}`,
+      cwd: svc.cwd,
+      env: { LOG_MODE: 'plain', ...(svc.env ?? {}) },
+    })
+  } catch (err) {
+    const message = redactDiagnosticText(err instanceof Error ? err.message : String(err))
+    try { fs.appendFileSync(logPath, `${message}\n`) } catch { /* best-effort; manifest still carries the spawn error */ }
+    recordBootFailure(ctx, {
+      service: svc.name,
+      safeName: svc.safeName,
+      reason: 'spawn-failed',
+      detail: `Canary could not spawn the service process: ${message}`,
+      ...bootEvidence(logPath),
+      command: redactDiagnosticText(svc.command),
+      cwd: svc.cwd,
+      exitCode: null,
+      signal: null,
+      nextAction: 'Fix the service command, working directory, shell, or executable permissions, then restart the run.',
+    }, `Service process could not spawn: ${svc.name}`)
+    return
+  }
   ctx.servicePtys.set(svc.name, pty)
+  ctx.serviceExitEvidence.delete(svc.name)
   ctx.emit('service-started', { service: svc, pid: pty.pid })
 
   pty.onData((chunk) => {
@@ -79,6 +221,7 @@ export function spawnService(ctx: RunContext, svc: ServiceSpec): void {
   pty.onExit(({ exitCode, signal }) => {
     if (ctx.servicePtys.get(svc.name) !== pty) return
     ctx.servicePtys.delete(svc.name)
+    ctx.serviceExitEvidence.set(svc.name, { exitCode, signal: signalName(signal) })
     ctx.emit('service-exit', { service: svc, exitCode, signal })
   })
 }
@@ -180,12 +323,26 @@ export async function pollUntilReady(ctx: RunContext,
   // execution type — readers like the flight's boot-verify need the real
   // cause (crashed vs never-healthy) and the log to surface, not just a
   // `timeout` status. What differs below is only whether the run dies.
+  const evidence = bootEvidence(ctx.paths.serviceLog(svc.safeName))
+  const exit = ctx.serviceExitEvidence.get(svc.name)
+  const classification = classifyBootEvidence({
+    reason: failureReason,
+    excerpt: evidence.excerpt,
+    exitCode: exit?.exitCode,
+    signal: exit?.signal,
+  })
   ctx.bootFailure ??= {
     service: svc.name,
     safeName: svc.safeName,
     reason: failureReason,
+    ...(classification ? { classification } : {}),
     detail,
-    logPath: ctx.paths.serviceLog(svc.safeName),
+    ...evidence,
+    command: redactDiagnosticText(svc.command),
+    cwd: svc.cwd,
+    exitCode: exit?.exitCode ?? null,
+    signal: exit?.signal ?? null,
+    nextAction: readinessNextAction(failureReason, classification),
   }
   ctx.stateSink.patchManifest(ctx.runId, { bootFailure: ctx.bootFailure })
   // Boot-only sessions hold whatever came up. A service that fails its

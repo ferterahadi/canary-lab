@@ -86,12 +86,23 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     canContinue: boolean
     prefill: { repoPaths: string[]; description: string; env: string; coverageTarget: number }
     stages: Array<{ key: string; allowed: boolean; reason?: string }>
+    continuation?: { fromStage: string; reason: string } | null
   }
-  const entryFor = async (feature: string) => {
-    const resp = await app.inject({ method: 'GET', url: `/api/flights/entry?feature=${feature}` })
+  const entryFor = async (feature: string, coverageTarget?: number | string) => {
+    const target = coverageTarget === undefined ? '' : `&coverageTarget=${coverageTarget}`
+    const resp = await app.inject({ method: 'GET', url: `/api/flights/entry?feature=${feature}${target}` })
     return { status: resp.statusCode, body: resp.json() as EntryBody }
   }
   const stageOf = (body: EntryBody, key: string) => body.stages.find((s) => s.key === key)!
+
+  it('accepts a finite target in range and falls malformed targets back to the stored default', async () => {
+    writeFeatureConfig('checkout')
+    app = await buildApp(allDone())
+
+    expect((await entryFor('checkout', '75')).body.prefill.coverageTarget).toBe(75)
+    expect((await entryFor('checkout', 'not-a-number')).body.prefill.coverageTarget).toBe(100)
+    expect((await entryFor('checkout', '101')).body.prefill.coverageTarget).toBe(100)
+  })
 
   /** A real feature.config the loader can parse, with declared repos. */
   function writeFeatureConfig(feature: string): string {
@@ -170,6 +181,8 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     expect(body.canContinue).toBe(false)
     expect(body.prefill.repoPaths).toEqual([repoDir])
     expect(body.prefill.description).toBe('')
+    expect(body.prefill.coverageTarget).toBe(100)
+    expect(body.continuation).toMatchObject({ fromStage: 'env-capture' })
     // Config on disk → every stage whose only dependency is the suite existing is
     // enterable with no flight record at all. `docs` and `prd-summary` belong here:
     // they gather and distil requirement files and boot nothing, so an envset is
@@ -247,6 +260,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     let fail = true
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => {
         await new Promise<void>((resolve) => { gateBox.gate = resolve })
         return fail ? { kind: 'failed', error: 'no docs' } : { kind: 'done' }

@@ -27,6 +27,7 @@ beforeEach(() => {
 /** `start_flight` reads the index first, then acts. Routes both legs. */
 function startRoutes(opts: {
   flights?: Array<Record<string, unknown>>
+  entry?: FlightReply
   detail?: FlightReply
   resume?: FlightReply
   create?: FlightReply
@@ -34,6 +35,9 @@ function startRoutes(opts: {
   return (req: { method: string; url: string }): FlightReply => {
     if (req.method === 'GET' && req.url === '/api/flights') {
       return { statusCode: 200, body: { flights: opts.flights ?? [] } }
+    }
+    if (req.method === 'GET' && req.url.startsWith('/api/flights/entry?')) {
+      return opts.entry ?? { statusCode: 404, body: { error: 'feature not found' } }
     }
     if (req.url.endsWith('/resume')) return opts.resume ?? { statusCode: 200, body: plainFlight('running') }
     if (req.method === 'GET') return opts.detail ?? { statusCode: 200, body: plainFlight('running') }
@@ -106,6 +110,125 @@ describe('start_flight — locating the record before starting one', () => {
         conversationName: 'resume checkout',
         sessionUrl: 'https://claude.ai/chat/resume',
       },
+    })
+  })
+
+  it('continues a recordless configured feature from the first target-invalid stage', async () => {
+    const { call, requests } = flightHarness({
+      reply: startRoutes({
+        entry: {
+          statusCode: 200,
+          body: {
+            feature: 'cns-wa-bot-signup',
+            flight: null,
+            active: false,
+            canContinue: false,
+            prefill: {
+              repoPaths: ['/repo/mighty-cns'],
+              description: 'WhatsApp bot signup',
+              env: 'local',
+              coverageTarget: 100,
+            },
+            stages: [],
+            evidence: {
+              'specs-coverage': { mappingState: 'fresh', coveragePct: 83.3, testsWritten: 6 },
+              run: { runId: 'run-green', status: 'passed' },
+            },
+            continuation: {
+              fromStage: 'specs-coverage',
+              reason: 'semantic coverage is 83.3%; the requested target is 100%',
+            },
+          },
+        },
+        create: { statusCode: 201, body: plainFlight('running', { feature: 'cns-wa-bot-signup' }) },
+      }),
+    })
+
+    const out = await call('start_flight', { feature: 'cns-wa-bot-signup', coverage_target: 100 })
+
+    expect(requests.map((r) => `${r.method} ${r.url}`)).toEqual([
+      'GET /api/flights',
+      'GET /api/flights/entry?feature=cns-wa-bot-signup&coverageTarget=100',
+      'POST /api/flights',
+    ])
+    expect(requests.at(-1)?.payload).toMatchObject({
+      feature: 'cns-wa-bot-signup',
+      repoPaths: ['/repo/mighty-cns'],
+      description: 'WhatsApp bot signup',
+      env: 'local',
+      coverageTarget: 100,
+      fromStage: 'specs-coverage',
+      stageProducer: 'external',
+    })
+    expect(requests.at(-1)?.payload).not.toHaveProperty('mode')
+    expect(out.note).toContain('continued the configured feature from specs-coverage')
+  })
+
+  it('does not restart a recordless feature whose full Flight outcome already exists', async () => {
+    const { call, requests } = flightHarness({
+      reply: startRoutes({
+        entry: {
+          statusCode: 200,
+          body: {
+            feature: 'checkout', flight: null, active: false, canContinue: false,
+            prefill: { repoPaths: ['/repo/shop'], description: 'checkout', env: 'local', coverageTarget: 100 },
+            stages: [], evidence: {}, continuation: null,
+          },
+        },
+      }),
+    })
+
+    const out = await call('start_flight', { feature: 'checkout' })
+
+    expect(out.type).toBe('flight_already_complete')
+    expect(requests.some((r) => r.method === 'POST')).toBe(false)
+    expect(requests).toContainEqual(expect.objectContaining({
+      url: '/api/flights/entry?feature=checkout',
+    }))
+  })
+
+  it('retains an explicitly chosen environment when resolving recordless entry evidence', async () => {
+    const { call, requests } = flightHarness({
+      reply: startRoutes({
+        entry: {
+          statusCode: 200,
+          body: {
+            feature: 'checkout', flight: null, active: false, canContinue: false,
+            prefill: { repoPaths: ['/repo/shop'], description: 'checkout', env: 'staging', coverageTarget: 100 },
+            stages: [], evidence: {}, continuation: null,
+          },
+        },
+      }),
+    })
+
+    await call('start_flight', { feature: 'checkout', env: 'staging' })
+
+    expect(requests).toContainEqual(expect.objectContaining({
+      url: '/api/flights/entry?feature=checkout&env=staging',
+    }))
+  })
+
+  it('explains missing entry evidence and supplies a usable intent when saved description is blank', async () => {
+    const missing = flightHarness({
+      reply: startRoutes({ entry: { statusCode: 503, body: {} } }),
+    })
+    expect(await missing.text('start_flight', { feature: 'checkout' })).toContain('entry evidence is unavailable')
+
+    const { call, requests } = flightHarness({
+      reply: startRoutes({
+        entry: {
+          statusCode: 200,
+          body: {
+            feature: 'checkout', flight: null, active: false, canContinue: false,
+            prefill: { repoPaths: ['/repo/shop'], description: '   ', env: 'local', coverageTarget: 100 },
+            stages: [], evidence: {}, continuation: { fromStage: 'run', reason: 'run needs refresh' },
+          },
+        },
+      }),
+    })
+    await call('start_flight', { feature: 'checkout' })
+    expect(requests.at(-1)?.payload).toMatchObject({
+      description: 'Continue the existing checkout suite to its requested Flight outcome.',
     })
   })
 
@@ -331,10 +454,10 @@ describe('start_flight — typed refusals', () => {
       type: 'flight_exists_requires_choice', feature: 'shop',
       existingFlightId: 'fl-old', existingStatus: 'done', options: ['redo', 'from_stage'],
     })
-    // The destructive default and independent Portify exception both have to
-    // be stated: neither is safe for a caller to infer from positional order.
-    expect(String(out.next)).toContain('most stage jumps wipe')
-    expect(String(out.next)).toContain('from_stage:"portify" resets only Parallel setup')
+    // The caller needs the artifact boundaries before choosing a restart.
+    expect(String(out.next)).toContain('from_stage resets only affected artifacts')
+    expect(String(out.next)).toContain('Tests & coverage keeps Parallel setup')
+    expect(String(out.next)).toContain('Parallel setup resets itself')
   })
 
   it('reports a null feature on the exists-choice when the caller named none', async () => {
@@ -720,7 +843,7 @@ describe('get_flight — steering per checkpoint kind', () => {
     expect(next).toContain('no subagent primitive')
   })
 
-  it('surfaces the downloadable Report while final Parallel setup is still running', async () => {
+  it('surfaces the downloadable Report while independent work is still running', async () => {
     const { call } = flightHarness({
       reply: {
         statusCode: 200,
@@ -739,7 +862,7 @@ describe('get_flight — steering per checkpoint kind', () => {
 
     expect(next).toContain('Report is ready')
     expect(next).toContain('/runs/evaluation.zip')
-    expect(next).toContain('Canary-owned persistent background work')
+    expect(next).toContain('Parallel setup')
     expect(next).toContain('Tell the user now, then end your turn')
     expect(next).toContain('Do not keep polling')
   })
@@ -779,7 +902,7 @@ describe('get_flight — steering per checkpoint kind', () => {
     })
 
     expect(next).toContain('Report is ready')
-    expect(next).toContain('Parallel setup did not invalidate it')
+    expect(next).toContain('Independent work did not invalidate it')
   })
 
   it('puts the Report path first when queued or user-paused Parallel setup is read', async () => {
@@ -796,7 +919,7 @@ describe('get_flight — steering per checkpoint kind', () => {
   for (const [kind, marker] of [
     ['config-approval', 'the REAL on-disk feature.config.cjs'],
     ['export-mode', 'raw = fast report straight from run evidence'],
-    ['portify-gate', 'final Parallel setup ask'],
+    ['portify-gate', 'Parallel setup ask'],
     ['portify-apply', 'passed a concurrent double-boot'],
   ] as const) {
     it(`explains the ${kind} choice in its own terms`, async () => {
@@ -972,9 +1095,14 @@ describe('respond_flight_checkpoint — what rides the response', () => {
   it('sends only the fields the caller actually supplied', async () => {
     const { call, requests } = flightHarness({ reply: { statusCode: 200, body: parkedFlight() } })
 
-    await call('respond_flight_checkpoint', { flightId: 'fl-1' })
+    await call('respond_flight_checkpoint', { flightId: 'fl-1', choice: 'approve' })
 
-    expect(requests[0].payload).toEqual({ response: {} })
+    expect(requests[0].payload).toEqual({ response: { choice: 'approve' } })
+    requests.length = 0
+    const unanswered = await call('respond_flight_checkpoint', { flightId: 'fl-1' })
+    expect(requests.every((request) => request.method === 'GET')).toBe(true)
+    expect(unanswered.next).toContain('agent work')
+    expect(unanswered.checkpoint).toMatchObject({ kind: 'external-work' })
   })
 
   it('carries every field when the caller supplies them all', async () => {

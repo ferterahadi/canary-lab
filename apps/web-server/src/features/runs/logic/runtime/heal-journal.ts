@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { DIAGNOSIS_JOURNAL_PATH, MANIFEST_PATH, ROOT, getSummaryPath } from './paths'
 import { FailedEntry, truncateOneLine } from './log-enrichment'
+import { environmentExclusions, type ApplicabilitySummary } from '../../../../../../../shared/run-applicability'
 
 // ─── Heal Index ─────────────────────────────────────────────────────────────
 
@@ -231,9 +232,12 @@ export interface JournalAppendInput {
   journalPath?: string
 }
 
-export type JournalOutcome = 'all_passed' | 'advanced' | 'partial' | 'no_change' | 'regression'
+export type JournalOutcome = 'all_tests_passed' | 'applicable_passed' | 'failures_cleared' | 'advanced' | 'partial' | 'no_change' | 'regression'
 
-export interface SummaryForJournalOutcome {
+export interface SummaryForJournalOutcome extends ApplicabilitySummary {
+  total?: unknown
+  passed?: unknown
+  skipped?: unknown
   failed?: Array<{ name?: unknown }>
   // `unknown` mirrors SummaryShape in run-verdict.ts: this is parsed JSON off
   // disk, so the field's type is a claim until checked. Kept as a local
@@ -281,7 +285,15 @@ export function classifyJournalOutcome(
 ): JournalOutcome {
   const beforeNames = new Set(failedNamesFromSummary(before))
   const afterNames = new Set(failedNamesFromSummary(after))
-  if (afterNames.size === 0) return 'all_passed'
+  if (afterNames.size === 0) {
+    const total = typeof after.total === 'number' ? after.total : 0
+    const passed = typeof after.passed === 'number' ? after.passed : 0
+    const skipped = typeof after.skipped === 'number' ? after.skipped : Array.isArray(after.skippedNames) ? after.skippedNames.length : 0
+    if (total > 0 && passed === total && skipped === 0) return 'all_tests_passed'
+    const excluded = environmentExclusions(after).length
+    if (passed > 0 && excluded > 0 && skipped === excluded && passed + excluded === total) return 'applicable_passed'
+    return 'failures_cleared'
+  }
 
   let fixed = 0
   for (const name of beforeNames) {

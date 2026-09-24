@@ -1,13 +1,12 @@
 @import "tailwindcss";
 @import "@xterm/xterm/css/xterm.css";
-@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
  * Canary Lab — crisp modern surface
  *
- * One sans family (Geist), one mono family (JetBrains Mono). Cool neutrals
+ * One type family (Geist) for every piece of UI text. Cool neutrals
  * for both themes; a single saturated blue accent; subtle shadows, soft
  * rounded corners, hairline borders. No decorative flourishes.
  */
@@ -23,9 +22,9 @@
   --bg-hover: #f5f5f5;
   --bg-selected: #ededed;
 
-  --border-default: #e5e5e5;
-  --border-strong: #d4d4d4;
-  --border-subtle: #f0f0f0;
+  --border-default: #c9c9d0;
+  --border-strong: #94949e;
+  --border-subtle: #e2e2e6;
   --border-focus: #2563eb;
 
   --accent: #2563eb;
@@ -57,8 +56,8 @@
   --assistant: #7c3aed;
 
   --text-primary: #0a0a0a;
-  --text-secondary: #525252;
-  --text-muted: #a3a3a3;
+  --text-secondary: #3f3f46;
+  --text-muted: #6b6b73;
 
   --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-popover:
@@ -94,8 +93,16 @@
   --semantic-error-control-flow: var(--code-keyword);
   --semantic-attention: #dc2626;
 
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-  --font-sans: 'Inter Tight', 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /* Two families, split by MEANING, not by screen region: proportional = written
+     by a human (titles, labels, prose, buttons); fixed-width = produced by a
+     machine (run ids, test ids, tags, file paths, ports, branch names, counts,
+     code, the xterm pane). A reader can tell which kind of thing they are
+     looking at before reading a word, and the rule keeps holding as surfaces
+     are added — unlike a per-screen font choice, which drifts.
+     Inter is drawn for dense screen UI and stays legible at this app's 10-13px
+     sizes; JetBrains Mono is the editor face the run terminal already uses. */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* Neutrals — dark
@@ -109,9 +116,9 @@
   --bg-hover: #1f1f1f;
   --bg-selected: #262626;
 
-  --border-default: #262626;
-  --border-strong: #3a3a3a;
-  --border-subtle: #1c1c1c;
+  --border-default: #454545;
+  --border-strong: #6b6b6b;
+  --border-subtle: #2e2e2e;
   --border-focus: #3b82f6;
 
   --accent: #3b82f6;
@@ -126,9 +133,9 @@
   --boot-soft: color-mix(in srgb, var(--boot) 18%, transparent);
   --assistant: #a78bfa;
 
-  --text-primary: #fafafa;
-  --text-secondary: #a3a3a3;
-  --text-muted: #737373;
+  --text-primary: #ffffff;
+  --text-secondary: #c9c9cf;
+  --text-muted: #9b9ba3;
 
   --code-string: #98c379;
   --code-variable: var(--code-string);
@@ -212,6 +219,11 @@ html, body, #root {
 
 body {
   font-family: var(--font-sans);
+  /* Tabular figures app-wide. With one proportional family for every surface,
+     digits would otherwise vary in width — columns of counts would ragged-edge
+     and live-updating numbers (elapsed timers, pass counts) would twitch as
+     they tick. Geist's tabular set is drawn for this; prose is unharmed. */
+  font-variant-numeric: tabular-nums;
   background: var(--bg-base);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
@@ -390,6 +402,27 @@ body {
   min-width: 0;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.cl-execution-label {
+  display: inline-flex;
+  margin-left: 0.5rem;
+  padding: 0 0.25rem;
+  border: 1px solid;
+  border-radius: 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.cl-execution-label-failed {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 65%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+.cl-execution-label-running {
+  color: var(--running);
+  border-color: color-mix(in srgb, var(--running) 65%, transparent);
+  background: color-mix(in srgb, var(--running) 10%, transparent);
 }
 /* The English pane's canvas — `.shiki-block pre`'s twin for frame, inset, and
    typography. Both representations wrap to the available panel width.
@@ -622,8 +655,8 @@ body {
   padding-right: var(--feature-row-actions, 100px);
 }
 
-/* Active-run state is shown by highlighting the whole feature row, not a
-   chip — see .cl-list-row-running / .cl-list-row-healing below. */
+/* Active work is shown by highlighting the whole feature row. Held/queued work
+   also carries a compact label because motion no longer names the state. */
 
 .numeric-input::-webkit-outer-spin-button,
 .numeric-input::-webkit-inner-spin-button {
@@ -681,6 +714,116 @@ body {
   border-bottom: 1px solid var(--border-default);
 }
 
+/* The three ledger columns (Suites · Tests · Runs) share one header band so
+   their rules line up whatever controls each column happens to be showing.
+   The band owns the height; controls inside size to the band instead of
+   pushing it taller. `.cl-*` is unlayered, so these rules beat a Tailwind
+   `py-*`/`h-*` utility at the call site — the call sites carry none. */
+.cl-column-header {
+  height: 40px;
+  padding-block: 0;
+}
+
+.cl-column-header .cl-button,
+.cl-column-header .cl-button-primary,
+.cl-column-header .cl-run-menu-button {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding-block: 0;
+}
+
+.cl-column-header .cl-run-menu-button-compact {
+  width: 24px;
+}
+
+.cl-column-header.cl-tests-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  height: auto;
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+.cl-tests-tabs { display: flex; align-items: center; gap: 20px; }
+.cl-tests-tabs .cl-tab { display: inline-flex; align-items: center; gap: 5px; min-height: 39px; padding-bottom: 0; white-space: nowrap; }
+
+/* One numeral system across both tabs. The source total used the standalone
+   count chip and the run ratio used a bare mono span, so the two halves of a
+   pair sat at different sizes on different backgrounds — the pair only reads as
+   a pair when each side is the same shape: one glyph, one figure. */
+.cl-tab-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* No underline on these tabs. The shared accent bar spans the whole tab, and each
+   tab here is an icon plus a figure of a different length ("59" against "13/19"),
+   so the bar changed length as you switched — a selection mark that resizes reads
+   as a second, meaningless variable. The hairline rules already divide the pair,
+   and selection is carried by the figure's own weight: the chosen tab's numerals
+   are `--text-primary`, the other's `--text-muted`. `aria-pressed` carries it to
+   assistive tech, and the difference is lightness, not hue, so it survives a
+   colour-vision difference. */
+.cl-tests-tabs .cl-tab-active::after {
+  content: none;
+}
+
+/* A short centred rule, not a full-height border: at 39px the tabs are taller
+   than their own content, and a rule that spans them cuts the header in half.
+   Every tab takes one, including the first, so the title reads as the first cell
+   of the same row rather than as a label sitting outside it. */
+.cl-tests-tabs .cl-tab::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  width: 1px;
+  height: 13px;
+  transform: translateY(-50%);
+  background: var(--border-subtle);
+}
+.cl-test-version-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.cl-test-changes { display: flex; align-items: center; gap: 9px; }
+
+/* A drift mark is a tinted glyph and a numeral, with no border of its own. The
+   bordered version read as three more buttons competing with the tabs, when the
+   trio is one reading of one thing: how far current source has moved from the
+   recorded run. Hover is the only chrome, so the mark still looks clickable. */
+.cl-test-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding-inline: 3px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  transition: background 120ms ease;
+}
+
+.cl-test-change:hover,
+.cl-test-change:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+
+/* The comparison footer renders this same trio as a FILTER, so the kind on show
+   has to stay lit with no pointer on it. The tests header passes no pressed
+   state, so its marks never match this and keep hover as their only chrome. */
+.cl-test-change[aria-pressed="true"] {
+  background: var(--bg-selected);
+}
+
+.cl-test-change:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .cl-panel-footer {
   background: var(--bg-surface);
   border-top: 1px solid var(--border-default);
@@ -706,6 +849,214 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
+}
+
+/* The same register one tone up: the NAME of a band or a section the reader is
+   meant to land on, rather than a caption they read after it. Colour is baked in
+   for the same reason `.cl-rubric` bakes muted — the register IS the tone pair,
+   and a `text-*` utility beside an unlayered `.cl-*` rule that declares colour
+   is dead anyway. */
+.cl-rubric-strong {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* ── Named type steps ──────────────────────────────────────────────────────
+   The dense operator-console scale, named by ROLE so a surface picks a step
+   instead of a number. Five steps in all — title (12.5) → body (12) → data
+   (11.5) → meta (11), with `.cl-rubric` (10 mono caps) as the kicker above a
+   card. Adopted by the flight-detail stage panes; the rest of the app still
+   spells sizes inline, so treat a raw `text-[Npx]` as un-migrated, not as a
+   sixth step.
+
+   These declare font-size and line-height ONLY — never colour. Every `.cl-*`
+   rule here sits outside `@layer`, which beats Tailwind's layered utilities:
+   `.cl-button`'s own `color` is why a `text-accent` beside it never rendered.
+   Leaving colour out keeps `text-secondary` / `text-muted` / `text-danger`
+   working next to a step. */
+
+/* Title — names one card. Same metrics as `.cl-frame-heading`, which is the
+   older twin that also bakes in `--text-primary`; a card titled in a status
+   hue (a failed stage) needs the colour left free, so
+   the flight panes spell every title with this step plus a colour utility. */
+.cl-type-title {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+/* Prose — a sentence a person reads: panel blurbs, state sentences, the
+   explanation under a checkpoint's question. */
+.cl-type-body {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Data — a value, a row, a name the machine produced: config values, service
+   rows, file paths, test titles, matrix cells. The most common step. */
+.cl-type-data {
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+/* Meta — supporting text subordinate to a data row it sits with: ports,
+   timestamps, counts, inline errors, footnotes. */
+.cl-type-meta {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+/* ── Ledger style — the coverage pane's vocabulary, as shared primitives ────
+   The coverage ledger is this app's reference surface: stacked detail reads as
+   hairline-separated NAMED bands, a sequence reads as a numbered ladder with a
+   mono bead, a list reads as flat divider rows with no box around them, and the
+   small print about a mechanism sits in the mono machine register. Those four
+   shapes were local to `coverage-ledger-css.ts`; every one of them is the house
+   style rather than a coverage detail, so they live here and the coverage pane
+   keeps only its own positioning on top.
+
+   Neutral surfaces, one accent: none of these spend a hue. Meaning arrives via a
+   status dot, a bead tone or a mark — never a tinted slab. */
+
+/* A stack of named facts. Hairlines between them, nothing around them: the
+   alternative (a card per fact) turns four related facts into four objects. */
+.cl-bands {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.cl-band {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 0;
+}
+.cl-band + .cl-band {
+  border-top: 1px solid var(--border-default);
+}
+.cl-band:first-child {
+  padding-top: 0;
+}
+.cl-band:last-child {
+  padding-bottom: 0;
+}
+
+/* The ladder: an ordered sequence of named steps. Same hairline rhythm as the
+   bands, plus a bead column. Use the bands when order doesn't matter. */
+.cl-ladder {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cl-ladder-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 10px 0;
+}
+.cl-ladder-step + .cl-ladder-step {
+  border-top: 1px solid var(--border-default);
+}
+.cl-ladder-step:first-child {
+  padding-top: 0;
+}
+.cl-ladder-step:last-child {
+  padding-bottom: 0;
+}
+.cl-ladder-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+/* The bead rides 1px low so its circle centres on the step's name rather than on
+   the name's line box. */
+.cl-ladder-step > .cl-bead {
+  margin-top: 1px;
+}
+
+/* The bead: the mark leading a step or a row — a position, a count, or a
+   settled verdict. Hollow and mono, so a column of them reads as a sequence
+   instead of a row of filled dots competing with the status vocabulary.
+
+   Tone is a variable, not a variant: a bead carrying a verdict sets
+   `--cl-bead-tone` to that status hue, and `data-toned` tints its edge to
+   match. The default is the quiet numeral. Metrics are baked in (an unlayered
+   `.cl-*` rule beats a `text-[Npx]` utility beside it), so callers pass the
+   tone and nothing else. */
+.cl-bead {
+  --cl-bead-tone: var(--text-muted);
+  --cl-bead-edge: var(--border-default);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  border: 1px solid var(--cl-bead-edge);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--cl-bead-tone);
+  font-variant-numeric: tabular-nums;
+}
+.cl-bead[data-toned='true'] {
+  --cl-bead-edge: color-mix(in srgb, var(--cl-bead-tone) 55%, var(--border-default));
+}
+
+/* The aside: small print about the mechanism — what a number is derived from,
+   what a step will cost, where a value came from. Mono because it describes the
+   machine; muted because it is never the thing you came to read. */
+.cl-aside {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A list as a ledger: transparent rows, one hairline between them, one above
+   and below the group. The box it replaces (a rounded border around a list of
+   rows that already divide themselves) drew a second frame inside a dialog that
+   is already a frame. Rows bring their own padding and their own selected /
+   hover surface — see `OptionRow`. */
+.cl-ledger {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--border-default);
+}
+.cl-ledger > * + * {
+  border-top: 1px solid var(--border-default);
+}
+
+/* A ledger split into named groups: each group opens with a band, a rubric
+   carrying its own dashed rule, and that rule is the divider. The hairline on
+   the band plus the one on the row it opens stacked three lines around a single
+   label, so neither takes one — and a ledger that opens with a band drops its
+   top edge too, because the band already is that edge. */
+.cl-ledger:has(> .cl-ledger-band:first-child) {
+  border-top: 0;
+}
+.cl-ledger > .cl-ledger-band,
+.cl-ledger > .cl-ledger-band + * {
+  border-top: 0;
+}
+
+/* Disclosed or quoted detail belonging to the thing above it: a 2px neutral
+   rail and a half-step-deeper ground. Neutral on purpose — the rail says "this
+   belongs to that", which is structure, not status, so it never takes a hue. */
+.cl-quote-rail {
+  border-left: 2px solid var(--border-default);
+  background: color-mix(in srgb, var(--bg-base) 55%, var(--bg-surface));
 }
 
 .cl-divider {
@@ -750,6 +1101,19 @@ body {
 .cl-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+/* The destructive tone, worn beside `.cl-button`: the same neutral slab with
+   danger ink and a danger-leaning border. A variant class because `.cl-button`
+   owns `color` and `border-color` — a `text-danger` beside it rendered grey, and
+   six buttons had each spelled this tone as the same inline style. The hover
+   and focus selectors restate the tone so only the slab lifts, as the inline
+   style did; declared after `.cl-button` so equal specificity resolves here. */
+.cl-button-danger,
+.cl-button-danger:not(:disabled):hover,
+.cl-button-danger:not(:disabled):focus-visible {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border-default));
 }
 
 /* Branch choice cards in the run-start branch-mismatch dialog — the whole card
@@ -805,6 +1169,22 @@ body {
   text-transform: uppercase;
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+/* The neutral twin — a quiet badge beside a card's title ("Locked — approved",
+   a fork path's note). Same metrics as the accent badge so two badges on one
+   line are the same object in two tones; it used to be spelled inline at 9px
+   and 9.5px, a hair smaller than the accent chip right next to it. */
+.cl-badge-neutral {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border: 1px solid var(--border-default);
   border-radius: 4px;
   padding: 1px 6px;
   white-space: nowrap;
@@ -904,6 +1284,11 @@ body {
 
 .cl-run-launch-menu {
   overflow: hidden;
+  /* Rows run edge to edge, so the popover carries only its vertical inset and
+     every child brings its own 12px. The old `p-1.5` at the call site inset the
+     rows instead, which is what made each one read as a floating chip rather
+     than a menu row. */
+  padding: 6px 0 4px;
 }
 
 /* ── Launch popover: one skeleton every mode fills ──────────────────────────
@@ -913,36 +1298,43 @@ body {
    the user has not made yet — so the status-hue vocabulary stays out of it and
    mode identity is carried by the mode's own icon (shape), not by colour. */
 
-/* Fixed two-line box so switching modes never resizes the popover. */
+/* Fixed two-line box so switching modes never resizes the popover. The step is
+   `.cl-type-meta` (11px), the one this app uses for supporting text under a row
+   — at 10px it sat below every other caption in the console. */
 .cl-run-launch-note {
-  min-height: 2.7em;
-  padding: 0.25rem 0.5rem 0.5rem;
-  font-size: 10px;
+  min-height: 2.8em;
+  padding: 2px 12px 8px;
+  font-size: 11px;
   line-height: 1.35;
   color: var(--text-muted);
 }
 
 /* Micro-label above the action rows. Present in every mode — its absence in
-   Verify was what made that tab read as a different menu. */
+   Verify was what made that tab read as a different menu. Position only: the
+   type comes from `.cl-rubric`, the app's one kicker register, which this used
+   to restate in sans and 0.08em of its own. */
 .cl-run-launch-label {
-  padding: 0.4rem 0.5rem 0.25rem;
+  padding: 8px 12px 4px;
   border-top: 1px solid var(--border-subtle);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
 }
 
+/* A ledger row, not a chip: full-bleed, transparent, hairline-separated, hover
+   spanning the popover edge to edge — the shape `.cl-ledger` and every other
+   menu in the app use. A rounded, inset row drew a second frame inside a
+   popover that is already a frame. */
 .cl-run-env-option {
   display: flex;
   width: 100%;
   align-items: center;
   gap: 0.5rem;
-  border-radius: var(--radius-md);
   color: var(--text-primary);
-  padding: 0.4rem 0.5rem;
+  padding: 7px 12px;
   text-align: left;
   transition: background 120ms ease, color 120ms ease;
+}
+
+.cl-run-env-option + .cl-run-env-option {
+  border-top: 1px solid var(--border-subtle);
 }
 
 .cl-run-env-option:hover,
@@ -968,8 +1360,18 @@ body {
   color: var(--text-secondary);
 }
 
-/* Boot | Test | Verify segmented control at the top of the launch popover. */
+/* Boot | Test | Verify segmented control at the top of the launch popover, and
+   the view switch in the cleanup page header.
+
+   The track and the thumb are variables because the control's whole reading —
+   an inset track with one segment raised out of it — depends on what it is
+   sitting ON, and this app puts it on two different grounds. The defaults are
+   the page-header ones. A surface whose own background already equals the track
+   re-points the pair; see the launch popover below. */
 .cl-mode-toggle {
+  --cl-toggle-track: var(--bg-elevated);
+  --cl-toggle-thumb: var(--bg-surface);
+  --cl-toggle-edge: var(--border-subtle);
   display: flex;
   gap: 2px;
   /* Flush with the popover's own padding so the segmented box and the action
@@ -977,8 +1379,21 @@ body {
   margin: 0 0 4px;
   padding: 2px;
   border-radius: 7px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
+  background: var(--cl-toggle-track);
+  border: 1px solid var(--cl-toggle-edge);
+}
+
+/* In the launch popover the defaults invert in dark mode: `--bg-overlay` and
+   `--bg-elevated` are the SAME grey there, so the track vanished and the thumb
+   (`--bg-surface`, a step darker) read as a recessed well — the selected mode
+   looked like the disabled one. The track drops to the page ground so it is a
+   real inset in both themes, and the thumb wears `--bg-selected`, which is
+   already this app's "this is the picked one" grey on every option row. */
+.cl-run-launch-menu .cl-mode-toggle {
+  --cl-toggle-track: var(--bg-base);
+  --cl-toggle-thumb: var(--bg-selected);
+  --cl-toggle-edge: transparent;
+  margin: 0 12px 6px;
 }
 
 .cl-mode-toggle-btn {
@@ -1004,7 +1419,7 @@ body {
    teal and Verify blue while Test stayed plain — three different bases for the
    same control, and blue-as-identity collides with accent = "clickable". */
 .cl-mode-toggle-btn[data-active="true"] {
-  background: var(--bg-surface);
+  background: var(--cl-toggle-thumb);
   color: var(--text-primary);
   box-shadow: var(--shadow-panel);
 }
@@ -1116,18 +1531,18 @@ body {
   background: color-mix(in srgb, var(--warning) 16%, transparent);
 }
 
-/* The at-rest flight chip yields to the hover action cluster that floats over
+/* The at-rest status chip yields to the hover action cluster that floats over
    the same right edge. It keeps its box in flow while fading, so the row never
    reflows — the actions simply take over the space the chip was occupying. */
-.feature-row__flight-chip {
+.feature-row__status-chip {
   transition: opacity 150ms ease;
 }
-.feature-row:hover .feature-row__flight-chip,
-.feature-row:focus-within .feature-row__flight-chip {
+.feature-row:hover .feature-row__status-chip,
+.feature-row:focus-within .feature-row__status-chip {
   opacity: 0;
 }
 
-/* Active-run highlight on the whole row — blue while running, yellow while
+/* Active-run highlight on the whole row — sky while running, amber while
    healing. Declared after the selected/hover rules so an in-flight run wins
    over the grey selected background at equal specificity. The interior tint is
    constant; the row's edge "breathes" — a brand-coloured hairline ring plus a
@@ -1136,10 +1551,10 @@ body {
    gaps. It keeps animating under prefers-reduced-motion by deliberate product
    decision — no reduced-motion gate. */
 .cl-list-row-running {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  background: color-mix(in srgb, var(--running) 16%, transparent);
 }
 .cl-list-row-running:hover {
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, var(--running) 22%, transparent);
 }
 .cl-list-row-healing {
   background: color-mix(in srgb, var(--warning) 18%, transparent);
@@ -1158,8 +1573,8 @@ body {
 }
 .cl-list-row-running::after {
   box-shadow:
-    inset 0 0 0 1px var(--accent),
-    inset 0 0 12px -4px var(--accent);
+    inset 0 0 0 1px var(--running),
+    inset 0 0 12px -4px var(--running);
 }
 .cl-list-row-healing::after {
   box-shadow:
@@ -1169,6 +1584,28 @@ body {
 @keyframes cl-edge-breathe {
   0%, 100% { opacity: 0.55; }
   50% { opacity: 0.95; }
+}
+
+/* A healing run can be resumable without work moving — for example while an
+   external agent is disconnected or test edits await review. Keep the suite
+   locatable with a lighter amber wash and steady inset edge, but never reuse the
+   breathing edge that means active work. The visible row label names the wait. */
+.cl-list-row-waiting {
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+.cl-list-row-waiting:hover {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+}
+.cl-list-row-waiting::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0.7;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--warning) 72%, transparent),
+    inset 0 0 10px -6px var(--warning);
 }
 
 /* Calm "alive but idle" breathe for the boot-only status dot — slower and
@@ -1216,11 +1653,9 @@ body {
     inset 0 0 12px -5px var(--boot);
 }
 
-/* Dirty (test files modified) row: danger tint with a SLOW breathing red edge
-   ring. Declared after the run/heal/boot rows so its ::after wins when a row is
-   both active and dirty — an integrity warning takes visual priority. The cue is
-   held until the user approves or commits, so the breathe is slower (4s) than a
-   running test's to avoid nagging over a long session. */
+/* Legacy integrity-risk treatment retained for callers outside the suite list.
+   Current suite rows keep execution as their row cue and expose modified tests
+   through the Review action instead. */
 .cl-list-row-dirty {
   background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
@@ -1237,6 +1672,16 @@ body {
   box-shadow:
     inset 0 0 0 1px var(--danger),
     inset 0 0 12px -4px var(--danger);
+}
+
+/* Changed test files at rest: a quiet neutral wash and no ring. During a run,
+   FeatureRow omits this class so execution remains the unambiguous row cue; the
+   Review action stays visible in both cases. */
+.cl-list-row-changed {
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+}
+.cl-list-row-changed:hover {
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
 }
 
 /* Subtle count chip — mono numeral on a soft fill. */
@@ -1287,6 +1732,18 @@ body {
 
 .cl-tab:hover {
   color: var(--text-primary);
+}
+
+.cl-tab .cl-count-chip {
+  /* Inside a tab a count is a bare numeral, not a pill. The standalone chip's
+     `min-width` plus pill padding leave ~14px of empty background after a
+     single digit, and the active tab's accent underline spans the whole
+     button — so the bar ran on past the number it underlines, worst on the
+     short "All" tab, and the two tabs read as differently aligned. */
+  min-width: 0;
+  margin-left: 2px;
+  padding: 0;
+  background: none;
 }
 
 .cl-tab-active {
@@ -1347,110 +1804,171 @@ body {
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-popover);
   animation: fm-fade-up 180ms ease-out;
-  /* Every dialog keeps a 10% viewport band above and below; individual
-     surfaces may be shorter, but none may grow into that reserved space. */
+  /* The default inset is 10vh; dense source review explicitly uses 6vh. */
   max-height: 80vh;
 }
 
-.cl-mcp-promo-modal {
-  width: min(880px, calc(100vw - 2rem));
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  position: relative;
+.cl-dialog-panes {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
-.cl-mcp-promo-backdrop {
-  padding-block: 10vh;
-  padding-inline: 1rem;
+.cl-dialog-rail {
+  border-right: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  scrollbar-gutter: stable;
 }
 
-.cl-mcp-promo-video-wrap {
+.cl-review-file {
+  width: 100%;
+  padding: 10px;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+}
+
+.cl-review-file:hover {
+  background: var(--bg-hover);
+}
+
+.cl-review-file[aria-pressed='true'] {
+  background: var(--bg-selected);
+  border-color: var(--border-strong);
+}
+
+.cl-review-file:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* All comparisons share one table. Diff hue describes an edit, never a verdict. */
+.cl-comparison-wrap, .cl-comparison-legend {
+  --comparison-removed: color-mix(in srgb, var(--danger) 70%, var(--text-primary));
+  --comparison-added: color-mix(in srgb, var(--success) 70%, var(--text-primary));
+}
+
+.cl-comparison-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.cl-comparison {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.cl-comparison th, .cl-comparison td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+
+.cl-comparison thead th, .cl-comparison-section td {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.cl-comparison tbody tr { border-top: 1px solid var(--border-default); }
+.cl-comparison th + th, .cl-comparison td + td, .cl-comparison th + td { border-left: 1px solid var(--border-default); }
+.cl-comparison .cl-comparison-label { width: 22%; font-size: 11px; font-weight: 400; }
+.cl-comparison-value { white-space: pre-wrap; line-height: 1.7; }
+.cl-comparison-code .cl-comparison-value { font-family: var(--font-mono); }
+.cl-comparison-empty { color: var(--text-secondary); font-family: var(--font-sans); font-size: 11px; }
+.cl-comparison del, .cl-comparison ins {
+  text-decoration: none;
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.cl-comparison del { color: var(--comparison-removed); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.cl-comparison ins { color: var(--comparison-added); background: color-mix(in srgb, var(--success) 12%, transparent); }
+.cl-comparison del::before { content: '−'; }
+.cl-comparison ins::before { content: '+'; }
+.cl-comparison del::before, .cl-comparison ins::before { display: inline-block; font-size: 10px; margin-right: 3px; user-select: none; }
+.cl-comparison-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--text-secondary); font-size: 11px; }
+.cl-comparison-legend > :first-child { color: var(--comparison-removed); }
+.cl-comparison-legend > :nth-child(2) { color: var(--comparison-added); }
+
+/* Test review keeps its chrome outside the one table scroller. Fixed columns
+   and reserved message space make file changes independent of content size. */
+.cl-review-advisory { display: flex; align-items: center; gap: 12px; height: 40px; flex-shrink: 0; padding: 0 20px; border-bottom: 1px solid var(--border-default); color: var(--text-secondary); font-size: 11px; }
+.cl-review-content { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: 0 20px 16px; }
+.cl-review-toolbar { flex-shrink: 0; }
+.cl-review-file-heading { display: flex; align-items: center; gap: 8px; height: 48px; }
+.cl-review-table-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 48px; }
+.cl-review-table-controls .cl-comparison-legend > :last-child { display: none; }
+.cl-comparison-review { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; overflow-anchor: none; }
+.cl-comparison-review .cl-comparison { min-width: 780px; }
+.cl-comparison-review .cl-comparison .cl-comparison-label { width: auto; }
+.cl-comparison-review thead th { position: sticky; top: 0; z-index: 1; box-shadow: inset 0 -1px var(--border-default); }
+.cl-review-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; gap: 4px 20px; width: 100%; }
+.cl-review-footer-navigation { grid-column: 1; grid-row: 1; justify-self: start; }
+.cl-review-commit-buttons { display: flex; grid-column: 2; grid-row: 1; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.cl-review-action-message { grid-column: 1 / -1; height: 20px; overflow: auto; font-size: 11px; }
+
+@media (max-width: 760px) {
+  .cl-review-advisory { height: 64px; }
+  .cl-review-content { padding-inline: 12px; }
+  .cl-review-file-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; height: 48px; gap: 0 8px; }
+  .cl-review-file-heading h3 { grid-column: 1 / -1; }
+  .cl-review-file-heading > :not(h3) { justify-self: start; }
+  .cl-review-file-heading > :last-child { justify-self: end; }
+  .cl-review-table-controls { height: 36px; justify-content: flex-end; }
+  .cl-review-table-controls .cl-comparison-legend { display: none; }
+  .cl-review-footer { grid-template-columns: minmax(0, 1fr); grid-template-rows: 48px 68px 20px; gap: 4px; }
+}
+
+@media (max-width: 480px) {
+  .cl-comparison th, .cl-comparison td { padding: 8px; }
+}
+
+@media (max-width: 640px) {
+  .cl-dialog-panes {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, auto) minmax(0, 1fr);
+  }
+
+  .cl-dialog-rail {
+    max-height: 120px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-default);
+  }
+
+  .cl-review-panes { grid-template-rows: 120px minmax(0, 1fr); }
+  .cl-review-panes > .cl-dialog-rail { height: 120px; max-height: 120px; }
+
+}
+
+/* The MCP promo dialog composes the shared `Modal`, so the only thing it needs
+   of its own is the video frame. The asset is 1920x1080; the frame used to
+   declare `1280 / 560`, so `object-fit: contain` pillarboxed a 16:9 video
+   between two black bars. Matching the source removes them, and the slab is a
+   token so light theme gets a surface instead of a black rectangle. */
+.cl-mcp-promo-frame {
   flex: 0 0 auto;
-  aspect-ratio: 1280 / 560;
-  background: #050505;
+  aspect-ratio: 16 / 9;
+  background: var(--bg-base);
   border-bottom: 1px solid var(--border-default);
 }
 
 .cl-mcp-promo-video {
-  aspect-ratio: 1280 / 560;
+  aspect-ratio: 16 / 9;
   height: auto;
   display: block;
   width: 100%;
-  background: #050505;
-  object-fit: contain;
+  background: var(--bg-base);
+  object-fit: cover;
 }
 
-.cl-mcp-promo-body {
-  flex: 0 0 auto;
-  min-height: 0;
-  overflow: auto;
-  padding: 0.9rem 1.25rem 1rem;
-}
-
-.cl-mcp-promo-setup {
-  margin: 0 0 0.75rem;
-  color: var(--text-secondary);
-  font-size: 0.8125rem;
-  line-height: 1.45;
-}
-
-.cl-mcp-promo-setup code {
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  white-space: nowrap;
-}
-
-.cl-mcp-promo-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-@media (max-width: 520px) {
-  .cl-mcp-promo-footer {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .cl-mcp-promo-footer .cl-button-primary {
-    justify-content: center;
-  }
-}
-
-.cl-mcp-promo-close {
-  position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
-  z-index: 2;
-  display: grid;
-  height: 2rem;
-  width: 2rem;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--border-default) 72%, var(--text-primary));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-overlay) 86%, transparent);
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-  font-weight: 700;
-  line-height: 1;
-  box-shadow: var(--shadow-popover);
-  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
-}
-
-.cl-mcp-promo-close:hover {
-  border-color: var(--border-focus);
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-}
-
-.cl-mcp-promo-close:focus-visible {
-  border-color: var(--border-focus);
-  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-popover);
-  outline: none;
-}
 
 /* The verify-deployment dialog carried its own skin here (gradient top rail,
    accent header wash, shadowed slab sections, green mode chips, barber-pole
@@ -1574,4 +2092,60 @@ body {
   font-family: var(--font-mono);
   font-size: 14px;
   font-weight: 600;
+}
+
+/* Source review gives both versions the workspace; shared renderer tokens stay
+   identical to the test cards. Other comparison-table consumers keep their layout. */
+.cl-review-panes { grid-template-columns: 184px minmax(0, 1fr); }
+.cl-review-panes .cl-review-content { padding: 0; }
+.cl-review-panes .cl-review-file { padding: 8px 32px 8px 8px; }
+.cl-review-file-row { position: relative; }
+.cl-review-file-editor { position: absolute; right: 4px; top: 4px; width: 24px; height: 24px; opacity: 0; pointer-events: none; }
+.cl-review-file-row:hover .cl-review-file-editor, .cl-review-file-row:focus-within .cl-review-file-editor { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .cl-review-file-editor { opacity: 1; pointer-events: auto; } }
+.cl-review-suite-name { padding: 4px 8px; font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
+.cl-context-toolbar { flex-shrink: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 8px 12px; border-bottom: 1px solid var(--border-default); }
+.cl-review-baseline { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; font-size: 11px; color: var(--text-secondary); }
+.cl-review-baseline select { max-width: 260px; }
+.cl-review-change-nav { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+/* Only the stepper's figure changes width as you walk the list, so it alone
+   keeps a floor — arrows that shift as the ordinal grows read as a layout bug.
+   Scoped to the status span: the drift marks beside it hold spans of their own,
+   and the bare `span` selector this replaces stretched each glyph to the floor. */
+.cl-review-change-nav .cl-review-change-status { min-width: 44px; text-align: center; font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.cl-review-change-nav .cl-icon-button { width: 24px; height: 24px; }
+.cl-review-change-nav .cl-icon-button:disabled { opacity: 0.4; cursor: not-allowed; }
+/* The short centred rule the tests tabs use, for the same reason: the marks say
+   WHICH tests are in play, the stepper says where you are inside them — two
+   readings, one strip. */
+.cl-review-change-nav .cl-test-change + .cl-icon-button { position: relative; margin-left: 4px; }
+.cl-review-change-nav .cl-test-change + .cl-icon-button::before { content: ""; position: absolute; left: -6px; top: 50%; width: 1px; height: 13px; transform: translateY(-50%); background: var(--border-subtle); }
+.cl-context-table { display: flex; overflow: hidden; }
+.cl-review-source-canvas { display: flex; flex: 1; min-width: 0; overflow: hidden; }
+.cl-context-table .cl-comparison-wrap { flex: 1; min-width: 0; background: transparent; overflow: auto; border: 0; border-radius: 0; scrollbar-gutter: stable; overflow-anchor: none; }
+.cl-context-table .cl-comparison { min-width: 720px; table-layout: fixed; background: transparent; }
+.cl-context-table .cl-comparison th { position: sticky; top: 0; z-index: 1; background: var(--bg-elevated); width: 50%; padding-block: 8px; }
+.cl-context-table .cl-comparison td { position: relative; padding: 2px 10px 2px calc(var(--review-gutter-width, 2ch) + 16px); vertical-align: top; }
+.cl-context-table .cl-comparison tbody tr { border-top: 0; }
+.cl-context-line { position: absolute; left: 8px; top: 5px; width: var(--review-gutter-width, 2ch); color: var(--text-muted); font: 10px var(--font-mono); text-align: right; }
+.cl-context-table tr[data-selected] td { box-shadow: inset 2px 0 var(--accent); }
+.cl-context-table tr[data-source-changed] .cl-context-line { color: var(--warning); font-weight: 600; }
+.cl-review-source-line { min-height: 1.65em; font: 12px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cl-review-source-line > del, .cl-review-source-line > ins { display: block; margin-inline: -6px; padding-inline: 6px; text-decoration: none; border-radius: 0; color: inherit; }
+.cl-review-source-line > del::before, .cl-review-source-line > ins::before { position: absolute; left: calc(var(--review-gutter-width, 2ch) + 8px); }
+.cl-review-story-line { display: grid; grid-template-columns: 9ch minmax(0, 1fr); gap: 8px; }
+.cl-review-story-link { width: 100%; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.cl-review-story-link:hover, .cl-review-story-link:focus-visible { background: var(--bg-selected); outline: 1px solid var(--accent); }
+.cl-review-source-line[data-source-selected] { background: var(--bg-selected); outline: 1px solid var(--accent); }
+.cl-context-assessment { flex: 0 0 auto; max-height: 72px; overflow: auto; padding: 8px 12px; border-top: 1px solid var(--border-default); font-size: 11px; line-height: 1.6; }
+.cl-review-footer { grid-template-rows: auto; min-height: 36px; row-gap: 4px; }
+.cl-review-action-message { height: auto; }
+.cl-review-commit-buttons:empty { display: none; }
+@media (max-width: 760px) {
+  .cl-review-panes { grid-template-columns: minmax(0, 1fr); grid-template-rows: 96px minmax(0, 1fr); }
+  .cl-review-panes > .cl-dialog-rail { height: 96px; max-height: 96px; }
+  .cl-review-baseline { width: 100%; }
+  .cl-review-footer { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; }
+  .cl-review-footer-navigation { grid-column: 1; grid-row: 1; }
+  .cl-review-commit-buttons { grid-column: 1; grid-row: 2; justify-content: flex-start; }
 }

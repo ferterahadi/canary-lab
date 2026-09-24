@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { discoveryFailureOutput } from './playwright-list'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -110,6 +111,44 @@ describe('listPlaywrightTests', () => {
     expect(await listPlaywrightTests(tmpDir, { spawner: stderrFailSpawner() })).toBeNull()
   })
 
+  it('logs the discovery failure from stdout, not the package runner banner on stderr', async () => {
+    // The banner is load-bearing: npm 12 writes `npm notice run ...` to
+    // stderr for every `npx`, so a console line that echoed stderr reported
+    // the banner instead of the failure — the same text for every feature.
+    const report = { config: { workers: 20 }, errors: [{ message: "Cannot find module './fixture'" }] }
+    const spawner: PlaywrightListSpawner = (cwd) => ({
+      command: 'node',
+      args: ['-e', `process.stderr.write('npm notice run pkg@0.1.0 npx'); process.stdout.write(${JSON.stringify(JSON.stringify(report))}); process.exit(1)`],
+      cwd,
+    })
+    const written: string[] = []
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true })
+    let diagnostic = ''
+    try {
+      expect(await listPlaywrightTests(tmpDir, { spawner, onDiagnostics: (text) => { diagnostic = text } })).toBeNull()
+    } finally {
+      spy.mockRestore()
+    }
+    const line = written.find((text) => text.startsWith('[playwright-list]'))
+    expect(line).toContain("Cannot find module './fixture'")
+    expect(line).toContain(tmpDir)
+    expect(line).not.toContain('npm notice')
+    expect(diagnostic).toContain("Cannot find module './fixture'")
+  })
+
+  it('stays silent on the console when a non-zero exit produced no output at all', async () => {
+    // Nothing to report is not the same as a failure worth a console line.
+    const spawner: PlaywrightListSpawner = (cwd) => ({ command: 'node', args: ['-e', 'process.exit(3)'], cwd })
+    const written: string[] = []
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true })
+    try {
+      expect(await listPlaywrightTests(tmpDir, { spawner })).toBeNull()
+    } finally {
+      spy.mockRestore()
+    }
+    expect(written.some((text) => text.startsWith('[playwright-list]'))).toBe(false)
+  })
+
   it('returns null when the command cannot be spawned', async () => {
     expect(await listPlaywrightTests(tmpDir, { spawner: notFoundSpawner() })).toBeNull()
   })
@@ -132,6 +171,17 @@ describe('listPlaywrightTests', () => {
     await listPlaywrightTests(tmpDir, { spawner: spy })
     await listPlaywrightTests(tmpDir, { spawner: spy })
     expect(calls).toBe(1)
+  })
+
+  it('fresh verification bypasses and invalidates a cached success when dependencies break', async () => {
+    const success = jsonSpawner({ config: { rootDir: tmpDir }, suites: [
+      { file: 'case.spec.ts', specs: [{ title: 'preserved case', line: 1 }] },
+    ] })
+    expect(await listPlaywrightTests(tmpDir, { spawner: success })).toHaveLength(1)
+    // A missing dependency need not change any spec file's signature.
+    expect(await listPlaywrightTests(tmpDir, { spawner: stderrFailSpawner(), fresh: true })).toBeNull()
+    expect(await listPlaywrightTests(tmpDir, { spawner: stderrFailSpawner() })).toBeNull()
+    expect(await listPlaywrightTests(tmpDir, { spawner: success, fresh: true })).toHaveLength(1)
   })
 
   it('walks suites that have only nested suites (no direct specs)', async () => {
@@ -240,5 +290,17 @@ describe('listPlaywrightTests', () => {
       }),
     })
     expect(entries![0].file).toBe(path.resolve(tmpDir, 'spec.ts'))
+  })
+})
+
+
+describe('discoveryFailureOutput', () => {
+  it('surfaces the Playwright error messages without burying them under the config dump', () => {
+    const report = { config: { workers: 20 }, errors: [{ message: "Cannot find module './fixture'" }, { message: 'No tests found' }, null] }
+    expect(discoveryFailureOutput(JSON.stringify(report), 'npm notice')).toBe("Cannot find module './fixture'\n\nNo tests found")
+  })
+  it('preserves bounded raw diagnostics when the output has no structured errors', () => {
+    for (const stdout of ['compile failed', 'null', '{"errors":[{}]}']) expect(discoveryFailureOutput(stdout, 'stderr')).toBe(`stderr\n${stdout}`)
+    expect(discoveryFailureOutput('x'.repeat(10000), '')).toHaveLength(8000)
   })
 })

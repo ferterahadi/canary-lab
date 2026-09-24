@@ -51,6 +51,29 @@ describe('Tooltip', () => {
     expect(document.body.querySelector('[role="tooltip"]')).toBeNull()
   })
 
+  it('stays shut while showIf says the hovered element has nothing to reveal', () => {
+    const gate = vi.fn((el: Element) => el.getAttribute('data-cut') === 'yes')
+    const render = (cut: string) => act(() => {
+      root.render(
+        <Tooltip label="the whole title" showIf={gate}>
+          <span data-testid="trigger" data-cut={cut}>clipped title</span>
+        </Tooltip>,
+      )
+    })
+
+    render('no')
+    const trigger = () => container.querySelector<HTMLElement>('[data-testid="trigger"]')!
+    act(() => { trigger().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(gate).toHaveBeenCalledWith(trigger())
+    expect(document.body.querySelector('[role="tooltip"]')).toBeNull()
+
+    // Same element, now reporting itself as cut: the gate is read per hover, so the
+    // answer can change without the component being told.
+    render('yes')
+    act(() => { trigger().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe('the whole title')
+  })
+
   // A tall trigger that hovers as one piece (a stage fact tile) still wants the
   // tip beside the small mark that advertised it, not a tile-height below.
   it('positions from the marked sub-element while the whole child stays the hover target', () => {

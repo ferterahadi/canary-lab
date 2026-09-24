@@ -11,6 +11,7 @@ import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs
 import type { PrdSummary, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
 import { type DocsCollection } from './docs-collection'
 import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
+import { readDocumentSelection } from './document-resolution'
 import { ParsedRequirement, assembleSummary, parsePrdSummaryOutput, parseVariantDimension, reconcileRequirementIds } from './prd-summary-parse'
 
 export { assembleSummary, parsePrdSummaryOutput, parseVariantDimension, reconcileRequirementIds } from './prd-summary-parse'
@@ -104,6 +105,10 @@ export function buildPrdSummaryPrompt(
     : '(none — infer the dimension from the documents, if any)'
   return renderPromptTemplate(loadPromptTemplate(templatePath), {
     docs,
+    sourceScope: (() => {
+      const selection = readDocumentSelection(path.dirname(collection.docsDir))
+      return selection ? JSON.stringify({ intent: selection.intent, sources: selection.sources.filter((source) => collection.entries.some((entry) => entry.relPath === source.relPath)).map(({ relPath, reason }) => ({ doc: relPath, relevance: reason })) }, null, 2) : '(Use the feature scope explicitly stated in the supplied documents.)'
+    })(),
     previousRequirements: previousJson,
     previousVariantDimension: previousDimensionJson,
   })

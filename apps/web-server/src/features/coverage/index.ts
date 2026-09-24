@@ -68,7 +68,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext, runs: R
     ptyFactory,
   } = ctx
 
-  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: projectRoot, coverageJobStore, flightStore, workspaceEvents, gettingStarted })
+  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: projectRoot, coverageJobStore, flightStore, workspaceEvents, gettingStarted, coverageMonitor: ctx.coverageMonitor })
   const startVerification = async (
     featureName: string,
     input: ResolveVerificationInput,

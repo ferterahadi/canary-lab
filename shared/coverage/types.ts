@@ -99,6 +99,27 @@ export interface Requirement {
    *  id is the durable spine; this captures whether the MEANING shifted, so a
    *  regen can (R10) re-infer only the requirements that actually changed. */
   fingerprint?: string
+  /** Where the wording came from (D11 provenance): the source doc under docs/ and
+   *  the section it sits in. Located by canary from the docs the summary was
+   *  built from — an agent's hint is validated against the collection, never
+   *  trusted. Absent when no source doc overlaps the wording (an invented or
+   *  fully-inferred requirement), and on summaries written before D11. */
+  source?: RequirementSource
+  /** When the requirement's MEANING last changed (D11 time axis): the generation
+   *  time of the summary that introduced it or moved its fingerprint. A survivor
+   *  from a pre-D11 summary carries none — readers fall back to `generatedAt`
+   *  rather than inventing a date. */
+  wordingChangedAt?: string
+}
+
+/** A requirement's provenance in the source docs (D11). */
+export interface RequirementSource {
+  /** Source doc path relative to docs/ (one of `PrdSummary.sourceDocs`). */
+  doc: string
+  /** Nearest markdown heading above the matching line, when the doc has one. */
+  heading?: string
+  /** 1-based line of the best-matching sentence in `doc`. */
+  line?: number
 }
 
 /**
@@ -149,7 +170,7 @@ export interface CoverageStateView {
   summary: SummaryState
   coverage: CoverageState
   /** One-line derived headline: Generating / Setup needed / Stale / No coverage
-   *  / Covered N%. */
+   *  / Mapped N%. */
   headline: string
   drift: DriftDetail
 }
@@ -183,6 +204,12 @@ export interface PathCoverage {
   /** Some claiming test also PASSED in the feature's latest run. Absent when no
    *  run has been recorded for the feature (claim-only view). */
   proven?: boolean
+  /** No claiming test passed, and at least one FAILED in that run. The companion
+   *  to `proven`: without it a failing test and a test nobody has run collapse
+   *  into the same "claimed, unproven" reading, which is the difference between
+   *  a broken promise and an unkept one. Never true alongside `proven` — a pass
+   *  proves the path whatever else failed. Absent when no run was joined. */
+  failed?: boolean
 }
 
 /**
@@ -204,6 +231,9 @@ export interface VariantCellCoverage {
   reason?: string
   /** Some test claiming this cell also PASSED in the feature's latest run. */
   proven?: boolean
+  /** No test claiming this cell passed, and at least one FAILED. Same rule as
+   *  `PathCoverage.failed`; never true alongside `proven`. */
+  failed?: boolean
 }
 
 /**
@@ -249,6 +279,61 @@ export interface RequirementCoverage {
    *  in the latest run — coverage proven, not just claimed. Absent when the
    *  feature has no recorded run. */
   proven?: boolean
+  /** The ledger's time axis (D11): when this requirement was last proven, when
+   *  its tests last changed, when its wording last changed, and the state those
+   *  three facts derive. Additive exactly like `proven` — no gap type, status or
+   *  percentage moves because of it. */
+  enforcement?: RequirementEnforcement
+}
+
+// --- D11: the ledger's time axis -------------------------------------------
+// Three timestamps per requirement, one state derived from their order:
+//   proven-unchanged  the proof (a green run over every mapped test) is newer
+//                     than both the tests' last change and the wording's
+//   tests-weakened    a mapped test was classified `weaker` AFTER the proof —
+//                     the run that proved it never saw the weaker test
+//   proof-stale       a mapped test changed after the proof (or was never
+//                     proven) and no green run has followed
+//   wording-ahead     the wording moved after the tests and the proof — the
+//                     tests may no longer test what the requirement says
+// Worst-first precedence: tests-weakened > proof-stale > wording-ahead.
+// A requirement never proven has no `provenAt`; it reads as −∞, so a never-run
+// suite is `wording-ahead` (or `proof-stale` once its tests have changed).
+
+export type EnforcementState = 'proven-unchanged' | 'tests-weakened' | 'wording-ahead' | 'proof-stale'
+
+/** A spec-edit classification on one or more of a requirement's mapped tests.
+ *  `weaker` and `cannot-classify` come from the verification-strength
+ *  differential (D13, advisory); `changed` is any other edit — equivalent,
+ *  stronger, or hash-only when no baseline content was readable. */
+export interface RequirementTestChange {
+  at: string
+  tests: string[]
+  verdict: 'weaker' | 'changed' | 'cannot-classify'
+  /** The run whose manifest recorded the edit. Absent for an edit made between
+   *  runs (the live dirty-specs record). */
+  runId?: string
+}
+
+export interface RequirementEnforcement {
+  state: EnforcementState
+  /** The newest run in which every mapped test passed. Only a `covered` claim
+   *  can be proven; absent for partial/untested requirements and never-run suites. */
+  provenAt?: { runId: string; at: string }
+  /** The latest classified change to a mapped test, when any is on record. */
+  testsChangedAt?: RequirementTestChange
+  /** `Requirement.wordingChangedAt`, or the summary's generation time for a
+   *  pre-D11 survivor that carries none. */
+  wordingChangedAt: string
+}
+
+/** Ledger-level roll-up of the time axis: "proven in run <id>: n/N". */
+export interface EnforcementSummary {
+  /** The latest run of the feature, when one exists. */
+  runId?: string
+  provenUnchanged: number
+  total: number
+  states: Record<EnforcementState, number>
 }
 
 export interface CoverageTotals {
@@ -290,6 +375,8 @@ export interface ProposedMapping {
 }
 
 export interface CoverageLedger {
+  /** Present on authoritative suite reads; absent on the pure math result. */
+  freshness?: import('./freshness').CoverageFreshness
   feature: string
   requirements: RequirementCoverage[]
   tests: TestCoverage[]
@@ -312,6 +399,9 @@ export interface CoverageLedger {
    *  surfaces caveat "every test passed" with this — the tests never all passed
    *  together in one execution. Absent when no run was joined. */
   provenSpansExecutions?: boolean
+  /** The time axis roll-up (D11). Absent only when enforcement was not applied
+   *  (a bare `computeCoverageLedger` call). */
+  enforcement?: EnforcementSummary
   /** Requirement ids annotated on tests but absent from the PRD (drift signal). */
   orphanRequirementIds: string[]
   /** Test names with no requirement linkage — the annotate-pass works this set. */
@@ -347,6 +437,9 @@ export interface CoverageJobModels {
 }
 
 export interface CoverageJobManifest {
+  /** Input revision pinned before handing work to an external agent. */
+  inputRevision?: string
+  inferenceSnapshot?: { tests: Record<string, string>; requirements: Record<string, string>; sourceRevision?: string; readable?: boolean }
   jobId: string
   feature: string
   kind: CoverageJobKind

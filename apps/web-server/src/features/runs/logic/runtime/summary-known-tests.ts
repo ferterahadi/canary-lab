@@ -43,6 +43,8 @@ export function listLineFromTitlePath(raw: readonly unknown[]): string | undefin
 }
 
 export interface ExistingSummary {
+  environment?: unknown
+  environmentExclusions?: unknown
   passedNames?: unknown
   passedIds?: unknown
   passedOnRetry?: unknown

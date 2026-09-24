@@ -47,16 +47,33 @@ export function getSlotFilesInSet(envSetsDir: string, setName: string, slots: st
   return slots.filter((slot) => fs.existsSync(path.join(setDir, slot)));
 }
 
+export function resolveSetTargets(
+  featureDir: string,
+  setName: string,
+): Array<{ slot: string; targetPath: string }> {
+  const envSetsDir = getEnvSetsDir(featureDir);
+  if (!fs.existsSync(path.join(envSetsDir, 'envsets.config.json'))) return [];
+  const config = loadConfig(featureDir);
+  return getSlotFilesInSet(envSetsDir, setName, config.feature.slots).map((slot) => ({
+    slot,
+    targetPath: resolveVars(config.slots[slot].target, config.appRoots),
+  }));
+}
+
 export function backup(
   targets: Array<{ slot: string; targetPath: string }>,
   timestamp: number,
 ): BackupRecord[] {
   const records: BackupRecord[] = [];
   for (const { targetPath } of targets) {
-    if (fs.existsSync(targetPath)) {
+    // lstat also sees dangling symlinks: they are user-owned entries, not an
+    // absent target the runner may remove during teardown.
+    if (fs.lstatSync(targetPath, { throwIfNoEntry: false })) {
       const backupPath = `${targetPath}.bak.${timestamp}`;
       fs.copyFileSync(targetPath, backupPath);
       records.push({ originalPath: targetPath, backupPath });
+    } else {
+      records.push({ originalPath: targetPath, backupPath: null });
     }
   }
   return records;
@@ -89,7 +106,9 @@ export function applySet(
 
 export function restore(records: BackupRecord[]) {
   for (const { originalPath, backupPath } of records) {
-    if (fs.existsSync(backupPath)) {
+    if (backupPath === null) {
+      fs.rmSync(originalPath, { force: true });
+    } else if (fs.existsSync(backupPath)) {
       fs.copyFileSync(backupPath, originalPath);
       fs.unlinkSync(backupPath);
     }
@@ -172,7 +191,8 @@ export async function main(args = process.argv.slice(2)) {
     }
     const timestamp = Date.now();
     console.log(`\nBacking up ${targets.length} file(s)...`);
-    backup(targets, timestamp);
+    const appliedTargets = targets.filter(({ slot }) => fs.existsSync(path.join(envSetsDir, setName, slot)));
+    backup(appliedTargets, timestamp);
     console.log(`Applying "${setName}" env set...`);
     applySet(envSetsDir, setName, targets);
     console.log('Done. Open "npx canary-lab ui" to manage or revert envsets when needed.\n');
@@ -210,7 +230,9 @@ export async function main(args = process.argv.slice(2)) {
   const timestamp = Date.now();
 
   console.log(`\nBacking up ${targets.length} file(s)... `);
-  const backups = backup(targets, timestamp);
+  const presentSlots = getSlotFilesInSet(envSetsDir, chosenSet, feature.slots);
+  const appliedTargets = targets.filter(({ slot }) => presentSlots.includes(slot));
+  const backups = backup(appliedTargets, timestamp);
   console.log('done');
 
   console.log(`Applying "${chosenSet}" env set... `);

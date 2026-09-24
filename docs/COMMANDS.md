@@ -14,6 +14,7 @@ npx canary-lab env apply <feature> <set>
 npx canary-lab env revert <feature>
 npx canary-lab boot <feature> [env]
 npx canary-lab boot stop <runId>
+npx canary-lab test-readability <file-or-directory...> [--fix] [--rules-only] [--json]
 npx canary-lab upgrade [--silent] [--check] [--force-archive]
 ```
 
@@ -31,15 +32,110 @@ npx canary-lab upgrade [--silent] [--check] [--force-archive]
 
 The web UI and MCP tools (`start_flight`, `get_flight`, and `respond_flight_checkpoint`) use the same flight record.
 
+### `test-readability`
+
+Audit active test source without executing tests or calling an LLM:
+
+```bash
+npx canary-lab test-readability features/checkout/e2e
+npx canary-lab test-readability features/checkout/e2e --fix
+```
+
+- The default is read-only. `--fix` separates ordinary grouped variable declarations
+  and applies Prettier formatting. It preserves expressions and assertions.
+- Comma expressions and declarations that cannot safely be split require a manual
+  rewrite. Nested conditionals produce advisory warnings. Errors exit with code 1;
+  warnings alone exit with code 0.
+- `--rules-only` checks or fixes syntax style without changing other formatting.
+  `--json` returns file locations, findings, and change counts.
+- Directories select `.test` and `.spec` JavaScript/TypeScript files. Pass a helper's
+  file path explicitly to include it. Generated output, recorded runs, fixture
+  directories, and symbolic links are excluded.
+- Review the diff and rerun the affected tests after cleanup. Existing run results
+  describe their recorded source, not the newly formatted files.
+
+Flight authoring and `apply_external_draft` use the same policy before accepting
+specs. They apply safe fixes and formatting automatically, reject unresolved
+errors before writing the batch, and surface review warnings.
+
+In this repository, `npm run check:test-readability` enforces syntax style across
+the test files; `npm run fix:test-readability` applies the safe declaration fixes.
+The check also runs in `npm run lint` and the package smoke test.
+
+### Contributor English audit
+
+Run this from the Canary Lab **source repository**:
+
+```bash
+npm run check:english
+npm run check:english -- --workspace /path/to/canary-workspace
+npm run check:english -- --json
+```
+
+The command selects `--workspace`, then `CANARY_LAB_PROJECT_ROOT`, then the
+current workspace (including parent directories), then the unique valid entry
+in the local workspace registry. Missing or ambiguous selection fails with an
+explicit `--workspace` instruction. It never substitutes package sample tests.
+
+It reads JavaScript and TypeScript under the selected workspace's features,
+including helpers, fixtures and suite configuration. Dependencies, envsets,
+runtime output and historical run directories are excluded; symbolic links fail
+with their path so linked inputs cannot silently disappear. The report names its
+workspace, source files, static test declarations, represented constructs and
+gaps. Parameterized declarations can generate multiple executed cases; these
+counts describe source representation, not runner coverage or test results.
+
+Every statement, callback, class member and expression-bodied arrow function
+must have a displayed explanation. Enclosing scopes cannot cover missing bodies.
+The check audits full-file review and each recognized test body, and rejects
+syntax-only fallbacks, parse errors and translation failures. It exits with code
+1 when any gap remains, grouped by syntax family with exact file locations.
+It also uses the comparison view's shared line mapping to detect source lines
+that would appear as unavailable even when a translated sentence exists.
+`--json` emits the same report for other development tooling. This is an
+accounting guarantee for the inspected source; wording accuracy also has
+regression tests and is not proved by the percentage alone.
+
+This is a local, read-only development command. It does not execute tests, load
+suite configuration, call AI, start a server, or watch files. It is deliberately
+separate from `npm run build`, package installation and normal Canary startup.
+Ordinary English rendering still happens locally when a source view is opened
+or its source changes. Regression fixtures run with the regular Vitest suite.
+
 ### Other commands
 
 - `init` creates the workspace, installs dependencies and Chromium, and registers agent skills plus the compact MCP profile. Use `--no-install` for CI or offline setup.
 - `ui` starts the main human interface. Its port comes from `canary-lab.config.json`; change it in Project Settings, not with `ui --port`.
-- `setup` refreshes agent skills and registers only the `compact` MCP profile. It exposes one always-loaded `exec` tool that dispatches every Canary Lab command, including Portify. `--force` replaces existing entries, `--dry-run` previews changes, and `--agent` limits the target.
+- `setup` refreshes agent skills and registers only the `compact` MCP profile. It exposes one always-loaded `exec` tool that dispatches every Canary Lab command, including Portify. `--force` repairs differing or disabled MCP entries, `--dry-run` previews changes, and `--agent` selects the CLI integrations. Claude Desktop is configured independently when installed.
 - `boot` starts a suite's services without tests. It requires the UI server; `boot stop <runId>` ends the session.
 - `mcp` connects an AI client to the UI server. A bare command and setup-installed clients both default to `compact`; focused profiles, `lifecycle`, and `full` remain opt-in direct-tool surfaces for debugging and rollback.
 - `new feature` creates a suite deterministically. `env` applies or restores an envset.
 - `upgrade` refreshes managed workspace files, existing agent skills, and existing MCP connections. It also repairs the browser-install hook and downloads the matching browser when an older workspace needs it. It does not install a newer npm package by itself.
+
+### Repair agent configuration
+
+Run `npx canary-lab setup --force` from the workspace. Codex skills install into
+`~/.agents/skills`; recognized older copies in `~/.codex/skills` (or the configured
+Codex home) move into backups under `~/.canary-lab/agent-integrations/skill-backups`.
+Customized or unrecognized skills stop setup without overwriting them, even with
+`--force`. Move those copies outside the skill directories before retrying.
+
+Setup compares the saved command, arguments, environment, and enabled state.
+CLI connections resolve the workspace from their working directory; Claude
+Desktop receives an explicit workspace and executable search path. Automatic
+refresh preserves disabled integrations and skips custom Codex working-directory
+or inherited-environment settings that require explicit repair.
+
+Invalid client JSON stops setup before configuration or skills change. Desktop
+updates preserve unrelated settings and save the original file beside it with
+a `.canary-lab-backup` suffix before an atomic replacement.
+
+Each saved connection is checked separately: the child process must connect,
+expose `exec`, discover commands, and reach the selected workspace. Broken
+configuration exits nonzero. When the UI is stopped, setup reports
+`configured; connection unverified`; start `npx canary-lab ui` and rerun setup.
+Restart connected agent apps to load changed configuration and skills. A
+successful setup probe does not prove an already-running app has reloaded them.
 
 ### Upgrade from 1.5.x to 2.0.0
 
@@ -72,9 +168,11 @@ That is the suite-scoped shape; commands with different inputs use the
 argument fields returned by `describe_tool`.
 
 `list_tools`, `search_tools`, and `describe_tool` are internal discovery
-commands reached through the same `exec` shape. Do not prefix commands with
-verbs such as `learn` or `call`. The `full` profile still exposes all 63 atomic
-tools directly if a client needs the old surface.
+commands reached through the same `exec` shape, and `get_workflow_guide` returns
+the complete guide for one workflow (the initialize instructions are a summary:
+MCP clients keep at most their first 2048 characters). Do not prefix commands
+with verbs such as `learn` or `call`. The `full` profile still exposes all 64
+atomic tools directly if a client needs the old surface.
 
 ## Requirement Coverage (MCP, `compact` or direct `coverage`/`lifecycle`/`full` profiles)
 
@@ -102,6 +200,6 @@ Major capabilities share stores, so work started on one surface appears on the o
 | Suite authoring | `/canary-lab-author` | `author` — `create_feature` / draft flow / envsets | `/api/features*` | Flight → Test authoring & coverage stage / config editor |
 | Coverage ledger | `/canary-lab-coverage` | `coverage` — summary/coverage jobs + ledger | `/api/coverage*` | Coverage ledger page (Suites column) |
 | Portify | `/canary-lab-portify` | `portify` — external portify workflow | `/api/portify*` | Flight → Parallel readiness stage (also run-collision recovery); Ports tab reports injectability |
-| Evaluation export | `/canary-lab-export` | `export` — evaluation export tools | `/api/evaluation*` | run detail → Export Evaluation |
+| Evaluation export | `/canary-lab-export` | `export` — evaluation export tools | `/api/evaluation*` | run detail → Create evaluation report |
 
 If a new capability lands with a missing cell, that's a gap — the parity bar is part of the product, not a coincidence.

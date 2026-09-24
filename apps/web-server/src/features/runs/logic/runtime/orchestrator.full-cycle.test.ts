@@ -7,7 +7,7 @@ import { RunOrchestrator } from './orchestrator'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor } from './run-paths'
-import { readManifest, type RunLifecycleEvent } from './manifest'
+import { readManifest } from './manifest'
 
 interface FakeProcess {
   pid: number
@@ -112,10 +112,12 @@ describe('RunOrchestrator.runFullCycle', () => {
       healthPollIntervalMs: 5,
       healSignalPollMs: 1,
       healAgentTimeoutMs: 1000,
-      playwrightSpawner: ({ rerunTargets }) => ({
-        command: `pw-${pwIdx++}${rerunTargets?.length ? ` ${rerunTargets.join(' ')}` : ''}`,
-        cwd: tmpDir,
-      }),
+      playwrightSpawner: ({ rerunTargets }) => {
+        return {
+          command: `pw-${pwIdx++}${rerunTargets?.length ? ` ${rerunTargets.join(' ')}` : ''}`,
+          cwd: tmpDir,
+        }
+      },
       autoHeal: opts.autoHeal
         ? {
             agent: 'claude',
@@ -127,14 +129,6 @@ describe('RunOrchestrator.runFullCycle', () => {
       externalHeal: opts.externalHeal,
     })
     return orch
-  }
-
-  function readLifecycleEvents(orch: RunOrchestrator): RunLifecycleEvent[] {
-    return fs.readFileSync(orch.paths.lifecycleEventsPath, 'utf-8')
-      .trim()
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as RunLifecycleEvent)
   }
 
   it('returns passed when Playwright exits 0 on first try', async () => {

@@ -52,6 +52,23 @@ describe('createRunContext', () => {
     expect(seen).toEqual([5000])
   })
 
+  it('runs the suite from the live feature dir until a snapshot is taken', () => {
+    const o = opts()
+    const ctx = createRunContext(o, () => true)
+    expect(ctx.suiteDir).toBe(o.feature.featureDir)
+  })
+
+  it('reuses an existing run-start snapshot, so a restart on the same run dir does not adopt live edits', () => {
+    // Restarts build a fresh orchestrator over the SAME run dir without calling
+    // start(); if the context fell back to the live dir here, every restart
+    // would silently run whatever the agent edited mid-run.
+    const o = opts()
+    const snapshot = path.join(o.runDir, 'suite')
+    fs.mkdirSync(snapshot, { recursive: true })
+    const ctx = createRunContext(o, () => true)
+    expect(ctx.suiteDir).toBe(snapshot)
+  })
+
   it('seeds the run state a fresh run starts from', () => {
     const ctx = createRunContext(opts(), () => true)
     expect(ctx.status).toBe('running')

@@ -10,6 +10,8 @@ import type { RunnerLog } from './runner-log'
 import { type WorktreeHandle } from './repo-worktree'
 import type { PlaywrightSpawner } from './run-spawn'
 import type { RunModelPlan } from './run-model-plan'
+import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
+import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 
 export interface ServiceSpec {
   repoName: string
@@ -31,7 +33,9 @@ export interface ServiceSpec {
 // the hashing/diffing. Structural so `DirtySpecStore` satisfies it and tests can
 // omit it. Absent in unit tests; wired to the singleton store in server.ts.
 export interface DirtySpecHooks {
-  captureRunStart(featureId: string, featureDir: string): Promise<unknown>
+  /** `suiteDir` is the directory the run executes — the run-start copy when one
+   *  was taken — and is remembered as the before side of the strength verdict. */
+  captureRunStart(featureId: string, suiteDir: string): Promise<unknown>
   finalizeRun(featureId: string, featureDir: string, passed: boolean): Promise<unknown>
 }
 
@@ -118,10 +122,12 @@ export interface OrchestratorOptions {
   // drive the WS push channel.
   runStateSink?: RunStateSink
   repoBranchSnapshots?: RepoBranchSnapshot[]
+  dependencyProvenance?: RunDependencyProvenance[]
   initialHealCycles?: number
   executionType?: ExecutionType
   verification?: VerificationRunMetadata
   playwrightEnv?: Record<string, string>
+  testReviewApproval?: RunTestReviewApproval
   /** Per-run allocated ports keyed by slot name (allocated by the start flow
    *  before construction). Resolves `${port.<slot>}` tokens and is injected as
    *  each service's declared `env`. Released on stop. */

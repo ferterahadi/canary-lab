@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { detectForeignTerminalWrite, setStatus, startHeartbeat, stopHeartbeat, writeInitialManifest } from './run-manifest-writer'
+import { captureDirtySpecBaseline, detectForeignTerminalWrite, setStatus, startHeartbeat, stopHeartbeat, writeInitialManifest } from './run-manifest-writer'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { RunManifest } from './manifest'
@@ -64,6 +64,33 @@ describe('writeInitialManifest', () => {
 
     const written = (sink.bootstrap as unknown as { mock: { calls: [{ repoPaths: string[] }][] } }).mock.calls[0][0]
     expect(written.repoPaths).toEqual([real])
+  })
+
+  it('persists dependency provenance and an exact test-review approval when the run carries them', () => {
+    const approval = { sourceRunId: 'source-run', revision: 'a'.repeat(64), approvedAt: 'now' }
+    const provenance = [{ repoName: 'app', verdict: 'unknown', mode: 'shared' }]
+    const { ctx, sink } = ctxFor({ dependencyProvenance: provenance as never, testReviewApproval: approval })
+
+    writeInitialManifest(ctx)
+
+    const written = (sink.bootstrap as unknown as { mock: { calls: [RunManifest][] } }).mock.calls[0][0]
+    expect(written.dependencyProvenance).toEqual(provenance)
+    expect(written.testReviewApproval).toEqual(approval)
+  })
+})
+
+describe('captureDirtySpecBaseline', () => {
+  it('hashes the run-start suite copy, not the live feature dir', async () => {
+    // The baseline must describe what the run will execute. Hashing the live
+    // dir instead would let an edit landing between snapshot and capture
+    // become the "run-start" content and never read as a mid-run change.
+    const captureRunStart = vi.fn(async () => ({}))
+    const { ctx } = ctxFor({}, { dirtySpecHooks: { captureRunStart, finalizeRun: vi.fn() } })
+    ctx.suiteDir = path.join(ctx.runDir, 'suite')
+
+    await captureDirtySpecBaseline(ctx)
+
+    expect(captureRunStart).toHaveBeenCalledWith('demo', ctx.suiteDir)
   })
 })
 

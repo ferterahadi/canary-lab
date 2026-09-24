@@ -3,6 +3,7 @@ import {
   onViewChangedInOtherTab,
   persistView,
   readPersistedView,
+  type ReviewFocus,
   type ConfigTab,
   type ModelsAgent,
   type RouteDialog,
@@ -30,6 +31,8 @@ const PERSISTED = readPersistedView()
 const SEED = initialNavState(PERSISTED)
 
 export interface WorkspaceNavigation {
+  currentTests: boolean
+  setCurrentTests: (current: boolean) => void
   view: WorkspaceView
   selectedFeature: string | null
   selectedRunId: string | null
@@ -43,6 +46,12 @@ export interface WorkspaceNavigation {
   /** Which tab the config dialog is on (null = the default the mount picks). */
   configTab: ConfigTab | null
   verifyOpen: boolean
+  /** Whether the changed-tests review is open (routed ?dialog=tests-review). */
+  reviewFocus?: ReviewFocus
+  setReviewFocus: (focus: ReviewFocus | undefined) => void
+  specReviewOpen: boolean
+  notificationsOpen: boolean
+  setNotificationsOpen: (open: boolean) => void
   flightStartFor: string | null
   flightStartFresh: boolean
   flightStartNew: boolean
@@ -63,9 +72,12 @@ export interface WorkspaceNavigation {
    *  tab it lands on; omitting it resets to the mount's default, so a later
    *  open can't inherit the tab a previous one left behind. */
   setConfigFor: (f: string | null, tab?: ConfigTab | null) => void
+  /** Open config for this suite and keep the URL's feature qualifier aligned. */
+  openConfig: (feature: string, tab?: ConfigTab) => void
   /** Follow the dialog's own tab switches into the route. */
   setConfigTab: (tab: ConfigTab) => void
   setVerifyOpen: (open: boolean) => void
+  setSpecReviewOpen: (open: boolean) => void
   /** Open (feature) / close (null) the flight launcher. `intent` picks which job
    *  it opens for — 're-fly' (the stage-entry picker, default) or 'fresh' (edit
    *  intent + repos, full restart). Setting it always rewrites the intent, so a
@@ -116,6 +128,11 @@ export interface WorkspaceNavigation {
 }
 
 export function useWorkspaceNavigation(): WorkspaceNavigation {
+  // Historical source is an explicit choice for one suite/run. Ordinary run
+  // selection changes the detail pane without replacing the current tests.
+  const [recordedSelection, setRecordedSelection] = useState<{ feature: string | null; run: string } | null>(
+    PERSISTED.currentTests === false && PERSISTED.run ? { feature: PERSISTED.feature, run: PERSISTED.run } : null,
+  )
   const [view, setView] = useState<WorkspaceView>(SEED.view)
   const [selectedFeature, setSelectedFeature] = useState<string | null>(SEED.feature)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(SEED.run)
@@ -129,7 +146,14 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setConfigForState(f)
     setConfigTab(f !== null ? tab : null)
   }, [])
+  const openConfig = useCallback((feature: string, tab?: ConfigTab) => {
+    setSelectedFeature(feature)
+    setConfigFor(feature, tab)
+  }, [setConfigFor])
   const [verifyOpen, setVerifyOpen] = useState<boolean>(SEED.verifyOpen)
+  const [notificationsOpen, setNotificationsOpen] = useState<boolean>(SEED.notificationsOpen)
+  const [reviewFocus, setReviewFocus] = useState<ReviewFocus | undefined>(PERSISTED.reviewFocus)
+  const [specReviewOpen, setSpecReviewOpen] = useState<boolean>(SEED.specReviewOpen)
   const [flightStartFor, setFlightStartForState] = useState<string | null>(SEED.flightStartFor)
   const [flightStartFresh, setFlightStartFresh] = useState<boolean>(SEED.flightStartFresh)
   const [flightStartNew, setFlightStartNew] = useState<boolean>(SEED.flightStartNew)
@@ -164,6 +188,11 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const selectedFlightIdRef = useRef<string | null>(SEED.flight)
   useEffect(() => { selectedFeatureRef.current = selectedFeature }, [selectedFeature])
   useEffect(() => { selectedRunIdRef.current = selectedRunId }, [selectedRunId])
+  const currentTests = !recordedSelection || recordedSelection.run !== selectedRunId || recordedSelection.feature !== selectedFeature
+  const setCurrentTests = useCallback(
+    (current: boolean) => { setRecordedSelection(!current && selectedRunId ? { feature: selectedFeature, run: selectedRunId } : null) },
+    [selectedFeature, selectedRunId],
+  )
   useEffect(() => { selectedFlightIdRef.current = selectedFlightId }, [selectedFlightId])
 
   const state: NavState = {
@@ -175,6 +204,8 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     configFor,
     configTab,
     verifyOpen,
+    specReviewOpen,
+    notificationsOpen,
     flightStartFor,
     flightStartFresh,
     flightStartNew,
@@ -191,7 +222,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   // Persist the full route to the URL on every change (durable tier also mirrors
   // to localStorage for cross-tab sync).
   useEffect(() => {
-    persistView(navToPersistedView(state))
+    persistView({ ...navToPersistedView(state), reviewFocus, ...(!currentTests ? { currentTests: false } : {}) })
     // Intentionally keyed on the primitive fields, not the freshly-built `state`
     // object (new identity every render).
     // configTab is listed explicitly: the `dialog` value stays 'config' while
@@ -202,7 +233,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // same while the focused test changes, so keying on selectedRunId alone
     // would leave the URL's `test` param stale. runTab is the same case —
     // re-opening the SAME run on a different tab must rewrite `runtab`.
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, configTab, modelsFor, focusTest, runTab, returnFlight])
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, configTab, modelsFor, focusTest, runTab, returnFlight, reviewFocus, currentTests])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -251,6 +282,8 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   }, [])
 
   return {
+    currentTests,
+    setCurrentTests,
     view,
     selectedFeature,
     selectedRunId,
@@ -260,6 +293,8 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     configFor,
     configTab,
     verifyOpen,
+    specReviewOpen,
+    notificationsOpen,
     flightStartFor,
     flightStartFresh,
     flightStartStage,
@@ -270,14 +305,19 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     resumePlanTaskId,
     focusTest,
     runTab,
+    reviewFocus,
+    setReviewFocus,
     routedDialog: dialog,
     setView,
     setSelectedFeature,
     setSelectedRunId,
     setSelectedFlightId,
     setConfigFor,
+    openConfig,
     setConfigTab,
     setVerifyOpen,
+    setSpecReviewOpen,
+    setNotificationsOpen,
     setFlightStartFor,
     setFlightStartNew,
     setDemoOpen,

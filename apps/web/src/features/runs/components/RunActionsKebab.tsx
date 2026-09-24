@@ -164,6 +164,8 @@ export function RunActionsKebab({
   )
 }
 
+/** One row in a popover menu. `neutral` is the plain navigational tone; the
+ *  two status tones are for actions that stop or interrupt a run. */
 export function MenuItem({
   label,
   variant,
@@ -172,14 +174,16 @@ export function MenuItem({
   onClick,
 }: {
   label: string
-  variant: 'warning' | 'danger'
+  variant: 'warning' | 'danger' | 'neutral'
   disabled: boolean
   icon?: React.ReactNode
   onClick: () => void
 }) {
   const color = variant === 'danger'
     ? 'text-danger hover:bg-danger/8 dark:hover:bg-danger/10'
-    : 'text-warning hover:bg-warning/8 dark:hover:bg-warning/10'
+    : variant === 'warning'
+      ? 'text-warning hover:bg-warning/8 dark:hover:bg-warning/10'
+      : 'text-primary hover:bg-[var(--bg-hover)]'
   return (
     <button
       type="button"
@@ -199,10 +203,10 @@ export function ExecutionTypeBadge({ type }: { type: ExecutionType }) {
     ? { background: 'var(--accent-soft)', color: 'var(--accent)' }
     : type === 'boot'
       ? { background: 'var(--boot-soft)', color: 'var(--boot)' }
-      : type === 'benchmark'
+      : type === 'benchmark' || type === 'robustness'
         ? { background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)' }
         : { background: 'var(--bg-selected)', color: 'var(--text-muted)' }
-  const label = type === 'verify' ? 'Verify' : type === 'boot' ? 'Boot' : type === 'benchmark' ? 'Arm' : 'Run'
+  const label = type === 'verify' ? 'Verify' : type === 'boot' ? 'Boot' : type === 'benchmark' ? 'Arm' : type === 'robustness' ? 'Cell' : 'Run'
   return (
     <span
       className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"

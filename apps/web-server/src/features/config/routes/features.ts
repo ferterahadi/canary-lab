@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
 import { formatCodeForDisplayWithLineMap } from '../../../../../../shared/code-display-format'
@@ -7,6 +7,7 @@ import { extractTestsFromSource, type ExtractedTest } from '../../../shared/ast-
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { translateReadableTest } from '../../../shared/readable-tests/translator'
 import type { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
+import { dirtySummaryView } from '../../runs/logic/dirty-specs/review-view'
 import { diffChangedLines } from '../../runs/logic/dirty-specs/text-diff'
 import { listPlaywrightTests, type PlaywrightListSpawner } from '../../runs/logic/playwright-list'
 import { parseDotenv } from '../logic/dotenv-edit'
@@ -17,36 +18,25 @@ import {
   loadConfig,
 } from '../../runs/logic/runtime/env-switcher/switch'
 import type { EnvSetsConfig } from '../../runs/logic/runtime/env-switcher/types'
+import { buildDiscoveryRepairPrompt } from '../logic/discovery-repair-prompt'
+import { attachSourceChanges } from '../logic/test-source-changes'
+import { recordedTestList } from '../logic/recorded-test-list'
+import { mergeSuiteTestRoster, sourceTestRoster } from '../../runs/logic/suite-test-roster'
+import { testReviewRoutes } from './test-review'
+import type { FeaturesRouteDeps } from './features-route-deps'
+import type { FeatureTestReview, TestReviewReceipt } from '../../../../../../shared/test-review'
+import { buildGitReview, commitReviewedFiles, restoreGitReview } from '../../runs/logic/test-review-acceptance'
+import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 
-export interface FeaturesRouteDeps {
-  featuresDir: string
-  // Run history, consulted for the boot half of each row's Suite setup
-  // evidence. Optional so route tests that never exercise runs stay unchanged;
-  // absent simply means no boot has been proven.
-  logsDir?: string
-  // Optional override so tests can stub the Playwright `--list` invocation
-  // without spawning a real `npx playwright test`.
-  playwrightListSpawner?: PlaywrightListSpawner
-  // Test-file integrity store. Absent in tests that don't exercise dirty state;
-  // when present, the feature list carries a `dirty` summary and the approve /
-  // commit routes are live. Mutations emit store change events which the server
-  // bridges to a `tests-dirty-changed` WorkspaceEvent (no direct publish here).
-  dirtySpecStore?: DirtySpecStore
-}
+export type { FeaturesRouteDeps } from './features-route-deps'
 
-// Compact dirty summary folded into each feature-list row. Clean when the store
-// has no record yet (cold load before the watcher's first recompute) or the
-// feature has no modified specs.
-function dirtySummary(store: DirtySpecStore | undefined, featureName: string): {
-  status: 'clean' | 'dirty'
-  specs: { file: string; affectedTests: string[] }[]
-} {
-  const rec = store?.get(featureName)
-  if (!rec || rec.status !== 'dirty') return { status: 'clean', specs: [] }
-  return { status: 'dirty', specs: rec.dirtySpecs.map((s) => ({ file: s.file, affectedTests: s.affectedTests })) }
+function reviewFailure(reply: FastifyReply, error: unknown, fallback: string) {
+  const statusCode = (error as { statusCode?: number }).statusCode ?? 500
+  return reply.code(statusCode).send({ error: error instanceof Error ? error.message : fallback })
 }
 
 export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDeps): Promise<void> {
+  await testReviewRoutes(app, deps)
   app.get('/api/features', async () => {
     const features = loadFeatures(deps.featuresDir)
     return features.map((f) => ({
@@ -66,8 +56,10 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       // (its live runs + export stores already carry it).
       evidence: deriveFeatureEvidence(f.featureDir, deps.logsDir, f.name, f.repos),
       // Test-file integrity: 'dirty' when a spec changed since the last green
-      // (or run-start) and hasn't been approved/committed. Drives the red cue.
-      dirty: dirtySummary(deps.dirtySpecStore, f.name),
+      // (or run-start) and hasn't been approved/committed, with the strength
+      // verdict and @req ids the review surfaces render. Clean when the store
+      // has no record yet (cold load before the watcher's first recompute).
+      dirty: dirtySummaryView(deps.dirtySpecStore?.get(f.name), f.featureDir),
     }))
   })
 
@@ -85,6 +77,79 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     }
     const rec = await deps.dirtySpecStore.approve(feature.name, feature.featureDir)
     return { status: rec.status, dirtySpecs: rec.dirtySpecs }
+  })
+
+  app.get<{ Params: { name: string } }>('/api/features/:name/test-review-plan', async (req, reply) => {
+    const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
+    if (!feature?.featureDir) return reply.code(404).send({ error: 'feature not found' })
+    if (!deps.dirtySpecStore) return reply.code(503).send({ error: 'test-file integrity tracking is not available' })
+    try {
+      const record = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
+      const review = await buildGitReview(feature.featureDir, record.dirtySpecs.map((spec) => spec.file))
+      return {
+        feature: feature.name,
+        baseline: 'head',
+        review_revision: review.revision,
+        files: review.files,
+        receipt: deps.dirtySpecStore.reviewReceipt(feature.name, review.revision),
+      } satisfies FeatureTestReview
+    } catch (error) {
+      return reviewFailure(reply, error, 'Could not prepare the reviewed files.')
+    }
+  })
+
+  app.post<{ Params: { name: string }; Body: { expectedRevision?: string } }>('/api/features/:name/accept-test-review', async (req, reply) => {
+    const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
+    if (!feature?.featureDir) return reply.code(404).send({ error: 'feature not found' })
+    if (!deps.dirtySpecStore) return reply.code(503).send({ error: 'test-file integrity tracking is not available' })
+    const revision = req.body?.expectedRevision
+    if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) return reply.code(400).send({ error: 'An exact review revision is required' })
+    const prior = deps.dirtySpecStore.reviewReceipt(feature.name, revision)
+    if (prior) return prior
+    try {
+      const record = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
+      const review = await buildGitReview(feature.featureDir, record.dirtySpecs.map((spec) => spec.file))
+      if (review.revision !== revision) return reply.code(409).send({ reason: 'review-changed', error: 'The files changed while this review was open. Review the latest version and try again.' })
+      if (review.files.length === 0) return reply.code(409).send({ reason: 'nothing-to-accept', error: 'No reviewed file changes remain to accept.' })
+      const git = await commitReviewedFiles(feature.name, feature.featureDir, review.files.map((file) => file.file))
+      await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
+      const receipt: TestReviewReceipt = {
+        decision: 'accepted', review_revision: revision, files: review.files.map((file) => file.file),
+        at: new Date().toISOString(), git, execution: { status: 'none' },
+      }
+      deps.dirtySpecStore.recordReviewReceipt(feature.name, receipt)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: feature.name })
+      return receipt
+    } catch (error) {
+      return reviewFailure(reply, error, 'Could not accept and commit the reviewed files.')
+    }
+  })
+
+  app.post<{ Params: { name: string }; Body: { expectedRevision?: string } }>('/api/features/:name/restore-test-review', async (req, reply) => {
+    const feature = loadFeatures(deps.featuresDir).find((item) => item.name === req.params.name)
+    if (!feature?.featureDir) return reply.code(404).send({ error: 'feature not found' })
+    if (!deps.dirtySpecStore) return reply.code(503).send({ error: 'test-file integrity tracking is not available' })
+    const revision = req.body?.expectedRevision
+    if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) return reply.code(400).send({ error: 'An exact review revision is required' })
+    const prior = deps.dirtySpecStore.reviewReceipt(feature.name, revision)
+    if (prior) return prior
+    try {
+      const record = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
+      const review = await buildGitReview(feature.featureDir, record.dirtySpecs.map((spec) => spec.file))
+      if (review.revision !== revision) return reply.code(409).send({ reason: 'review-changed', error: 'The files changed while this review was open. Review the latest version and try again.' })
+      if (review.files.length === 0) return reply.code(409).send({ reason: 'nothing-to-restore', error: 'No reviewed file changes remain to restore.' })
+      const restored = await restoreGitReview(feature.featureDir, review)
+      await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
+      const receipt: TestReviewReceipt = {
+        decision: 'restored', review_revision: revision, files: restored,
+        at: new Date().toISOString(), git: { status: 'not-requested' }, execution: { status: 'none' },
+      }
+      deps.dirtySpecStore.recordReviewReceipt(feature.name, receipt)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: feature.name })
+      return receipt
+    } catch (error) {
+      return reviewFailure(reply, error, 'Could not restore the reviewed files.')
+    }
   })
 
   // Commit the modified specs to git — the durable, reviewable acknowledgment.
@@ -107,23 +172,21 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       return { committed: false, reason: 'no modified specs', status: rec.status }
     }
     const root = await getGitRoot(feature.featureDir)
-    if (!root) {
-      reply.code(409)
-      return { error: 'feature is not inside a git repository' }
-    }
+    if (!root) return reply.code(409).send({ error: 'feature is not inside a git repository' })
     const realDir = fs.realpathSync(feature.featureDir)
-    const repoRelPaths = specs.map((s) => path.relative(root, path.join(realDir, s.file)))
-    const add = await runGit(root, ['add', '--', ...repoRelPaths])
-    if (add.code !== 0) {
-      reply.code(500)
-      return { error: (add.stderr || add.stdout).trim() || 'git add failed' }
+    const paths = specs.map((spec) => path.relative(root, path.join(realDir, spec.file)))
+    const staged = await runGit(root, ['add', '--', ...paths])
+    if (staged.code !== 0) return reply.code(500).send({ error: staged.stderr.trim() || 'git add failed' })
+    const changed = await runGit(root, ['diff', '--cached', '--quiet', '--', ...paths])
+    if (changed.code === 0) {
+      const rec = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
+      return { committed: false, reason: 'no modified specs', status: rec.status }
     }
-    const message = `test: accept modified specs for "${feature.name}" via Canary Lab`
-    const commit = await runGit(root, ['commit', '-m', message, '--', ...repoRelPaths])
-    if (commit.code !== 0) {
-      reply.code(500)
-      return { error: (commit.stderr || commit.stdout).trim() || 'git commit failed' }
-    }
+    if (changed.code !== 1) return reply.code(500).send({ error: changed.stderr.trim() || 'git diff failed' })
+    const committed = await runGit(root, [
+      'commit', '--only', '-m', `test: accept modified specs for "${feature.name}" via Canary Lab`, '--', ...paths,
+    ])
+    if (committed.code !== 0) return reply.code(500).send({ error: committed.stderr.trim() || 'git commit failed' })
     const rec = await deps.dirtySpecStore.recompute(feature.name, feature.featureDir)
     return { committed: true, status: rec.status }
   })
@@ -199,13 +262,14 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     return { error: 'config file not found' }
   })
 
-  app.get<{ Params: { name: string } }>('/api/features/:name/tests', async (req, reply) => {
+  app.get<{ Params: { name: string }; Querystring: { runId?: string } }>('/api/features/:name/tests', async (req, reply) => {
     const features = loadFeatures(deps.featuresDir)
     const feature = features.find((f) => f.name === req.params.name)
     if (!feature) {
       reply.code(404)
       return { error: 'feature not found' }
     }
+    const recorded = req.query.runId ? recordedTestList(deps.logsDir, feature.name, req.query.runId) : undefined
     const codeDisplayCache = new Map<string, ReturnType<typeof formatCodeForDisplayWithLineMap>>()
     const withCodeDisplay = (test: ExtractedTest): ExtractedTest => {
       if (!test.bodySource) return test
@@ -218,37 +282,66 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       }
       return { ...test, codeDisplay }
     }
-    const specFiles = listSpecFiles(feature.featureDir)
+    const specFiles = recorded ? [...new Set(recorded.tests.map((test) => test.file))] : listSpecFiles(feature.featureDir)
 
     // 1. Run AST over each spec to gather (line -> { bodySource, steps }) for
     //    enrichment. This is the single source of body/step extraction.
     const astByFile = new Map<string, ReturnType<typeof extractTestsFromSource>>()
+    const unavailableSources = new Set<string>()
     for (const file of specFiles) {
       let source = ''
-      try { source = fs.readFileSync(file, 'utf-8') } catch { /* unreadable */ }
-      astByFile.set(file, extractTestsFromSource(file, source, feature.semanticRules))
+      if (recorded && !recorded.dir) unavailableSources.add(file)
+      else try { source = fs.readFileSync(file, 'utf-8') } catch { if (recorded) unavailableSources.add(file) }
+      const result = extractTestsFromSource(file, source, feature.semanticRules)
+      try { if (!recorded) await attachSourceChanges(feature.featureDir, file, source, result.tests) } catch (err) {
+        app.log.warn({ err, file }, 'test source change markers unavailable')
+      }
+      astByFile.set(file, result)
     }
 
     // 2. Ask Playwright to enumerate the resolved test list (loops expanded,
     //    `${var}` substituted). On failure, fall back to AST-only output.
-    const pwList = await listPlaywrightTests(feature.featureDir, {
+    // Seeded, not left undefined: every path on which `listPlaywrightTests`
+    // resolves to null runs `onDiagnostics` first — a non-zero exit, a spawn
+    // failure, a timeout and unparseable JSON each carry their own text, and a
+    // null result is never cached — so the failure branch below always has a
+    // reason to show. Holding that as the variable's type keeps the fallback
+    // in one place instead of a `??` and a conditional spread whose empty arms
+    // nothing can reach.
+    let discoveryDiagnostics = 'Playwright could not enumerate the test cases.'
+    const discovered = recorded?.tests ?? await listPlaywrightTests(feature.featureDir, {
       spawner: deps.playwrightListSpawner,
+      onDiagnostics: (diagnostic) => {
+        discoveryDiagnostics = diagnostic
+        app.log.warn({ feature: feature.name, diagnostic }, 'test discovery failed')
+      },
       env: envsetProcessEnv(feature.featureDir, feature.envs?.[0], (err) => {
         app.log.warn({ err, feature: feature.name }, 'ignoring invalid feature envset config while listing tests')
       }),
     })
 
-    if (pwList === null) {
-      return specFiles.map((file) => {
+    if (discovered === null) {
+      const discoveryRepairPrompt = buildDiscoveryRepairPrompt(feature, discoveryDiagnostics)
+      if (specFiles.length === 0) return [{
+        file: path.join(feature.featureDir, 'playwright.config.ts'), tests: [],
+        discoveryError: 'Playwright could not enumerate the test cases.',
+        discoveryDiagnostics, discoveryRepairPrompt,
+      }]
+      return specFiles.map((file, index) => {
         // astByFile has an entry for every specFile (populated above).
         const result = astByFile.get(file)!
         return {
           file,
           tests: result.tests.map(withCodeDisplay),
+          discoveryError: 'Playwright could not enumerate the test cases. The source definitions may omit generated cases.',
+          discoveryDiagnostics,
+          ...(index === 0 ? { discoveryRepairPrompt } : {}),
           ...(result.parseError ? { parseError: result.parseError } : {}),
         }
       })
     }
+
+    const pwList = recorded ? discovered : mergeSuiteTestRoster(sourceTestRoster(feature.featureDir), discovered, 'reported')
 
     // 3. Group Playwright entries by spec file, then emit one ExtractedTest
     //    per resolved entry. Body/steps come from the AST entry whose `line`
@@ -269,7 +362,11 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       if (astByFile.has(entry.originFile) || originAstByFile.has(entry.originFile)) continue
       let source = ''
       try { source = fs.readFileSync(entry.originFile, 'utf-8') } catch { /* unreadable */ }
-      originAstByFile.set(entry.originFile, extractTestsFromSource(entry.originFile, source, feature.semanticRules))
+      const result = extractTestsFromSource(entry.originFile, source, feature.semanticRules)
+      try { if (!recorded) await attachSourceChanges(feature.featureDir, entry.originFile, source, result.tests) } catch (err) {
+        app.log.warn({ err, file: entry.originFile }, 'test source change markers unavailable')
+      }
+      originAstByFile.set(entry.originFile, result)
     }
 
     function lookupAstByLine(file: string, line: number): ExtractedTest | undefined {
@@ -302,6 +399,8 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
             : lookupAstByLine(file, entry.line)
           const test: ExtractedTest = {
             name: entry.title,
+            sourceChanges: fromAst?.sourceChanges,
+            endLine: fromAst?.endLine,
             line: isHelperDefined ? entry.originLine : entry.line,
             bodySource: fromAst?.bodySource ?? '',
             bodyLine: fromAst?.bodyLine ?? (isHelperDefined ? entry.originLine : entry.line),
@@ -321,13 +420,14 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       return {
         file,
         tests,
+        ...(unavailableSources.has(file) ? { recordedSourceUnavailable: true } : {}),
         ...(ast.parseError ? { parseError: ast.parseError } : {}),
       }
     })
   })
 }
 
-function envsetProcessEnv(
+export function envsetProcessEnv(
   featureDir: string,
   envName: string | undefined,
   warn: (err: unknown) => void,

@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
+import type { AddressInfo } from 'node:net'
 import { randomUUID } from 'crypto'
 import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from '@modelcontextprotocol/node'
 import { createMcpHandler, isInitializeRequest, isLegacyRequest, McpServer } from '@modelcontextprotocol/server'
@@ -15,7 +16,7 @@ import {
 import { classifyMcpClient } from './client-surface'
 import { isClientKind, type ClientKind } from '../../../../shared/run-mode'
 import { CANARY_LAB_MCP_PROTOCOL_VERSION } from '../../../../shared/mcp-protocol'
-import { loadPromptTemplate, promptPath } from '../shared/prompts'
+import { INSTRUCTIONS_BY_PROFILE } from './instructions'
 
 // MCP endpoint mounted on the existing Fastify instance at `/mcp`. Uses
 // streamable HTTP so Claude / Codex clients (Desktop or CLI) and other MCP
@@ -49,45 +50,14 @@ export function mcpErrorLogger(
   return (err) => app.log.error({ err }, message)
 }
 
-// Sent to MCP clients through initialize/discovery so external agents that do
-// not carry the Canary Lab skill still learn the run/heal/author loops. The
-// repair text is load-bearing: without it, result-driven clients invent their
-// own get_run_snapshot poll loop instead of blocking on wait_for_heal_task,
-// and never pick up the needs_heal handoff.
-const REPAIR_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-repair-instructions.md'))
-
-const VERIFY_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-verify-instructions.md'))
-
-const AUTHOR_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-author-instructions.md'))
-
-const COVERAGE_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-coverage-instructions.md'))
-
-const FLIGHT_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-flight-instructions.md'))
-
-const EXPORT_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-export-instructions.md'))
-
-const PORTIFY_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-portify-instructions.md'))
-
-const COMPACT_INSTRUCTIONS = loadPromptTemplate(promptPath('mcp-compact-instructions.md'))
-
-// `lifecycle` carries the everyday one-session loop (repair + author +
-// coverage + flight + export + verify); `full` adds the portify instructions
-// on top. Keep these compositions in step with TOOLS_BY_PROFILE in tools.ts.
-const LIFECYCLE_INSTRUCTIONS = `${REPAIR_INSTRUCTIONS}\n\n${AUTHOR_INSTRUCTIONS}\n\n${COVERAGE_INSTRUCTIONS}\n\n${FLIGHT_INSTRUCTIONS}\n\n${EXPORT_INSTRUCTIONS}\n\n${VERIFY_INSTRUCTIONS}`
-
-// Exported so `repair-guardrail.test.ts` can pin the repair rule ("fix
-// app/service code, not tests") on every profile that can drive a heal loop.
-export const INSTRUCTIONS_BY_PROFILE: Record<CanaryLabMcpProfile, string> = {
-  repair: REPAIR_INSTRUCTIONS,
-  verify: VERIFY_INSTRUCTIONS,
-  author: AUTHOR_INSTRUCTIONS,
-  coverage: COVERAGE_INSTRUCTIONS,
-  export: EXPORT_INSTRUCTIONS,
-  flight: FLIGHT_INSTRUCTIONS,
-  portify: PORTIFY_INSTRUCTIONS,
-  lifecycle: LIFECYCLE_INSTRUCTIONS,
-  full: `${LIFECYCLE_INSTRUCTIONS}\n\n${PORTIFY_INSTRUCTIONS}`,
-  compact: COMPACT_INSTRUCTIONS,
+/** The origin a tool result hands the human to open Canary Lab. Read from the
+ *  live bind rather than from config, so a port fallback cannot produce a link
+ *  to a port nothing is serving. Absent unless the bind is TCP: Node reports
+ *  `null` before `listen` resolves and a plain path string for a unix socket,
+ *  and neither yields a URL an agent can pass on — the tools that need one fall
+ *  back to asking the user in chat instead of inventing a host. */
+export function uiUrlFromAddress(address: AddressInfo | string | null): string | undefined {
+  return address && typeof address !== 'string' ? `http://127.0.0.1:${address.port}` : undefined
 }
 
 export async function registerMcpRoutes(
@@ -121,7 +91,7 @@ export async function registerMcpRoutes(
     defaultClientKind: ClientKind | undefined,
   ): McpServer => {
     const mcp = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS_BY_PROFILE[profile] })
-    registerCanaryLabTools(mcp, deps, {
+    registerCanaryLabTools(mcp, { ...deps, getUiUrl: () => uiUrlFromAddress(app.server.address()) }, {
       profile,
       defaultClientKind,
       onExecCall: (event) => {

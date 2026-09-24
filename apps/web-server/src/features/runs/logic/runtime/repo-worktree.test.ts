@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addWorktree, hydrateWorkingTreeDiff, isGitWorktreeCapable, linkNodeModules, listUntracked, removeWorktree, sanitizeRepoFileName } from './repo-worktree'
 
 let root: string
@@ -126,6 +126,26 @@ describe('addWorktree / removeWorktree', () => {
       // Real dir preserved (not replaced by a symlink).
       expect(fs.lstatSync(path.join(wt, 'node_modules')).isSymbolicLink()).toBe(false)
       expect(fs.existsSync(path.join(wt, 'node_modules', 'already'))).toBe(true)
+    })
+
+    it('returns an Error message when creating the dependency link fails', () => {
+      const src = path.join(root, 'src-link-error')
+      const wt = path.join(root, 'wt-link-error')
+      fs.mkdirSync(path.join(src, 'node_modules'), { recursive: true })
+      fs.mkdirSync(wt, { recursive: true })
+      vi.spyOn(fs, 'symlinkSync').mockImplementation(() => { throw new Error('link denied') })
+
+      expect(linkNodeModules({ sourceRoot: src, worktreeRoot: wt })).toEqual({ error: 'link denied' })
+    })
+
+    it('stringifies a non-Error dependency-link failure', () => {
+      const src = path.join(root, 'src-link-raw-error')
+      const wt = path.join(root, 'wt-link-raw-error')
+      fs.mkdirSync(path.join(src, 'node_modules'), { recursive: true })
+      fs.mkdirSync(wt, { recursive: true })
+      vi.spyOn(fs, 'symlinkSync').mockImplementation(() => { throw 'link unavailable' })
+
+      expect(linkNodeModules({ sourceRoot: src, worktreeRoot: wt })).toEqual({ error: 'link unavailable' })
     })
   })
 

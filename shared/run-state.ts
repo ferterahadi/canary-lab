@@ -37,7 +37,8 @@ export interface RunLifecycleRestartPlan {
 export interface RunLifecycleTargetedRerun {
   selected: number
   total: number
-  mode: 'failed-and-pending' | 'failed-only' | 'full-suite' | 'none'
+  /** `robustness-cell` is retained only to read historical run events. */
+  mode: 'failed-and-pending' | 'failed-only' | 'full-suite' | 'none' | 'robustness-cell'
   reason: string
 }
 
@@ -51,19 +52,64 @@ export interface RunLifecycleAbortReason {
  *  the run is declared `failed` and — if a heal mode is configured — routed into
  *  the heal loop with the service log as the failure context, instead of being
  *  silently aborted. Cleared on a successful (re)boot. */
+export type RunBootReason = 'health-timeout' | 'process-exited' | 'spawn-failed' | 'dependency-incompatible'
+
+export type RunBootPhase = 'spawn' | 'process-exit' | 'readiness' | 'configuration'
+
+/** One phase per reason, so the phase is a restatement of the reason rather
+ *  than a second field four producers must keep in lockstep. Derived on read,
+ *  which also gives historical records (written before the phase existed) the
+ *  right answer instead of a "legacy" placeholder. */
+const BOOT_PHASE = {
+  'spawn-failed': 'spawn',
+  'process-exited': 'process-exit',
+  'health-timeout': 'readiness',
+  'dependency-incompatible': 'configuration',
+} as const satisfies Record<RunBootReason, RunBootPhase>
+
+export function runBootPhase(reason: RunBootReason): RunBootPhase {
+  return BOOT_PHASE[reason]
+}
+
+/** What the preserved evidence adds ON TOP OF `reason`. Every value here names
+ *  something the reason alone does not say, so a record whose evidence only
+ *  confirms its reason carries no classification at all. */
+export type RunBootEvidence =
+  | 'rejected-startup'
+  | 'compiler-failure'
+  | 'seed-failure'
+  | 'empty-output'
+  | 'abrupt-signal'
+  | 'underlying-cause-not-preserved'
+
 export interface RunBootFailure {
   /** Service display name (matches ServiceSpec.name). */
   service: string
   /** On-disk safe name (matches ServiceManifestEntry.safeName). */
   safeName: string
-  /** `health-timeout` = never answered its readiness probe within the deadline;
-   *  `process-exited` = the service process died before it became healthy. */
-  reason: 'health-timeout' | 'process-exited'
+  /** Stable machine classification. Historical records contain only
+   *  `health-timeout` and `process-exited`. */
+  reason: RunBootReason
+  /** Evidence classification, kept separate from the inferred root cause.
+   *  Absent when the evidence says nothing beyond `reason`. */
+  classification?: RunBootEvidence
   /** Human-readable one-liner (transport + probe target / exit info). */
   detail: string
   /** Path to the service's log file — the heal agent reads this to diagnose
    *  why the service won't serve. */
   logPath: string
+  /** The exact service/preflight command and directory Canary invoked. */
+  command?: string
+  cwd?: string
+  exitCode?: number | null
+  /** Signal NAME (`SIGTERM`), never the raw number — producers normalize so
+   *  one record never reads "signal 15" where another reads "signal SIGTERM". */
+  signal?: string | null
+  /** Sanitized, bounded evidence copied from the full log. */
+  excerpt?: string
+  excerptTruncated?: boolean
+  /** Evidence-bounded next action; never an inferred root cause. */
+  nextAction?: string
 }
 
 /**
@@ -215,9 +261,11 @@ export interface RunActionAvailabilitySet {
 
 export const TERMINAL_RUN_STATUSES = ['passed', 'failed', 'aborted'] as const
 export const ACTIVE_RUN_STATUSES = ['running', 'healing'] as const
+export const UNSETTLED_RUN_STATUSES = ['queued', ...ACTIVE_RUN_STATUSES] as const
 
 export type TerminalRunStatus = typeof TERMINAL_RUN_STATUSES[number]
 export type ActiveRunStatus = typeof ACTIVE_RUN_STATUSES[number]
+export type UnsettledRunStatus = typeof UNSETTLED_RUN_STATUSES[number]
 
 export const HEARTBEAT_STALE_MS = 10 * 60 * 1000
 
@@ -237,6 +285,22 @@ export function isRestartableRunStatus(status: string | null | undefined): statu
  *  ports. Distinct from active (running/healing) and terminal statuses. */
 export function isQueuedRunStatus(status: string | null | undefined): status is 'queued' {
   return status === 'queued'
+}
+
+/** A run that has not reached a verdict — queued for admission, or active with
+ *  processes. Every unsettled row is held in some server process's memory: a
+ *  registered orchestrator, or a slot in the admission queue. A fresh server
+ *  has neither, so an unsettled row on disk at boot belongs to a process that
+ *  died without finalizing it, and nothing here can drive it any further.
+ *
+ *  Distinct from `isActiveRunStatus`, which asks the narrower question "does
+ *  this run hold processes and ports right now" — the question admission and
+ *  the resource budget care about. Recovery paths want this wider one: a
+ *  `queued` orphan is just as un-drivable as a `running` one, and gating them
+ *  on `isActiveRunStatus` left queued orphans stuck active forever with a Stop
+ *  button that 404'd. */
+export function isUnsettledRunStatus(status: string | null | undefined): status is UnsettledRunStatus {
+  return isActiveRunStatus(status) || isQueuedRunStatus(status)
 }
 
 /** Why a run is parked in the queue. `resources` = the admission budget is
@@ -326,6 +390,10 @@ export class HealSignalGate {
 
   endWaiting(): void {
     this.waiting = false
+  }
+
+  isReadyForSignal(): boolean {
+    return this.waiting && this.pending === null
   }
 
   observe(kind: HealSignalKind, body: Record<string, unknown>): HealSignalGateResult {

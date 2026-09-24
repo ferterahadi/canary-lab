@@ -4,6 +4,8 @@ import { act } from 'react'
 import type { CoverageLedger } from '@/shared/api/types'
 
 export const LEDGER: CoverageLedger = {
+  freshness: { revision: 'stale-inputs', checkedAt: '2026-09-17T00:00:00Z', state: 'stale', reasons: ['Source requirements changed.'], changedTests: [], latestRunFailed: false,
+    nextAction: { stage: 'prd-summary', label: 'Update requirements & coverage', command: 'start_external_summary', arguments: { feature: 'checkout' } } },
   feature: 'checkout',
   requirements: [
     {

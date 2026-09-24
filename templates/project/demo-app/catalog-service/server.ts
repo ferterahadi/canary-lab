@@ -1,4 +1,5 @@
 import http, { type IncomingMessage } from 'node:http'
+import { durableRequest, openStore, type Replayable } from '../shared/durable'
 
 // First service in the storefront journey: product identity and price originate
 // here, and its SKU becomes inventory's input.
@@ -10,7 +11,13 @@ interface Product {
   priceCents: number
 }
 
-const products: Product[] = []
+interface CatalogState extends Replayable {
+  products: Product[]
+}
+
+// The state file outlives the process — see shared/durable.ts.
+const store = openStore<CatalogState>('catalog', () => ({ products: [], replies: {} }))
+const products = store.state.products
 
 const nextProductId = () => String(products.length + 1)
 
@@ -28,6 +35,7 @@ const server = http.createServer(async (req, res) => {
 
   console.log(`[catalog-service] ${method} ${url.pathname}`)
   res.setHeader('Content-Type', 'application/json')
+  if (durableRequest(store, req, res)) return
 
   try {
     if (method === 'GET' && url.pathname === '/') {

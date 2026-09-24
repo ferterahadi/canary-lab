@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import type { PathType } from '../../../../../../shared/coverage/types'
+import type { EnvironmentExclusion } from '../../../../../../shared/run-applicability'
 import { readManifest, type RunLifecycleEvent, type RunManifest } from './runtime/manifest'
 import { buildRunPaths, runDirFor } from './runtime/run-paths'
 import { PlaywrightArtifactGroup, indexPlaywrightArtifacts } from './run-artifacts'
@@ -48,6 +49,8 @@ export interface RunSummaryRunningStep {
 }
 
 export interface RunSummary {
+  environment?: string
+  environmentExclusions?: EnvironmentExclusion[]
   complete: boolean
   total: number
   passed: number
@@ -61,6 +64,11 @@ export interface RunSummary {
   skipped?: number
   skippedNames?: string[]
   skippedIds?: string[]
+  /** The summary was seeded from a prior execution (a targeted heal rerun
+   *  merged untouched results forward), so its outcomes span several partial
+   *  executions rather than one clean run. Written by the reporter; read by the
+   *  certificate and the coverage ledger's proven axis. */
+  mergedFromPriorExecution?: boolean
   knownTests?: Array<{
     id?: string
     name: string

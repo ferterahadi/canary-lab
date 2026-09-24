@@ -8,6 +8,7 @@ import type {
 } from '@/shared/api/types'
 import { durationBetween } from '@/shared/lib/format'
 import { isTerminalRunStatus } from '@shared/run-state'
+import { stageHasEvidence } from '@shared/flights/types'
 
 // ─── Stage band measurements ────────────────────────────────────────────────
 // The "At a glance" band reports COUNTS, so each one is derived here, once, and
@@ -123,12 +124,6 @@ export function distinctRepoPaths(paths: string[]): string[] {
  *  Evidence is the discriminator, so a genuinely empty skip still reads as one —
  *  Parallel readiness stepped over with nothing to show keeps its skip mark and
  *  its "already checked" sentence. */
-export function stageHasEvidence(evidence: unknown): boolean {
-  return evidence !== null
-    && typeof evidence === 'object'
-    && Object.keys(evidence as object).length > 0
-}
-
 export function settledStageStatus(
   stage: { status: FlightStageStatus; evidence?: unknown },
 ): FlightStageStatus {

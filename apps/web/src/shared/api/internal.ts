@@ -19,12 +19,33 @@ export type FetchLike = typeof fetch
 export interface ClientOptions {
   baseUrl?: string
   fetchImpl?: FetchLike
+  /** Local invalidation generation; never sent over HTTP. */
+  readRevision?: string
 }
 
-export const defaultOpts = (opts?: ClientOptions): Required<ClientOptions> => ({
+export const defaultOpts = (opts?: ClientOptions): Required<Pick<ClientOptions, 'baseUrl' | 'fetchImpl'>> => ({
   baseUrl: opts?.baseUrl ?? '',
   fetchImpl: opts?.fetchImpl ?? globalThis.fetch.bind(globalThis),
 })
+
+const snapshotReads = new WeakMap<FetchLike, Map<string, Promise<unknown>>>()
+
+/** Coalesce concurrent readers, not results. A newer invalidation must start a
+ * new request instead of inheriting an older in-flight response. */
+export function requestSnapshot<T>(pathname: string, opts?: ClientOptions): Promise<T> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  // defaultOpts binds fetch per call; use the underlying function as identity.
+  const identity = opts?.fetchImpl ?? globalThis.fetch
+  let pending = snapshotReads.get(identity)
+  if (!pending) { pending = new Map(); snapshotReads.set(identity, pending) }
+  const key = JSON.stringify([baseUrl, pathname, opts?.readRevision])
+  const existing = pending.get(key)
+  if (existing) return existing as Promise<T>
+  const promise = request<T>(`${baseUrl}${pathname}`, { method: 'GET' }, fetchImpl)
+    .finally(() => { pending.delete(key) })
+  pending.set(key, promise)
+  return promise
+}
 
 export async function request<T>(
   url: string,
@@ -53,4 +74,3 @@ export async function request<T>(
   }
   return body as T
 }
-

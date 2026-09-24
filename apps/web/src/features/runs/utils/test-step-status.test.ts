@@ -223,7 +223,7 @@ describe('statusForTest', () => {
     expect(statusForTest({
       name: 'validates input',
       allowNameFallback: false,
-    }, summary)).toBe('pending')
+    }, summary)).toBe('unmatched')
   })
 
   it('falls back to summary.running when only its id matches the identity id', () => {

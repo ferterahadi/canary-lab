@@ -8,7 +8,7 @@ import type {
 import type { StartFlightBody } from '@/shared/api/flights'
 import type { RunIndexEntry } from '@/shared/api/types'
 import type { FlightEntryOptions, FlightIndexEntry, FlightStageKey } from '@shared/flights/types'
-import { isActiveRunStatus, isQueuedRunStatus, isTerminalRunStatus } from '@shared/run-state'
+import { isTerminalRunStatus, isUnsettledRunStatus } from '@shared/run-state'
 import { useInvalidationKey } from './invalidation'
 
 // The Getting Started launcher: one guided path plus the specialized workflows
@@ -128,7 +128,7 @@ export function deriveGettingStartedRunSession(
   // sample run becomes the active card, including queued runs.
   if (!active) {
     const newest = relevant
-      .filter(({ run }) => isActiveRunStatus(run.status) || isQueuedRunStatus(run.status))
+      .filter(({ run }) => isUnsettledRunStatus(run.status))
       .reduce<CatalogRun | null>((current, candidate) => (
         !current || candidate.run.startedAt.localeCompare(current.run.startedAt) > 0
           ? candidate

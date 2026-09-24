@@ -1,0 +1,1302 @@
+{
+  "manifest": {
+    "runId": "2000-01-01T0406-demo",
+    "feature": "sample-suite",
+    "featureDir": "/workspace/features/sample-suite",
+    "startedAt": "2000-01-01T04:06:01.300Z",
+    "status": "healing",
+    "healCycles": 2,
+    "externalHealSession": {
+      "sessionId": "fixture-session",
+      "clientKind": "codex",
+      "conversationName": "Review the recorded sample suite",
+      "claimedAt": "2000-01-01T04:06:01.300Z",
+      "lastHeartbeatAt": "2000-01-01T04:09:45.330Z",
+      "status": "disconnected",
+      "cycleCount": 1
+    },
+    "lifecycle": {
+      "phase": "waiting-for-signal",
+      "headline": "Waiting for heal signal",
+      "updatedAt": "2000-01-01T04:09:41.229Z",
+      "detail": "The runner is waiting for .restart, .rerun, or .heal.",
+      "activeCycle": 2,
+      "targetedRerun": {
+        "selected": 21,
+        "total": 98,
+        "mode": "failed-and-pending",
+        "reason": "Rerunning 21 not-yet-passed tests (12 failed first, then 9 skipped, then 0 pending/not-run) because 77 passed and 12 failed before healing."
+      }
+    },
+    "suiteSnapshot": {
+      "kind": "taken",
+      "dir": "/workspace/logs/runs/2000-01-01T0406-demo/suite",
+      "takenAt": "2000-01-01T04:06:01.308Z",
+      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "services": [],
+    "specEdits": {
+      "checkedAt": "2000-01-01T04:09:41.877Z",
+      "pending": [
+        {
+          "file": "e2e/delivery.spec.ts",
+          "change": "modified",
+          "affectedTests": []
+        }
+      ],
+      "adopted": []
+    }
+  },
+  "summary": {
+    "complete": true,
+    "total": 98,
+    "passed": 77,
+    "passedNames": [
+      "test-case-req-r1-path-happy-variant-demo-recorded-case-001",
+      "test-case-req-r1-path-sad-variant-demo-recorded-case-002",
+      "test-case-req-r1-path-sad-variant-demo-recorded-case-003",
+      "test-case-req-r4-path-happy-variant-demo-recorded-case-004",
+      "test-case-req-r4-path-happy-variant-demo-recorded-case-005",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-006",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-007",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-008",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-009",
+      "test-case-req-r20-path-sad-variant-demo-recorded-case-011",
+      "test-case-req-r20-path-sad-variant-demo-recorded-case-012",
+      "test-case-req-r16-path-happy-variant-demo-recorded-case-014",
+      "test-case-req-r16-path-sad-variant-demo-recorded-case-015",
+      "test-case-req-r17-path-happy-recorded-case-016",
+      "test-case-req-r17-path-sad-recorded-case-017",
+      "test-case-req-r17-path-sad-recorded-case-018",
+      "test-case-req-r17-path-sad-recorded-case-019",
+      "test-case-req-r20-path-happy-variant-demo-recorded-case-020",
+      "test-case-req-r3-path-happy-path-sad-variant-demo-recorded-case-021",
+      "test-case-req-r3-req-r25-path-sad-variant-demo-recorded-case-022",
+      "test-case-req-r21-path-happy-variant-demo-recorded-case-023",
+      "test-case-req-r27-path-happy-variant-demo-recorded-case-024",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-030",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-031",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-032",
+      "test-case-req-r22-path-sad-variant-demo-recorded-case-033",
+      "test-case-req-r26-path-sad-variant-demo-recorded-case-034",
+      "test-case-req-r26-path-sad-variant-demo-recorded-case-035",
+      "test-case-req-r26-path-sad-variant-demo-recorded-case-036",
+      "test-case-req-r13-req-r15-path-happy-variant-demo-recorded-case-037",
+      "test-case-req-r14-path-happy-variant-demo-recorded-case-038",
+      "test-case-req-r14-path-happy-variant-demo-recorded-case-039",
+      "test-case-req-r33-path-happy-variant-demo-recorded-case-040",
+      "test-case-req-r33-path-happy-variant-demo-recorded-case-042",
+      "test-case-req-r33-path-happy-variant-demo-recorded-case-044",
+      "test-case-req-r3-req-r33-path-sad-variant-demo-recorded-case-045",
+      "test-case-req-r34-path-happy-variant-demo-recorded-case-046",
+      "test-case-req-r34-path-sad-variant-demo-recorded-case-047",
+      "test-case-req-r13-path-sad-variant-demo-recorded-case-048",
+      "test-case-req-r13-path-sad-variant-demo-recorded-case-049",
+      "test-case-req-r13-path-sad-variant-demo-recorded-case-050",
+      "test-case-req-r3-req-r13-path-sad-variant-demo-recorded-case-051",
+      "test-case-req-r15-path-sad-recorded-case-052",
+      "test-case-req-r23-path-happy-variant-demo-recorded-case-053",
+      "test-case-req-r2-req-r1-path-happy-variant-demo-recorded-case-058",
+      "test-case-req-r2-path-sad-recorded-case-059",
+      "test-case-req-r2-path-sad-recorded-case-060",
+      "test-case-req-r1-path-sad-variant-demo-recorded-case-061",
+      "test-case-req-r1-path-sad-variant-demo-recorded-case-062",
+      "test-case-req-r5-req-r6-req-r8-path-happy-recorded-case-063",
+      "test-case-req-r5-req-r7-req-r8-path-happy-recorded-case-064",
+      "test-case-req-r7-path-happy-recorded-case-065",
+      "test-case-req-r5-req-r8-path-sad-recorded-case-066",
+      "test-case-req-r5-req-r8-path-sad-recorded-case-067",
+      "test-case-req-r5-req-r8-path-sad-recorded-case-068",
+      "test-case-req-r6-path-sad-recorded-case-069",
+      "test-case-req-r6-path-sad-recorded-case-070",
+      "test-case-req-r3-path-happy-variant-demo-recorded-case-071",
+      "test-case-req-r3-path-sad-variant-demo-recorded-case-073",
+      "test-case-req-r4-path-happy-variant-demo-recorded-case-074",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-075",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-076",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-077",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-078",
+      "test-case-req-r4-path-sad-variant-demo-recorded-case-079",
+      "test-case-req-r9-path-happy-recorded-case-081",
+      "test-case-req-r9-path-sad-recorded-case-082",
+      "test-case-req-r9-path-sad-recorded-case-083",
+      "test-case-req-r10-path-happy-recorded-case-085",
+      "test-case-req-r12-path-happy-recorded-case-087",
+      "test-case-req-r12-path-happy-recorded-case-088",
+      "test-case-req-r12-path-sad-recorded-case-089",
+      "test-case-req-r12-path-sad-recorded-case-090",
+      "test-case-req-r35-req-r3-path-happy-variant-demo-recorded-case-091",
+      "test-case-req-r27-req-r30-path-sad-variant-demo-recorded-case-093",
+      "test-case-req-r27-req-r30-path-sad-variant-demo-recorded-case-094",
+      "test-case-req-r25-path-sad-variant-demo-recorded-case-095"
+    ],
+    "passedIds": [
+      "test-id-case-001",
+      "test-id-case-002",
+      "test-id-case-003",
+      "test-id-case-004",
+      "test-id-case-005",
+      "test-id-case-006",
+      "test-id-case-007",
+      "test-id-case-008",
+      "test-id-case-009",
+      "test-id-case-011",
+      "test-id-case-012",
+      "test-id-case-014",
+      "test-id-case-015",
+      "test-id-case-016",
+      "test-id-case-017",
+      "test-id-case-018",
+      "test-id-case-019",
+      "test-id-case-020",
+      "test-id-case-021",
+      "test-id-case-022",
+      "test-id-case-023",
+      "test-id-case-024",
+      "test-id-case-030",
+      "test-id-case-031",
+      "test-id-case-032",
+      "test-id-case-033",
+      "test-id-case-034",
+      "test-id-case-035",
+      "test-id-case-036",
+      "test-id-case-037",
+      "test-id-case-038",
+      "test-id-case-039",
+      "test-id-case-040",
+      "test-id-case-042",
+      "test-id-case-044",
+      "test-id-case-045",
+      "test-id-case-046",
+      "test-id-case-047",
+      "test-id-case-048",
+      "test-id-case-049",
+      "test-id-case-050",
+      "test-id-case-051",
+      "test-id-case-052",
+      "test-id-case-053",
+      "test-id-case-058",
+      "test-id-case-059",
+      "test-id-case-060",
+      "test-id-case-061",
+      "test-id-case-062",
+      "test-id-case-063",
+      "test-id-case-064",
+      "test-id-case-065",
+      "test-id-case-066",
+      "test-id-case-067",
+      "test-id-case-068",
+      "test-id-case-069",
+      "test-id-case-070",
+      "test-id-case-071",
+      "test-id-case-073",
+      "test-id-case-074",
+      "test-id-case-075",
+      "test-id-case-076",
+      "test-id-case-077",
+      "test-id-case-078",
+      "test-id-case-079",
+      "test-id-case-081",
+      "test-id-case-082",
+      "test-id-case-083",
+      "test-id-case-085",
+      "test-id-case-087",
+      "test-id-case-088",
+      "test-id-case-089",
+      "test-id-case-090",
+      "test-id-case-091",
+      "test-id-case-093",
+      "test-id-case-094",
+      "test-id-case-095"
+    ],
+    "knownTests": [
+      {
+        "id": "test-id-case-001",
+        "name": "test-case-req-r1-path-happy-variant-demo-recorded-case-001",
+        "title": "@req-R1 @path-happy @variant-demo recorded case 001",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:70"
+      },
+      {
+        "id": "test-id-case-002",
+        "name": "test-case-req-r1-path-sad-variant-demo-recorded-case-002",
+        "title": "@req-R1 @path-sad @variant-demo recorded case 002",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:81"
+      },
+      {
+        "id": "test-id-case-003",
+        "name": "test-case-req-r1-path-sad-variant-demo-recorded-case-003",
+        "title": "@req-R1 @path-sad @variant-demo recorded case 003",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:81"
+      },
+      {
+        "id": "test-id-case-004",
+        "name": "test-case-req-r4-path-happy-variant-demo-recorded-case-004",
+        "title": "@req-R4 @path-happy @variant-demo recorded case 004",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:90"
+      },
+      {
+        "id": "test-id-case-005",
+        "name": "test-case-req-r4-path-happy-variant-demo-recorded-case-005",
+        "title": "@req-R4 @path-happy @variant-demo recorded case 005",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:90"
+      },
+      {
+        "id": "test-id-case-006",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-006",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 006",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:109"
+      },
+      {
+        "id": "test-id-case-007",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-007",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 007",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:109"
+      },
+      {
+        "id": "test-id-case-008",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-008",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 008",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:109"
+      },
+      {
+        "id": "test-id-case-009",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-009",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 009",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:109"
+      },
+      {
+        "id": "test-id-case-010",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-010",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 010",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:109"
+      },
+      {
+        "id": "test-id-case-011",
+        "name": "test-case-req-r20-path-sad-variant-demo-recorded-case-011",
+        "title": "@req-R20 @path-sad @variant-demo recorded case 011",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:117"
+      },
+      {
+        "id": "test-id-case-012",
+        "name": "test-case-req-r20-path-sad-variant-demo-recorded-case-012",
+        "title": "@req-R20 @path-sad @variant-demo recorded case 012",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:117"
+      },
+      {
+        "id": "test-id-case-013",
+        "name": "test-case-req-r21-path-sad-variant-demo-recorded-case-013",
+        "title": "@req-R21 @path-sad @variant-demo recorded case 013",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:126"
+      },
+      {
+        "id": "test-id-case-014",
+        "name": "test-case-req-r16-path-happy-variant-demo-recorded-case-014",
+        "title": "@req-R16 @path-happy @variant-demo recorded case 014",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:137"
+      },
+      {
+        "id": "test-id-case-015",
+        "name": "test-case-req-r16-path-sad-variant-demo-recorded-case-015",
+        "title": "@req-R16 @path-sad @variant-demo recorded case 015",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:145"
+      },
+      {
+        "id": "test-id-case-016",
+        "name": "test-case-req-r17-path-happy-recorded-case-016",
+        "title": "@req-R17 @path-happy recorded case 016",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:151"
+      },
+      {
+        "id": "test-id-case-017",
+        "name": "test-case-req-r17-path-sad-recorded-case-017",
+        "title": "@req-R17 @path-sad recorded case 017",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:166"
+      },
+      {
+        "id": "test-id-case-018",
+        "name": "test-case-req-r17-path-sad-recorded-case-018",
+        "title": "@req-R17 @path-sad recorded case 018",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:166"
+      },
+      {
+        "id": "test-id-case-019",
+        "name": "test-case-req-r17-path-sad-recorded-case-019",
+        "title": "@req-R17 @path-sad recorded case 019",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:166"
+      },
+      {
+        "id": "test-id-case-020",
+        "name": "test-case-req-r20-path-happy-variant-demo-recorded-case-020",
+        "title": "@req-R20 @path-happy @variant-demo recorded case 020",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:173"
+      },
+      {
+        "id": "test-id-case-021",
+        "name": "test-case-req-r3-path-happy-path-sad-variant-demo-recorded-case-021",
+        "title": "@req-R3 @path-happy @path-sad @variant-demo recorded case 021",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:183"
+      },
+      {
+        "id": "test-id-case-022",
+        "name": "test-case-req-r3-req-r25-path-sad-variant-demo-recorded-case-022",
+        "title": "@req-R3 @req-R25 @path-sad @variant-demo recorded case 022",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:195"
+      },
+      {
+        "id": "test-id-case-023",
+        "name": "test-case-req-r21-path-happy-variant-demo-recorded-case-023",
+        "title": "@req-R21 @path-happy @variant-demo recorded case 023",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:205"
+      },
+      {
+        "id": "test-id-case-024",
+        "name": "test-case-req-r27-path-happy-variant-demo-recorded-case-024",
+        "title": "@req-R27 @path-happy @variant-demo recorded case 024",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:219"
+      },
+      {
+        "id": "test-id-case-025",
+        "name": "test-case-req-r16-req-r18-req-r20-req-r21-path-happy-variant-demo-recorded-case-025",
+        "title": "@req-R16 @req-R18 @req-R20 @req-R21 @path-happy @variant-demo recorded case 025",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:343"
+      },
+      {
+        "id": "test-id-case-026",
+        "name": "test-case-req-r18-path-sad-variant-demo-recorded-case-026",
+        "title": "@req-R18 @path-sad @variant-demo recorded case 026",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:358"
+      },
+      {
+        "id": "test-id-case-027",
+        "name": "test-case-req-r19-path-happy-path-sad-variant-demo-recorded-case-027",
+        "title": "@req-R19 @path-happy @path-sad @variant-demo recorded case 027",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:376"
+      },
+      {
+        "id": "test-id-case-028",
+        "name": "test-case-req-r22-path-happy-variant-demo-recorded-case-028",
+        "title": "@req-R22 @path-happy @variant-demo recorded case 028",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:390"
+      },
+      {
+        "id": "test-id-case-029",
+        "name": "test-case-req-r3-path-sad-variant-demo-recorded-case-029",
+        "title": "@req-R3 @path-sad @variant-demo recorded case 029",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:423"
+      },
+      {
+        "id": "test-id-case-030",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-030",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 030",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:442"
+      },
+      {
+        "id": "test-id-case-031",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-031",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 031",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:442"
+      },
+      {
+        "id": "test-id-case-032",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-032",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 032",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:442"
+      },
+      {
+        "id": "test-id-case-033",
+        "name": "test-case-req-r22-path-sad-variant-demo-recorded-case-033",
+        "title": "@req-R22 @path-sad @variant-demo recorded case 033",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:448"
+      },
+      {
+        "id": "test-id-case-034",
+        "name": "test-case-req-r26-path-sad-variant-demo-recorded-case-034",
+        "title": "@req-R26 @path-sad @variant-demo recorded case 034",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:459"
+      },
+      {
+        "id": "test-id-case-035",
+        "name": "test-case-req-r26-path-sad-variant-demo-recorded-case-035",
+        "title": "@req-R26 @path-sad @variant-demo recorded case 035",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:459"
+      },
+      {
+        "id": "test-id-case-036",
+        "name": "test-case-req-r26-path-sad-variant-demo-recorded-case-036",
+        "title": "@req-R26 @path-sad @variant-demo recorded case 036",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:459"
+      },
+      {
+        "id": "test-id-case-037",
+        "name": "test-case-req-r13-req-r15-path-happy-variant-demo-recorded-case-037",
+        "title": "@req-R13 @req-R15 @path-happy @variant-demo recorded case 037",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:14"
+      },
+      {
+        "id": "test-id-case-038",
+        "name": "test-case-req-r14-path-happy-variant-demo-recorded-case-038",
+        "title": "@req-R14 @path-happy @variant-demo recorded case 038",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:32"
+      },
+      {
+        "id": "test-id-case-039",
+        "name": "test-case-req-r14-path-happy-variant-demo-recorded-case-039",
+        "title": "@req-R14 @path-happy @variant-demo recorded case 039",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:48"
+      },
+      {
+        "id": "test-id-case-040",
+        "name": "test-case-req-r33-path-happy-variant-demo-recorded-case-040",
+        "title": "@req-R33 @path-happy @variant-demo recorded case 040",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:58"
+      },
+      {
+        "id": "test-id-case-041",
+        "name": "test-case-req-r33-path-happy-variant-demo-recorded-case-041",
+        "title": "@req-R33 @path-happy @variant-demo recorded case 041",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:63"
+      },
+      {
+        "id": "test-id-case-042",
+        "name": "test-case-req-r33-path-happy-variant-demo-recorded-case-042",
+        "title": "@req-R33 @path-happy @variant-demo recorded case 042",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:58"
+      },
+      {
+        "id": "test-id-case-043",
+        "name": "test-case-req-r33-path-happy-variant-demo-recorded-case-043",
+        "title": "@req-R33 @path-happy @variant-demo recorded case 043",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:63"
+      },
+      {
+        "id": "test-id-case-044",
+        "name": "test-case-req-r33-path-happy-variant-demo-recorded-case-044",
+        "title": "@req-R33 @path-happy @variant-demo recorded case 044",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:71"
+      },
+      {
+        "id": "test-id-case-045",
+        "name": "test-case-req-r3-req-r33-path-sad-variant-demo-recorded-case-045",
+        "title": "@req-R3 @req-R33 @path-sad @variant-demo recorded case 045",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:79"
+      },
+      {
+        "id": "test-id-case-046",
+        "name": "test-case-req-r34-path-happy-variant-demo-recorded-case-046",
+        "title": "@req-R34 @path-happy @variant-demo recorded case 046",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:84"
+      },
+      {
+        "id": "test-id-case-047",
+        "name": "test-case-req-r34-path-sad-variant-demo-recorded-case-047",
+        "title": "@req-R34 @path-sad @variant-demo recorded case 047",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:94"
+      },
+      {
+        "id": "test-id-case-048",
+        "name": "test-case-req-r13-path-sad-variant-demo-recorded-case-048",
+        "title": "@req-R13 @path-sad @variant-demo recorded case 048",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:101"
+      },
+      {
+        "id": "test-id-case-049",
+        "name": "test-case-req-r13-path-sad-variant-demo-recorded-case-049",
+        "title": "@req-R13 @path-sad @variant-demo recorded case 049",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:101"
+      },
+      {
+        "id": "test-id-case-050",
+        "name": "test-case-req-r13-path-sad-variant-demo-recorded-case-050",
+        "title": "@req-R13 @path-sad @variant-demo recorded case 050",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:101"
+      },
+      {
+        "id": "test-id-case-051",
+        "name": "test-case-req-r3-req-r13-path-sad-variant-demo-recorded-case-051",
+        "title": "@req-R3 @req-R13 @path-sad @variant-demo recorded case 051",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:108"
+      },
+      {
+        "id": "test-id-case-052",
+        "name": "test-case-req-r15-path-sad-recorded-case-052",
+        "title": "@req-R15 @path-sad recorded case 052",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:113"
+      },
+      {
+        "id": "test-id-case-053",
+        "name": "test-case-req-r23-path-happy-variant-demo-recorded-case-053",
+        "title": "@req-R23 @path-happy @variant-demo recorded case 053",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:126"
+      },
+      {
+        "id": "test-id-case-054",
+        "name": "test-case-req-r24-path-happy-recorded-case-054",
+        "title": "@req-R24 @path-happy recorded case 054",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:135"
+      },
+      {
+        "id": "test-id-case-055",
+        "name": "test-case-req-r26-req-r27-req-r28-req-r29-path-happy-variant-demo-recorded-case-055",
+        "title": "@req-R26 @req-R27 @req-R28 @req-R29 @path-happy @variant-demo recorded case 055",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:140"
+      },
+      {
+        "id": "test-id-case-056",
+        "name": "test-case-req-r41-path-happy-variant-demo-recorded-case-056",
+        "title": "@req-R41 @path-happy @variant-demo recorded case 056",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:166"
+      },
+      {
+        "id": "test-id-case-057",
+        "name": "test-case-req-r30-path-happy-variant-demo-recorded-case-057",
+        "title": "@req-R30 @path-happy @variant-demo recorded case 057",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:172"
+      },
+      {
+        "id": "test-id-case-058",
+        "name": "test-case-req-r2-req-r1-path-happy-variant-demo-recorded-case-058",
+        "title": "@req-R2 @req-R1 @path-happy @variant-demo recorded case 058",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:119"
+      },
+      {
+        "id": "test-id-case-059",
+        "name": "test-case-req-r2-path-sad-recorded-case-059",
+        "title": "@req-R2 @path-sad recorded case 059",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:134"
+      },
+      {
+        "id": "test-id-case-060",
+        "name": "test-case-req-r2-path-sad-recorded-case-060",
+        "title": "@req-R2 @path-sad recorded case 060",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:144"
+      },
+      {
+        "id": "test-id-case-061",
+        "name": "test-case-req-r1-path-sad-variant-demo-recorded-case-061",
+        "title": "@req-R1 @path-sad @variant-demo recorded case 061",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:152"
+      },
+      {
+        "id": "test-id-case-062",
+        "name": "test-case-req-r1-path-sad-variant-demo-recorded-case-062",
+        "title": "@req-R1 @path-sad @variant-demo recorded case 062",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:152"
+      },
+      {
+        "id": "test-id-case-063",
+        "name": "test-case-req-r5-req-r6-req-r8-path-happy-recorded-case-063",
+        "title": "@req-R5 @req-R6 @req-R8 @path-happy recorded case 063",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:159"
+      },
+      {
+        "id": "test-id-case-064",
+        "name": "test-case-req-r5-req-r7-req-r8-path-happy-recorded-case-064",
+        "title": "@req-R5 @req-R7 @req-R8 @path-happy recorded case 064",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:168"
+      },
+      {
+        "id": "test-id-case-065",
+        "name": "test-case-req-r7-path-happy-recorded-case-065",
+        "title": "@req-R7 @path-happy recorded case 065",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:186"
+      },
+      {
+        "id": "test-id-case-066",
+        "name": "test-case-req-r5-req-r8-path-sad-recorded-case-066",
+        "title": "@req-R5 @req-R8 @path-sad recorded case 066",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:203"
+      },
+      {
+        "id": "test-id-case-067",
+        "name": "test-case-req-r5-req-r8-path-sad-recorded-case-067",
+        "title": "@req-R5 @req-R8 @path-sad recorded case 067",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:203"
+      },
+      {
+        "id": "test-id-case-068",
+        "name": "test-case-req-r5-req-r8-path-sad-recorded-case-068",
+        "title": "@req-R5 @req-R8 @path-sad recorded case 068",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:203"
+      },
+      {
+        "id": "test-id-case-069",
+        "name": "test-case-req-r6-path-sad-recorded-case-069",
+        "title": "@req-R6 @path-sad recorded case 069",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:211"
+      },
+      {
+        "id": "test-id-case-070",
+        "name": "test-case-req-r6-path-sad-recorded-case-070",
+        "title": "@req-R6 @path-sad recorded case 070",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:218"
+      },
+      {
+        "id": "test-id-case-071",
+        "name": "test-case-req-r3-path-happy-variant-demo-recorded-case-071",
+        "title": "@req-R3 @path-happy @variant-demo recorded case 071",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:227"
+      },
+      {
+        "id": "test-id-case-072",
+        "name": "test-case-req-r3-path-happy-variant-demo-recorded-case-072",
+        "title": "@req-R3 @path-happy @variant-demo recorded case 072",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:239"
+      },
+      {
+        "id": "test-id-case-073",
+        "name": "test-case-req-r3-path-sad-variant-demo-recorded-case-073",
+        "title": "@req-R3 @path-sad @variant-demo recorded case 073",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:245"
+      },
+      {
+        "id": "test-id-case-074",
+        "name": "test-case-req-r4-path-happy-variant-demo-recorded-case-074",
+        "title": "@req-R4 @path-happy @variant-demo recorded case 074",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:255"
+      },
+      {
+        "id": "test-id-case-075",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-075",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 075",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:269"
+      },
+      {
+        "id": "test-id-case-076",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-076",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 076",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:269"
+      },
+      {
+        "id": "test-id-case-077",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-077",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 077",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:269"
+      },
+      {
+        "id": "test-id-case-078",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-078",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 078",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:269"
+      },
+      {
+        "id": "test-id-case-079",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-079",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 079",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:269"
+      },
+      {
+        "id": "test-id-case-080",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-080",
+        "title": "@req-R4 @path-sad @variant-demo recorded case 080",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:269"
+      },
+      {
+        "id": "test-id-case-081",
+        "name": "test-case-req-r9-path-happy-recorded-case-081",
+        "title": "@req-R9 @path-happy recorded case 081",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:277"
+      },
+      {
+        "id": "test-id-case-082",
+        "name": "test-case-req-r9-path-sad-recorded-case-082",
+        "title": "@req-R9 @path-sad recorded case 082",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:287"
+      },
+      {
+        "id": "test-id-case-083",
+        "name": "test-case-req-r9-path-sad-recorded-case-083",
+        "title": "@req-R9 @path-sad recorded case 083",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:295"
+      },
+      {
+        "id": "test-id-case-084",
+        "name": "test-case-req-r3-req-r9-path-sad-variant-demo-recorded-case-084",
+        "title": "@req-R3 @req-R9 @path-sad @variant-demo recorded case 084",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:302"
+      },
+      {
+        "id": "test-id-case-085",
+        "name": "test-case-req-r10-path-happy-recorded-case-085",
+        "title": "@req-R10 @path-happy recorded case 085",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:310"
+      },
+      {
+        "id": "test-id-case-086",
+        "name": "test-case-req-r10-path-sad-recorded-case-086",
+        "title": "@req-R10 @path-sad recorded case 086",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:318"
+      },
+      {
+        "id": "test-id-case-087",
+        "name": "test-case-req-r12-path-happy-recorded-case-087",
+        "title": "@req-R12 @path-happy recorded case 087",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:334"
+      },
+      {
+        "id": "test-id-case-088",
+        "name": "test-case-req-r12-path-happy-recorded-case-088",
+        "title": "@req-R12 @path-happy recorded case 088",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:334"
+      },
+      {
+        "id": "test-id-case-089",
+        "name": "test-case-req-r12-path-sad-recorded-case-089",
+        "title": "@req-R12 @path-sad recorded case 089",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:348"
+      },
+      {
+        "id": "test-id-case-090",
+        "name": "test-case-req-r12-path-sad-recorded-case-090",
+        "title": "@req-R12 @path-sad recorded case 090",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:359"
+      },
+      {
+        "id": "test-id-case-091",
+        "name": "test-case-req-r35-req-r3-path-happy-variant-demo-recorded-case-091",
+        "title": "@req-R35 @req-R3 @path-happy @variant-demo recorded case 091",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:366"
+      },
+      {
+        "id": "test-id-case-092",
+        "name": "test-case-req-r35-req-r3-path-sad-variant-demo-recorded-case-092",
+        "title": "@req-R35 @req-R3 @path-sad @variant-demo recorded case 092",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:392"
+      },
+      {
+        "id": "test-id-case-093",
+        "name": "test-case-req-r27-req-r30-path-sad-variant-demo-recorded-case-093",
+        "title": "@req-R27 @req-R30 @path-sad @variant-demo recorded case 093",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/validation.spec.ts:26"
+      },
+      {
+        "id": "test-id-case-094",
+        "name": "test-case-req-r27-req-r30-path-sad-variant-demo-recorded-case-094",
+        "title": "@req-R27 @req-R30 @path-sad @variant-demo recorded case 094",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/validation.spec.ts:26"
+      },
+      {
+        "id": "test-id-case-095",
+        "name": "test-case-req-r25-path-sad-variant-demo-recorded-case-095",
+        "title": "@req-R25 @path-sad @variant-demo recorded case 095",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/validation.spec.ts:46"
+      },
+      {
+        "id": "test-id-case-096",
+        "name": "test-case-req-r31-req-r32-path-happy-variant-demo-recorded-case-096",
+        "title": "@req-R31 @req-R32 @path-happy @variant-demo recorded case 096",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/validation.spec.ts:58"
+      },
+      {
+        "id": "test-id-case-097",
+        "name": "test-case-req-r9-path-happy-variant-demo-recorded-case-097",
+        "title": "@req-R9 @path-happy @variant-demo recorded case 097",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/validation.spec.ts:77"
+      },
+      {
+        "id": "test-id-case-098",
+        "name": "test-case-req-r11-req-r7-path-happy-variant-demo-recorded-case-098",
+        "title": "@req-R11 @req-R7 @path-happy @variant-demo recorded case 098",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/validation.spec.ts:98"
+      }
+    ],
+    "skipped": 9,
+    "skippedNames": [
+      "test-case-req-r21-path-sad-variant-demo-recorded-case-013",
+      "test-case-req-r16-req-r18-req-r20-req-r21-path-happy-variant-demo-recorded-case-025",
+      "test-case-req-r18-path-sad-variant-demo-recorded-case-026",
+      "test-case-req-r19-path-happy-path-sad-variant-demo-recorded-case-027",
+      "test-case-req-r22-path-happy-variant-demo-recorded-case-028",
+      "test-case-req-r3-path-sad-variant-demo-recorded-case-029",
+      "test-case-req-r24-path-happy-recorded-case-054",
+      "test-case-req-r41-path-happy-variant-demo-recorded-case-056",
+      "test-case-req-r3-path-happy-variant-demo-recorded-case-072"
+    ],
+    "skippedIds": [
+      "test-id-case-013",
+      "test-id-case-025",
+      "test-id-case-026",
+      "test-id-case-027",
+      "test-id-case-028",
+      "test-id-case-029",
+      "test-id-case-054",
+      "test-id-case-056",
+      "test-id-case-072"
+    ],
+    "failed": [
+      {
+        "id": "test-id-case-010",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-010",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/records.spec.ts:109"
+      },
+      {
+        "id": "test-id-case-041",
+        "name": "test-case-req-r33-path-happy-variant-demo-recorded-case-041",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:63"
+      },
+      {
+        "id": "test-id-case-043",
+        "name": "test-case-req-r33-path-happy-variant-demo-recorded-case-043",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:63"
+      },
+      {
+        "id": "test-id-case-055",
+        "name": "test-case-req-r26-req-r27-req-r28-req-r29-path-happy-variant-demo-recorded-case-055",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:140"
+      },
+      {
+        "id": "test-id-case-057",
+        "name": "test-case-req-r30-path-happy-variant-demo-recorded-case-057",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/delivery.spec.ts:172"
+      },
+      {
+        "id": "test-id-case-080",
+        "name": "test-case-req-r4-path-sad-variant-demo-recorded-case-080",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:269"
+      },
+      {
+        "id": "test-id-case-084",
+        "name": "test-case-req-r3-req-r9-path-sad-variant-demo-recorded-case-084",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:302"
+      },
+      {
+        "id": "test-id-case-086",
+        "name": "test-case-req-r10-path-sad-recorded-case-086",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:318"
+      },
+      {
+        "id": "test-id-case-092",
+        "name": "test-case-req-r35-req-r3-path-sad-variant-demo-recorded-case-092",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/setup.spec.ts:392"
+      },
+      {
+        "id": "test-id-case-096",
+        "name": "test-case-req-r31-req-r32-path-happy-variant-demo-recorded-case-096",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/validation.spec.ts:58"
+      },
+      {
+        "id": "test-id-case-097",
+        "name": "test-case-req-r9-path-happy-variant-demo-recorded-case-097",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/validation.spec.ts:77"
+      },
+      {
+        "id": "test-id-case-098",
+        "name": "test-case-req-r11-req-r7-path-happy-variant-demo-recorded-case-098",
+        "location": "/workspace/logs/runs/2000-01-01T0406-demo/suite/e2e/validation.spec.ts:98"
+      }
+    ]
+  },
+  "specs": [
+    {
+      "file": "/workspace/features/sample-suite/e2e/records.spec.ts",
+      "tests": [
+        {
+          "name": "@req-R1 @path-happy @variant-demo recorded case 001",
+          "line": 70
+        },
+        {
+          "name": "@req-R1 @path-sad @variant-demo recorded case 002",
+          "line": 81
+        },
+        {
+          "name": "@req-R1 @path-sad @variant-demo recorded case 003",
+          "line": 81
+        },
+        {
+          "name": "@req-R4 @path-happy @variant-demo recorded case 004",
+          "line": 90
+        },
+        {
+          "name": "@req-R4 @path-happy @variant-demo recorded case 005",
+          "line": 90
+        },
+        {
+          "name": "@req-R4 @path-sad @variant-demo recorded case 009",
+          "line": 109
+        },
+        {
+          "name": "@req-R4 @path-sad @variant-demo recorded case 008",
+          "line": 109
+        },
+        {
+          "name": "@req-R4 @path-sad @variant-demo recorded case 006",
+          "line": 109
+        },
+        {
+          "name": "@req-R4 @path-sad @variant-demo recorded case 007",
+          "line": 109
+        },
+        {
+          "name": "@req-R4 @path-sad @variant-demo recorded case 010",
+          "line": 109
+        },
+        {
+          "name": "@req-R20 @path-sad @variant-demo recorded case 011",
+          "line": 117
+        },
+        {
+          "name": "@req-R20 @path-sad @variant-demo recorded case 012",
+          "line": 117
+        },
+        {
+          "name": "@req-R21 @path-sad @variant-demo recorded case 013",
+          "line": 126
+        },
+        {
+          "name": "@req-R16 @path-happy @variant-demo recorded case 014",
+          "line": 137
+        },
+        {
+          "name": "@req-R16 @path-sad @variant-demo recorded case 015",
+          "line": 145
+        },
+        {
+          "name": "@req-R17 @path-happy recorded case 016",
+          "line": 151
+        },
+        {
+          "name": "@req-R17 @path-sad recorded case 018",
+          "line": 166
+        },
+        {
+          "name": "@req-R17 @path-sad recorded case 019",
+          "line": 166
+        },
+        {
+          "name": "@req-R17 @path-sad recorded case 017",
+          "line": 166
+        },
+        {
+          "name": "@req-R20 @path-happy @variant-demo recorded case 020",
+          "line": 173
+        },
+        {
+          "name": "@req-R3 @path-happy @path-sad @variant-demo recorded case 021",
+          "line": 183
+        },
+        {
+          "name": "@req-R3 @req-R25 @path-sad @variant-demo recorded case 022",
+          "line": 195
+        },
+        {
+          "name": "@req-R21 @path-happy @variant-demo recorded case 023",
+          "line": 205
+        },
+        {
+          "name": "@req-R27 @path-happy @variant-demo recorded case 024",
+          "line": 219
+        },
+        {
+          "name": "@req-R16 @req-R18 @req-R20 @req-R21 @path-happy @variant-demo recorded case 025",
+          "line": 343
+        },
+        {
+          "name": "@req-R18 @path-sad @variant-demo recorded case 026",
+          "line": 358
+        },
+        {
+          "name": "@req-R19 @path-happy @path-sad @variant-demo recorded case 027",
+          "line": 376
+        },
+        {
+          "name": "@req-R22 @path-happy @variant-demo recorded case 028",
+          "line": 390
+        },
+        {
+          "name": "@req-R3 @path-sad @variant-demo recorded case 029",
+          "line": 423
+        },
+        {
+          "name": "@req-R4 @path-sad @variant-demo recorded case 032",
+          "line": 442
+        },
+        {
+          "name": "@req-R4 @path-sad @variant-demo recorded case 031",
+          "line": 442
+        },
+        {
+          "name": "@req-R4 @path-sad @variant-demo recorded case 030",
+          "line": 442
+        },
+        {
+          "name": "@req-R22 @path-sad @variant-demo recorded case 033",
+          "line": 448
+        },
+        {
+          "name": "@req-R26 @path-sad @variant-demo recorded case 036",
+          "line": 459
+        },
+        {
+          "name": "@req-R26 @path-sad @variant-demo recorded case 034",
+          "line": 459
+        },
+        {
+          "name": "@req-R26 @path-sad @variant-demo recorded case 035",
+          "line": 459
+        }
+      ]
+    },
+    {
+      "file": "/workspace/features/sample-suite/e2e/delivery.spec.ts",
+      "tests": [
+        {
+          "name": "@req-R13 @req-R15 @path-happy @variant-demo recorded case 037",
+          "line": 14
+        },
+        {
+          "name": "@req-R14 @path-happy @variant-demo recorded case 038",
+          "line": 32
+        },
+        {
+          "name": "@req-R14 @path-happy @variant-demo recorded case 039",
+          "line": 48
+        },
+        {
+          "name": "@req-R33 @path-happy @variant-demo recorded case 040",
+          "line": 58
+        },
+        {
+          "name": "@req-R33 @path-happy @variant-demo recorded case 042",
+          "line": 58
+        },
+        {
+          "name": "@req-R33 @path-happy @variant-demo recorded case 041",
+          "line": 63
+        },
+        {
+          "name": "@req-R33 @path-happy @variant-demo recorded case 043",
+          "line": 63
+        },
+        {
+          "name": "@req-R33 @path-happy @variant-demo recorded case 044",
+          "line": 71
+        },
+        {
+          "name": "@req-R3 @req-R33 @path-sad @variant-demo recorded case 045",
+          "line": 79
+        },
+        {
+          "name": "@req-R34 @path-happy @variant-demo recorded case 046",
+          "line": 84
+        },
+        {
+          "name": "@req-R34 @path-sad @variant-demo recorded case 047",
+          "line": 94
+        },
+        {
+          "name": "@req-R13 @path-sad @variant-demo recorded case 049",
+          "line": 101
+        },
+        {
+          "name": "@req-R13 @path-sad @variant-demo recorded case 050",
+          "line": 101
+        },
+        {
+          "name": "@req-R13 @path-sad @variant-demo recorded case 048",
+          "line": 101
+        },
+        {
+          "name": "@req-R3 @req-R13 @path-sad @variant-demo recorded case 051",
+          "line": 108
+        },
+        {
+          "name": "@req-R15 @path-sad recorded case 052",
+          "line": 113
+        },
+        {
+          "name": "@req-R23 @path-happy @variant-demo recorded case 053",
+          "line": 126
+        },
+        {
+          "name": "@req-R24 @path-happy recorded case 054",
+          "line": 135
+        },
+        {
+          "name": "@req-R26 @req-R27 @req-R28 @req-R29 @path-happy @variant-demo recorded case 055",
+          "line": 140
+        },
+        {
+          "name": "@req-R41 @path-happy @variant-demo recorded case 056",
+          "line": 166
+        },
+        {
+          "name": "@req-R30 @path-happy @variant-demo recorded case 057",
+          "line": 172
+        }
+      ]
+    },
+    {
+      "file": "/workspace/features/sample-suite/e2e/setup.spec.ts",
+      "tests": [
+        {
+          "name": "@req-R2 @req-R1 @path-happy @variant-demo recorded case 058",
+          "line": 119
+        },
+        {
+          "name": "@req-R2 @path-sad recorded case 059",
+          "line": 134
+        },
+        {
+          "name": "@req-R2 @path-sad recorded case 060",
+          "line": 144
+        },
+        {
+          "name": "@req-R1 @path-sad @variant-demo recorded case 061",
+          "line": 152
+        },
+        {
+          "name": "@req-R1 @path-sad @variant-demo recorded case 062",
+          "line": 152
+        },
+        {
+          "name": "@req-R5 @req-R6 @req-R8 @path-happy recorded case 063",
+          "line": 159
+        },
+        {
+          "name": "@req-R5 @req-R7 @req-R8 @path-happy recorded case 064",
+          "line": 168
+        },
+        {
+          "name": "@req-R7 @path-happy recorded case 065",
+          "line": 186
+        },
+        {
+          "name": "@req-R5 @req-R8 @path-sad recorded case 067",
+          "line": 203
+        },
+        {
+          "name": "@req-R5 @req-R8 @path-sad recorded case 066",
+          "line": 203
+        },
+        {
+          "name": "@req-R5 @req-R8 @path-sad recorded case 068",
+          "line": 203
+        },
+        {
+          "name": "@req-R6 @path-sad recorded case 069",
+          "line": 211
+        },
+        {
+          "name": "@req-R6 @path-sad recorded case 070",
+          "line": 218
+        },
+        {
+          "name": "@req-R3 @path-happy @variant-demo recorded case 071",
+          "line": 227
+        },
+        {
+          "name": "@req-R3 @path-happy @variant-demo recorded case 072",
+          "line": 239
+        },
+        {
+          "name": "@req-R3 @path-sad @variant-demo recorded case 073",
+          "line": 245
+        },
+        {
+          "name": "@req-R4 @path-happy @variant-demo recorded case 074",
+          "line": 255
+        },
+        {
+          "name": "@req-R4 @path-sad @variant-demo recorded case 078",
+          "line": 269
+        },
+        {
+          "name": "@req-R4 @path-sad @variant-demo recorded case 076",
+          "line": 269
+        },
+        {
+          "name": "@req-R4 @path-sad @variant-demo recorded case 080",
+          "line": 269
+        },
+        {
+          "name": "@req-R4 @path-sad @variant-demo recorded case 079",
+          "line": 269
+        },
+        {
+          "name": "@req-R4 @path-sad @variant-demo recorded case 077",
+          "line": 269
+        },
+        {
+          "name": "@req-R4 @path-sad @variant-demo recorded case 075",
+          "line": 269
+        },
+        {
+          "name": "@req-R9 @path-happy recorded case 081",
+          "line": 277
+        },
+        {
+          "name": "@req-R9 @path-sad recorded case 082",
+          "line": 287
+        },
+        {
+          "name": "@req-R9 @path-sad recorded case 083",
+          "line": 295
+        },
+        {
+          "name": "@req-R3 @req-R9 @path-sad @variant-demo recorded case 084",
+          "line": 302
+        },
+        {
+          "name": "@req-R10 @path-happy recorded case 085",
+          "line": 310
+        },
+        {
+          "name": "@req-R10 @path-sad recorded case 086",
+          "line": 318
+        },
+        {
+          "name": "@req-R12 @path-happy recorded case 088",
+          "line": 334
+        },
+        {
+          "name": "@req-R12 @path-happy recorded case 087",
+          "line": 334
+        },
+        {
+          "name": "@req-R12 @path-sad recorded case 089",
+          "line": 348
+        },
+        {
+          "name": "@req-R12 @path-sad recorded case 090",
+          "line": 359
+        },
+        {
+          "name": "@req-R35 @req-R3 @path-happy @variant-demo recorded case 091",
+          "line": 366
+        },
+        {
+          "name": "@req-R35 @req-R3 @path-sad @variant-demo recorded case 092",
+          "line": 392
+        }
+      ]
+    },
+    {
+      "file": "/workspace/features/sample-suite/e2e/validation.spec.ts",
+      "tests": [
+        {
+          "name": "@req-R27 @req-R30 @path-sad @variant-demo recorded case 093",
+          "line": 26
+        },
+        {
+          "name": "@req-R27 @req-R30 @path-sad @variant-demo recorded case 094",
+          "line": 26
+        },
+        {
+          "name": "@req-R25 @path-sad @variant-demo recorded case 095",
+          "line": 46
+        },
+        {
+          "name": "@req-R31 @req-R32 @path-happy @variant-demo recorded case 096",
+          "line": 58
+        },
+        {
+          "name": "@req-R9 @path-happy @variant-demo recorded case 097",
+          "line": 77
+        },
+        {
+          "name": "@req-R11 @req-R7 @path-happy @variant-demo recorded case 098",
+          "line": 98
+        }
+      ]
+    }
+  ]
+}

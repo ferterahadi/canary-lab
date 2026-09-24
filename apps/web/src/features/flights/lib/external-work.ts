@@ -74,14 +74,14 @@ export function externalWorkChipTitle(verb: string): string {
  *  the flight's `currentStage`, so map exactly that one. */
 export function presentedIndexStages(
   entry: Pick<FlightIndexEntry, 'status' | 'checkpointKind' | 'currentStage' | 'stages'>,
-): Array<{ key: FlightStageKey; status: FlightStageStatus }> {
+): NonNullable<FlightIndexEntry['stages']> {
   const stages = entry.stages ?? []
-  if (!isExternalWorkPark(entry)) return stages
-  return stages.map((s) => (
-    s.key === entry.currentStage && s.status === 'waiting-for-approval'
-      ? { ...s, status: 'running' as FlightStageStatus }
-      : s
-  ))
+  return stages.map((stage) => ({
+    ...stage,
+    status: stage.key === entry.currentStage && stage.status === 'waiting-for-approval' && isExternalWorkPark(entry)
+      ? 'running' as const
+      : stage.status === 'skipped' && stage.hasEvidence ? 'done' as const : stage.status,
+  }))
 }
 
 // ---------------------------------------------------------------------------

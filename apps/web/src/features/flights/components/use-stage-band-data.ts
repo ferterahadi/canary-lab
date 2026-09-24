@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import { useLiveResource } from '@/shared/state/use-live-resource'
+import { useLiveCoverage } from '@/shared/state/use-live-coverage'
 import { usePortify, usePortifyWorkflow } from '@/features/portify'
 import type { FlightManifest, FlightStage } from '@/shared/api/client'
 import type { CoverageLedger, EvaluationExportTask, FeatureDocsListing, RunDetail } from '@/shared/api/types'
@@ -48,19 +49,13 @@ export function useStageBandData(
   const needsConfig = stageKey === 'scout'
   const needsBoot = stageKey === 'scaffold' || stageKey === 'env-capture'
   const needsDocs = stageKey === 'docs'
-
   // `coverage` is the live trigger: the specs↔coverage loop publishes
   // `coverage-changed` the moment each pass's mapping lands, and the stage stays
   // MOUNTED across the whole loop. Fetched once, the composition card kept the
   // pre-mapping snapshot and a settled stage showed "100% covered" beside
   // "Untested 18" — one card apart, from the same ledger. A feature with no PRD
   // summary has no ledger at all; the tiles that read it simply don't render.
-  const { value: ledger, loading: ledgerLoading } = useLiveResource<CoverageLedger>(
-    'coverage',
-    needsLedger ? feature : null,
-    (f) => api.getFeatureCoverage(f),
-    { cache: 'ledger' },
-  )
+  const { value: ledger, loading: ledgerLoading, confirmed: ledgerConfirmed } = useLiveCoverage(needsLedger ? feature : null)
 
   // Keyed on the run id when the stage recorded one, else on the feature (the
   // probe path below). `repos` is the live trigger: a re-boot writes a new run,
@@ -155,6 +150,7 @@ export function useStageBandData(
       || (portifyId != null && !livePortify && hydratedId !== portifyId),
     evalTask,
     ledger,
+    ledgerConfirmed,
     boot,
     portify: livePortify ?? null,
     config,

@@ -36,9 +36,13 @@ describe('git-repo subprocess edge cases', () => {
 
   it('surfaces default checkout failure text when git emits no output', async () => {
     const repo = tmpDir()
+    // One reply per subprocess getGitStatus spawns — is-inside-work-tree, then
+    // the branch / HEAD sha / porcelain status / local refs / remote refs
+    // quintet — followed by the checkout itself.
     mockGitSequence([
       { stdout: 'true\n' },
       { stdout: 'main\n' },
+      { stdout: `${'a'.repeat(40)}\n` },
       { stdout: '' },
       { stdout: 'main\n' },
       { stdout: '' },

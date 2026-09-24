@@ -8,10 +8,14 @@ export type { ExternalHealAgentRequest } from './runs-route-support'
 
 import { registerRunActionRoutes } from './runs-actions'
 import { registerRunCleanupRoutes } from './runs-cleanup-routes'
+import { registerRunTestReviewRoutes } from './runs-test-review'
 import { registerRunReadRoutes } from './runs-read'
+import { registerRunStartRequests } from './run-start-requests'
 
 export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
+  deps = { ...deps, runRequests: registerRunStartRequests(app, deps) }
   await registerRunReadRoutes(app, deps)
+  await registerRunTestReviewRoutes(app, deps)
   await registerRunActionRoutes(app, deps)
   await registerRunCleanupRoutes(app, deps)
 }

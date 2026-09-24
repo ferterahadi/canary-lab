@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import type {
   ReadableSource,
   ReadableStoryFlowKind,
@@ -23,7 +23,7 @@ interface ReadableExecutionHighlight {
 }
 
 // English mode is one source-ordered test story. The role label remains on
-// every line, so setup/action/check meaning stays visible without moving steps
+// every line, so test/setup/action/check meaning stays visible without moving steps
 // away from their authored execution position.
 export function ReadableTestView({
   test,
@@ -49,7 +49,10 @@ export function ReadableTestView({
       data-testid="readable-test-story"
       className="shiki-block cl-code-shell overflow-hidden rounded-md text-[11px]"
     >
-      <div className="cl-readable-body" style={{ backgroundColor: canvas.bg, color: canvas.fg }}>
+      <div
+        className="cl-readable-body"
+        style={{ backgroundColor: canvas.bg, color: canvas.fg, '--code-comment': canvas.comment } as CSSProperties}
+      >
         {steps.length ? (
           <StorySequence
             steps={steps}
@@ -133,6 +136,7 @@ function StoryRow({
   const sequenceLabel = storySequenceLabel(sequence)
   const localSequenceLabel = storyLocalSequenceLabel(sequence)
   const keyword = storyKeyword(step)
+  const displayText = storyDisplayText(step)
   const selected = selectedNodeId === step.id
   const executionKind = executionHighlight?.nodeId === step.id
     ? executionHighlight.kind
@@ -141,6 +145,7 @@ function StoryRow({
   const executionLabel = executionKind === 'running' ? 'RUNNING' : 'FAILED HERE'
   const executionDescription = executionKind === 'running' ? 'Currently running' : 'Last failed here'
   const executionColor = executionKind === 'failed' ? 'var(--danger)' : 'var(--running)'
+  const executionNestingOffset = `${(sequence.length - 1) * 1.25}rem`
   return (
     <li
       data-story-role={step.role}
@@ -155,20 +160,23 @@ function StoryRow({
         data-execution-highlight={executionKind}
         data-changed-source={changed ? 'true' : undefined}
         aria-pressed={selected}
-        aria-label={`${sequenceLabel}. ${keyword}: ${step.text}. ${changed ? 'Modified since the committed test. ' : ''}${executionKind ? `${executionDescription}. ` : ''}Show ${sourceLabel(step.source)}`}
+        aria-label={`${sequenceLabel}. ${keyword}: ${displayText}. ${changed ? 'Modified since the committed test. ' : ''}${executionKind ? `${executionDescription}. ` : ''}Show ${sourceLabel(step.source)}`}
         title={`Step ${sequenceLabel} — ${sourceLabel(step.source)} — ${fidelityTitle(step.fidelity)}${changed ? ' — Modified since the committed test' : ''}${executionKind ? ` — ${executionDescription}` : ''}`}
         onClick={() => onSourceSelect?.({ id: step.id, source: step.source })}
         className="grid w-full grid-cols-[2ch_8ch_minmax(0,1fr)] items-start gap-x-2 px-2 py-0 text-left leading-[1.65] transition-colors hover:bg-running/10"
         style={{
+          marginLeft: executionKind ? `-${executionNestingOffset}` : undefined,
+          width: executionKind ? `calc(100% + ${executionNestingOffset})` : undefined,
+          paddingLeft: executionKind ? `calc(0.5rem + ${executionNestingOffset})` : undefined,
           background: executionKind
             ? `color-mix(in srgb, ${executionColor} 18%, transparent)`
             : changed
-              ? 'color-mix(in srgb, var(--danger) 16%, transparent)'
+              ? 'color-mix(in srgb, var(--warning) 16%, transparent)'
               : selected ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : undefined,
           boxShadow: executionKind
             ? `inset 2px 0 0 ${executionColor}`
             : changed
-              ? 'inset 2px 0 0 var(--danger)'
+              ? 'inset 2px 0 0 var(--warning)'
               : selected ? 'inset 2px 0 0 var(--accent)' : undefined,
         }}
       >
@@ -180,23 +188,16 @@ function StoryRow({
         >
           {localSequenceLabel}
         </span>
-        <span
-          data-testid={`readable-story-role-${step.id}`}
-          style={{ color: storyKeywordColor(step), fontWeight: 600 }}
-        >
-          {keyword}
-        </span>
-        <span className="min-w-0 whitespace-pre-wrap break-words">
-          {step.spans.map((span, index) => <StorySpan key={index} span={span} />)}
+        <ReadableStoryText step={step}>
           {fileNote && <span style={{ color: 'var(--text-muted)' }}> {`// ${fileNote}`}</span>}
           {changed && (
             <span
               data-testid={`readable-modified-${step.id}`}
               className="ml-2 inline-flex rounded border px-1 text-[9px] font-semibold leading-[1.4]"
               style={{
-                color: 'var(--danger)',
-                borderColor: 'color-mix(in srgb, var(--danger) 65%, transparent)',
-                background: 'color-mix(in srgb, var(--danger) 10%, transparent)',
+                color: 'var(--warning)',
+                borderColor: 'color-mix(in srgb, var(--warning) 65%, transparent)',
+                background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
                 fontFamily: 'var(--font-mono)',
               }}
             >
@@ -205,18 +206,12 @@ function StoryRow({
           )}
           {executionKind && (
             <span
-              className="ml-2 inline-flex rounded border px-1 text-[9px] font-semibold leading-[1.4]"
-              style={{
-                color: executionColor,
-                borderColor: `color-mix(in srgb, ${executionColor} 65%, transparent)`,
-                background: `color-mix(in srgb, ${executionColor} 10%, transparent)`,
-                fontFamily: 'var(--font-mono)',
-              }}
+              className={`cl-execution-label cl-execution-label-${executionKind}`}
             >
               {executionLabel}
             </span>
           )}
-        </span>
+        </ReadableStoryText>
       </button>
       {step.kind === 'flow' && step.children.length > 0 && (
         <StorySequence
@@ -233,11 +228,11 @@ function StoryRow({
   )
 }
 
-function StorySpan({ span }: { span: ReadableStorySpan }) {
+function StorySpan({ span, color }: { span: ReadableStorySpan; color?: string }) {
   return (
     <span
       data-story-span={span.kind ?? 'text'}
-      style={{ color: storySpanColor(span.kind) }}
+      style={{ color: color ?? storySpanColor(span.kind) }}
     >
       {span.text}
     </span>
@@ -258,8 +253,9 @@ function storySpanColor(kind: ReadableStorySpan['kind']): string | undefined {
 }
 
 function roleColor(role: ReadableStoryRole): string {
+  if (role === 'note') return 'var(--code-comment)'
   if (role === 'setup') return 'var(--code-cyan)'
-  if (role === 'action') return 'var(--code-keyword)'
+  if (role === 'action' || role === 'output' || role === 'test') return 'var(--code-keyword)'
   return 'var(--semantic-attention)'
 }
 
@@ -275,7 +271,7 @@ function storyKeyword(step: ReadableStoryItem): string {
     scope: roleLabel(step.role),
     condition: 'IF',
     then: 'THEN',
-    otherwise: 'OTHERWISE',
+    otherwise: 'ELSE',
     switch: 'SWITCH',
     case: 'WHEN',
     loop: 'REPEAT',
@@ -287,29 +283,63 @@ function storyKeyword(step: ReadableStoryItem): string {
   return keywords[step.flowKind]
 }
 
-function roleLabel(role: ReadableStoryRole): 'SETUP' | 'ACTION' | 'CHECK' {
+function roleLabel(role: ReadableStoryRole): 'TEST' | 'SETUP' | 'ACTION' | 'OUTPUT' | 'CHECK' | 'NOTE' {
+  if (role === 'note') return 'NOTE'
+  if (role === 'test') return 'TEST'
   if (role === 'setup') return 'SETUP'
   if (role === 'action') return 'ACTION'
+  if (role === 'output') return 'OUTPUT'
   return 'CHECK'
+}
+
+function redundantStoryPrefix(step: ReadableStoryItem): string {
+  const keyword = storyKeyword(step)
+  if (keyword === 'TEST' && step.text.startsWith('Test: ')) return 'Test: '
+  if (keyword === 'CHECK' && step.text.startsWith('Check that ')) return 'Check that '
+  if (keyword === 'OUTPUT' && step.text.startsWith('Output ')) return 'Output '
+  return ''
+}
+
+function storyDisplayText(step: ReadableStoryItem): string {
+  return step.text.slice(redundantStoryPrefix(step).length)
+}
+
+function storyDisplaySpans(step: ReadableStoryItem): ReadableStorySpan[] {
+  let remaining = redundantStoryPrefix(step).length
+  if (remaining === 0) return step.spans
+  const spans: ReadableStorySpan[] = []
+  for (const span of step.spans) {
+    if (remaining >= span.text.length) {
+      remaining -= span.text.length
+      continue
+    }
+    spans.push(remaining > 0 ? { ...span, text: span.text.slice(remaining) } : span)
+    remaining = 0
+  }
+  return spans
 }
 
 /** The Shiki theme's canvas colours, shared with Code mode. Until Shiki is
  * ready, the same shell tokens provide the initial background and foreground. */
-function useCodeThemeColors(): { bg: string; fg: string } {
+function useCodeThemeColors(): { bg: string; fg: string; comment: string } {
   const { resolved } = useTheme()
-  const [canvas, setCanvas] = useState<{ bg: string; fg: string } | null>(null)
+  const [canvas, setCanvas] = useState<{ bg: string; fg: string; comment: string } | null>(null)
   useEffect(() => {
     let cancelled = false
     getCodeHighlighter()
       .then((highlighter) => {
         if (cancelled) return
         const colors = highlighter.themeColors(codeThemeFor(resolved))
-        setCanvas({ bg: colors.bg ?? 'var(--bg-input)', fg: colors.fg ?? 'var(--text-primary)' })
+        setCanvas({
+          bg: colors.bg ?? 'var(--bg-input)',
+          fg: colors.fg ?? 'var(--text-primary)',
+          comment: colors.comment ?? 'var(--text-muted)',
+        })
       })
       .catch(() => { if (!cancelled) setCanvas(null) })
     return () => { cancelled = true }
   }, [resolved])
-  return canvas ?? { bg: 'var(--bg-input)', fg: 'var(--text-primary)' }
+  return canvas ?? { bg: 'var(--bg-input)', fg: 'var(--text-primary)', comment: 'var(--text-muted)' }
 }
 
 function fidelityTitle(fidelity: ReadableStoryItem['fidelity']): string {
@@ -326,4 +356,19 @@ function sourceLabel(source: ReadableSource): string {
     ? `L${source.startLine}`
     : `L${source.startLine}–${source.endLine}`
   return `${fileName(source.file)}:${line}`
+}
+
+/** The semantic row shared by test stories and source-aligned English diffs. */
+export function ReadableStoryText({ step, children }: { step: ReadableStoryItem; children?: ReactNode }) {
+  const noteColor = step.role === 'note' ? roleColor(step.role) : undefined
+  return <>
+    <span data-testid={`readable-story-role-${step.id}`} style={{ color: storyKeywordColor(step), fontWeight: 600 }}>
+      {storyKeyword(step)}
+    </span>
+    <span className="min-w-0 whitespace-pre-wrap break-words" style={{ color: noteColor }}>
+      {step.presentation === 'syntax-fallback' && <span style={{ color: 'var(--semantic-attention)' }}>English incomplete · </span>}
+      {storyDisplaySpans(step).map((span, index) => <StorySpan key={index} span={span} color={noteColor} />)}
+      {children}
+    </span>
+  </>
 }

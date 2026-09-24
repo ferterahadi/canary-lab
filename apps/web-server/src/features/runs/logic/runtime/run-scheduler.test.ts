@@ -109,3 +109,32 @@ describe('RunScheduler.promote', () => {
     expect(s.isQueued('q3')).toBe(true)
   })
 })
+
+describe('RunScheduler diagnostics', () => {
+  it('explains the current limiting budget without launching, and recomputes after capacity changes', () => {
+    const active = [{ runId: 'review', feature: 'scope', repoPaths: ['/scope'], cost: 2 }]
+    const s = scheduler(active, heuristic, { cpuCount: 8, freeMemBytes: GB })
+    const launched: string[] = []
+    s.enqueue({ runId: 'q', feature: 'merchant', repoPaths: ['/merchant'], cost: 2, reason: 'resources', launch: async () => { launched.push('q') } })
+    expect(s.diagnostics('q')).toMatchObject({ reason: 'memory', slotBudget: 1, usedSlots: 2, candidateCost: 2, activeRuns: [{ runId: 'review', feature: 'scope', cost: 2 }] })
+    expect(s.fits({ repoPaths: ['/merchant'], cost: 2 })).toEqual({ ok: false, reason: 'resources' })
+    active.length = 0
+    expect(s.diagnostics('q')?.reason).toBe('ready')
+    expect(s.isQueued('q')).toBe(true)
+    expect(launched).toEqual([])
+    s.cancel('q')
+    expect(s.diagnostics('q')).toBeNull()
+  })
+
+  it.each([
+    { paths: ['/scope'], config: heuristic, resources: bigBox, reason: 'repo-collision' },
+    { paths: ['/other'], config: { ...heuristic, maxConcurrentRuns: 1 }, resources: bigBox, reason: 'run-limit' },
+    { paths: ['/other'], config: heuristic, resources: { ...bigBox, cpuCount: 2 }, reason: 'cpu' },
+  ])('identifies $reason from admission inputs', ({ paths, config, resources, reason }) => {
+    const s = scheduler([{ runId: 'active', feature: 'scope', repoPaths: ['/scope'], cost: 2 }], config, resources)
+    s.enqueue({ runId: 'q', feature: 'merchant', repoPaths: paths, cost: 2, reason: 'resources', launch: async () => {} })
+    const d = s.diagnostics('q')!
+    expect(d.reason).toBe(reason)
+    expect(d.conflictingRunId).toBe(reason === 'repo-collision' ? 'active' : undefined)
+  })
+})

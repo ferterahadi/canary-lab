@@ -1,5 +1,7 @@
 import { buildPrPreflight } from './pr-preflight'
 import { proposeFixesForRun } from './propose-fixes'
+import { verdictProvenanceOf } from './pr-provenance'
+import { readManifest } from '../runtime/manifest'
 import { commitModelPlans } from '../runtime/run-model-plan'
 import { loadProjectConfig } from '../runtime/launcher/project-config'
 import type { RunContext } from '../runtime/run-context'
@@ -72,12 +74,17 @@ export async function autoProposeFixes(opts: {
 
   const fixCapture = capture as RunFixCapture
   const preflight = await preflightFor(fixCapture)
+  // The manifest on disk is the record of the boundary: recordSpecEdits wrote
+  // the pending/adopted edits and hints there after the last Playwright exit,
+  // which is before teardown reaches this call.
+  const verdict = verdictProvenanceOf(readManifest(ctx.paths.manifestPath))
   const results = await propose({
     runId: ctx.runId,
     feature: ctx.feature.name,
     fixCapture,
     preflight,
     draft: true,
+    ...(verdict ? { verdict } : {}),
     // Commit-stage choices per agent, with the run's launch-resolved choice
     // laid over the agent the run locked to.
     models: commitModelPlans(

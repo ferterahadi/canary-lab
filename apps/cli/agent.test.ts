@@ -2,9 +2,65 @@ import { describe, expect, it } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { recordManagedSkill } from './agent-skill-ownership'
 import { install, installOrRefresh, main, refreshInstalled, refreshAgentIntegrationsQuietly } from './agent'
 
+const legacySkill = fs.readFileSync(path.join(__dirname, 'fixtures', 'legacy-canary-skill.md'), 'utf-8')
+
 describe('canary-lab agent install', () => {
+  it('migrates managed legacy skills to the canonical location and keeps a backup', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-skill-migration-'))
+    try {
+      const legacy = path.join(home, '.codex', 'skills', 'canary-lab')
+      fs.mkdirSync(legacy, { recursive: true })
+      fs.writeFileSync(path.join(legacy, 'SKILL.md'), legacySkill)
+      recordManagedSkill(legacy, home)
+      installOrRefresh('codex', { homeDir: home, force: true, log: () => {} })
+      expect(fs.existsSync(legacy)).toBe(false)
+      const canonical = path.join(home, '.agents', 'skills', 'canary-lab', 'SKILL.md')
+      expect(fs.readFileSync(canonical, 'utf-8')).toContain('start_flight')
+      const backups = path.join(home, '.canary-lab', 'agent-integrations', 'skill-backups')
+      const backup = fs.readdirSync(backups)[0]
+      expect(fs.readFileSync(path.join(backups, backup, 'canary-lab', 'SKILL.md'), 'utf-8')).toBe(legacySkill)
+      const modified = fs.statSync(canonical).mtimeMs
+      expect(installOrRefresh('codex', { homeDir: home, force: true, log: () => {} })).toBe(0)
+      expect(fs.statSync(canonical).mtimeMs).toBe(modified)
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps customized copies intact and fails before installing other skills', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-skill-custom-'))
+    try {
+      const custom = path.join(home, '.agents', 'skills', 'canary-lab-run', 'SKILL.md')
+      fs.mkdirSync(path.dirname(custom), { recursive: true })
+      fs.writeFileSync(custom, 'custom instructions')
+      expect(() => installOrRefresh('all', { homeDir: home, force: true, log: () => {} })).toThrow(/Customized or unrecognized/)
+      expect(fs.readFileSync(custom, 'utf-8')).toBe('custom instructions')
+      expect(fs.existsSync(path.join(home, '.claude'))).toBe(false)
+      expect(fs.existsSync(path.join(home, '.agents', 'skills', 'canary-lab'))).toBe(false)
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('previews legacy migration without creating backups or moving files', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-skill-preview-'))
+    try {
+      const legacy = path.join(home, '.codex', 'skills', 'canary-lab', 'SKILL.md')
+      fs.mkdirSync(path.dirname(legacy), { recursive: true })
+      fs.writeFileSync(legacy, legacySkill)
+      recordManagedSkill(path.dirname(legacy), home)
+      installOrRefresh('codex', { homeDir: home, dryRun: true, log: () => {} })
+      expect(fs.readFileSync(legacy, 'utf-8')).toBe(legacySkill)
+      expect(fs.existsSync(path.join(home, '.agents'))).toBe(false)
+      expect(fs.existsSync(path.join(home, '.canary-lab', 'agent-integrations', 'skill-backups'))).toBe(false)
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it('dry-run prints planned copies and MCP snippets without writing files', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-dry-'))
     const lines: string[] = []
@@ -20,7 +76,7 @@ describe('canary-lab agent install', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-install-'))
     install('codex', { homeDir: home, log: () => {} })
 
-    expect(fs.existsSync(path.join(home, '.codex', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
+    expect(fs.existsSync(path.join(home, '.agents', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
     expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(false)
     expect(fs.existsSync(path.join(home, '.canary-lab', 'agent-integrations', 'canary-lab-plugin', '.mcp.json'))).toBe(true)
   })
@@ -36,9 +92,10 @@ describe('canary-lab agent install', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-refresh-'))
     const lines: string[] = []
     install('codex', { homeDir: home, log: () => {} })
-    const skillPath = path.join(home, '.codex', 'skills', 'canary-lab', 'SKILL.md')
-    fs.writeFileSync(skillPath, 'stale prompt')
-    fs.rmSync(path.join(home, '.canary-lab'), { recursive: true, force: true })
+    const skillPath = path.join(home, '.agents', 'skills', 'canary-lab', 'SKILL.md')
+    fs.writeFileSync(skillPath, legacySkill)
+    recordManagedSkill(path.dirname(skillPath), home)
+    fs.rmSync(path.join(home, '.canary-lab', 'agent-integrations', 'canary-lab-plugin'), { recursive: true, force: true })
 
     expect(refreshInstalled('all', { homeDir: home, log: (line) => lines.push(line) })).toBe(1)
 
@@ -59,7 +116,8 @@ describe('canary-lab agent install', () => {
     for (const client of ['.codex', '.claude'] as const) {
       const legacy = path.join(home, client, 'skills', 'canary-lab')
       fs.mkdirSync(legacy, { recursive: true })
-      fs.writeFileSync(path.join(legacy, 'SKILL.md'), 'pre-2.0.0 skill')
+      fs.writeFileSync(path.join(legacy, 'SKILL.md'), legacySkill)
+      recordManagedSkill(legacy, home)
     }
 
     refreshInstalled('all', { homeDir: home, log: () => {} })
@@ -69,9 +127,9 @@ describe('canary-lab agent install', () => {
       .sort()
     expect(packaged.length).toBeGreaterThan(1)
     expect(fs.readdirSync(path.join(home, '.claude', 'skills')).sort()).toEqual(packaged)
-    expect(fs.readdirSync(path.join(home, '.codex', 'skills')).sort()).toEqual(packaged)
+    expect(fs.readdirSync(path.join(home, '.agents', 'skills')).sort()).toEqual(packaged)
     // The plugin bundle is its own group: nothing installed it, so it stays out.
-    expect(fs.existsSync(path.join(home, '.canary-lab'))).toBe(false)
+    expect(fs.existsSync(path.join(home, '.canary-lab', 'agent-integrations', 'canary-lab-plugin'))).toBe(false)
   })
 
   it('refresh leaves a client with nothing installed entirely alone', () => {
@@ -79,13 +137,14 @@ describe('canary-lab agent install', () => {
     // into an installer for a client the user never opted in on — that stays
     // explicit via `canary-lab setup`.
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-optin-'))
-    const legacy = path.join(home, '.codex', 'skills', 'canary-lab')
+    const legacy = path.join(home, '.agents', 'skills', 'canary-lab')
     fs.mkdirSync(legacy, { recursive: true })
-    fs.writeFileSync(path.join(legacy, 'SKILL.md'), 'pre-2.0.0 skill')
+    fs.writeFileSync(path.join(legacy, 'SKILL.md'), legacySkill)
+      recordManagedSkill(legacy, home)
 
     refreshInstalled('all', { homeDir: home, log: () => {} })
 
-    expect(fs.readdirSync(path.join(home, '.codex', 'skills')).length).toBeGreaterThan(1)
+    expect(fs.readdirSync(path.join(home, '.agents', 'skills')).length).toBeGreaterThan(1)
     expect(fs.existsSync(path.join(home, '.claude'))).toBe(false)
   })
 
@@ -93,8 +152,9 @@ describe('canary-lab agent install', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-setup-'))
     const lines: string[] = []
     installOrRefresh('codex', { homeDir: home, log: (line) => lines.push(line) })
-    const skillPath = path.join(home, '.codex', 'skills', 'canary-lab', 'SKILL.md')
-    fs.writeFileSync(skillPath, 'stale prompt')
+    const skillPath = path.join(home, '.agents', 'skills', 'canary-lab', 'SKILL.md')
+    fs.writeFileSync(skillPath, legacySkill)
+    recordManagedSkill(path.dirname(skillPath), home)
 
     expect(installOrRefresh('codex', { homeDir: home, log: (line) => lines.push(line) })).toBe(1)
 
@@ -118,11 +178,12 @@ describe('canary-lab agent install', () => {
       'canary-lab-coverage',
       'canary-lab-export',
       'canary-lab-portify',
+      'canary-lab-repair-discovery',
       'canary-lab-run',
       'canary-lab-verify',
     ])
     const allSkillPaths = skillNames.flatMap(mirrors)
-    expect(allSkillPaths).toHaveLength(21)
+    expect(allSkillPaths).toHaveLength(24)
     for (const skillPath of allSkillPaths) {
       const body = fs.readFileSync(skillPath, 'utf-8')
       expect(body).toContain('mcp__Canary_Lab__exec')
@@ -150,9 +211,9 @@ describe('canary-lab agent install', () => {
       expect(body).toContain('context.healPrompt.startHere')
       expect(body).toContain('get_run_snapshot')
       expect(body).toContain('`signal_run` with `hypothesis` and `fixDescription`, then `wait_for_heal_task`')
-      expect(body).toContain('Use `force_new` only when the user explicitly wants a separate concurrent run')
+      expect(body).toContain('`force_new` cannot replace an active run')
       expect(body).toContain('cancel_heal')
-      expect(body).toContain('continued by default')
+      expect(body).toContain('continued even with `force_new:true`')
       expect(body).toContain('remaining-test mode')
       expect(body).toContain('failed tests first, then skipped tests, then pending/not-run tests')
       expect(body).toContain('do not tell the user no test filter exists')
@@ -169,6 +230,16 @@ describe('canary-lab agent install', () => {
       expect(body).toContain('Only a `run not found` result')
     }
 
+    for (const skill of ['canary-lab-author', 'canary-lab-run']) {
+      for (const skillPath of mirrors(skill)) {
+        const body = fs.readFileSync(skillPath, 'utf-8')
+        expect(body).toContain('features/<feature>/envsets/<env>/<slot>')
+        expect(body).toContain('Never create pointer-only envsets')
+        expect(body).toContain('`.runtime/envsets`')
+        expect(body).toContain('source → target → consumer')
+      }
+      expect(fs.readFileSync(mirrors(skill)[2])).toEqual(fs.readFileSync(mirrors(skill)[1]))
+    }
     // Authoring rules live in canary-lab-author.
     for (const skillPath of mirrors('canary-lab-author')) {
       const body = fs.readFileSync(skillPath, 'utf-8')
@@ -201,7 +272,7 @@ describe('canary-lab agent install', () => {
   it('leaves up-to-date installed integrations untouched during refresh', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-refresh-current-'))
     install('codex', { homeDir: home, log: () => {} })
-    const skillPath = path.join(home, '.codex', 'skills', 'canary-lab', 'SKILL.md')
+    const skillPath = path.join(home, '.agents', 'skills', 'canary-lab', 'SKILL.md')
     const before = fs.statSync(skillPath).mtimeMs
     await new Promise((resolve) => setTimeout(resolve, 10))
 
@@ -249,7 +320,8 @@ describe('refreshAgentIntegrationsQuietly temp-install guard', () => {
       // is what makes a non-zero count the observable proof that the refresh ran.
       install('claude', { homeDir: home, log: () => {} })
       const stale = path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md')
-      fs.writeFileSync(stale, 'stale content from an older version\n')
+      fs.writeFileSync(stale, legacySkill)
+      recordManagedSkill(path.dirname(stale), home)
       const n = refreshAgentIntegrationsQuietly({
         homeDir: home,
         cliPath: '/Users/x/Documents/canary-lab-workspace/node_modules/canary-lab/dist/scripts/cli.js',

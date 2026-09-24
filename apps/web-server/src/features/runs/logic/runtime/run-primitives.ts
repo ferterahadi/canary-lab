@@ -4,7 +4,7 @@ import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { collectPortSlots } from './orchestrator'
 import { allocatePorts } from './port-allocator'
 import { resolvePortTokens } from './launcher/interpolate'
-import { getEnvSetsDir, loadConfig, backup, applySet, resolveVars } from './env-switcher/switch'
+import { getEnvSetsDir, backup, applySet, restore, resolveSetTargets } from './env-switcher/switch'
 import type { BackupRecord } from './env-switcher/types'
 
 // Run primitives shared by every feature that starts a run: the run loop itself,
@@ -32,11 +32,8 @@ export function applyFeatureEnvset(
 ): BackupRecord[] | null {
   const envSetsDir = getEnvSetsDir(featureDir)
   if (!fs.existsSync(path.join(envSetsDir, 'envsets.config.json'))) return null
-  const config = loadConfig(featureDir)
-  const targets = config.feature.slots.map((slot) => ({
-    slot,
-    targetPath: resolveVars(config.slots[slot].target, config.appRoots),
-  }))
+  // A missing slot is not applied and must not grant teardown ownership of its target.
+  const targets = resolveSetTargets(featureDir, setName)
   const backups = backup(targets, Date.now())
   // Resolve the reserved ${port.<slot>} namespace in each applied file so a
   // multi-service feature's inter-service config follows the run's allocated
@@ -44,6 +41,12 @@ export function applyFeatureEnvset(
   const resolve = portMap && portMap.size > 0
     ? (content: string) => resolvePortTokens(content, portMap)
     : undefined
-  applySet(envSetsDir, setName, targets, resolve)
+  try {
+    applySet(envSetsDir, setName, targets, resolve)
+  } catch (error) {
+    // The caller never receives the records on failure, so unwind partial writes here.
+    restore(backups)
+    throw error
+  }
   return backups
 }

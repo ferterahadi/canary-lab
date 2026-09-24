@@ -22,7 +22,7 @@ const EXPECTED_LOG_NOISE: { match: (log: string) => boolean; tag: string }[] = [
     tag: 'ECONNREFUSED :3000 (HTTP-fallback path under test)',
   },
   {
-    match: (l) => l.includes('[playwright-list] exit 2: boom'),
+    match: (l) => l.includes('[playwright-list]') && l.includes('boom'),
     tag: 'playwright-list fixture failure',
   },
 ]
@@ -144,6 +144,7 @@ export default defineConfig({
         'shared/flights/**/*.ts',
         'shared/launcher/**/*.ts',
         'shared/lib/**/*.ts',
+        'shared/robustness/**/*.ts',
         'shared/runtime/**/*.ts',
         'shared/agent-models.ts',
         'shared/code-display-format.ts',

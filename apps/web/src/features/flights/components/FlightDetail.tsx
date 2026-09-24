@@ -1,3 +1,5 @@
+import type { CoverageJobIndexEntry } from '@/shared/api/types'
+import { coverageJobStage } from '../lib/coverage-activity'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { ExternalWorkCheckpointData, FlightEntryOptions, FlightIndexEntry, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
@@ -5,15 +7,15 @@ import { isActivePortify, usePortify } from '@/features/portify'
 import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
-import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { DisabledControlTooltip, Tooltip } from '@/shared/ui/Tooltip'
+import { AlertCircleIcon } from '@/shared/ui/Icons'
 import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
-import { ACTIVITY_CHIP } from './FlightChipState'
+import { ACTIVITY_CHIP, featureChipState } from './FlightChipState'
 import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
 import { ACTIVITY_STAGE, type FeatureActivity, type FeatureExternalHistory } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageRailRows, stageStatusTone } from './stage-meta'
-import { stageStateLine } from './StageStatusLines'
+import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageRowKey, stageStatusTone, stagePresentationStatus } from './stage-meta'
 import {
   buildDerivedManifest,
   derivedEntryStage,
@@ -26,6 +28,11 @@ import { FlightTakeoverAction } from './FlightTakeoverAction'
 import { FlightDrillThroughs, FlightPage } from './FlightPage'
 import { FlightSummaryStrip } from './FlightSummaryStrip'
 import { StageDetail, truncate } from './StageDetail'
+import { FLIGHT_STAGE_SECTIONS } from './flight-sections'
+import { useLiveCoverage } from '@/shared/state/use-live-coverage'
+import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
+import { coverageStageWarning, isCoverageWarningRow } from './coverage-stage-warning'
+import { activityRowKey as rowKeyForActivity, presentedFlightRows } from './presented-flight-rows'
 
 // Flight detail — the routed full-screen view (?view=flights&flight=<id>)
 // that owns a flight's lifecycle: a stage rail on the left (harness-computed
@@ -57,10 +64,12 @@ export function FlightDetail({
   onClose,
   onStartFlight,
   onOpenConfig,
+  onOpenSpecReview,
   configRefreshKey,
   docsRefreshKey,
   activity,
   externalHistory,
+  coverageJobs = [],
   derivedStages,
   drill,
   stage: routedStage,
@@ -79,6 +88,7 @@ export function FlightDetail({
   onClose: () => void
   onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
   onOpenConfig?: (feature: string, tab?: ConfigTab) => void
+  onOpenSpecReview?: () => void
   configRefreshKey?: number
   docsRefreshKey?: number
   /** Per-feature live activity — drives the run row's live icon (R64). */
@@ -86,6 +96,7 @@ export function FlightDetail({
   /** Persistent external provenance — keeps the Activity rail honest after a
    *  standalone task settles and drops out of the live activity map. */
   externalHistory?: FeatureExternalHistory
+  coverageJobs?: CoverageJobIndexEntry[]
   derivedStages?: Map<string, DerivedStage[]>
   drill: FlightDrillThroughs
   /** The selected stage, when App owns it (routed as `?stage=…`) — null is
@@ -196,6 +207,12 @@ export function FlightDetail({
     }
   }, [indexEntry, flightId])
   const flight = derivedManifest ?? (derivedFeature ? null : (liveFlight ?? fetched ?? seed))
+  const coverage = useLiveCoverage(flight?.feature ?? derivedFeature ?? null)
+  const coverageWarningText = coverageWarning(coverage.value?.freshness, coverage.confirmed, coverage.error)
+  const stageCoverageWarning = coverageStageWarning(coverage.value?.freshness, coverage.confirmed, coverage.error)
+  const coverageNextAction = coverage.value?.freshness?.nextAction
+  const coverageRecovery = coverageWarningText && coverage.confirmed && coverageNextAction && coverage.value?.freshness?.state !== 'updating'
+    ? { stage: coverageNextAction.stage, warning: coverageWarningText } : undefined
   const seeded = !derivedManifest && !derivedFeature && !liveFlight && !fetched && seed != null
   /** The stage a "Continue" would enter at — first one without evidence. */
   const derivedEntry = derivedRail ? derivedEntryStage(derivedRail) : null
@@ -272,14 +289,22 @@ export function FlightDetail({
 
   // The rail hides conductor plumbing (R21) and merges run+heal into one user
   // step (R22) — selection and auto-pick both work on these visible rows.
-  // While a run for this feature is live, the run row reads `running` (blue +
-  // pulse) instead of its settled verdict — the icon must never show a green
-  // tick over a run that is still working (R64).
+  // Standalone work can restart a completed step. The rail and Follow must
+  // read the same live activity as the chip, not just the saved flight verdict.
   const featureActivity = flight ? activity?.get(flight.feature) : undefined
+  const activityRowKey = rowKeyForActivity(featureActivity)
+  const featureCoverageJobs = coverageJobs.filter((job) => job.feature === flight?.feature)
+  const activeCoverageJob = featureCoverageJobs.filter((job) => job.status === 'running')
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || (a.kind === 'coverage' ? -1 : 1))[0]
+  const coveragePhase = activeCoverageJob ? coverageJobStage(activeCoverageJob) : null
+  const [followedCoverage, setFollowedCoverage] = useState<{ flightId: string; stage: FlightStageKey } | null>(null)
+  useEffect(() => {
+    if (coveragePhase) setFollowedCoverage({ flightId, stage: coveragePhase })
+  }, [flightId, coveragePhase])
+  // Keep the last generation stage in view when it settles. An explicit rail
+  // selection still wins, and another live stage can take over follow-mode.
+  const coverageLanding = followedCoverage?.flightId === flightId ? followedCoverage.stage : null
   const featureExternalHistory = flight ? externalHistory?.get(flight.feature) : undefined
-  // A run is intentionally the louder feature-level activity, so that map may
-  // hide a simultaneous Portify job. Read Portify's own index as well: the
-  // Parallel setup pane must keep its workflow and header state while tests run.
   const featurePortify = flight
     ? portifyWorkflows.find((workflow) => workflow.feature === flight.feature && isActivePortify(workflow.status))
     : undefined
@@ -290,29 +315,20 @@ export function FlightDetail({
   // has no such record, so its live run identity comes from the shared run
   // stream. This is display-only: it never navigates or starts another run.
   const derivedActiveRunId = derivedFeature && runLive ? featureActivity.runId : undefined
-  const railRows = useMemo(() => {
-    let rows = flight ? stageRailRows(flight.stages) : []
-    if (runLive) {
-      rows = rows.map((candidate) => (
-        candidate.key === 'run' && candidate.status !== 'running'
-          ? { ...candidate, status: 'running' as const }
-          : candidate
-      ))
-    }
-    if (featurePortify) {
-      const status = featurePortify.status === 'ready-to-save'
-        ? 'waiting-for-approval' as const
-        : 'running' as const
-      rows = rows.map((candidate) => candidate.key === 'portify' ? { ...candidate, status } : candidate)
-    }
-    return rows
-  }, [flight, runLive, featurePortify])
+  const railRows = useMemo(() => flight ? presentedFlightRows({
+    feature: flight.feature,
+    stages: flight.stages,
+    activity: featureActivity,
+    portifyWorkflows,
+    coverageJobs,
+    derivedStages: derivedStages?.get(flight.feature),
+  }) : [], [flight, featureActivity, portifyWorkflows, coverageJobs, derivedStages])
 
   // Default the selected stage to the one that needs eyes: waiting → running →
   // first failed → the row that resumes next → last done. The user's explicit
-  // pick wins. Parallel setup is the one background exception: once Report is
-  // ready, its ordinary pending/running/done states stay in the rail while the
-  // main panel keeps the deliverable in front. A checkpoint or failure still
+  // pick wins. Once Report is ready, ordinary Parallel setup
+  // progress stays in the rail while the main panel keeps the deliverable in
+  // front. A checkpoint or failure still
   // takes focus because it needs the user. (R78: a paused flight whose current
   // row is half-finished has no `done` row after it, so without the pending
   // fallback the panel would open on "Pick a stage." instead of the step the
@@ -327,21 +343,31 @@ export function FlightDetail({
       : undefined
     const pick =
       railRows.find((s) => s.status === 'waiting-for-approval')
-      ?? railRows.find((s) => s.status === 'running' && !(reportForeground && s.key === 'portify'))
+      ?? railRows.find((s) => s.key === coveragePhase)
+      ?? railRows.find((s) => s.status === 'running'
+        && !(reportForeground && s.key === 'portify'))
       ?? railRows.find((s) => s.status === 'failed')
+      ?? railRows.find((s) => s.key === coverageLanding)
       ?? reportForeground
       ?? railRows.find((s) => s.status === 'running')
       ?? railRows.find((s) => s.status === 'pending')
       ?? [...railRows].reverse().find((s) => s.status === 'done')
     return pick?.key ?? null
-  }, [railRows])
-  const stageKey = selectedStage ?? autoStage
+  }, [railRows, coveragePhase, coverageLanding])
+  const stageKey = selectedStage && railRows.some((stage) => stage.key === selectedStage)
+    ? selectedStage
+    : autoStage
   const row = railRows.find((s) => s.key === stageKey) ?? null
   const stage = flight?.stages.find((s) => s.key === stageKey) ?? null
   // The pair-merged rows (run+heal, scaffold+env-capture, docs+prd-summary)
   // carry their folded companion so its facts/checkpoint/log surface too.
   const companionKey = stageKey ? STAGE_COMPANION[stageKey] : undefined
   const companionStage = (companionKey ? flight?.stages.find((s) => s.key === companionKey) : null) ?? null
+  useEffect(() => {
+    // Once generation settles, pin its result stage in the URL so refresh
+    // restores the same result instead of jumping to an unrelated pending step.
+    if (!coveragePhase && coverageLanding && selectedStage === null) setSelectedStage(coverageLanding)
+  }, [coveragePhase, coverageLanding, selectedStage, setSelectedStage])
 
   // A read failure only blanks the view when there is nothing else to show.
   // With a pushed manifest in hand the record is NOT missing, and a transient
@@ -350,7 +376,7 @@ export function FlightDetail({
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 text-xs text-muted">
         <div>Couldn't open this flight. {error}</div>
-        <button type="button" onClick={onBackToList} className="cl-button px-2.5 py-1 text-xs">All flights</button>
+        <button type="button" onClick={onBackToList} className="cl-button px-2.5 py-1">All flights</button>
       </div>
     )
   }
@@ -399,10 +425,13 @@ export function FlightDetail({
     && externalMutationOwner == null
   const takeoverRequested = externalWorkCheckpoint != null
     && typeof (externalWorkCheckpoint.data as ExternalWorkCheckpointData | undefined)?.takeoverRequestedAt === 'string'
-  const suiteActivityChip = externalSuiteWork && featureActivity ? ACTIVITY_CHIP[featureActivity.kind] : null
-  const tone = agentHolding
+  const waitingChip = featureActivity?.waiting ? featureChipState(flight, featureActivity) : null
+  const suiteActivityChip = activeCoverageJob
+    ? ACTIVITY_CHIP[activeCoverageJob.kind === 'summary' ? 'condensing' : 'mapping']
+    : externalSuiteWork && featureActivity ? ACTIVITY_CHIP[featureActivity.kind] : null
+  const tone = waitingChip?.tone ?? (agentHolding
     ? FLIGHT_STATUS_TONE['running']
-    : suiteActivityChip?.tone ?? FLIGHT_STATUS_TONE[flight.status]
+    : suiteActivityChip?.tone ?? FLIGHT_STATUS_TONE[flight.status])
   const evalStage = flight.stages.find((s) => s.key === 'evaluation-export') ?? null
   return (
     <>
@@ -440,7 +469,7 @@ export function FlightDetail({
             // R81: a derived flight was never paused or interrupted — its steps
             // were simply completed outside the conductor, so it must not
             // borrow the record-only "paused by you / a stage failed" copy.
-            title={agentHolding
+            title={waitingChip ? waitingChip.title : agentHolding
               ? EXTERNAL_WORK_COPY.headerTitle
               : suiteActivityChip
               ? suiteActivityChip.title
@@ -453,8 +482,8 @@ export function FlightDetail({
                 : flight.pauseReason === 'restart' ? 'Interrupted by a server restart — Continue resumes it'
                 : 'A step failed — Continue retries it')
               : undefined}
-            icon={flight.status === 'running' || agentHolding || suiteActivityChip ? <StatusDot state="running" className="shrink-0" /> : undefined}
-            label={agentHolding
+            icon={waitingChip ? <StatusDot state={featureActivity?.waiting?.kind === 'queued' ? 'idle' : 'warning'} className="shrink-0" /> : flight.status === 'running' || agentHolding || suiteActivityChip ? <StatusDot state="running" className="shrink-0" /> : undefined}
+            label={waitingChip ? capitalizeFirst(waitingChip.label) : agentHolding
               ? EXTERNAL_WORK_COPY.headerLabel
               : suiteActivityChip
               ? capitalizeFirst(suiteActivityChip.label)
@@ -480,7 +509,7 @@ export function FlightDetail({
               data-testid="flight-primary-respond"
               onClick={respondJump}
               disabled={externalMutationOwner != null}
-              className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+              className="cl-button-primary px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-45"
               title={externalMutationOwner
                 ? externalMutationTooltip(externalMutationOwner, 'answer this checkpoint')
                 : 'Jump to the question the flight is waiting on'}
@@ -509,7 +538,7 @@ export function FlightDetail({
               // the only safe way to transfer ownership without discarding the
               // external agent's eventual result.
               disabled={externalMutationOwner != null}
-              className="cl-button px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+              className="cl-button px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-45"
               title={externalMutationOwner
                 ? externalMutationTooltip(externalMutationOwner, 'pause this work')
                 : 'Stops everything — the agent, the test run, and any repair. Continue starts this step again.'}
@@ -536,7 +565,7 @@ export function FlightDetail({
               data-testid="flight-run-parallel-setup"
               onClick={startParallelSetup}
               disabled={parallelSetupStarting}
-              className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-wait disabled:opacity-65"
+              className="cl-button-primary px-2.5 py-1 disabled:cursor-wait disabled:opacity-65"
               title="Start Parallel setup now. The remaining Flight can continue at the same time."
             >
               {parallelSetupStarting ? 'Starting…' : 'Run Parallel Setup'}
@@ -551,22 +580,23 @@ export function FlightDetail({
           </>
         ) : derivedFeature ? (
           <>
-            {derivedEntry ? (
+            {derivedEntry || coverageRecovery ? (!activeCoverageJob && (
               <ContinueMenu
                 flight={flight}
                 onAction={act}
                 onStartFlight={onStartFlight}
                 externalMutationOwner={externalMutationOwner}
-                recordlessEntry={derivedEntry}
+                recordlessEntry={derivedEntry ?? coverageRecovery!.stage}
+                coverageRecovery={coverageRecovery}
               />
-            ) : (
+            )) : (
               <DisabledControlTooltip>
                 <button
                   type="button"
                   data-testid="derived-conduct"
                   onClick={() => onStartFlight?.(derivedFeature, 'fresh', null)}
                   disabled={externalMutationOwner != null}
-                  className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+                  className="cl-button-primary px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-45"
                   title={externalMutationOwner
                     ? externalMutationTooltip(externalMutationOwner, 'start or continue a flight')
                     : 'Every step is done — start a fresh flight to fly it again'}
@@ -579,11 +609,12 @@ export function FlightDetail({
           </>
         ) : (
           <>
-            {flight.status === 'done' && evalStage && (
+            {evalStage?.status === 'done' && (
               <DownloadEvaluationAction flight={flight} stage={evalStage} testId="flight-primary-download" primary />
             )}
-            {(flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
-              <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} externalMutationOwner={externalMutationOwner} />
+            {!activeCoverageJob && (flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
+              <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} externalMutationOwner={externalMutationOwner}
+                coverageRecovery={coverageRecovery} />
             )}
             <FlightMenu flight={flight} onAction={act} onDeleted={onBackToList} externalMutationOwner={externalMutationOwner} />
           </>
@@ -605,7 +636,7 @@ export function FlightDetail({
           className="flex items-center gap-2 border-b px-4 py-1.5 text-[11px] border-line text-danger"
         >
           <span className="min-w-0 flex-1 truncate" title={actionError}>{actionError}</span>
-          <button type="button" onClick={() => setActionError(null)} className="cl-button min-h-6 shrink-0 px-2 py-0.5 text-[10.5px]">Dismiss</button>
+          <button type="button" onClick={() => setActionError(null)} className="cl-button min-h-6 shrink-0 px-2 py-0.5">Dismiss</button>
         </div>
       )}
 
@@ -635,91 +666,95 @@ export function FlightDetail({
           className="flex w-[240px] shrink-0 flex-col gap-0.5 overflow-auto border-r border-line p-2 scrollbar-thin"
           style={{ scrollbarGutter: 'stable' }}
         >
-          {/* R72 (restyled): follow-mode now reads as a real button, not a bare
-              text link — the standard bordered `cl-button` chrome. Still
-              subordinate to Continue (10px, tucked in the rail corner), just
-              unmistakably clickable. ONE element in both states so nothing
-              jumps: a sky ● + "Follow" in a pressed/selected look while
-              auto-following, a "↺ Follow" resume button once a manual pick
-              parks the selection. Enabled in both — clicking while already
-              following is a harmless no-op. */}
-          {/* R85: the same rubric + dashed-rule header the run stage's bands use
-              (FailingTests, Previous runs), so the rail's label band reads as a
-              header ABOVE the list instead of the list's first row. The rule is
-              what does the separating — the strip no longer needs a fixed
-              height, so the pill sizes to its own content and stops filling the
-              band edge to edge. `mb-1.5` puts real air between label and list;
-              the old 2px flex gap glued the button to "Repo scan". */}
+          {/* R72: follow-mode is a real bordered `cl-button`, not a bare text
+              link, so it reads as clickable. ONE element in both states so
+              nothing jumps — "● Follow" pressed while auto-following, "↺ Follow"
+              once a manual pick parks the selection. Enabled in both: clicking
+              while already following is a harmless no-op. That no-op is why the
+              pressed look stays quiet — the default state, where the click does
+              nothing, must not be the loudest thing in the rail. It is the
+              selected grey plus ONE sky element, the dot; text and border stay
+              neutral, and `py-0.5` keeps the chip from towering over the title. */}
+          {/* "Steps" TITLES the list instead of opening a band of its own. The
+              rail's section bands (Setup, Verification cycle, …) carry the rubric
+              + dashed rule, so a ruled "Steps" stacked straight onto "Setup" read
+              as an empty band. One tone up and unruled, it sits above them as
+              their parent. `mb-1.5` still keeps air between the title and a first
+              row that opens no section (the pre-flight check). */}
           <div className="mb-1.5 flex items-center gap-2 px-2">
             {/* "Steps", not "Stages": every tooltip and card in the pane says
                 "step" — one word for one thing. */}
-            <span className="cl-rubric shrink-0">
+            <span className="cl-rubric-strong shrink-0">
               Steps
             </span>
-            <span className="h-px flex-1 border-t border-dashed border-line" />
-            <button
-              type="button"
-              data-testid={selectedStage === null ? 'rail-following' : 'rail-resume-follow'}
-              aria-pressed={selectedStage === null}
-              onClick={() => setSelectedStage(null)}
-              className="cl-button flex shrink-0 items-center gap-1 px-1.5 py-1 text-[10px] leading-none"
-              style={selectedStage === null
-                ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))', background: 'var(--bg-selected)' }
-                : undefined}
-              title={selectedStage === null
-                ? 'Following whichever step needs you'
-                : 'Go back to following the step that needs you'}
-            >
-              <span aria-hidden="true" className="text-[9px]" style={selectedStage !== null ? { color: 'var(--accent)' } : undefined}>
-                {selectedStage === null ? '●' : '↺'}
-              </span>
-              Follow
-            </button>
+            <Tooltip label={selectedStage === null
+              ? 'Following whichever step needs you'
+              : 'Go back to following the step that needs you'}>
+              <button
+                type="button"
+                data-testid={selectedStage === null ? 'rail-following' : 'rail-resume-follow'}
+                aria-pressed={selectedStage === null}
+                onClick={() => setSelectedStage(null)}
+                className="cl-button ml-auto flex shrink-0 items-center gap-1 px-1.5 py-0.5 leading-none"
+                style={selectedStage === null ? { background: 'var(--bg-selected)' } : undefined}
+              >
+                <span aria-hidden="true" className="text-[9px]" style={selectedStage === null ? { color: 'var(--accent)' } : undefined}>
+                  {selectedStage === null ? '●' : '↺'}
+                </span>
+                Follow
+              </button>
+            </Tooltip>
           </div>
           {railRows.map((s) => {
+            const section = FLIGHT_STAGE_SECTIONS.find((group) => group.keys[0] === s.key)
             const selected = s.key === stageKey
-            const t = stageStatusTone(s.status)
+            const rowWaiting = s.key === activityRowKey ? featureActivity?.waiting : undefined
+            const displayStatus = stagePresentationStatus(s.status, rowWaiting)
+            const warning = isCoverageWarningRow(s.key, stageCoverageWarning) ? stageCoverageWarning?.message : undefined
+            const t = warning ? 'var(--warning)' : stageStatusTone(displayStatus)
             // A merged row's duration sums its primary + folded companion
             // (run→heal, scaffold→env-capture, docs→prd-summary) — R61. Work
             // time, not wall clock: checkpoint parks and pauses don't count.
             const primary = flight.stages.find((st) => st.key === s.key)
             const folded = flight.stages.find((st) => st.key === STAGE_COMPANION[s.key])
             const duration = formatStageDuration(primary, folded)
-            // R84: the stage panel no longer paints its "where are we" sentence —
-            // it rides here instead, under the static blurb, so hovering a rail
-            // row still answers both "what is this step" and "what's it done".
-            const stateLine = primary ? stageStateLine(primary, flight, folded) : null
-            const tooltip = stateLine ? `${STAGE_BLURB[s.key]}\n\n${stateLine}` : STAGE_BLURB[s.key]
+            // One custom tooltip owns the rail row. Status remains visible in its
+            // icon and the selected-stage pane; folding it into the short stage
+            // explanation made the hover copy needlessly dense.
+            const tooltip = warning ?? (rowWaiting ? `${rowWaiting.label}. ${rowWaiting.detail}` : STAGE_BLURB[s.key])
             return (
               <Fragment key={s.key}>
-                {s.key === 'portify' && (
-                  <div data-testid="parallel-setup-divider" className="mb-1 mt-2 px-2">
+                {section && (
+                  <div data-testid={`flight-rail-section-${section.id}`} className="mb-1 mt-2 px-2">
                     <div className="flex items-center gap-2">
-                      <span className="cl-rubric shrink-0">Independent</span>
+                      <span className="cl-rubric shrink-0">{section.label}</span>
                       <span className="h-px flex-1 border-t border-dashed border-line" />
                     </div>
                   </div>
                 )}
-                <button
+                <Tooltip label={tooltip}><button
                   type="button"
                   data-testid={`stage-rail-${s.key}`}
                   aria-current={selected ? 'true' : undefined}
+                  aria-label={warning ? `${s.label} — ${warning}` : undefined}
                   onClick={() => setSelectedStage(s.key)}
-                  title={tooltip}
                   className={`cl-hover-row flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors${selected ? ' bg-selected' : ''}`}
                 >
                   {/* Status hue stays a computed token string (one source of
                       truth in stageStatusTone), so this one keeps `color`. */}
                   <span className="w-3 shrink-0 text-center font-semibold" style={{ color: t }} aria-hidden="true">
-                    {STAGE_ICON[s.status]}
+                    {warning ? <AlertCircleIcon size={12} /> : STAGE_ICON[displayStatus]}
                   </span>
                   <span className={`min-w-0 flex-1 truncate${s.status === 'pending' ? ' text-muted' : ''}`}>
                     {s.label}
                   </span>
+                  {/* The amber wash carries the tone; the text keeps the
+                      rubric's baked-in muted ink (a `text-*` utility beside
+                      `.cl-rubric` is dead). */}
                   {s.note && (
                     <span
                       data-testid={`stage-rail-note-${s.key}`}
-                      className="cl-rubric shrink-0 rounded bg-warning/12 px-1 text-warning"
+                      className="cl-rubric shrink-0 rounded bg-warning/12 px-1"
                     >
                       {s.note}
                     </span>
@@ -729,8 +764,9 @@ export function FlightDetail({
                       {duration}
                     </span>
                   )}
-                  {s.status === 'running' && <StatusDot state="running" className="shrink-0" />}
-                </button>
+                  {rowWaiting && <span className="shrink-0 text-[10px]" style={{ color: t }}>{rowWaiting.label}</span>}
+                  {displayStatus === 'running' && <StatusDot state="running" className="shrink-0" />}
+                </button></Tooltip>
               </Fragment>
             )
           })}
@@ -758,6 +794,7 @@ export function FlightDetail({
               activePortifyWorkflowId={featurePortify?.workflowId}
               activity={featureActivity}
               externalHistory={featureExternalHistory}
+              coverageJobs={featureCoverageJobs}
               activityOpen={activityOpenByFlight[flightId]?.[stage.key]}
               onActivityOpenChange={(open) => setStageActivityOpen(stage.key, open)}
               externalMutationOwner={externalMutationOwner}
@@ -765,6 +802,7 @@ export function FlightDetail({
               onActionError={setActionError}
               onStartFlight={onStartFlight}
               onOpenConfig={onOpenConfig}
+              onOpenSpecReview={onOpenSpecReview}
               configRefreshKey={configRefreshKey}
               docsRefreshKey={docsRefreshKey}
               drill={drill}
@@ -805,11 +843,11 @@ export function stageDrillThrough(
   // source docs are approved, and offering a ledger then opens an empty one.
   if (stage.key === 'docs' && drill.onOpenCoverage && companion?.status === 'done') {
     const open = drill.onOpenCoverage
-    return { label: 'Open test coverage →', onClick: () => open(flight.feature) }
+    return { label: 'Test coverage →', onClick: () => open(flight.feature) }
   }
   if (stage.key === 'specs-coverage' && drill.onOpenCoverage && stage.status !== 'pending') {
     const open = drill.onOpenCoverage
-    return { label: 'Open test coverage →', onClick: () => open(flight.feature) }
+    return { label: 'Test coverage →', onClick: () => open(flight.feature) }
   }
   // Flight owns the Parallel-readiness workflow, including live work, review
   // and save. This drill is only a supporting-config lens: the Ports tab holds
@@ -818,7 +856,7 @@ export function stageDrillThrough(
   // parked. `pending` alone isn't "never ran": an interrupted stage reverts to
   // pending and keeps its startedAt, and that's exactly when you want the tab.
   if (stage.key === 'portify' && onOpenConfig && (stage.status !== 'pending' || stage.startedAt != null)) {
-    return { label: 'Open port settings →', onClick: () => onOpenConfig(flight.feature, 'ports') }
+    return { label: 'Port settings →', onClick: () => onOpenConfig(flight.feature, 'ports') }
   }
   return null
 }

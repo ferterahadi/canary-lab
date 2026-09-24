@@ -5,7 +5,7 @@
 
 import type { RunSummary } from '@/shared/api/types'
 
-export type StepStatus = 'pending' | 'testing' | 'passed' | 'failed' | 'skipped' | 'timedout'
+export type StepStatus = 'unmatched' | 'pending' | 'testing' | 'passed' | 'failed' | 'skipped' | 'timedout'
 export type TestExecutionHighlightKind = 'running' | 'failed'
 export interface TestExecutionLineHighlight {
   kind: TestExecutionHighlightKind
@@ -52,6 +52,11 @@ export const STATUS_PRESENTATION: Record<StepStatus, StatusPresentation> = {
     cardClassName: 'border-warning/40 bg-warning/5 dark:border-warning/50',
     pillClassName: 'border-warning/60 bg-warning/10 text-warning',
   },
+  unmatched: {
+    label: 'no matching result',
+    cardClassName: 'border-line-strong bg-elevated/40',
+    pillClassName: 'border-idle/70 bg-transparent text-secondary',
+  },
   pending: {
     label: 'pending',
     cardClassName: 'border-line-strong bg-elevated/40',
@@ -94,7 +99,7 @@ export function statusForTest(
   // is in flight. Checking `running` first lets the badge flip to "running"
   // instead of sticking on the stale "failed" label.
   if (isRunActivelyTesting && runningTestForTest(summary, identity)) return 'testing'
-  if (!identity.id && identity.allowNameFallback === false) return 'pending'
+  if (!identity.id && identity.allowNameFallback === false) return 'unmatched'
   const failed = summaryEntryForIdentity(summary.failed, expected, identity.id, identity.allowNameFallback)
   if (failed) {
     const msg = failed.error?.message ?? ''

@@ -49,10 +49,8 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
   const scheduling = buildRunScheduling(ctx)
   const { scheduler } = scheduling
   const restartLocalHeal = makeRestartLocalHeal(ctx, attachRunStreams)
-  await app.register(
-    runsRoutes,
-    buildRunsRouteDeps(ctx, { attachRunStreams, restartExternalRun, scheduling, restartLocalHeal }),
-  )
+  const runsDeps = buildRunsRouteDeps(ctx, { attachRunStreams, restartExternalRun, scheduling, restartLocalHeal })
+  await app.register(runsRoutes, runsDeps)
   // The external-heal handoff route reads `deps.restartLocalHeal` at request
   // time, so binding it after the runs route is registered is still in time.
   externalHealDeps.restartLocalHeal = (runId, guidance) => restartLocalHeal(runId, guidance)

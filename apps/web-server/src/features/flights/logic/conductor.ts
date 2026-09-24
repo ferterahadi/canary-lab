@@ -1,9 +1,9 @@
 import type { FlightStore } from './store'
-import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type ExternalWorkCheckpointData, type FlightCheckpointResponse, type FlightExternalAgentSession, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey } from './types'
+import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, STAGE_DEPENDS_ON, isActiveFlightStatus, type ExternalWorkCheckpointData, type FlightCheckpointResponse, type FlightExternalAgentSession, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey } from './types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { drive } from './flight-drive'
 import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightNotParkedError, FlightStageEntryError, FlightTakeoverRequestedError, stampSystemLine } from './flight-errors'
-import { FlightEntryMode, StageAdapters, bankAllStageTimings, bankStageActivity, checkStageEntry, defaultFlightId, driveControllers, firstOpenStageIndex, freshStages, interruptStage, resetStagesForRestart, sameRepoSet, stagesForJump } from './flight-stages'
+import { FlightEntryMode, StageAdapters, bankAllStageTimings, bankStageActivity, checkStageEntry, defaultFlightId, abortFlightWork, firstOpenStageIndex, freshStages, interruptStage, resetStagesForRestart, sameRepoSet, stagesForJump, stagesResetByEntry } from './flight-stages'
 
 export { abortFlight, deleteFlight, drainQueuedFlights, enqueueFlight, removeFlightRecordsForFeature } from './flight-queue'
 
@@ -114,6 +114,9 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
     const nextDescription = mode === 'redo' && wantsNewIntent ? trimmedDescription : existing.description
     const entryLinks = checkStageEntry({ ...args, repoPaths: nextRepoPaths }, deps, existing)
     const preservesReport = mode === 'jump' && args.fromStage === 'portify'
+    const preservesRun = mode === 'jump'
+      && (preservesReport || args.fromStage === 'evaluation-export')
+    const reportLinks = existing.links ?? {}
     const nextOpts: FlightOptions = {
       ...args.opts,
       ...(mode === 'redo'
@@ -178,15 +181,16 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       startedAt: now(),
       endedAt: undefined,
       error: undefined,
-      runVerdict: preservesReport ? existing.runVerdict : undefined,
-      // A jump straight to evaluation-export was validated AGAINST the old
-      // record's run — that runId is the stage's input, so it must survive
-      // the reset (the deliverable links are dropped and regenerated).
+      runVerdict: preservesRun ? existing.runVerdict : undefined,
+      // Re-entering independent work keeps the run and its completed report.
+      // Earlier entries regenerate their downstream artifacts.
       links:
         preservesReport
-          ? existing.links
-          : mode === 'jump' && args.fromStage === 'evaluation-export'
-          ? (existing.links?.runId ? { runId: existing.links.runId } : entryLinks)
+          ? { ...reportLinks, ...entryLinks }
+          : mode === 'jump' && args.fromStage && STAGE_DEPENDS_ON[args.fromStage].includes('run')
+          ? {
+              ...(existing.links?.runId ? { runId: existing.links.runId } : entryLinks),
+            }
           : undefined,
     }
     store.save(manifest)
@@ -242,7 +246,7 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
  *  evidence and its recorded checkpoint answers, and an answer the open stage
  *  was executing when paused is REPLAYED (never re-asked). Resetting a step to
  *  its initial state is what "From a step…" (redo/jump) is for; it discards
- *  the target stage's evidence and everything after it. */
+ *  the target stage's evidence and its artifact dependents. */
 export function resumeFlight(
   flightId: string,
   deps: FlightConductorDeps,
@@ -325,7 +329,7 @@ export async function pauseFlight(flightId: string, deps: FlightConductorDeps): 
   if (!isActiveFlightStatus(current.status)) {
     throw new Error(`flight ${flightId} is ${current.status}, not active — nothing to pause`)
   }
-  const openStage = current.stages.find(
+  const openStages = current.stages.filter(
     (s) => s.status === 'running' || s.status === 'waiting-for-approval',
   )
   const pausedAt = now()
@@ -335,7 +339,7 @@ export async function pauseFlight(flightId: string, deps: FlightConductorDeps): 
     pauseReason: 'user',
     updatedAt: pausedAt,
     stages: current.stages.map((s) =>
-      s.key === openStage?.key
+      openStages.some((open) => open.key === s.key)
         ? {
             // Close the work clock: the pause ends the stage's live segment,
             // and the time parked must not count as stage work. A stage paused
@@ -348,16 +352,16 @@ export async function pauseFlight(flightId: string, deps: FlightConductorDeps): 
             // replays it (seamless). An answer that already produced the park
             // the user paused on is spent; keeping it would replay a stale
             // choice instead of re-asking.
-            ...(openStage.status === 'waiting-for-approval' ? { checkpointResponse: undefined } : {}),
+            ...(s.status === 'waiting-for-approval' ? { checkpointResponse: undefined } : {}),
           }
         : s,
     ),
   }
   store.save(manifest)
-  driveControllers.get(flightId)?.abort()
+  abortFlightWork(flightId)
   // Awaited, not fired and forgotten. The park above already happened, so the
   // drive cannot advance while we wait, and the pause-race rule still holds.
-  if (openStage) await interruptStage(flightId, openStage.key, 'pause', deps)
+  await Promise.all(openStages.map((stage) => interruptStage(flightId, stage.key, 'pause', deps)))
   // Re-read: the teardown writes its own log line through the store, so the
   // snapshot built above is already one write stale. Callers render this
   // response — a client shown a record with no teardown line would have to wait
@@ -403,8 +407,7 @@ export function redoFlight(
   )
 }
 
-/** Flip the named stages (and everything after the earliest of them — their
- *  evidence is downstream of the reopened work) back to `pending` on a
+/** Flip the named stages and their artifact dependents back to `pending` on a
  *  NON-ACTIVE flight, so an out-of-band redo (coverage's "Redo from the
  *  start" clearing the PRD) reflects into the flight record live. No-op on
  *  active flights — the running conductor owns those. */
@@ -418,21 +421,28 @@ export function reopenStages(
   const current = store.get(flightId)
   if (!current) return null
   if (isActiveFlightStatus(current.status)) return null
-  const indices = keys.map((k) => FLIGHT_STAGE_KEYS.indexOf(k)).filter((i) => i >= 0)
-  if (indices.length === 0) return null
-  const earliest = Math.min(...indices)
+  const validKeys = keys.filter((key) => FLIGHT_STAGE_KEYS.includes(key))
+  if (validKeys.length === 0) return null
+  const earliest = validKeys.reduce((first, key) =>
+    FLIGHT_EXECUTION_ORDER.indexOf(key) < FLIGHT_EXECUTION_ORDER.indexOf(first) ? key : first)
+  const reset = new Set(validKeys.flatMap((key) => stagesResetByEntry(key)))
+  const preservedLinks = { ...current.links }
+  if (reset.has('evaluation-export')) {
+    delete preservedLinks.evaluationTaskId
+    delete preservedLinks.evaluationZip
+  }
   const manifest: FlightManifest = {
     ...current,
     status: 'paused',
     pauseReason: 'user',
-    currentStage: FLIGHT_STAGE_KEYS[earliest],
+    currentStage: earliest,
     updatedAt: now(),
     endedAt: undefined,
     error: undefined,
-    links: undefined,
-    runVerdict: undefined,
-    stages: current.stages.map((s, i) =>
-      i >= earliest ? { key: s.key, status: 'pending' as const } : s,
+    links: reset.has('run') || Object.keys(preservedLinks).length === 0 ? undefined : preservedLinks,
+    runVerdict: reset.has('run') ? undefined : current.runVerdict,
+    stages: current.stages.map((s) =>
+      reset.has(s.key) ? { key: s.key, status: 'pending' as const } : s,
     ),
   }
   store.save(manifest)
@@ -452,6 +462,9 @@ export function respondToFlightCheckpoint(
   const now = deps.now ?? (() => new Date().toISOString())
   const current = store.get(flightId)
   if (!current) throw new Error(`flight not found: ${flightId}`)
+  if (response.expectedUpdatedAt !== undefined && response.expectedUpdatedAt !== current.updatedAt) {
+    throw Object.assign(new Error('The flight changed while its checkpoint was being reviewed. Read the current checkpoint before responding.'), { statusCode: 409 })
+  }
   if (current.status !== 'waiting-for-approval') {
     throw new FlightNotParkedError(flightId, current.status, current.pauseReason)
   }

@@ -150,6 +150,75 @@ describe('FileRunStateSink', () => {
     expect(readRunsIndex(logsDir)[0].healMode).toBe('external')
   })
 
+  it('mirrors the envset into the index so sibling runs of one suite stay distinguishable', () => {
+    // Spec selection cannot vary by envset, so two runs of one suite declare the
+    // SAME roster and differ only in which tests the environment let execute —
+    // 41 passed / 4 skipped under one, 4 passed / 41 skipped under another. The
+    // runs list renders off this index, so without the envset here the second
+    // row reads as a run that went badly rather than a different environment.
+    const sink = new FileRunStateSink(logsDir)
+    sink.bootstrap(manifest({ env: 'meta' }))
+    expect(readRunsIndex(logsDir)[0].env).toBe('meta')
+
+    // A suite that declares no envsets names none: absent, not an empty string.
+    sink.bootstrap(manifest({ runId: 'run-2' }))
+    expect(readRunsIndex(logsDir).find((e) => e.runId === 'run-2')).not.toHaveProperty('env')
+  })
+
+  it('mirrors pending spec-edit and hint counts into the index so list_runs can flag a run', () => {
+    const sink = new FileRunStateSink(logsDir)
+    sink.bootstrap(manifest())
+    // Written through patchManifest (Playwright exit, or a live spec change
+    // mid-heal); the index carries the counts from THAT write, not the next
+    // status write — a heal wait can be minutes long.
+    sink.patchManifest('run-1', {
+      specEdits: {
+        checkedAt: 't',
+        pending: [
+          { file: 'e2e/a.spec.ts', change: 'modified', affectedTests: ['a'] },
+          { file: 'e2e/b.spec.ts', change: 'deleted', affectedTests: ['b'] },
+        ],
+        adopted: [],
+      },
+      integrity: { hints: [{ kind: 'cannot-classify', file: 'e2e/b.spec.ts', reason: 'deleted' }], disclosure: 'd' },
+    })
+    expect(readRunsIndex(logsDir)[0]).toMatchObject({ status: 'running', pendingSpecEdits: 2, integrityHints: 1 })
+    expect(readRunsIndex(logsDir)[0]).not.toHaveProperty('endedAt')
+
+    sink.finalize('run-1', 'passed', '2026-05-08T00:01:00.000Z', 0)
+    expect(readRunsIndex(logsDir)[0]).toMatchObject({ status: 'passed', pendingSpecEdits: 2, integrityHints: 1 })
+
+    // A later re-measure that finds nothing pending (a restore) clears the
+    // counts on the same write, and keeps the terminal status + endedAt.
+    sink.patchManifest('run-1', { specEdits: { checkedAt: 't2', pending: [], adopted: [] }, integrity: { hints: [], disclosure: 'd' } })
+    const entry = readRunsIndex(logsDir)[0]
+    expect(entry).toMatchObject({ status: 'passed', endedAt: '2026-05-08T00:01:00.000Z' })
+    expect(entry).not.toHaveProperty('pendingSpecEdits')
+    expect(entry).not.toHaveProperty('integrityHints')
+  })
+
+  it('leaves the index alone for a patch that carries neither counts field', () => {
+    const sink = new FileRunStateSink(logsDir)
+    sink.bootstrap(manifest())
+    const before = JSON.stringify(readRunsIndex(logsDir))
+    sink.patchManifest('run-1', { stoppedEarly: { reason: 'user-paused', at: 't' } as never })
+    expect(JSON.stringify(readRunsIndex(logsDir))).toBe(before)
+  })
+
+  it('leaves the counts off the index when nothing is pending', () => {
+    const sink = new FileRunStateSink(logsDir)
+    sink.bootstrap(manifest())
+    sink.patchManifest('run-1', {
+      specEdits: { checkedAt: 't', pending: [], adopted: [{ at: 't', files: ['e2e/a.spec.ts'] }] },
+      integrity: { hints: [], disclosure: 'd' },
+    })
+    sink.finalize('run-1', 'passed', '2026-05-08T00:01:00.000Z', 0)
+
+    const entry = readRunsIndex(logsDir)[0]
+    expect(entry).not.toHaveProperty('pendingSpecEdits')
+    expect(entry).not.toHaveProperty('integrityHints')
+  })
+
   it('flips a stale index entry terminal even when the manifest file is missing', () => {
     const sink = new FileRunStateSink(logsDir)
     // Simulate an interrupted run: an active index entry with no manifest.json

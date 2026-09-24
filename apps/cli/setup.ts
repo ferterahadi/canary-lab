@@ -9,15 +9,18 @@ import {
   isTempInstallPath,
   registerCanaryLabMcp,
   resolveCliPath,
-  resolveMcpInvocation,
+  readRegisteredMcp,
+  type McpRegistrationResult,
   type ResolvedMcpInvocation,
 } from './mcp-registration'
 import {
   registerClaudeDesktopMcp,
   claudeDesktopConfigPath,
   claudeDesktopInstalled,
+  readDesktopMcp,
 } from './desktop-registration'
-import { verifyMcpRegistration, type VerifyResult } from './mcp-verify'
+import { verifySavedMcpRegistration, type SavedMcpVerificationOptions, type VerifyResult } from './mcp-verify'
+import { readMcpConfig } from './mcp-config'
 import { runAsScript } from './run-as-script'
 import { getProjectRoot, looksLikeProjectRoot } from '../../shared/runtime/project-root'
 import {
@@ -39,8 +42,8 @@ export interface SetupOptions {
   cliPath?: string
   /** Override the Claude Desktop config path (testing). Defaults to the per-OS location. */
   claudeDesktopConfigPath?: string
-  /** Verification hook. Defaults to probing the registered command with `mcp doctor`. */
-  verifyMcp?: (invocation: ResolvedMcpInvocation) => VerifyResult
+  /** Verification hook. Defaults to probing the saved command over stdio. */
+  verifyMcp?: (invocation: ResolvedMcpInvocation, options: SavedMcpVerificationOptions) => VerifyResult | Promise<VerifyResult>
 }
 
 export interface ParsedArgs {
@@ -69,14 +72,14 @@ export async function main(
   }
 
   try {
-    setup(parsed.value, opts)
+    await setup(parsed.value, opts)
   } catch (err) {
     ;(opts.error ?? console.error)((err as Error).message)
     exit(1)
   }
 }
 
-export function setup(args: ParsedArgs, opts: SetupOptions = {}): void {
+export async function setup(args: ParsedArgs, opts: SetupOptions = {}): Promise<void> {
   const log = opts.log ?? console.log
   const homeDir = opts.homeDir ?? process.env.CANARY_LAB_AGENT_HOME ?? os.homedir()
   const workspace = path.resolve(args.workspace ?? getProjectRoot())
@@ -85,16 +88,9 @@ export function setup(args: ParsedArgs, opts: SetupOptions = {}): void {
     throw new Error(`Not a Canary Lab workspace: ${workspace}`)
   }
 
-  if (args.dryRun) {
-    log(`[dry-run] register workspace: ${workspace} -> ${registryPath(homeDir)}`)
-  } else {
-    const entry = upsertWorkspace(workspace, { homeDir })
-    log(`Registered workspace "${entry.name}": ${entry.path}`)
-  }
-
   const execPath = opts.execPath ?? process.execPath
   const cliPath = opts.cliPath ?? resolveCliPath()
-  let registered = false
+  const registrations: Array<{ label: string; result: McpRegistrationResult; gui?: boolean }> = []
 
   // `claude mcp add` / `codex mcp add` write to the real client configs
   // (~/.claude.json, ~/.codex) regardless of CANARY_LAB_HOME — those shell out
@@ -124,6 +120,19 @@ export function setup(args: ParsedArgs, opts: SetupOptions = {}): void {
   }
 
   const target = resolveAgentTarget(args.agent, homeDir)
+  const desktopConfigPath = opts.claudeDesktopConfigPath ?? claudeDesktopConfigPath(homeDir)
+  const desktopInstalled = !skipClientMcp && claudeDesktopInstalled(desktopConfigPath)
+  // Validate JSON before registering the workspace or replacing any skills.
+  if (desktopInstalled) readMcpConfig(desktopConfigPath)
+  if (!skipClientMcp && (target === 'claude' || target === 'all')) readRegisteredMcp('claude', { homeDir })
+  if (!skipClientMcp && (target === 'codex' || target === 'all') && commandAvailable('codex')) readRegisteredMcp('codex', { homeDir })
+
+  if (args.dryRun) {
+    log(`[dry-run] register workspace: ${workspace} -> ${registryPath(homeDir)}`)
+  } else {
+    const entry = upsertWorkspace(workspace, { homeDir })
+    log(`Registered workspace "${entry.name}": ${entry.path}`)
+  }
   if (target) {
     installOrRefresh(target, {
       homeDir,
@@ -134,14 +143,14 @@ export function setup(args: ParsedArgs, opts: SetupOptions = {}): void {
     if (skipClientMcp) {
       log(`Skipping client MCP registration — ${skipClientMcpReason}.`)
     } else {
-      registerMcpTargets(target, {
+      registrations.push(...registerMcpTargets(target, {
         dryRun: args.dryRun,
         force: args.force,
         log,
         execPath,
         cliPath,
-      })
-      registered = true
+        homeDir,
+      }))
     }
   } else {
     log('No Codex or Claude installation detected. Skipping agent integration setup.')
@@ -149,9 +158,8 @@ export function setup(args: ParsedArgs, opts: SetupOptions = {}): void {
 
   // Claude Desktop keeps MCP servers in its own config file, not via
   // `claude mcp add`, so configure it independently whenever it is installed.
-  const desktopConfigPath = opts.claudeDesktopConfigPath ?? claudeDesktopConfigPath(homeDir)
-  if (!skipClientMcp && claudeDesktopInstalled(desktopConfigPath)) {
-    registerClaudeDesktopMcp({
+  if (desktopInstalled) {
+    const status = registerClaudeDesktopMcp({
       dryRun: args.dryRun,
       force: args.force,
       log,
@@ -164,24 +172,44 @@ export function setup(args: ParsedArgs, opts: SetupOptions = {}): void {
       // session rooted anywhere.
       projectRoot: workspace,
     })
-    registered = true
+    if (!args.dryRun) {
+      const saved = readDesktopMcp(desktopConfigPath)
+      registrations.push({ label: 'Claude Desktop', gui: true, result:
+        status !== 'skipped' && saved?.invocation && saved.enabled
+          ? { status, invocation: saved.invocation }
+          : { status: 'conflict', reason: 'saved Desktop configuration differs; rerun setup --force' },
+      })
+      if (status === 'configured') log('Restart Claude Desktop to load its updated MCP configuration.')
+    }
   }
 
   // Verify the registered command actually works, so a broken config fails
   // loudly here rather than as a silent "failed to connect" inside the client.
-  if (registered && !args.dryRun) {
-    const verify = opts.verifyMcp ?? verifyMcpRegistration
-    reportVerification(verify(resolveMcpInvocation({ execPath, cliPath })), log)
+  if (!args.dryRun) {
+    const failures: string[] = []
+    for (const registration of registrations) {
+      const { result, label, gui } = registration
+      if (result.status === 'skipped') continue
+      if (result.status === 'conflict') {
+        failures.push(`${label}: ${result.reason}`)
+        continue
+      }
+      const verify = opts.verifyMcp ?? verifySavedMcpRegistration
+      const verification = await verify(result.invocation, { workspace, gui })
+      reportVerification(label, verification, log)
+      if (verification.status === 'broken') failures.push(`${label}: ${verification.message}`)
+    }
+    if (failures.length) throw new Error(`Canary Lab setup verification failed:\n${failures.join('\n')}`)
   }
 }
 
-function reportVerification(result: VerifyResult, log: (msg: string) => void): void {
+function reportVerification(label: string, result: VerifyResult, log: (msg: string) => void): void {
   if (result.status === 'verified') {
-    log('Verified Canary Lab MCP is reachable.')
+    log(`${label} MCP verified: ${result.message}`)
   } else if (result.status === 'server-down') {
-    log(`Canary Lab MCP configured. ${result.message}`)
+    log(`${label} MCP configured; connection unverified. ${result.message}`)
   } else {
-    log(`WARNING: Canary Lab MCP verification failed — ${result.message}`)
+    log(`${label} MCP verification failed — ${result.message}`)
   }
 }
 
@@ -264,14 +292,16 @@ function usage(): string {
 
 function registerMcpTargets(
   target: AgentInstallTarget,
-  opts: { dryRun: boolean; force: boolean; log: (msg: string) => void; execPath: string; cliPath: string },
-): void {
+  opts: { dryRun: boolean; force: boolean; log: (msg: string) => void; execPath: string; cliPath: string; homeDir: string },
+): Array<{ label: string; result: McpRegistrationResult }> {
+  const results: Array<{ label: string; result: McpRegistrationResult }> = []
   if (target === 'codex' || target === 'all') {
-    registerCanaryLabMcp('codex', opts)
+    results.push({ label: 'Codex', result: registerCanaryLabMcp('codex', opts) })
   }
   if (target === 'claude' || target === 'all') {
-    registerCanaryLabMcp('claude', opts)
+    results.push({ label: 'Claude Code', result: registerCanaryLabMcp('claude', opts) })
   }
+  return results
 }
 
 runAsScript(module, main)

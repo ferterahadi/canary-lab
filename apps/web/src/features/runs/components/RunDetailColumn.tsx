@@ -7,10 +7,14 @@ import { useInvalidationKey } from '@/shared/state/invalidation'
 import { deriveRunViewModel } from '../utils/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
+import { EmptyState } from '@/shared/ui/EmptyState'
+import { EMPTY_COPY, healNoTranscriptCopy, type EmptyCopy } from '@/shared/ui/empty-state-copy'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { ExternalHealPanel } from './ExternalHealPanel'
 import { ChangesTab } from './ChangesTab'
 import { JournalTab } from './JournalTab'
+import { RunQueueBanner } from './RunQueueBanner'
+import { TestReviewBanner } from './TestReviewBanner'
 import { ManualHealBanner } from './ManualHealBanner'
 import { PlaywrightPanel } from './RunDiagnosticsPanels'
 import { RunLogsTab, RunOverviewTab, VerifyOverviewTab, repoServiceCount } from './RunOverviewTabs'
@@ -27,27 +31,11 @@ type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'chan
 
 /** Why this run has no repair transcript. A run that passed never spawned an
  *  agent at all — saying so is the whole answer, where "no structured session
- *  log found" reads as a missing file the user should go hunting for. */
-export function healEmptyCopy(status: RunStatus, healCycles: number): { title: string; body: string; tone: 'neutral' | 'good' } {
-  if (healCycles === 0 && status === 'passed') {
-    return {
-      title: 'No repairs needed',
-      body: 'Every test passed on the first attempt, so no repair agent was ever started. Nothing was changed in your code.',
-      tone: 'good',
-    }
-  }
-  if (healCycles === 0) {
-    return {
-      title: 'No repair agent ran',
-      body: 'This run ended before a repair cycle started — it was aborted, or heal is switched off for this suite.',
-      tone: 'neutral',
-    }
-  }
-  return {
-    title: 'No transcript found',
-    body: `This run went through ${healCycles} repair ${healCycles === 1 ? 'cycle' : 'cycles'}, but no session log for it could be read. If the run only just ended, the agent CLI may still be writing one — reopen this tab. The Journal tab holds what each cycle concluded either way.`,
-    tone: 'neutral',
-  }
+ *  log found" reads as a missing file the user should go hunting for. The three
+ *  answers are three different `EmptyReason`s, which is why they can't collapse. */
+export function healEmptyCopy(status: RunStatus, healCycles: number): EmptyCopy {
+  if (healCycles === 0) return status === 'passed' ? EMPTY_COPY.healPassed : EMPTY_COPY.healNeverRan
+  return healNoTranscriptCopy(healCycles)
 }
 
 export function RunDetailColumn({
@@ -57,8 +45,10 @@ export function RunDetailColumn({
   focusTest,
   arriveTab,
   onOpenEvaluationReport,
+  onOpenSpecReview,
 }: {
   runId: string | null
+  onOpenSpecReview?: () => void
   onOpenPlaywrightSettings?: (feature: string) => void
   /** Opens the routed Flight Report stage after an evaluation task starts. */
   onOpenEvaluationReport?: (feature: string) => void
@@ -145,20 +135,10 @@ export function RunDetailColumn({
     if (isBootRun && tab !== 'overview' && tab !== 'run-logs' && tab !== 'services') setTab('overview')
   }, [isVerifyRun, isBootRun, tab])
 
-  if (!runId) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
-        Select a run
-      </div>
-    )
-  }
-  if (!detail) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
-        Loading...
-      </div>
-    )
-  }
+  // Compact for both: the run list that fills this pane sits directly above
+  // it, so a three-line body here would spend all three saying "pick one".
+  if (!runId) return <EmptyState compact reason="not-yet" title="No run selected" testId="run-detail-none" />
+  if (!detail) return <EmptyState compact reason="not-yet" title="Loading this run…" testId="run-detail-loading" />
 
   const m = detail.manifest
   const isVerify = isVerifyRun
@@ -173,7 +153,7 @@ export function RunDetailColumn({
       <header className="cl-panel-header px-4 pt-3 pb-0">
         <div className="flex min-w-0 items-center gap-2">
           <span className="shrink-0">
-            <RunStatusIndicator status={view.displayStatus} executionType={executionType} />
+            <RunStatusIndicator status={view.displayStatus} executionType={executionType} waitingLabel={view.waiting?.label} />
           </span>
           <span
             className="min-w-0 flex-1 truncate text-sm font-medium"
@@ -181,6 +161,13 @@ export function RunDetailColumn({
             style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
           >
             {m.runId}
+          </span>
+          <span
+            className="min-w-0 shrink truncate text-xs"
+            title={m.feature}
+            style={{ color: 'var(--text-muted)' }}
+          >
+            {m.feature}
           </span>
           <span
             className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
@@ -192,14 +179,11 @@ export function RunDetailColumn({
           >
             {isVerify ? 'Verify' : isBootRun ? 'Boot' : 'Run'}
           </span>
-          <span
-            className="min-w-0 shrink truncate text-xs"
-            title={m.feature}
-            style={{ color: 'var(--text-muted)' }}
-          >
-            {m.feature}
-          </span>
         </div>
+        {m.status === 'queued' && <RunQueueBanner key={m.runId} runId={m.runId} />}
+        {view.waiting?.kind === 'test-review' && onOpenSpecReview && (
+          <TestReviewBanner count={m.specEdits?.pending.length ?? 0} onReview={onOpenSpecReview} />
+        )}
         <nav className="mt-3 flex gap-5 overflow-x-auto scrollbar-none">
           <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>Overview</TabButton>
           {!isVerify && <TabButton active={tab === 'run-logs'} onClick={() => setTab('run-logs')}>Run Logs</TabButton>}
@@ -256,7 +240,7 @@ export function RunDetailColumn({
               <PaneTerminal
                 runId={m.runId}
                 paneId={`service:${activeService.safeName}`}
-                emptyState={{ title: 'Nothing logged yet', hint: 'This service’s stdout and stderr stream here the moment it writes its first line.' }}
+                emptyState={{ idle: EMPTY_COPY.paneServiceIdle, missing: EMPTY_COPY.paneServiceMissing }}
               />
             )}
           </RunPane>
@@ -314,7 +298,7 @@ export function RunDetailColumn({
                   runId={m.runId}
                   paneId="agent"
                   onExit={handleAgentPaneExit}
-                  emptyState={{ title: 'No repair agent running', hint: 'If the tests fail, the agent starts here and its reasoning streams live.' }}
+                  emptyState={{ idle: EMPTY_COPY.paneAgentIdle, missing: EMPTY_COPY.paneAgentMissing }}
                 />
               )}
               </div>

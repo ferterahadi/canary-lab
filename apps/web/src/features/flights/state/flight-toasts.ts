@@ -25,7 +25,8 @@
  *    view is on screen; the aggregate + other flights' toasts still show.
  */
 import type { FlightCheckpointKind, FlightIndexEntry, FlightPauseReason, FlightStatus } from '@/shared/api/client'
-import { isExternalWorkPark, isExternallyDriven } from '../lib/external-work'
+import { flightNeedsAttention } from '@shared/flights/attention'
+export { flightNeedsAttention } from '@shared/flights/attention'
 
 export const AGGREGATE_TOAST_ID = 'flights-need-input'
 
@@ -41,26 +42,6 @@ export interface FlightAttentionInput {
    *  it is the one that answers, and this reader has no control to press. */
   stageProducer?: 'internal' | 'external'
   currentStage?: FlightIndexEntry['currentStage']
-}
-
-/** True iff the flight is parked waiting on the USER (not queued, not a user
- *  pause) — i.e. it should nag. */
-export function flightNeedsAttention(f: {
-  status: FlightStatus
-  pauseReason?: FlightPauseReason
-  checkpointKind?: FlightCheckpointKind
-  stageProducer?: 'internal' | 'external'
-}): boolean {
-  // Widened from the `external-work` park alone: a flight the user's own agent
-  // is driving asks nothing of the person reading this UI whatever it stopped
-  // on. The narrower check let a `prd-source` fork — or a stage-failed pause
-  // the agent is about to resume — fire "X is waiting for you", which is the
-  // toast that made a hand-off look like a demand and a failure look final.
-  if (isExternallyDriven(f)) return false
-  if (isExternalWorkPark(f)) return false
-  if (f.status === 'waiting-for-approval') return true
-  if (f.status === 'paused' && f.pauseReason !== 'user' && f.pauseReason !== 'queued') return true
-  return false
 }
 
 /** The status key we diff on. Folding pauseReason in means a flight that moves

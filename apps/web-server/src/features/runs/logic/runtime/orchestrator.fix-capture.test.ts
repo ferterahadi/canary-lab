@@ -348,6 +348,55 @@ describe('RunOrchestrator.runFullCycle', () => {
 })
 
 describe('RunOrchestrator.restartTerminalRun', () => {
+  it('preserves the snapshot, start time and review history when live tests changed', async () => {
+    const f = makeFakeFactory()
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'contract.spec.ts')
+    const original = "test('contract', () => expect(true).toBe(true))"
+    fs.writeFileSync(spec, original)
+    const options = {
+      feature: makeFeature({ featureDir, repos: undefined }), runId: RUN_ID, runDir,
+      ptyFactory: f.factory, healthCheck: async () => true,
+      playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
+    }
+    const first = new RunOrchestrator(options)
+    await first.start()
+    await first.stop('failed')
+    const previous = readManifest(first.paths.manifestPath)!
+    previous.specEdits = { checkedAt: 'prior', pending: [], adopted: [{ at: 'prior', by: 'human', files: ['e2e/contract.spec.ts'] }] }
+    fs.writeFileSync(first.paths.manifestPath, JSON.stringify(previous))
+    fs.writeFileSync(spec, "test.skip('contract', () => {})")
+    fs.writeFileSync(first.paths.diagnosisJournalPath, '# Existing iterations\n')
+
+    const resumed = new RunOrchestrator(options)
+    const promise = resumed.restartTerminalRun()
+    await vi.waitFor(() => expect(f.spawned).toHaveLength(1))
+    const manifest = readManifest(resumed.paths.manifestPath)!
+    expect(manifest.startedAt).toBe(previous.startedAt)
+    expect(manifest.suiteSnapshot).toEqual(previous.suiteSnapshot)
+    expect(manifest.specEdits?.adopted).toEqual(previous.specEdits.adopted)
+    expect(manifest.specEdits?.pending[0].file).toBe('e2e/contract.spec.ts')
+    expect(fs.readFileSync(path.join(resumed.paths.suiteSnapshotDir, 'e2e', 'contract.spec.ts'), 'utf8')).toBe(original)
+    expect(fs.readFileSync(resumed.paths.diagnosisJournalPath, 'utf8')).toBe('# Existing iterations\n')
+    f.spawned[0].emitExit(1)
+    await promise
+    await resumed.stop('failed')
+  })
+
+  it('refuses to replace a missing recorded snapshot with live tests', async () => {
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const options = { feature: makeFeature({ featureDir, repos: undefined }), runId: RUN_ID, runDir, ptyFactory: makeFakeFactory().factory }
+    const first = new RunOrchestrator(options)
+    await first.start()
+    await first.stop('failed')
+    fs.rmSync(first.paths.suiteSnapshotDir, { recursive: true })
+    const resumed = new RunOrchestrator(options)
+    await expect(resumed.restartTerminalRun()).rejects.toThrow('recorded suite snapshot is missing')
+    expect(readManifest(first.paths.manifestPath)?.status).toBe('failed')
+  })
+
   it('starts by retesting failed, skipped, and pending tests without a full-suite first pass', async () => {
     const f = makeFakeFactory()
     const featureDir = path.join(tmpDir, 'features', 'demo')

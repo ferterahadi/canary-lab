@@ -81,7 +81,7 @@ describe('PortifyOrchestrator', () => {
 
   it('attempt 0: a seeded sibling overlay that verifies parks at ready-to-save with NO agent run', async () => {
     const runAgent = vi.fn(async () => {})
-    const { deps } = makeDeps({ seeded: () => true, runAgent })
+    const { deps } = makeDeps({ verifyBeforeAgent: () => true, runAgent })
     const m = await new PortifyOrchestrator(deps).run()
     expect(m.status).toBe('ready-to-save')
     expect(runAgent).not.toHaveBeenCalled()
@@ -94,7 +94,7 @@ describe('PortifyOrchestrator', () => {
       .mockResolvedValueOnce({ ok: false, instances: [], failureDetail: 'seeded overlay: port 3007 still bound' })
       .mockResolvedValueOnce({ ok: true, instances: [] })
     const runAgent = vi.fn(async () => {})
-    const { deps } = makeDeps({ seeded: () => true, verify, runAgent })
+    const { deps } = makeDeps({ verifyBeforeAgent: () => true, verify, runAgent })
     const m = await new PortifyOrchestrator(deps).run()
     expect(m.status).toBe('ready-to-save')
     expect(m.attempt).toBe(1)
@@ -115,7 +115,7 @@ describe('PortifyOrchestrator', () => {
   it('attempt 0 stops fast (no agent) when the seeded boot failure is notPortFixable', async () => {
     const runAgent = vi.fn(async () => {})
     const { deps } = makeDeps({
-      seeded: () => true,
+      verifyBeforeAgent: () => true,
       runAgent,
       verify: async () => ({ ok: false, instances: [], failureDetail: 'db down', notPortFixable: true }),
     })
@@ -131,7 +131,7 @@ describe('PortifyOrchestrator', () => {
     let calls = 0
     const runAgent = vi.fn(async () => {})
     const { deps } = makeDeps({
-      seeded: () => true,
+      verifyBeforeAgent: () => true,
       runAgent,
       // false after setup, true on the post-verify check.
       isAborted: () => { calls += 1; return calls >= 2 },

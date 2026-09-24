@@ -29,6 +29,19 @@ export const FLIGHT_STATUS_TONE: Record<FlightStatus, string> = {
   'aborted': 'var(--text-muted)',
 }
 
+export function summarizeFlightActivity(
+  flights: FlightIndexEntry[],
+  preFlights: PlanFeaturesTask[],
+  activity: Map<string, FeatureActivity>,
+): { activeFeatures: Set<string>; preFlightRows: PlanFeaturesTask[]; activeCount: number } {
+  const activeFeatures = new Set([
+    ...flights.filter((flight) => flight.status === 'running' || flight.status === 'waiting-for-approval').map((flight) => flight.feature),
+    ...activity.keys(),
+  ])
+  const preFlightRows = preFlights.filter((task) => task.status === 'running' || task.status === 'done')
+  return { activeFeatures, preFlightRows, activeCount: activeFeatures.size + preFlightRows.length }
+}
+
 export function flightStatusLabel(status: FlightStatus): string {
   if (status === 'waiting-for-approval') return 'needs approval'
   return status
@@ -177,6 +190,14 @@ export function featureChipState(
   activity?: FeatureActivity,
   derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>,
 ): FeatureChipState {
+  if (activity?.waiting?.kind === 'queued') return {
+    label: 'queued', tone: 'var(--text-muted)', live: false, rank: 5.5,
+    title: `${activity.waiting.label}. ${activity.waiting.detail}`,
+  }
+  if (activity?.waiting) return {
+    label: activity.waiting.shortLabel, tone: FLIGHT_STATUS_TONE['waiting-for-approval'],
+    live: false, rank: 0, title: `${activity.waiting.label}. ${activity.waiting.detail}`,
+  }
   // A hand-off to the client that started the flight is WORK, not a question —
   // it reads exactly like a running flight (same verb, same sky, same pulse,
   // same rank), and only the tooltip says where the work is happening. Checked
@@ -186,7 +207,7 @@ export function featureChipState(
   // (stage-failed, restart, user) fall through to the resting branches below,
   // because those are states, not demands.
   if (isExternalWorkPark(flight) || (flight?.status === 'waiting-for-approval' && isExternallyDriven(flight))) {
-    const verb = flight?.currentStage ? RUNNING_STAGE_CHIP[flight.currentStage] : 'running'
+    const verb = flight?.currentStage ? RUNNING_STAGE_CHIP[flight.currentStage] ?? 'running' : 'running'
     return { label: verb, tone: FLIGHT_STATUS_TONE['running'], live: true, rank: 1, title: externalWorkChipTitle(verb) }
   }
   if (flight?.status === 'waiting-for-approval') {
@@ -220,11 +241,11 @@ export function featureChipState(
     return {
       // The one remaining fallback is a flight with no stage recorded yet (just
       // launched) — every KNOWN stage now has its own verb.
-      label: flight.currentStage ? RUNNING_STAGE_CHIP[flight.currentStage] : 'running',
+      label: flight.currentStage ? RUNNING_STAGE_CHIP[flight.currentStage] ?? 'running' : 'running',
       tone: FLIGHT_STATUS_TONE['running'],
       live: true,
       rank: 1,
-      title: flight.currentStage ? stageLabel(flight.currentStage) : 'running',
+      title: flight.currentStage && RUNNING_STAGE_CHIP[flight.currentStage] ? stageLabel(flight.currentStage) : 'running',
     }
   }
   // R74: a pause the USER chose is a quiet resting state (shelving a flight is
@@ -259,6 +280,16 @@ export interface FeatureFlightAction {
   /** The flight is parked on a checkpoint: blocked on the human rather than
    *  merely busy, so the row wash sits a step heavier (amber, not sky). */
   attention: boolean
+  queued?: boolean
+}
+
+/** Prefer the first recorded flight; standalone progress uses a derived token. */
+export function resolveFeatureFlightTarget(
+  feature: string,
+  flights: FlightIndexEntry[],
+): { flight: FlightIndexEntry | null; flightId: string } {
+  const flight = flights.find((entry) => entry.feature === feature) ?? null
+  return { flight, flightId: flight?.flightId ?? derivedFlightToken(feature) }
 }
 
 /** Resolve the shortcut for one suite, or null when there is no flight to open.
@@ -278,19 +309,20 @@ export function resolveFeatureFlightAction(
 ): FeatureFlightAction | null {
   // First match wins — the same dedupe-by-feature rule the picker rows use, so
   // a suite with several flights opens the one the picker would.
-  const flight = flights.find((f) => f.feature === feature) ?? null
+  const { flight, flightId } = resolveFeatureFlightTarget(feature, flights)
   if (!flight && !derived?.some((s) => s.status !== 'pending')) return null
   const chip = featureChipState(flight, activity, derived)
   return {
-    flightId: flight?.flightId ?? derivedFlightToken(feature),
+    flightId,
     tone: chip.tone,
     label: chip.label,
     title: chip.title,
     live: chip.live,
+    ...(activity?.waiting?.kind === 'queued' || (flight?.status === 'paused' && flight.pauseReason === 'queued') ? { queued: true } : {}),
     // Read off the flight record rather than the chip's rank, so the "blocked on
     // the human" wash tracks the same condition featureChipState branches on —
     // a hand-off is busy, not blocked, so it takes the sky `live` wash instead.
-    attention: flightAwaitsUser(flight),
+    attention: activity?.waiting?.kind === 'test-review' || flightAwaitsUser(flight),
   }
 }
 

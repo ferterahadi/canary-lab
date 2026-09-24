@@ -19,6 +19,35 @@ copied to `dist/templates/` during build.
 
 ## Hard rules
 
+- **Live state is part of completion.** Every change to documents, tests, runs,
+  jobs, or configuration must reach all affected open views without a browser
+  refresh, reopening the view, or restarting Canary. Read `cl_live-state-sync`
+  and `cl_ws-driven-state` before changing a producer or consumer of that state.
+  Include direct file edits, linked sources, MCP writes, and standalone runs;
+  update derived counts, freshness, and evidence as well as the source viewer.
+  Relevant changes must also reach connected Claude/Codex workflows through a
+  supported agent delivery path with recovery for missed changes. An emitted
+  event or a correct response after reload is insufficient: verify the already
+  open UI and agent consumer, and identify any unverified client limitation.
+- **Keep workspace data in the workspace.** Feature suites, their fixtures, and
+  original run artifacts belong in the selected Canary workspace, never this
+  package's source tree. Repository unit/regression fixtures stay beside their
+  tests so a fresh checkout works: use synthetic data or anonymized recordings,
+  preserve the behavior and result relationships, and replace personal paths,
+  project names, and identifying content with neutral placeholders. Never load
+  or symlink a contributor's live workspace from a repository test.
+  `npm run check:conventions` rejects personal home paths and symlinks in fixture
+  directories under `apps/`, `shared/`, and `tools/`; `npm run smoke:pack` runs
+  that gate too. This is a repository check, not a filesystem sandbox.
+- **Envset sources and targets have different ownership.** Durable values belong
+  in the selected workspace under `features/<feature>/envsets/<env>/<slot>`.
+  Trace source → target → consumer before changing a mapping. A suite that reads
+  `.env` normally targets `$CANARY_LAB_PROJECT_ROOT/features/<feature>/.env`;
+  the runner materializes it and restores the prior state at teardown. Never
+  invent pointer-only envsets, target `.runtime/envsets`, or choose a personal
+  source checkout just because an old env variable points there. Preserve genuine
+  file inputs and update their consumers together. The full migration contract
+  lives in `apps/web-server/prompts/mcp-author-instructions.md`.
 - **Never run the canary-apply rebuild/restart cycle** — the user runs it themselves
   (see the `cl_verify-changes` skill for the hand-off). Sole exception: a checkout
   that carries a gitignored `cl_apply-local` skill has opted in locally — follow that
@@ -119,13 +148,12 @@ natively.)
   `apps/web`: assign it a URL param so it's deep-linkable and survives refresh.
   Covers the cold-load test (which dialogs to route), the two-tier URL schema,
   and the hydration checklist + gotchas.
-- `cl_ws-driven-state` — adding any server-side mutation (route, background job,
-  MCP tool) that changes visible UI state: emit a `WorkspaceEvent` so the client
-  updates live. Covers the full chain + checklist + the two gaps fixed in 1.4.0
-  (portify save, coverage job completion).
-- `cl_live-state-sync` — a UI that must react in real time to a backend state
-  change, or anything that "only updates after refresh": picking
-  broadcast-push vs task-scoped stream vs refetch.
+- `cl_ws-driven-state` — changing a state producer, including routes, jobs, MCP
+  writes, direct files, and run results: publish through the owning store/event
+  path and trace delivery to every affected consumer.
+- `cl_live-state-sync` — changing any displayed or agent-consumed state: keep
+  open views and connected Claude/Codex workflows current, recover missed
+  changes, and verify updates without refresh or another user action.
 - `cl_surfacing-agent-work` — any UI showing an agent's progress/output (live
   or historical): know what the agent actually produces before designing the
   viewer.

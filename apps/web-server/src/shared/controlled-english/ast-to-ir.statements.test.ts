@@ -1,6 +1,7 @@
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import {
+  callbackHeaderEnglish,
   catchHeaderEnglish,
   finallyHeaderEnglish,
   ifPathHeaderEnglish,
@@ -96,6 +97,11 @@ describe('loops', () => {
       english:
         'declare asynchronous function `f`\nwith no parameters\nbody:\n    for await each constant `chunk`\n    from iterable `stream`\n    body:\n        call `write`\n        with argument `chunk`',
     },
+    {
+      name: 'for-of declaration with type and initializer recovery',
+      source: 'for (let item: string = "seed" of items) { use(item); }',
+      english: 'for each variable `item`\nwith type string\nand initialize it to string "seed"\nfrom iterable `items`\nbody:\n    call `use`\n    with argument `item`',
+    },
     { name: 'for-in', source: 'for (const key in bag) { log(key); }', english: 'for each constant `key`\nfrom the enumerable keys of `bag`\nbody:\n    call `log`\n    with argument `key`' },
     { name: 'while', source: 'while (busy) { wait(); }', english: 'while `busy` is truthy\nbody:\n    call `wait` with no arguments' },
     { name: 'do-while', source: 'do { poll(); } while (pending);', english: 'do:\n    call `poll` with no arguments\nthen repeat while `pending` is truthy' },
@@ -108,7 +114,7 @@ describe('branching', () => {
       name: 'if with else-if chain',
       source: 'if (a) { one(); } else if (b) { two(); } else { three(); }',
       english:
-        'if `a` is truthy\nthen:\n    call `one` with no arguments\notherwise:\n    if `b` is truthy\n    then:\n        call `two` with no arguments\n    otherwise:\n        call `three` with no arguments',
+        'if `a` is truthy\nthen:\n    call `one` with no arguments\nelse:\n    if `b` is truthy\n    then:\n        call `two` with no arguments\n    else:\n        call `three` with no arguments',
     },
     { name: 'if with a non-block branch', source: 'if (ready) start();', english: 'if `ready` is truthy\nthen:\n    call `start` with no arguments' },
     {
@@ -301,7 +307,7 @@ switch (mode) { case 'a': run(); break; default: wait(); }
 
     expect(renderEnglish(statementHeaderEnglish(decision))).toBe('if `ready` is truthy')
     expect(renderEnglish(ifPathHeaderEnglish(decision, 'then'))).toBe('then')
-    expect(renderEnglish(ifPathHeaderEnglish(decision, 'otherwise'))).toBe('otherwise')
+    expect(renderEnglish(ifPathHeaderEnglish(decision, 'otherwise'))).toBe('else')
     expect(renderEnglish(statementHeaderEnglish(selection))).toBe('switch on `mode`')
     expect(renderEnglish(switchPathHeaderEnglish(selection, 0))).toBe('when case matches string "a"')
     expect(renderEnglish(switchPathHeaderEnglish(selection, 1))).toBe('the default case')
@@ -355,5 +361,24 @@ try { run(); } catch { recover(); }
     expect(renderEnglish(catchHeaderEnglish(withBinding))).toBe('on error caught as `error`')
     expect(renderEnglish(finallyHeaderEnglish(withBinding))).toBe('finally')
     expect(renderEnglish(catchHeaderEnglish(withoutBinding))).toBe('catch')
+  })
+
+  it('projects arrow and function-expression callback headers without their bodies', () => {
+    const { sourceFile } = parseSource('example.ts', 'run(async (value: string) => { use(value); }, function named() { return 1; });')
+    const statement = sourceFile.statements[0]
+    if (!ts.isExpressionStatement(statement) || !ts.isCallExpression(statement.expression)) throw new Error('Expected call')
+    const [arrow, functionExpression] = statement.expression.arguments
+    if (!arrow || !functionExpression || !ts.isArrowFunction(arrow) || !ts.isFunctionExpression(functionExpression)) throw new Error('Expected callbacks')
+
+    expect(renderEnglish(callbackHeaderEnglish(arrow))).toContain('asynchronous arrow function')
+    expect(renderEnglish(callbackHeaderEnglish(functionExpression))).toContain('function expression')
+  })
+
+  it('keeps a declaration-only function header when no body exists', () => {
+    const { sourceFile } = parseSource('example.ts', 'declare function declared(value: string): void;')
+    const declaration = sourceFile.statements[0]
+    if (!ts.isFunctionDeclaration(declaration)) throw new Error('Expected function declaration')
+
+    expect(renderEnglish(statementHeaderEnglish(declaration))).toContain('declare ambient function `declared`')
   })
 })

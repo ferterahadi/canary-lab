@@ -14,6 +14,7 @@ import { listRuns } from '../../runs/logic/run-store'
 import { findBootProof } from './stage-evidence'
 import { readManifest } from '../../runs/logic/runtime/manifest'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
+import { isAuxiliaryExecution } from '../../../../../../shared/verification'
 
 // Read-time stage evidence, probed from the workspace for stages that never
 // recorded their own. Stored evidence is a CACHE of what the conductor measured;
@@ -162,8 +163,7 @@ function portifyEvidence(deps: WorkspaceEvidenceDeps, feature: string, featureDi
 function latestSettledRun(deps: WorkspaceEvidenceDeps, feature: string): { runId: string; status: string } | undefined {
   const runs = listRuns(deps.logsDir, { feature }).filter(
     (r) =>
-      r.executionType !== 'boot' &&
-      r.executionType !== 'benchmark' &&
+      !isAuxiliaryExecution(r.executionType) &&
       r.executionType !== 'verify' &&
       (r.status === 'passed' || r.status === 'failed'),
   )

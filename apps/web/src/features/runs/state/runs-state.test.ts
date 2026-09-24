@@ -89,6 +89,54 @@ describe('runsReducer', () => {
     expect(e.verificationTargetUrls).toEqual({ default: 'https://x' })
   })
 
+  it('update carries the envset onto the derived list entry', () => {
+    // Same field-for-field rule: an active run gets an `update` frame on every
+    // heartbeat, and the envset is what separates a 4/45-passed row from a
+    // 41/45-passed row of the SAME suite (spec selection cannot vary by envset,
+    // so both declare the same roster). Dropping it here blanks the envset
+    // mid-run and the two rows collapse into "one of these went badly".
+    const next = runsReducer(initialRunsState, {
+      type: 'update',
+      runId: 'm1',
+      detail: detail({ runId: 'm1', env: 'meta' }),
+    })
+    expect(next.runs.find((r) => r.runId === 'm1')!.env).toBe('meta')
+
+    // A suite that declares no envsets leaves the field off entirely.
+    const bare = runsReducer(initialRunsState, { type: 'update', runId: 'm2', detail: detail({ runId: 'm2' }) })
+    expect(bare.runs.find((r) => r.runId === 'm2')!).not.toHaveProperty('env')
+  })
+
+  it('update mirrors the pending spec-edit and hint counts the backend index carries', () => {
+    // Same field-for-field rule as above: the Runs list flags a run with
+    // untested spec edits off these counts, and every heartbeat `update` frame
+    // rebuilds the entry — dropping them here would blank the flag mid-run.
+    const next = runsReducer(initialRunsState, {
+      type: 'update',
+      runId: 'e1',
+      detail: detail({
+        runId: 'e1',
+        specEdits: {
+          checkedAt: 't',
+          pending: [
+            { file: 'e2e/a.spec.ts', change: 'modified', affectedTests: ['a'] },
+            { file: 'e2e/b.spec.ts', change: 'deleted', affectedTests: ['b'] },
+          ],
+          adopted: [],
+        },
+        integrity: { hints: [{ kind: 'cannot-classify', file: 'e2e/b.spec.ts', reason: 'deleted' }], disclosure: 'd' },
+      }),
+    })
+    const e = next.runs.find((r) => r.runId === 'e1')!
+    expect(e.pendingSpecEdits).toBe(2)
+    expect(e.integrityHints).toBe(1)
+
+    const clean = runsReducer(initialRunsState, { type: 'update', runId: 'e2', detail: detail({ runId: 'e2' }) })
+    const c = clean.runs.find((r) => r.runId === 'e2')!
+    expect(c).not.toHaveProperty('pendingSpecEdits')
+    expect(c).not.toHaveProperty('integrityHints')
+  })
+
   it('places an older incoming run after a newer existing one', () => {
     // The "inserts new sorted desc" test above hits the `a < b → 1` arm of
     // byStartedDesc. This case (incoming older than existing) hits the

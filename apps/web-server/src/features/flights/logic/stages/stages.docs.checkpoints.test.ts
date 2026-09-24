@@ -220,6 +220,47 @@ describe('docs stage', () => {
     expect(outcome.checkpoint.message).toContain('repos carry no requirement material')
   })
 
+  it('preserves a collector source conflict for focused elicitation without accepting a document', async () => {
+    const document_resolution = { status: 'conflicting', searched: [repoDir], question: 'Which refund period applies?', candidates: [
+      { label: 'Current', sources: [{ path: path.join(repoDir, 'current.md'), sha256: 'a'.repeat(64), reason: 'Spec says 30 days.' }] },
+      { label: 'Draft', sources: [{ path: path.join(repoDir, 'draft.md'), sha256: 'b'.repeat(64), reason: 'Draft says 7 days.' }] },
+    ] }
+    const spawnAgent: FlightStageDeps['spawnAgent'] = async (opts) => {
+      expect(opts.prompt).toContain('Discover documents before asking')
+      expect(opts.prompt).toContain('inference requires')
+      return { text: JSON.stringify({ document_resolution }) }
+    }
+    const adapter = docsStage(deps({ spawnAgent }))
+    const { ctx, setStage } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'collect-repo-docs' })
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'prd-source', data: {
+      documentResolution: document_resolution,
+      lastAttempt: { mode: 'collect-repo-docs', outcome: 'empty', reason: document_resolution.question },
+    } } })
+    expect(fs.existsSync(path.join(featuresDir, 'checkout', 'docs', 'checkout-prd.md'))).toBe(false)
+  })
+
+  // A collector that searched and came back empty explains itself rather than
+  // asking: the checkpoint has to carry that wording, not the NOTHING_FOUND
+  // prose it falls back to when there is no structured answer at all.
+  it('preserves a collector’s structured "nothing here" reason', async () => {
+    const document_resolution = { status: 'missing', searched: [repoDir], reason: 'Neither repository documents refunds.' }
+    const spawnAgent: FlightStageDeps['spawnAgent'] = async () => ({ text: JSON.stringify({ document_resolution }) })
+    const adapter = docsStage(deps({ spawnAgent }))
+    const { ctx, setStage } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'collect-repo-docs' })
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'prd-source', data: {
+      documentResolution: document_resolution,
+      lastAttempt: { mode: 'collect-repo-docs', outcome: 'empty', reason: document_resolution.reason },
+    } } })
+  })
+
   it('checkpoint response: an empty-handed collector re-parks with a STRUCTURED attempt', async () => {
     const spawnAgent: FlightStageDeps['spawnAgent'] = async () => ({ text: 'NOTHING_FOUND: no loyalty flow in either repo' })
     const adapter = docsStage(deps({ spawnAgent }))

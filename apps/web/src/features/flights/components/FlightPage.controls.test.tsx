@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlightManifest, FlightStageKey } from '@/shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
+import { LEDGER } from '@/features/coverage/components/__fixtures__/CoverageLedgerPage.part2-fixtures'
 
 const mocks = vi.hoisted(() => ({
   listFlights: vi.fn(),
@@ -261,6 +262,102 @@ async function render(flightId: string, extraProps: Record<string, unknown> = {}
 }
 
 describe('flight controls (R48/R71)', () => {
+  it('updates the rail warning and recovery menu while the Flight stays open', async () => {
+    vi.useFakeTimers()
+    try {
+      const ledger = structuredClone(LEDGER)
+      ledger.freshness = { ...ledger.freshness!, state: 'current', reasons: [], nextAction: undefined }
+      const stale = structuredClone(LEDGER)
+      stale.freshness!.nextAction = { stage: 'specs-coverage', command: 'start_external_coverage', label: 'Update coverage mappings', arguments: { feature: 'checkout' } }
+      mocks.getFeatureCoverage.mockResolvedValue(ledger)
+      mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', currentStage: 'run', stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'specs-coverage' ? 'done' : 'pending' })) }))
+      await render('fl_1')
+      const rail = () => container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')!
+      expect(rail().textContent).toContain('✓')
+      mocks.getFeatureCoverage.mockResolvedValue(stale)
+      await act(async () => vi.advanceTimersByTimeAsync(5000))
+      expect(rail().getAttribute('aria-label')).toContain('Coverage out of date')
+      await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')!.click())
+      expect(container.querySelector('[data-testid="flight-coverage-recover"]')).toBeTruthy()
+      mocks.getFeatureCoverage.mockResolvedValue(ledger)
+      await act(async () => vi.advanceTimersByTimeAsync(5000))
+      expect(rail().textContent).toContain('✓')
+      expect(container.querySelector('[data-testid="flight-coverage-recover"]')).toBeNull()
+    } finally { vi.useRealTimers() }
+  })
+
+  it.each(['run', 'specs-coverage'] as const)('offers compact stale-coverage recovery while viewing %s', async (selectedStage) => {
+    const ledger = structuredClone(LEDGER)
+    ledger.freshness!.nextAction = { stage: 'specs-coverage', command: 'start_external_coverage', label: 'Update coverage mappings', arguments: { feature: 'checkout' } }
+    mocks.getFeatureCoverage.mockResolvedValue(ledger)
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', currentStage: 'run', stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'specs-coverage' ? 'done' : 'pending' })) }))
+    mocks.redoFlight.mockResolvedValue(manifest({ status: 'running' }))
+    await render('fl_1')
+    const rail = container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')!
+    expect(rail.textContent).not.toContain('✓')
+    expect(rail.getAttribute('aria-label')).toContain('Coverage out of date')
+    expect(rail.getAttribute('title')).toBeNull()
+    act(() => { rail.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent)
+      .toBe('Coverage out of date.')
+    expect(container.querySelector('[data-testid="coverage-freshness-notice"]')).toBeNull()
+    await act(async () => container.querySelector<HTMLButtonElement>(`[data-testid="stage-rail-${selectedStage}"]`)!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')!.click())
+    expect(container.querySelectorAll('[role="menuitem"]')).toHaveLength(3)
+    expect(container.querySelector('[data-testid="flight-resume"]')?.textContent).toContain('Resume at Test run')
+    const recovery = container.querySelector<HTMLButtonElement>('[data-testid="flight-coverage-recover"]')!
+    expect(recovery.textContent).toContain('Run from Tests & coverage')
+    await act(async () => recovery.click())
+    expect(container.querySelector('[data-testid="flight-redo-specs-coverage"]')?.getAttribute('aria-checked')).toBe('true')
+    expect(mocks.redoFlight).not.toHaveBeenCalled()
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-submit"]')!.click())
+    expect(mocks.redoFlight).toHaveBeenCalledWith('fl_1', { fromStage: 'specs-coverage', feedback: undefined })
+  })
+
+  it('starts recovery at Requirements when the source changed, and preserves prerequisite checks', async () => {
+    mocks.getFeatureCoverage.mockResolvedValue(structuredClone(LEDGER))
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', currentStage: 'run' }))
+    mocks.getFlightEntryOptions.mockResolvedValue({ stages: [{ key: 'docs', allowed: false, reason: 'Missing source' }] })
+    await render('fl_1')
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')!.click())
+    const recovery = container.querySelector<HTMLButtonElement>('[data-testid="flight-coverage-recover"]')!
+    expect(recovery.textContent).toContain('Run from Requirements')
+    await act(async () => recovery.click())
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="flight-redo-submit"]')!.disabled).toBe(true)
+    expect(mocks.redoFlight).not.toHaveBeenCalled()
+  })
+
+  it('keeps the missing-requirements warning short on both affected steps', async () => {
+    const ledger = structuredClone(LEDGER)
+    ledger.freshness = {
+      ...ledger.freshness!, state: 'not-measured', reasons: ['Requirements have not been generated.'],
+      nextAction: { stage: 'prd-summary', command: 'start_external_summary', label: 'Generate requirements & coverage', arguments: { feature: 'checkout' } },
+    }
+    mocks.getFeatureCoverage.mockResolvedValue(ledger)
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', currentStage: 'docs' }))
+    await render('fl_1')
+    for (const key of ['docs', 'specs-coverage']) {
+      const rail = container.querySelector<HTMLButtonElement>(`[data-testid="stage-rail-${key}"]`)!
+      expect(rail.getAttribute('aria-label')).toContain('Requirements missing; coverage not measured.')
+      act(() => rail.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+      expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe('Requirements missing; coverage not measured.')
+      act(() => rail.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })))
+    }
+  })
+
+  it('shows only recovery when Resume would enter the same stage', async () => {
+    mocks.getFeatureCoverage.mockResolvedValue(structuredClone(LEDGER))
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', currentStage: 'prd-summary' }))
+    await render('fl_1')
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')!.click())
+
+    expect(container.querySelector('[data-testid="flight-resume"]')).toBeNull()
+    expect(container.querySelector('[data-testid="flight-coverage-recover"]')?.textContent)
+      .toContain('Run from Requirements')
+    expect(container.querySelectorAll('[role="menuitem"]')).toHaveLength(2)
+  })
+
   const openMenu = async () => {
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-menu"]')?.click() })
   }
@@ -567,11 +664,45 @@ describe('rail follow mode (R71/W2)', () => {
     expect(container.querySelector('[data-testid="rail-following"]')).toBeTruthy()
   })
 
-  it('rail and stage-header tooltips speak the STAGE_BLURB, not internal keys', async () => {
+  it('uses one short custom tooltip for a rail row', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ stages: runningStages() }))
     await render('fl_1')
-    const title = container.querySelector('[data-testid="stage-rail-scout"]')?.getAttribute('title')
-    expect(title).toContain('Reads your repo')
-    expect(title).not.toBe('scout')
+    const row = container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scout"]')!
+    expect(row.getAttribute('title')).toBeNull()
+    act(() => { row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent)
+      .toBe('Checks your repo and how to start it.')
+  })
+
+  it('the Follow chip spends its one sky accent on the dot, and only while following', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ stages: runningStages() }))
+    await render('fl_1')
+    // Following is the default and a click there is a no-op, so the pressed chip
+    // must not be the loudest thing in the rail: text and border keep
+    // `.cl-button`'s neutral ink and the dot is the only sky element.
+    const following = container.querySelector<HTMLButtonElement>('[data-testid="rail-following"]')!
+    expect(following.style.color).toBe('')
+    expect(following.style.borderColor).toBe('')
+    expect(following.querySelector<HTMLElement>('[aria-hidden="true"]')?.style.color).toBe('var(--accent)')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click() })
+    // Parked, it is a plain resume button — the ↺ carries no accent either.
+    const resume = container.querySelector<HTMLButtonElement>('[data-testid="rail-resume-follow"]')!
+    expect(resume.style.color).toBe('')
+    expect(resume.querySelector<HTMLElement>('[aria-hidden="true"]')?.style.color).toBe('')
+  })
+
+  it('the Follow chip explains each state in the shared tooltip, not a native title', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ stages: runningStages() }))
+    await render('fl_1')
+    const following = container.querySelector<HTMLButtonElement>('[data-testid="rail-following"]')!
+    expect(following.getAttribute('title')).toBeNull()
+    act(() => { following.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe('Following whichever step needs you')
+    act(() => { following.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })) })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click() })
+    const resume = container.querySelector<HTMLButtonElement>('[data-testid="rail-resume-follow"]')!
+    expect(resume.getAttribute('title')).toBeNull()
+    act(() => { resume.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe('Go back to following the step that needs you')
   })
 })

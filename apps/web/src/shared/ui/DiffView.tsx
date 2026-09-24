@@ -1,11 +1,13 @@
-import React from 'react'
+import { useMemo } from 'react'
+import { comparisonPatchRows } from '@/shared/lib/comparison-diff'
+import { ComparisonLegend, ComparisonTable } from './ComparisonTable'
 
-/** Unified-diff block with per-line colouring (+ green, − red, `# ` section
- *  headers accent, @@ hunks muted) — the one diff renderer for every surface
- *  that shows a captured patch (Portify wizard review, flight portify-apply
- *  checkpoint). Extracted from the legacy Portify overlay so Flight stopped
- *  rendering the same diff as an uncoloured wall of text. */
+/** Captured patches use the same before/after presentation as semantic changes.
+ * File and hunk metadata remain visible so the comparison keeps its context. */
 export function DiffView({ diff, onOpenInEditor, openTitle = 'Open project in editor' }: { diff: string; onOpenInEditor?: () => void; openTitle?: string }) {
+  const rows = useMemo(() => comparisonPatchRows(diff).map((row, index) => row.kind === 'section'
+    ? { id: String(index), kind: 'section' as const, label: row.text }
+    : { id: String(index), before: row.before, after: row.after }), [diff])
   if (!diff.trim()) return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>(no diff captured)</div>
   return (
     <div style={{ position: 'relative' }}>
@@ -26,23 +28,10 @@ export function DiffView({ diff, onOpenInEditor, openTitle = 'Open project in ed
           ↗
         </button>
       )}
-      <pre style={{
-        fontSize: 11.5, fontFamily: 'var(--font-mono)', lineHeight: 1.5, color: 'var(--text-secondary)',
-        background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
-        padding: '12px 14px', maxHeight: 360, overflow: 'auto', whiteSpace: 'pre', margin: 0,
-      }}>
-        {diff.split('\n').map((line, i) => (
-          <div key={i} style={{ color: lineColor(line) }}>{line || ' '}</div>
-        ))}
-      </pre>
+      <div className="mb-2 pr-10"><ComparisonLegend /></div>
+      <div className="max-h-[360px] overflow-auto scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+        <ComparisonTable rows={rows} code ariaLabel="Patch before and after" />
+      </div>
     </div>
   )
-}
-
-function lineColor(line: string): string {
-  if (line.startsWith('# ')) return 'var(--accent)'
-  if (line.startsWith('+') && !line.startsWith('+++')) return 'var(--success)'
-  if (line.startsWith('-') && !line.startsWith('---')) return 'var(--danger)'
-  if (line.startsWith('@@')) return 'var(--text-muted)'
-  return 'var(--text-secondary)'
 }

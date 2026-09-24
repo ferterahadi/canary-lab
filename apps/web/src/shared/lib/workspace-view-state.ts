@@ -47,7 +47,14 @@ export type WorkspaceView = 'workspace' | 'cleanup' | 'coverage' | 'flights'
 // `settings` is Project Settings (the features column's gear). Workspace-scoped
 // rather than feature-scoped, and rebuilt entirely from GET /api/project-config,
 // so a cold load needs nothing this tab happened to be holding.
-export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' | 'flight-new' | 'demo' | 'settings'
+// `tests-review` is the changed-tests review (the status bar's "Tests changed"
+// pill, the features-column badge, and the run hero's "verdict from run-start
+// snapshot" link all open it). Workspace-scoped: it lists every suite with a
+// changed spec or a live run holding unexecuted edits, rebuilt from
+// GET /api/features + the runs index, so a cold load is coherent — and it is
+// exactly the surface a teammate pastes a link to ("look at this weakened
+// test"), which is the point of routing it.
+export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' | 'flight-new' | 'demo' | 'settings' | 'tests-review' | 'notifications'
 
 /** The Feature-config dialog's tabs — the `tab` qualifier for `dialog=config`.
  *  Routed because entry points land on different tabs (the run detail opens
@@ -79,7 +86,31 @@ export interface RunOpenTarget {
   tab?: RunArrivalTab
 }
 
+export interface ReviewFocus { file?: string; line?: number; mode?: 'english' | 'code'; baseline?: 'run'; change?: 'added' | 'changed' | 'removed'; test?: string }
+
+/** URL-mode MCP elicitation explicitly invites the human to answer this
+ * checkpoint in the existing UI. The token is the fact and the review flag is
+ * derived from it, so the two can never disagree about the same URL. This is a
+ * UI ownership hint, not authority for an API call, and cannot unlock
+ * agent-work checkpoints or another flight. */
+export function checkpointInputToken(flightId: string, checkpointKind: string): string | undefined {
+  const params = new URLSearchParams(window.location.search)
+  const token = params.get('inputToken')
+  return checkpointKind !== 'external-work' && params.get('view') === 'flights'
+    && params.get('flight') === flightId
+    && params.get('elicitation') === `${flightId}:${checkpointKind}`
+    && token ? token : undefined
+}
+
+export function isElicitationReview(flightId: string, checkpointKind: string): boolean {
+  return checkpointInputToken(flightId, checkpointKind) !== undefined
+}
+
 export interface PersistedView {
+  /** Current source is the default. False explicitly opens the selected run's
+   *  recorded tests (URL only). True remains supported for older links. */
+  currentTests?: boolean
+  reviewFocus?: ReviewFocus
   view: WorkspaceView
   feature: string | null
   /** Selected run id (URL only). */
@@ -133,7 +164,7 @@ export type DurableView = Pick<PersistedView, 'view' | 'feature'>
 
 const STORAGE_KEY = 'cl.workspace.view'
 const VIEWS: WorkspaceView[] = ['workspace', 'cleanup', 'coverage', 'flights']
-const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-fresh', 'flight-new', 'demo', 'settings']
+const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-fresh', 'flight-new', 'demo', 'settings', 'tests-review', 'notifications']
 const CONFIG_TABS: ConfigTab[] = ['general', 'repos', 'ports', 'envsets', 'playwright']
 const RUN_ARRIVAL_TABS: RunArrivalTab[] = ['changes']
 const MODELS_AGENTS: ModelsAgent[] = ['claude', 'codex']
@@ -195,10 +226,16 @@ export function readPersistedView(): PersistedView {
     // `from` names the flight a drill-through left — meaningless on the flights
     // view itself, dropped there.
     const returnFlight = v === 'flights' ? null : params.get('from') || null
+    const change = params.get('reviewChange')
+    const reviewFocus: ReviewFocus | undefined = dialog === 'tests-review' && (params.get('reviewFile') || params.get('reviewBase') === 'run' || params.get('reviewMode')) ? { ...(params.get('reviewBase') === 'run' ? { baseline: 'run' as const, ...(change === 'added' || change === 'changed' || change === 'removed' ? { change, ...(params.get('reviewTest') ? { test: params.get('reviewTest')! } : {}) } : {}) } : {}), ...(params.get('reviewFile') ? { file: params.get('reviewFile')! } : {}), line: /^[1-9]\d*$/.test(params.get('reviewLine') ?? '') ? Number(params.get('reviewLine')) : undefined, mode: params.get('reviewMode') === 'code' ? 'code' as const : 'english' as const } : undefined
+    const review = reviewFocus ? { reviewFocus } : {}
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.
-    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, modelsAgent, focusTest, runTab, returnFlight }
-    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, modelsAgent, focusTest, runTab, returnFlight }
+    const source = params.get('tests')
+    const tests = feature && run && (!v || v === 'workspace') && (source === 'current' || source === 'recorded')
+      ? { currentTests: source === 'current' } : {}
+    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, modelsAgent, focusTest, runTab, returnFlight, ...review, ...tests }
+    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, modelsAgent, focusTest, runTab, returnFlight, ...review, ...tests }
   } catch { /* ignore */ }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -220,6 +257,8 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'view', state.view === 'workspace' ? null : state.view)
     setOrDelete(params, 'feature', state.feature)
     setOrDelete(params, 'run', state.run)
+    setOrDelete(params, 'tests', state.view === 'workspace' && state.feature && state.run && state.currentTests !== undefined
+      ? state.currentTests ? 'current' : 'recorded' : null)
     setOrDelete(params, 'dialog', state.dialog)
     // `wf` qualified the retired portify dialog (R50), `task` the retired
     // evaluation dialog (R29), and `draft` the retired external-authoring
@@ -231,6 +270,10 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'draft', null)
     // `flight` only qualifies the flights view — drop it otherwise.
     setOrDelete(params, 'flight', state.view === 'flights' ? state.flight : null)
+    if (state.view !== 'flights' || !state.flight || !params.get('elicitation')?.startsWith(`${state.flight}:`)) {
+      params.delete('elicitation')
+      params.delete('inputToken')
+    }
     // `stage` only qualifies an OPEN flight — drop it on the flights landing
     // list and off the view entirely, so a stage pick can't outlive its flight.
     setOrDelete(params, 'stage', state.view === 'flights' && state.flight ? state.flightStage : null)
@@ -238,6 +281,12 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'tab', state.dialog === 'config' ? state.configTab : null)
     // `models` only qualifies the settings dialog — drop it otherwise, so a
     // matrix pick can't outlive the settings dialog it was stacked over.
+    setOrDelete(params, 'reviewBase', state.dialog === 'tests-review' ? state.reviewFocus?.baseline ?? null : null)
+    setOrDelete(params, 'reviewChange', state.dialog === 'tests-review' && state.reviewFocus?.baseline === 'run' ? state.reviewFocus.change ?? null : null)
+    setOrDelete(params, 'reviewTest', state.dialog === 'tests-review' && state.reviewFocus?.baseline === 'run' && state.reviewFocus.change ? state.reviewFocus.test ?? null : null)
+    setOrDelete(params, 'reviewFile', state.dialog === 'tests-review' ? state.reviewFocus?.file ?? null : null)
+    setOrDelete(params, 'reviewLine', state.dialog === 'tests-review' && state.reviewFocus?.line ? String(state.reviewFocus.line) : null)
+    setOrDelete(params, 'reviewMode', state.dialog === 'tests-review' ? state.reviewFocus?.mode ?? null : null)
     setOrDelete(params, 'models', state.dialog === 'settings' ? state.modelsAgent : null)
     // `test` only qualifies a selected run — drop it otherwise, so switching runs
     // can't leave a previous run's failure pinned in the URL.

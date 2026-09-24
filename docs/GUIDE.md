@@ -11,6 +11,23 @@ Canary Lab backs up each configured target, writes the selected values before
 the run, and restores the originals during teardown. Manage envsets in the UI;
 their source files live under `features/<feature>/envsets/`.
 
+For a suite that reads `.env`, store its actual values in
+`features/<feature>/envsets/local/<feature>.env` and set that slot's target to
+`$CANARY_LAB_PROJECT_ROOT/features/<feature>/.env`. The source stays in the
+workspace; the target is materialized for the run. Existing target files are
+backed up and restored; targets absent before the run are removed at teardown.
+Slots absent from the selected envset do not change or claim their targets.
+An interrupted process that cannot execute teardown still needs inspection;
+do not delete pre-existing user files when cleaning up a run.
+
+A target names the file a launcher, application, or test actually reads. Do not
+point it at `.runtime/envsets` or back into the envset sources. Importing values
+from a personal checkout does not make that checkout the correct target:
+`capture_feature_env_files` defaults an omitted target to its source path, so set
+the target explicitly when the consumer lives elsewhere. Store actual values
+instead of a pointer to another unmanaged env file. Separate slots remain valid
+for required file inputs such as JSON configuration or certificates.
+
 Suite configuration can also make service startup environment-specific. A
 typical suite starts local services for `local` and skips them for
 `production`, where Playwright points at a deployed URL.
@@ -77,6 +94,10 @@ When the suite has a PRD summary, the report separates two questions:
 
 Canary Lab never borrows a result from another run for an export.
 
+Canary stores a behavior certificate separately for internal evidence and MCP
+consumers. The downloadable archive contains the HTML report and captured media;
+it does not contain `certificate.json` or the offline checker.
+
 The Export menu offers two wording modes:
 
 - **Raw** renders directly from captured evidence and uses no LLM.
@@ -97,11 +118,43 @@ proof state for Flight and evaluation surfaces. The Coverage headline and gap
 groups remain claim-based. Strictness describes the strongest assertion layer
 in each test.
 
+At rest a requirement is one row: its id, its title, one square per case it
+has to cover, and a status dot only when something is wrong. The square carries
+the whole claim-versus-proof distinction — hollow means no test points at that
+case, sky means a test claims it, and green means a run actually passed it.
+A red dot means a mapped test was weakened after the proof; an amber one means
+a requirement that *is* claimed has lost its proof. Weakened requirements sort
+to the top.
+
+Opening a row shows the requirement's own sentence, then one
+block per promise the requirement makes (happy path, unhappy path), then — for
+a requirement that spans channels — a grid with the channels down the side and
+the paths across, worst-covered channel first.
+
+It closes with a short verdict label, such as *Not provable yet* when coverage
+is incomplete,
+*Not proven yet* when tests claim it but no run has passed them, *Proven*,
+*Proof out of date*, or *A test was weakened after the proof*. The three
+underlying dates sit on the verdict's dot. The header states how many requirements are proven unchanged in
+the latest run.
+
+**Generate** opens the suite's Flight page and follows Requirements → Tests &
+coverage. Activity shows the live summary and mapping sessions, with their
+history available after completion. Return to Coverage to inspect the resulting
+requirements, test mappings, and gaps.
+
 Regenerating the PRD summary preserves surviving requirement IDs. Changes to
 source docs mark the summary and dependent coverage state stale instead of
 silently reusing old mappings. See [FEATURES](FEATURES.md#requirement-coverage)
 for the tag contract and [COMMANDS](COMMANDS.md#requirement-coverage-mcp-compact-or-direct-coveragelifecyclefull-profiles)
 for MCP tools.
+
+Linked local documents stay symlinked. If a source moves or is deleted,
+its document card shows **Source unavailable**. Choose **Relink** and enter the
+new absolute or `~/` path. Canary keeps the document's name and existing summary
+baseline, so changed contents still trigger requirements drift. Relinking creates
+no recovery copy; if the new path is invalid or the symlink cannot be created,
+the old link remains available to repair. Uploaded documents remain imported copies. MCP coverage and Flight document steps ask for the new path through elicitation when the client supports forms. After relinking, the agent retries its original command; cancellation leaves the work pending.
 
 ## Repair a failed run
 
@@ -157,6 +210,43 @@ debugging; do not poll it.
 Fix application or service code. Never delete, skip, weaken, or loosen a test to
 turn the run green. Signal once per repair cycle, with the hypothesis and change
 description, then wait on the same run again.
+
+`start_run` continues a matching active run even with `force_new:true`. Use the
+Run panel for a deliberate concurrent run of the same feature. Resume a stopped
+run with `start_run(run_ref)` to retain its recorded tests and journal. A fresh
+start cannot adopt outstanding suite changes without review. Use `get_test_review`
+then `review_test_changes`; the human reviews the exact patch before adoption.
+`abort_run` requests human stop approval. An agent-written `confirm:true` alone
+does not stop a run; clients without forms use Stop in the Run panel.
+
+### Environment-specific tests
+
+Keep the same test roster in every environment. If a contract applies only to a
+known envset, declare that boundary in the suite before execution and skip it in
+other envsets:
+
+```ts
+test.describe('Provider contracts', {
+  annotation: { type: 'canary:environments', description: '["meta"]' },
+}, () => {
+  test.skip(process.env.CANARY_LAB_ENV !== 'meta', 'Requires the meta envset')
+  // Provider-specific tests go here.
+})
+```
+
+The runner sets `CANARY_LAB_ENV` to the selected envset. The reporter captures the
+declaration before tests start and records an exclusion only for an actual skip
+outside the allowed envsets. For example, **51 passed, 4 skipped (outside local)**
+can finish the local run, but proves nothing about those four Meta contracts.
+The summary still says 51/55 passed; `counts.notApplicable` is a subset of skipped.
+Ordinary skips, interrupted tests, and missing prerequisites remain incomplete.
+A run with no applicable passes cannot pass. Never add a declaration to evade a
+failure; changing this boundary during repair requires human test review.
+
+New Journal entries distinguish **all tests passed**, **applicable tests passed**,
+and **failures cleared**. Older `all_passed` entries display **no failures recorded**
+because that label did not establish complete execution. Their raw history remains
+unchanged.
 
 Setup-installed sessions intentionally expose one MCP tool: `exec`. Atomic names
 such as `get_feature_coverage` are command values and do not appear as public
@@ -227,12 +317,11 @@ similarity → scout → scaffold → env capture → docs → PRD summary
 → Tests & coverage → Test run → Auto-repair → Report → Parallel setup
 ```
 
-The serial Test run and downloadable Report finish before Parallel setup, so a
-large app produces its evaluation without first waiting for port-injection
-work. The Report is the end of the foreground journey: surface it as soon as it
-exists. Parallel setup remains a persisted, server-owned final stage that can
-finish, park, or be retried in the background without deleting the completed run
-or Report. The Flight page continues to show its live progress.
+The serial Test run and downloadable Report finish before the independent work,
+so a large app produces its evaluation without first waiting for port-injection
+work. Surface the Report as soon as it exists. Parallel
+setup runs next and can be repeated without deleting the completed Report.
+The Flight page shows its live progress.
 
 The server owns stage priority, persistence, and every verdict. Judgment work can
 come from two producers:
@@ -245,9 +334,9 @@ come from two producers:
   export. Canary Lab still re-reads artifacts and computes the verdict.
 
 Mechanical work—scaffold writes, env application, Playwright execution, and raw
-export—plus final Parallel setup stays in Canary Lab in both modes. Once
+export—plus Parallel setup stays in Canary Lab in both modes. Once
 `links.evaluationZip` appears, an external client reports that path and ends its
-turn; it does not keep polling while Parallel setup runs. An external client can
+turn; it does not keep polling while the independent work runs. An external client can
 return any earlier handoff to the internal agent with `choice: "run-internally"`.
 Flights persisted under the older client-owned Portify behavior use that same
 choice to migrate their final handoff back to Canary Lab.
@@ -300,10 +389,11 @@ One suite has one Flight record.
 - Recalling an active Flight follows it.
 - Recalling a paused Flight resumes its first open stage without deleting
   artifacts.
-- `from_stage` re-enters one stage after checking prerequisites. It normally
-  deletes that stage's and every later record stage's artifacts; re-entering
-  Parallel setup deletes only its own Portify attempt and preserves the run and
-  Report.
+- `from_stage` re-enters one stage after checking prerequisites and resets the
+  artifacts that depend on it. Repeating Tests & coverage or Test run keeps
+  Parallel setup. Repeating Parallel setup resets only that stage while
+  preserving the run and Report. Completed reports stay
+  downloadable in history.
 - `redo: true` restarts from stage one and deletes all stage artifacts. A full
   redo may replace the stored repos and description; omit them to reuse the old
   values.
@@ -325,7 +415,7 @@ queue. This planning surface is not available through the CLI or MCP.
 ## External authoring workflow
 
 The default MCP surface is `compact`: one always-loaded `exec` tool dispatches
-all 63 atomic commands, including Portify. Bare connections and `setup`-installed
+all 64 atomic commands, including Portify. Bare connections and `setup`-installed
 clients use the same profile. Focused direct profiles, `lifecycle`, and `full`
 remain opt-in surfaces for debugging and rollback.
 A client can use the following standalone flow without asking Canary Lab to

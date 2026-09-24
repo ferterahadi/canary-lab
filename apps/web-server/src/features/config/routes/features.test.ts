@@ -308,6 +308,29 @@ describe('dirty summary on GET /api/features', () => {
     expect(alpha.dirty.specs[0]).toMatchObject({ file: 'e2e/a.spec.ts' })
     expect(alpha.dirty.specs[0].affectedTests).toEqual(['one'])
   })
+
+  it('ships the strength verdict whole, with the live @requirement ids on each changed test', async () => {
+    const dir = writeFeature('alpha', { spec: "// @requirement checkout-1\ntest('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    // exact → existential: the differential reads this as weaker.
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "// @requirement checkout-1\ntest('one', async () => { expect(1).toBeTruthy() })\n")
+
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+
+    const app = await build({ dirtySpecStore: store })
+    const res = await app.inject({ method: 'GET', url: '/api/features' })
+    const body = res.json() as Array<{
+      name: string
+      dirty: { specs: { strength?: { verdict: string; baseline: string; tests: { name: string; verdict: string; requirements?: string[]; changes: unknown[] }[] } }[] }
+    }>
+    const strength = body.find((f) => f.name === 'alpha')!.dirty.specs[0].strength!
+    expect(strength.verdict).toBe('weaker')
+    expect(strength.baseline).toBe('head')
+    expect(strength.tests).toHaveLength(1)
+    expect(strength.tests[0]).toMatchObject({ name: 'one', verdict: 'weaker', requirements: ['checkout-1'] })
+    expect(strength.tests[0].changes).toHaveLength(1)
+  })
 })
 
 describe('POST /api/features/:name/approve-dirty', () => {
@@ -411,7 +434,7 @@ describe('POST /api/features/:name/commit-dirty', () => {
     expect((res.json() as { error: string }).error).toBeTruthy()
   })
 
-  it('500s with the git stderr when `git commit` fails (nothing staged to commit)', async () => {
+  it.each(['reverted', 'committed'])('quietly clears stale edits that were already %s, preserving unrelated staged work', async (action) => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
     initGitFeature(dir)
     fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
@@ -420,15 +443,26 @@ describe('POST /api/features/:name/commit-dirty', () => {
     await store.recompute('alpha', dir)
     expect(store.get('alpha')?.status).toBe('dirty')
 
-    // Revert the working tree back to the committed content before the route
-    // runs. `git add` on unmodified content stages nothing, so the follow-up
-    // `git commit` for those pathspecs fails ("nothing to commit").
-    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(1) })\n")
+    if (action === 'reverted') {
+      fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(1) })\n")
+    } else {
+      git(dir, ['add', '.'])
+      git(dir, ['commit', '-qm', 'external commit'])
+    }
+    fs.writeFileSync(path.join(dir, 'unrelated.txt'), 'keep staged')
+    git(dir, ['add', 'unrelated.txt'])
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir }).toString()
+    const changed = vi.fn()
+    store.onEvent(changed)
 
     const app = await build({ dirtySpecStore: store })
     const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
-    expect(res.statusCode).toBe(500)
-    expect((res.json() as { error: string }).error).toBeTruthy()
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ committed: false, reason: 'no modified specs', status: 'clean' })
+    expect(store.get('alpha')?.dirtySpecs).toEqual([])
+    expect(changed).toHaveBeenCalledWith({ kind: 'changed', featureId: 'alpha' })
+    expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir }).toString()).toBe(head)
+    expect(execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: dir }).toString().trim()).toBe('unrelated.txt')
   })
 
   it('commits the dirty specs and clears the dirty status on success', async () => {
@@ -475,6 +509,33 @@ describe('POST /api/features/:name/commit-dirty', () => {
     }
   })
 
+  // `git diff --cached --quiet` answers in its exit code: 0 clean, 1 staged
+  // changes. Anything else is git failing, not an answer — committing on it
+  // would treat "I could not tell" as "there is something to accept".
+  it('refuses to commit when the staged-change check itself fails', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+
+    const realRunGit = vi.mocked(runGit).getMockImplementation()!
+    vi.mocked(runGit).mockImplementation(async (cwd, args) =>
+      args[0] === 'diff' ? { code: 2, stdout: '', stderr: '' } : realRunGit(cwd, args),
+    )
+    try {
+      const app = await build({ dirtySpecStore: store })
+      const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
+      expect(res.statusCode).toBe(500)
+      expect((res.json() as { error: string }).error).toBe('git diff failed')
+      // Nothing was committed on an unreadable answer.
+      expect(execFileSync('git', ['status', '--porcelain'], { cwd: dir }).toString()).toContain('e2e/a.spec.ts')
+    } finally {
+      vi.mocked(runGit).mockImplementation(realRunGit)
+    }
+  })
+
   it('falls back to "git commit failed" when git exits nonzero with no output', async () => {
     const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
     initGitFeature(dir)
@@ -495,5 +556,131 @@ describe('POST /api/features/:name/commit-dirty', () => {
     } finally {
       vi.mocked(runGit).mockImplementation(realRunGit)
     }
+  })
+
+  it('surfaces a failed Git comparison instead of treating it as a clean suite', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+    const realRunGit = vi.mocked(runGit).getMockImplementation()!
+    vi.mocked(runGit).mockImplementation(async (cwd, args) =>
+      args[0] === 'diff' ? { code: 128, stdout: '', stderr: 'cannot read index' } : realRunGit(cwd, args),
+    )
+    try {
+      const app = await build({ dirtySpecStore: store })
+      const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
+      expect(res.statusCode).toBe(500)
+      expect(res.json()).toEqual({ error: 'cannot read index' })
+      expect(store.get('alpha')?.status).toBe('dirty')
+    } finally {
+      vi.mocked(runGit).mockImplementation(realRunGit)
+    }
+  })
+
+  it('commits an untracked spec with a run baseline rather than mistaking it for a no-op', async () => {
+    const dir = writeFeature('alpha')
+    initGitFeature(dir)
+    fs.mkdirSync(path.join(dir, 'e2e'))
+    const file = path.join(dir, 'e2e', 'new.spec.ts')
+    fs.writeFileSync(file, "test('one', async () => { expect(1).toBe(1) })\n")
+    const store = makeDirtySpecStore()
+    await store.captureRunStart('alpha', dir)
+    fs.writeFileSync(file, "test('one', async () => { expect(1).toBe(2) })\n")
+    await store.recompute('alpha', dir)
+    const app = await build({ dirtySpecStore: store })
+    const res = await app.inject({ method: 'POST', url: '/api/features/alpha/commit-dirty' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ committed: true, status: 'clean' })
+    expect(execFileSync('git', ['show', 'HEAD:e2e/new.spec.ts'], { cwd: dir }).toString()).toBe(fs.readFileSync(file, 'utf8'))
+  })
+})
+
+describe('feature test review decisions', () => {
+  it('returns specific review-route errors for missing state, Git failures, and non-Error faults', async () => {
+    writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    const revision = 'a'.repeat(64)
+    const tracked = makeDirtySpecStore()
+    const app = await build({ dirtySpecStore: tracked })
+
+    // No Git checkout: the route preserves the actionable 409 from the review
+    // helper instead of replacing it with a generic 500.
+    expect((await app.inject({ method: 'GET', url: '/api/features/alpha/test-review-plan' })).statusCode).toBe(409)
+    expect((await app.inject({ method: 'POST', url: '/api/features/alpha/accept-test-review', payload: { expectedRevision: revision } })).statusCode).toBe(409)
+    expect((await app.inject({ method: 'POST', url: '/api/features/alpha/restore-test-review', payload: { expectedRevision: revision } })).statusCode).toBe(409)
+
+    const withoutTracking = await build()
+    expect((await withoutTracking.inject('/api/features/missing/test-review-plan')).statusCode).toBe(404)
+    expect((await withoutTracking.inject('/api/features/alpha/test-review-plan')).statusCode).toBe(503)
+    expect((await withoutTracking.inject({ method: 'POST', url: '/api/features/missing/accept-test-review', payload: { expectedRevision: revision } })).statusCode).toBe(404)
+    expect((await withoutTracking.inject({ method: 'POST', url: '/api/features/alpha/accept-test-review', payload: {} })).statusCode).toBe(503)
+    expect((await withoutTracking.inject({ method: 'POST', url: '/api/features/missing/restore-test-review', payload: { expectedRevision: revision } })).statusCode).toBe(404)
+    expect((await withoutTracking.inject({ method: 'POST', url: '/api/features/alpha/restore-test-review', payload: {} })).statusCode).toBe(503)
+
+    const faultingStore = { recompute: async () => { throw 'filesystem unavailable' } } as unknown as DirtySpecStore
+    const faulting = await build({ dirtySpecStore: faultingStore })
+    const response = await faulting.inject('/api/features/alpha/test-review-plan')
+    expect(response.statusCode).toBe(500)
+    expect(response.json()).toEqual({ error: 'Could not prepare the reviewed files.' })
+  })
+
+  it('commits the exact reviewed revision and returns the same durable receipt on retry', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+    const app = await build({ dirtySpecStore: store })
+    const plan = (await app.inject({ method: 'GET', url: '/api/features/alpha/test-review-plan' })).json() as { review_revision: string }
+
+    const first = await app.inject({ method: 'POST', url: '/api/features/alpha/accept-test-review', payload: { expectedRevision: plan.review_revision } })
+    expect(first.statusCode).toBe(200)
+    expect(first.json()).toMatchObject({
+      decision: 'accepted', review_revision: plan.review_revision, files: ['e2e/a.spec.ts'],
+      git: { status: 'committed', commit: expect.stringMatching(/^[a-f0-9]{40}$/) }, execution: { status: 'none' },
+    })
+    expect(store.reviewReceipt('alpha', plan.review_revision)).toEqual(first.json())
+    const retry = await app.inject({ method: 'POST', url: '/api/features/alpha/accept-test-review', payload: { expectedRevision: plan.review_revision } })
+    expect(retry.json()).toEqual(first.json())
+  })
+
+  it('refuses a stale revision and restores the current reviewed files', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+    const store = makeDirtySpecStore()
+    await store.recompute('alpha', dir)
+    const app = await build({ dirtySpecStore: store })
+    const plan = (await app.inject({ method: 'GET', url: '/api/features/alpha/test-review-plan' })).json() as { review_revision: string }
+    fs.appendFileSync(path.join(dir, 'e2e', 'a.spec.ts'), '// later\n')
+    const stale = await app.inject({ method: 'POST', url: '/api/features/alpha/restore-test-review', payload: { expectedRevision: plan.review_revision } })
+    expect(stale.statusCode).toBe(409)
+    expect(stale.json()).toMatchObject({ reason: 'review-changed', error: expect.stringContaining('changed') })
+    const latest = (await app.inject({ method: 'GET', url: '/api/features/alpha/test-review-plan' })).json() as { review_revision: string }
+    const restored = await app.inject({ method: 'POST', url: '/api/features/alpha/restore-test-review', payload: { expectedRevision: latest.review_revision } })
+    expect(restored.json()).toMatchObject({ decision: 'restored', review_revision: latest.review_revision, files: ['e2e/a.spec.ts'] })
+    expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf8')).toBe("test('one', async () => { expect(1).toBe(1) })\n")
+    // A retry is a durable receipt lookup, not a second Git restore.
+    expect((await app.inject({ method: 'POST', url: '/api/features/alpha/restore-test-review', payload: { expectedRevision: latest.review_revision } })).json()).toEqual(restored.json())
+  })
+
+  it('rejects malformed, stale, and empty review decisions without recording a receipt', async () => {
+    const dir = writeFeature('alpha', { spec: "test('one', async () => { expect(1).toBe(1) })\n" })
+    initGitFeature(dir)
+    const store = makeDirtySpecStore()
+    const app = await build({ dirtySpecStore: store })
+
+    for (const action of ['accept-test-review', 'restore-test-review']) {
+      expect((await app.inject({ method: 'POST', url: `/api/features/alpha/${action}`, payload: { expectedRevision: 'invalid' } })).statusCode).toBe(400)
+    }
+    const empty = (await app.inject({ method: 'GET', url: '/api/features/alpha/test-review-plan' })).json() as { review_revision: string }
+    expect((await app.inject({ method: 'POST', url: '/api/features/alpha/accept-test-review', payload: { expectedRevision: empty.review_revision } })).json()).toMatchObject({ reason: 'nothing-to-accept' })
+    expect((await app.inject({ method: 'POST', url: '/api/features/alpha/restore-test-review', payload: { expectedRevision: empty.review_revision } })).json()).toMatchObject({ reason: 'nothing-to-restore' })
+
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), "test('one', async () => { expect(1).toBe(2) })\n")
+    const changed = (await app.inject({ method: 'GET', url: '/api/features/alpha/test-review-plan' })).json() as { review_revision: string }
+    fs.appendFileSync(path.join(dir, 'e2e', 'a.spec.ts'), '// later\n')
+    expect((await app.inject({ method: 'POST', url: '/api/features/alpha/accept-test-review', payload: { expectedRevision: changed.review_revision } })).json()).toMatchObject({ reason: 'review-changed' })
   })
 })

@@ -73,7 +73,7 @@ export interface ReadableSource {
   snippet: string
 }
 
-export type ReadableStoryRole = 'setup' | 'action' | 'check'
+export type ReadableStoryRole = 'test' | 'setup' | 'action' | 'output' | 'check' | 'note'
 
 export type ReadableStoryFlowKind =
   | 'scope'
@@ -98,6 +98,8 @@ interface ReadableStoryItemBase {
   text: string
   spans: ReadableStorySpan[]
   fidelity: 'exact' | 'derived'
+  /** A syntax dump is retained for inspection but is not a complete English explanation. */
+  presentation?: 'english' | 'syntax-fallback'
   source: ReadableSource
 }
 
@@ -114,13 +116,17 @@ export interface ReadableStoryFlow extends ReadableStoryItemBase {
   kind: 'flow'
   role: ReadableStoryRole
   flowKind: ReadableStoryFlowKind
+  /** Last source line described by the header; the body has its own rows. */
+  headerEndLine?: number
+  /** A do/while condition follows its body but is described by the loop row. */
+  footerStartLine?: number
   children: ReadableStoryItem[]
 }
 
 export type ReadableStoryItem = ReadableStoryStep | ReadableStoryFlow
 
 /** The reader-first altitude in authored execution order. Each row carries its
- * setup/action/check role instead of being moved into a role-based bucket. */
+ * test/setup/action/check role instead of being moved into a role-based bucket. */
 export interface ReadableTestStory {
   steps: ReadableStoryItem[]
 }
@@ -180,5 +186,7 @@ export interface ReadableTest {
   completeness: ReadableCompleteness
   /** Optional so version-2 payloads cached by an older server still render. */
   story?: ReadableTestStory
+  /** Optional compact summary; may omit details and is never the complete review. */
+  summary?: ReadableTestStory
   nodes: ReadableNode[]
 }

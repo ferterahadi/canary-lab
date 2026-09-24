@@ -51,6 +51,7 @@ function harness(over: Record<string, unknown> = {}) {
   }, brokerOver as Record<string, unknown> | undefined)
   const store = Object.assign({
     logsDir,
+    registry: { get: () => undefined },
     get: (): RunDetail | undefined => undefined,
     onEvent: () => undefined,
     offEvent: () => undefined,

@@ -181,7 +181,7 @@ describe('recommendation policy', () => {
     })
   })
 
-  it('resolves Codex roles from a new CLI catalog without hardcoding the model version', () => {
+  it('falls back to an installed Sol when the CLI catalog lacks GPT-6 Sol', () => {
     const catalog = [
       { value: 'gpt-5.7-sol', label: 'GPT-5.7-Sol' },
       { value: 'gpt-5.7-terra', label: 'GPT-5.7-Terra' },
@@ -190,15 +190,15 @@ describe('recommendation policy', () => {
 
     expect(Object.fromEntries(MODEL_STAGE_KEYS.map((stage) => [stage, recommendedChoice('codex', stage, catalog)])))
       .toEqual({
-        scout: { model: 'gpt-5.7-terra', effort: 'high' },
-        docs: { model: 'gpt-5.7-terra', effort: 'high' },
+        scout: { model: 'gpt-5.7-sol', effort: 'high' },
+        docs: { model: 'gpt-5.7-sol', effort: 'high' },
         prd: { model: 'gpt-5.7-sol', effort: 'high' },
         gen: { model: 'gpt-5.7-sol', effort: 'high' },
         mapping: { model: 'gpt-5.7-sol', effort: 'high' },
         heal: { model: 'gpt-5.7-sol', effort: 'high' },
-        portify: { model: 'gpt-5.7-terra', effort: 'high' },
-        report: { model: 'gpt-5.7-terra', effort: 'high' },
-        commit: { model: 'gpt-5.7-terra', effort: 'medium' },
+        portify: { model: 'gpt-5.7-sol', effort: 'high' },
+        report: { model: 'gpt-5.7-sol', effort: 'high' },
+        commit: { model: 'gpt-5.7-sol', effort: 'medium' },
       })
   })
 

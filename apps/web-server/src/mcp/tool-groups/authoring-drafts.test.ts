@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createDraft, readDraft, type DraftRecord } from '../../features/wizard/logic/draft-store'
+import { createDraft, readDraft, paths as draftPaths, type DraftRecord } from '../../features/wizard/logic/draft-store'
 import { registerExternalDraftTools } from './authoring-drafts'
 import { BUSY_ACTIVE, captureTools, fakeGettingStartedDemo } from './__fixtures__/tool-group-harness'
 
@@ -284,6 +284,7 @@ describe('apply_external_draft', () => {
     // payload; the draft still has to end up marked applied.
     expect(out).toMatchObject({ status: 'applied' })
     expect(readDraft(logsDir, draftId)).toMatchObject({ externalStage: 'applied' })
+    expect(fs.readFileSync(path.join(draftPaths(logsDir, draftId).generatedDir, 'e2e/existing.spec.ts'), 'utf8')).toBe(SPEC)
   })
 
   it('writes the specs into the feature, keeps a copy, and announces the change', async () => {
@@ -315,6 +316,20 @@ describe('apply_external_draft', () => {
     expect(fs.existsSync(path.join(tmpDir, 'escape.ts'))).toBe(false)
     // The record must not claim it applied anything.
     expect(readDraft(logsDir, draftId)).not.toMatchObject({ externalStage: 'applied' })
+  })
+
+  it('stores the normalized source as the draft evidence and returns review warnings', async () => {
+    const draftId = await seedExternal()
+    const { call, published } = harness()
+    const content = SPEC + 'const first = 1, second = first + 1\nconst value = first ? 1 : second ? 2 : 3\n'
+    const out = await call('apply_external_draft', {
+      draftId, confirm: true, files: [{ path: 'e2e/checkout.spec.ts', content }],
+    })
+    const written = fs.readFileSync(path.join(featuresDir, 'checkout/e2e/checkout.spec.ts'), 'utf8')
+    expect(written).toContain('const first = 1\nconst second = first + 1\n')
+    expect(fs.readFileSync(path.join(draftPaths(logsDir, draftId).generatedDir, 'e2e/checkout.spec.ts'), 'utf8')).toBe(written)
+    expect(out).toMatchObject({ status: 'applied', warnings: [expect.stringContaining('no-nested-ternary')] })
+    expect(published).toEqual([{ type: 'tests-changed', feature: 'checkout' }])
   })
 
   it('refuses a draft whose feature has been deleted since', async () => {

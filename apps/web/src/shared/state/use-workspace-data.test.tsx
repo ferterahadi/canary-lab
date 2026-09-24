@@ -232,6 +232,7 @@ describe('useWorkspaceData — refreshFeatures selection', () => {
       allRuns: [
         run('boot-1', 'checkout', 'boot'),
         run('bench-1', 'checkout', 'benchmark'),
+        run('cell-1', 'checkout', 'robustness'),
         run('test-1', 'checkout', 'test'),
       ],
     })
@@ -446,14 +447,24 @@ describe('useWorkspaceData — workspace events', () => {
     const before = api.listFeatures.mock.calls.length
 
     await fire({ type: 'tests-changed', feature: 'search' })
-    expect(harness.invalidated).toEqual([])
+    expect(harness.invalidated).toEqual([['coverage', undefined]])
 
     await fire({ type: 'tests-changed', feature: 'checkout' })
-    expect(harness.invalidated).toEqual([['tests', undefined]])
+    expect(harness.invalidated).toEqual([['coverage', undefined], ['coverage', undefined], ['tests', undefined]])
     expect(api.listFeatures.mock.calls.length).toBe(before + 2)
   })
 
-  it('re-reads features on envset and dirty-test changes', async () => {
+  it('refreshes source markers after a selected suite commit changes its dirty state', async () => {
+    api.listFeatures.mockResolvedValue([feature('checkout')])
+    await mount({ initialSelectedFeature: 'checkout' })
+    harness.featureRef.current = 'checkout'
+    await fire({ type: 'tests-dirty-changed', feature: 'search' })
+    expect(harness.invalidated).toEqual([['coverage', undefined]])
+    await fire({ type: 'tests-dirty-changed', feature: 'checkout' })
+    expect(harness.invalidated).toEqual([['coverage', undefined], ['coverage', undefined], ['tests', undefined]])
+  })
+
+  it('re-reads features on envset and dirty-test changes' , async () => {
     await mount()
     const before = api.listFeatures.mock.calls.length
 
@@ -461,7 +472,7 @@ describe('useWorkspaceData — workspace events', () => {
     await fire({ type: 'tests-dirty-changed', feature: 'checkout' })
 
     expect(api.listFeatures.mock.calls.length).toBe(before + 2)
-    expect(harness.invalidated).toEqual([])
+    expect(harness.invalidated).toEqual([['coverage', undefined]])
   })
 
   it('invalidates coverage and re-reads features on a coverage change', async () => {
@@ -506,6 +517,9 @@ describe('useWorkspaceData — workspace events', () => {
     await mount()
     const before = api.listFlights.mock.calls.length
 
+    await fire({ type: 'notifications-changed' })
+    expect(harness.invalidated).toContainEqual(['notifications', undefined])
+    harness.invalidated = []
     await fire({ type: 'flights-changed' })
 
     expect(harness.invalidated).toEqual([['flights', undefined]])
@@ -530,30 +544,29 @@ describe('useWorkspaceData — workspace events', () => {
     expect(harness.invalidated).toEqual([['project-config', undefined], ['onboarding', undefined]])
   })
 
-  it('ignores an event it does not handle', async () => {
+  it('resyncs authoritative state on the server handshake', async () => {
     await mount()
-    const before = api.listFeatures.mock.calls.length
+    expect(socket.opts?.onReconnect).toBeUndefined()
 
     await fire({ type: 'connected' })
 
-    expect(harness.invalidated).toEqual([])
-    expect(api.listFeatures.mock.calls.length).toBe(before)
+    expect(harness.invalidated).toContainEqual(['coverage', undefined])
   })
 })
 
-describe('useWorkspaceData — reconnect resync', () => {
-  it('refetches everything and re-invalidates every topic', async () => {
+describe('useWorkspaceData — server reconnect resync', () => {
+  it('refetches everything and re-invalidates every topic from the connected frame', async () => {
     await mount()
     harness.featureRef.current = 'checkout'
     harness.runIdRef.current = 'r1'
     api.listFeatures.mockResolvedValue([feature('checkout')])
 
-    await act(async () => { socket.opts?.onReconnect?.() })
+    await fire({ type: 'connected' })
 
     expect(harness.invalidated).toEqual([
       ['repos', undefined], ['tests', undefined], ['coverage', undefined],
       ['verification', undefined], ['journal', 'r1'], ['flights', undefined],
-      ['project-config', undefined], ['onboarding', undefined],
+      ['project-config', undefined], ['onboarding', undefined], ['notifications', undefined],
     ])
     expect(api.listFlights.mock.calls.length).toBe(2)
     expect(api.getVersionStatus.mock.calls.length).toBe(2)
@@ -562,7 +575,7 @@ describe('useWorkspaceData — reconnect resync', () => {
   it('skips the journal topic when no run is selected', async () => {
     await mount()
 
-    await act(async () => { socket.opts?.onReconnect?.() })
+    await fire({ type: 'connected' })
 
     expect(harness.invalidated.map(([topic]) => topic)).not.toContain('journal')
   })
@@ -586,4 +599,16 @@ describe('useWorkspaceData — socket lifecycle', () => {
 
     expect(socket.closes).toBe(1)
   })
+})
+
+it.each([{ allRuns: [] }, { allRuns: [run('newest', 'checkout'), run('historical', 'checkout')] }])('keeps the selected historical run across a feature refresh with runs $allRuns', async ({ allRuns }) => {
+  api.listFeatures.mockResolvedValue([feature('checkout')])
+  await mount({ allRuns, initialSelectedFeature: 'checkout' })
+  harness.featureRef.current = 'checkout'
+  harness.runIdRef.current = 'historical'
+  harness.pendingRef.current = 'historical'
+  harness.selectedRunId = []
+  await act(async () => { harness.data.refreshFeatures('checkout') })
+  expect(harness.selectedRunId).toEqual([])
+  expect(harness.pendingRef.current).toBe('historical')
 })

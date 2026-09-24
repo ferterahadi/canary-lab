@@ -18,6 +18,8 @@ const base: NavState = {
   configFor: null,
   configTab: null,
   verifyOpen: false,
+  specReviewOpen: false,
+  notificationsOpen: false,
   flightStartFor: null,
   flightStartFresh: false,
   flightStartNew: false,
@@ -109,6 +111,11 @@ describe('initialNavState', () => {
   it('opens verification / flight-new from their dialog params', () => {
     expect(initialNavState(persisted({ dialog: 'verification' })).verifyOpen).toBe(true)
     expect(initialNavState(persisted({ dialog: 'flight-new' })).flightStartNew).toBe(true)
+  })
+
+  it('reopens the changed-tests review from a cold load, and only from its own param', () => {
+    expect(initialNavState(persisted({ dialog: 'tests-review' })).specReviewOpen).toBe(true)
+    expect(initialNavState(persisted({ dialog: 'verification' })).specReviewOpen).toBe(false)
   })
 
   it('reopens the demo chooser from a cold load, and only from its own param', () => {
@@ -205,6 +212,15 @@ describe('routedDialog precedence (z-order)', () => {
     expect(routedDialog({ ...base, verifyOpen: true })).toBe('verification')
   })
 
+  it('routes the changed-tests review above verify and settings, under the full-screen overlays', () => {
+    expect(routedDialog({ ...base, specReviewOpen: true })).toBe('tests-review')
+    // A status-bar modal paints over the columns' own dialogs…
+    expect(routedDialog({ ...base, specReviewOpen: true, verifyOpen: true, settingsOpen: true })).toBe('tests-review')
+    // …but a launcher opened from a flight is what is on top.
+    expect(routedDialog({ ...base, specReviewOpen: true, demoOpen: true })).toBe('demo')
+    expect(routedDialog({ ...base, specReviewOpen: true, flightStartFor: 'y' })).toBe('flight-start')
+  })
+
   it('routes Project Settings, and ranks it under every overlay above it', () => {
     expect(routedDialog({ ...base, settingsOpen: true })).toBe('settings')
     // It mounts in the features column — the first column App renders — so
@@ -280,4 +296,11 @@ describe('resolveActivityTarget', () => {
     expect(resolveActivityTarget('other', { kind: 'portifying' }, flights))
       .toEqual({ kind: 'flight', flightId: 'feature:other', stage: 'portify' })
   })
+})
+
+
+it('rehydrates the notification inbox and serializes it as a routed dialog', () => {
+  const state = initialNavState(persisted({ dialog: 'notifications' }))
+  expect(state.notificationsOpen).toBe(true)
+  expect(navToPersistedView(state).dialog).toBe('notifications')
 })

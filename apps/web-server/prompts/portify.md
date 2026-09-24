@@ -87,8 +87,6 @@ Ports hide outside `.ts`/`.js` source:
 - `.env` / `.env.local` / `.env.example` default port values.
 - `docker-compose.yml` port mappings and service URLs, `nginx`/proxy configs, Procfiles.
 
-Note: Canary Lab can resolve the `${port.<slot>}` token *inside applied envset files* at boot. So a config-file listen port can be driven by putting `${port.<slot>}` in the matching envset rather than hardcoding — but the SOURCE still needs to read the env var for that to take effect.
-
 ## 6b. Rewrite the feature's envsets — a hardcoded URL there is silently broken
 
 The feature has envset files under `envsets/<env>/` next to {{featureConfigPath}}. They are applied at boot, BEFORE port injection, and `${port.<slot>}` tokens inside them resolve to the run's assigned ports. They are part of this job:

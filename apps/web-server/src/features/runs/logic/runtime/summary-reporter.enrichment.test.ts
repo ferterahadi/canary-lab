@@ -82,7 +82,7 @@ describe('SummaryReporter', () => {
     reporter.onEnd({} as any)
 
     expect(fs.readFileSync(path.join(LOGS_DIR, 'diagnosis-journal.md'), 'utf-8'))
-      .toContain('- outcome: all_passed')
+      .toContain('- outcome: all_tests_passed')
   })
 
   it('updates the latest pending journal outcome on a failed targeted rerun end', () => {

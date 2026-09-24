@@ -12,7 +12,7 @@ describe('evaluation export task labels', () => {
 
   it('keeps export mode and status in secondary task metadata', () => {
     expect(evaluationTaskMeta({ mode: 'localized', status: 'completed', runId: '2026-05-28T0443-jjcx' })).toBe(
-      'Localized output · completed · 2026-05-28T0443-jjcx',
+      'Plain-English report · completed · 2026-05-28T0443-jjcx',
     )
   })
 })

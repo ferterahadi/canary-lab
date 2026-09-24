@@ -20,7 +20,10 @@ import {
   evalTaskStatusOf,
   type EvaluationExportTaskRecord,
   renameEvaluationExportFeature,
+  readEvaluationExportCertificate,
+  writeEvaluationExportBuild,
 } from './evaluation-export-store'
+import type { BehaviorCertificate } from '../../../../../../shared/verification-strength/certificate'
 
 let tmpDir: string
 const ID = 'eval-task-abc'
@@ -260,5 +263,33 @@ describe('evaluation-export-store', () => {
     createEvaluationExportTask(tmpDir, makeRecord({ taskId: 'eval-task-t1', feature: 'kept' }))
     expect(renameEvaluationExportFeature(tmpDir, 'absent', 'new_name')).toBe(0)
     expect(readEvaluationExportTask(tmpDir, 'eval-task-t1')?.feature).toBe('kept')
+  })
+})
+
+describe('the behavior certificate beside the archive', () => {
+  const certificate = { format: 'canary-lab/behavior-certificate@1', run: { runId: 'run-1' } } as unknown as BehaviorCertificate
+
+  it('writes the zip and the certificate together and reads the certificate back', () => {
+    createEvaluationExportTask(tmpDir, makeRecord())
+
+    writeEvaluationExportBuild(tmpDir, ID, { zip: Buffer.from('zip'), certificate })
+
+    const paths = evaluationExportTaskPaths(tmpDir, ID)!
+    expect(paths.certificatePath).toBe(path.join(paths.taskDir, 'certificate.json'))
+    expect(fs.readFileSync(paths.zipPath, 'utf8')).toBe('zip')
+    expect(JSON.parse(fs.readFileSync(paths.certificatePath, 'utf8'))).toEqual(certificate)
+    expect(readEvaluationExportCertificate(tmpDir, ID)).toEqual(certificate)
+  })
+
+  it('refuses an unsafe id before touching either file', () => {
+    expect(() => writeEvaluationExportBuild(tmpDir, BAD, { zip: Buffer.from('zip'), certificate })).toThrow(/Invalid evaluation export task id/)
+    expect(readEvaluationExportCertificate(tmpDir, BAD)).toBeNull()
+  })
+
+  it('reads null for an export that has no certificate (built before they existed)', () => {
+    createEvaluationExportTask(tmpDir, makeRecord())
+    writeEvaluationExportZip(tmpDir, ID, Buffer.from('zip'))
+
+    expect(readEvaluationExportCertificate(tmpDir, ID)).toBeNull()
   })
 })

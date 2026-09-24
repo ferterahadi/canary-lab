@@ -1,0 +1,236 @@
+import { expect, it } from 'vitest'
+import { multilineImportReview, testFileReview } from '../api/__fixtures__/test-review'
+import { assessmentsForRows, comparedTestRows, englishLines, englishSourceRange, rowsForTest, sourceRows, testSelections } from './test-review-model'
+it('isolates a real removal from the surviving or added test occupying its old lines', () => {
+  const review = testFileReview()
+  const old = review.before.tests[0]
+  const rows = comparedTestRows(review, { file: review.file, ...old }, 'removed')
+  expect(rows).toHaveLength(6)
+  expect(rows.map((row) => row.beforeLine)).toEqual([3, 4, 5, 6, 7, 8])
+  expect(rows.every((row) => row.after === null && row.afterLine === undefined && row.change === 1)).toBe(true)
+})
+it('keeps a changed declaration without a matching baseline separate from unrelated tests', () => {
+  const review = testFileReview()
+  const rows = comparedTestRows(review, { file: review.file, ...review.after.tests[0], name: 'unmatched' }, 'changed')
+  expect(rows).toHaveLength(6)
+  expect(rows.every((row) => row.before === null && row.beforeLine === undefined)).toBe(true)
+  expect(rows.map((row) => row.afterLine)).toEqual([3, 4, 5, 6, 7, 8])
+})
+it('does not attach an old declaration with the same title to an explicitly added test', () => {
+  const review = testFileReview()
+  const rows = comparedTestRows(review, { file: review.file, ...review.after.tests[0] }, 'added')
+  expect(rows).toHaveLength(6)
+  expect(rows.every((row) => row.before === null && row.beforeLine === undefined && row.change === 1)).toBe(true)
+})
+it('uses semantic source ranges instead of colouring formatting-only line edits', () => {
+  const review = testFileReview()
+  review.meaningfulChanges = { before: [7], after: [7] }
+  const rows = comparedTestRows(review, { file: review.file, ...review.after.tests[0] }, 'changed')
+  expect(rows.filter((row) => row.change != null)).toEqual([expect.objectContaining({ beforeLine: 7, afterLine: 7, beforeChanged: true, afterChanged: true })])
+  expect(rows.find((row) => row.afterLine === 5)).toMatchObject({ beforeChanged: false, afterChanged: false, change: undefined })
+})
+// The reverse of the test above: semantic analysis can flag a line the text diff
+// paired as equal (a helper it calls now behaves differently). Such a row carries
+// no diff group of its own, so it joins the first one rather than rendering plain.
+it('colours a line the text diff called equal when semantic analysis flags it', () => {
+  const review = testFileReview()
+  review.meaningfulChanges = { before: [4], after: [4] }
+  const rows = comparedTestRows(review, { file: review.file, ...review.after.tests[0] }, 'changed')
+  expect(rows.filter((row) => row.change != null)).toEqual([
+    expect.objectContaining({ beforeLine: 4, afterLine: 4, change: 1, beforeChanged: true, afterChanged: true }),
+  ])
+})
+it('aligns corresponding statements after wrapping without including another test range', () => {
+  const review = testFileReview()
+  review.after.source = review.before.source.replace("test('a', async () => {", "test(\n 'renamed',\n async () => {")
+  review.meaningfulChanges = { before: [3], after: [3, 4, 5] }
+  review.comparisonAlignment = [
+    { before: { line: 20, endLine: 24 }, after: { line: 30, endLine: 34 } },
+    { before: { line: 3, endLine: 3 }, after: { line: 3, endLine: 5 } },
+    { before: { line: 4, endLine: 4 }, after: { line: 6, endLine: 6 } },
+    { before: { line: 5, endLine: 7 }, after: { line: 7, endLine: 9 } },
+  ]
+  const rows = comparedTestRows(review, { file: review.file, name: 'renamed', line: 3, endLine: 10, previous: review.before.tests[0] }, 'changed')
+  expect(rows.find((row) => row.beforeLine === 4)).toMatchObject({ afterLine: 6, before: '  const x = 1', after: '  const x = 1', change: undefined })
+  expect(rows.at(-1)).toMatchObject({ beforeLine: 8, afterLine: 10, before: '})', after: '})' })
+  expect(rows.filter((row) => row.beforeLine != null)).toHaveLength(6)
+  expect(rows.filter((row) => row.afterLine != null)).toHaveLength(8)
+})
+// File-level alignment pairs a line inside the selected test with one outside it
+// (shared setup, an import, a neighbouring test). Only the half that falls inside
+// may contribute a row — the other half belongs to whatever selection owns it —
+// and the selected declaration must still be reported line for line.
+it('takes only the inside half of an alignment pair that reaches outside the selected test', () => {
+  const review = testFileReview()
+  review.comparisonAlignment = [
+    { before: { line: 1, endLine: 1 }, after: { line: 4, endLine: 4 } },
+    { before: { line: 6, endLine: 6 }, after: { line: 1, endLine: 1 } },
+  ]
+  const rows = comparedTestRows(review, { file: review.file, ...review.after.tests[0] }, 'changed')
+  expect(rows.filter((row) => row.beforeLine != null).map((row) => row.beforeLine)).toEqual([3, 4, 5, 6, 7, 8])
+  expect(rows.filter((row) => row.afterLine != null).map((row) => row.afterLine)).toEqual([3, 4, 5, 6, 7, 8])
+  expect(rows.filter((row) => row.before === null)).toHaveLength(4)
+  expect(rows.filter((row) => row.after === null)).toHaveLength(4)
+})
+it('aligns only a renamed test despite inserted shared setup and a neighbouring test', () => {
+  const review = testFileReview()
+  const original = review.before.tests[0]
+  review.after.source = "test.beforeEach(() => { setup() })\n\n" + review.after.source.replace("test('a'", "test('renamed'") + "\ntest('unrelated', () => { other() })"
+  const test = { file: review.file, name: 'renamed', line: 5, endLine: 10, previous: original }
+  const rows = comparedTestRows(review, test, 'changed')
+  expect(rows).toHaveLength(6)
+  expect(rows[0]).toMatchObject({ beforeLine: 3, afterLine: 5, change: 1 })
+  expect(rows[1]).toMatchObject({ before: '  const x = 1', after: '  const x = 1' })
+  expect(rows[1].change).toBeUndefined()
+  expect(rows.map((row) => row.after).join('\n')).not.toMatch(/beforeEach|unrelated|import/)
+  expect(rows.filter((row) => row.change != null)).toHaveLength(3)
+})
+it('aligns unequal insertion and deletion blocks within the selected test', () => {
+  const review = testFileReview()
+  review.after.source = review.before.source.replace('  const x = 1', '  const x = 1\n  prepare()\n  prepareAgain()').replace('  const context = x\n', '')
+  const test = { file: review.file, name: 'a', line: 3, endLine: 9, previous: review.before.tests[0] }
+  const rows = comparedTestRows(review, test, 'changed')
+  expect(rows.filter((row) => row.before === null).map((row) => row.after)).toEqual(['  prepare()', '  prepareAgain()'])
+  expect(rows.filter((row) => row.after === null).map((row) => row.before)).toEqual(['  const context = x'])
+  expect(rows.at(-1)).toMatchObject({ before: '})', after: '})', beforeLine: 8, afterLine: 9 })
+})
+it('maps every import continuation back to its full English range and leaves following code alone', () => {
+  const lines = englishLines(multilineImportReview().after)
+  for (let line = 2; line <= 18; line++) expect(englishSourceRange(lines, line)).toEqual({ line: 2, endLine: 18 })
+  expect(englishSourceRange(lines, 19)).toEqual({ line: 19, endLine: 19 })
+})
+it('links a do/while footer to its loop explanation without hiding an omitted body statement', () => {
+  const review = testFileReview()
+  review.after.source = 'do {\n  work()\n  omitted()\n} while (\n  ready\n)'
+  review.after.story = { steps: [{ id: 'loop', kind: 'flow', flowKind: 'loop', role: 'action', text: 'Run once, then repeat while ready is truthy', spans: [], fidelity: 'derived',
+    source: { file: review.file, startLine: 1, endLine: 6, snippet: review.after.source }, headerEndLine: 1, footerStartLine: 4,
+    children: [{ id: 'work', role: 'action', text: 'Call work with no arguments', spans: [], fidelity: 'derived', source: { file: review.file, startLine: 2, endLine: 2, snippet: 'work()' } }] }] }
+  const lines = englishLines(review.after)
+  expect(lines.has(3)).toBe(false)
+  expect(lines.get(4)).toBeNull()
+  expect(lines.get(5)).toBeNull()
+  expect(englishSourceRange(lines, 5)).toEqual({ line: 1, endLine: 6 })
+  const loop = review.after.story.steps[0]
+  if (loop.kind !== 'flow') throw new Error('Expected a loop flow')
+  review.after.source = 'do {\n  work(); } while (\n  ready\n)'
+  loop.footerStartLine = 2
+  loop.source.endLine = 4
+  expect(englishLines(review.after).get(2)?.[0].step.id).toBe('work')
+})
+it('keeps unchanged context, source line numbers and contiguous change groups', () => {
+  const review = testFileReview(); const rows = sourceRows(review)
+  expect(rows).toHaveLength(8)
+  expect(rows[4]).toMatchObject({ beforeLine: 5, afterLine: 5, change: 1 })
+  expect(rows[6].change).toBe(2)
+  const context = rowsForTest(rows, testSelections(review, rows)[0], review)
+  expect(context).toHaveLength(6)
+  expect(context[0].after).toContain("test('a'")
+  expect(context.at(-1)?.after).toBe('})')
+  expect(assessmentsForRows(review, [rows[4]])[0].verdict).toBe('unclassifiable')
+  expect(assessmentsForRows(review, [rows[0]])).toEqual([])
+})
+it('never drops tests sharing a name and retains removed tests as source contexts', () => {
+  const review = testFileReview()
+  review.after.tests.push({ ...review.after.tests[0], line: 9, endLine: 10 })
+  review.before.tests.push({ ...review.before.tests[0], name: 'removed', line: 11, endLine: 12 })
+  const rows = sourceRows(review)
+  rows.push({ id: 'removed', before: "test('removed')", after: null, beforeLine: 11, change: 3 })
+  const choices = testSelections(review, rows)
+  expect(choices.map((item) => item.key)).toEqual(['after:3', 'after:9', 'before:11'])
+  expect(rowsForTest(rows, choices[2], review)).toEqual([rows.at(-1)])
+})
+it('keeps both sides of a rename plus assertion edit together using source boundaries', () => {
+  const review = testFileReview(); review.before.tests[0].name = 'old name'
+  const rows = sourceRows(review)
+  expect(testSelections(review, rows)).toHaveLength(1)
+  expect(rowsForTest(rows, testSelections(review, rows)[0], review)).toHaveLength(6)
+})
+it('preserves complete source when unchanged or viewing full file', () => {
+  const review = testFileReview(); review.before = review.after; review.patch = ''
+  const rows = sourceRows(review)
+  expect(rows.every((row) => row.change == null)).toBe(true)
+  expect(rowsForTest(rows, undefined, review)).toBe(rows)
+})
+it('projects the existing English story in source order and retains code fallback outside translated ranges', () => {
+  const review = testFileReview()
+  review.after.tests[0].readable.story = { steps: [{ id: 'branch', kind: 'flow', role: 'setup', flowKind: 'condition', text: 'If enabled', spans: [], fidelity: 'exact', source: { file: review.file, startLine: 4, endLine: 8, snippet: '' }, children: [{ id: 'check', role: 'check', text: 'Expect the value to be 2', spans: [], fidelity: 'exact', source: { file: review.file, startLine: 5, endLine: 6, snippet: '' } }] }] }
+  const lines = englishLines(review.after)
+  expect(lines.get(4)).toMatchObject([{ depth: 0, step: { text: 'If enabled' } }]); expect(lines.get(5)).toMatchObject([{ depth: 1, step: { text: 'Expect the value to be 2' } }])
+  expect(lines.get(6)).toBeNull(); expect(lines.has(7)).toBe(false)
+})
+
+it('finds an assessment when the edit is inside a multiline assertion rather than on its first line', () => {
+  const review = testFileReview()
+  review.before.source = 'expect(body).toEqual({\n  count: 1\n})'
+  review.after.source = 'expect(body).toEqual({\n  count: 2\n})'
+  const change = review.assessment.tests[0].changes[0]
+  change.before = { line: 1, source: 'expect(body).toEqual({ count: 1 })', reason: 'value' }
+  change.after = { line: 1, source: 'expect(body).toEqual({ count: 2 })', reason: 'value' }
+  expect(assessmentsForRows(review, [{ id: 'inner', before: 'count: 1', after: 'count: 2', beforeLine: 2, afterLine: 2 }])).toEqual([change])
+})
+
+it('flattens the redundant then row in older stories without dropping its actions', () => {
+  const review = testFileReview()
+  const source = { file: review.file, startLine: 4, endLine: 6, snippet: '' }
+  review.after.tests[0].readable.story = { steps: [{ id: 'if', kind: 'flow', role: 'setup', flowKind: 'condition', text: 'If enabled', spans: [], fidelity: 'exact', source, children: [{ id: 'then', kind: 'flow', role: 'setup', flowKind: 'then', text: 'When true', spans: [], fidelity: 'exact', source, children: [{ id: 'action', role: 'action', text: 'Act', spans: [], fidelity: 'exact', source: { ...source, startLine: 5, endLine: 5 } }] }] }] }
+  expect(englishLines(review.after).get(4)?.map(({ step }) => step.id)).toEqual(['if'])
+  expect(englishLines(review.after).get(5)).toMatchObject([{ depth: 1, step: { id: 'action' } }])
+})
+
+it('uses whole-file English outside test bodies without duplicating callback stories', () => {
+  const review = testFileReview()
+  review.after.story = { steps: [{ id: 'import', role: 'setup', text: 'Import test', spans: [], fidelity: 'derived', source: { file: review.file, startLine: 1, endLine: 2, snippet: '' } }] }
+  expect(englishLines(review.after).get(1)).toMatchObject([{ step: { id: 'import' }, depth: 0 }])
+  expect(englishLines(review.after).get(2)).toBeNull()
+  expect(englishLines(review.after).has(5)).toBe(false)
+})
+it('collapses closing delimiters only inside translated flows while keeping actual missing statements', () => {
+  const review = testFileReview()
+  review.after.source = 'function helper() {\n  if (ready) {\n    missing()\n  }\n}\n}\n'
+  review.after.story = { steps: [{ id: 'helper', kind: 'flow', flowKind: 'scope', role: 'setup', text: 'Define function helper', spans: [], fidelity: 'derived',
+    source: { file: review.file, startLine: 1, endLine: 5, snippet: '' }, children: [{ id: 'branch', kind: 'flow', flowKind: 'condition', role: 'action', text: 'If ready', spans: [], fidelity: 'derived',
+      source: { file: review.file, startLine: 2, endLine: 4, snippet: '' }, children: [] }] }] }
+  const lines = englishLines(review.after)
+  expect(lines.get(4)).toBeNull()
+  expect(lines.get(5)).toBeNull()
+  expect(lines.has(3)).toBe(false)
+  expect(lines.has(6)).toBe(false)
+  review.after.story.steps[0].source.endLine = 9
+  expect(englishLines(review.after).has(9)).toBe(false)
+})
+it('suppresses translated multiline loop headers without suppressing body statements on the last header line', () => {
+  const review = testFileReview()
+  review.after.story = { steps: [{ id: 'loop', kind: 'flow', flowKind: 'loop', role: 'setup', headerEndLine: 6,
+    text: 'Build this list in order', spans: [], fidelity: 'derived', source: { file: review.file, startLine: 3, endLine: 8, snippet: '' },
+    children: [{ id: 'body', role: 'action', text: 'Call consume', spans: [], fidelity: 'derived', source: { file: review.file, startLine: 6, endLine: 6, snippet: 'consume()' } }] }] }
+  const lines = englishLines(review.after)
+  expect(lines.get(4)).toBeNull()
+  expect(lines.get(5)).toBeNull()
+  expect(lines.get(6)?.[0].step.id).toBe('body')
+  expect(lines.has(7)).toBe(false)
+})
+
+it('keeps code fallback for missing stories and helper steps outside the reviewed tests', () => {
+  const review = testFileReview()
+  delete review.after.tests[0].readable.story
+  expect(englishLines(review.after).size).toBe(0)
+  review.after.tests[0].readable.story = { steps: [{ id: 'helper', role: 'setup', text: 'Helper setup', spans: [], fidelity: 'exact', source: { file: 'helper.ts', startLine: 90, endLine: 91, snippet: '' } }] }
+  expect(englishLines(review.after).size).toBe(0)
+})
+
+it('does not erase a translated step when a later story item spans its source line', () => {
+  const review = testFileReview()
+  const step = { id: 'check', role: 'check' as const, text: 'Check value', spans: [], fidelity: 'exact' as const, source: { file: review.file, startLine: 5, endLine: 5, snippet: '' } }
+  review.after.tests[0].readable.story = { steps: [step, { ...step, id: 'setup', source: { ...step.source, startLine: 4, endLine: 6 } }] }
+  expect(englishLines(review.after).get(5)?.[0].step.id).toBe('check')
+  expect(englishLines(review.after).get(6)).toBeNull()
+})
+
+it('limits an unmatched predicate to its reported first line instead of assigning the rest of the file', () => {
+  const review = testFileReview()
+  const change = review.assessment.tests[0].changes[0]
+  change.before = { line: 5, source: 'expect(transformed).toBe(1)', reason: 'source spelling differs' }
+  delete change.after
+  expect(assessmentsForRows(review, [{ id: 'first', before: 'assertion', after: null, beforeLine: 5 }])).toEqual([change])
+  expect(assessmentsForRows(review, [{ id: 'later', before: 'unrelated setup', after: null, beforeLine: 6 }])).toEqual([])
+})

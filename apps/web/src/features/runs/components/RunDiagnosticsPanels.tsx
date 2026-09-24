@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { PlaywrightArtifactGroup, PlaywrightArtifactPolicy, PlaywrightPlaybackEvent, RunLifecycleEvent, RunSummary, VerificationDiagnostics } from '@/shared/api/types'
 import { isTerminalLifecyclePhase, type TimelineRow } from '../utils/run-timeline'
 import { PaneTerminal } from './PaneTerminal'
+import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { RunPane } from './RunPane'
 import { PlaywrightPlayback, PlaywrightView, SegmentButton, formatSummaryTestName, isPlaywrightLifecyclePhase, shortLocation } from './RunPlaybackPanels'
 
@@ -65,7 +66,7 @@ export function PlaywrightPanel({
         <PaneTerminal
           runId={runId}
           paneId="playwright"
-          emptyState={{ title: 'Playwright hasn’t written anything yet', hint: 'The raw test output streams here line by line once the run reaches the test phase.' }}
+          emptyState={{ idle: EMPTY_COPY.panePlaywrightIdle, missing: EMPTY_COPY.panePlaywrightMissing }}
         />
       )}
       {view === 'playback' && (

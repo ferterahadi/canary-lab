@@ -1,13 +1,11 @@
 import fs from 'fs'
-import path from 'path'
 import { readPlaywrightConfig, type ConfigValue } from '../../../../shared/config-ast'
+import { findPlaywrightConfig } from '../../../../shared/playwright-config'
 import {
   PLAYWRIGHT_RETAINED_ARTIFACT_MODES,
   PLAYWRIGHT_SCREENSHOT_MODES,
 } from '../../../../../../../shared/configs/playwright-modes'
 import type { PlaywrightArtifactPolicy } from './manifest'
-
-const PLAYWRIGHT_CONFIG_NAMES = ['playwright.config.ts', 'playwright.config.js', 'playwright.config.cjs']
 
 export const DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY: PlaywrightArtifactPolicy = {
   screenshot: 'only-on-failure',
@@ -48,10 +46,3 @@ function readMode<T extends string>(value: ConfigValue | undefined, allowed: rea
   return typeof value === 'string' && allowed.includes(value as T) ? value as T : fallback
 }
 
-function findPlaywrightConfig(featureDir: string): string | null {
-  for (const name of PLAYWRIGHT_CONFIG_NAMES) {
-    const candidate = path.join(featureDir, name)
-    if (fs.existsSync(candidate)) return candidate
-  }
-  return null
-}

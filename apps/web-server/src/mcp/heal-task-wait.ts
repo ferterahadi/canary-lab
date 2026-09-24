@@ -1,6 +1,6 @@
 import type { RunDetail, RunStoreEvent } from '../features/runs/logic/run-store'
 import type { ClientKind } from '../../../../shared/run-mode'
-import { buildExternalHealContext, normalizeRunCounts, slimRepeatHealContext, type ExternalHealContext, type NormalizedRunCounts } from '../features/runs/logic/heal/external-heal-surface'
+import { buildExternalHealContext, buildSpecEditsWarning, hasPendingHealSignal, normalizeRunCounts, slimRepeatHealContext, type ExternalHealContext, type NormalizedRunCounts, type SpecEditsWarning } from '../features/runs/logic/heal/external-heal-surface'
 import { isActiveRunStatus, isTerminalRunStatus } from '../../../../shared/run-state'
 import type { CanaryLabMcpDeps } from './tool-schemas'
 import { ensureExternalClaimForMcpCall } from './tool-support'
@@ -11,14 +11,14 @@ import { ensureExternalClaimForMcpCall } from './tool-support'
 // agent immediately re-calls. This keeps every request well under any client
 // JSON-RPC request timeout (the cause of the -32001 the long-poll used to hit),
 // while the logical wait stays unbounded across re-calls.
-export const WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS = 90 * 1000
+export const WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS = 45 * 1000
 
 export const WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS = 60 * 60 * 1000
 
 // Hard cap on a single block regardless of the requested timeout_ms. Large
 // requested values are clamped to this (not rejected) so older clients keep
 // working — they just get a `still_waiting` to loop on sooner.
-export const WAIT_FOR_HEAL_TASK_WINDOW_MS = 120 * 1000
+export const WAIT_FOR_HEAL_TASK_WINDOW_MS = 45 * 1000
 
 // ─── result helpers ─────────────────────────────────────────────────────
 
@@ -33,7 +33,7 @@ export function healWaitNext(): { nextSteps: string[] } {
 }
 
 export const BOOT_SESSION_MESSAGE =
-  'Boot-only session: services are up and held. No tests run and there is no heal task. A service that fails its readiness probe is marked failed (status "timeout") but the session stays held — boot does not self-abort on a health-check failure. Stop with abort_run (confirm:true) when done.'
+  'Boot-only session: services are up and held. No tests run and there is no heal task. A service that fails its readiness probe is marked failed (status "timeout") but the session stays held — boot does not self-abort on a health-check failure. Request abort_run when done; its human stop form must be accepted (without forms, use Stop in the Run panel).'
 
 // A boot run (started via boot_services) holds its services up with no Playwright
 // tests and no heal loop. Following or waiting on one must not claim heal or block
@@ -81,7 +81,7 @@ export function bootSessionValue(detail: RunDetail): Extract<WaitForHealTaskValu
     claimed: false,
     lifecycle: detail.manifest.lifecycle ?? null,
     message: BOOT_SESSION_MESSAGE,
-    nextSteps: ['boot session — services are up and held; a service that failed its readiness probe shows status "timeout" but the session stays held (boot does not self-abort on health failure); exercise the live ones, then abort_run (confirm:true) when done'],
+    nextSteps: ['boot session — services are up and held; a service that failed its readiness probe shows status "timeout" but the session stays held (boot does not self-abort on health failure); exercise the live ones, then request abort_run for human stop approval when done'],
   }
 }
 
@@ -123,10 +123,13 @@ export function healFixOutcome(detail: RunDetail): HealFixOutcome | undefined {
   }
 }
 
+// `dirtyTests` is the feature's live dirty record; `specEdits` is what THIS run
+// recorded against its own run-start suite copy (D9). They answer different
+// questions, so both ride along; neither is consulted by the verdict.
 export type WaitForHealTaskValue =
-  | { type: 'needs_heal'; runId: string; cycle: number; context: ExternalHealContext; dirtyTests?: DirtyTestsWarning }
-  | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning; fix?: HealFixOutcome }
-  | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning }
+  | { type: 'needs_heal'; runId: string; cycle: number; context: ExternalHealContext; dirtyTests?: DirtyTestsWarning; specEdits?: SpecEditsWarning }
+  | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning; specEdits?: SpecEditsWarning; fix?: HealFixOutcome }
+  | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning; specEdits?: SpecEditsWarning }
   | {
       type: 'still_waiting'
       runId: string
@@ -170,7 +173,11 @@ export function classifyWaitForHealTask(
   if (isActiveBootRun(detail)) return { ok: true, value: bootSessionValue(detail) }
 
   const status = detail.manifest.status
+  // Playwright's verdict is written before the orchestrator enters healing
+  // or finishes teardown. Only finalization ends a live runner's wait.
+  if (isTerminalRunStatus(status) && !detail.manifest.endedAt && deps.store.registry.get(runId)) return null
   const dirtyTests = dirtyTestsWarning(deps, detail.manifest.feature)
+  const specEdits = buildSpecEditsWarning(detail.manifest)
   if (status === 'passed') {
     const fix = healFixOutcome(detail)
     return {
@@ -181,6 +188,7 @@ export function classifyWaitForHealTask(
         summary: detail.summary ?? null,
         counts: normalizeRunCounts(detail.summary ?? null),
         ...(dirtyTests ? { dirtyTests } : {}),
+        ...(specEdits ? { specEdits } : {}),
         ...(fix ? { fix } : {}),
       },
     }
@@ -195,6 +203,7 @@ export function classifyWaitForHealTask(
         summary: detail.summary ?? null,
         counts: normalizeRunCounts(detail.summary ?? null),
         ...(dirtyTests ? { dirtyTests } : {}),
+        ...(specEdits ? { specEdits } : {}),
       },
     }
   }
@@ -214,6 +223,10 @@ export function classifyWaitForHealTask(
     detail.manifest.healMode === 'external' &&
     detail.manifest.lifecycle?.phase === 'waiting-for-signal'
   ) {
+    // A signal has been written, but the runner's watcher has not consumed it
+    // yet. Returning this same task would invite a duplicate repair cycle.
+    if (hasPendingHealSignal(deps.store.logsDir, runId)
+      || deps.store.registry.get(runId)?.isWaitingForHealSignal?.() === false) return null
     const latest = deps.store.get(runId)
     if (!latest) return { ok: false, error: `run not found: ${runId}` }
     const full = buildExternalHealContext({
@@ -234,6 +247,7 @@ export function classifyWaitForHealTask(
         cycle,
         context,
         ...(dirtyTests ? { dirtyTests } : {}),
+        ...(specEdits ? { specEdits } : {}),
       },
     }
   }

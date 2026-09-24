@@ -16,10 +16,15 @@ vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => '
 // depth next door, so here they're stubbed to prove the wiring, the 409 gate,
 // and the manifest merge.
 const prMocks = vi.hoisted(() => ({ buildPrPreflight: vi.fn(), proposeFixesForRun: vi.fn() }))
+const ghMocks = vi.hoisted(() => ({
+  detectGhStatus: vi.fn(async () => ({ installed: true, authenticated: false })),
+}))
 
 vi.mock('../logic/pr/pr-preflight', () => ({ buildPrPreflight: prMocks.buildPrPreflight }))
 
 vi.mock('../logic/pr/propose-fixes', () => ({ proposeFixesForRun: prMocks.proposeFixesForRun }))
+
+vi.mock('../../../shared/gh-cli', () => ({ detectGhStatus: ghMocks.detectGhStatus }))
 
 let tmpDir: string
 
@@ -28,6 +33,7 @@ let logsDir: string
 let featuresDir: string
 
 beforeEach(() => {
+  ghMocks.detectGhStatus.mockClear()
   tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-rroutes-')))
   logsDir = path.join(tmpDir, 'logs')
   featuresDir = path.join(tmpDir, 'features')
@@ -115,6 +121,7 @@ describe('GitHub / PR routes (R80)', () => {
     expect(res.statusCode).toBe(200)
     expect(res.json()).toHaveProperty('installed')
     expect(res.json()).toHaveProperty('authenticated')
+    expect(ghMocks.detectGhStatus).toHaveBeenCalledOnce()
   })
 
   it('pr-preflight + propose-pr 404 for an unknown run, 409 with no captured fixes', async () => {
@@ -179,6 +186,19 @@ describe('GitHub / PR routes (R80)', () => {
     expect(saved.proposedPrs).toEqual([
       { repoName: 'prod', url: 'https://github.com/org/prod/pull/1', branch: 'b', base: 'main', createdAt: 'T' },
     ])
+  })
+
+  it('POST propose-pr forwards the verdict provenance so the PR footer says which suite passed (D9)', async () => {
+    const suiteSnapshot = { kind: 'taken' as const, dir: '/s', takenAt: 't', digest: 'abcdef0123456789' }
+    const specEdits = { checkedAt: 't', pending: [{ file: 'e2e/a.spec.ts', change: 'modified' as const, affectedTests: ['a'] }], adopted: [] }
+    writeManifestWithCapture('r1', undefined, { suiteSnapshot, specEdits })
+    prMocks.buildPrPreflight.mockResolvedValueOnce(PREFLIGHT_PUSHABLE)
+    prMocks.proposeFixesForRun.mockResolvedValueOnce([])
+    const { app } = await build()
+
+    await app.inject({ method: 'POST', url: '/api/runs/r1/propose-pr' })
+
+    expect(prMocks.proposeFixesForRun).toHaveBeenCalledWith(expect.objectContaining({ verdict: { suiteSnapshot, specEdits } }))
   })
 
   it('POST propose-pr forwards the run\'s failures as the message agent\'s evidence', async () => {

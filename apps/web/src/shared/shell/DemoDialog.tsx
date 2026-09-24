@@ -17,7 +17,7 @@ const MORE_ACTION_LABEL: Record<Exclude<OnboardingWorkflowAction['kind'], 'run' 
   author: 'Author test',
   portify: 'Enable parallel runs',
   heal: 'Run and heal',
-  export: 'Export evaluation',
+  export: 'Create evaluation report',
 }
 
 type FeedbackTone = 'ready' | 'running' | 'done' | 'blocked'
@@ -44,7 +44,7 @@ const WORKFLOW_WAIT_LABEL: Record<string, string> = {
   heal: 'Run and Heal a Suite',
   // A pre-upgrade active session can still carry the retired key.
   verify: 'Verify a Running App',
-  export: 'Export an Evaluation',
+  export: 'Create an evaluation report',
 }
 
 /** What "Open <this>" opens: coverage jobs land on the coverage ledger, runs on
