@@ -7,6 +7,8 @@
 
 Your agent investigates the app, writes tests, and fixes application failures. Canary Lab starts the services, runs Playwright, and records the results. You get a report that links requirements, tests, captured evidence, and the actual pass or fail result.
 
+![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab-flight.gif)
+
 ## Quick Start
 
 You need Node.js 22.12 or newer and npm 9 or newer.
@@ -35,8 +37,6 @@ npx canary-lab ui
 ```
 
 If `/canary-lab` or the Canary Lab `exec` tool is missing, run `npx canary-lab setup --force` from the workspace and restart your agent. Setup reports each saved connection separately; see [configuration repair](docs/COMMANDS.md#repair-agent-configuration) for skill migration, backups, and verification outcomes.
-
-![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab-flight.gif)
 
 ## What Happens During a Flight
 
