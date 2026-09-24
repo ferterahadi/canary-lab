@@ -104,9 +104,9 @@ export const KNOWN_MODELS: Record<ModelAgentKind, readonly string[]> = {
 // ── Recommendation policy ────────────────────────────────────────────────────
 // The tier is explanatory UI copy; the actual provider knobs are explicit per
 // stage below because equal-capability models can need different effort levels.
-// Claude's stable aliases resolve to the latest family member. Codex resolves a
-// Astra/Sol/Terra role from the installed CLI catalog, so version releases do not
-// require a Canary update.
+// Claude's stable aliases resolve to the latest family member. Codex prefers
+// GPT-6 Terra for balanced work once available, GPT-6 Sol until then, and an
+// older Sol when the current CLI exposes neither GPT-6 choice.
 export type ModelTier = 'frontier' | 'agentic' | 'balanced'
 
 export const STAGE_TIERS: Record<ModelStageKey, ModelTier> = {
@@ -135,7 +135,7 @@ export const STAGE_RECOMMENDATION_REASON: Record<ModelStageKey, string> = {
   commit: 'Commit and PR copy needs faithful diff analysis but does not modify product code.',
 }
 
-type CodexModelRole = 'astra' | 'sol' | 'terra'
+type CodexModelRole = 'sol' | 'terra'
 
 interface StageModelRecommendation<TModel extends string = string> {
   model: TModel
@@ -148,8 +148,8 @@ interface ModelRecommendations {
 }
 
 /** Provider-specific model selector and effort per stage. Claude selectors are
- *  stable aliases; Codex selectors are stable roles resolved to a versioned id
- *  from the runtime catalog. */
+ *  stable aliases; Codex selectors resolve to a visible id from the runtime
+ *  catalog. */
 export const RECOMMENDED_BY_STAGE: ModelRecommendations = {
   claude: {
     scout: { model: 'sonnet', effort: 'high' },
@@ -166,9 +166,9 @@ export const RECOMMENDED_BY_STAGE: ModelRecommendations = {
     scout: { model: 'terra', effort: 'high' },
     docs: { model: 'terra', effort: 'high' },
     prd: { model: 'sol', effort: 'high' },
-    gen: { model: 'astra', effort: 'high' },
+    gen: { model: 'sol', effort: 'high' },
     mapping: { model: 'sol', effort: 'high' },
-    heal: { model: 'astra', effort: 'high' },
+    heal: { model: 'sol', effort: 'high' },
     portify: { model: 'terra', effort: 'high' },
     report: { model: 'terra', effort: 'high' },
     commit: { model: 'terra', effort: 'medium' },
@@ -182,15 +182,17 @@ export function recommendedChoice(
 ): StageModelChoice {
   if (agent === 'claude') return RECOMMENDED_BY_STAGE.claude[stage]
 
-  // Reserve Astra for code authoring and repair; older catalogs retain Sol.
-  // Match roles in preference order, independent of the CLI catalog order.
-  // Without a matching role, keep the safe effort-only recommendation.
+  // Prefer GPT-6 regardless of catalog order. The balanced stages use Sol
+  // until Terra joins that lineup; older CLIs can still use an installed Sol.
+  // Without a matching model, keep the safe effort-only recommendation.
   const recommendation = RECOMMENDED_BY_STAGE.codex[stage]
-  const roles = recommendation.model === 'astra' ? ['astra', 'sol'] : [recommendation.model]
-  for (const role of roles) {
-    const model = availableModels.find(({ value }) => value.toLowerCase().endsWith(`-${role}`))?.value
-    if (model) return { model, effort: recommendation.effort }
+  const preferredIds = recommendation.model === 'terra' ? ['gpt-6-terra', 'gpt-6-sol'] : ['gpt-6-sol']
+  for (const id of preferredIds) {
+    const preferred = availableModels.find(({ value }) => value.toLowerCase() === id)
+    if (preferred) return { model: preferred.value, effort: recommendation.effort }
   }
+  const fallback = availableModels.find(({ value }) => value.toLowerCase().endsWith('-sol'))
+  if (fallback) return { model: fallback.value, effort: recommendation.effort }
   return { model: null, effort: recommendation.effort }
 }
 

@@ -193,43 +193,45 @@ describe('ModelMatrixDialog', () => {
     expect(document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.disabled).toBe(false)
   })
 
-  it('Reset all resolves Codex recommendations from the installed model roles', async () => {
+  it('Reset all falls back to the installed Sol when GPT-6 Sol is not visible', async () => {
     await mount({ agent: 'codex' })
     const buttons = [...document.querySelectorAll('button')]
     await act(async () => { buttons.find((b) => b.textContent === 'Reset all to recommended')!.click() })
 
-    expect(select('Repo scan model').value).toBe('gpt-5.6-terra')
+    expect(select('Repo scan model').value).toBe('gpt-5.6-sol')
     expect(select('Repo scan reasoning effort').value).toBe('high')
-    expect(select('Doc collection model').value).toBe('gpt-5.6-terra')
+    expect(select('Doc collection model').value).toBe('gpt-5.6-sol')
     expect(select('Doc collection reasoning effort').value).toBe('high')
     expect(select('Auto-repair model').value).toBe('gpt-5.6-sol')
     expect(select('Auto-repair reasoning effort').value).toBe('high')
-    expect(select('Report model').value).toBe('gpt-5.6-terra')
+    expect(select('Report model').value).toBe('gpt-5.6-sol')
     expect(select('Report reasoning effort').value).toBe('high')
   })
 
-  it('Reset all selects discovered Astra for authoring and repair and saves those choices', async () => {
+  it('Reset all selects GPT-6 Terra for balanced stages and Sol for authoring and repair', async () => {
     vi.mocked(api.getAgentProbe).mockResolvedValue({
       ...SNAPSHOT,
       codex: OK_PROBE('codex', { models: [
         ...CODEX_MODELS,
         { value: 'gpt-6-astra', label: 'GPT-6-Astra' },
+        { value: 'gpt-6-sol', label: 'GPT-6-Sol' },
+        { value: 'gpt-6-terra', label: 'GPT-6-Terra' },
       ] }),
     })
     await mount({ agent: 'codex' })
     await act(async () => {
       [...document.querySelectorAll('button')].find((b) => b.textContent === 'Reset all to recommended')!.click()
     })
-    expect(select('Test authoring model').value).toBe('gpt-6-astra')
-    expect(select('Auto-repair model').value).toBe('gpt-6-astra')
-    expect(select('Coverage mapping model').value).toBe('gpt-5.6-sol')
-    expect(select('Repo scan model').value).toBe('gpt-5.6-terra')
+    expect(select('Test authoring model').value).toBe('gpt-6-sol')
+    expect(select('Auto-repair model').value).toBe('gpt-6-sol')
+    expect(select('Coverage mapping model').value).toBe('gpt-6-sol')
+    expect(select('Repo scan model').value).toBe('gpt-6-terra')
     await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.click() })
     expect(api.putProjectConfig).toHaveBeenCalledWith({ agentModels: {
       claude: {},
       codex: expect.objectContaining({
-        gen: { model: 'gpt-6-astra', effort: 'high' },
-        heal: { model: 'gpt-6-astra', effort: 'high' },
+        gen: { model: 'gpt-6-sol', effort: 'high' },
+        heal: { model: 'gpt-6-sol', effort: 'high' },
       }),
     } })
   })
