@@ -177,6 +177,23 @@ describe('buildOrchestratorHealPrompt', () => {
     expect(prompt).toBe(promptBody)
   })
 
+  it('tells a local heal agent when the suite attempt is already claimed', () => {
+    const receipt = path.join(runDir, 'runtime/effect-attempt/attempt.json')
+    fs.mkdirSync(path.dirname(receipt), { recursive: true })
+    fs.writeFileSync(receipt, '{}')
+    fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify({
+      runId: 'run-1', feature: 'demo', status: 'healing', healCycles: 1, services: [],
+      singleAttempt: { receipt: 'runtime/effect-attempt/attempt.json' },
+    }))
+
+    const prompt = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })({
+      cycle: 1, outputDir: path.join(runDir, 'out'),
+    })
+
+    expect(prompt).toContain('one external-effect attempt')
+    expect(prompt).toContain('It will not restart services or rerun tests')
+  })
+
   it('shows the cycle budget ("of N") — default AUTO_HEAL_MAX_CYCLES, overridable', () => {
     // Regression: maxCycles was never threaded from the factory into the
     // addendum, so the PTY agent saw "Cycle N." with no budget to pace against.
@@ -194,9 +211,9 @@ describe('buildOrchestratorHealPrompt', () => {
     expect(prompt).toContain('Do not read the test spec unless')
     expect(prompt).toContain('Do NOT Read the test spec file')
     expect(prompt).not.toContain('no editable service repos')
-    expect(prompt).toContain('The signal requests runner verification')
+    expect(prompt).toContain('For an ordinary run it requests Canary Lab restart')
     expect(prompt).toContain('Do not start services or run Playwright')
-    expect(prompt).toContain('targeted Playwright verification after the signal')
+    expect(prompt).toContain('Playwright verification')
   })
 
   it('surfaces feature docs when the accepted feature has preserved context', () => {

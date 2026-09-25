@@ -71,6 +71,9 @@ export function writeInitialManifest(ctx: RunContext, serviceStatus: ServiceMani
     startedAt: ctx.startedAt,
     status: ctx.status,
     healCycles: ctx.healCycles,
+    ...((previous?.singleAttempt ?? ctx.feature.singleAttempt)
+      ? { singleAttempt: previous?.singleAttempt ?? ctx.feature.singleAttempt }
+      : {}),
     // Continuing a run preserves the evidence and review boundary. Runtime
     // status and service state are rebuilt below for the new process.
     ...(previous ? {

@@ -7,8 +7,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { EventEmitter } from 'events'
 import type { RunContext } from './run-context'
 import type { RunnerLog } from './runner-log'
+import { readManifest, writeManifest } from './manifest'
+import { FileRunStateSink } from './run-state-sink'
 import { FIX_CAPTURE_MAX_FILE_NAMES } from '../../../../../../../shared/run-state'
 
 const h = vi.hoisted(() => ({
@@ -36,7 +39,7 @@ vi.mock('../../../portify/logic/runtime/git-ops', async (importOriginal) => ({
   reverseOverlay: h.reverseOverlay,
 }))
 
-const { captureFixBaseline, captureFixes, reversePortifyOverlay } = await import('./run-fix-capture')
+const { captureFixBaseline, captureFixes, reversePortifyOverlay, startLiveFixCapture } = await import('./run-fix-capture')
 const { makeHealLoopContext } = await import('./__fixtures__/heal-loop-context')
 
 let tmpDir: string
@@ -166,7 +169,7 @@ describe('captureFixes', () => {
     const { ctx } = withBaseline(runnerLog)
     const realWrite = fs.writeFileSync
     vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: string, data: string) => {
-      if (String(p).endsWith('app.patch')) throw new Error('EROFS: read-only file system')
+      if (String(p).endsWith('app.patch.tmp')) throw new Error('EROFS: read-only file system')
       return realWrite(p, data)
     }) as typeof fs.writeFileSync)
 
@@ -183,6 +186,49 @@ describe('captureFixes', () => {
     h.diffContentSinceSnapshot.mockResolvedValue('   \n')
 
     expect(await captureFixes(ctx)).toBeNull()
+  })
+
+  it('publishes an evolving patch and then finalizes it without waiting to discover edits', async () => {
+    const { ctx } = withBaseline()
+    ctx.stateSink = new FileRunStateSink(path.join(tmpDir, 'logs'))
+    writeManifest(ctx.paths.manifestPath, {
+      runId: ctx.runId, feature: 'demo', featureDir: ctx.feature.featureDir,
+      startedAt: 'now', status: 'healing', healCycles: 1, services: [],
+    })
+
+    const live = await captureFixes(ctx, true)
+    expect(live?.provisional).toBe(true)
+    expect(readManifest(ctx.paths.manifestPath)?.fixCapture?.repos[0].fileNames).toEqual(['src/app.ts'])
+    expect((await captureFixes(ctx, true))?.capturedAt).toBe(live?.capturedAt)
+
+    const final = await captureFixes(ctx)
+    expect(final?.provisional).toBeUndefined()
+    expect(readManifest(ctx.paths.manifestPath)?.fixCapture?.provisional).toBeUndefined()
+
+    await captureFixes(ctx, true)
+    h.diffContentSinceSnapshot.mockResolvedValue('')
+    expect(await captureFixes(ctx, true)).toBeNull()
+    expect(readManifest(ctx.paths.manifestPath)?.fixCapture).toBeUndefined()
+    expect(fs.existsSync(path.join(ctx.paths.fixesDir, 'app.patch'))).toBe(false)
+    expect(fs.existsSync(path.join(ctx.paths.fixesDir, 'fixes.json'))).toBe(false)
+  })
+
+  it('publishes a worktree edit from the file watcher before reconciliation', async () => {
+    const { ctx, sink } = withBaseline()
+    let changed: fs.WatchListener<string> | undefined
+    const watcher = Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as fs.FSWatcher
+    const monitor = startLiveFixCapture(ctx, {
+      watchPath: (_root, listener) => { changed = listener; return watcher },
+      debounceMs: 1,
+      reconcileMs: 60_000,
+    })
+
+    changed?.('change', 'src/app.ts')
+    await vi.waitFor(() => expect(sink.patches).toEqual([
+      expect.objectContaining({ fixCapture: expect.objectContaining({ provisional: true }) }),
+    ]))
+    await monitor.close()
+    expect(watcher.close).toHaveBeenCalledOnce()
   })
 })
 

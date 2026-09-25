@@ -315,7 +315,9 @@ export function RunDetailColumn({
           <ChangesTab
             runId={m.runId}
             healCycles={m.healCycles}
+            runStopped={isTerminalRunStatus(m.status) && Boolean(m.endedAt)}
             fixCapture={m.fixCapture}
+            worktrees={m.worktrees}
             proposedPrs={m.proposedPrs}
             prAttempt={m.prAttempt}
             repoBranches={repoBranches}

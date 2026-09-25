@@ -14,6 +14,7 @@ import { INTEGRITY_HINT_DISCLOSURE, type IntegrityHint } from '../runtime/run-in
 import { CompactRunCounts, NormalizedRunCounts, compactCounts, normalizeRunCounts } from './external-heal-counts'
 import { dependencyIncompatibilityReason, type DependencyIncompatibilityCause } from '../../../../../../../shared/dependency-provenance'
 import { loadPromptTemplate, promptPath } from '../../../../shared/prompts'
+import { claimedSingleAttempt, policyForRunManifest, NEW_RUN_REQUIRED_MESSAGE } from '../../../../shared/single-attempt'
 
 export { normalizeRunCounts } from './external-heal-counts'
 export type { CompactRunCounts, NormalizedRunCounts } from './external-heal-counts'
@@ -95,6 +96,9 @@ export interface ExternalHealContext {
   // service won't serve, fix the service/app code, then signal_run
   // kind:"restart". Absent on ordinary test-failure heals.
   bootFailure?: RunBootFailure
+  /** The suite already used this run's external-effect budget. A signal records
+   *  the repair and ends this run without restarting services or tests. */
+  singleAttempt?: { claimed: true; message: string }
   // Slim packet: the markdown blobs are deferred to paths the agent `Read`s on
   // demand (they grow with #failures × #cycles). `get_run_snapshot` still inlines
   // them for verbose debugging.
@@ -309,6 +313,7 @@ export function slimRepeatHealContext(context: ExternalHealContext): ExternalHea
   // Full fingerprints remain available through get_heal_context. The current
   // compact blockers must survive slimming: recovery preflights replace them.
   const { healPrompt: _healPrompt, nextSteps: _nextSteps, dependencyProvenance: _provenance, ...rest } = context
+  if (rest.singleAttempt) return { ...rest, guidance: rest.singleAttempt.message }
   if (rest.dependencyBlockers?.length) return { ...rest, guidance: DEPENDENCY_RECOVERY_GUIDANCE }
   if (rest.escalation) return rest
   return { ...rest, guidance: REPEAT_HEAL_GUIDANCE }
@@ -328,6 +333,7 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
   const snapshot = buildExternalRunSnapshot(input)
   const runDir = runDirFor(input.logsDir, snapshot.runId)
   const paths = buildRunPaths(runDir)
+  const attemptClaimed = claimedSingleAttempt(runDir, policyForRunManifest(input.detail.manifest))
 
   const failingSlugs = snapshot.counts.failedNames
   // Flake-tolerant stuck detection: per-test streaks from the journal, so a
@@ -346,6 +352,15 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
       failedDir: paths.failedDir,
     })
     : undefined
+  const procedure = snapshot.bootFailure ? bootFailureNextSteps(snapshot.bootFailure) : EXTERNAL_HEAL_NEXT_STEPS
+  const attemptSteps = attemptClaimed
+    ? [
+        ...procedure.slice(0, 3),
+        'Apply the app/service fix, then signal_run ONCE with hypothesis and fixDescription. The signal records the fix and ends this run without restarting services or tests.',
+        'Call wait_for_heal_task for the failed/unverified terminal result. Review its captured changes, promote the fix, and request approval for a fresh run without run_ref.',
+        'Read pass counts from result.counts.statusLine / counts.passed. This run did not verify the repair.',
+      ]
+    : procedure
 
   return {
     runId: snapshot.runId,
@@ -365,6 +380,7 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     counts: compactCounts(snapshot.counts),
     failedTests: snapshot.failedTests,
     ...(snapshot.bootFailure ? { bootFailure: snapshot.bootFailure } : {}),
+    ...(attemptClaimed ? { singleAttempt: { claimed: true as const, message: NEW_RUN_REQUIRED_MESSAGE } } : {}),
     // Path only — the agent `Read`s the file when it needs the content. Presence
     // mirrors whether the markdown file exists on disk.
     healIndex: snapshot.healIndexMarkdown === null ? null : { path: paths.healIndexPath },
@@ -376,10 +392,7 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     // procedures: it governs every edit that follows, so an agent that stops
     // reading early has still seen it.
     nextSteps: withWorktreeRule(
-      [
-        ...(snapshot.dependencyBlockers?.length ? [DEPENDENCY_RECOVERY_GUIDANCE] : []),
-        ...(snapshot.bootFailure ? bootFailureNextSteps(snapshot.bootFailure) : EXTERNAL_HEAL_NEXT_STEPS),
-      ],
+      [...(snapshot.dependencyBlockers?.length ? [DEPENDENCY_RECOVERY_GUIDANCE] : []), ...attemptSteps],
       snapshot.worktrees,
     ),
     ...(escalation ? { escalation } : {}),

@@ -401,7 +401,7 @@ function runStats({
   healCycles: number
   healEnd: HealEnd | undefined
   services: RunDetail['manifest']['services'] | undefined
-  /** The repair's captured diff, when the run left one. */
+  /** The repair's live or final diff. */
   fixCapture: RunDetail['manifest']['fixCapture'] | undefined
   /** Opens the run detail's Changes tab. Omitted when there is nowhere to go
    *  (no drill-through wired), and the fixes then aren't reported here at all —
@@ -451,12 +451,12 @@ function runStats({
   // accent-filled ones — restating what the run detail's Changes tab already owns
   // (the same RepairedRepoCard, plus the per-repo branch and PR state the stage
   // never had room for). The stage is the run's SUMMARY (R82), so it reports THAT
-  // a fix was captured and where to review it; the actions live at the
+  // a fix exists and where to review it; the actions live at the
   // destination.
   const fixRepos = fixCapture?.repos ?? []
   if (fixRepos.length > 0 && onOpenFixes) {
     stats.push({
-      label: 'Fixes captured',
+      label: fixCapture?.provisional ? 'Fixes in progress' : 'Fixes captured',
       value: plural(fixRepos.length, 'repo'),
       // Which repo, and how much of it — the one thing the old cards said that a
       // count can't. Same roll-up-gets-a-tooltip rule the Services segment uses.

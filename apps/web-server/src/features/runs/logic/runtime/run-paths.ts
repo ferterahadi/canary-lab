@@ -41,7 +41,7 @@ export interface RunPaths {
   // explain WHY the agent went quiet (usage limit, auth, crash) — the agent's
   // own bytes are the only evidence when it never wrote a signal.
   healAgentTailPath: string
-  // Directory holding the heal fix patches captured at teardown — one
+  // Directory holding live and final heal fix patches — one
   // `<repoName>.patch` per changed repo plus a `fixes.json` index. The
   // run detail's Changes tab and the PR pipeline read from here.
   fixesDir: string

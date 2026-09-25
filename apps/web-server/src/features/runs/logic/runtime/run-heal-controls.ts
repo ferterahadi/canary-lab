@@ -7,11 +7,12 @@ import { type RunContext } from './run-context'
 import type { CancelHealResult, PauseResult } from './run-orchestrator-types'
 import { waitForPlaywrightExit } from './run-playwright'
 import { recordHealEnd } from './run-heal-agent'
-import { type RunManifest } from './manifest'
+import { readManifest, type RunManifest } from './manifest'
 import { summarizeFailures } from './run-verdict'
 import { killTree, scheduleSigkillFallback } from './run-spawn'
 import { appendJournalIteration, markStoppedEarly, prepareRun, recordLifecycle } from './run-manifest-writer'
 import { RunLoopHost, runAutoHealLoop, runManualExternalHealLoop } from './run-heal-loop'
+import { claimedSingleAttempt, NEW_RUN_REQUIRED_MESSAGE } from '../../../../shared/single-attempt'
 
 // Manual interruption: check the failure summary FIRST, and only kill the
 // in-flight Playwright pty when we're actually committing to a heal cycle.
@@ -156,6 +157,9 @@ export async function continueAfterTestRun(ctx: RunContext, host: RunLoopHost, f
 
 export async function restartHealFromFailure(ctx: RunContext, host: RunLoopHost, userGuidance: string): Promise<RunManifest['status']> {
   if (!ctx.autoHeal) return 'failed'
+  if (claimedSingleAttempt(ctx.runDir, readManifest(ctx.paths.manifestPath)?.singleAttempt ?? ctx.feature.singleAttempt)) {
+    throw new Error(NEW_RUN_REQUIRED_MESSAGE)
+  }
   prepareRun(ctx, 'stopped')
   if (ctx.stopped) return ctx.status
   // The pane broker's in-memory ring buffer is cleared separately (see

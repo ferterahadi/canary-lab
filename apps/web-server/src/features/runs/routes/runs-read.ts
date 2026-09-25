@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify'
 import type { RunsRouteDeps } from './runs-route-deps'
 import fs from 'fs'
 import path from 'path'
-import { updateManifest, type RunProposedPr } from '../logic/runtime/manifest'
+import { updateManifest, type RunManifest, type RunProposedPr } from '../logic/runtime/manifest'
 import { applyFixCapture, buildApplyPreflight } from '../logic/apply-fixes'
 import { resolveRepoPath } from '../../../shared/git-repo'
 import { launchEditorDir } from '../../../shared/editor-launch'
@@ -23,13 +23,31 @@ import {
   selectAgentSessionRef,
 } from '../../agent-sessions/logic/agent-session-log'
 import { ExternalHealAgentRequest, contentTypeFor } from './runs-route-support'
+import { isRestartableRunStatus, isTerminalRunStatus } from '../../../../../../shared/run-state'
+import { claimedSingleAttempt, policyForRunManifest } from '../../../shared/single-attempt'
+
+function captureIsFinal(manifest: RunManifest): boolean {
+  return isTerminalRunStatus(manifest.status) && Boolean(manifest.endedAt) && manifest.fixCapture?.provisional !== true
+}
 
 export { compareActiveRuns } from './runs-route-support'
 export type { ExternalHealAgentRequest } from './runs-route-support'
 
 export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
   app.get<{ Querystring: { feature?: string } }>('/api/runs', async (req) => {
-    return deps.store.list({ feature: req.query.feature })
+    const policies = new Map<string, ReturnType<typeof policyForRunManifest>>()
+    return deps.store.list({ feature: req.query.feature }).map((entry) => {
+      if (entry.newRunRequired || !isRestartableRunStatus(entry.status)) return entry
+      if (!policies.has(entry.feature)) {
+        policies.set(entry.feature, policyForRunManifest({
+          feature: entry.feature,
+          featureDir: path.join(deps.featuresDir, entry.feature),
+        }))
+      }
+      return claimedSingleAttempt(runDirFor(deps.store.logsDir, entry.runId), policies.get(entry.feature))
+        ? { ...entry, newRunRequired: true as const }
+        : entry
+    })
   })
 
   app.get<{ Params: { runId: string } }>('/api/runs/:runId/queue', async (req, reply) => {
@@ -44,7 +62,10 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(404)
       return { error: 'run not found' }
     }
-    return detail
+    return isRestartableRunStatus(detail.manifest.status)
+      && claimedSingleAttempt(runDirFor(deps.store.logsDir, detail.runId), policyForRunManifest(detail.manifest))
+      ? { ...detail, newRunRequired: true as const }
+      : detail
   })
 
   // Apply a run's captured heal fixes (R80) INTO the real product repos on
@@ -63,6 +84,10 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     if (!fixCapture || fixCapture.repos.length === 0) {
       reply.code(409)
       return { error: 'this run captured no fixes to apply' }
+    }
+    if (!captureIsFinal(detail.manifest)) {
+      reply.code(409)
+      return { error: 'wait for the run to stop before applying its changes' }
     }
     const repoName = req.body?.repoName
     if (repoName !== undefined && !fixCapture.repos.some((r) => r.repoName === repoName)) {
@@ -91,6 +116,10 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(409)
       return { error: 'this run captured no fixes' }
     }
+    if (!captureIsFinal(detail.manifest)) {
+      reply.code(409)
+      return { error: 'wait for the run to stop before applying its changes' }
+    }
     return { targets: await buildApplyPreflight(fixCapture) }
   })
 
@@ -110,7 +139,12 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(404)
       return { error: 'no captured patch for this repo' }
     }
-    const target = resolveRepoPath(repo.repoRoot)
+    const liveWorktree = detail.manifest.fixCapture?.provisional ? detail.manifest.worktrees?.[repo.repoName] : undefined
+    if (detail.manifest.fixCapture?.provisional && !liveWorktree) {
+      reply.code(410)
+      return { error: 'the live run worktree is no longer available' }
+    }
+    const target = resolveRepoPath(liveWorktree ?? repo.repoRoot)
     if (!fs.existsSync(target)) {
       reply.code(410)
       return { error: 'the repo path no longer exists' }
@@ -168,6 +202,10 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(409)
       return { error: 'this run captured no fixes' }
     }
+    if (!captureIsFinal(detail.manifest)) {
+      reply.code(409)
+      return { error: 'wait for the run to stop before opening a pull request' }
+    }
     return buildPrPreflight(fixCapture)
   })
 
@@ -185,6 +223,10 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     if (!fixCapture || fixCapture.repos.length === 0) {
       reply.code(409)
       return { error: 'this run captured no fixes' }
+    }
+    if (!captureIsFinal(detail.manifest)) {
+      reply.code(409)
+      return { error: 'wait for the run to stop before opening a pull request' }
     }
     const preflight = await buildPrPreflight(fixCapture)
     if (!preflight.anyPushable) {

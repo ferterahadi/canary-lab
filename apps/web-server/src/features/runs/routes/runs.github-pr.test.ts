@@ -75,6 +75,7 @@ function writeManifestWithCapture(
     feature: 'foo',
     featureDir: path.join(featuresDir, 'foo'),
     startedAt: 'now',
+    endedAt: 'later',
     status: 'failed',
     healCycles: 1,
     services: [],
@@ -138,6 +139,29 @@ describe('GitHub / PR routes (R80)', () => {
     const { app } = await build()
     expect((await app.inject({ method: 'GET', url: '/api/runs/r1/pr-preflight' })).statusCode).toBe(409)
     expect((await app.inject({ method: 'POST', url: '/api/runs/r1/propose-pr' })).statusCode).toBe(409)
+  })
+
+  it('keeps a live patch reviewable but refuses apply and PR actions until teardown', async () => {
+    writeManifestWithCapture('r1', undefined, {
+      status: 'healing',
+      endedAt: undefined,
+      worktrees: { prod: tmpDir },
+      fixCapture: {
+        provisional: true,
+        capturedAt: 'now',
+        repos: [{ repoName: 'prod', patchPath: '/p.patch', patchFile: 'p.patch', repoRoot: '/repos/prod', baseSha: 'abc', files: 1 }],
+      },
+    })
+    const { app } = await build()
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/pr-preflight' })).statusCode).toBe(409)
+    expect((await app.inject({ method: 'POST', url: '/api/runs/r1/propose-pr' })).statusCode).toBe(409)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/apply-preflight' })).statusCode).toBe(409)
+    expect((await app.inject({ method: 'POST', url: '/api/runs/r1/apply-fixes' })).statusCode).toBe(409)
+    expect(prMocks.proposeFixesForRun).not.toHaveBeenCalled()
+
+    const open = await app.inject({ method: 'POST', url: '/api/runs/r1/open-repo', payload: { repoName: 'prod' } })
+    expect(open.statusCode).toBe(200)
+    expect(open.json().path).toBe(tmpDir)
   })
 
   it('GET pr-preflight returns the preflight for the run capture', async () => {

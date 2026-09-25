@@ -40,6 +40,7 @@ export function healEndLine(healEnd: HealEnd | undefined): string | null {
     case 'no-progress': return 'Auto-repair stopped — repeated tries got nowhere.'
     case 'cancelled': return 'Auto-repair was stopped before the tests passed.'
     case 'foreign-abort': return 'Auto-repair stopped — another Canary window took over this run.'
+    case 'new-run-required': return 'Verification needs a fresh approved run.'
     default: return null
   }
 }
@@ -57,6 +58,7 @@ export function healEndShort(healEnd: HealEnd | undefined): string | null {
     case 'no-progress': return 'stopped — no progress'
     case 'cancelled': return 'stopped by you'
     case 'foreign-abort': return 'stopped — record taken over'
+    case 'new-run-required': return 'new run required'
     default: return null
   }
 }

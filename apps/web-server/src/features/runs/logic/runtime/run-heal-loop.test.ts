@@ -133,9 +133,30 @@ function ctxFor(state: Partial<RunContext> = {}, opts: Record<string, unknown> =
   return makeHealLoopContext({ root: tmpDir, opts, state })
 }
 
+function claimAttempt(ctx: RunContext): void {
+  const receipt = path.join(ctx.runDir, 'runtime/effect-attempt/attempt.json')
+  fs.mkdirSync(path.dirname(receipt), { recursive: true })
+  fs.writeFileSync(receipt, '{}')
+  ctx.feature.singleAttempt = { receipt: 'runtime/effect-attempt/attempt.json' }
+}
+
 // ───────────────────────── manual / external loop ─────────────────────────
 
 describe('runManualExternalHealLoop', () => {
+  it('records a repair signal but never restarts or reruns after a suite attempt is claimed', async () => {
+    const { ctx } = ctxFor({}, { externalHeal: true })
+    claimAttempt(ctx)
+    h.waitForHealSignal.mockResolvedValue({ signal: rerunSignal({ hypothesis: 'app bug', fixDescription: 'fixed app' }) })
+    const host = makeLoopHost()
+
+    expect(await runManualExternalHealLoop(ctx, host, 'failed')).toBe('failed')
+    expect(h.appendJournalIteration).toHaveBeenCalledWith(ctx, expect.objectContaining({ signal: '.rerun' }))
+    expect(h.recordHealEnd).toHaveBeenCalledWith(ctx, expect.objectContaining({ reason: 'new-run-required' }))
+    expect(host.restart).not.toHaveBeenCalled()
+    expect(host.rerun).not.toHaveBeenCalled()
+    expect(h.runPlaywright).not.toHaveBeenCalled()
+  })
+
   it('snapshots effective worktree repo paths before waiting for a manual repair', async () => {
     const repoPathOverrides = { catalog: '/worktrees/catalog' }
     const { ctx } = ctxFor({ repoPathOverrides })
@@ -401,6 +422,15 @@ describe('runAutoHealLoop', () => {
       h.verificationPlanForSummary.mockReturnValue(targeted(['skipped-one']))
     })
 
+    it('does not rerun pending tests when the suite attempt was already claimed', async () => {
+      const { ctx } = ctxFor({}, { autoHeal: AUTO })
+      claimAttempt(ctx)
+
+      expect(await runAutoHealLoop(ctx, makeLoopHost())).toBe('failed')
+      expect(h.recordHealEnd).toHaveBeenCalledWith(ctx, expect.objectContaining({ reason: 'new-run-required' }))
+      expect(h.runPlaywright).not.toHaveBeenCalled()
+    })
+
     it('returns the live status when the abort lands during the pending rerun', async () => {
       const { ctx } = ctxFor({}, { autoHeal: AUTO })
       h.runPlaywright.mockImplementation(async () => {
@@ -490,6 +520,19 @@ describe('runAutoHealLoop', () => {
   describe('heal cycles', () => {
     beforeEach(() => {
       h.extractFailedSlugs.mockReturnValue(['spec.ts > fails'])
+    })
+
+    it('ends auto repair after a claimed attempt without restarting services or Playwright', async () => {
+      const { ctx } = ctxFor({}, { autoHeal: AUTO })
+      claimAttempt(ctx)
+      h.runHealAgent.mockResolvedValue({ signal: { kind: 'restart', body: {} }, reason: 'signal' })
+      const host = makeLoopHost()
+
+      expect(await runAutoHealLoop(ctx, host)).toBe('failed')
+      expect(h.recordHealEnd).toHaveBeenCalledWith(ctx, expect.objectContaining({ reason: 'new-run-required' }))
+      expect(host.restart).not.toHaveBeenCalled()
+      expect(host.rerun).not.toHaveBeenCalled()
+      expect(h.runPlaywright).not.toHaveBeenCalled()
     })
 
     it('snapshots effective worktree repo paths before spawning the heal agent', async () => {

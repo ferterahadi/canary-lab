@@ -7,7 +7,8 @@ import type { HealEnd, RunBootFailure, RunFixCapture, RunPrAttempt, RunProposedP
 import type { ExecutionType, VerificationRunMetadata } from '@shared/verification'
 import type { ClientKind } from '@shared/run-mode'
 import type { SpecDiff } from '@shared/verification-strength/types'
-import type { TestReviewDecision } from '@shared/test-review'
+import type { RunTestReviewApproval, TestReviewDecision } from '@shared/test-review'
+import type { SingleAttemptPolicy } from '@shared/launcher/types'
 import type { RunDependencyProvenance } from '@shared/dependency-provenance'
 
 export interface RunIndexEntry {
@@ -29,6 +30,7 @@ export interface RunIndexEntry {
   /** Mirrored from the manifest so terminal external repair provenance remains
    *  available when the run detail is not part of the WebSocket snapshot. */
   healMode?: 'auto' | 'manual' | 'external'
+  newRunRequired?: true
   verificationConfigName?: string
   verificationPlaywrightEnvsetId?: string
   verificationTargetUrls?: Record<string, string>
@@ -174,8 +176,9 @@ export interface RunManifest {
   /** Why the auto-heal loop stopped without passing. Drives the Test Run
    *  hero's "why heal stopped" line. Absent unless the run entered heal. */
   healEnd?: HealEnd
-  /** The heal agent's edits captured from the per-run worktree at teardown —
-   *  what the run detail's Changes tab surfaces (patch path, apply-locally, PR).
+  singleAttempt?: SingleAttemptPolicy
+  /** The heal agent's edits from the per-run worktree, shown live in Changes.
+   *  Applying and proposing wait until teardown makes the capture final.
    *  A flight's Test Run stage only reports that it exists, and links here. */
   fixCapture?: RunFixCapture
   /** PRs opened from this run's captured fix, per repo — automatically when the
@@ -186,6 +189,7 @@ export interface RunManifest {
   prAttempt?: RunPrAttempt
   verification?: VerificationRunMetadata
   suiteSnapshot?: RunSuiteSnapshot
+  testReviewApproval?: RunTestReviewApproval
   /** Absent until the first Playwright exit, and on runs without a snapshot. */
   specEdits?: RunSpecEdits
   /** Written together with `specEdits`; same absence rule. */
@@ -306,6 +310,7 @@ export interface PlaywrightArtifactGroup {
 export interface RunDetail {
   runId: string
   manifest: RunManifest
+  newRunRequired?: true
   summary?: RunSummary
   playbackEvents?: PlaywrightPlaybackEvent[]
   playwrightArtifacts?: PlaywrightArtifactGroup[]

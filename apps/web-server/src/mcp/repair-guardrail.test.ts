@@ -116,8 +116,10 @@ describe('repair guardrail — MCP instructions', () => {
     expect(INSTRUCTIONS_BY_PROFILE.repair).toMatch(/never total - failed/i)
   })
 
-  it('repair instructions assign runtime verification to the runner', () => {
-    expect(INSTRUCTIONS_BY_PROFILE.repair).toContain('The signal requests runner verification')
+  it('repair instructions distinguish ordinary verification from a claimed one-attempt run', () => {
+    expect(INSTRUCTIONS_BY_PROFILE.repair).toContain('For an ordinary run the signal requests runner verification')
+    expect(INSTRUCTIONS_BY_PROFILE.repair).toContain('ends this run failed/unverified')
+    expect(INSTRUCTIONS_BY_PROFILE.repair).toContain('fresh run without run_ref')
     expect(INSTRUCTIONS_BY_PROFILE.repair).toContain('Do not start services or run Playwright')
   })
 })

@@ -224,8 +224,12 @@ start after an ended run create messages even when the browser is closed. Termin
 blockers use the same byte-level review gate as run start, including exact-revision
 approval and restoration, rather than relying on a pending-file count in the run
 index. Each inbox read also reconciles these sources; the open client's ten-second
-reconciliation repairs missed events. An unavailable suite or historical snapshot
+reconciliation repairs missed events. An unreadable suite or historical snapshot
 preserves its existing review alert without preventing other features from updating.
+Canary's explicit suite deletion, or a committed Git deletion of its tracked config,
+marks the review source retired. The alert moves to History while the saved run
+remains available. A missing live suite without retirement evidence keeps the alert;
+its comparison dialog explains the unavailable source instead of offering review actions.
 A possible test weakening also stays
 in the inbox as an advisory integrity review after the run ends. Ordinary edits,
 coverage freshness, verification readiness, and failed-run evidence remain on
@@ -406,6 +410,19 @@ client. The agent fixes code and signals `rerun` or `restart`; the orchestrator
 continues the same run until pass or terminal failure. At teardown, Canary Lab
 captures repair diffs only for worktrees with a valid baseline. A captured repair
 that heals the run green may then be proposed as a draft pull request.
+
+For a feature with `singleAttempt.receipt`, the suite owns a run-relative
+receipt written before its one permitted external-effect attempt. Canary pins
+that path in the run manifest and checks for the file before any heal restart
+or rerun, including implicit pending-test reruns and terminal `run_ref` resume.
+For saved runs from before this field existed, restart checks consult that
+run's named suite config so a claimed historical attempt is not reused.
+After the receipt appears, a heal signal still records the diagnosis journal,
+but the orchestrator finalizes the run failed with `healEnd.reason =
+'new-run-required'` and captures the unverified patch at normal teardown.
+The external heal context, signal result, terminal wait result, and run UI
+explain that verification needs a fresh approved run ID. The suite's own boot
+guard remains the final barrier against another external effect.
 
 ### Logging and retention
 
@@ -604,9 +621,12 @@ no such fallback: the run fails before boot because its overlay must be applied
 in an isolated worktree.
 
 The normal worktree path exists for fix capture. `captureFixBaseline` stores a baseline ref after
-overlay + envset + WIP hydration, so the teardown diff is exactly the repair; `captureFixes`
-writes it to `<runDir>/fixes/<repo>.patch` + `fixes.json` + `manifest.fixCapture` before the
-worktree goes away. On this path, the heal agent does not mutate the source checkout;
+overlay + envset + WIP hydration. A worktree watcher publishes provisional diffs to
+`<runDir>/fixes/<repo>.patch`, `fixes.json`, and `manifest.fixCapture` while the agent edits;
+a periodic scan recovers missed file events. `captureFixes` writes the final diff before the
+worktree goes away. Changes shows provisional files immediately, but applying them to the
+source checkout or opening a PR waits until the run has stopped and finalized its patch.
+On this path, the heal agent does not mutate the source checkout;
 its edits reach the user as a patch file and, on a green healed run, may become a draft
 pull request (see [End-of-run pull request](#end-of-run-pull-request)). Non-portified
 worktrees are removed at teardown; a portified run reverses

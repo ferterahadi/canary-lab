@@ -11,6 +11,8 @@ import { isActiveRunStatus } from '../../../../../shared/run-state'
 import { type ToolGroupContext, CLAIM_SUPPRESSED_MESSAGE, asJsonResult, bootSessionValue, claimRun, errorResult, failureResult, findContinuingRunForFeature, healWaitNext, isActiveBootRun, resolveRunRef, runCandidate } from '../tool-support'
 import { readCoverageUpdate } from '../coverage-catchup'
 import type { TestReviewRequiredInfo } from '../../../../../shared/test-review'
+import { runDirFor } from '../../features/runs/logic/runtime/run-paths'
+import { claimedSingleAttempt, policyForRunManifest, NEW_RUN_REQUIRED_MESSAGE, NEW_RUN_REQUIRED_NEXT_STEPS } from '../../shared/single-attempt'
 
 const coverageChangeResponse = z.object({
   change: z.object({
@@ -46,7 +48,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
 
   registerTool('start_run', {
     description:
-      'Start or continue a run. Before a fresh run, stale test-to-requirement coverage asks the user whether to update coverage first or run now with the historical percentage explicitly qualified; no run starts while that choice is pending. A matching active run is reused even with force_new:true, and run_ref resumes an ordinary failed/aborted run with its recorded suite and journal, so neither path is blocked by current coverage freshness. An intentional concurrent run of the same feature must be started from the Run panel. Fresh starts reject pending suite changes unless a human durably approved the exact terminal-run revision; after that approval start without run_ref, and only the new run can produce a verdict. After a code fix use signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run. Ordinary skips remain incomplete; only reporter-observed, predeclared environment exclusions settle as not applicable and never count as passes.',
+      'Start or continue a run. Before a fresh run, stale test-to-requirement coverage asks the user whether to update coverage first or run now with the historical percentage explicitly qualified; no run starts while that choice is pending. A matching active run is reused even with force_new:true, and run_ref resumes an ordinary failed/aborted run with its recorded suite and journal (a claimed single-attempt receipt instead returns new_run_required; start a fresh approved run without run_ref), so neither path is blocked by current coverage freshness. An intentional concurrent run of the same feature must be started from the Run panel. Fresh starts reject pending suite changes unless a human durably approved the exact terminal-run revision; after that approval start without run_ref, and only the new run can produce a verdict. After a code fix use signal_run (hypothesis + fixDescription), then wait_for_heal_task on the same run. Ordinary skips remain incomplete; only reporter-observed, predeclared environment exclusions settle as not applicable and never count as passes.',
     inputSchema: {
       feature: z.string().describe('Feature name (from list_features).'),
       request_id: z.string().optional().describe('Resume the exact blocked request returned by test_review_required. Reuse its original session_id; approval in another surface never transfers this request to that client.'),
@@ -204,6 +206,16 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
               claim,
               ...suppressionFields,
               ...(claimAllowed ? healWaitNext() : {}),
+            })
+          }
+          const singleAttempt = policyForRunManifest(target.manifest)
+          if (singleAttempt && claimedSingleAttempt(runDirFor(deps.store.logsDir, target.manifest.runId), singleAttempt)) {
+            return asJsonResult({
+              type: 'new_run_required',
+              runId: target.manifest.runId,
+              status,
+              message: NEW_RUN_REQUIRED_MESSAGE,
+              nextSteps: NEW_RUN_REQUIRED_NEXT_STEPS,
             })
           }
           if (status === 'passed') {

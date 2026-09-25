@@ -14,6 +14,7 @@ import {
   type AgentResolveDeps,
 } from '../../../agent-sessions/logic/agent-binary'
 import { directoryExists, renderPlaywrightMcpHint, renderTraceExtractHint } from './heal-prompt-map'
+import { claimedSingleAttempt } from '../../../../shared/single-attempt'
 
 export { buildAgentSpawnCommand, buildClaudeMcpConfigArg, makeAgentSpawnCommandBuilder, pickAvailableHealAgent, readPriorSessionId, readPriorSessionIdFromValue } from './heal-agent-spawn'
 export type { AgentSpawnArgs, AgentSpawnCommandDefaults } from './heal-agent-spawn'
@@ -46,14 +47,14 @@ export const MODE_COPY: Record<HealMode, {
   service: {
     healingDirective: 'Fix service/app code, not tests.',
     testSpecRule: 'Do not read the test spec unless the failure cannot be understood from the index and logs.',
-    loggingRule: "If the existing logs and snapshots don't give you a clear hypothesis, add temporary logging to the suspect service/app code and write the restart signal. The next cycle will read the new log output.",
-    closingDirective: 'Make the failing Playwright tests pass on the next cycle by fixing the root cause in service/app code and writing the appropriate signal file.',
+    loggingRule: "If the existing logs and snapshots don't give you a clear hypothesis, add temporary logging to the suspect service/app code and write the restart signal. The runner will follow this run's attempt policy.",
+    closingDirective: 'Fix the root cause in service/app code and write the appropriate signal file. Verification follows this run\'s attempt policy.',
   },
   test: {
     healingDirective: 'This feature has no editable service repos. Fix the failing Playwright tests or their helpers.',
     testSpecRule: 'Read the failing test spec and its helpers (e.g., `e2e/helpers/`) — they are what you need to fix.',
-    loggingRule: "If the logs and snapshots don't give you a clear hypothesis, add diagnostic logging or assertions in the test spec or helpers and write the rerun signal. The next cycle will pick up the new output.",
-    closingDirective: 'Make the failing Playwright tests pass on the next cycle by fixing the test spec or its helpers and writing the rerun signal.',
+    loggingRule: "If the logs and snapshots don't give you a clear hypothesis, add diagnostic logging or assertions in the test spec or helpers and write the rerun signal. The runner will follow this run's attempt policy.",
+    closingDirective: 'Fix the test spec or its helpers and write the rerun signal. Verification follows this run\'s attempt policy.',
   },
 }
 
@@ -130,10 +131,14 @@ export function buildOrchestratorHealPrompt(
     // the first heal cycle, and re-reading on each cycle keeps us correct if
     // a later iteration extends the manifest.
     const mode = detectHealMode(paths.manifestPath)
+    const manifest = readManifest(paths.manifestPath)
     const modeCopy = MODE_COPY[mode]
     const basePrompt = renderPromptTemplate(promptTemplate, {
       runDir: opts.runDir,
       runDirRel,
+      singleAttemptGuidance: claimedSingleAttempt(opts.runDir, manifest?.singleAttempt)
+        ? loadPromptTemplate(promptPath('heal-single-attempt.md'))
+        : '',
       healIndexPath: paths.healIndexPath,
       summaryPath: paths.summaryPath,
       failedDir: paths.failedDir,

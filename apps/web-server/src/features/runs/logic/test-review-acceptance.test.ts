@@ -74,6 +74,56 @@ describe('revision-bound Git test review', () => {
     })
   })
 
+  it('accepts a committed move without passing its removed path to Git', async () => {
+    const root = fixture()
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' }).toString().trim()
+    fs.writeFileSync(path.join(root, 'e2e/subscription.cjs'), 'original\n')
+    git('add', 'e2e/subscription.cjs')
+    git('commit', '-qm', 'record subscription helper')
+
+    fs.mkdirSync(path.join(root, 'scripts'))
+    fs.renameSync(path.join(root, 'e2e/subscription.cjs'), path.join(root, 'scripts/subscription.cjs'))
+    git('add', '-A')
+    git('commit', '-qm', 'move subscription helper')
+    fs.writeFileSync(path.join(root, 'e2e/a.spec.ts'), 'after\n')
+    fs.writeFileSync(path.join(root, 'unrelated.txt'), 'unrelated staged\n')
+    git('add', 'unrelated.txt')
+
+    const receipt = await commitReviewedFiles('checkout', root, ['e2e/a.spec.ts', 'e2e/subscription.cjs'])
+    expect(receipt.status).toBe('committed')
+    expect(git('show', 'HEAD:e2e/a.spec.ts')).toBe('after')
+    expect(git('show', 'HEAD:scripts/subscription.cjs')).toBe('original')
+    expect(git('ls-files', 'e2e/subscription.cjs')).toBe('')
+    expect(git('diff', '--cached', '--name-only')).toBe('unrelated.txt')
+    expect(await commitReviewedFiles('checkout', root, ['e2e/a.spec.ts', 'e2e/subscription.cjs'])).toEqual({
+      status: 'already-committed', commit: receipt.commit,
+    })
+    expect(await commitReviewedFiles('checkout', root, ['e2e/subscription.cjs'])).toEqual({
+      status: 'already-committed', commit: receipt.commit,
+    })
+  })
+
+  it('commits a reviewed deletion that is still tracked by Git', async () => {
+    const root = fixture()
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' }).toString().trim()
+    fs.rmSync(path.join(root, 'e2e/fixture.ts'))
+
+    const receipt = await commitReviewedFiles('checkout', root, ['e2e/fixture.ts'])
+    expect(receipt.status).toBe('committed')
+    expect(git('ls-files', 'e2e/fixture.ts')).toBe('')
+    expect(git('show', '--format=', '--name-status', 'HEAD')).toBe('D\te2e/fixture.ts')
+  })
+
+  it('commits a reviewed deletion already staged with git rm', async () => {
+    const root = fixture()
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' }).toString().trim()
+    git('rm', 'e2e/fixture.ts')
+
+    const receipt = await commitReviewedFiles('checkout', root, ['e2e/fixture.ts'])
+    expect(receipt.status).toBe('committed')
+    expect(git('show', '--format=', '--name-status', 'HEAD')).toBe('D\te2e/fixture.ts')
+  })
+
   it('restores the exact reviewed revision, including removing a newly added supporting file', async () => {
     const root = fixture()
     fs.writeFileSync(path.join(root, 'e2e/a.spec.ts'), 'after\n')

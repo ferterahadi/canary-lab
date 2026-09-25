@@ -36,12 +36,13 @@ import type { ExecutionType } from '../../../../../shared/verification'
 import type { makeAttachRunStreams, makeRestartExternalRun } from './run-stream-wiring'
 import type { buildRunScheduling } from './run-scheduling'
 import { settleOrchestratorRun } from './logic/settle-run'
+import { claimedSingleAttempt, policyForRunManifest } from '../../shared/single-attempt'
 
 export interface RunsRouteDepsParts {
   attachRunStreams: ReturnType<typeof makeAttachRunStreams>
   restartExternalRun: ReturnType<typeof makeRestartExternalRun>
   scheduling: ReturnType<typeof buildRunScheduling>
-  restartLocalHeal: (runId: string, text: string) => Promise<{ ok: true } | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'manual-mode' | 'spawn-failed' }>
+  restartLocalHeal: (runId: string, text: string) => Promise<{ ok: true } | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'new-run-required' | 'manual-mode' | 'spawn-failed' }>
 }
 
 export function buildRunsRouteDeps(
@@ -384,6 +385,9 @@ export function buildRunsRouteDeps(
       if ((manifest.executionType ?? 'run') === 'verify') return { ok: false, reason: 'not-restartable' as const }
       if (isActiveRunStatus(manifest.status)) return { ok: false, reason: 'already-active' as const }
       if (!isRestartableRunStatus(manifest.status)) return { ok: false, reason: 'not-restartable' as const }
+      if (claimedSingleAttempt(runDirFor(logsDir, runId), policyForRunManifest(manifest))) {
+        return { ok: false, reason: 'new-run-required' as const }
+      }
 
       const features = loadFeatures(featuresDir)
       const feature = features.find((f) => f.name === manifest.feature)

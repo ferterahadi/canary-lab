@@ -3,6 +3,7 @@
 // hydration, and the ephemeral portify overlay applied and reversed around the
 // run. Split out of orchestrator.ts; the bodies are unchanged.
 import { type RunContext } from './run-context'
+import { readManifest } from './manifest'
 import fs from 'fs'
 import path from 'path'
 import { FIX_CAPTURE_MAX_FILE_NAMES, type RunFixCapture } from '../../../../../../../shared/run-state'
@@ -44,12 +45,12 @@ export async function captureFixBaseline(ctx: RunContext): Promise<void> {
 
 /** Diff each worktree against its capture baseline and persist the heal fix as
  *  `<runDir>/fixes/<repo>.patch` + `fixes.json` + `manifest.fixCapture`. Called
- *  at teardown BEFORE the worktrees are removed. A run whose agent changed
+ *  while healing and at teardown BEFORE the worktrees are removed. A run whose agent changed
  *  nothing writes no capture. Intent-to-add stages agent-created files so new
  *  source files ride the patch too; gitignored/untracked-at-baseline state
  *  (envset .env, hydrated WIP) never leaks in — the baseline already had it or
  *  git ignores it. */
-export async function captureFixes(ctx: RunContext): Promise<RunFixCapture | null> {
+export async function captureFixes(ctx: RunContext, provisional = false): Promise<RunFixCapture | null> {
   if (ctx.fixBaselines.size === 0) return null
   // No heal cycle, no repair to capture. Teardown runs this for EVERY worktree
   // run, so without this gate anything a worktree accumulated on its own — a
@@ -59,7 +60,9 @@ export async function captureFixes(ctx: RunContext): Promise<RunFixCapture | nul
   // (local and external), so a genuine repair always carries at least one.
   // Same predicate `shouldAutoPropose` already uses for "a repair happened".
   if (ctx.healCycles <= 0) return null
+  const previous = readManifest(ctx.paths.manifestPath)?.fixCapture
   const repos: RunFixCapture['repos'] = []
+  let patchChanged = false
   for (const [repoName, base] of ctx.fixBaselines) {
     // Stage ONLY agent-created files (untracked now, but not at baseline) so
     // `git diff <ref>` includes their content — the hydrated WIP / generated
@@ -75,7 +78,12 @@ export async function captureFixes(ctx: RunContext): Promise<RunFixCapture | nul
     const patchPath = path.join(ctx.paths.fixesDir, patchFile)
     try {
       fs.mkdirSync(ctx.paths.fixesDir, { recursive: true })
-      fs.writeFileSync(patchPath, patch)
+      if (!fs.existsSync(patchPath) || fs.readFileSync(patchPath, 'utf8') !== patch) {
+        const pendingPath = `${patchPath}.tmp`
+        fs.writeFileSync(pendingPath, patch)
+        fs.renameSync(pendingPath, patchPath)
+        patchChanged = true
+      }
     } catch (err) {
       ctx.runnerLog?.warn(`Fix capture write failed for "${repoName}": ${(err as Error).message}`)
       continue
@@ -93,14 +101,105 @@ export async function captureFixes(ctx: RunContext): Promise<RunFixCapture | nul
       fileNames: names.slice(0, FIX_CAPTURE_MAX_FILE_NAMES),
     })
   }
-  if (repos.length === 0) return null
-  const fixCapture: RunFixCapture = { repos, capturedAt: new Date().toISOString() }
+  if (repos.length === 0) {
+    if (previous?.provisional) {
+      ctx.stateSink.patchManifest(ctx.runId, { fixCapture: undefined })
+      for (const repo of previous.repos) removeStalePatch(ctx, repo.patchFile)
+      removeStalePatch(ctx, 'fixes.json')
+    }
+    return null
+  }
+  if (previous && !patchChanged && previous.provisional === (provisional || undefined)
+    && JSON.stringify(previous.repos) === JSON.stringify(repos)) return previous
+  const fixCapture: RunFixCapture = {
+    repos,
+    capturedAt: new Date().toISOString(),
+    ...(provisional ? { provisional: true } : {}),
+  }
   try {
-    fs.writeFileSync(path.join(ctx.paths.fixesDir, 'fixes.json'), JSON.stringify(fixCapture, null, 2) + '\n')
+    const indexPath = path.join(ctx.paths.fixesDir, 'fixes.json')
+    fs.writeFileSync(`${indexPath}.tmp`, JSON.stringify(fixCapture, null, 2) + '\n')
+    fs.renameSync(`${indexPath}.tmp`, indexPath)
   } catch { /* the manifest carries the same data — index file is a convenience */ }
   ctx.stateSink.patchManifest(ctx.runId, { fixCapture })
-  ctx.runnerLog?.info(`Captured heal fix diff for ${repos.map((r) => r.repoName).join(', ')} → ${ctx.paths.fixesDir}`)
+  for (const repo of previous?.repos ?? []) {
+    if (!repos.some((current) => current.repoName === repo.repoName)) {
+      removeStalePatch(ctx, repo.patchFile)
+    }
+  }
+  if (!provisional) ctx.runnerLog?.info(`Captured heal fix diff for ${repos.map((r) => r.repoName).join(', ')} → ${ctx.paths.fixesDir}`)
   return fixCapture
+}
+
+function removeStalePatch(ctx: RunContext, file: string): void {
+  try {
+    fs.rmSync(path.join(ctx.paths.fixesDir, path.basename(file)), { force: true })
+  } catch (err) {
+    ctx.runnerLog?.warn(`Stale fix patch cleanup failed: ${(err as Error).message}`)
+  }
+}
+
+/** File events make edits visible promptly; reconciliation catches missed
+ *  events and newly created directories. Both read the same worktree baseline
+ *  as teardown, and the manifest write publishes through RunStore to open UIs. */
+export function startLiveFixCapture(ctx: RunContext, opts: {
+  watchPath?: (root: string, listener: fs.WatchListener<string>) => fs.FSWatcher
+  debounceMs?: number
+  reconcileMs?: number
+} = {}): { close(): Promise<void> } {
+  const watchers: fs.FSWatcher[] = []
+  let closed = false
+  let timer: NodeJS.Timeout | null = null
+  let inFlight: Promise<void> | null = null
+  let rescan = false
+
+  const scan = (): void => {
+    timer = null
+    if (closed || ctx.healCycles <= 0) return
+    if (inFlight) { rescan = true; return }
+    inFlight = captureFixes(ctx, true)
+      .then(() => {})
+      .catch((err) => ctx.runnerLog?.warn(`Live fix capture failed: ${(err as Error).message}`))
+      .finally(() => {
+        inFlight = null
+        if (rescan && !closed) { rescan = false; schedule() }
+      })
+  }
+  const schedule = (): void => {
+    if (closed || timer) return
+    timer = setTimeout(scan, opts.debounceMs ?? 150)
+    timer.unref()
+  }
+  const watchPath = opts.watchPath ?? ((root: string, listener: fs.WatchListener<string>) => (
+    fs.watch(root, { recursive: true, persistent: false }, listener)
+  ))
+  for (const base of ctx.fixBaselines.values()) {
+    try {
+      const watcher = watchPath(base.worktreeRoot, (_event, name) => {
+        if (name && /^(?:\.git|node_modules)(?:[\\/]|$)/.test(String(name))) return
+        schedule()
+      })
+      watcher.on('error', (err) => ctx.runnerLog?.warn(`Live fix watcher failed: ${err.message}`))
+      watchers.push(watcher)
+    } catch (err) {
+      ctx.runnerLog?.warn(`Live fix watcher failed: ${(err as Error).message}`)
+    }
+  }
+  const reconcile = setInterval(schedule, opts.reconcileMs ?? 2_000)
+  reconcile.unref()
+  return {
+    async close(): Promise<void> {
+      closed = true
+      clearInterval(reconcile)
+      if (timer) clearTimeout(timer)
+      for (const watcher of watchers) {
+        try { watcher.close() } catch (err) {
+          ctx.runnerLog?.warn(`Live fix watcher close failed: ${(err as Error).message}`)
+        }
+      }
+      await inFlight
+    },
+  }
 }
 
 /** Hydrate the feature's envset into every per-run worktree (portified or

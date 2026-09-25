@@ -4,6 +4,7 @@ import { buildExternalHealContext, buildSpecEditsWarning, hasPendingHealSignal, 
 import { isActiveRunStatus, isTerminalRunStatus } from '../../../../shared/run-state'
 import type { CanaryLabMcpDeps } from './tool-schemas'
 import { ensureExternalClaimForMcpCall } from './tool-support'
+import { NEW_RUN_REQUIRED_NEXT_STEPS } from '../shared/single-attempt'
 
 // `timeout_ms` is the per-call block budget — how long ONE wait_for_heal_task
 // request may hold open. It is NOT the overall heal budget: when the window
@@ -129,7 +130,7 @@ export function healFixOutcome(detail: RunDetail): HealFixOutcome | undefined {
 export type WaitForHealTaskValue =
   | { type: 'needs_heal'; runId: string; cycle: number; context: ExternalHealContext; dirtyTests?: DirtyTestsWarning; specEdits?: SpecEditsWarning }
   | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning; specEdits?: SpecEditsWarning; fix?: HealFixOutcome }
-  | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning; specEdits?: SpecEditsWarning }
+  | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning; specEdits?: SpecEditsWarning; newRunRequired?: { message: string; nextSteps: string[] } }
   | {
       type: 'still_waiting'
       runId: string
@@ -204,6 +205,12 @@ export function classifyWaitForHealTask(
         counts: normalizeRunCounts(detail.summary ?? null),
         ...(dirtyTests ? { dirtyTests } : {}),
         ...(specEdits ? { specEdits } : {}),
+        ...(detail.manifest.healEnd?.reason === 'new-run-required' ? {
+          newRunRequired: {
+            message: detail.manifest.healEnd.message,
+            nextSteps: NEW_RUN_REQUIRED_NEXT_STEPS,
+          },
+        } : {}),
       },
     }
   }

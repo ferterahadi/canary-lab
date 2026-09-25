@@ -100,6 +100,23 @@ function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
 }
 
 describe('RunOrchestrator.restartHealFromFailure', () => {
+  it('refuses a spent suite attempt before spawning a heal agent', async () => {
+    const receipt = path.join(runDir, 'runtime/effect-attempt/attempt.json')
+    fs.mkdirSync(path.dirname(receipt), { recursive: true })
+    fs.writeFileSync(receipt, '{}')
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ singleAttempt: { receipt: 'runtime/effect-attempt/attempt.json' } }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      autoHeal: { agent: 'codex', buildSpawnCommand: () => 'codex heal', buildCyclePrompt: () => 'heal' },
+    })
+
+    await expect(orch.restartHealFromFailure('try again')).rejects.toThrow('fresh run')
+    expect(f.spawned).toHaveLength(0)
+  })
+
   it('starts services only after the restarted heal agent requests a rerun', async () => {
     const f = makeFakeFactory()
     const orch = new RunOrchestrator({

@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD, type FeatureConfig } from '../../../../shared/launcher/types'
 import { normalizeStartCommand, validateHealthCheck } from './launcher-startup'
+import { validateSingleAttempt } from './single-attempt'
 
 // Discover features by scanning <featuresDir>/<feature>/feature.config.{cjs,js,ts}.
 // Takes an explicit featuresDir so tests can point at a fixture tree.
@@ -30,6 +31,7 @@ export function loadFeatures(featuresDir: string): FeatureConfig[] {
         // it opts out. `??` preserves an explicit `0` (run the full suite) and
         // any explicit N; only an absent value picks up the default.
         cfg.healOnFailureThreshold = cfg.healOnFailureThreshold ?? DEFAULT_HEAL_ON_FAILURE_THRESHOLD
+        validateSingleAttempt(cfg.singleAttempt)
         // Validate every healthCheck shape — surface invalid configs at
         // load time with a descriptive error rather than at run time
         // when the orchestrator hits an unknown probe shape.
@@ -48,7 +50,7 @@ export function loadFeatures(featuresDir: string): FeatureConfig[] {
       // (the same place the user launched the UI) and skip just that feature,
       // so it is visibly unavailable rather than crashing the server. Truly
       // malformed configs (syntax errors, etc.) are skipped quietly as before.
-      if (err instanceof Error && err.message.includes('healthCheck')) {
+      if (err instanceof Error && /healthCheck|singleAttempt/.test(err.message)) {
         console.error(`[canary-lab] Skipping feature "${dir}" — invalid feature.config: ${err.message}`)
       }
       /* skip malformed config */

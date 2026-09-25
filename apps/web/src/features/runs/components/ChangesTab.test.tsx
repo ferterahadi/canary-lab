@@ -392,6 +392,33 @@ describe('ChangesTab', () => {
     await click('changes-propose-mighty-cns')
     expect(mocks.getRunPrPreflight).toHaveBeenCalledWith('r1')
   })
+
+  it('shows live edits but unlocks PR only after the run stops', async () => {
+    const live = { ...fixCapture, provisional: true, repos: [fixCapture.repos[0]] }
+    await render(<ChangesTab runId="r1" fixCapture={live} worktrees={{ 'mighty-cns': '/runs/r1/worktrees/cns' }} runStopped={false} />)
+    expect(text('changes-files-mighty-cns')).toContain('src/api/orders.ts')
+    expect(container.querySelector('[data-testid="changes-repo-mighty-cns"] [title="/runs/r1/worktrees/cns"]')).not.toBeNull()
+    const button = container.querySelector<HTMLButtonElement>('[data-testid="changes-propose-mighty-cns"]')!
+    expect(button.disabled).toBe(true)
+    expect(button.parentElement?.title).toContain('after this run stops')
+    await click('changes-propose-mighty-cns')
+    expect(mocks.getRunPrPreflight).not.toHaveBeenCalled()
+
+    await click('changes-open-repo-mighty-cns')
+    expect(mocks.openRunRepo).toHaveBeenCalledWith('r1', 'mighty-cns')
+    expect(mocks.applyRunFixes).not.toHaveBeenCalled()
+    expect(text('changes-open-done-mighty-cns')).toContain('Opened live run worktree')
+
+    await render(<ChangesTab runId="r1" fixCapture={{ ...fixCapture, repos: [fixCapture.repos[0]] }} runStopped />)
+    expect(button.disabled).toBe(false)
+    await click('changes-propose-mighty-cns')
+    expect(mocks.getRunPrPreflight).toHaveBeenCalledWith('r1')
+  })
+
+  it('waits for edits instead of claiming none were made while healing', async () => {
+    await render(<ChangesTab runId="r1" healCycles={1} runStopped={false} />)
+    expect(text('changes-empty')).toContain('Waiting for code changes')
+  })
 })
 
 describe('rosterFor', () => {

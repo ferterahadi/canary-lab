@@ -59,6 +59,17 @@ afterEach(async () => {
 const inbox = async (): Promise<unknown[]> => (await app.inject('/api/notifications')).json()
 
 describe('notifications feature registrar', () => {
+  it('resolves a Flight alert from the store event when the Flight resumes', async () => {
+    const [active] = await inbox() as Array<{ id: string; resolvedAt?: string }>
+    expect(active.resolvedAt).toBeUndefined()
+
+    flightStore.list.mockReturnValue([{ ...flight, status: 'running', pauseReason: undefined }])
+    flightStore.fire()
+
+    const persisted = JSON.parse(fs.readFileSync(path.join(dir, 'notifications', 'state.json'), 'utf8')) as { items: Array<{ id: string; resolvedAt?: string }> }
+    expect(persisted.items).toEqual([expect.objectContaining({ id: active.id, resolvedAt: expect.any(String) })])
+  })
+
   it('keeps serving the inbox it already built when a store read fails, rather than throwing into the event that triggered the rebuild', async () => {
     const previous = await inbox()
     expect(previous).toHaveLength(1)

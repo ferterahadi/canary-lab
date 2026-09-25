@@ -22,6 +22,7 @@ import { ensureServicesRunning } from './run-service-boot'
 import { appendJournalIteration, markStoppedEarly, noteHealCycle, recordLifecycle, setStatus } from './run-manifest-writer'
 import { adoptTestHealSpecEdits } from './run-suite-snapshot'
 import type { RunOrchestrator } from './orchestrator'
+import { finishClaimedAttempt } from './run-single-attempt'
 
 export { cancelHeal, continueAfterTestRun, pauseAndHeal, restartHealFromFailure } from './run-heal-controls'
 
@@ -85,6 +86,7 @@ export async function runManualExternalHealLoop(ctx: RunContext, host: RunLoopHo
         })
       }
     } catch { /* journal is best-effort */ }
+    if (finishClaimedAttempt(ctx)) return 'failed'
     const verificationPlan = verificationPlanForSummary(ctx, readSummary(ctx.paths.summaryPath))
     setStatus(ctx, 'running')
     // Test-heal mode only (zero editable repos): the spec IS the fix, so the
@@ -210,6 +212,7 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
         // terminates the run instead of re-running the identical summary
         // forever (the skipped-test infinite-rerun bug).
         const beforeSignature = nonPassedSignatureFromPlan(pendingPlan)
+        if (finishClaimedAttempt(ctx)) return 'failed'
         setStatus(ctx, 'running')
         const exitCode = await runPlaywright(ctx, selectionForPlan(pendingPlan))
         if (ctx.stopped) return ctx.status
@@ -424,6 +427,8 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
           })
         }
       } catch { /* journal write is best-effort */ }
+
+      if (finishClaimedAttempt(ctx)) return 'failed'
 
       const verificationPlan = verificationPlanForSummary(ctx, summary)
       setStatus(ctx, 'running')

@@ -1,6 +1,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { execFileSync } from 'child_process'
 import Fastify from 'fastify'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationStore } from './store'
@@ -8,6 +9,8 @@ import { notificationRoutes } from './index'
 import type { NotificationSource } from '../../../../../shared/notifications/types'
 import type { RunManifest } from '../runs/logic/runtime/manifest'
 import { suiteReviewRevision } from '../runs/logic/runtime/suite-review'
+import { WorkspaceEventBus } from '../../shared/workspace-events'
+
 
 let dir: string
 const events = { publish: vi.fn() }
@@ -44,7 +47,89 @@ it('keeps passive coverage state out of the inbox and resolves test review throu
   expect(dirtyListeners.size).toBe(0)
 })
 
+it('resolves a review after a committed suite deletion while keeping its run snapshot', async () => {
+  const { register } = await import('./index')
+  const git = (...args: string[]): void => { execFileSync('git', args, { cwd: dir, stdio: 'ignore' }) }
+  const featuresDir = path.join(dir, 'features')
+  const live = path.join(featuresDir, 'shop')
+  const snapshot = path.join(dir, 'snapshot')
+  for (const root of [live, snapshot]) {
+    fs.mkdirSync(path.join(root, 'e2e'), { recursive: true })
+    fs.writeFileSync(path.join(root, 'e2e', 'checkout.spec.ts'), "test('checkout', () => expect(1).toBe(1))")
+  }
+  fs.writeFileSync(path.join(live, 'feature.config.cjs'), "module.exports = { name: 'shop' }\n")
+  fs.writeFileSync(path.join(snapshot, 'feature.config.cjs'), "module.exports = { name: 'shop' }\n")
+  fs.writeFileSync(path.join(live, 'e2e', 'checkout.spec.ts'), "test('checkout', () => expect(2).toBe(2))")
+  git('init', '-q')
+  git('add', 'features')
+  git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'add suite')
+  const manifest = { runId: 'old-run', feature: 'shop', status: 'failed', featureDir: live,
+    suiteSnapshot: { kind: 'taken', dir: snapshot } } as RunManifest
+  const app = Fastify()
+  await register(app, {
+    logsDir: dir, featuresDir, workspaceEvents: events,
+    dirtySpecStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
+    runStore: { list: () => [{ runId: manifest.runId, feature: manifest.feature, status: manifest.status }],
+      get: () => ({ manifest }), onEvent: vi.fn(), offEvent: vi.fn() },
+    flightStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
+  } as unknown as import('../../server-context').ServerContext)
+  try {
+    const [review] = (await app.inject('/api/notifications')).json()
+    expect(review.target).toEqual({ kind: 'test-review', feature: 'shop', runId: 'old-run' })
+    fs.unlinkSync(path.join(live, 'feature.config.cjs'))
+    const [unavailable] = (await app.inject('/api/notifications')).json()
+    expect(unavailable).toMatchObject({ id: review.id, title: 'shop: suite unavailable' })
+    expect(unavailable.resolvedAt).toBeUndefined()
+    git('rm', '-qr', 'features/shop')
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'retire suite')
+    fs.mkdirSync(path.join(live, 'e2e'), { recursive: true })
+    fs.writeFileSync(path.join(live, 'e2e', 'leftover.spec.ts'), 'untracked remnant')
+    const [history] = (await app.inject('/api/notifications')).json()
+    expect(history).toMatchObject({ id: review.id, resolvedAt: expect.any(String) })
+    expect(fs.existsSync(path.join(snapshot, 'e2e', 'checkout.spec.ts'))).toBe(true)
+  } finally { await app.close() }
+})
+
+it('resolves a review when Canary explicitly deletes its suite', async () => {
+  const { register } = await import('./index')
+  const bus = new WorkspaceEventBus()
+  const app = Fastify()
+  await register(app, {
+    logsDir: dir, featuresDir: path.join(dir, 'features'), workspaceEvents: bus,
+    dirtySpecStore: { list: () => [{ featureId: 'shop', status: 'dirty', dirtySpecs: [{ strength: { verdict: 'weaker' } }] }], onEvent: vi.fn(), offEvent: vi.fn() },
+    runStore: { list: () => [], get: () => null, onEvent: vi.fn(), offEvent: vi.fn() },
+    flightStore: { list: () => [], onEvent: vi.fn(), offEvent: vi.fn() },
+  } as unknown as import('../../server-context').ServerContext)
+  try {
+    const [review] = (await app.inject('/api/notifications')).json()
+    expect(review.resolvedAt).toBeUndefined()
+    bus.publish({ type: 'feature-deleted', feature: 'shop' })
+    const [history] = (await app.inject('/api/notifications')).json()
+    expect(history).toMatchObject({ id: review.id, resolvedAt: expect.any(String) })
+  } finally { await app.close() }
+})
+
 describe('durable notifications', () => {
+  it('keeps a retired review resolved across reload and allows a recreated suite to start a new episode', () => {
+    const review: NotificationSource = { key: 'test-review:shop', signature: 'attention', message: {
+      title: 'shop: tests changed', target: { kind: 'test-review', feature: 'shop', runId: 'r1' },
+    } }
+    const store = new NotificationStore(dir, events)
+    store.reconcile([review])
+    const original = store.list()[0]
+    store.retire('shop')
+    const reloaded = new NotificationStore(dir, events)
+    reloaded.reconcile([])
+    expect(reloaded.isRetired('shop')).toBe(true)
+    expect(reloaded.list()).toEqual([expect.objectContaining({ id: original.id, resolvedAt: expect.any(String) })])
+
+    reloaded.restore('shop')
+    reloaded.reconcile([review])
+    const items = reloaded.list()
+    expect(items).toHaveLength(2)
+    expect(items.find((item) => item.id === original.id)?.resolvedAt).toBeTruthy()
+    expect(items.find((item) => item.id !== original.id)?.resolvedAt).toBeUndefined()
+  })
   it('upgrades an existing neutral test review to warning without duplicating it or resetting read state', () => {
     const current: NotificationSource = {
       key: 'test-review:shop',
@@ -331,8 +416,8 @@ it.each(['snapshot', 'live'] as const)('keeps an unavailable %s review pending w
   const app = Fastify()
   await register(app, {
     logsDir: dir, featuresDir, workspaceEvents: events,
-    // The unavailable suite also has a quiet source. It must not overwrite
-    // the last confirmed review merely because its comparison cannot be read.
+    // The unavailable suite also has a quiet source. A missing snapshot keeps
+    // the last confirmed review; a missing live folder updates it in place.
     dirtySpecStore: { list: () => [{ featureId: 'missing-suite', status: 'clean', dirtySpecs: [] }], onEvent: vi.fn(), offEvent: vi.fn() },
     runStore: {
       list: (options: { feature?: string } = {}) => manifests.filter((item) => !options.feature || item.feature === options.feature),
@@ -355,6 +440,7 @@ it.each(['snapshot', 'live'] as const)('keeps an unavailable %s review pending w
       expect.objectContaining({ body: expect.stringContaining('2 test files changed'), target: { kind: 'test-review', feature: 'valid-suite', runId: 'valid-suite-run' } }),
     ]))
     expect(response.json().find((item: { id: string }) => item.id === missingNote.id).resolvedAt).toBeUndefined()
+    if (missing === 'live') expect(response.json().find((item: { id: string }) => item.id === missingNote.id).body).toContain('live suite folder is missing')
     fs.copyFileSync(path.join(dir, 'valid-suite-snapshot', 'e2e', 'contract.spec.ts'), path.join(featuresDir, 'valid-suite', 'e2e', 'contract.spec.ts'))
     fs.unlinkSync(path.join(featuresDir, 'valid-suite', 'e2e', 'fixture.ts'))
     const settled = (await app.inject('/api/notifications')).json()

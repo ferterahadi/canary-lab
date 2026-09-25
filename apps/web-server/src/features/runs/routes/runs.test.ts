@@ -90,6 +90,25 @@ async function build(opts: {
 }
 
 describe('GET /api/runs', () => {
+  it('marks a claimed legacy run for a fresh attempt in list and detail reads', async () => {
+    const featureDir = path.join(featuresDir, 'foo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'),
+      "module.exports = { config: { name: 'foo', singleAttempt: { receipt: 'runtime/attempt.json' } } }\n")
+    writeManifestForRun('spent', 'foo', 'failed')
+    writeRunsIndex(logsDir, [{ runId: 'spent', feature: 'foo', startedAt: 'now', status: 'failed' }])
+    const receipt = path.join(runDirFor(logsDir, 'spent'), 'runtime/attempt.json')
+    fs.mkdirSync(path.dirname(receipt), { recursive: true })
+    fs.writeFileSync(receipt, '{}')
+    const { app } = await build()
+
+    const list = await app.inject({ method: 'GET', url: '/api/runs?feature=foo' })
+    const detail = await app.inject({ method: 'GET', url: '/api/runs/spent' })
+
+    expect(list.json()[0].newRunRequired).toBe(true)
+    expect(detail.json().newRunRequired).toBe(true)
+  })
+
   it('lists runs newest first', async () => {
     writeRunsIndex(logsDir, [
       { runId: 'a', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },

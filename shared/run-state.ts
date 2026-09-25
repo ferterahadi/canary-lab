@@ -139,7 +139,7 @@ export interface RunBootFailure {
  * call that can actually produce it.
  */
 export interface HealEnd {
-  reason: 'no-signal' | 'max-cycles' | 'no-progress' | 'cancelled' | 'foreign-abort'
+  reason: 'no-signal' | 'max-cycles' | 'no-progress' | 'cancelled' | 'foreign-abort' | 'new-run-required'
   /** Which watchdog ended the wait. Set only when `reason === 'no-signal'`. */
   agentWait?: 'idle-timeout' | 'hard-timeout' | 'pty-died'
   /** Best-effort classification of why the agent went quiet, from its output
@@ -196,7 +196,9 @@ export const FIX_CAPTURE_MAX_FILE_NAMES = 200
 
 export interface RunFixCapture {
   repos: RunFixCaptureRepo[]
-  /** ISO timestamp of the capture (run teardown). */
+  /** True while the worktree is still changing; teardown makes this final. */
+  provisional?: boolean
+  /** ISO timestamp of the latest captured worktree state. */
   capturedAt: string
 }
 

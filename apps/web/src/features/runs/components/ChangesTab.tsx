@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { RepoBranchSnapshot, RunFixCapture, RunPrAttempt, RunProposedPr } from '@/shared/api/types'
 import { EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
@@ -24,7 +24,9 @@ export function ChangesTab({
   proposedPrs,
   prAttempt,
   repoBranches,
+  worktrees,
   healCycles = 0,
+  runStopped = true,
 }: {
   runId: string
   fixCapture?: RunFixCapture
@@ -36,24 +38,32 @@ export function ChangesTab({
    *  come from. Absent on runs recorded before it was captured; the tab then
    *  falls back to showing only what changed. */
   repoBranches?: RepoBranchSnapshot[]
+  /** Run-owned worktree paths while the provisional capture is still live. */
+  worktrees?: Record<string, string>
   /** Repair cycles this run went through. Zero means nothing changed because
    *  nothing needed repairing — a different fact from "the agent ran and
    *  changed nothing", and the empty state says which. */
   healCycles?: number
+  /** True after teardown has finalized the patch and ended the run. */
+  runStopped?: boolean
 }) {
   const [prOpen, setPrOpen] = useState(false)
+  useEffect(() => {
+    if (!runStopped) setPrOpen(false)
+  }, [runStopped])
   const repos = fixCapture?.repos ?? []
   const changed = new Map(repos.map((r) => [r.repoName, r]))
   const prByRepo = new Map((proposedPrs ?? []).map((p) => [p.repoName, p]))
   const reasonByRepo = new Map(
     (prAttempt?.results ?? []).filter((r) => !r.ok && r.reason).map((r) => [r.repoName, r.reason!]),
   )
-  const opener = useRepoOpener(runId, repos.length > 0)
+  const provisional = fixCapture?.provisional === true
+  const opener = useRepoOpener(runId, repos.length > 0 && runStopped, provisional)
 
   if (repos.length === 0) {
     return (
       <RunPane padded>
-        <EmptyState testId="changes-empty" {...(healCycles > 0 ? EMPTY_COPY.changesNoEdits : EMPTY_COPY.changesPassed)} />
+        <EmptyState testId="changes-empty" {...(!runStopped ? EMPTY_COPY.changesWaiting : healCycles > 0 ? EMPTY_COPY.changesNoEdits : EMPTY_COPY.changesPassed)} />
       </RunPane>
     )
   }
@@ -70,6 +80,9 @@ export function ChangesTab({
             {...(prByRepo.has(repoName) ? { pr: prByRepo.get(repoName)! } : {})}
             {...(reasonByRepo.has(repoName) ? { blockedReason: reasonByRepo.get(repoName)! } : {})}
             auto={prAttempt?.auto === true}
+            provisional={provisional}
+            liveWorktreeRoot={worktrees?.[repoName]}
+            runStopped={runStopped}
             onProposeClick={() => setPrOpen(true)}
           />
         ))}

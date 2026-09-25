@@ -369,6 +369,48 @@ describe('MCP HTTP server (smoke)', () => {
     }
   })
 
+  it('refuses a terminal run_ref when its suite attempt receipt was claimed', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-spent-ref-')))
+    const restarted = vi.fn()
+    const { app, runStore } = await createMcpHarness({
+      logsDir,
+      projectRoot,
+      featuresDir: path.join(projectRoot, 'features'),
+      restartExternalRun: restarted,
+    })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=lifecycle')
+      const runId = '2026-05-19T0841-spent'
+      const featureDir = path.join(logsDir, 'features', 'demo_catalog')
+      fs.mkdirSync(featureDir, { recursive: true })
+      fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'),
+        "module.exports = { config: { name: 'demo_catalog', singleAttempt: { receipt: 'runtime/effect-attempt/attempt.json' } } }\n")
+      runStore.bootstrap({
+        runId, feature: 'demo_catalog', env: 'local',
+        featureDir,
+        startedAt: '2026-05-19T08:41:00.000Z', status: 'failed',
+        healCycles: 1, services: [], healMode: 'external',
+      })
+      const receipt = path.join(logsDir, 'runs', runId, 'runtime/effect-attempt/attempt.json')
+      fs.mkdirSync(path.dirname(receipt), { recursive: true })
+      fs.writeFileSync(receipt, '{}')
+
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: { feature: 'demo_catalog', env: 'local', run_ref: 'spent', session_id: 'sess-restart' },
+      })
+
+      expect(JSON.parse(toolText(result))).toMatchObject({ type: 'new_run_required', runId })
+      expect(restarted).not.toHaveBeenCalled()
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
   it('start_run reports a held boot session instead of claiming heal', async () => {
     const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-boot-')))

@@ -3,6 +3,8 @@ Playwright failed. {{healingDirective}}
 Run directory:
 - `{{runDir}}` (`{{runDirRel}}` from the project root)
 
+{{singleAttemptGuidance}}
+
 Start here:
 - `{{healIndexPath}}` — first file to read when present. It lists failed tests, assertion errors, editable repos, and exact per-failure slice paths.
 - `{{summaryPath}}` — raw Playwright summary. Use only if `heal-index.md` is missing or incomplete.
@@ -35,7 +37,7 @@ Rules:
   sub-agent that comes back empty has not cleared its failure — say so in your
   hypothesis, or investigate that one yourself, rather than signalling as
   though its test were addressed.
-- The signal requests runner verification; it is not a claim that the fix already passes. Do not start services or run Playwright, smoke, end-to-end, or other runtime checks yourself. Canary Lab owns affected-service restart, health checks, and targeted Playwright verification after the signal. If an edit command failed or syntax is uncertain, run at most one fast non-network static check before signalling.
+- The signal is not a claim that the fix already passes. For an ordinary run it requests Canary Lab restart, health checks, and Playwright verification. Do not start services or run Playwright, smoke, end-to-end, or other runtime checks yourself. If an edit command failed or syntax is uncertain, run at most one fast non-network static check before signalling.
 - After fixing, write the per-run signal file:
   - Service/app fix → `{{restartSignal}}`
   - Test/config-only fix → `{{rerunSignal}}`

@@ -444,6 +444,28 @@ describe('external heal routes', () => {
     })
   })
 
+  it('marks a signal as finalizing when the suite attempt is claimed', async () => {
+    writeRun('run-1')
+    const runDir = runDirFor(logsDir, 'run-1')
+    const manifest = manifestForRun('run-1')
+    manifest.singleAttempt = { receipt: 'runtime/effect-attempt/attempt.json' }
+    writeManifest(path.join(runDir, 'manifest.json'), manifest)
+    const receipt = path.join(runDir, manifest.singleAttempt.receipt)
+    fs.mkdirSync(path.dirname(receipt), { recursive: true })
+    fs.writeFileSync(receipt, '{}')
+    const { app } = await build()
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/run-1/signal',
+      payload: { kind: 'restart', body: { hypothesis: 'app bug', fixDescription: 'fixed app' } },
+    })
+
+    expect(res.statusCode).toBe(202)
+    expect(res.json()).toMatchObject({ accepted: true, disposition: 'new_run_required' })
+    expect(fs.existsSync(buildRunPaths(runDir).restartSignal)).toBe(true)
+  })
+
   it('validates signal requests and returns filesystem errors', async () => {
     writeRun('run-1')
     writeRun('done', 'passed')

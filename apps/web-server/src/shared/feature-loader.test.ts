@@ -33,6 +33,19 @@ describe('loadFeatures', () => {
     expect(features[0].featureDir).toBe(fdir)
   })
 
+  it('loads a run-relative single-attempt receipt and rejects traversal', () => {
+    writeFeature('safe', `module.exports = { config: { name: 'safe', singleAttempt: { receipt: 'runtime/attempt.json' } } }`)
+    writeFeature('unsafe', `module.exports = { config: { name: 'unsafe', singleAttempt: { receipt: '../outside.json' } } }`)
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const features = loadFeatures(path.join(tmpDir, 'features'))
+
+    expect(features.map((feature) => feature.name)).toEqual(['safe'])
+    expect(features[0].singleAttempt?.receipt).toBe('runtime/attempt.json')
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('singleAttempt.receipt'))
+    spy.mockRestore()
+  })
+
   it('skips dirs without a feature.config.* file', () => {
     fs.mkdirSync(path.join(tmpDir, 'features', 'empty'), { recursive: true })
     expect(loadFeatures(path.join(tmpDir, 'features'))).toEqual([])

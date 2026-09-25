@@ -120,6 +120,8 @@ export type PlaywrightPlaybackEvent =
 export interface RunDetail {
   runId: string
   manifest: RunManifest
+  /** Read-side recovery hint for runs recorded before singleAttempt existed. */
+  newRunRequired?: true
   summary?: RunSummary
   playbackEvents?: PlaywrightPlaybackEvent[]
   playwrightArtifacts?: PlaywrightArtifactGroup[]

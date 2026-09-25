@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { NotificationTarget, WorkspaceNotification } from '@/shared/api/notifications'
 import { timeAgo } from '@/shared/lib/format'
 import { EmptyState } from '@/shared/ui/EmptyState'
-import { CheckIcon, ChevronRightIcon, TrashIcon } from '@/shared/ui/Icons'
+import { ChevronRightIcon, TrashIcon } from '@/shared/ui/Icons'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { IconButton, Modal, StatusDot } from '@/shared/ui/atoms'
@@ -41,7 +41,6 @@ export function NotificationCenter({ open, onOpenChange, onNavigate }: {
   const visible = showHistory ? history : attention
   const hasWeakerHint = attention.some((item) => item.severity === 'danger')
   const openItem = (item: WorkspaceNotification): void => {
-    void inbox.read(item.id)
     onOpenChange(false)
     const target = item.target
     if (!target) return
@@ -74,19 +73,10 @@ export function NotificationCenter({ open, onOpenChange, onNavigate }: {
             <span>{label}</span>
             <span aria-hidden="true" className="text-muted">·</span>
             <time className="font-mono text-muted" dateTime={item.createdAt} title={new Date(item.createdAt).toLocaleString()}>{timeAgo(item.createdAt)}</time>
-            {!item.readAt && <span className="cl-count-chip">Unread</span>}
           </div>
           {item.body && <p className="mt-1.5 whitespace-pre-wrap break-words pl-3.5 text-xs leading-relaxed text-secondary">{item.body}</p>}
         </div>
-        {/* Fixed width, right-aligned: the mark-read control only exists while a
-            message is unread, and without a reserved column its disappearance
-            would re-flow the title and body beside it. */}
-        <div className={`flex ${reviewNeeded ? 'w-[144px]' : 'w-[104px]'} shrink-0 items-center justify-end gap-1`}>
-          {!item.readAt && (
-            <IconButton ariaLabel="Mark read" disabled={inbox.busy} onClick={() => { void inbox.read(item.id) }}>
-              <CheckIcon />
-            </IconButton>
-          )}
+        <div className="flex shrink-0 items-center justify-end gap-1">
           <IconButton ariaLabel="Delete permanently" title={DELETE_HINT} disabled={inbox.busy} onClick={() => { void inbox.remove(item.id) }}>
             <TrashIcon />
           </IconButton>
