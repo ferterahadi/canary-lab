@@ -157,6 +157,18 @@ describe('blocked run request ownership', () => {
     expect(starts).toHaveLength(1)
   })
 
+  it('restores reviewed files without starting an external blocked request', async () => {
+    const { app, begin, read, decide, starts, featureDir } = await fixture()
+    const blocked = await begin({ healAgent: { kind: 'external', sessionId: 'external-session', clientKind: 'claude' } })
+    expect((await decide(blocked.review_revision, 'restore-spec-edits')).statusCode).toBe(200)
+    expect(await read(blocked.request.requestId)).toMatchObject({ status: 'cancelled', owner: { kind: 'external' } })
+    expect(fs.readFileSync(path.join(featureDir, 'e2e/a.spec.ts'), 'utf8')).toBe('recorded\n')
+    const resume = await app.inject({ method: 'POST', url: `/api/run-requests/${blocked.request.requestId}/resume`,
+      headers: { 'x-canary-origin': 'mcp' }, payload: { sessionId: 'external-session' } })
+    expect(resume.statusCode).toBe(409)
+    expect(starts).toHaveLength(0)
+  })
+
   it('follows a superseding review revision and cannot resume from the stale question', async () => {
     const { begin, read, decide, starts, featureDir } = await fixture()
     const blocked = await begin()

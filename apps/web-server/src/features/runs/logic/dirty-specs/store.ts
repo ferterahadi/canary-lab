@@ -150,6 +150,10 @@ export class DirtySpecStore {
   async recompute(featureId: string, featureDir: string): Promise<DirtySpecRecord> {
     const rec = this.load(featureId)
     const { status, dirtySpecs } = await computeDirty(featureDir, rec)
+    // A watcher, recovery scan, or run adoption may have changed the baseline
+    // while Git was being read. Never overwrite that newer record.
+    const current = this.get(featureId)
+    if (current && !sameRecord(current, rec)) return this.recompute(featureId, featureDir)
     return this.saveWithDirty(rec, status, dirtySpecs)
   }
 

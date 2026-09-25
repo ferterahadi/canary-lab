@@ -46,7 +46,7 @@ beforeEach(async () => {
   dirtySpecStore = stubStore<never>([])
   app = Fastify()
   await register(app, {
-    logsDir: dir, workspaceEvents: { publish: vi.fn() }, flightStore, runStore, dirtySpecStore,
+    logsDir: dir, featuresDir: dir, workspaceEvents: { publish: vi.fn() }, flightStore, runStore, dirtySpecStore,
   } as unknown as ServerContext)
   await app.ready()
 })
@@ -103,4 +103,12 @@ describe('notifications feature registrar', () => {
     await app.close()
     for (const store of [flightStore, runStore, dirtySpecStore]) expect(store.subscriberCount()).toBe(0)
   })
+})
+
+it('settles a healthy Flight even when test source reads fail', async () => {
+  const [active] = await inbox() as Array<{ id: string }>
+  runStore.list.mockImplementation(() => { throw new Error('run source unavailable') })
+  flightStore.list.mockReturnValue([{ ...flight, status: 'running', pauseReason: undefined }])
+  flightStore.fire()
+  expect(await inbox()).toEqual([expect.objectContaining({ id: active.id, resolvedAt: expect.any(String) })])
 })

@@ -23,8 +23,8 @@ import {
   selectAgentSessionRef,
 } from '../../agent-sessions/logic/agent-session-log'
 import { ExternalHealAgentRequest, contentTypeFor } from './runs-route-support'
-import { isRestartableRunStatus, isTerminalRunStatus } from '../../../../../../shared/run-state'
-import { claimedSingleAttempt, policyForRunManifest } from '../../../shared/single-attempt'
+import { isTerminalRunStatus } from '../../../../../../shared/run-state'
+import { withSingleAttemptDetailState, withSingleAttemptIndexState } from '../logic/single-attempt-view'
 
 function captureIsFinal(manifest: RunManifest): boolean {
   return isTerminalRunStatus(manifest.status) && Boolean(manifest.endedAt) && manifest.fixCapture?.provisional !== true
@@ -35,19 +35,7 @@ export type { ExternalHealAgentRequest } from './runs-route-support'
 
 export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
   app.get<{ Querystring: { feature?: string } }>('/api/runs', async (req) => {
-    const policies = new Map<string, ReturnType<typeof policyForRunManifest>>()
-    return deps.store.list({ feature: req.query.feature }).map((entry) => {
-      if (entry.newRunRequired || !isRestartableRunStatus(entry.status)) return entry
-      if (!policies.has(entry.feature)) {
-        policies.set(entry.feature, policyForRunManifest({
-          feature: entry.feature,
-          featureDir: path.join(deps.featuresDir, entry.feature),
-        }))
-      }
-      return claimedSingleAttempt(runDirFor(deps.store.logsDir, entry.runId), policies.get(entry.feature))
-        ? { ...entry, newRunRequired: true as const }
-        : entry
-    })
+    return withSingleAttemptIndexState(deps.store.list({ feature: req.query.feature }), deps.store.logsDir, deps.featuresDir)
   })
 
   app.get<{ Params: { runId: string } }>('/api/runs/:runId/queue', async (req, reply) => {
@@ -62,10 +50,7 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(404)
       return { error: 'run not found' }
     }
-    return isRestartableRunStatus(detail.manifest.status)
-      && claimedSingleAttempt(runDirFor(deps.store.logsDir, detail.runId), policyForRunManifest(detail.manifest))
-      ? { ...detail, newRunRequired: true as const }
-      : detail
+    return withSingleAttemptDetailState(detail, deps.store.logsDir)
   })
 
   // Apply a run's captured heal fixes (R80) INTO the real product repos on

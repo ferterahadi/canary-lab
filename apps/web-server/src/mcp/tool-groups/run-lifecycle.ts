@@ -354,7 +354,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
       } catch (err) {
         const review = (err as { testReviewRequired?: TestReviewRequiredInfo }).testReviewRequired
         if (review) return asJsonResult({ ...review, runStarted: false,
-          next: 'Show get_test_review for this run and request the human decision with review_test_changes. Carry request_id into both tools. Wait for the persisted decision, then resume with start_run using request_id and the SAME session_id. Approval in the browser does not transfer execution to Canary.',
+          next: 'Show get_test_review for this run and request the human decision with review_test_changes. Carry request_id into both tools. If the form is unavailable or the client declines without a recorded decision, show the browser review and keep a read-only watcher active. After Accept & commit, resume with start_run using request_id and the SAME session_id. Restore recorded files cancels this external request. Browser approval does not transfer execution to Canary.',
           ...(review.request ? { request_id: review.request.requestId } : {}),
         })
         return failureResult(err)

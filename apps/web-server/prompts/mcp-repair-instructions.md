@@ -51,15 +51,19 @@ start a background repair agent.
   input, report that the run is still active and needs attention.
 
 When a blocked start returns request_id, carry it through get_test_review and
-review_test_changes. After human acceptance or restoration, resume with start_run
-using request_id and the SAME session_id. The original external client owns that
-continuation even if the user decides in the browser. Canary resumes internal
-requests itself; never launch a replacement or transfer ownership implicitly.
-get_test_review returns a read-only browser_wait_token for every client, including
-clients with forms. Use it with wait_for_decision:true to observe a browser decision;
-after reconnect obtain a fresh token and read the same durable request. Neither a
-wait token nor an agent-written argument approves anything. A receipt proves the
-review decision, not that the request started or the tests passed.
+review_test_changes. Accept & commit makes the original external request ready:
+resume it with start_run using request_id and the SAME session_id. Restore recorded
+files cancels that external request; stop without starting a run. Canary resumes
+internal requests itself. Never launch a replacement or transfer ownership.
+If the client cannot present the form, or answers decline/cancel without a recorded
+human decision, show reviewUrl. Keep the request waiting: spawn ONE background
+agent if this client supports it, otherwise wait in this turn. The watcher must
+call get_test_review in its own MCP session for a fresh browser_wait_token, then
+repeat review_test_changes with wait_for_decision:true. On an accepted receipt,
+check the request is ready before resuming; on restored/cancelled or a changed
+revision, stop. A watcher never clicks review controls. A reconnect gets a fresh
+token and reads the durable receipt. Neither waiting nor a commit approves tests;
+approval is not a passing run result.
 
 Envset values belong in `features/<feature>/envsets/<env>/<slot>` in the selected
 workspace. A suite `.env` is a materialized consumer target, not a second source.
@@ -94,7 +98,7 @@ get_run_snapshot is for verbose debugging only, not for waiting. Read pass count
 Two awareness signals can ride a run result. Neither changes the verdict, and you never edit the test files to clear either one.
 
 - dirtyTests (a test file changed since the last green run): relay its message to the user VERBATIM (e.g. "⚠️ Tests have been modified, please review.⚠️") — once, alongside the pass/fail outcome. Do NOT block, gate, re-run, or revert on it: the user reviews or commits the change.
-- specEdits (test files changed AFTER this run started): the run used the tests recorded at run start, so the changed files were NOT tested — the result you see says nothing about them. Relay specEdits.message and follow specEdits.nextSteps: call get_test_review(runId), show the exact patch (read patchPath if needed), then call review_test_changes(runId, review_revision) WITHOUT wait_for_decision for human elicitation in this agent session. The human chooses Accept & commit or Restore recorded files; cancel/decline leaves pending. Accept & commit binds approval to the displayed revision, commits every reviewed file including helpers/fixtures/config, and returns a durable receipt with Git and execution outcomes. For an active run continue with wait_for_heal_task and do not signal twice; for an ended passed/failed/aborted run call start_run without run_ref when the receipt says new-run-required. Acceptance preserves the old result and never counts as a pass. reviewUrl is optional side-by-side inspection, never a required operational step. If elicitation is unavailable, say that no question was presented; do not claim the human ignored it. Use a capable client, or only if the human chooses browser fallback, wait with the returned browser_wait_token and wait_for_decision:true. A Git commit, clean tree, restart, or chat statement is not a persisted review receipt; only the explicit decision action creates one. Changed revisions require a fresh review. No MCP tool can self-approve a test-file change, and a passed run with pending specEdits is a pass of the RECORDED tests — never report the changed tests as passed. specEdits.hints carries the advisory check: a kind:"weaker" hint means an assertion was removed or loosened relative to the test that ran — restore it, a weaker assertion is never a repair; kind:"cannot-classify" means review by hand. Quote specEdits.disclosure with any hint you quote: one AI labelled the samples; a second AI checked 40 without seeing those labels; no human labelled them.
+- specEdits (test files changed AFTER this run started): the run used the tests recorded at run start, so the changed files were NOT tested — the result you see says nothing about them. Relay specEdits.message and follow specEdits.nextSteps: call get_test_review(runId), show the exact patch (read patchPath if needed), then call review_test_changes(runId, review_revision) WITHOUT wait_for_decision for human elicitation in this agent session. The human chooses Accept & commit or Restore recorded files; cancel/decline leaves pending. Accept & commit binds approval to the displayed revision, commits every reviewed file including helpers/fixtures/config, and returns a durable receipt with Git and execution outcomes. For an active run continue with wait_for_heal_task and do not signal twice; for an ended passed/failed/aborted run call start_run without run_ref when the receipt says new-run-required. Acceptance preserves the old result and never counts as a pass. reviewUrl is optional side-by-side inspection, never a required operational step. If elicitation is unavailable or the client declines without a recorded decision, say no human decision was recorded; for a blocked request_id, show reviewUrl and keep a read-only watcher active as described above. For other reviews, use a capable client or the human-chosen browser fallback. A Git commit, clean tree, restart, or chat statement is not a persisted review receipt; only the explicit decision action creates one. Changed revisions require a fresh review. No MCP tool can self-approve a test-file change, and a passed run with pending specEdits is a pass of the RECORDED tests — never report the changed tests as passed. specEdits.hints carries the advisory check: a kind:"weaker" hint means an assertion was removed or loosened relative to the test that ran — restore it, a weaker assertion is never a repair; kind:"cannot-classify" means review by hand. Quote specEdits.disclosure with any hint you quote: one AI labelled the samples; a second AI checked 40 without seeing those labels; no human labelled them.
 
 
 ## Discovery repair (test list cannot load)

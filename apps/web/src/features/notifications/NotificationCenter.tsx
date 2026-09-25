@@ -40,13 +40,17 @@ export function NotificationCenter({ open, onOpenChange, onNavigate }: {
   const history = items.filter((item) => !needsAttention(item))
   const visible = showHistory ? history : attention
   const hasWeakerHint = attention.some((item) => item.severity === 'danger')
-  const openItem = (item: WorkspaceNotification): void => {
+  const openItem = async (item: WorkspaceNotification): Promise<void> => {
+    const result = await inbox.resolveAction(item.id)
+    if (!result) return
+    if (item.resolvedAt !== result.item.resolvedAt || JSON.stringify(item.target) !== JSON.stringify(result.item.target)
+      || item.body !== result.item.body || item.title !== result.item.title || item.severity !== result.item.severity
+      || item.unavailable !== result.item.unavailable) {
+      setShowHistory(!!result.item.resolvedAt)
+      return
+    }
     onOpenChange(false)
-    const target = item.target
-    if (!target) return
-    if (item.resolvedAt && target.kind === 'test-review') {
-      onNavigate(target.runId ? { ...target, kind: 'run', runId: target.runId } : { kind: 'feature', feature: target.feature })
-    } else onNavigate(target)
+    onNavigate(result.target)
   }
   const row = (item: WorkspaceNotification) => {
     const hint = !item.resolvedAt && item.severity === 'danger' && item.target?.kind === 'test-review'
@@ -58,7 +62,8 @@ export function NotificationCenter({ open, onOpenChange, onNavigate }: {
     // this is, and how old it is. The suite name is already the first word of
     // every title, and the hint's "not a verdict" caveat is in the body, so
     // neither is repeated here.
-    const label = item.resolvedAt ? 'Resolved'
+    const label = item.unavailable ? 'Current state unavailable · retrying'
+      : item.resolvedAt ? 'Resolved'
       : hint ? 'Test integrity · Hint'
       : reviewNeeded ? 'Review needed'
       : target ? 'Needs input' : 'Note'
@@ -87,7 +92,8 @@ export function NotificationCenter({ open, onOpenChange, onNavigate }: {
                 className={`cl-button inline-flex h-7 ${reviewNeeded ? 'gap-1 px-2' : 'w-7'} items-center justify-center rounded-md text-xs`}
                 aria-label={action}
                 title={action}
-                onClick={() => openItem(item)}
+                disabled={inbox.busy}
+                onClick={() => { void openItem(item) }}
               >
                 {reviewNeeded && <span>Review</span>}<span aria-hidden="true" className="flex"><ChevronRightIcon /></span>
               </button>

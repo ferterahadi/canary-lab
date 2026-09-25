@@ -77,6 +77,7 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
         ...(m.verification?.targetUrls ? { verificationTargetUrls: m.verification.targetUrls } : {}),
         ...(m.specEdits?.pending.length ? { pendingSpecEdits: m.specEdits.pending.length } : {}),
         ...(m.integrity?.hints.length ? { integrityHints: m.integrity.hints.length } : {}),
+        ...(action.detail.newRunRequired || m.healEnd?.reason === 'new-run-required' ? { newRunRequired: true as const } : {}),
       }
       const others = state.runs.filter((r) => r.runId !== action.runId)
       const transients = isTerminalRunStatus(entry.status)

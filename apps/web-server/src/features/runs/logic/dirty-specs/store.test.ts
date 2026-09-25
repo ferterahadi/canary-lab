@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DirtySpecStore } from './store'
+import * as detect from './detect'
 
 let root: string
 let featureDir: string
@@ -329,4 +330,32 @@ describe('DirtySpecStore', () => {
     // Still indexed — `list()` filters on read; it does not repair the index.
     expect(JSON.parse(fs.readFileSync(path.join(logsDir, 'dirty-specs', 'index.json'), 'utf8'))).toHaveLength(1)
   })
+})
+
+
+it('does not overwrite an approval made while an older recovery computation was waiting', async () => {
+  writeSpec(PASS)
+  const store = new DirtySpecStore(logsDir)
+  await store.captureRunStart('checkout', featureDir)
+  writeSpec(TAMPERED)
+  const compute = detect.computeDirty
+  let release!: () => void
+  const barrier = new Promise<void>((resolve) => { release = resolve })
+  let computed!: () => void
+  const ready = new Promise<void>((resolve) => { computed = resolve })
+  const spy = vi.spyOn(detect, 'computeDirty').mockImplementationOnce(async (...args) => {
+    const result = await compute(...args)
+    computed()
+    await barrier
+    return result
+  })
+  try {
+    const recovery = store.recompute('checkout', featureDir)
+    await ready
+    const approved = await store.approve('checkout', featureDir)
+    release()
+    await recovery
+    expect(store.get('checkout')?.approvedHashes).toEqual(approved.approvedHashes)
+    expect(store.get('checkout')?.status).toBe('clean')
+  } finally { release(); spy.mockRestore() }
 })

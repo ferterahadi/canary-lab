@@ -45,6 +45,19 @@ export class NotificationStore {
     return this.read().items.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }
 
+  sourceKeys(prefix: string): string[] {
+    return Object.keys(this.read().sources).filter((key) => key.startsWith(prefix))
+  }
+
+  markUnavailable(): void {
+    const data = this.read()
+    let changed = false
+    for (const item of data.items) {
+      if (!item.resolvedAt && !item.unavailable) { item.unavailable = true; changed = true }
+    }
+    if (changed) this.save(data)
+  }
+
   remove(id: string): void {
     const data = this.read()
     const items = data.items.filter((item) => item.id !== id)
@@ -90,6 +103,13 @@ export class NotificationStore {
     const now = new Date().toISOString()
     let changed = false
     const seen = new Set(sources.map((source) => source.key))
+    for (const [key, previous] of Object.entries(data.sources)) {
+      const item = data.items.find((entry) => entry.id === previous.notificationId)
+      if (!item || item.resolvedAt) continue
+      const unavailable = unavailableSourceKeys.has(key)
+      if (unavailable && !item.unavailable) { item.unavailable = true; changed = true }
+      if (!unavailable && item.unavailable) { delete item.unavailable; changed = true }
+    }
     const settle = (id: string | undefined): void => {
       const item = data.items.find((item) => item.id === id)
       if (item && !item.resolvedAt) { item.resolvedAt = now; changed = true }

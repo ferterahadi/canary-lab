@@ -2,9 +2,10 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { notificationTarget } from '@shared/notifications/types'
 import type { WorkspaceNotification } from '@/shared/api/notifications'
 
-const api = vi.hoisted(() => ({ getNotifications: vi.fn(), deleteNotification: vi.fn(), readNotification: vi.fn() }))
+const api = vi.hoisted(() => ({ getNotifications: vi.fn(), deleteNotification: vi.fn(), readNotification: vi.fn(), resolveNotificationAction: vi.fn() }))
 vi.mock('@/shared/api/notifications', () => api)
 import { NotificationCenter } from './NotificationCenter'
 import { useNotifications } from './use-notifications'
@@ -18,6 +19,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   rows = [{ id: 'n1', title: 'shop awaits review', body: '1 changed file', target, toast: true, createdAt: '2026-09-08T10:00:00Z' }]
   api.getNotifications.mockImplementation(async () => [...rows])
+  api.resolveNotificationAction.mockImplementation(async (id: string) => ({ status: 'current', items: [...rows], target: notificationTarget(rows.find((row) => row.id === id)!) }))
   api.deleteNotification.mockImplementation(async (id) => { rows = rows.filter((row) => row.id !== id) })
   api.readNotification.mockImplementation(async (id) => { rows = rows.map((row) => row.id === id ? { ...row, readAt: 'now' } : row) })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
@@ -263,4 +265,31 @@ it('opens a resolved feature-only alert as the suite, not an active review', asy
   await act(async () => button('History 1').click())
   await act(async () => labelled('Open suite').click())
   expect(navigate).toHaveBeenCalledWith({ kind: 'feature', feature: 'shop' })
+})
+
+it('revalidates a stale review click and shows the settled action without a page refresh', async () => {
+  const navigate = vi.fn()
+  await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={navigate} />))
+  rows = rows.map((row) => ({ ...row, resolvedAt: 'now' }))
+  // No invalidation or polling reaches the rendered row before this click.
+  await act(async () => labelled('Review test changes').click())
+  expect(api.resolveNotificationAction).toHaveBeenCalledWith('n1')
+  expect(navigate).not.toHaveBeenCalled()
+  expect(labelled('Notifications, 0 need attention')).not.toBeNull()
+  expect(labelled('Open run')).not.toBeNull()
+  await act(async () => labelled('Open run').click())
+  expect(navigate).toHaveBeenCalledWith({ kind: 'run', feature: 'shop', runId: 'run-1' })
+})
+
+it('shows unavailable source truth and does not navigate after failed action validation', async () => {
+  rows = rows.map((row) => ({ ...row, unavailable: true }))
+  api.resolveNotificationAction.mockRejectedValue(new Error('Could not verify current notification'))
+  const navigate = vi.fn()
+  const close = vi.fn()
+  await act(async () => root.render(<NotificationCenter open onOpenChange={close} onNavigate={navigate} />))
+  expect(document.body.textContent).toContain('Current state unavailable')
+  await act(async () => labelled('Review test changes').click())
+  expect(navigate).not.toHaveBeenCalled()
+  expect(close).not.toHaveBeenCalled()
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('Could not verify')
 })

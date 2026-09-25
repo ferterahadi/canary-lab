@@ -87,8 +87,16 @@ describe('durable run request recovery', () => {
     await Promise.resolve()
     save.mockRestore()
   })
-  it.each(['restored', 'adopted'] as const)('recovers a newer %s boundary, but never from an empty diff alone', (decision) => {
-    const { root, runs, requests, pending } = fixture()
+  it.each([
+    { decision: 'restored', external: false, status: 'ready' },
+    { decision: 'adopted', external: false, status: 'ready' },
+    { decision: 'restored', external: true, status: 'cancelled' },
+    { decision: 'adopted', external: true, status: 'ready' },
+  ] as const)('recovers a newer $decision boundary for external=$external, but never from an empty diff alone', ({ decision, external, status }) => {
+    const { root, runs, requests, pending: internal } = fixture()
+    const pending = external ? requests.remember({ type: 'test_review_required', feature: 'checkout', runId: 'source',
+      review_revision: 'a'.repeat(64), changedFileCount: 1, error: 'Review needed', reviewUrl: '/?dialog=tests-review' },
+    { feature: 'checkout', healAgent: { sessionId: 'owner', clientKind: 'codex' } }) : internal
     const featureDir = path.join(root, 'live')
     const snapshot = path.join(root, 'snapshot')
     fs.mkdirSync(featureDir)
@@ -103,7 +111,25 @@ describe('durable run request recovery', () => {
       at, revision, decision, receipt: { decision: decision === 'adopted' ? 'accepted' : 'restored', review_revision: revision,
         files: ['helper.ts'], at, git: { status: 'not-requested' }, execution: { status: 'none' } },
     }] } })
-    expect(requests.get(pending.requestId)).toMatchObject({ status: 'ready', review: { revision } })
+    expect(requests.get(pending.requestId)).toMatchObject({ status, review: { revision } })
+  })
+  it.each(['restored', 'approved-for-new-run'] as const)('settles an external request after a %s receipt', async (decision) => {
+    const { runs, requests } = fixture()
+    const review: TestReviewRequiredInfo = { type: 'test_review_required', feature: 'checkout', runId: 'source',
+      review_revision: 'b'.repeat(64), changedFileCount: 1, error: 'Review needed', reviewUrl: '/?dialog=tests-review' }
+    const pending = requests.remember(review, { feature: 'checkout', healAgent: { sessionId: 'owner', clientKind: 'claude' } })
+    runs.patchManifest('source', { specEdits: { checkedAt: 'now', pending: [], adopted: [], reviewDecisions: [{
+      at: 'now', revision: review.review_revision, decision,
+      receipt: { decision: decision === 'restored' ? 'restored' : 'accepted', review_revision: review.review_revision,
+        files: ['e2e/a.spec.ts'], at: 'now', git: { status: 'not-requested' },
+        execution: decision === 'restored' ? { status: 'none' } : { status: 'new-run-required', runId: 'source' } },
+    }] } })
+    expect(requests.get(pending.requestId)?.status).toBe(decision === 'restored' ? 'cancelled' : 'ready')
+    const dispatch = vi.fn()
+    if (decision === 'restored') {
+      expect(await requests.resume(pending.requestId, dispatch)).toMatchObject({ statusCode: 409, body: { request: { status: 'cancelled' } } })
+      expect(dispatch).not.toHaveBeenCalled()
+    }
   })
   it('finds a completed receipt for a newer still-different candidate without first observing that edit', () => {
     const { root, runs, requests, pending } = fixture()

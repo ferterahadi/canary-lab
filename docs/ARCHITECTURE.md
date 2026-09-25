@@ -223,9 +223,15 @@ Flight attention transitions and test changes that block an active run or a fres
 start after an ended run create messages even when the browser is closed. Terminal
 blockers use the same byte-level review gate as run start, including exact-revision
 approval and restoration, rather than relying on a pending-file count in the run
-index. Each inbox read also reconciles these sources; the open client's ten-second
-reconciliation repairs missed events. An unreadable suite or historical snapshot
-preserves its existing review alert without preventing other features from updating.
+index. Each inbox read also reconciles these sources. A server recovery scan starts
+every ten seconds when no scan is running, reloads configured suite paths, and
+recomputes test integrity from disk. It yields between suites and does not queue
+overlapping scans. This repairs missed filesystem events even with no browser open.
+The open client's ten-second reconciliation repairs missed notification pushes.
+Recovery latency includes scan duration; these intervals are not instantaneous
+delivery guarantees. An unreadable suite or historical snapshot preserves its
+existing review alert with a visible unavailable state. Test-source failures do not
+prevent healthy Flight transitions from reaching History.
 Canary's explicit suite deletion, or a committed Git deletion of its tracked config,
 marks the review source retired. The alert moves to History while the saved run
 remains available. A missing live suite without retirement evidence keeps the alert;
@@ -244,8 +250,19 @@ later quiet-to-attention transition creates a new message. Recovery marks retain
 messages resolved and moves them from the default Needs attention view into History.
 One feature-level identity owns test review across run transitions, so target or
 severity updates do not create a second active message. Manual note creation is not available.
-Notification actions navigate to the relevant flight or test
-review; they never change the run verdict or adopt test edits themselves.
+Notification actions revalidate their source on the server before navigation.
+Test-review clicks refresh the selected suite's integrity. If the issue settled or
+its action changed, the open panel shows the updated row and action; unavailable
+sources keep the panel open with an error. Resolved test reviews offer Open run or
+Open suite. Navigation never changes the run verdict or adopts test edits.
+
+Connected agent workflows receive a compact suite-scoped notification snapshot and
+revision in relevant tool catch-up responses and in every `wait_for_feature_change`
+response, including coverage timeouts. Notification-only changes do not wake that
+coverage wait early: the active client observes them on its next response, within
+the requested wait's maximum thirty seconds after server reconciliation. Reconnects
+receive the current snapshot without a notification cursor. Passive clients cannot
+be woken unsolicited. Neither delivery nor an action link authorizes extra work.
 
 Inbox eligibility and toast eligibility are separate. A blocked Flight or pending
 run review, including a terminal review that gates a fresh start, can raise the sticky toast; an advisory weakening hint remains in the
@@ -337,6 +354,14 @@ a reconnect reads the same receipt. The normal elicited path returns that receip
 without any browser click; retries do not apply the decision twice. Restoration
 checks the reviewed revision before changing files and rejects symlink paths.
 A clean Git tree is never treated as approval.
+For a blocked external start, Accept & commit makes its saved request ready for
+the original client to resume. Restore recorded files cancels that request after
+restoring the files; an elicitation decline or cancel records no decision and
+leaves it pending. If the client cannot present the form, it can keep a read-only
+wait in a background agent when supported, or in the current turn otherwise.
+Each watcher gets its own wait token. The external client must remain running
+for automatic continuation; Canary never treats a wait or notification as a
+review decision or starts an external request on the client's behalf.
 Active acceptance signals a rerun. Terminal acceptance is carried into fresh-run
 snapshot capture, rechecked before and during the copy, and recorded as provenance
 on the new run. Neither decision changes a verdict into a pass. Editing opens the existing
