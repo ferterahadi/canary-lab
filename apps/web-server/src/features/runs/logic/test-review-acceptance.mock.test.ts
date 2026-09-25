@@ -122,3 +122,32 @@ it('uses stable fallback messages when Git returns an error without output', asy
     statusCode: 500, message: 'Git could not restore the reviewed files.',
   })
 })
+
+it('handles a reviewed path that is already absent from disk and the Git index', async () => {
+  fs.rmSync(path.join(root, 'e2e/a.spec.ts'))
+  const reply = (code: number, stderr = '', stdout = '') => ({ code, stdout, stderr })
+  const reviewed = ['e2e/a.spec.ts']
+
+  // A committed deletion has nothing left to stage or commit. Approval still
+  // receives the current revision rather than silently creating a new commit.
+  git.runGit.mockResolvedValueOnce(reply(1)).mockResolvedValueOnce(reply(0)).mockResolvedValueOnce(reply(0, '', 'head\n'))
+  await expect(commitReviewedFiles('checkout', root, reviewed)).resolves.toEqual({ status: 'already-committed', commit: 'head' })
+
+  git.runGit.mockResolvedValueOnce(reply(1)).mockResolvedValueOnce(reply(0)).mockResolvedValueOnce(reply(1))
+  await expect(commitReviewedFiles('checkout', root, reviewed)).rejects.toMatchObject({ statusCode: 409, message: 'No Git commit exists for the reviewed files.' })
+
+  // The deletion is staged, so it belongs in commitPaths but never in git add.
+  git.runGit.mockResolvedValueOnce(reply(1)).mockResolvedValueOnce(reply(1))
+    .mockResolvedValueOnce(reply(1)).mockResolvedValueOnce(reply(0)).mockResolvedValueOnce(reply(0, '', 'new-head\n'))
+  await expect(commitReviewedFiles('checkout', root, reviewed)).resolves.toEqual({ status: 'committed', commit: 'new-head' })
+
+  for (const output of [reply(2, 'index locked'), reply(2, '', 'index locked'), reply(2)]) {
+    git.runGit.mockResolvedValueOnce(reply(1)).mockResolvedValueOnce(output)
+    await expect(commitReviewedFiles('checkout', root, reviewed)).rejects.toMatchObject({ statusCode: 500, message: output.stderr || output.stdout || 'Git could not inspect the reviewed files.' })
+  }
+
+  for (const output of [reply(2, 'index locked'), reply(2, '', 'index locked'), reply(2)]) {
+    git.runGit.mockResolvedValueOnce(output)
+    await expect(commitReviewedFiles('checkout', root, reviewed)).rejects.toMatchObject({ statusCode: 500, message: output.stderr || output.stdout || 'Git could not inspect the reviewed files.' })
+  }
+})

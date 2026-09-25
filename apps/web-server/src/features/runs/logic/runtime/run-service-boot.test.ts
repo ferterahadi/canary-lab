@@ -311,6 +311,16 @@ describe('pollUntilReady', () => {
     expect(ctx.bootFailure).toBeUndefined()
   })
 
+  it('does not probe a second service after another service failed', async () => {
+    const attempt = vi.fn(async () => true)
+    const { ctx } = ctxFor({ bootFailure: { service: 'api' } as RunContext['bootFailure'] })
+
+    await pollUntilReady(ctx, svcSpec({ name: 'web', safeName: 'web', healthProbe: { tcp: { port: 5999, deadlineMs: 1_000 } } }), 'tcp', attempt)
+
+    expect(attempt).not.toHaveBeenCalled()
+    expect(ctx.serviceReady.has('web')).toBe(false)
+  })
+
   it('explains an unpreserved rejected startup and leaves unclassified evidence unlabelled', async () => {
     const rejected = ctxFor({ servicePtys: new Map(), serviceExitEvidence: new Map([['api', { exitCode: 0, signal: null }]]) })
     fs.mkdirSync(path.dirname(rejected.ctx.paths.serviceLog('api')), { recursive: true })

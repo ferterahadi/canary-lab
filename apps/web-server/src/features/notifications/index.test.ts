@@ -92,6 +92,29 @@ describe('notifications feature registrar', () => {
     expect(await inbox()).toEqual([expect.objectContaining({ resolvedAt: expect.any(String) })])
   })
 
+  it('marks an existing Flight alert unavailable when its source cannot be read', async () => {
+    const [active] = await inbox() as Array<{ id: string }>
+    flightStore.list.mockImplementation(() => { throw new Error('flight index unreadable') })
+
+    expect(() => flightStore.fire()).not.toThrow()
+
+    const rows = await inbox() as Array<{ id: string; unavailable?: boolean }>
+    expect(rows).toEqual([expect.objectContaining({ id: active.id, unavailable: true })])
+  })
+
+  it('returns a bounded feature projection and reports a missing action', async () => {
+    const active = (await app.inject('/api/notifications/feature/shop')).json()
+    expect(active).toMatchObject({ feature: 'shop', attentionCount: 1, items: [expect.objectContaining({ state: 'attention' })] })
+
+    flightStore.list.mockReturnValue([{ ...flight, status: 'running', pauseReason: undefined }])
+    flightStore.fire()
+    const resolved = (await app.inject('/api/notifications/feature/shop')).json()
+    expect(resolved).toMatchObject({ attentionCount: 0, items: [expect.objectContaining({ state: 'resolved' })] })
+
+    const missing = (await app.inject({ method: 'POST', url: '/api/notifications/not-here/resolve-action' })).json()
+    expect(missing.status).toBe('missing')
+  })
+
   it('does not replace a corrupt inbox with an empty success when refresh fails', async () => {
     fs.writeFileSync(path.join(dir, 'notifications', 'state.json'), '{invalid')
 

@@ -191,7 +191,7 @@ describe('captureFixes', () => {
 
   it('publishes an evolving patch and then finalizes it without waiting to discover edits', async () => {
     const { ctx } = withBaseline()
-    ctx.stateSink = new FileRunStateSink(path.join(tmpDir, 'logs'))
+    Object.assign(ctx, { stateSink: new FileRunStateSink(path.join(tmpDir, 'logs')) })
     writeManifest(ctx.paths.manifestPath, {
       runId: ctx.runId, feature: 'demo', featureDir: ctx.feature.featureDir,
       startedAt: 'now', status: 'healing', healCycles: 1, services: [],
@@ -212,6 +212,24 @@ describe('captureFixes', () => {
     expect(readManifest(ctx.paths.manifestPath)?.fixCapture).toBeUndefined()
     expect(fs.existsSync(path.join(ctx.paths.fixesDir, 'app.patch'))).toBe(false)
     expect(fs.existsSync(path.join(ctx.paths.fixesDir, 'fixes.json'))).toBe(false)
+  })
+
+  it('removes a stale patch when one repo has no current fix and reports cleanup failure', async () => {
+    const log = fakeRunnerLog()
+    const { ctx } = withBaseline(log)
+    const other = worktree('other')
+    ctx.fixBaselines.set('other', { ref: 'stash-ref', worktreeRoot: other.worktreeRoot, sourceRoot: other.sourceRoot, baseSha: 'abc123', untracked: new Set() })
+    Object.assign(ctx, { stateSink: new FileRunStateSink(path.join(tmpDir, 'logs')) })
+    writeManifest(ctx.paths.manifestPath, { runId: ctx.runId, feature: 'demo', startedAt: 'now', status: 'healing', healCycles: 1, services: [] })
+    expect((await captureFixes(ctx, true))?.repos.map((repo) => repo.repoName)).toEqual(['app', 'other'])
+
+    h.diffContentSinceSnapshot.mockImplementation(async (root: string) => root === other.worktreeRoot ? '' : 'diff --git a/x b/x\n')
+    const remove = vi.spyOn(fs, 'rmSync').mockImplementation((target, _opts) => {
+      if (String(target).endsWith('other.patch')) throw new Error('cleanup denied')
+    })
+    expect((await captureFixes(ctx, true))?.repos.map((repo) => repo.repoName)).toEqual(['app'])
+    expect(log.warnings).toContain('Stale fix patch cleanup failed: cleanup denied')
+    remove.mockRestore()
   })
 
   it('publishes a worktree edit from the file watcher before reconciliation', async () => {
@@ -263,6 +281,21 @@ describe('captureFixes', () => {
     expect(h.diffContentSinceSnapshot).not.toHaveBeenCalled()
     changed?.('change', 'src/app.ts')
     await vi.waitFor(() => expect(log.warnings).toContain('Live fix capture failed: diff unavailable'))
+    await monitor.close()
+  })
+
+  it('does not capture a watcher event before any heal cycle', async () => {
+    vi.useFakeTimers()
+    const { ctx } = withBaseline()
+    ctx.healCycles = 0
+    let changed: fs.WatchListener<string> | undefined
+    const watcher = Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as fs.FSWatcher
+    const monitor = startLiveFixCapture(ctx, { watchPath: (_root, listener) => { changed = listener; return watcher }, debounceMs: 1 })
+
+    changed?.('change', 'src/app.ts')
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(h.diffContentSinceSnapshot).not.toHaveBeenCalled()
     await monitor.close()
   })
 

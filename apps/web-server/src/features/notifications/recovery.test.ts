@@ -4,6 +4,7 @@ import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { register, NOTIFICATION_RECOVERY_MS } from './index'
+import { NotificationStore } from './store'
 import { DirtySpecStore } from '../runs/logic/dirty-specs/store'
 import { WorkspaceEventBus } from '../../shared/workspace-events'
 import type { RunManifest } from '../runs/logic/runtime/manifest'
@@ -91,11 +92,110 @@ it('preserves an unverifiable issue, blocks its stale action, and automatically 
   expect(result.json()).toMatchObject({ status: 'unavailable', items: [expect.objectContaining({ unavailable: true })] })
   expect(persisted()[0]).toMatchObject({ id, unavailable: true })
   expect(persisted()[0].resolvedAt).toBeUndefined()
+  expect((await app.inject('/api/notifications/feature/shop')).json().items).toEqual([expect.objectContaining({ state: 'unavailable' })])
   recompute.mockRestore()
   fs.writeFileSync(spec, original)
   recovery()
   await vi.waitFor(() => expect(persisted()[0].resolvedAt).toEqual(expect.any(String)))
   expect(persisted()[0].unavailable).toBeUndefined()
+})
+
+it('keeps one recovery in flight when another refresh event arrives', async () => {
+  const record = dirty.get('shop')!
+  let release: () => void = () => {}
+  const pending = new Promise<typeof record>((resolve) => { release = () => resolve(record) })
+  const recompute = vi.spyOn(dirty, 'recompute').mockImplementationOnce(() => pending)
+
+  recovery()
+  recovery()
+  await vi.waitFor(() => expect(recompute).toHaveBeenCalledTimes(1))
+  release()
+  await vi.waitFor(() => expect(recompute.mock.results[0]?.value).toBe(pending))
+})
+
+it('stops refreshing additional suites once the server begins closing', async () => {
+  const discovery = path.join(dir, 'features', 'second')
+  const linked = path.join(dir, 'second-suite')
+  fs.mkdirSync(discovery, { recursive: true })
+  fs.mkdirSync(linked)
+  fs.writeFileSync(path.join(discovery, 'feature.config.cjs'), `exports.config = { name: 'second', featureDir: ${JSON.stringify(linked)}, repos: [] }`)
+  const record = dirty.get('shop')!
+  let release: () => void = () => {}
+  const pending = new Promise<typeof record>((resolve) => { release = () => resolve(record) })
+  const recompute = vi.spyOn(dirty, 'recompute').mockImplementationOnce(() => pending)
+
+  recovery()
+  await vi.waitFor(() => expect(recompute).toHaveBeenCalledTimes(1))
+  const closing = app.close()
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  release()
+  await closing
+
+  expect(recompute).toHaveBeenCalledTimes(1)
+})
+
+it('marks a periodic recompute failure unavailable and clears it when the suite disappears', async () => {
+  const warning = vi.spyOn(app.log, 'warn')
+  const recompute = vi.spyOn(dirty, 'recompute').mockRejectedValueOnce(new Error('suite unreadable'))
+  recovery()
+  await vi.waitFor(() => expect(warning).toHaveBeenCalledWith({ err: expect.any(Error), feature: 'shop' }, 'Could not refresh test integrity for notifications'))
+  await vi.waitFor(() => expect(persisted()[0].unavailable).toBe(true))
+  recompute.mockRestore()
+
+  fs.rmSync(path.join(dir, 'features', 'shop'), { recursive: true })
+  recovery()
+  await vi.waitFor(() => expect(persisted()[0].resolvedAt).toEqual(expect.any(String)))
+})
+
+it('reports a vanished suite config when resolving a saved review action', async () => {
+  const id = persisted()[0].id
+  fs.rmSync(path.join(dir, 'features', 'shop', 'feature.config.cjs'))
+  const warning = vi.spyOn(app.log, 'warn')
+
+  await app.inject({ method: 'POST', url: `/api/notifications/${id}/resolve-action` })
+
+  expect(warning).toHaveBeenCalledWith({ err: expect.objectContaining({ message: 'Suite configuration is unavailable' }), feature: 'shop' }, 'Could not refresh notification action')
+})
+
+it.each([new Error('feature scan failed'), 'feature scan failed'])('keeps the inbox unavailable when discovery throws %s', async (failure) => {
+  const logged = vi.spyOn(app.log, 'error')
+  vi.spyOn(fs, 'readdirSync').mockImplementationOnce(() => { throw failure })
+
+  recovery()
+
+  await vi.waitFor(() => expect(logged).toHaveBeenCalledWith({ err: expect.objectContaining({ message: 'feature scan failed' }) }, 'Could not update notifications'))
+})
+
+it('skips a discovered config without a live suite directory', async () => {
+  const config = path.join(dir, 'features', 'shop', 'feature.config.cjs')
+  fs.writeFileSync(config, "exports.config = { name: 'shop', repos: [] }\n")
+  const recompute = vi.spyOn(dirty, 'recompute')
+
+  recovery()
+
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  expect(recompute).not.toHaveBeenCalled()
+})
+
+it('reports a failed notification recovery without leaking its rejection', async () => {
+  vi.spyOn(NotificationStore.prototype, 'reconcile').mockImplementationOnce(() => { throw new Error('store unavailable') })
+  const logged = vi.spyOn(app.log, 'error').mockImplementationOnce(() => { throw new Error('log sink unavailable') })
+
+  recovery()
+
+  await vi.waitFor(() => expect(logged).toHaveBeenCalledWith({ err: expect.objectContaining({ message: 'log sink unavailable' }) }, 'Could not recover notifications'))
+})
+
+it('logs a failed suite retirement and refreshes when a feature is created', async () => {
+  const logged = vi.spyOn(app.log, 'error')
+  vi.spyOn(NotificationStore.prototype, 'retire').mockImplementationOnce(() => { throw new Error('retirement unavailable') })
+
+  events.publish({ type: 'feature-deleted', feature: 'shop' })
+  expect(logged).toHaveBeenCalledWith({ err: expect.objectContaining({ message: 'retirement unavailable' }) }, 'Could not retire test-review notification')
+
+  const recompute = vi.spyOn(dirty, 'recompute')
+  events.publish({ type: 'feature-created', feature: 'shop' })
+  await vi.waitFor(() => expect(recompute).toHaveBeenCalled())
 })
 
 it('settles a removed linked suite without a browser request, then creates a fresh episode after restoration', async () => {
