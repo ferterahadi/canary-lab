@@ -136,6 +136,11 @@ export interface NgrokTunnel {
   subdomain: string
 }
 
+export interface SingleAttemptPolicy {
+  /** Relative to logs/runs/<runId>; written by the suite, never by Canary. */
+  receipt: string
+}
+
 export interface FeatureConfig {
   name: string
   description: string
@@ -157,6 +162,9 @@ export interface FeatureConfig {
   // default number of failures. Set explicitly to `0` to opt out and let the
   // full suite finish before healing.
   healOnFailureThreshold?: number
+  /** A suite-owned receipt under this run's directory. Once it exists, a
+   *  second service boot or test invocation needs a fresh run and approval. */
+  singleAttempt?: SingleAttemptPolicy
 }
 
 // Default for `healOnFailureThreshold` applied by `loadFeatures` to any feature

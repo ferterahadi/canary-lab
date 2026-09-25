@@ -221,6 +221,31 @@ describe('POST /api/runs/:runId/accept-test-review', () => {
     expect(replay.json()).toEqual(first.json())
   })
 
+  it('keeps an already committed deletion in the run review receipt', async () => {
+    const { app } = await build()
+    const seeded = terminalReview('passed')
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: seeded.featureDir, stdio: 'pipe' }).toString().trim()
+    fs.writeFileSync(path.join(seeded.snapshot, 'e2e/subscription.cjs'), 'recorded helper\n')
+    fs.writeFileSync(path.join(seeded.featureDir, 'e2e/subscription.cjs'), 'recorded helper\n')
+    git('add', 'e2e/subscription.cjs')
+    git('commit', '-qm', 'record helper')
+    git('rm', 'e2e/subscription.cjs')
+    git('commit', '-qm', 'remove helper from suite')
+    const revision = suiteReviewRevision(seeded.snapshot, seeded.featureDir)
+
+    const response = await app.inject({ method: 'POST', url: '/api/runs/terminal/accept-test-review', payload: { expectedRevision: revision } })
+    expect(response.statusCode).toBe(202)
+    expect(response.json()).toMatchObject({
+      decision: 'accepted', review_revision: revision,
+      files: ['e2e/a.spec.ts', 'e2e/subscription.cjs'],
+      git: { status: 'committed' }, execution: { status: 'new-run-required' },
+    })
+    expect(git('show', '--format=', '--name-only', 'HEAD')).toBe('e2e/a.spec.ts')
+    expect(readManifest(path.join(seeded.runDir, 'manifest.json'))?.specEdits?.reviewDecisions?.[0]?.receipt?.files).toEqual([
+      'e2e/a.spec.ts', 'e2e/subscription.cjs',
+    ])
+  })
+
   it('requires a live terminal snapshot, the exact current revision, and remaining reviewed files', async () => {
     const { app } = await build()
     const seeded = terminalReview('passed')

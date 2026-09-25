@@ -313,6 +313,24 @@ describe('classifyWaitForHealTask', () => {
     })
   }
 
+  it('returns the fresh-run handoff with the terminal failed result', () => {
+    const result = classify(runDetail({
+      status: 'failed',
+      healEnd: { reason: 'new-run-required', cycle: 1, at: '2026-05-25T08:01:00.000Z', message: 'Fresh approved run required.' },
+    }))
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        type: 'failed',
+        newRunRequired: {
+          message: 'Fresh approved run required.',
+          nextSteps: expect.arrayContaining([expect.stringContaining('start_run without run_ref')]),
+        },
+      },
+    })
+  })
+
   for (const status of ['passed', 'failed'] as const) {
     it(`reports a ${status} run that never wrote a summary as zero counts, not as a pass`, () => {
       // A run that died before the reporter wrote e2e-summary.json has no

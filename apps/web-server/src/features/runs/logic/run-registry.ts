@@ -43,11 +43,11 @@ export type OrchestratorInterjectResult =
 
 export type RestartHealResult =
   | { ok: true }
-  | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'manual-mode' | 'spawn-failed' }
+  | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'new-run-required' | 'manual-mode' | 'spawn-failed' }
 
 export type RestartRunResult =
   | { ok: true; mode: 'remaining' }
-  | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'already-active' | 'spawn-failed' }
+  | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'new-run-required' | 'already-active' | 'spawn-failed' }
 
 export interface OrchestratorLike {
   runId: string

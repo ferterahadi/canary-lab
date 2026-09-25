@@ -131,6 +131,17 @@ describe('recordBootFailureHealWait', () => {
 })
 
 describe('restartTerminalRun', () => {
+  it('keeps a service failure as the verdict when Playwright exits successfully', async () => {
+    const orch = makeOrchestrator()
+    h.runPlaywright.mockImplementation(async (ctx: RunContext) => {
+      ctx.serviceFailure = { service: 'api', detail: 'watch build failed', logPath: '/run/api.log' } as RunContext['serviceFailure']
+      return 0
+    })
+
+    expect(await orch.restartTerminalRun()).toBe('failed')
+    expect(h.runPlaywright).toHaveBeenCalledOnce()
+  })
+
   it('returns the live status when the run was aborted during start', async () => {
     const orch = makeOrchestrator()
     h.ensureServicesRunning.mockImplementation(async (ctx: RunContext) => {

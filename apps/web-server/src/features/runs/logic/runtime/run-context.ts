@@ -17,7 +17,7 @@ import fs from 'fs'
 import path from 'path'
 import { buildRunPaths, type RunPaths } from './run-paths'
 import { overlayExists } from '../../../portify/logic/runtime/overlay'
-import { HealSignalGate, type RunBootFailure } from '../../../../../../../shared/run-state'
+import { HealSignalGate, type RunBootFailure, type RunServiceFailure } from '../../../../../../../shared/run-state'
 import { AgentSessionRefStore } from './agent-session-refs'
 import { FileRunStateSink, type RunStateSink } from './run-state-sink'
 import { isHealthy } from '../../../../shared/launcher-startup'
@@ -121,6 +121,9 @@ export interface RunContext {
   startedAt: string
   stopped: boolean
   servicePtys: Map<string, PtyHandle>
+  /** Readiness belongs to a process attempt, not the service name forever. */
+  serviceReady: Set<string>
+  serviceCompilerOutput: Map<string, string>
   /** Exit facts of the last service process, kept for the boot-failure
    *  record. `signal` is the NAME, normalized by the producer. */
   serviceExitEvidence: Map<string, { exitCode: number; signal: string | null }>
@@ -152,6 +155,7 @@ export interface RunContext {
    *  the start of every service boot/restart attempt so a stale failure from a
    *  prior cycle doesn't survive a successful reboot. */
   bootFailure: RunBootFailure | undefined
+  serviceFailure: RunServiceFailure | undefined
 
   // ── heal-agent state ──────────────────────────────────────────────────────
   /** Tracked while a heal-agent pty is in flight so cancelHeal() can SIGTERM it.
@@ -265,6 +269,8 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     startedAt: '',
     stopped: false,
     servicePtys: new Map(),
+    serviceReady: new Set(),
+    serviceCompilerOutput: new Map(),
     serviceExitEvidence: new Map(),
     logFiles: new Set(),
     signalWatcher: null,
@@ -278,6 +284,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     playwrightPty: null,
     playwrightExitWaiter: null,
     bootFailure: undefined,
+    serviceFailure: undefined,
 
     healAgentPty: null,
     healAgentMcpOutputDir: undefined,

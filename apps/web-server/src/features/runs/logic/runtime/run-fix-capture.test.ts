@@ -7,8 +7,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { EventEmitter } from 'events'
 import type { RunContext } from './run-context'
 import type { RunnerLog } from './runner-log'
+import { readManifest, writeManifest } from './manifest'
+import { FileRunStateSink } from './run-state-sink'
 import { FIX_CAPTURE_MAX_FILE_NAMES } from '../../../../../../../shared/run-state'
 
 const h = vi.hoisted(() => ({
@@ -36,7 +39,7 @@ vi.mock('../../../portify/logic/runtime/git-ops', async (importOriginal) => ({
   reverseOverlay: h.reverseOverlay,
 }))
 
-const { captureFixBaseline, captureFixes, reversePortifyOverlay } = await import('./run-fix-capture')
+const { captureFixBaseline, captureFixes, reversePortifyOverlay, startLiveFixCapture } = await import('./run-fix-capture')
 const { makeHealLoopContext } = await import('./__fixtures__/heal-loop-context')
 
 let tmpDir: string
@@ -51,6 +54,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
   fs.rmSync(tmpDir, { recursive: true, force: true })
 })
@@ -166,7 +170,7 @@ describe('captureFixes', () => {
     const { ctx } = withBaseline(runnerLog)
     const realWrite = fs.writeFileSync
     vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: string, data: string) => {
-      if (String(p).endsWith('app.patch')) throw new Error('EROFS: read-only file system')
+      if (String(p).endsWith('app.patch.tmp')) throw new Error('EROFS: read-only file system')
       return realWrite(p, data)
     }) as typeof fs.writeFileSync)
 
@@ -183,6 +187,144 @@ describe('captureFixes', () => {
     h.diffContentSinceSnapshot.mockResolvedValue('   \n')
 
     expect(await captureFixes(ctx)).toBeNull()
+  })
+
+  it('publishes an evolving patch and then finalizes it without waiting to discover edits', async () => {
+    const { ctx } = withBaseline()
+    Object.assign(ctx, { stateSink: new FileRunStateSink(path.join(tmpDir, 'logs')) })
+    writeManifest(ctx.paths.manifestPath, {
+      runId: ctx.runId, feature: 'demo', featureDir: ctx.feature.featureDir,
+      startedAt: 'now', status: 'healing', healCycles: 1, services: [],
+    })
+
+    const live = await captureFixes(ctx, true)
+    expect(live?.provisional).toBe(true)
+    expect(readManifest(ctx.paths.manifestPath)?.fixCapture?.repos[0].fileNames).toEqual(['src/app.ts'])
+    expect((await captureFixes(ctx, true))?.capturedAt).toBe(live?.capturedAt)
+
+    const final = await captureFixes(ctx)
+    expect(final?.provisional).toBeUndefined()
+    expect(readManifest(ctx.paths.manifestPath)?.fixCapture?.provisional).toBeUndefined()
+
+    await captureFixes(ctx, true)
+    h.diffContentSinceSnapshot.mockResolvedValue('')
+    expect(await captureFixes(ctx, true)).toBeNull()
+    expect(readManifest(ctx.paths.manifestPath)?.fixCapture).toBeUndefined()
+    expect(fs.existsSync(path.join(ctx.paths.fixesDir, 'app.patch'))).toBe(false)
+    expect(fs.existsSync(path.join(ctx.paths.fixesDir, 'fixes.json'))).toBe(false)
+  })
+
+  it('removes a stale patch when one repo has no current fix and reports cleanup failure', async () => {
+    const log = fakeRunnerLog()
+    const { ctx } = withBaseline(log)
+    const other = worktree('other')
+    ctx.fixBaselines.set('other', { ref: 'stash-ref', worktreeRoot: other.worktreeRoot, sourceRoot: other.sourceRoot, baseSha: 'abc123', untracked: new Set() })
+    Object.assign(ctx, { stateSink: new FileRunStateSink(path.join(tmpDir, 'logs')) })
+    writeManifest(ctx.paths.manifestPath, { runId: ctx.runId, feature: 'demo', startedAt: 'now', status: 'healing', healCycles: 1, services: [] })
+    expect((await captureFixes(ctx, true))?.repos.map((repo) => repo.repoName)).toEqual(['app', 'other'])
+
+    h.diffContentSinceSnapshot.mockImplementation(async (root: string) => root === other.worktreeRoot ? '' : 'diff --git a/x b/x\n')
+    const remove = vi.spyOn(fs, 'rmSync').mockImplementation((target, _opts) => {
+      if (String(target).endsWith('other.patch')) throw new Error('cleanup denied')
+    })
+    expect((await captureFixes(ctx, true))?.repos.map((repo) => repo.repoName)).toEqual(['app'])
+    expect(log.warnings).toContain('Stale fix patch cleanup failed: cleanup denied')
+    remove.mockRestore()
+  })
+
+  it('publishes a worktree edit from the file watcher before reconciliation', async () => {
+    const { ctx, sink } = withBaseline()
+    let changed: fs.WatchListener<string> | undefined
+    const watcher = Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as fs.FSWatcher
+    const monitor = startLiveFixCapture(ctx, {
+      watchPath: (_root, listener) => { changed = listener; return watcher },
+      debounceMs: 1,
+      reconcileMs: 60_000,
+    })
+
+    changed?.('change', 'src/app.ts')
+    await vi.waitFor(() => expect(sink.patches).toEqual([
+      expect.objectContaining({ fixCapture: expect.objectContaining({ provisional: true }) }),
+    ]))
+    await monitor.close()
+    expect(watcher.close).toHaveBeenCalledOnce()
+  })
+
+  it('reports watcher setup, runtime, and close failures without losing the run', async () => {
+    const log = fakeRunnerLog()
+    const { ctx } = withBaseline(log)
+    const broken = startLiveFixCapture(ctx, { watchPath: () => { throw new Error('watch unavailable') } })
+    expect(log.warnings).toContain('Live fix watcher failed: watch unavailable')
+    await broken.close()
+
+    const watcher = Object.assign(new EventEmitter(), { close: () => { throw new Error('close unavailable') } }) as unknown as fs.FSWatcher
+    const monitor = startLiveFixCapture(ctx, { watchPath: () => watcher })
+    watcher.emit('error', new Error('watch stopped'))
+    await monitor.close()
+    expect(log.warnings).toContain('Live fix watcher failed: watch stopped')
+    expect(log.warnings).toContain('Live fix watcher close failed: close unavailable')
+  })
+
+  it('ignores dependency tree events and reports a failed capture', async () => {
+    const log = fakeRunnerLog()
+    const { ctx } = withBaseline(log)
+    let changed: fs.WatchListener<string> | undefined
+    const watcher = Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as fs.FSWatcher
+    const monitor = startLiveFixCapture(ctx, {
+      watchPath: (_root, listener) => { changed = listener; return watcher },
+      debounceMs: 1,
+      reconcileMs: 60_000,
+    })
+    h.diffContentSinceSnapshot.mockRejectedValueOnce(new Error('diff unavailable'))
+
+    changed?.('change', '.git/index')
+    expect(h.diffContentSinceSnapshot).not.toHaveBeenCalled()
+    changed?.('change', 'src/app.ts')
+    await vi.waitFor(() => expect(log.warnings).toContain('Live fix capture failed: diff unavailable'))
+    await monitor.close()
+  })
+
+  it('does not capture a watcher event before any heal cycle', async () => {
+    vi.useFakeTimers()
+    const { ctx } = withBaseline()
+    ctx.healCycles = 0
+    let changed: fs.WatchListener<string> | undefined
+    const watcher = Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as fs.FSWatcher
+    const monitor = startLiveFixCapture(ctx, { watchPath: (_root, listener) => { changed = listener; return watcher }, debounceMs: 1 })
+
+    changed?.('change', 'src/app.ts')
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(h.diffContentSinceSnapshot).not.toHaveBeenCalled()
+    await monitor.close()
+  })
+
+  it('rescans after a second change arrives during an in-flight capture', async () => {
+    vi.useFakeTimers()
+    const { ctx } = withBaseline()
+    let changed: fs.WatchListener<string> | undefined
+    const watcher = Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as fs.FSWatcher
+    let releaseFirst: (patch: string) => void = () => {}
+    h.diffContentSinceSnapshot.mockImplementationOnce(() => new Promise<string>((resolve) => { releaseFirst = resolve }))
+    const monitor = startLiveFixCapture(ctx, {
+      watchPath: (_root, listener) => { changed = listener; return watcher },
+      debounceMs: 1,
+      reconcileMs: 60_000,
+    })
+
+    changed?.('change', 'src/first.ts')
+    changed?.('change', 'src/duplicate.ts')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(h.diffContentSinceSnapshot).toHaveBeenCalledTimes(1)
+    changed?.('change', 'src/second.ts')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(h.diffContentSinceSnapshot).toHaveBeenCalledTimes(1)
+    releaseFirst('diff --git a/x b/x\n')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(h.diffContentSinceSnapshot).toHaveBeenCalledTimes(2)
+    await monitor.close()
+    changed?.('change', 'src/after-close.ts')
+    expect(h.diffContentSinceSnapshot).toHaveBeenCalledTimes(2)
   })
 })
 

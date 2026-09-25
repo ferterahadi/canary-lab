@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { loadFeatures, listSpecFiles } from './feature-loader'
+import { loadFeatures, listSpecFiles, suiteAvailability } from './feature-loader'
 
 let tmpDir: string
 
@@ -31,6 +31,19 @@ describe('loadFeatures', () => {
     expect(features).toHaveLength(1)
     expect(features[0].name).toBe('alpha')
     expect(features[0].featureDir).toBe(fdir)
+  })
+
+  it('loads a run-relative single-attempt receipt and rejects traversal', () => {
+    writeFeature('safe', `module.exports = { config: { name: 'safe', singleAttempt: { receipt: 'runtime/attempt.json' } } }`)
+    writeFeature('unsafe', `module.exports = { config: { name: 'unsafe', singleAttempt: { receipt: '../outside.json' } } }`)
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const features = loadFeatures(path.join(tmpDir, 'features'))
+
+    expect(features.map((feature) => feature.name)).toEqual(['safe'])
+    expect(features[0].singleAttempt?.receipt).toBe('runtime/attempt.json')
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('singleAttempt.receipt'))
+    spy.mockRestore()
   })
 
   it('skips dirs without a feature.config.* file', () => {
@@ -123,5 +136,42 @@ describe('listSpecFiles', () => {
     fs.mkdirSync(path.join(e2e, 'sub'))
     const files = listSpecFiles(tmpDir).map((f) => path.basename(f))
     expect(files).toEqual(['a.spec.ts', 'b.spec.ts'])
+  })
+})
+
+describe('suiteAvailability', () => {
+  it('distinguishes a removed suite from missing configuration and an unloadable configuration', () => {
+    const featuresDir = path.join(tmpDir, 'features')
+    expect(suiteAvailability(featuresDir, 'shop').kind).toBe('removed')
+    fs.mkdirSync(path.join(featuresDir, 'shop'), { recursive: true })
+    expect(suiteAvailability(featuresDir, 'shop')).toMatchObject({ kind: 'config-missing', diagnostic: expect.stringContaining('missing') })
+    const configPath = path.join(featuresDir, 'shop', 'feature.config.cjs')
+    fs.writeFileSync(configPath, 'throw new Error("broken")')
+    expect(suiteAvailability(featuresDir, 'shop')).toMatchObject({ kind: 'config-invalid', configPath })
+    fs.writeFileSync(configPath, 'module.exports = { config: { name: "shop", featureDir: __dirname, envs: [], description: "shop" } }')
+    expect(suiteAvailability(featuresDir, 'shop')).toMatchObject({ kind: 'ready', configPath })
+    fs.rmSync(path.join(featuresDir, 'shop'), { recursive: true })
+    expect(suiteAvailability(featuresDir, 'shop').kind).toBe('removed')
+    expect(suiteAvailability(featuresDir, '../outside').kind).toBe('removed')
+  })
+
+  it('reports a missing linked test directory as removed even when discovery config remains', () => {
+    const featuresDir = path.join(tmpDir, 'features')
+    const suiteDir = writeFeature('linked', `module.exports = { config: { name: 'linked', featureDir: ${JSON.stringify(path.join(tmpDir, 'external'))}, envs: [], description: 'linked' } }`)
+    expect(fs.existsSync(suiteDir)).toBe(true)
+    expect(suiteAvailability(featuresDir, 'linked').kind).toBe('removed')
+  })
+
+  it('finds a named suite through a differently named discovery folder', () => {
+    const featuresDir = path.join(tmpDir, 'features')
+    const linked = path.join(tmpDir, 'linked-tests')
+    fs.mkdirSync(linked)
+    writeFeature('alias', `module.exports = { config: { name: 'shop', featureDir: ${JSON.stringify(linked)}, repos: [] } }`)
+
+    expect(suiteAvailability(featuresDir, 'shop')).toMatchObject({
+      kind: 'ready',
+      feature: { name: 'shop', featureDir: linked },
+      configPath: path.join(linked, 'feature.config.cjs'),
+    })
   })
 })

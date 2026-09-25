@@ -25,6 +25,48 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
 
 describe('discovery repair lifecycle', () => {
+  it.each(['missing', 'invalid'] as const)('offers a real repair for an existing suite with %s configuration', async (condition) => {
+    const configPath = path.join(root, 'features', 'suite', 'feature.config.cjs')
+    const original = fs.readFileSync(configPath, 'utf8')
+    if (condition === 'missing') fs.unlinkSync(configPath)
+    else fs.writeFileSync(configPath, 'throw new Error("bad config")')
+    const repair = service.start('suite', owner)
+    await service.settled()
+    expect(listTests).not.toHaveBeenCalled()
+    expect(fs.readFileSync(repair.promptPath, 'utf8')).toContain(`Feature configuration: ${configPath}`)
+    expect(service.get(repair.id)).toMatchObject({ status: 'repairing', diagnostic: expect.stringContaining('configuration') })
+    fs.writeFileSync(configPath, original)
+    listTests.mockResolvedValue(tests)
+    service.update(repair.id, 'owner', 'verify')
+    await service.settled()
+    expect(service.get(repair.id)).toMatchObject({ status: 'succeeded', discoveredCount: 1 })
+  })
+
+  it.each(['missing', 'invalid'] as const)('fails verification while the %s suite configuration remains broken', async (condition) => {
+    const repair = service.start('suite', owner)
+    await service.settled()
+    const configPath = path.join(root, 'features', 'suite', 'feature.config.cjs')
+    if (condition === 'missing') fs.unlinkSync(configPath)
+    else fs.writeFileSync(configPath, 'throw new Error("bad config")')
+
+    service.update(repair.id, 'owner', 'verify')
+    await service.settled()
+    expect(service.get(repair.id)).toMatchObject({ status: 'failed', diagnostic: expect.stringContaining('Suite configuration') })
+    expect(listTests).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails verification when the suite was removed after repair started', async () => {
+    const repair = service.start('suite', owner)
+    await service.settled()
+    fs.rmSync(path.join(root, 'features', 'suite'), { recursive: true, force: true })
+
+    service.update(repair.id, 'owner', 'verify')
+    await service.settled()
+
+    expect(service.get(repair.id)).toMatchObject({ status: 'failed', diagnostic: 'Feature not found' })
+    expect(listTests).toHaveBeenCalledTimes(1)
+  })
+
   it('reserves one owner before async discovery, records progress, and only Canary can verify success', async () => {
     const repair = service.start('suite', owner)
     expect(service.start('suite', owner).id).toBe(repair.id)

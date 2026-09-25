@@ -14,14 +14,9 @@ import { RepairPatchDialog } from './RepairPatchDialog'
 // (they were near-identical copies that had already diverged on which actions
 // they offered).
 //
-// The card is built around one fact: by the time anyone reads it, the scratch
-// worktree the agent edited is GONE. Teardown captures a patch and deletes the
-// copy, so there is no branch to visit and nothing uncommitted anywhere. The
-// primary action therefore has to CREATE the thing the user wants to look at —
-// it lands the patch in the real repo as unstaged edits, then opens that repo
-// in their editor, where the changed-files list is the view they actually came
-// for. The patch text itself stays off the card; reading a unified diff in a
-// side panel is the thing this card replaced.
+// While the run is active, Open in editor shows the isolated worktree without
+// applying it to the source repo. After teardown removes that worktree, the
+// same action applies the final patch to the source repo before opening it.
 //
 // What the card does NOT print is deliberate. The repo root is the header's
 // tooltip (plus a hover copy button), not a row: it repeated most of the patch
@@ -33,7 +28,7 @@ import { RepairPatchDialog } from './RepairPatchDialog'
 type OpenState =
   | { kind: 'idle' }
   | { kind: 'working' }
-  | { kind: 'done'; editor?: string }
+  | { kind: 'done'; editor?: string; provisional?: boolean }
   | { kind: 'failed'; reason: string }
 
 /**
@@ -43,16 +38,21 @@ type OpenState =
  * and because the confirm is modal — two cards must never each own a copy of
  * it. Callers render `confirm` once and spread `cardProps(repoName)` per card.
  */
-export function useRepoOpener(runId: string, enabled: boolean) {
+export function useRepoOpener(runId: string, enabled: boolean, provisional = false) {
   const [targets, setTargets] = useState<ApplyTarget[] | null>(null)
   const [state, setState] = useState<Record<string, OpenState>>({})
   const [pending, setPending] = useState<ApplyTarget | null>(null)
+
+  useEffect(() => {
+    setState({})
+    setPending(null)
+  }, [runId, provisional])
 
   // The preflight reads the user's repos as they are RIGHT NOW, not as the run
   // snapshotted them at boot — they have had the whole run to edit their tree,
   // and whether it is dirty decides if opening it needs to ask first.
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled) { setTargets(null); return }
     let live = true
     api.getRunApplyPreflight(runId)
       .then((r) => { if (live) setTargets(r.targets) })
@@ -66,6 +66,16 @@ export function useRepoOpener(runId: string, enabled: boolean) {
   const run = useCallback(async (repoName: string) => {
     setState((s) => ({ ...s, [repoName]: { kind: 'working' } }))
     try {
+      if (provisional) {
+        const opened = await api.openRunRepo(runId, repoName)
+        setState((s) => ({
+          ...s,
+          [repoName]: opened.opened
+            ? { kind: 'done', provisional: true, ...(opened.editor ? { editor: opened.editor } : {}) }
+            : { kind: 'failed', reason: opened.error ?? 'the editor would not launch' },
+        }))
+        return
+      }
       const applied = await api.applyRunFixes(runId, repoName)
       const failure = applied.results.find((r) => !r.ok)
       if (failure) {
@@ -84,7 +94,7 @@ export function useRepoOpener(runId: string, enabled: boolean) {
     } catch (err) {
       setState((s) => ({ ...s, [repoName]: { kind: 'failed', reason: err instanceof Error ? err.message : String(err) } }))
     }
-  }, [runId])
+  }, [runId, provisional])
 
   const open = useCallback((repoName: string) => {
     const target = targets?.find((t) => t.repoName === repoName)
@@ -149,6 +159,9 @@ export function RepairedRepoCard({
   pr,
   blockedReason,
   auto,
+  provisional = false,
+  liveWorktreeRoot,
+  runStopped = true,
   onProposeClick,
 }: {
   runId: string
@@ -162,12 +175,15 @@ export function RepairedRepoCard({
   pr?: RunProposedPr
   blockedReason?: string
   auto: boolean
+  provisional?: boolean
+  liveWorktreeRoot?: string
+  runStopped?: boolean
   onProposeClick: () => void
 }) {
   const [patchOpen, setPatchOpen] = useState(false)
   const changed = repo !== undefined
   const names = repo?.fileNames ?? []
-  const repoRoot = target?.repoRoot ?? repo?.repoRoot ?? ''
+  const repoRoot = provisional ? liveWorktreeRoot ?? '' : target?.repoRoot ?? repo?.repoRoot ?? ''
   // The repo isn't where the run left it, so there is nothing to apply into and
   // nothing to open — the patch becomes the only route to the repair.
   const moved = target?.ready === false
@@ -180,6 +196,8 @@ export function RepairedRepoCard({
   // rolled up — and it isn't for a capture recorded before file names were kept
   // either, which is the case that must not lose its way to the patch.
   const listedEverything = !rolled && names.length >= (repo?.files ?? 0)
+  const canPropose = runStopped && !provisional
+  const waitForStop = 'Available after this run stops and captures its final changes.'
 
   return (
     <li className="cl-card group/card p-3" data-testid={`changes-repo-${repoName}`}>
@@ -288,22 +306,26 @@ export function RepairedRepoCard({
                 type="button"
                 data-testid={`changes-open-repo-${repoName}`}
                 onClick={onOpen}
-                disabled={openState.kind === 'working'}
-                title="Applies the repair into this repo as uncommitted changes, then opens it"
+                disabled={openState.kind === 'working' || (!provisional && !runStopped)}
+                title={provisional ? 'Opens this run’s isolated worktree without applying its edits' : 'Applies the repair into this repo as uncommitted changes, then opens it'}
                 className="cl-button cl-button-primary px-2.5 py-1 text-[11px]"
               >
                 {openState.kind === 'working' ? 'Opening…' : 'Open in editor'}
               </button>
             )}
-            <button
-              type="button"
-              data-testid={`changes-propose-${repoName}`}
-              onClick={onProposeClick}
-              className="cl-button px-2.5 py-1 text-[11px]"
-              title="Commits the repair on its own branch and opens a pull request — the message and body are written by an agent from the diff"
-            >
-              Commit &amp; open PR…
-            </button>
+            <span title={canPropose ? undefined : waitForStop} className={`inline-flex ${canPropose ? '' : 'cursor-not-allowed'}`}>
+              <button
+                type="button"
+                data-testid={`changes-propose-${repoName}`}
+                onClick={onProposeClick}
+                disabled={!canPropose}
+                aria-label={canPropose ? 'Commit and open PR' : `Commit and open PR. ${waitForStop}`}
+                className="cl-button px-2.5 py-1 text-[11px] disabled:pointer-events-none disabled:opacity-50"
+                title={canPropose ? 'Commits the repair on its own branch and opens a pull request — the message and body are written by an agent from the diff' : undefined}
+              >
+                Commit &amp; open PR…
+              </button>
+            </span>
             {/* One entrance to the dialog per card: `View patch` already is it
                 when the repo has moved. */}
             {!listedEverything && !moved && (
@@ -377,7 +399,7 @@ function OpenOutcome({ repoName, state, target }: { repoName: string; state: Ope
   if (state.kind === 'done') {
     return (
       <OutcomeLine state="success" tone="var(--success)" testId={`changes-open-done-${repoName}`}>
-        Applied to your repo{state.editor ? ` · opened in ${editorLabel(state.editor)}` : ''}
+        {state.provisional ? 'Opened live run worktree' : 'Applied to your repo'}{state.editor ? ` · opened in ${editorLabel(state.editor)}` : ''}
       </OutcomeLine>
     )
   }

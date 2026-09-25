@@ -11,6 +11,7 @@ import type { ExternalHealSessionStatus } from '../logic/runtime/manifest'
 import { isClientKind, type ClientKind } from '../../../../../../shared/run-mode'
 import { buildExternalHealContext, buildExternalRunSnapshot, writeHealSignal } from '../logic/heal/external-heal-surface'
 import { runDirFor } from '../logic/runtime/run-paths'
+import { claimedSingleAttempt, policyForRunManifest, NEW_RUN_REQUIRED_MESSAGE } from '../../../shared/single-attempt'
 import {
   isActiveRunStatus,
   isRestartableRunStatus,
@@ -242,6 +243,7 @@ export async function externalHealRoutes(
         reply.code(409)
         return { reason: 'session-mismatch', currentSession: ownership.currentSession }
       }
+      const newRunRequired = claimedSingleAttempt(runDirFor(deps.store.logsDir, req.params.runId), policyForRunManifest(detail.manifest))
       let signal: ReturnType<typeof writeHealSignal>
       try {
         signal = writeHealSignal({
@@ -260,7 +262,10 @@ export async function externalHealRoutes(
       deps.broker.bumpCycle(req.params.runId)
       deps.onSignalAccepted?.(req.params.runId, kind, signalBody)
       reply.code(202)
-      return { accepted: true, kind, path: signal.path }
+      return {
+        accepted: true, kind, path: signal.path,
+        ...(newRunRequired ? { disposition: 'new_run_required', message: NEW_RUN_REQUIRED_MESSAGE } : {}),
+      }
     },
   )
 

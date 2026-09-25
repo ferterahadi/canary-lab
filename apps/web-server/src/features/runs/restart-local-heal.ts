@@ -23,6 +23,7 @@ import {
 import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { makeAttachRunStreams } from './run-stream-wiring'
 import { settleOrchestratorRun } from './logic/settle-run'
+import { claimedSingleAttempt, policyForRunManifest } from '../../shared/single-attempt'
 
 export function makeRestartLocalHeal(
   ctx: ServerContext,
@@ -45,13 +46,16 @@ export function makeRestartLocalHeal(
   // both runs (agent-input → restartHeal) and external-heal (handoff) paths
   // can share the same orchestrator-construction code without duplicating it.
   // The function body matches the previous inline definition exactly.
-  async function restartLocalHealClosure(runId: string, text: string): Promise<{ ok: true } | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'manual-mode' | 'spawn-failed' }> {
+  async function restartLocalHealClosure(runId: string, text: string): Promise<{ ok: true } | { ok: false; reason: 'run-not-found' | 'not-restartable' | 'new-run-required' | 'manual-mode' | 'spawn-failed' }> {
       const detail = runStore.get(runId)
       if (!detail) return { ok: false, reason: 'run-not-found' as const }
       const manifest = detail.manifest
       if (hasRetiredPerturbation(manifest)) return { ok: false, reason: 'not-restartable' as const }
       if ((manifest.executionType ?? 'run') === 'verify') return { ok: false, reason: 'not-restartable' as const }
       if (!isRestartableRunStatus(manifest.status)) return { ok: false, reason: 'not-restartable' as const }
+      if (claimedSingleAttempt(runDirFor(logsDir, runId), policyForRunManifest(manifest))) {
+        return { ok: false, reason: 'new-run-required' as const }
+      }
       if (manifest.healMode === 'manual') return { ok: false, reason: 'manual-mode' as const }
 
       const features = loadFeatures(featuresDir)

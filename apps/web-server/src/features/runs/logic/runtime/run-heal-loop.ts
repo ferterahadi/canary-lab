@@ -22,6 +22,7 @@ import { ensureServicesRunning } from './run-service-boot'
 import { appendJournalIteration, markStoppedEarly, noteHealCycle, recordLifecycle, setStatus } from './run-manifest-writer'
 import { adoptTestHealSpecEdits } from './run-suite-snapshot'
 import type { RunOrchestrator } from './orchestrator'
+import { finishClaimedAttempt } from './run-single-attempt'
 
 export { cancelHeal, continueAfterTestRun, pauseAndHeal, restartHealFromFailure } from './run-heal-controls'
 
@@ -85,6 +86,7 @@ export async function runManualExternalHealLoop(ctx: RunContext, host: RunLoopHo
         })
       }
     } catch { /* journal is best-effort */ }
+    if (finishClaimedAttempt(ctx)) return 'failed'
     const verificationPlan = verificationPlanForSummary(ctx, readSummary(ctx.paths.summaryPath))
     setStatus(ctx, 'running')
     // Test-heal mode only (zero editable repos): the spec IS the fix, so the
@@ -110,13 +112,21 @@ export async function runManualExternalHealLoop(ctx: RunContext, host: RunLoopHo
       host.recordBootFailureHealWait()
       continue
     }
+    if (ctx.serviceFailure) {
+      recordLifecycle(ctx, 'agent-healing', `Service still failed: ${ctx.serviceFailure.service}`, {
+        detail: `${ctx.serviceFailure.detail} Skipped tests; repair the service (log: ${ctx.serviceFailure.logPath}) and signal again.`,
+        severity: 'error',
+        activeCycle: ctx.healCycles,
+      })
+      continue
+    }
     const exitCode = await runPlaywright(ctx, selectionForPlan(verificationPlan))
     // Manual-heal mirror of the auto-heal abort guard: the top of the
     // loop already checks `stopped`, but the killed Playwright pty's
     // exit code arrives after the abort flips the flag — don't
     // compute a finalStatus from it.
     if (ctx.stopped) return ctx.status
-    finalStatus = decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
+    finalStatus = ctx.serviceFailure ? 'failed' : decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
     setStatus(ctx, finalStatus)
     if (finalStatus === 'passed') break
   }
@@ -193,7 +203,10 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
       }
       const summary = readSummary(ctx.paths.summaryPath)
       const failedSlugs = extractFailedSlugs(summary)
-      if (failedSlugs.length === 0) {
+      const serviceSlugs = [ctx.bootFailure, ctx.serviceFailure]
+        .filter((failure) => failure !== undefined)
+        .map((failure) => `service:${failure.safeName}`)
+      if (failedSlugs.length === 0 && serviceSlugs.length === 0) {
         const pendingPlan = verificationPlanForSummary(ctx, summary)
         if (pendingPlan.kind === 'all-passed') {
           if (summaryHasPassingEvidence(summary)) {
@@ -210,6 +223,7 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
         // terminates the run instead of re-running the identical summary
         // forever (the skipped-test infinite-rerun bug).
         const beforeSignature = nonPassedSignatureFromPlan(pendingPlan)
+        if (finishClaimedAttempt(ctx)) return 'failed'
         setStatus(ctx, 'running')
         const exitCode = await runPlaywright(ctx, selectionForPlan(pendingPlan))
         if (ctx.stopped) return ctx.status
@@ -218,9 +232,13 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
           setStatus(ctx, finalStatus)
           break
         }
-        finalStatus = decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
+        finalStatus = ctx.serviceFailure ? 'failed' : decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
         setStatus(ctx, finalStatus)
         if (finalStatus === 'passed') break
+        // A service failure can interrupt this no-agent pending-test rerun.
+        // Give the service its own heal cycle instead of treating the unchanged
+        // partial test summary as evidence that a test rerun made no progress.
+        if (ctx.serviceFailure) continue
         const afterSummary = readSummary(ctx.paths.summaryPath)
         if (
           extractFailedSlugs(afterSummary).length === 0 &&
@@ -246,12 +264,13 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
         }
         continue
       }
-      const signature = failedSlugs.slice().sort().join('|')
+      const failureSlugs = [...failedSlugs, ...serviceSlugs]
+      const signature = failureSlugs.slice().sort().join('|')
       // `observeFailures` now takes the raw slug array so it can remember it
       // on `snapshot().lastFailingSlugs` — that's what the heal-index uses
       // to compute the "delta vs previous cycle" section. The signature
       // string stays as the human-readable lifecycle-event detail.
-      const decision = heal.observeFailures(failedSlugs)
+      const decision = heal.observeFailures(failureSlugs)
       if (!decision.shouldHeal) {
         // Record WHY the loop stops so the Test Run surface can state it
         // plainly. Every refusal carries a reason — see `HealDecision`.
@@ -425,6 +444,8 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
         }
       } catch { /* journal write is best-effort */ }
 
+      if (finishClaimedAttempt(ctx)) return 'failed'
+
       const verificationPlan = verificationPlanForSummary(ctx, summary)
       setStatus(ctx, 'running')
       // Same test-heal adopt as the manual loop, before either arm reruns.
@@ -463,6 +484,14 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
         host.recordBootFailureHealWait()
         continue
       }
+      if (ctx.serviceFailure) {
+        recordLifecycle(ctx, 'agent-healing', `Service still failed: ${ctx.serviceFailure.service}`, {
+          detail: `${ctx.serviceFailure.detail} Skipped tests; repair the service (log: ${ctx.serviceFailure.logPath}) and signal again.`,
+          severity: 'error',
+          activeCycle: ctx.healCycles,
+        })
+        continue
+      }
       const exitCode = await runPlaywright(ctx, selectionForPlan(verificationPlan))
       if (ctx.stopped) return ctx.status
       // User cancelled mid-Playwright (cancelHeal SIGTERM'd the pw pty).
@@ -472,7 +501,7 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
         setStatus(ctx, finalStatus)
         break
       }
-      finalStatus = decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
+      finalStatus = ctx.serviceFailure ? 'failed' : decideRunStatus(ctx.suiteDir, ctx.paths.summaryPath, exitCode)
       setStatus(ctx, finalStatus)
       if (finalStatus === 'passed') break
     }

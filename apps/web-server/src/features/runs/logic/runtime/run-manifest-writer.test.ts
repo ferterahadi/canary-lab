@@ -30,6 +30,27 @@ function ctxFor(state: Partial<RunContext> = {}, opts: Record<string, unknown> =
 }
 
 describe('writeInitialManifest', () => {
+  it('pins the prior attempt policy across a restart even if the suite changed', () => {
+    const { ctx, sink } = ctxFor()
+    ctx.feature.singleAttempt = { receipt: 'current.json' }
+    const previous = { singleAttempt: { receipt: 'original.json' } } as RunManifest
+
+    writeInitialManifest(ctx, 'starting', previous)
+
+    const written = (sink.bootstrap as unknown as { mock: { calls: [RunManifest][] } }).mock.calls[0][0]
+    expect(written.singleAttempt).toEqual({ receipt: 'original.json' })
+  })
+
+  it('records a new suite attempt policy when there is no earlier manifest', () => {
+    const { ctx, sink } = ctxFor()
+    ctx.feature.singleAttempt = { receipt: 'attempt.json' }
+
+    writeInitialManifest(ctx)
+
+    const written = (sink.bootstrap as unknown as { mock: { calls: [RunManifest][] } }).mock.calls[0][0]
+    expect(written.singleAttempt).toEqual({ receipt: 'attempt.json' })
+  })
+
   it('carries a service\'s allocated ports into the manifest', () => {
     const { ctx, sink } = ctxFor()
     const services: ServiceSpec[] = [

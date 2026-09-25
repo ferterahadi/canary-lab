@@ -33,6 +33,19 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## 2.3.1 — 2026-09-26
+
+> After upgrading, run `npx canary-lab upgrade`, then restart connected agent apps, to refresh repair instructions.
+
+- **[Test Runner]** **Service failures show their cause.** Compiler errors and services that stop after becoming ready appear in the run evidence and can enter repair without a misleading test result.
+- **[Test Runner]** **Single-attempt suites stop after a claimed attempt.** Canary Lab saves the repair changes and requires a fresh run instead of repeating an external effect.
+- **[Test Runner]** **Repair changes appear while work is still running.** The Changes tab shows a provisional patch during healing and enables commit and pull request actions after the run stops.
+- **[General]** **Notifications recover from missed updates.** Open views and connected agents receive current review actions, while an unavailable source stays visibly unresolved.
+- **[General]** **Removed suites no longer invite stale reviews.** Saved run evidence remains available, but actions that need the missing suite are withheld.
+- **[General]** **The test list explains loading problems.** It distinguishes a removed suite from a failed load and keeps the available test preview visible.
+
+---
+
 ## 2.3.0 — Verification Integrity (2026-09-25)
 
 > After upgrading, run `npx canary-lab upgrade`, then restart connected agent apps, to refresh Flight and Portify instructions.

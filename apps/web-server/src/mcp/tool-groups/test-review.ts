@@ -31,11 +31,17 @@ export function registerTestReviewTools(ctx: ToolGroupContext): void {
     if (response.statusCode >= 400) return { ...value, continuationError: 'The original run request is unavailable. Do not create a replacement implicitly.' }
     const request = response.body as RunStartRequest
     if (request.review.runId !== runId) return { ...value, continuationError: 'This run request belongs to a different review.' }
+    if (value.status === 'review-changed' || value.status === 'run-ended') return {
+      ...value, request, request_id: request.requestId, nextSteps: ['get_test_review'],
+      next: `${value.next} Stop this watcher until the fresh review is shown to the human.`,
+    }
+    const hasBrowserHandoff = request.status === 'awaiting-review' && value.status === 'needs-input' && typeof value.browser_wait_token === 'string'
     return { ...value, request, request_id: request.requestId,
       nextSteps: request.status === 'ready'
         ? request.owner.kind === 'external' ? ['start_run'] : []
         : request.status === 'started' || request.status === 'queued' ? ['get_run']
-          : request.status === 'awaiting-review' ? ['review_test_changes'] : [],
+          : request.status === 'awaiting-review'
+            ? hasBrowserHandoff ? ['get_test_review', 'review_test_changes'] : ['review_test_changes'] : [],
       next: request.status === 'ready'
         ? request.owner.kind === 'external'
           ? `The decision is recorded. Continue only in the original ${request.owner.clientKind} session ${request.owner.sessionId}: call start_run with feature ${request.feature}, request_id ${request.requestId}, and that same session_id.`
@@ -43,9 +49,13 @@ export function registerTestReviewTools(ctx: ToolGroupContext): void {
         : request.status === 'started' || request.status === 'queued'
           ? `The original request ${request.status} run ${request.runId}. Continue that run; do not start another.`
           : request.status === 'awaiting-review'
-            ? value.status === 'still_waiting'
+            ? hasBrowserHandoff
+              ? value.next
+              : value.status === 'still_waiting'
               ? `${value.next} Carry the original request_id ${request.requestId}.`
               : 'Show the review evidence and request the human decision with review_test_changes, carrying this request_id. A read-only wait can observe a browser decision; never approve the changes yourself.'
+            : request.status === 'cancelled'
+              ? 'The original run request is cancelled. Stop waiting and do not start a run. A restored review leaves its recorded files in place.'
             : `The original request is ${request.status}. ${request.error ?? 'Do not start a replacement implicitly.'}`,
     }
   }
@@ -57,6 +67,13 @@ export function registerTestReviewTools(ctx: ToolGroupContext): void {
     if (review.files[0]) url.searchParams.set('reviewFile', review.files[0].file)
     return url.toString()
   }
+  const browserHandoff = (review: TestReview, requestId: string | undefined, waitToken: string, reason: string, facts: ReturnType<typeof ctx.clientFacts>) => ({
+    status: 'needs-input', reason, runId: review.runId, reviewUrl: reviewUrl(review), patchPath: review.patchPath,
+    review_revision: review.review_revision, browser_wait_token: waitToken,
+    ...(requestId ? { request_id: requestId, nextSteps: ['get_test_review', 'review_test_changes'],
+      next: `${reason === 'elicitation-unavailable' ? elicitationAdviceFor(facts, 'form') : reason} No human review decision is recorded. Show reviewUrl and keep the original request pending. If this client supports a background agent, start exactly one read-only watcher for this request; otherwise keep this turn waiting. The watcher calls get_test_review with runId and request_id in its own MCP session for a fresh token, then repeats review_test_changes with wait_for_decision:true. After an accepted receipt, continue only the original request with start_run(request_id, original session_id); Restore recorded files stops that request. Stop on a changed review revision and fetch a fresh review. Never click review controls or infer approval from a commit or restart.`,
+    } : { next: `${reason === 'elicitation-unavailable' ? elicitationAdviceFor(facts, 'form') : reason} Use an elicitation-capable session for approval here. If the human chooses the optional browser fallback, open reviewUrl and wait with the returned browser_wait_token and wait_for_decision:true. Do not click approval controls yourself. Never infer approval from a Git commit or restart.` }),
+  })
 
   ctx.registerTool('get_test_review', {
     description: 'Read the exact run-snapshot versus live suite diff, including supporting files adoption copies. Show the patch to the human in this conversation (read patchPath in chunks if not inline); never substitute a Git diff. Then call review_test_changes with review_revision. reviewUrl can open the existing side-by-side viewer in the client browser panel.',
@@ -80,7 +97,7 @@ export function registerTestReviewTools(ctx: ToolGroupContext): void {
   })
 
   ctx.registerTool('review_test_changes', {
-    description: 'After showing get_test_review evidence, request the HUMAN decision through MCP elicitation. No tool argument approves changes. Accept & commit records exact approval and Git/execution receipts; Restore returns recorded files; cancel leaves pending. Every client may observe a browser decision with wait_for_decision and the browser_wait_token returned by get_test_review; reconnect obtains a fresh token. A wait without a valid token still requests human input. Carry request_id to preserve the original run-request owner; continue only that request in its original client.',
+    description: 'After showing get_test_review evidence, request the HUMAN decision through MCP elicitation. No tool argument approves changes. Accept & commit records exact approval and Git/execution receipts; Restore returns recorded files and stops a blocked external run request; an elicitation cancel leaves review pending. Every client may observe a browser decision with wait_for_decision and the browser_wait_token returned by get_test_review; reconnect obtains a fresh token. A wait without a valid token still requests human input. Carry request_id to preserve the original run-request owner; continue only that request in its original client.',
     inputSchema: {
       runId: z.string(), review_revision: z.string().regex(/^[a-f0-9]{64}$/),
       request_id: z.string().optional().describe('Original blocked run request. Preserves its continuation owner regardless of where the human approves.'),
@@ -116,12 +133,8 @@ export function registerTestReviewTools(ctx: ToolGroupContext): void {
       scope, revision: review_revision,
       mode: 'form', schema: z.object({ choice: z.enum(['Accept & commit', 'Restore recorded files']) }),
       message: `Review ${review.files.length} changed suite files for ${review.feature} (${runId}). ${reviewUrl(review) ? `Optional comparison: ${reviewUrl(review)}. ` : ''}Patch: ${review.patchPath}. Revision ${review_revision}. Choose Accept & commit or Restore recorded files. Cancel leaves the review pending. Acceptance is not a passing test result.`,
-      fallback: () => asJsonResult({ status: 'needs-input', reason: 'elicitation-unavailable', runId, reviewUrl: reviewUrl(review), patchPath: review.patchPath,
-        review_revision, browser_wait_token: waitToken,
-        // The client sentence comes from one helper; everything after it is this
-        // gate's own rule and stays verbatim — it is what keeps a browser click, a
-        // commit, or a restart from ever reading as approval.
-        next: `${elicitationAdviceFor(facts, 'form')} Use an elicitation-capable session for approval here. If the human chooses the optional browser fallback, open reviewUrl and wait with the returned browser_wait_token and wait_for_decision:true. Do not click approval controls yourself. Never infer approval from a Git commit or restart.` }),
+      fallback: () => asJsonResult(browserHandoff(review, request_id, waitToken, 'elicitation-unavailable', facts)),
+      onNonAccept: async (reason) => asJsonResult(await continuation(request_id, runId, browserHandoff(review, request_id, waitToken, reason, facts))),
     }, async (answer) => {
       // The human response is the only entry to this mutation; the route rechecks
       // the revision again while copying, including edits after this form resumed.

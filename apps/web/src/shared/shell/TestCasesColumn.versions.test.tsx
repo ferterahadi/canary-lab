@@ -9,7 +9,7 @@ import { readableTest } from '../api/__fixtures__/readable-test'
 import { TestCasesColumn } from './TestCasesColumn'
 import { InvalidationProvider, useInvalidation } from '../state/invalidation'
 
-vi.mock('../api/client', async (original) => ({ ...await original<typeof api>(), getFeatureTests: vi.fn(), getTestSourceComparison: vi.fn() }))
+vi.mock('../api/client', async (original) => ({ ...await original<typeof api>(), getFeatureTests: vi.fn(), getFeatureTestsPreview: vi.fn(), getTestSourceComparison: vi.fn() }))
 vi.mock('./use-discovery-repair', () => ({ useDiscoveryRepair: () => ({ repairs: [], start: vi.fn(), starting: false, startError: null }) }))
 vi.mock('../ui/TestPresentation', () => ({ TestPresentation: () => null }))
 
@@ -37,6 +37,7 @@ beforeEach(() => {
   recorded = [spec('/recorded', ['passed', 'failed', 'skipped'])]
   comparison = { ...noChanges, differences: [{ file: 'e2e/a.spec.ts', affectedTests: ['new'] }], changes: { added: [{ file: 'e2e/a.spec.ts', name: 'new', line: 31, endLine: 39 }], changed: [], removed: [] } }
   vi.mocked(api.getFeatureTests).mockImplementation(async (_feature, _opts, runId) => runId ? recorded : current)
+  vi.mocked(api.getFeatureTestsPreview).mockResolvedValue([])
   vi.mocked(api.getTestSourceComparison).mockImplementation(async () => comparison)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })

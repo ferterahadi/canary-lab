@@ -264,6 +264,23 @@ describe('buildExternalHealContext', () => {
     expect((fallback.nextSteps ?? []).join('\n')).toContain('Use the structured evidence and bounded redacted excerpt first')
   })
 
+  it('sends post-readiness service evidence with partial test results to the external healer', () => {
+    const detail = detailFor('run-service-fail')
+    const failure = {
+      service: 'app', safeName: 'app', kind: 'compiler' as const,
+      detail: 'Watch compiler failed.', logPath: '/logs/svc-app.log',
+      command: 'npm run dev', cwd: '/worktree/app', at: '2026-05-25T08:01:00.000Z',
+    }
+    detail.manifest.serviceFailure = failure
+
+    const context = buildExternalHealContext({ detail, logsDir, projectRoot: tmpDir })
+
+    expect(context.serviceFailure).toEqual(failure)
+    expect(context.failedTests).toHaveLength(1)
+    expect((context.nextSteps ?? []).join(' ')).toContain('Playwright was stopped')
+    expect((context.nextSteps ?? []).join(' ')).toContain('kind:"restart"')
+  })
+
   it('omits a zero not-applicable count from compact agent output', () => {
     expect(compactCounts({
       totalKnown: 2,

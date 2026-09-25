@@ -51,6 +51,11 @@ export const EMPTY_COPY = {
     title: 'Nothing was changed in your code',
     body: 'A repair agent ran on this run, but no file edits were captured from it. What the agent was reasoning about is still in the Heal agent tab.',
   },
+  changesWaiting: {
+    reason: 'not-yet',
+    title: 'Waiting for code changes',
+    body: 'Edits appear here during repair. Review them now; commit and pull request actions unlock after the run stops and captures its final patch.',
+  },
   journalPassed: {
     reason: 'nothing-to-report',
     title: 'Nothing to repair',
@@ -100,6 +105,11 @@ export const EMPTY_COPY = {
     reason: 'nothing-to-report',
     title: 'No changed test files',
     body: 'No uncommitted test edits remain in this working tree. Existing run results still describe exactly the tests each of those runs executed.',
+  },
+  dirtySuiteUnavailable: {
+    reason: 'not-captured',
+    title: 'Live suite unavailable',
+    body: 'Canary cannot compare this run with current tests because the suite is missing. Restore it if accidental, or open the saved run instead.',
   },
   paneServiceIdle: {
     reason: 'not-yet',

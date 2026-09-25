@@ -10,7 +10,7 @@ import path from 'path'
 import type { HttpProbe, TcpProbe } from '../../../../../../../shared/launcher/types'
 import { coerceTcpPort, isHealthy, isTcpListening } from '../../../../shared/launcher-startup'
 import { type RunBootFailure } from './manifest'
-import type { RunBootEvidence } from '../../../../../../../shared/run-state'
+import { COMPILER_FAILURE_NEXT_ACTION, type RunBootEvidence } from '../../../../../../../shared/run-state'
 import { classifyBootEvidence, diagnosticExcerpt, redactDiagnosticText } from './diagnostic-redaction'
 import type { PtyHandle } from './pty-spawner'
 import os from 'os'
@@ -18,6 +18,8 @@ import { randomUUID } from 'crypto'
 import { prepareWorktreeDependencies } from './dependency-provenance'
 import { dependencyIncompatibilityReason } from '../../../../../../../shared/dependency-provenance'
 import { loadFeatures } from '../../../../shared/feature-loader'
+import { killTree, scheduleSigkillFallback } from './run-spawn'
+import { readWatchCompilerFailure } from './watch-compiler-result'
 
 // node-pty reports the raw signal number; spawnSync reports the name. The
 // manifest stores names only, so one record can never read "signal 15" where
@@ -40,12 +42,46 @@ function bootEvidence(logPath: string): Pick<RunBootFailure, 'logPath' | 'excerp
 // same attempt don't overwrite the original cause.
 function recordBootFailure(ctx: RunContext, failure: RunBootFailure, lifecycleLabel: string): void {
   ctx.bootFailure ??= failure
-  ctx.stateSink.setServiceStatus(ctx.runId, failure.safeName, 'timeout')
+  ctx.stateSink.setServiceStatus(ctx.runId, failure.safeName, failure.reason === 'compiler-failed' ? 'failed' : 'timeout')
   ctx.stateSink.patchManifest(ctx.runId, { bootFailure: ctx.bootFailure })
   recordLifecycle(ctx, 'starting-services', lifecycleLabel, {
     detail: [ctx.bootFailure.detail, ctx.bootFailure.nextAction].filter(Boolean).join(' '),
     severity: 'error',
   })
+}
+
+function recordRuntimeServiceFailure(
+  ctx: RunContext,
+  svc: ServiceSpec,
+  kind: 'compiler' | 'process-exited',
+  detail: string,
+  exit?: { exitCode: number; signal: string | null },
+): void {
+  if (ctx.stopped || ctx.serviceFailure || ctx.status === 'passed' || ctx.status === 'aborted') return
+  const logPath = ctx.paths.serviceLog(svc.safeName)
+  ctx.serviceFailure = {
+    service: svc.name,
+    safeName: svc.safeName,
+    kind,
+    detail,
+    ...bootEvidence(logPath),
+    command: redactDiagnosticText(svc.command),
+    cwd: svc.cwd,
+    ...(exit ? { exitCode: exit.exitCode, signal: exit.signal } : {}),
+    at: new Date().toISOString(),
+  }
+  ctx.stateSink.setServiceStatus(ctx.runId, svc.safeName, 'failed')
+  ctx.stateSink.patchManifest(ctx.runId, { serviceFailure: ctx.serviceFailure })
+  recordLifecycle(ctx, ctx.status === 'healing' ? 'agent-healing' : ctx.playwrightPty ? 'running-tests' : 'services-ready', `Service failed after readiness: ${svc.name}`, {
+    detail: ctx.status === 'healing'
+      ? `${detail} The service will restart before test verification.`
+      : `${detail} The run will enter healing after the current Playwright process stops.`,
+    severity: 'error',
+  })
+  if (ctx.playwrightPty) {
+    killTree(ctx.playwrightPty, 'SIGTERM')
+    scheduleSigkillFallback(ctx.playwrightPty)
+  }
 }
 
 // What the evidence added decides the action; the reason only breaks the tie
@@ -57,6 +93,7 @@ const HEALTH_TIMEOUT_ACTION = 'The process remained alive but readiness never pa
 
 function readinessNextAction(reason: 'health-timeout' | 'process-exited', evidence: RunBootEvidence | null): string {
   if (evidence === 'underlying-cause-not-preserved') return UNPRESERVED_CAUSE_ACTION
+  if (evidence === 'compiler-failure') return COMPILER_FAILURE_NEXT_ACTION
   if (reason === 'health-timeout') return HEALTH_TIMEOUT_ACTION
   if (evidence === 'empty-output') return EMPTY_OUTPUT_ACTION
   return 'Fix the failure shown in the preserved process evidence, then restart the run.'
@@ -186,6 +223,12 @@ export function ensureLogFile(ctx: RunContext, target: string): void {
 export function spawnService(ctx: RunContext, svc: ServiceSpec): void {
   const logPath = ctx.paths.serviceLog(svc.safeName)
   ensureLogFile(ctx, logPath)
+  ctx.serviceReady.delete(svc.name)
+  ctx.serviceCompilerOutput.delete(svc.name)
+  if (ctx.serviceFailure?.service === svc.name) {
+    ctx.serviceFailure = undefined
+    ctx.stateSink.patchManifest(ctx.runId, { serviceFailure: undefined })
+  }
   let pty: PtyHandle
   try {
     pty = ctx.ptyFactory({
@@ -213,16 +256,50 @@ export function spawnService(ctx: RunContext, svc: ServiceSpec): void {
   ctx.servicePtys.set(svc.name, pty)
   ctx.serviceExitEvidence.delete(svc.name)
   ctx.emit('service-started', { service: svc, pid: pty.pid })
+  let stoppedForCompilerFailure = false
 
   pty.onData((chunk) => {
     try { fs.appendFileSync(logPath, chunk) } catch { /* ignore */ }
     ctx.emit('service-output', { service: svc, chunk })
+    if (ctx.stopped || ctx.status === 'passed' || ctx.status === 'aborted' || ctx.servicePtys.get(svc.name) !== pty) return
+    const result = readWatchCompilerFailure(ctx.serviceCompilerOutput.get(svc.name) ?? '', chunk)
+    ctx.serviceCompilerOutput.set(svc.name, result.tail)
+    if (!result.failed) return
+    const detail = `Watch compiler reported a failed build for ${svc.name}.`
+    if (ctx.serviceReady.has(svc.name)) {
+      recordRuntimeServiceFailure(ctx, svc, 'compiler', detail)
+    } else {
+      recordBootFailure(ctx, {
+        service: svc.name,
+        safeName: svc.safeName,
+        reason: 'compiler-failed',
+        classification: 'compiler-failure',
+        detail,
+        ...bootEvidence(logPath),
+        command: redactDiagnosticText(svc.command),
+        cwd: svc.cwd,
+        nextAction: COMPILER_FAILURE_NEXT_ACTION,
+      }, `Compiler failed before readiness: ${svc.name}`)
+    }
+    if (ctx.executionType !== 'boot') {
+      stoppedForCompilerFailure = true
+      ctx.servicePtys.delete(svc.name)
+      killTree(pty, 'SIGTERM')
+      scheduleSigkillFallback(pty)
+    }
   })
   pty.onExit(({ exitCode, signal }) => {
-    if (ctx.servicePtys.get(svc.name) !== pty) return
-    ctx.servicePtys.delete(svc.name)
+    const current = ctx.servicePtys.get(svc.name)
+    // A failed watcher is removed immediately so healing can restart it. Its
+    // later exit still closes the visible terminal unless a replacement owns it.
+    if (current !== pty && !(stoppedForCompilerFailure && !current)) return
+    const wasReady = ctx.serviceReady.has(svc.name)
+    if (current === pty) ctx.servicePtys.delete(svc.name)
     ctx.serviceExitEvidence.set(svc.name, { exitCode, signal: signalName(signal) })
     ctx.emit('service-exit', { service: svc, exitCode, signal })
+    if (wasReady) recordRuntimeServiceFailure(ctx, svc, 'process-exited',
+      `Required service ${svc.name} exited after readiness (code ${exitCode}).`,
+      { exitCode, signal: signalName(signal) })
   })
 }
 
@@ -243,6 +320,7 @@ export async function waitForServiceReady(ctx: RunContext, svc: ServiceSpec): Pr
     ctx.runnerLog?.warn(msg)
     ctx.emit('agent-output', { chunk: `\n[warning] ${msg}\n` })
     ctx.stateSink.setServiceStatus(ctx.runId, svc.safeName, 'ready')
+    ctx.serviceReady.add(svc.name)
     ctx.emit('health-check', { service: svc, healthy: true })
     return
   }
@@ -290,9 +368,14 @@ export async function pollUntilReady(ctx: RunContext,
   let failureReason: RunBootFailure['reason'] = 'health-timeout'
   while (Date.now() < deadline) {
     if (ctx.stopped) return
+    if (ctx.bootFailure || ctx.serviceFailure) return
     const ready = await attempt()
     if (ctx.stopped) return
-    if (ready) {
+    if (ctx.bootFailure || ctx.serviceFailure) return
+    // The process may exit while an in-flight probe is returning green.
+    // Its exit evidence belongs to this attempt (spawn clears older evidence).
+    if (ready && !ctx.serviceExitEvidence.has(svc.name)) {
+      ctx.serviceReady.add(svc.name)
       ctx.stateSink.setServiceStatus(ctx.runId, svc.safeName, 'ready')
       ctx.emit('health-check', { service: svc, healthy: true, transport })
       recordLifecycle(ctx, ctx.status === 'healing' ? 'agent-healing' : 'starting-services', `Health passed: ${svc.name}`, {
@@ -305,7 +388,7 @@ export async function pollUntilReady(ctx: RunContext,
     // crash or compile error). spawnService's onExit removed it from the pty
     // map, so a missing entry means the process is gone — fail now instead of
     // polling a dead port for the rest of the deadline.
-    if (!ctx.servicePtys.has(svc.name)) {
+    if (!ctx.servicePtys.has(svc.name) || ctx.serviceExitEvidence.has(svc.name)) {
       failureReason = 'process-exited'
       break
     }

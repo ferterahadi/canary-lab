@@ -5,6 +5,8 @@
 // profile arrays in ../tool-support.ts (see the cl_add-mcp-tool skill).
 import { z } from 'zod'
 import { writeHealSignal } from '../../features/runs/logic/heal/external-heal-surface'
+import { runDirFor } from '../../features/runs/logic/runtime/run-paths'
+import { claimedSingleAttempt, policyForRunManifest, NEW_RUN_REQUIRED_MESSAGE } from '../../shared/single-attempt'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
 import { type ToolGroupContext, HEAL_STATUS, SIGNAL_KIND, WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS, WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS, asJsonResult, ensureExternalClaimForMcpCall, errorResult, failureResult, hasText, healWaitNext, waitForHealTask } from '../tool-support'
 
@@ -67,7 +69,7 @@ export function registerHealFlowTools(ctx: ToolGroupContext): void {
 
   registerTool('wait_for_heal_task', {
     description:
-      'Wait until a claimed run needs code fixes or reaches a terminal result. Use after start_run/claim_heal and again after signal_run. Blocks for a short bounded window and heartbeats for you. If still active when the window elapses it returns type:"still_waiting" (NOT terminal) — immediately call wait_for_heal_task again with the same runId + session_id. Loop on still_waiting until needs_heal / passed / failed. Never poll get_run_snapshot or get_run to wait. A needs_heal task may be a service that failed to boot (no tests ran): context.failedTests is empty and context.bootFailure carries reason/classification, command/cwd, exit/signal, a bounded redacted excerpt, and full log path. classification:"underlying-cause-not-preserved" means an outer wrapper did not preserve the underlying failure — do not guess it; fix that product wrapper to log and rethrow, then signal_run kind:"restart".',
+      'Wait until a claimed run needs code fixes or reaches a terminal result. Use after start_run/claim_heal and again after signal_run. Blocks for a short bounded window and heartbeats for you. If still active when the window elapses it returns type:"still_waiting" (NOT terminal) — immediately call wait_for_heal_task again with the same runId + session_id. Loop on still_waiting until needs_heal / passed / failed. Never poll get_run_snapshot or get_run to wait. A needs_heal task may be a service that failed to boot (no tests ran): context.failedTests is empty and context.bootFailure carries reason/classification, command/cwd, exit/signal, a bounded redacted excerpt, and full log path. classification:"underlying-cause-not-preserved" means an outer wrapper did not preserve the underlying failure — do not guess it; fix that product wrapper to log and rethrow, then signal_run kind:"restart". A post-readiness service failure appears as context.serviceFailure with partial Playwright results; inspect its kind, excerpt and service log, fix app code, then signal_run kind:"restart".',
     inputSchema: {
       runId: z.string(),
       session_id: z.string().describe('External heal session id that owns this run.'),
@@ -83,7 +85,7 @@ export function registerHealFlowTools(ctx: ToolGroupContext): void {
 
   registerTool('signal_run', {
     description:
-      'Write a heal-cycle signal. The orchestrator picks it up via its existing poll loop and writes the diagnosis journal from this signal plus runner-observed git diff. Use `rerun` for test-only fixes (no service restart) and `restart` when services need to be restarted. Both paths recheck dependencies and persist fresh evidence before service spawn or test verification. A dependency block remains in context.dependencyBlockers on repeat waits and get_heal_context; repair its requiredAction, asking only for a genuine user choice or missing authority.',
+      'Write a heal-cycle signal. The orchestrator picks it up via its existing poll loop and writes the diagnosis journal from this signal plus runner-observed git diff. Use `rerun` for test-only fixes (no service restart) and `restart` when services need to be restarted. If context.singleAttempt.claimed is true, the signal ends this run failed/unverified with its patch captured; no restart or rerun occurs. Otherwise both paths recheck dependencies and persist fresh evidence before service spawn or test verification. A dependency block remains in context.dependencyBlockers on repeat waits and get_heal_context; repair its requiredAction, asking only for a genuine user choice or missing authority.',
     inputSchema: {
       runId: z.string(),
       kind: SIGNAL_KIND,
@@ -107,6 +109,7 @@ export function registerHealFlowTools(ctx: ToolGroupContext): void {
       return errorResult(`session-mismatch: run is held by ${ownership.currentSession?.sessionId}`)
     }
     if (session_id) deps.broker.touch(runId, session_id)
+    const newRunRequired = claimedSingleAttempt(runDirFor(deps.store.logsDir, runId), policyForRunManifest(detail.manifest))
     const body = kind === 'restart' || kind === 'rerun'
       ? { hypothesis: hypothesis!.trim(), fixDescription: fixDescription!.trim() }
       : {}
@@ -117,7 +120,11 @@ export function registerHealFlowTools(ctx: ToolGroupContext): void {
       return errorResult(`could not write signal: ${(err as Error).message}`)
     }
     deps.broker.bumpCycle(runId)
-    return asJsonResult({ accepted: true, kind, path: signal.path, runId, ...healWaitNext() })
+    return asJsonResult({
+      accepted: true, kind, path: signal.path, runId,
+      ...(newRunRequired ? { disposition: 'new_run_required', message: NEW_RUN_REQUIRED_MESSAGE } : {}),
+      ...healWaitNext(),
+    })
   })
 
   registerTool('handoff_heal', {

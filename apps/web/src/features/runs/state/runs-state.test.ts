@@ -107,6 +107,14 @@ describe('runsReducer', () => {
     expect(bare.runs.find((r) => r.runId === 'm2')!).not.toHaveProperty('env')
   })
 
+  it('keeps a spent attempt unavailable after a live detail update', () => {
+    const spent = { ...detail({ status: 'failed' }), newRunRequired: true as const }
+    const next = runsReducer(initialRunsState, { type: 'update', runId: 'r1', detail: spent })
+
+    expect(next.runs[0].newRunRequired).toBe(true)
+    expect(next.details.r1.newRunRequired).toBe(true)
+  })
+
   it('update mirrors the pending spec-edit and hint counts the backend index carries', () => {
     // Same field-for-field rule as above: the Runs list flags a run with
     // untested spec edits off these counts, and every heartbeat `update` frame

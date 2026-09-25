@@ -16,6 +16,8 @@ interface StoredRequest extends RunStartRequest {
 export interface StartRequestResponse { statusCode: number; body: Record<string, unknown> }
 
 const pendingStates = new Set<RunStartRequest['status']>(['awaiting-review', 'ready', 'starting'])
+const statusAfterReview = (record: StoredRequest, decision: 'restored' | 'adopted' | 'approved-for-new-run') =>
+  decision === 'restored' && record.owner.kind === 'external' ? 'cancelled' as const : 'ready' as const
 
 export function runStartRequestStore(logsDir: string) {
   return sharedTaskStore<StoredRequest>({
@@ -98,7 +100,10 @@ export class RunStartRequests {
       ?.find((item) => item.revision === record.review.revision && item.receipt)
     // An intermediate adoption entry or an empty diff is not a completed
     // decision. The full persisted receipt closes the mutation boundary.
-    if (decision) return this.save(record, { status: 'ready', error: undefined })
+    if (decision) return this.save(record, {
+      status: statusAfterReview(record, decision.decision),
+      error: undefined,
+    })
     if (manifest?.suiteSnapshot?.kind === 'taken' && manifest.featureDir) {
       try {
         const current = suiteReviewFiles(manifest.suiteSnapshot.dir, manifest.featureDir, suiteRuntimeInputTargetsForSnapshot(manifest.suiteSnapshot.dir))
@@ -107,10 +112,14 @@ export class RunStartRequests {
         // matching recorded boundary; an empty diff alone is not approval.
         const settledBoundary = current.files.length === 0 && [...(manifest.specEdits?.reviewDecisions ?? [])].reverse()
           .find((item) => (item.decision === 'restored' || item.decision === 'adopted') && item.receipt && item.at >= record.createdAt)
-        if (settledBoundary) return this.save(record, { status: 'ready', review: { runId: record.review.runId, revision: settledBoundary.revision }, error: undefined })
+        if (settledBoundary) return this.save(record, {
+          status: statusAfterReview(record, settledBoundary.decision),
+          review: { runId: record.review.runId, revision: settledBoundary.revision }, error: undefined,
+        })
         if (current.files.length && current.revision !== record.review.revision) {
-          const settled = manifest.specEdits?.reviewDecisions?.some((item) => item.revision === current.revision && item.receipt)
-          return this.save(record, { review: { runId: record.review.runId, revision: current.revision }, status: settled ? 'ready' : 'awaiting-review' })
+          const settled = manifest.specEdits?.reviewDecisions?.find((item) => item.revision === current.revision && item.receipt)
+          const status = settled ? statusAfterReview(record, settled.decision) : 'awaiting-review'
+          return this.save(record, { review: { runId: record.review.runId, revision: current.revision }, status })
         }
       } catch { /* retain the blocker when its source is temporarily unavailable */ }
     }

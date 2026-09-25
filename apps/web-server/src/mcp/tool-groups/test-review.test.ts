@@ -27,7 +27,7 @@ describe('test review human gate', () => {
     const base = send.getMockImplementation()!
     send.mockImplementation(async (request) => {
       if ((request as { url?: string }).url === '/api/run-requests/request1') return { statusCode: 200, body: {
-        requestId: 'request1', feature: 'checkout', status: 'ready', review: { runId: args.runId, revision: args.review_revision },
+        requestId: 'request1', feature: 'checkout', status: kind === 'external' ? 'cancelled' : 'ready', review: { runId: args.runId, revision: args.review_revision },
         owner: kind === 'internal' ? { kind } : { kind, sessionId: 'owner-session', clientKind: 'codex' },
       } } as never
       if (request.method === 'POST') return { statusCode: 200, body: { decision: 'restored', execution: { status: 'none' } } } as never
@@ -38,8 +38,8 @@ describe('test review human gate', () => {
     const result = value(await tools.raw('review_test_changes', parameters, context(opened.requestState, {
       action: 'accept', content: { choice: 'Restore recorded files' },
     })))
-    expect(result.nextSteps).toEqual(kind === 'external' ? ['start_run'] : [])
-    expect(result.next).toContain(kind === 'external' ? 'owner-session' : 'do not start another run')
+    expect(result.nextSteps).toEqual([])
+    expect(result.next).toContain(kind === 'external' ? 'Stop waiting and do not start a run' : 'do not start another run')
     expect(result.nextSteps).not.toContain('wait_for_heal_task')
   })
 
@@ -63,6 +63,22 @@ describe('test review human gate', () => {
     const result = await tools.call('get_test_review', { runId: args.runId, request_id: 'request1' })
     expect(String(result.next)).toContain(expected)
     expect(result.request_id).toBe('request1')
+  })
+
+  it('routes an approved external request back to its original session', async () => {
+    const { tools, send } = fixture()
+    const fallback = send.getMockImplementation()!
+    send.mockImplementation(async (request) => {
+      if ((request as { url?: string }).url === '/api/run-requests/request1') return { statusCode: 200, body: {
+        requestId: 'request1', feature: 'checkout', status: 'ready', review: { runId: args.runId, revision: args.review_revision },
+        owner: { kind: 'external', clientKind: 'codex', sessionId: 'original-session' },
+      } } as never
+      return fallback(request)
+    })
+
+    const result = await tools.call('get_test_review', { runId: args.runId, request_id: 'request1' })
+    expect(result.nextSteps).toEqual(['start_run'])
+    expect(result.next).toContain('original-session')
   })
 
   it('keeps a missing or cross-run continuation explicit rather than guessing a replacement', async () => {
@@ -105,8 +121,9 @@ describe('test review human gate', () => {
         offEvent: (listener: (event: unknown) => void) => { listeners.splice(listeners.indexOf(listener), 1) },
       }
       const review = { ...args, review_revision: revision, feature: 'checkout', files: [{ file: 'e2e/a.spec.ts', change: 'modified' }], patchPath: '/review.patch', canAdopt: true }
+      let requestStatus: 'awaiting-review' | 'ready' = 'awaiting-review'
       const send = vi.fn(async (request: { url: string }) => request.url === '/api/run-requests/request1'
-        ? { statusCode: 200, body: { requestId: 'request1', feature: 'checkout', runId: args.runId, review: { runId: args.runId, revision }, owner: { kind: 'internal' }, status: 'awaiting-review' } }
+        ? { statusCode: 200, body: { requestId: 'request1', feature: 'checkout', runId: args.runId, review: { runId: args.runId, revision }, owner: { kind: 'internal' }, status: requestStatus } }
         : { statusCode: 200, body: review })
       const tools = captureTools(registerTestReviewTools, { projectRoot: '/project', store, testReviewRequest: send })
       const opened = await tools.call('get_test_review', { runId: args.runId })
@@ -117,6 +134,13 @@ describe('test review human gate', () => {
       expect(waited).toMatchObject({ status: 'still_waiting', request_id: 'request1' })
       expect(String(waited.next)).toContain('Carry the original request_id')
       expect(listeners).toHaveLength(0)
+      fs.writeFileSync(path.join(feature, 'e2e/a.spec.ts'), 'different candidate\n')
+      requestStatus = 'ready'
+      const changed = value(await tools.raw('review_test_changes', {
+        ...args, review_revision: revision, request_id: 'request1', wait_for_decision: true, browser_wait_token: opened.browser_wait_token, timeout_ms: 1,
+      }))
+      expect(changed).toMatchObject({ status: 'review-changed', nextSteps: ['get_test_review'] })
+      expect(changed.next).toContain('Stop this watcher')
     } finally {
       fs.rmSync(root, { recursive: true, force: true })
     }
@@ -173,6 +197,37 @@ describe('test review human gate', () => {
     const { tools, send } = fixture(false)
     expect(value(await tools.raw('review_test_changes', { ...args, confirm: true }, context()))).toMatchObject({ reason: 'elicitation-unavailable', reviewUrl: expect.stringContaining('tests-review') })
     expect(send.mock.calls.some(([r]) => r.method === 'POST')).toBe(false)
+  })
+
+  it('offers a browser watcher to a Codex client without forms for the saved request', async () => {
+    const { tools, send } = fixture(false)
+    const result = value(await tools.raw('review_test_changes', { ...args, request_id: 'request1' }, context()))
+    expect(result).toMatchObject({ status: 'needs-input', reason: 'elicitation-unavailable',
+      request_id: 'request1', nextSteps: ['get_test_review', 'review_test_changes'] })
+    expect(result.next).toContain('background agent')
+    expect(send.mock.calls.some(([request]) => request.method === 'POST')).toBe(false)
+  })
+
+  it.each(['decline', 'cancel'] as const)('hands a %s response to a read-only watcher without claiming a human decision', async (action) => {
+    const { tools, send } = fixture()
+    const original = send.getMockImplementation()!
+    send.mockImplementation(async (request) => {
+      if ((request as { url?: string }).url === '/api/run-requests/request1') return { statusCode: 200, body: {
+        requestId: 'request1', feature: 'checkout', status: 'awaiting-review',
+        review: { runId: args.runId, revision: args.review_revision },
+        owner: { kind: 'external', sessionId: 'original-session', clientKind: 'codex' },
+      } } as never
+      return original(request)
+    })
+    const parameters = { ...args, request_id: 'request1' }
+    const opened = await tools.raw('review_test_changes', parameters, context()) as InputRequiredResult
+    const result = value(await tools.raw('review_test_changes', parameters, context(opened.requestState, { action })))
+    expect(result).toMatchObject({ status: 'needs-input', request_id: 'request1',
+      request: { status: 'awaiting-review', owner: { sessionId: 'original-session' } },
+      browser_wait_token: expect.any(String), nextSteps: ['get_test_review', 'review_test_changes'] })
+    expect(result.reason).toContain(`client answered "${action}"`)
+    expect(result.next).toContain('background agent')
+    expect(send.mock.calls.some(([request]) => request.method === 'POST')).toBe(false)
   })
 
   it('tells Desktop\'s Code tab that nothing was shown, then keeps the approval rule verbatim', async () => {

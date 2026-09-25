@@ -45,6 +45,19 @@ export class NotificationStore {
     return this.read().items.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }
 
+  sourceKeys(prefix: string): string[] {
+    return Object.keys(this.read().sources).filter((key) => key.startsWith(prefix))
+  }
+
+  markUnavailable(): void {
+    const data = this.read()
+    let changed = false
+    for (const item of data.items) {
+      if (!item.resolvedAt && !item.unavailable) { item.unavailable = true; changed = true }
+    }
+    if (changed) this.save(data)
+  }
+
   remove(id: string): void {
     const data = this.read()
     const items = data.items.filter((item) => item.id !== id)
@@ -62,11 +75,41 @@ export class NotificationStore {
     this.save(data)
   }
 
+  isRetired(feature: string): boolean {
+    return this.read().sources[`test-review:${feature}`]?.signature === 'retired'
+  }
+
+  retire(feature: string): void {
+    const data = this.read()
+    const key = `test-review:${feature}`
+    const previous = data.sources[key]
+    if (previous?.signature === 'retired') return
+    const item = data.items.find((entry) => entry.id === previous?.notificationId)
+    if (item && !item.resolvedAt) item.resolvedAt = new Date().toISOString()
+    data.sources[key] = { signature: 'retired', ...(previous?.notificationId ? { notificationId: previous.notificationId } : {}) }
+    this.save(data)
+  }
+
+  restore(feature: string): void {
+    const data = this.read()
+    const key = `test-review:${feature}`
+    if (data.sources[key]?.signature !== 'retired') return
+    data.sources[key] = { signature: 'absent' }
+    this.save(data)
+  }
+
   reconcile(sources: NotificationSource[], unavailableSourceKeys: ReadonlySet<string> = new Set()): void {
     const data = this.read()
     const now = new Date().toISOString()
     let changed = false
     const seen = new Set(sources.map((source) => source.key))
+    for (const [key, previous] of Object.entries(data.sources)) {
+      const item = data.items.find((entry) => entry.id === previous.notificationId)
+      if (!item || item.resolvedAt) continue
+      const unavailable = unavailableSourceKeys.has(key)
+      if (unavailable && !item.unavailable) { item.unavailable = true; changed = true }
+      if (!unavailable && item.unavailable) { delete item.unavailable; changed = true }
+    }
     const settle = (id: string | undefined): void => {
       const item = data.items.find((item) => item.id === id)
       if (item && !item.resolvedAt) { item.resolvedAt = now; changed = true }
@@ -99,7 +142,7 @@ export class NotificationStore {
       changed = true
     }
     for (const [key, previous] of Object.entries(data.sources)) {
-      if (!seen.has(key) && !unavailableSourceKeys.has(key) && previous.signature !== 'absent') {
+      if (!seen.has(key) && !unavailableSourceKeys.has(key) && previous.signature !== 'absent' && previous.signature !== 'retired') {
         settle(previous.notificationId)
         data.sources[key] = { signature: 'absent' }
         changed = true

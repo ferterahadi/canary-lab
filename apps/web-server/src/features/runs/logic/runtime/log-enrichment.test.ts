@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { capSlice, capSliceWithMeta, enrichSummaryWithLogs, extractAllSlices, extractLogsForTest, stripAnsi, writeErrorFile, writeHealIndex } from './log-enrichment'
+import { capSlice, capSliceWithMeta, enrichSummaryWithLogs, extractAllSlices, extractLogsForTest, readableTerminalLog, stripAnsi, writeErrorFile, writeHealIndex } from './log-enrichment'
 import { LOGS_DIR as REAL_LOGS, MANIFEST_PATH as REAL_MANIFEST, SUMMARY_PATH as REAL_SUMMARY } from './paths'
 
 let tmpDir: string
@@ -147,6 +147,33 @@ describe('stripAnsi', () => {
     expect(stripAnsi('\x1b[2Jcleared')).toBe('cleared')  // erase screen
     expect(stripAnsi('\x1b(B\x1b[mhi')).toBe('hi')       // charset + reset
     expect(stripAnsi('\x1b]0;title\x07x')).toBe('x')     // OSC window title
+  })
+})
+
+describe('readableTerminalLog', () => {
+  it('strips codes, keeps the last redraw frame, and folds repeats in order', () => {
+    const raw = [
+      '\x1b[32mINFO\x1b[0m boot\r',
+      '\x1b[2K\x1b[1Gyarn run v1.22.22\r',
+      '\x1b[2K\x1b[1Gyarn run v1.22.22\r',
+      'building 10%\rbuilding 90%\rbuilt\r',
+      '',
+      '',
+      '',
+      'webpack compiled with \x1b[1m\x1b[31m6 errors\x1b[39m\x1b[22m',
+    ].join('\n')
+    expect(readableTerminalLog(raw)).toBe([
+      'INFO boot',
+      'yarn run v1.22.22  (×2)',
+      'built',
+      '',
+      'webpack compiled with 6 errors',
+      '',
+    ].join('\n'))
+  })
+
+  it('renders an empty log as a single newline', () => {
+    expect(readableTerminalLog('\x1b[0m\r\n\n')).toBe('\n')
   })
 })
 

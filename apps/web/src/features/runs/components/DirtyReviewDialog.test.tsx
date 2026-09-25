@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Feature, RunIndexEntry, RunDetail } from '@/shared/api/types'
 import * as api from '@/shared/api/client'
+import { ApiError } from '@/shared/api/internal'
 import { multilineImportReview, testFileReview } from '@/shared/api/__fixtures__/test-review'
 import { DirtyReviewDialog } from './DirtyReviewDialog'
 
@@ -645,6 +646,37 @@ it('shows unavailable counts rather than a fabricated zero when a comparison fai
   expect(changeMarks()).toEqual([])
   expect(button('Next test change').disabled).toBe(true)
   expect(document.querySelector('[aria-label="Edit blocks in this file"]')).toBeNull()
+})
+
+it('explains a removed live suite and returns to the saved run', async () => {
+  const onClose = vi.fn()
+  vi.mocked(api.getTestSourceComparison).mockRejectedValue(new ApiError(404, { error: 'Suite not found' }, 'Suite not found'))
+  await render({ features: [feature()], pendingRuns: [run], focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: detail, onClose })
+  expect(document.querySelector('[data-testid="dirty-review-suite-unavailable"]')?.textContent).toContain('Live suite unavailable')
+  expect(document.body.textContent).not.toContain('No test files available')
+  expect(document.body.textContent).not.toContain('Could not confirm this run’s review state')
+  await click('View saved run')
+  expect(onClose).toHaveBeenCalledOnce()
+})
+
+it('explains a stale review link after the suite disappears from feature listing', async () => {
+  vi.mocked(api.getTestSourceComparison).mockRejectedValue(new ApiError(404, { error: 'Suite not found' }, 'Suite not found'))
+  await render({ features: [], focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: detail, focus: { baseline: 'run' } })
+  expect(document.querySelector('[data-testid="dirty-review-suite-unavailable"]')).not.toBeNull()
+  expect(button('View saved run')).not.toBeUndefined()
+})
+
+it('notices a suite removed while its comparison stays open', async () => {
+  const intervals = vi.spyOn(globalThis, 'setInterval')
+  try {
+    await render({ features: [feature()], pendingRuns: [run], focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: detail })
+    const reconcile = intervals.mock.calls.find(([, delay]) => delay === 10_000)?.[0] as (() => void) | undefined
+    expect(reconcile).toBeDefined()
+    vi.mocked(api.getTestSourceComparison).mockRejectedValue(new ApiError(404, { error: 'Suite not found' }, 'Suite not found'))
+    await act(async () => { reconcile?.(); await Promise.resolve() })
+    expect(document.querySelector('[data-testid="dirty-review-suite-unavailable"]')).not.toBeNull()
+    expect(button('Accept & commit')).toBeUndefined()
+  } finally { intervals.mockRestore() }
 })
 
 it('hides a kind with nothing in it and opens on a kind that has tests', async () => {

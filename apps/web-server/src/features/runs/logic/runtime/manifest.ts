@@ -5,6 +5,7 @@ import type {
   HealEnd,
   QueueReason,
   RunBootFailure,
+  RunServiceFailure,
   RunFixCapture,
   RunPrAttempt,
   RunProposedPr,
@@ -23,6 +24,7 @@ import type { PendingSpecEdit } from '../dirty-specs/detect'
 import type { IntegrityHint } from './run-integrity-hints'
 import type { TestReviewDecision } from '../../../../../../../shared/test-review'
 import type { RunTestReviewApproval } from '../../../../../../../shared/test-review'
+import type { SingleAttemptPolicy } from '../../../../../../../shared/launcher/types'
 import type { RunDependencyProvenance } from '../../../../../../../shared/dependency-provenance'
 export type {
   HealEnd,
@@ -256,12 +258,17 @@ export interface RunManifest {
    *  service log as context. Absent on healthy/boot-only runs; cleared on a
    *  successful reboot during a heal cycle. */
   bootFailure?: RunBootFailure
+  /** Confirmed failure of a service after readiness, independent of test counts. */
+  serviceFailure?: RunServiceFailure
   /** Why the auto-heal loop stopped without passing. Written at every give-up
    *  site in `runAutoHealLoop`; absent on passing/boot-only/manual runs and on
    *  runs that never entered heal. */
   healEnd?: HealEnd
-  /** The heal agent's edits captured from the per-run worktree at teardown.
-   *  Absent on green runs, in-place runs, and runs the agent didn't change. */
+  /** Pinned at run start so a suite config edit cannot change retry safety
+   *  for an attempt that has already begun. The receipt belongs to the suite. */
+  singleAttempt?: SingleAttemptPolicy
+  /** The heal agent's edits from the per-run worktree. Provisional while the
+   *  run is active; final capture is written at teardown. */
   fixCapture?: RunFixCapture
   /** PRs opened from this run's captured fix, per repo — by the user's own
    *  request, or automatically when the run healed green. */
@@ -367,6 +374,8 @@ export interface RunIndexEntry {
    *  cold-loads terminal runs from this index, while full manifests are sent
    *  only for active runs. */
   healMode?: RunManifest['healMode']
+  /** Terminal single-attempt run whose repair still needs a fresh run. */
+  newRunRequired?: true
   verificationConfigName?: string
   verificationPlaywrightEnvsetId?: string
   verificationTargetUrls?: Record<string, string>

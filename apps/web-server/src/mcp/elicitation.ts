@@ -9,6 +9,7 @@ type ToolResult = CallToolResult | InputRequiredResult
 type AnswerSpec<T> = {
   scope: unknown
   revision?: unknown
+  onNonAccept?: (reason: string) => ToolResult | Promise<ToolResult>
 } & ({ mode: 'form'; schema: z.ZodType<T> } | { mode: 'url' })
 type InputSpec<T> = AnswerSpec<T> & { message: string; fallback: () => CallToolResult }
   & ({ mode: 'form' } | { mode: 'url'; url: string })
@@ -111,7 +112,8 @@ async function applyAnswer<T>(
   const response = z.object({ action: z.enum(['accept', 'decline', 'cancel']), content: z.unknown().optional() }).safeParse(ctx?.mcpReq.inputResponses?.answer)
   if (!response.success) return errorResult('Invalid elicitation response. Nothing was applied.')
   if (response.data.action !== 'accept') {
-    entry.result = Promise.resolve(inputPending(clientAnswerReport(response.data.action)))
+    const reason = clientAnswerReport(response.data.action)
+    entry.result = Promise.resolve(spec.onNonAccept?.(reason) ?? inputPending(reason))
   } else if (spec.mode === 'form') {
     const parsed = spec.schema.safeParse(response.data.content)
     if (!parsed.success) return errorResult('The submitted input does not match the requested fields. Nothing was applied.')

@@ -81,9 +81,10 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
       // reads the run over MCP right after) sees which live edits did not run.
       recordSpecEdits(ctx)
       ctx.emit('playwright-exit', { exitCode })
-      recordLifecycle(ctx, exitCode === 0 ? 'completed' : 'failed', `Playwright exited with code ${exitCode}`, {
-        detail: signal ? `Process signal: ${signal}` : undefined,
-        severity: exitCode === 0 ? 'success' : 'warning',
+      recordLifecycle(ctx, ctx.serviceFailure || exitCode !== 0 ? 'failed' : 'completed',
+        ctx.serviceFailure ? 'Playwright stopped after service failure' : `Playwright exited with code ${exitCode}`, {
+        detail: ctx.serviceFailure?.detail ?? (signal ? `Process signal: ${signal}` : undefined),
+        severity: ctx.serviceFailure ? 'error' : exitCode === 0 ? 'success' : 'warning',
       })
       const waiter = ctx.playwrightExitWaiter
       ctx.playwrightExitWaiter = null

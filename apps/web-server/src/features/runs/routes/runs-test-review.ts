@@ -41,6 +41,9 @@ export async function registerRunTestReviewRoutes(app: FastifyInstance, deps: Ru
     if (snapshot?.kind !== 'taken' || !manifest.featureDir || !fs.existsSync(snapshot.dir)) {
       return reply.code(409).send({ error: 'Run snapshot unavailable; no review baseline can be substituted.' })
     }
+    if (!fs.existsSync(manifest.featureDir) || (fs.existsSync(path.join(snapshot.dir, 'feature.config.cjs')) && !fs.existsSync(path.join(manifest.featureDir, 'feature.config.cjs')))) {
+      return reply.code(409).send({ error: 'The live suite is unavailable. This run’s saved snapshot remains available in the run details.' })
+    }
     const runtimeInputs = suiteRuntimeInputTargetsForSnapshot(snapshot.dir)
     const active = !!deps.store.registry.get(manifest.runId)?.adoptSpecEdits
     const terminal = isTerminalRunStatus(manifest.status)

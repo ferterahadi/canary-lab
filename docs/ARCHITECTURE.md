@@ -223,9 +223,23 @@ Flight attention transitions and test changes that block an active run or a fres
 start after an ended run create messages even when the browser is closed. Terminal
 blockers use the same byte-level review gate as run start, including exact-revision
 approval and restoration, rather than relying on a pending-file count in the run
-index. Each inbox read also reconciles these sources; the open client's ten-second
-reconciliation repairs missed events. An unavailable suite or historical snapshot
-preserves its existing review alert without preventing other features from updating.
+index. Each inbox read also reconciles these sources. A server recovery scan starts
+every ten seconds when no scan is running, reloads configured suite paths, and
+recomputes test integrity from disk. It yields between suites and does not queue
+overlapping scans. This repairs missed filesystem events even with no browser open.
+The open client's ten-second reconciliation repairs missed notification pushes.
+Recovery latency includes scan duration; these intervals are not instantaneous
+delivery guarantees. An unreadable suite or historical snapshot preserves its
+existing review alert with a visible unavailable state. Test-source failures do not
+prevent healthy Flight transitions from reaching History.
+Canary's explicit suite deletion, or a committed Git deletion of its tracked config,
+marks the review source retired. The alert moves to History while the saved run
+remains available. A missing live suite directory or discovery configuration also settles its test-review notification,
+even when a saved run still records pending edits: there is no current suite to
+review. This changes inbox eligibility only; it never approves edits, deletes saved
+evidence, or bypasses the run-start review gate. A restored suite with real pending
+changes creates a fresh notification episode. An existing live suite whose saved
+comparison cannot be read stays unverified rather than being treated as settled.
 A possible test weakening also stays
 in the inbox as an advisory integrity review after the run ends. Ordinary edits,
 coverage freshness, verification readiness, and failed-run evidence remain on
@@ -240,8 +254,19 @@ later quiet-to-attention transition creates a new message. Recovery marks retain
 messages resolved and moves them from the default Needs attention view into History.
 One feature-level identity owns test review across run transitions, so target or
 severity updates do not create a second active message. Manual note creation is not available.
-Notification actions navigate to the relevant flight or test
-review; they never change the run verdict or adopt test edits themselves.
+Notification actions revalidate their source on the server before navigation.
+Test-review clicks refresh the selected suite's integrity. If the issue settled or
+its action changed, the open panel shows the updated row and action; unavailable
+sources keep the panel open with an error. Resolved test reviews offer Open run or
+Open suite. Navigation never changes the run verdict or adopts test edits.
+
+Connected agent workflows receive a compact suite-scoped notification snapshot and
+revision in relevant tool catch-up responses and in every `wait_for_feature_change`
+response, including coverage timeouts. Notification-only changes do not wake that
+coverage wait early: the active client observes them on its next response, within
+the requested wait's maximum thirty seconds after server reconciliation. Reconnects
+receive the current snapshot without a notification cursor. Passive clients cannot
+be woken unsolicited. Neither delivery nor an action link authorizes extra work.
 
 Inbox eligibility and toast eligibility are separate. A blocked Flight or pending
 run review, including a terminal review that gates a fresh start, can raise the sticky toast; an advisory weakening hint remains in the
@@ -333,6 +358,14 @@ a reconnect reads the same receipt. The normal elicited path returns that receip
 without any browser click; retries do not apply the decision twice. Restoration
 checks the reviewed revision before changing files and rejects symlink paths.
 A clean Git tree is never treated as approval.
+For a blocked external start, Accept & commit makes its saved request ready for
+the original client to resume. Restore recorded files cancels that request after
+restoring the files; an elicitation decline or cancel records no decision and
+leaves it pending. If the client cannot present the form, it can keep a read-only
+wait in a background agent when supported, or in the current turn otherwise.
+Each watcher gets its own wait token. The external client must remain running
+for automatic continuation; Canary never treats a wait or notification as a
+review decision or starts an external request on the client's behalf.
 Active acceptance signals a rerun. Terminal acceptance is carried into fresh-run
 snapshot capture, rechecked before and during the copy, and recorded as provenance
 on the new run. Neither decision changes a verdict into a pass. Editing opens the existing
@@ -400,12 +433,30 @@ The MCP `start_run` tool calls the same route through `app.inject()`, so it does
 own a second execution path. `orchestrator.ts` then boots services through the
 launcher/PTY layer, runs Playwright, and captures evidence. Service output is
 written directly to `svc-<name>.log`; it does not depend on a visible terminal.
+The runner treats a completed webpack watch result with errors or an unexpected
+service exit as a confirmed service failure. Before readiness this stops boot
+without running tests; after readiness it stops Playwright, retains partial test
+evidence, and enters the configured heal path. Readiness resets on each service
+restart. Generic log lines containing "error" are diagnostic output, not verdicts.
 
 On failure, the run either spawns a local heal agent or parks for an external
 client. The agent fixes code and signals `rerun` or `restart`; the orchestrator
 continues the same run until pass or terminal failure. At teardown, Canary Lab
 captures repair diffs only for worktrees with a valid baseline. A captured repair
 that heals the run green may then be proposed as a draft pull request.
+
+For a feature with `singleAttempt.receipt`, the suite owns a run-relative
+receipt written before its one permitted external-effect attempt. Canary pins
+that path in the run manifest and checks for the file before any heal restart
+or rerun, including implicit pending-test reruns and terminal `run_ref` resume.
+For saved runs from before this field existed, restart checks consult that
+run's named suite config so a claimed historical attempt is not reused.
+After the receipt appears, a heal signal still records the diagnosis journal,
+but the orchestrator finalizes the run failed with `healEnd.reason =
+'new-run-required'` and captures the unverified patch at normal teardown.
+The external heal context, signal result, terminal wait result, and run UI
+explain that verification needs a fresh approved run ID. The suite's own boot
+guard remains the final barrier against another external effect.
 
 ### Logging and retention
 
@@ -604,9 +655,12 @@ no such fallback: the run fails before boot because its overlay must be applied
 in an isolated worktree.
 
 The normal worktree path exists for fix capture. `captureFixBaseline` stores a baseline ref after
-overlay + envset + WIP hydration, so the teardown diff is exactly the repair; `captureFixes`
-writes it to `<runDir>/fixes/<repo>.patch` + `fixes.json` + `manifest.fixCapture` before the
-worktree goes away. On this path, the heal agent does not mutate the source checkout;
+overlay + envset + WIP hydration. A worktree watcher publishes provisional diffs to
+`<runDir>/fixes/<repo>.patch`, `fixes.json`, and `manifest.fixCapture` while the agent edits;
+a periodic scan recovers missed file events. `captureFixes` writes the final diff before the
+worktree goes away. Changes shows provisional files immediately, but applying them to the
+source checkout or opening a PR waits until the run has stopped and finalized its patch.
+On this path, the heal agent does not mutate the source checkout;
 its edits reach the user as a patch file and, on a green healed run, may become a draft
 pull request (see [End-of-run pull request](#end-of-run-pull-request)). Non-portified
 worktrees are removed at teardown; a portified run reverses
@@ -1122,6 +1176,15 @@ or update a test run. One agent owns each suite repair until editing stops.
 Internal agents use the shared `runAgentProcess`; external agents use
 `start_discovery_repair`, `get_discovery_repair`, and `update_discovery_repair`
 through MCP. Both paths receive the same discovery-repair prompt template.
+
+The Tests API distinguishes a removed live suite from an existing suite whose
+configuration is missing or cannot load. A removed suite uses the same unavailable
+card layout without repair actions; no Playwright discovery was attempted.
+Missing or invalid configuration enters the discovery-error state with its exact
+diagnostic and the usual repair and retry actions. Discovery repair can start
+from the existing suite folder before its configuration loads, then verifies
+against the restored configuration and a fresh Playwright test list. A generic
+request failure has retry only and is not described as Playwright discovery.
 
 The Tests column has a discovery-error state and a repairing state. The latter
 uses `AgentSessionView` for internal session activity or external milestone

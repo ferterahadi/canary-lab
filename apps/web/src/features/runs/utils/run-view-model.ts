@@ -40,12 +40,16 @@ export function deriveRunViewModel(
   const status = manifest?.status ?? 'aborted'
   const executionType = manifest?.executionType ?? 'run'
   const lifecycle = detail?.manifest.lifecycle
+  const newRunRequired = detail?.newRunRequired === true || detail?.manifest.healEnd?.reason === 'new-run-required'
+    || (!detail && input?.newRunRequired === true)
   const events = detail?.lifecycleEvents ?? []
   const displayStatus = deriveDisplayStatus(status, transient)
   const waiting = transient ? undefined : runWaitingState(input)
-  const headline = (waiting?.kind === 'queued' ? undefined : waiting?.label) ?? transientHeadline(transient, executionType) ?? lifecycle?.headline ?? fallbackHeadline(status, executionType)
-  const subtext = waiting?.detail ?? lifecycle?.detail
-  const alert = primaryAlert(status, lifecycle?.abortReason?.service, executionType)
+  const headline = newRunRequired ? 'New run required to verify repair' : (waiting?.kind === 'queued' ? undefined : waiting?.label) ?? transientHeadline(transient, executionType) ?? lifecycle?.headline ?? fallbackHeadline(status, executionType)
+  const subtext = newRunRequired ? detail?.manifest.healEnd?.message : waiting?.detail ?? lifecycle?.detail
+  const alert = newRunRequired
+    ? { tone: 'warning' as const, message: detail?.manifest.healEnd?.message ?? 'This run cannot verify another attempt. Start a fresh run after approval.' }
+    : primaryAlert(status, lifecycle?.abortReason?.service, executionType)
 
   return {
     displayStatus,
@@ -53,7 +57,9 @@ export function deriveRunViewModel(
     headline,
     ...(subtext ? { subtext } : {}),
     ...(alert ? { primaryAlert: alert } : {}),
-    actions: executionType === 'verify'
+    actions: newRunRequired
+      ? { ...deriveRunActionAvailability(status, transient), restartHeal: { enabled: false, reason: 'This attempt is spent; start a fresh run after approval.' } }
+      : executionType === 'verify'
       ? verifyActionAvailability(status, transient)
       : executionType === 'boot'
         ? bootActionAvailability(status, transient)

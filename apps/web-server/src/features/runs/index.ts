@@ -59,7 +59,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     brokerFor: (runId) => brokers.get(runId) ?? null,
     logsDir,
   })
-  await app.register(runsStreamRoutes, { store: runStore })
+  await app.register(runsStreamRoutes, { store: runStore, featuresDir })
 
   return { scheduler, attachRunStreams, restartExternalRun }
 }

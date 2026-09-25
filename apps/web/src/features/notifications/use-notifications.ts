@@ -32,21 +32,37 @@ export function useNotifications() {
     return () => clearInterval(interval)
   }, [refresh])
 
-  const act = async (action: () => Promise<unknown>): Promise<boolean> => {
-    setBusy(true)
-    try {
-      await action()
-      await refresh()
-      return true
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not update notifications')
-      return false
-    } finally { setBusy(false) }
-  }
-
   return {
     items, error, loading, busy, refresh,
-    remove: (id: string) => act(() => api.deleteNotification(id)),
-    read: (id: string) => act(() => api.readNotification(id)),
+    resolveAction: async (id: string): Promise<{ target: api.NotificationTarget; item: api.WorkspaceNotification } | undefined> => {
+      setBusy(true)
+      try {
+        const result = await api.resolveNotificationAction(id)
+        // The action response is a fresh server snapshot; an older list request
+        // must not put its stale row back while navigation is happening.
+        generation.current++
+        setItems(result.items)
+        setError(result.status === 'unavailable' ? 'Could not verify the current notification. Retrying automatically.' : null)
+        const item = result.items.find((entry) => entry.id === id)
+        return result.status === 'current' && item && result.target ? { target: result.target, item } : undefined
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not verify notification action')
+        return undefined
+      } finally { setBusy(false) }
+    },
+    remove: async (id: string): Promise<boolean> => {
+      setBusy(true)
+      try {
+        await api.deleteNotification(id)
+        // A list request started before the delete must not restore its stale row.
+        generation.current++
+        setItems((current) => current.filter((item) => item.id !== id))
+        setError(null)
+        return true
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not update notifications')
+        return false
+      } finally { setBusy(false) }
+    },
   }
 }

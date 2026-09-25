@@ -145,7 +145,7 @@ describe('runs feature registrar', () => {
     expect(registrations[1].opts.broker).toBe(externalHealBroker)
     expect(registrations[2].opts).toMatchObject({ featuresDir, projectRoot: tmpDir, store: runStore })
     expect(registrations[3].opts).toMatchObject({ registry, logsDir })
-    expect(registrations[4].opts).toEqual({ store: runStore })
+    expect(registrations[4].opts).toEqual({ store: runStore, featuresDir })
 
     // The handle benchmark and the MCP surface reuse. An empty queue plus a
     // usable `fits` is the scheduler having been constructed here rather than

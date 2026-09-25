@@ -19,6 +19,7 @@ const base: NavState = {
   configTab: null,
   verifyOpen: false,
   specReviewOpen: false,
+  bootFailureFor: null,
   notificationsOpen: false,
   flightStartFor: null,
   flightStartFresh: false,
@@ -48,6 +49,11 @@ const persisted = (over: Partial<PersistedView> = {}): PersistedView => ({
 })
 
 describe('initialNavState', () => {
+  it('seeds the boot-failure dialog for the persisted run only', () => {
+    expect(initialNavState(persisted({ run: 'run-1', dialog: 'boot-failure' })).bootFailureFor).toBe('run-1')
+    expect(initialNavState(persisted({ run: 'run-1', dialog: 'config' })).bootFailureFor).toBeNull()
+  })
+
   it('carries view/feature/run/flight straight through', () => {
     const s = initialNavState(persisted({ view: 'coverage', feature: 'checkout', run: 'run-1', flight: 'fl_1' }))
     expect(s).toMatchObject({ view: 'coverage', feature: 'checkout', run: 'run-1', flight: 'fl_1' })
@@ -219,6 +225,13 @@ describe('routedDialog precedence (z-order)', () => {
     // …but a launcher opened from a flight is what is on top.
     expect(routedDialog({ ...base, specReviewOpen: true, demoOpen: true })).toBe('demo')
     expect(routedDialog({ ...base, specReviewOpen: true, flightStartFor: 'y' })).toBe('flight-start')
+  })
+
+  it('routes the boot-failure dialog only while its run is the selected one', () => {
+    expect(routedDialog({ ...base, run: 'run-1', bootFailureFor: 'run-1' })).toBe('boot-failure')
+    // Selecting another run leaves the dialog without a subject.
+    expect(routedDialog({ ...base, run: 'run-2', bootFailureFor: 'run-1' })).toBeNull()
+    expect(routedDialog({ ...base, run: 'run-1', bootFailureFor: 'run-1', specReviewOpen: true })).toBe('tests-review')
   })
 
   it('routes Project Settings, and ranks it under every overlay above it', () => {

@@ -46,7 +46,7 @@ beforeEach(async () => {
   dirtySpecStore = stubStore<never>([])
   app = Fastify()
   await register(app, {
-    logsDir: dir, workspaceEvents: { publish: vi.fn() }, flightStore, runStore, dirtySpecStore,
+    logsDir: dir, featuresDir: dir, workspaceEvents: { publish: vi.fn() }, flightStore, runStore, dirtySpecStore,
   } as unknown as ServerContext)
   await app.ready()
 })
@@ -59,6 +59,17 @@ afterEach(async () => {
 const inbox = async (): Promise<unknown[]> => (await app.inject('/api/notifications')).json()
 
 describe('notifications feature registrar', () => {
+  it('resolves a Flight alert from the store event when the Flight resumes', async () => {
+    const [active] = await inbox() as Array<{ id: string; resolvedAt?: string }>
+    expect(active.resolvedAt).toBeUndefined()
+
+    flightStore.list.mockReturnValue([{ ...flight, status: 'running', pauseReason: undefined }])
+    flightStore.fire()
+
+    const persisted = JSON.parse(fs.readFileSync(path.join(dir, 'notifications', 'state.json'), 'utf8')) as { items: Array<{ id: string; resolvedAt?: string }> }
+    expect(persisted.items).toEqual([expect.objectContaining({ id: active.id, resolvedAt: expect.any(String) })])
+  })
+
   it('keeps serving the inbox it already built when a store read fails, rather than throwing into the event that triggered the rebuild', async () => {
     const previous = await inbox()
     expect(previous).toHaveLength(1)
@@ -81,6 +92,29 @@ describe('notifications feature registrar', () => {
     expect(await inbox()).toEqual([expect.objectContaining({ resolvedAt: expect.any(String) })])
   })
 
+  it('marks an existing Flight alert unavailable when its source cannot be read', async () => {
+    const [active] = await inbox() as Array<{ id: string }>
+    flightStore.list.mockImplementation(() => { throw new Error('flight index unreadable') })
+
+    expect(() => flightStore.fire()).not.toThrow()
+
+    const rows = await inbox() as Array<{ id: string; unavailable?: boolean }>
+    expect(rows).toEqual([expect.objectContaining({ id: active.id, unavailable: true })])
+  })
+
+  it('returns a bounded feature projection and reports a missing action', async () => {
+    const active = (await app.inject('/api/notifications/feature/shop')).json()
+    expect(active).toMatchObject({ feature: 'shop', attentionCount: 1, items: [expect.objectContaining({ state: 'attention' })] })
+
+    flightStore.list.mockReturnValue([{ ...flight, status: 'running', pauseReason: undefined }])
+    flightStore.fire()
+    const resolved = (await app.inject('/api/notifications/feature/shop')).json()
+    expect(resolved).toMatchObject({ attentionCount: 0, items: [expect.objectContaining({ state: 'resolved' })] })
+
+    const missing = (await app.inject({ method: 'POST', url: '/api/notifications/not-here/resolve-action' })).json()
+    expect(missing.status).toBe('missing')
+  })
+
   it('does not replace a corrupt inbox with an empty success when refresh fails', async () => {
     fs.writeFileSync(path.join(dir, 'notifications', 'state.json'), '{invalid')
 
@@ -92,4 +126,12 @@ describe('notifications feature registrar', () => {
     await app.close()
     for (const store of [flightStore, runStore, dirtySpecStore]) expect(store.subscriberCount()).toBe(0)
   })
+})
+
+it('settles a healthy Flight even when test source reads fail', async () => {
+  const [active] = await inbox() as Array<{ id: string }>
+  runStore.list.mockImplementation(() => { throw new Error('run source unavailable') })
+  flightStore.list.mockReturnValue([{ ...flight, status: 'running', pauseReason: undefined }])
+  flightStore.fire()
+  expect(await inbox()).toEqual([expect.objectContaining({ id: active.id, resolvedAt: expect.any(String) })])
 })

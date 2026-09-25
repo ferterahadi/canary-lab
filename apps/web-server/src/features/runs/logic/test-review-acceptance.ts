@@ -81,10 +81,41 @@ function reviewedRepoPaths(root: string, featureDir: string, files: string[]): s
 export async function commitReviewedFiles(feature: string, featureDir: string, files: string[]): Promise<TestReviewGitReceipt> {
   const { root, realDir } = await gitLocation(featureDir)
   const repoPaths = reviewedRepoPaths(root, realDir, files)
-  const add = await runGit(root, ['add', '-A', '--', ...repoPaths])
-  if (add.code !== 0) throw Object.assign(new Error((add.stderr || add.stdout).trim() || 'Git could not stage the reviewed files.'), { statusCode: 500 })
-
+  const stagePaths: string[] = []
+  const commitPaths: string[] = []
   for (const repoPath of repoPaths) {
+    if (fs.existsSync(path.join(root, repoPath))) {
+      stagePaths.push(repoPath)
+      commitPaths.push(repoPath)
+      continue
+    }
+    const indexed = await runGit(root, ['ls-files', '--error-unmatch', '--', repoPath])
+    if (indexed.code === 0) {
+      stagePaths.push(repoPath)
+      commitPaths.push(repoPath)
+    } else if (indexed.code === 1) {
+      const staged = await runGit(root, ['diff', '--cached', '--quiet', '--', repoPath])
+      if (staged.code === 1) commitPaths.push(repoPath)
+      else if (staged.code !== 0) throw Object.assign(new Error((staged.stderr || staged.stdout).trim() || 'Git could not inspect the reviewed files.'), { statusCode: 500 })
+    } else {
+      throw Object.assign(new Error((indexed.stderr || indexed.stdout).trim() || 'Git could not inspect the reviewed files.'), { statusCode: 500 })
+    }
+  }
+  // A run snapshot can include a file whose deletion was already committed.
+  // Git has no path left to stage, but the caller still records its approval.
+  // A staged deletion remains in commitPaths and must not be passed to git add.
+  if (commitPaths.length === 0) {
+    const head = await runGit(root, ['rev-parse', '--verify', 'HEAD'])
+    if (head.code !== 0) throw Object.assign(new Error('No Git commit exists for the reviewed files.'), { statusCode: 409 })
+    return { status: 'already-committed', commit: head.stdout.trim() }
+  }
+
+  if (stagePaths.length > 0) {
+    const add = await runGit(root, ['add', '-A', '--', ...stagePaths])
+    if (add.code !== 0) throw Object.assign(new Error((add.stderr || add.stdout).trim() || 'Git could not stage the reviewed files.'), { statusCode: 500 })
+  }
+
+  for (const repoPath of stagePaths) {
     const liveExists = fs.existsSync(path.join(root, repoPath))
     const indexed = await runGit(root, ['ls-files', '--error-unmatch', '--', repoPath])
     if (liveExists && indexed.code !== 0) {
@@ -92,7 +123,7 @@ export async function commitReviewedFiles(feature: string, featureDir: string, f
     }
   }
 
-  const staged = await runGit(root, ['diff', '--cached', '--quiet', '--', ...repoPaths])
+  const staged = await runGit(root, ['diff', '--cached', '--quiet', '--', ...commitPaths])
   if (staged.code === 0) {
     const head = await runGit(root, ['rev-parse', '--verify', 'HEAD'])
     if (head.code !== 0) throw Object.assign(new Error('No Git commit exists for the reviewed files.'), { statusCode: 409 })
@@ -100,7 +131,7 @@ export async function commitReviewedFiles(feature: string, featureDir: string, f
   }
   if (staged.code !== 1) throw Object.assign(new Error((staged.stderr || staged.stdout).trim() || 'Git could not inspect the reviewed files.'), { statusCode: 500 })
 
-  const commit = await runGit(root, ['commit', '--only', '-m', `test: accept reviewed suite changes for "${feature}"`, '--', ...repoPaths])
+  const commit = await runGit(root, ['commit', '--only', '-m', `test: accept reviewed suite changes for "${feature}"`, '--', ...commitPaths])
   if (commit.code !== 0) throw Object.assign(new Error((commit.stderr || commit.stdout).trim() || 'Git could not commit the reviewed files.'), { statusCode: 500 })
   const head = await runGit(root, ['rev-parse', '--verify', 'HEAD'])
   if (head.code !== 0) throw Object.assign(new Error('Git committed the review but could not report its revision.'), { statusCode: 500 })

@@ -141,6 +141,13 @@ describe('useWorkspaceNavigation — seeding from the route', () => {
     expect(nav.routedDialog).toBeNull()
     expect(window.location.search).not.toContain('tests-review')
 
+    await mount(persisted({ run: 'run-1', dialog: 'boot-failure' }))
+    expect(nav.bootFailureFor).toBe('run-1')
+    expect(nav.routedDialog).toBe('boot-failure')
+    await act(async () => { nav.setBootFailureFor(null) })
+    expect(nav.routedDialog).toBeNull()
+    expect(window.location.search).not.toContain('boot-failure')
+
     await mount(persisted({ feature: 'checkout', dialog: 'flight-fresh' }))
     expect(nav.flightStartFor).toBe('checkout')
     expect(nav.flightStartFresh).toBe(true)

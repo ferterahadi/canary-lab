@@ -21,6 +21,7 @@ import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { ServerContext } from '../../server-context'
 import { settleOrchestratorRun } from './logic/settle-run'
 import { startSummaryChangeWatcher } from './logic/summary-change-watcher'
+import { claimedSingleAttempt, policyForRunManifest, NEW_RUN_REQUIRED_MESSAGE } from '../../shared/single-attempt'
 
 export function makeAttachRunStreams(
   ctx: ServerContext,
@@ -139,6 +140,9 @@ export function makeRestartExternalRun(
   const manifest = detail.manifest
   if (hasRetiredPerturbation(manifest)) throw Object.assign(new Error('This run used a retired perturbation and cannot be restarted; start a new run.'), { statusCode: 409 })
   if (!isRestartableRunStatus(manifest.status)) throw Object.assign(new Error('not-restartable'), { statusCode: 409 })
+  if (claimedSingleAttempt(runDirFor(logsDir, runId), policyForRunManifest(manifest))) {
+    throw Object.assign(new Error(NEW_RUN_REQUIRED_MESSAGE), { statusCode: 409 })
+  }
 
   const features = loadFeatures(featuresDir)
   const feature = features.find((f) => f.name === manifest.feature)

@@ -78,6 +78,9 @@ export interface WorkspaceNavigation {
   setConfigTab: (tab: ConfigTab) => void
   setVerifyOpen: (open: boolean) => void
   setSpecReviewOpen: (open: boolean) => void
+  /** The run whose boot-failure detail is open, or null. */
+  bootFailureFor: string | null
+  setBootFailureFor: (runId: string | null) => void
   /** Open (feature) / close (null) the flight launcher. `intent` picks which job
    *  it opens for — 're-fly' (the stage-entry picker, default) or 'fresh' (edit
    *  intent + repos, full restart). Setting it always rewrites the intent, so a
@@ -152,6 +155,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   }, [setConfigFor])
   const [verifyOpen, setVerifyOpen] = useState<boolean>(SEED.verifyOpen)
   const [notificationsOpen, setNotificationsOpen] = useState<boolean>(SEED.notificationsOpen)
+  const [bootFailureFor, setBootFailureFor] = useState<string | null>(SEED.bootFailureFor)
   const [reviewFocus, setReviewFocus] = useState<ReviewFocus | undefined>(PERSISTED.reviewFocus)
   const [specReviewOpen, setSpecReviewOpen] = useState<boolean>(SEED.specReviewOpen)
   const [flightStartFor, setFlightStartForState] = useState<string | null>(SEED.flightStartFor)
@@ -206,6 +210,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     verifyOpen,
     specReviewOpen,
     notificationsOpen,
+    bootFailureFor,
     flightStartFor,
     flightStartFresh,
     flightStartNew,
@@ -317,6 +322,8 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setConfigTab,
     setVerifyOpen,
     setSpecReviewOpen,
+    bootFailureFor,
+    setBootFailureFor,
     setNotificationsOpen,
     setFlightStartFor,
     setFlightStartNew,

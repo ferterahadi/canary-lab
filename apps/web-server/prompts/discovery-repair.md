@@ -2,7 +2,7 @@ Repair Playwright test discovery for suite {{feature}}.
 
 Workspace: {{projectRoot}}
 Suite directory: {{featureDir}}
-Feature configuration: {{featureDir}}/feature.config.cjs
+Feature configuration: {{configPath}}
 Envset configuration: {{featureDir}}/envsets/envsets.config.json
 Configured repositories:
 {{repos}}
@@ -18,6 +18,9 @@ status, and coverage requirement; never delete, skip, weaken, or loosen tests to
 make discovery succeed. Mechanical import/path corrections and moving runtime
 initialization into hooks or fixtures are allowed when the loading error proves
 they are necessary. Do not hide failures with empty defaults or conditional skips.
+If configuration is missing or cannot load, inspect the suite folder and its
+version history. Restore the intended configuration from trustworthy evidence;
+do not invent a replacement suite or tests to make discovery appear successful.
 
 Prevent recurrence: listing tests must work before runtime credentials, services,
 or per-run checkouts exist. Load required runtime files inside test setup, keeping

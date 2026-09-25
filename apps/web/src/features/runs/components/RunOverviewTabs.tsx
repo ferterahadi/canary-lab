@@ -1,7 +1,8 @@
 import { pinnedPlanSummary } from '@shared/agent-models'
 import { useEffect, useMemo, useState } from 'react'
 import type { AuditEntry, RepoBranchSnapshot, ServiceManifestEntry, RunManifest, RunStatus, RunSummary } from '@/shared/api/types'
-import { getRunAudit, openEditor } from '@/shared/api/client'
+import { getRunAudit } from '@/shared/api/client'
+import { openRunLog } from '../utils/open-run-log'
 import { BootEvidenceRows, bootEvidenceLabel } from '@/shared/ui/BootEvidence'
 import { formatDuration, durationBetween } from '@/shared/lib/format'
 import { buildTimelineRows } from '../utils/run-timeline'
@@ -63,6 +64,8 @@ export interface RunOverviewTabProps {
   services: ServiceManifestEntry[]
   repoBranches: RepoBranchSnapshot[]
   onOpenEvaluationReport?: (feature: string) => void
+  /** Opens the boot-failure dialog from the failing service's card. */
+  onOpenBootFailure?: () => void
 }
 
 export function RunOverviewTab({
@@ -71,6 +74,7 @@ export function RunOverviewTab({
   services,
   repoBranches,
   onOpenEvaluationReport,
+  onOpenBootFailure = () => {},
 }: RunOverviewTabProps) {
   const duration = durationBetween(manifest.startedAt, manifest.endedAt)
   const serviceOwnsBootFailure = Boolean(
@@ -82,7 +86,9 @@ export function RunOverviewTab({
     manifest.dependencyProvenance?.filter((item) => item.verdict === 'incompatible').map((item) => item.repoName) ?? [],
   )
   const needsAttention = (service: ServiceManifestEntry) => (
-    manifest.bootFailure?.safeName === service.safeName || incompatibleRepos.has(service.repoName ?? '')
+    manifest.bootFailure?.safeName === service.safeName
+    || manifest.serviceFailure?.safeName === service.safeName
+    || incompatibleRepos.has(service.repoName ?? '')
   )
   // Preserve configured order within each group; only lift affected services
   // so a failure is never buried below healthy peers in a longer stack.
@@ -160,8 +166,9 @@ export function RunOverviewTab({
         </div>
       )}
       {manifest.bootFailure && manifest.bootFailure.reason !== 'dependency-incompatible' && !serviceOwnsBootFailure && (
-        <BootFailureEvidence failure={manifest.bootFailure} />
+        <BootFailureEvidence runId={manifest.runId} failure={manifest.bootFailure} />
       )}
+      {manifest.serviceFailure && <ServiceFailureEvidence runId={manifest.runId} failure={manifest.serviceFailure} />}
       <div className="mt-4">
         {/* No `Services` heading: a stack of named service cards is self-evident,
             and the label was one more line of chrome between the run's facts and
@@ -176,11 +183,13 @@ export function RunOverviewTab({
             {displayedServices.map((s) => (
               <ServiceCard
                 key={s.safeName}
+                runId={manifest.runId}
                 service={s}
                 branch={branchForService(s, repoBranches)}
                 siblings={repoServiceCount(s, services)}
                 bootFailure={manifest.bootFailure?.safeName === s.safeName ? manifest.bootFailure : undefined}
                 dependency={manifest.dependencyProvenance?.find((item) => item.repoName === s.repoName && item.verdict === 'incompatible')}
+                onOpenBootFailure={onOpenBootFailure}
               />
             ))}
           </ul>
@@ -190,7 +199,7 @@ export function RunOverviewTab({
   )
 }
 
-export function BootFailureEvidence({ failure }: { failure: NonNullable<RunManifest['bootFailure']> }) {
+export function BootFailureEvidence({ runId, failure }: { runId: string; failure: NonNullable<RunManifest['bootFailure']> }) {
   return (
     <section data-testid="boot-failure-evidence" className={`mt-4 rounded-md border p-3 text-xs ${alertClass('error')}`}>
       <div className="flex items-center justify-between gap-3">
@@ -208,10 +217,28 @@ export function BootFailureEvidence({ failure }: { failure: NonNullable<RunManif
       )}
       {failure.nextAction && <p className="mt-2 text-secondary">{failure.nextAction}</p>}
       <div className="mt-2 flex min-w-0 items-center gap-2">
-        <button type="button" className="cl-button min-h-6 shrink-0 px-2 py-0.5" onClick={() => { void openEditor({ file: failure.logPath }).catch(() => {}) }}>
+        <button type="button" className="cl-button min-h-6 shrink-0 px-2 py-0.5" onClick={() => { void openRunLog(runId, failure.logPath) }}>
           Open full service log
         </button>
       </div>
+    </section>
+  )
+}
+
+function ServiceFailureEvidence({ runId, failure }: { runId: string; failure: NonNullable<RunManifest['serviceFailure']> }) {
+  return (
+    <section data-testid="service-failure-evidence" className={`mt-4 rounded-md border p-3 text-xs ${alertClass('error')}`}>
+      <SectionHeader>Service failure after readiness</SectionHeader>
+      <p className="mt-1">{failure.service}: {failure.detail}</p>
+      <p className="mt-1 text-secondary">Cause: {failure.kind}. Playwright results from this attempt may be partial.</p>
+      {failure.excerpt && (
+        <pre className="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded border border-line bg-canvas p-2 font-mono text-secondary">
+          {failure.excerpt}{failure.excerptTruncated ? '\n… excerpt truncated; open the full log' : ''}
+        </pre>
+      )}
+      <button type="button" className="cl-button mt-2 min-h-6 px-2 py-0.5" onClick={() => { void openRunLog(runId, failure.logPath) }}>
+        Open full service log
+      </button>
     </section>
   )
 }

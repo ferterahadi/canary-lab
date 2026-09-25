@@ -35,6 +35,7 @@ const BOOT_ERROR_BY_REASON: Record<RunBootFailure['reason'], string> = {
   'spawn-failed': 'could not be spawned',
   'process-exited': 'exited during boot — it never reached its health check',
   'health-timeout': 'never passed its health check',
+  'compiler-failed': 'failed compilation before becoming ready',
 }
 
 // The evidence fields the stage passes straight through from the run's record.

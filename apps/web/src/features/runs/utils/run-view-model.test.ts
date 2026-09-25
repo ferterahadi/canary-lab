@@ -18,6 +18,35 @@ function detail(overrides: Partial<RunDetail['manifest']> = {}): RunDetail {
 }
 
 describe('deriveRunViewModel', () => {
+  it('shows a claimed attempt as unverified and disables Restart Heal', () => {
+    const vm = deriveRunViewModel(detail({
+      status: 'failed',
+      healEnd: {
+        reason: 'new-run-required',
+        cycle: 1,
+        message: 'Fresh approved run required after this suite attempt.',
+        at: '2026-05-08T00:00:03.000Z',
+      },
+    }))
+
+    expect(vm.headline).toBe('New run required to verify repair')
+    expect(vm.primaryAlert?.message).toContain('Fresh approved run')
+    expect(vm.actions.restartHeal.enabled).toBe(false)
+  })
+
+  it('shows the fresh-run handoff for an older run read through the API', () => {
+    const vm = deriveRunViewModel({ ...detail({ status: 'failed' }), newRunRequired: true })
+    expect(vm.headline).toBe('New run required to verify repair')
+    expect(vm.actions.restartHeal.enabled).toBe(false)
+  })
+
+  it('hides Retest from the initial run row before its detail is selected', () => {
+    const vm = deriveRunViewModel({
+      runId: 'run-1', feature: 'checkout', startedAt: '2026-05-08T00:00:00.000Z',
+      status: 'failed', newRunRequired: true,
+    })
+    expect(vm.actions.restartHeal.enabled).toBe(false)
+  })
   it('uses lifecycle as the shared headline and timeline source', () => {
     const vm = deriveRunViewModel({
       ...detail({

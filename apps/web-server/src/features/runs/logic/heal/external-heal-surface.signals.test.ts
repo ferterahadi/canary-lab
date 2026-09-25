@@ -97,6 +97,22 @@ describe('writeHealSignal', () => {
   })
 })
 
+describe('claimed suite attempt in external heal context', () => {
+  it('tells the agent that its signal will finish unverified and a new run needs approval', () => {
+    const detail = detailFor('run-1')
+    detail.manifest.singleAttempt = { receipt: 'runtime/effect-attempt/attempt.json' }
+    const receipt = path.join(runDirFor(logsDir, 'run-1'), detail.manifest.singleAttempt.receipt)
+    fs.mkdirSync(path.dirname(receipt), { recursive: true })
+    fs.writeFileSync(receipt, '{}')
+
+    const context = buildExternalHealContext({ detail, logsDir, projectRoot: tmpDir })
+    expect(context.singleAttempt).toEqual(expect.objectContaining({ claimed: true }))
+    expect(context.nextSteps?.join(' ')).toContain('without restarting services or tests')
+    expect(context.nextSteps?.join(' ')).toContain('fresh run without run_ref')
+    expect(slimRepeatHealContext(context).singleAttempt?.claimed).toBe(true)
+  })
+})
+
 describe('buildExternalRunSnapshotSlim — null healIndex/journal branches (lines 252-253)', () => {
   it('returns null healIndex and null journal when heal-index and journal files are absent', () => {
     // healIndexMarkdown = null (no file) → healIndex: null

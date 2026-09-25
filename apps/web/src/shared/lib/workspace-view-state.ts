@@ -54,7 +54,11 @@ export type WorkspaceView = 'workspace' | 'cleanup' | 'coverage' | 'flights'
 // GET /api/features + the runs index, so a cold load is coherent — and it is
 // exactly the surface a teammate pastes a link to ("look at this weakened
 // test"), which is the point of routing it.
-export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' | 'flight-new' | 'demo' | 'settings' | 'tests-review' | 'notifications'
+// `boot-failure` is the selected run's boot-failure detail (every compiler
+// error, diagnostics, raw output). It qualifies `run` rather than carrying an
+// id: a run records at most one boot failure, and its manifest rebuilds the
+// whole dialog from GET /api/runs/:id, so a cold load is coherent.
+export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' | 'flight-new' | 'demo' | 'settings' | 'tests-review' | 'notifications' | 'boot-failure'
 
 /** The Feature-config dialog's tabs — the `tab` qualifier for `dialog=config`.
  *  Routed because entry points land on different tabs (the run detail opens
@@ -164,7 +168,7 @@ export type DurableView = Pick<PersistedView, 'view' | 'feature'>
 
 const STORAGE_KEY = 'cl.workspace.view'
 const VIEWS: WorkspaceView[] = ['workspace', 'cleanup', 'coverage', 'flights']
-const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-fresh', 'flight-new', 'demo', 'settings', 'tests-review', 'notifications']
+const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-fresh', 'flight-new', 'demo', 'settings', 'tests-review', 'notifications', 'boot-failure']
 const CONFIG_TABS: ConfigTab[] = ['general', 'repos', 'ports', 'envsets', 'playwright']
 const RUN_ARRIVAL_TABS: RunArrivalTab[] = ['changes']
 const MODELS_AGENTS: ModelsAgent[] = ['claude', 'codex']

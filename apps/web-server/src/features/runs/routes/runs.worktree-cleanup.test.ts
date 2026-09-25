@@ -341,7 +341,7 @@ describe('POST /api/runs/:runId/apply-fixes (R80)', () => {
     fs.writeFileSync(patchPath, patch)
     writeManifest(path.join(runDir, 'manifest.json'), {
       runId: 'r1', feature: 'foo', featureDir: path.join(featuresDir, 'foo'),
-      startedAt: 'now', status: 'failed', healCycles: 1, services: [],
+      startedAt: 'now', endedAt: 'later', status: 'failed', healCycles: 1, services: [],
       fixCapture: { capturedAt: 'now', repos: [{ repoName: 'prod', patchPath, patchFile: 'prod.patch', repoRoot: repo, baseSha: 'deadbeef', files: 1 }] },
     })
 

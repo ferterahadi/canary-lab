@@ -169,6 +169,36 @@ describe('RunOrchestrator.runFullCycle', () => {
     await orch.stop('failed')
   })
 
+  it('fails a passing partial suite when a ready service exits during Playwright', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      playwrightSpawner: () => ({ command: 'playwright test', cwd: tmpDir }),
+    })
+    const running = orch.runFullCycle()
+    while (f.spawned.length < 2) await new Promise((resolve) => setTimeout(resolve, 5))
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({
+      total: 1,
+      passed: 1,
+      passedNames: ['passes'],
+      knownTests: [{ name: 'passes', title: 'passes', location: 'tests/demo.spec.ts:1' }],
+    }))
+
+    f.spawned[0].emitExit(0)
+    expect(f.spawned[1].killed).toBe('SIGTERM')
+    f.spawned[1].emitExit(0)
+
+    expect(await running).toBe('failed')
+    expect(readManifest(orch.paths.manifestPath)?.serviceFailure).toMatchObject({
+      service: 'api', kind: 'process-exited', exitCode: 0,
+    })
+    await orch.stop('failed')
+  })
+
   it('stops instead of re-running forever when only skipped tests remain (auto-heal)', async () => {
     // Regression: a run that ends 6-passed / 1-skipped / 0-failed is treated as
     // 'failed' (a skipped test is not verified), so auto-heal enters the

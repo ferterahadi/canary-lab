@@ -1,5 +1,5 @@
 export type RunStatus = 'queued' | 'running' | 'passed' | 'failed' | 'healing' | 'aborted'
-export type ServiceStatus = 'queued' | 'starting' | 'ready' | 'timeout' | 'stopped'
+export type ServiceStatus = 'queued' | 'starting' | 'ready' | 'failed' | 'timeout' | 'stopped'
 
 export type RunLifecyclePhase =
   | 'starting-services'
@@ -52,9 +52,9 @@ export interface RunLifecycleAbortReason {
  *  the run is declared `failed` and — if a heal mode is configured — routed into
  *  the heal loop with the service log as the failure context, instead of being
  *  silently aborted. Cleared on a successful (re)boot. */
-export type RunBootReason = 'health-timeout' | 'process-exited' | 'spawn-failed' | 'dependency-incompatible'
+export type RunBootReason = 'health-timeout' | 'process-exited' | 'spawn-failed' | 'dependency-incompatible' | 'compiler-failed'
 
-export type RunBootPhase = 'spawn' | 'process-exit' | 'readiness' | 'configuration'
+export type RunBootPhase = 'spawn' | 'process-exit' | 'readiness' | 'configuration' | 'compilation'
 
 /** One phase per reason, so the phase is a restatement of the reason rather
  *  than a second field four producers must keep in lockstep. Derived on read,
@@ -65,11 +65,18 @@ const BOOT_PHASE = {
   'process-exited': 'process-exit',
   'health-timeout': 'readiness',
   'dependency-incompatible': 'configuration',
+  'compiler-failed': 'compilation',
 } as const satisfies Record<RunBootReason, RunBootPhase>
 
 export function runBootPhase(reason: RunBootReason): RunBootPhase {
   return BOOT_PHASE[reason]
 }
+
+/** The next step once the evidence shows a failed build. Shared because the UI
+ *  derives it on read too: a record written before readiness advice consulted
+ *  the evidence still carries "verify the listen address" under a build that
+ *  never compiled. */
+export const COMPILER_FAILURE_NEXT_ACTION = 'Fix the compiler errors in the service log, then restart the service.'
 
 /** What the preserved evidence adds ON TOP OF `reason`. Every value here names
  *  something the reason alone does not say, so a record whose evidence only
@@ -112,6 +119,23 @@ export interface RunBootFailure {
   nextAction?: string
 }
 
+/** A required service failed after its first successful readiness probe in
+ * the current launch attempt. Test results stay separate from this evidence. */
+export interface RunServiceFailure {
+  service: string
+  safeName: string
+  kind: 'compiler' | 'process-exited'
+  detail: string
+  logPath: string
+  command: string
+  cwd: string
+  exitCode?: number | null
+  signal?: string | null
+  excerpt?: string
+  excerptTruncated?: boolean
+  at: string
+}
+
 /**
  * Why the auto-heal loop stopped without the run passing. Typed and persisted
  * on the manifest so the Test Run surface can state the reason plainly instead
@@ -139,7 +163,7 @@ export interface RunBootFailure {
  * call that can actually produce it.
  */
 export interface HealEnd {
-  reason: 'no-signal' | 'max-cycles' | 'no-progress' | 'cancelled' | 'foreign-abort'
+  reason: 'no-signal' | 'max-cycles' | 'no-progress' | 'cancelled' | 'foreign-abort' | 'new-run-required'
   /** Which watchdog ended the wait. Set only when `reason === 'no-signal'`. */
   agentWait?: 'idle-timeout' | 'hard-timeout' | 'pty-died'
   /** Best-effort classification of why the agent went quiet, from its output
@@ -196,7 +220,9 @@ export const FIX_CAPTURE_MAX_FILE_NAMES = 200
 
 export interface RunFixCapture {
   repos: RunFixCaptureRepo[]
-  /** ISO timestamp of the capture (run teardown). */
+  /** True while the worktree is still changing; teardown makes this final. */
+  provisional?: boolean
+  /** ISO timestamp of the latest captured worktree state. */
   capturedAt: string
 }
 

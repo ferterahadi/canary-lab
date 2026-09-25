@@ -178,6 +178,7 @@ function indexEntryFromManifest(
     ...(endedAt ? { endedAt } : {}),
     ...(manifest.healCycles ? { healCycles: manifest.healCycles } : {}),
     ...(manifest.healMode ? { healMode: manifest.healMode } : {}),
+    ...(manifest.healEnd?.reason === 'new-run-required' ? { newRunRequired: true as const } : {}),
     ...(manifest.verification?.configName ? { verificationConfigName: manifest.verification.configName } : {}),
     ...(manifest.verification?.playwrightEnvsetId ? { verificationPlaywrightEnvsetId: manifest.verification.playwrightEnvsetId } : {}),
     ...(manifest.verification?.targetUrls ? { verificationTargetUrls: manifest.verification.targetUrls } : {}),

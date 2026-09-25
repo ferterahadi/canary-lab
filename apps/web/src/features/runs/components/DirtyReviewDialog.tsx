@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { DirtySpecSummary, Feature, RunDetail, RunIndexEntry } from '@/shared/api/types'
 import type { FeatureTestReview, RunTestReview, TestReviewReceipt } from '@shared/test-review'
 import * as api from '@/shared/api/client'
+import { ApiError } from '@/shared/api/internal'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { shortRunRef } from '@/shared/lib/format'
@@ -50,7 +51,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   useEffect(() => { setFocus(routedFocus) }, [routedFocus])
   const updateFocus = (next: ReviewFocus): void => { setFocus(next); onFocus?.(next) }
   const [navigationTarget, setNavigationTarget] = useState<HTMLDivElement | null>(null)
-  const [runFiles, setRunFiles] = useState<{ feature: string; runId: string; revision: number; rootsKey: string; files: string[]; changedFiles: string[]; changes?: TestVersionChanges; error?: string } | null>(null)
+  const [runFiles, setRunFiles] = useState<{ feature: string; runId: string; revision: number; rootsKey: string; files: string[]; changedFiles: string[]; changes?: TestVersionChanges; error?: string; missingSuite?: boolean } | null>(null)
   const pendingByFeature = new Map<string, RunIndexEntry>()
   for (const run of pendingRuns) {
     if (!pendingByFeature.has(run.feature) || run.runId === focusRunId) pendingByFeature.set(run.feature, run)
@@ -162,19 +163,33 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   useEffect(() => {
     if (!comparisonFeature || !comparisonRunId) return
     let cancelled = false
-    api.getTestSourceComparison(comparisonFeature, comparisonRunId).then((comparison) => {
-      if (cancelled) return
-      setRunFiles({ feature: comparisonFeature, runId: comparisonRunId, revision: testChanges, rootsKey,
-        files: comparison.files, changedFiles: comparison.differences.map((item) => item.file),
-        ...(comparison.state === 'ready' ? { changes: comparison.changes }
-          : { error: 'Test change counts are unavailable because source or snapshot information is incomplete.' }),
+    let requested = 0
+    const load = (): void => {
+      const request = ++requested
+      api.getTestSourceComparison(comparisonFeature, comparisonRunId).then((comparison) => {
+        if (cancelled || request !== requested) return
+        setRunFiles({ feature: comparisonFeature, runId: comparisonRunId, revision: testChanges, rootsKey,
+          files: comparison.files, changedFiles: comparison.differences.map((item) => item.file),
+          ...(comparison.state === 'ready' ? { changes: comparison.changes }
+            : { error: 'Test change counts are unavailable because source or snapshot information is incomplete.' }),
+        })
+      }).catch((err: unknown) => {
+        if (cancelled || request !== requested) return
+        setRunFiles({ feature: comparisonFeature, runId: comparisonRunId, revision: testChanges, rootsKey, files: [], changedFiles: [],
+          ...(err instanceof ApiError && err.status === 404 && err.message === 'Suite not found'
+            ? { missingSuite: true }
+            : { error: 'Could not list all comparison files. Showing the available files.' }),
+        })
       })
-    }).catch(() => {
-      if (!cancelled) setRunFiles({ feature: comparisonFeature, runId: comparisonRunId, revision: testChanges, rootsKey, files: [], changedFiles: [], error: 'Could not list all comparison files. Showing the available files.' })
-    })
-    return () => { cancelled = true }
+    }
+    load()
+    // Direct Git or filesystem deletion may not deliver a feature event. An
+    // open comparison still needs to notice that its live side disappeared.
+    const interval = setInterval(load, 10_000)
+    return () => { cancelled = true; clearInterval(interval) }
   }, [comparisonFeature, comparisonRunId, comparisonDir, snapshotDir, rootsKey, testChanges])
   const currentRunFiles = runFiles && runFiles.feature === selected?.name && runFiles.runId === comparisonRunId && runFiles.revision === testChanges && runFiles.rootsKey === rootsKey ? runFiles : null
+  const suiteUnavailable = !!currentRunFiles?.missingSuite
   const changedFiles = new Set(useRunBaseline
     ? currentRunFiles?.changedFiles ?? []
     : assessedFiles.map((file) => file.file))
@@ -246,17 +261,20 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
             </div>}
           </div>
           <div className="cl-review-commit-buttons">
-            {(reviewRevision || featureReviewRevision) && <>
+            {!suiteUnavailable && (reviewRevision || featureReviewRevision) && <>
               <button className="cl-button px-3 py-1.5 text-xs" disabled={busy || (reviewRun ? !runReview.confirmed : !featureReview.confirmed)} onClick={() => { void act(restoreChanges) }}>Restore recorded files</button>
               <button className="cl-button-primary px-3 py-1.5 text-xs" disabled={busy || (reviewRun ? !runReview.confirmed : !featureReview.confirmed)} onClick={() => { void act(acceptChanges) }}>Accept &amp; commit</button>
             </>}
           </div>
-          {run && runReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this run’s review state. {runReview.error}</p>}
-          {!run && featureReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this suite’s review state. {featureReview.error}</p>}
+          {run && !suiteUnavailable && runReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this run’s review state. {runReview.error}</p>}
+          {!run && !suiteUnavailable && featureReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this suite’s review state. {featureReview.error}</p>}
           {error && <p role="alert" className="cl-review-action-message text-danger">{error}</p>}
         </div>}
       >
-        {!selected ? <div className="p-5"><EmptyState {...EMPTY_COPY.dirtyNoTestFiles} icon={EmptyGlyph.journal} testId="dirty-review-empty" /></div> : <div className="cl-dialog-panes cl-review-panes min-h-0 flex-1">
+        {!selected ? <div className="p-5"><EmptyState {...EMPTY_COPY.dirtyNoTestFiles} icon={EmptyGlyph.journal} testId="dirty-review-empty" /></div>
+          : suiteUnavailable ? <div className="flex-1"><EmptyState {...EMPTY_COPY.dirtySuiteUnavailable} icon={EmptyGlyph.journal} testId="dirty-review-suite-unavailable"
+            detail={focusRunId ? <button className="cl-button px-3 py-1" onClick={onClose}>View saved run</button> : undefined} /></div>
+          : <div className="cl-dialog-panes cl-review-panes min-h-0 flex-1">
           <nav className="cl-dialog-rail overflow-auto p-2 scrollbar-thin" aria-label="Changed test files">
             {runFiles?.feature === selected.name && runFiles.runId === comparisonRunId && runFiles.error && <p role="status" className="mb-2 px-2 text-xs text-warning">{runFiles.error}</p>}
             <div key={selected.name} className="mb-3" data-testid={`dirty-review-suite-${selected.name}`}>

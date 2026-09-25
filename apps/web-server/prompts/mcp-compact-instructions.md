@@ -10,4 +10,4 @@ Read coverageUpdate; historical stats are not current. Monitor with wait_for_fea
 
 Fresh + stale: start_run asks the user update-first or run-now. Never choose; run-now stays coverageStale.
 
-Test-review request_id preserves its original owner. Carry it through review, then resume start_run with that request_id and the same session_id. Canary resumes internal requests; external requests stay external even after browser approval. get_test_review supplies a read-only wait token for all clients; reconnect obtains a fresh token. Waiting never approves.
+Test-review request_id keeps its owner. Accept & commit: resume the external request with start_run(request_id, same session_id). Restore recorded files: cancel it. If no form or no recorded human decision, show reviewUrl and wait in one background agent where supported, otherwise in this turn. Watchers get their own get_test_review token; reconnect refreshes it. Waiting never approves.

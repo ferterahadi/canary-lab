@@ -133,9 +133,30 @@ function ctxFor(state: Partial<RunContext> = {}, opts: Record<string, unknown> =
   return makeHealLoopContext({ root: tmpDir, opts, state })
 }
 
+function claimAttempt(ctx: RunContext): void {
+  const receipt = path.join(ctx.runDir, 'runtime/effect-attempt/attempt.json')
+  fs.mkdirSync(path.dirname(receipt), { recursive: true })
+  fs.writeFileSync(receipt, '{}')
+  ctx.feature.singleAttempt = { receipt: 'runtime/effect-attempt/attempt.json' }
+}
+
 // ───────────────────────── manual / external loop ─────────────────────────
 
 describe('runManualExternalHealLoop', () => {
+  it('records a repair signal but never restarts or reruns after a suite attempt is claimed', async () => {
+    const { ctx } = ctxFor({}, { externalHeal: true })
+    claimAttempt(ctx)
+    h.waitForHealSignal.mockResolvedValue({ signal: rerunSignal({ hypothesis: 'app bug', fixDescription: 'fixed app' }) })
+    const host = makeLoopHost()
+
+    expect(await runManualExternalHealLoop(ctx, host, 'failed')).toBe('failed')
+    expect(h.appendJournalIteration).toHaveBeenCalledWith(ctx, expect.objectContaining({ signal: '.rerun' }))
+    expect(h.recordHealEnd).toHaveBeenCalledWith(ctx, expect.objectContaining({ reason: 'new-run-required' }))
+    expect(host.restart).not.toHaveBeenCalled()
+    expect(host.rerun).not.toHaveBeenCalled()
+    expect(h.runPlaywright).not.toHaveBeenCalled()
+  })
+
   it('snapshots effective worktree repo paths before waiting for a manual repair', async () => {
     const repoPathOverrides = { catalog: '/worktrees/catalog' }
     const { ctx } = ctxFor({ repoPathOverrides })
@@ -276,6 +297,34 @@ describe('runManualExternalHealLoop', () => {
     expect(h.runPlaywright).toHaveBeenCalledTimes(1)
   })
 
+  it('waits for another repair when a required service remains failed', async () => {
+    const { ctx } = ctxFor()
+    let cycle = 0
+    h.waitForHealSignal.mockImplementation(async () => {
+      cycle += 1
+      ctx.serviceFailure = cycle === 1 ? ({ service: 'api', detail: 'compiler failed', logPath: '/run/api.log' } as RunContext['serviceFailure']) : undefined
+      return { signal: rerunSignal() }
+    })
+    h.decideRunStatus.mockReturnValue('passed')
+
+    expect(await runManualExternalHealLoop(ctx, makeLoopHost(), 'failed')).toBe('passed')
+    expect(h.recordLifecycle).toHaveBeenCalledWith(ctx, 'agent-healing', 'Service still failed: api', expect.objectContaining({ severity: 'error' }))
+    expect(h.runPlaywright).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not mark the rerun passed if a service fails while Playwright runs', async () => {
+    const { ctx } = ctxFor()
+    h.waitForHealSignal.mockResolvedValueOnce({ signal: rerunSignal() }).mockResolvedValueOnce({ signal: undefined })
+    h.runPlaywright.mockImplementation(async () => {
+      ctx.serviceFailure = { service: 'api', detail: 'process exited', logPath: '/run/api.log' } as RunContext['serviceFailure']
+      return 0
+    })
+    h.decideRunStatus.mockReturnValue('passed')
+
+    expect(await runManualExternalHealLoop(ctx, makeLoopHost(), 'failed')).toBe('failed')
+    expect(h.decideRunStatus).not.toHaveBeenCalled()
+  })
+
   it('returns the live status when the abort lands while Playwright is running', async () => {
     const { ctx } = ctxFor()
     h.waitForHealSignal.mockResolvedValue({ signal: rerunSignal() })
@@ -375,6 +424,28 @@ describe('runAutoHealLoop', () => {
     expect(ctx.status).not.toBe('passed')
   })
 
+  it('heals a confirmed service failure even when no test has failed', async () => {
+    const { ctx } = ctxFor({
+      serviceFailure: {
+        service: 'api', safeName: 'api', kind: 'compiler', detail: 'build failed',
+        logPath: '/tmp/svc-api.log', command: 'start', cwd: '/tmp', at: new Date().toISOString(),
+      },
+    }, { autoHeal: AUTO })
+    h.runHealAgent.mockResolvedValue({ signal: { kind: 'restart', body: {} }, reason: 'signal' })
+    h.runPlaywright.mockResolvedValue(0)
+    h.decideRunStatus.mockReturnValue('passed')
+    const host = makeLoopHost()
+    host.restart = vi.fn(async () => {
+      ctx.serviceFailure = undefined
+      return { restarted: ['api'], kept: [], startedBecauseMissing: [] }
+    })
+
+    expect(await runAutoHealLoop(ctx, host)).toBe('passed')
+    expect(h.runHealAgent).toHaveBeenCalledTimes(1)
+    expect(host.restart).toHaveBeenCalledTimes(1)
+    expect(h.runPlaywright).toHaveBeenCalledTimes(1)
+  })
+
   it('returns the live status when the run was aborted before the first cycle', async () => {
     const { ctx } = ctxFor({ stopped: true, status: 'aborted' }, { autoHeal: AUTO })
 
@@ -399,6 +470,37 @@ describe('runAutoHealLoop', () => {
   describe('pending-test rerun (no heal agent spawned)', () => {
     beforeEach(() => {
       h.verificationPlanForSummary.mockReturnValue(targeted(['skipped-one']))
+    })
+
+    it('enters service healing if a required service fails during the pending rerun', async () => {
+      const { ctx } = ctxFor({}, { autoHeal: AUTO })
+      h.runPlaywright.mockImplementationOnce(async () => {
+        ctx.serviceFailure = {
+          service: 'api', safeName: 'api', kind: 'process-exited', detail: 'exited',
+          logPath: '/tmp/svc-api.log', command: 'start', cwd: '/tmp', at: new Date().toISOString(),
+        }
+        return 0
+      }).mockResolvedValueOnce(0)
+      h.decideRunStatus.mockReturnValue('passed')
+      h.runHealAgent.mockResolvedValue({ signal: { kind: 'restart', body: {} }, reason: 'signal' })
+      const host = makeLoopHost()
+      host.restart = vi.fn(async () => {
+        ctx.serviceFailure = undefined
+        return { restarted: ['api'], kept: [], startedBecauseMissing: [] }
+      })
+
+      expect(await runAutoHealLoop(ctx, host)).toBe('passed')
+      expect(h.runHealAgent).toHaveBeenCalledTimes(1)
+      expect(h.runPlaywright).toHaveBeenCalledTimes(2)
+    })
+
+    it('does not rerun pending tests when the suite attempt was already claimed', async () => {
+      const { ctx } = ctxFor({}, { autoHeal: AUTO })
+      claimAttempt(ctx)
+
+      expect(await runAutoHealLoop(ctx, makeLoopHost())).toBe('failed')
+      expect(h.recordHealEnd).toHaveBeenCalledWith(ctx, expect.objectContaining({ reason: 'new-run-required' }))
+      expect(h.runPlaywright).not.toHaveBeenCalled()
     })
 
     it('returns the live status when the abort lands during the pending rerun', async () => {
@@ -490,6 +592,19 @@ describe('runAutoHealLoop', () => {
   describe('heal cycles', () => {
     beforeEach(() => {
       h.extractFailedSlugs.mockReturnValue(['spec.ts > fails'])
+    })
+
+    it('ends auto repair after a claimed attempt without restarting services or Playwright', async () => {
+      const { ctx } = ctxFor({}, { autoHeal: AUTO })
+      claimAttempt(ctx)
+      h.runHealAgent.mockResolvedValue({ signal: { kind: 'restart', body: {} }, reason: 'signal' })
+      const host = makeLoopHost()
+
+      expect(await runAutoHealLoop(ctx, host)).toBe('failed')
+      expect(h.recordHealEnd).toHaveBeenCalledWith(ctx, expect.objectContaining({ reason: 'new-run-required' }))
+      expect(host.restart).not.toHaveBeenCalled()
+      expect(host.rerun).not.toHaveBeenCalled()
+      expect(h.runPlaywright).not.toHaveBeenCalled()
     })
 
     it('snapshots effective worktree repo paths before spawning the heal agent', async () => {
@@ -763,6 +878,34 @@ describe('runAutoHealLoop', () => {
       expect(await runAutoHealLoop(ctx, host)).toBe('passed')
       expect(host.recordBootFailureHealWait).toHaveBeenCalledTimes(1)
       expect(h.runPlaywright).toHaveBeenCalledTimes(1)
+    })
+
+    it('waits for another agent repair when a required service remains failed', async () => {
+      const { ctx } = ctxFor({}, { autoHeal: { maxCycles: 2 } })
+      let cycle = 0
+      h.runHealAgent.mockImplementation(async () => {
+        cycle += 1
+        ctx.serviceFailure = cycle === 1 ? ({ service: 'api', detail: 'compiler failed', logPath: '/run/api.log' } as RunContext['serviceFailure']) : undefined
+        return { signal: rerunSignal(), reason: 'signal' }
+      })
+      h.decideRunStatus.mockReturnValue('passed')
+
+      expect(await runAutoHealLoop(ctx, makeLoopHost())).toBe('passed')
+      expect(h.recordLifecycle).toHaveBeenCalledWith(ctx, 'agent-healing', 'Service still failed: api', expect.objectContaining({ severity: 'error' }))
+      expect(h.runPlaywright).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not mark auto repair passed if a service fails during Playwright', async () => {
+      const { ctx } = ctxFor({}, { autoHeal: { maxCycles: 1 } })
+      h.runHealAgent.mockResolvedValue({ signal: rerunSignal(), reason: 'signal' })
+      h.runPlaywright.mockImplementation(async () => {
+        ctx.serviceFailure = { service: 'api', detail: 'process exited', logPath: '/run/api.log' } as RunContext['serviceFailure']
+        return 0
+      })
+      h.decideRunStatus.mockReturnValue('passed')
+
+      expect(await runAutoHealLoop(ctx, makeLoopHost())).toBe('failed')
+      expect(h.decideRunStatus).not.toHaveBeenCalled()
     })
 
     it('returns the live status when the abort lands while Playwright reruns', async () => {

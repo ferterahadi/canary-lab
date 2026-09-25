@@ -21,6 +21,8 @@ import { RunLogsTab, RunOverviewTab, VerifyOverviewTab, repoServiceCount } from 
 import { RunPane } from './RunPane'
 import type { PlaywrightView } from './RunPlaybackPanels'
 import { ServiceTabButton, TabButton } from './RunServicePanels'
+import { BootFailureDialog } from './BootFailureDialog'
+import { compilerErrors } from '@/shared/ui/BootEvidence'
 import { isTerminalRunStatus } from './run-export-links'
 
 export { canRestartHeal, repoServiceCount, servicePrimaryLabel, serviceTabLabelParts } from './RunOverviewTabs'
@@ -46,6 +48,8 @@ export function RunDetailColumn({
   arriveTab,
   onOpenEvaluationReport,
   onOpenSpecReview,
+  bootFailureOpen,
+  onBootFailureOpenChange,
 }: {
   runId: string | null
   onOpenSpecReview?: () => void
@@ -62,6 +66,10 @@ export function RunDetailColumn({
    *  failing test — the flight's Test Run stage sends its captured fixes to
    *  `changes`. Routed as `?run=…&runtab=…`, so a refresh lands the same way. */
   arriveTab?: RunArrivalTab
+  /** The boot-failure detail dialog, routed as `?run=…&dialog=boot-failure`.
+   *  Absent = the service card keeps the open state itself. */
+  bootFailureOpen?: boolean
+  onBootFailureOpenChange?: (open: boolean) => void
 }) {
   // The journal refetches on `journal-changed` for THIS run (scoped so a bump
   // for another run doesn't reload it).
@@ -75,6 +83,9 @@ export function RunDetailColumn({
   const [agentPaneRestartKey, setAgentPaneRestartKey] = useState(0)
   const [agentPaneExited, setAgentPaneExited] = useState(false)
   const currentRunStatusRef = useRef<RunStatus | undefined>(undefined)
+  const [ownBootFailureOpen, setOwnBootFailureOpen] = useState(false)
+  const bootFailureDialogOpen = bootFailureOpen ?? ownBootFailureOpen
+  const setBootFailureDialogOpen = onBootFailureOpenChange ?? setOwnBootFailureOpen
 
   // Detail comes from the WebSocket-backed RunsContext. No polling here —
   // the same `state.details[runId]` populated for the runs list is reused,
@@ -147,6 +158,10 @@ export function RunDetailColumn({
   const repoBranches = m.repoBranches ?? []
   const activeService = services[serviceIdx]
   const showAgentSession = isTerminalRunStatus(m.status) || agentPaneExited
+  // The dialog is the full compiler-error list, so only a card that shows such a
+  // list can open it. A dependency blocker has its own panel and no dialog.
+  const bootFailure = m.bootFailure?.reason !== 'dependency-incompatible' ? m.bootFailure : undefined
+  const bootErrors = compilerErrors(bootFailure?.excerpt)
 
   return (
     <div className="cl-panel relative flex h-full flex-col">
@@ -212,6 +227,7 @@ export function RunDetailColumn({
               services={services}
               repoBranches={repoBranches}
               onOpenEvaluationReport={onOpenEvaluationReport}
+              onOpenBootFailure={() => setBootFailureDialogOpen(true)}
             />
           )
         )}
@@ -315,7 +331,9 @@ export function RunDetailColumn({
           <ChangesTab
             runId={m.runId}
             healCycles={m.healCycles}
+            runStopped={isTerminalRunStatus(m.status) && Boolean(m.endedAt)}
             fixCapture={m.fixCapture}
+            worktrees={m.worktrees}
             proposedPrs={m.proposedPrs}
             prAttempt={m.prAttempt}
             repoBranches={repoBranches}
@@ -325,6 +343,16 @@ export function RunDetailColumn({
           <JournalTab feature={m.feature} runId={m.runId} refreshKey={journalRefreshKey} healCycles={m.healCycles} />
         )}
       </div>
+      {/* Mounted here, not in the Overview tab, so switching tabs can't strand
+          an open dialog's route. */}
+      {bootFailure && bootErrors.length > 0 && (
+        <BootFailureDialog
+          open={bootFailureDialogOpen}
+          onClose={() => setBootFailureDialogOpen(false)}
+          failure={bootFailure}
+          errors={bootErrors}
+        />
+      )}
     </div>
   )
 }

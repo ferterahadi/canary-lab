@@ -92,6 +92,23 @@ describe('GET /api/runs/:runId/test-review', () => {
     expect(settled.json()).toMatchObject({ reviewState: 'settled', allowedActions: [], nextAction: 'none', files: [] })
   })
 
+  it('reports a missing live suite without treating the saved snapshot as missing', async () => {
+    const app = await build()
+    fs.rmSync(path.join(tmpDir, 'features/demo'), { recursive: true })
+    const response = await app.inject('/api/runs/r1/test-review?summary=true')
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toContain('live suite is unavailable')
+    expect(fs.existsSync(path.join(tmpDir, 'snap/e2e/a.spec.ts'))).toBe(true)
+  })
+
+  it('rejects a retired suite with only untracked files left in its folder', async () => {
+    const app = await build()
+    fs.writeFileSync(path.join(tmpDir, 'snap/feature.config.cjs'), "module.exports = { name: 'demo' }\n")
+    const response = await app.inject('/api/runs/r1/test-review?summary=true')
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error).toContain('live suite is unavailable')
+  })
+
   it('serves the patch and its revision for a snapshot that held still', async () => {
     const res = await (await build()).inject({ method: 'GET', url: '/api/runs/r1/test-review' })
     expect(res.statusCode).toBe(200)

@@ -75,6 +75,7 @@ function writeManifestWithCapture(
     feature: 'foo',
     featureDir: path.join(featuresDir, 'foo'),
     startedAt: 'now',
+    endedAt: 'later',
     status: 'failed',
     healCycles: 1,
     services: [],
@@ -138,6 +139,29 @@ describe('GitHub / PR routes (R80)', () => {
     const { app } = await build()
     expect((await app.inject({ method: 'GET', url: '/api/runs/r1/pr-preflight' })).statusCode).toBe(409)
     expect((await app.inject({ method: 'POST', url: '/api/runs/r1/propose-pr' })).statusCode).toBe(409)
+  })
+
+  it('keeps a live patch reviewable but refuses apply and PR actions until teardown', async () => {
+    writeManifestWithCapture('r1', undefined, {
+      status: 'healing',
+      endedAt: undefined,
+      worktrees: { prod: tmpDir },
+      fixCapture: {
+        provisional: true,
+        capturedAt: 'now',
+        repos: [{ repoName: 'prod', patchPath: '/p.patch', patchFile: 'p.patch', repoRoot: '/repos/prod', baseSha: 'abc', files: 1 }],
+      },
+    })
+    const { app } = await build()
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/pr-preflight' })).statusCode).toBe(409)
+    expect((await app.inject({ method: 'POST', url: '/api/runs/r1/propose-pr' })).statusCode).toBe(409)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/apply-preflight' })).statusCode).toBe(409)
+    expect((await app.inject({ method: 'POST', url: '/api/runs/r1/apply-fixes' })).statusCode).toBe(409)
+    expect(prMocks.proposeFixesForRun).not.toHaveBeenCalled()
+
+    const open = await app.inject({ method: 'POST', url: '/api/runs/r1/open-repo', payload: { repoName: 'prod' } })
+    expect(open.statusCode).toBe(200)
+    expect(open.json().path).toBe(tmpDir)
   })
 
   it('GET pr-preflight returns the preflight for the run capture', async () => {
@@ -383,6 +407,24 @@ describe('open-repo + apply-preflight routes', () => {
     expect((await app.inject({ method: 'POST', url: '/api/runs/r1/open-repo', payload: { repoName: 'prod' } })).statusCode).toBe(410)
   })
 
+  it('410s a provisional capture whose live worktree was already removed', async () => {
+    writeManifestWithCapture('r1', undefined, {
+      fixCapture: {
+        provisional: true,
+        capturedAt: 'now',
+        repos: [{ repoName: 'prod', patchPath: '/p.patch', patchFile: 'p.patch', repoRoot: tmpDir, baseSha: 'abc', files: 1 }],
+      },
+    })
+    const { app } = await build()
+    vi.mocked(launchEditorDir).mockClear()
+
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/open-repo', payload: { repoName: 'prod' } })
+
+    expect(res.statusCode).toBe(410)
+    expect(res.json().error).toContain('live run worktree')
+    expect(vi.mocked(launchEditorDir)).not.toHaveBeenCalled()
+  })
+
   it('reports an editor that would not launch instead of throwing', async () => {
     const repoRoot = fs.mkdtempSync(path.join(tmpDir, 'prod-'))
     writeManifestWithCapture('r1', [{ repoName: 'prod', patchPath: '/p.patch', patchFile: 'p.patch', repoRoot, baseSha: 'abc', files: 1 }])
@@ -444,5 +486,57 @@ describe('open-repo + apply-preflight routes', () => {
     // point is that the route accepted the request rather than 404ing.
     expect(res.statusCode).toBe(200)
     expect(res.json().results).toHaveLength(1)
+  })
+})
+
+describe('readable-log route', () => {
+  const rawLog = '\x1b[32mINFO\x1b[0m boot\r\nwebpack compiled with \x1b[31m6 errors\x1b[39m\r\n'
+
+  it('writes a readable copy under readable-logs/ and leaves the raw log untouched', async () => {
+    writeManifestForRun('r1')
+    const raw = path.join(runDirFor(logsDir, 'r1'), 'svc-api.log')
+    fs.writeFileSync(raw, rawLog)
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/readable-log', payload: { file: raw } })
+
+    expect(res.statusCode).toBe(200)
+    const target = path.join(runDirFor(logsDir, 'r1'), 'readable-logs', 'svc-api.log')
+    expect(res.json()).toEqual({ path: target })
+    expect(fs.readFileSync(target, 'utf-8')).toBe('INFO boot\nwebpack compiled with 6 errors\n')
+    expect(fs.readFileSync(raw, 'utf-8')).toBe(rawLog)
+  })
+
+  it('404s an unknown run and a missing log', async () => {
+    const { app } = await build()
+    const unknown = await app.inject({ method: 'POST', url: '/api/runs/nope/readable-log', payload: { file: '/x.log' } })
+    expect(unknown.statusCode).toBe(404)
+
+    writeManifestForRun('r1')
+    const missing = path.join(runDirFor(logsDir, 'r1'), 'svc-gone.log')
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/readable-log', payload: { file: missing } })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('rejects anything but a raw .log file inside the run', async () => {
+    writeManifestForRun('r1')
+    const runDir = runDirFor(logsDir, 'r1')
+    const outside = path.join(tmpDir, 'secret.log')
+    fs.writeFileSync(outside, 'secret')
+    fs.symlinkSync(outside, path.join(runDir, 'svc-link.log'))
+    const { app } = await build()
+
+    for (const file of [
+      undefined,
+      'svc-api.log',
+      outside,
+      path.join(runDir, 'manifest.json'),
+      path.join(runDir, 'readable-logs', 'svc-api.log'),
+      path.join(runDir, 'svc-link.log'),
+    ]) {
+      const res = await app.inject({ method: 'POST', url: '/api/runs/r1/readable-log', payload: { file } })
+      expect(res.statusCode, String(file)).toBe(400)
+    }
+    expect(fs.existsSync(path.join(runDir, 'readable-logs'))).toBe(false)
   })
 })

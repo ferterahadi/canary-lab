@@ -142,6 +142,17 @@ describe('FileRunStateSink', () => {
     expect(readRunsIndex(logsDir)[0].healCycles).toBe(3)
   })
 
+  it('mirrors a claimed attempt handoff into the terminal run index', () => {
+    const sink = new FileRunStateSink(logsDir)
+    sink.bootstrap(manifest())
+    sink.patchManifest('run-1', {
+      healEnd: { reason: 'new-run-required', cycle: 1, message: 'Fresh run required.', at: '2026-05-08T00:00:30.000Z' },
+    })
+    sink.finalize('run-1', 'failed', '2026-05-08T00:01:00.000Z', 1)
+
+    expect(readRunsIndex(logsDir)[0]).toMatchObject({ status: 'failed', newRunRequired: true })
+  })
+
   it('mirrors external repair ownership into the index for terminal Activity history', () => {
     const sink = new FileRunStateSink(logsDir)
     sink.bootstrap(manifest({ healMode: 'external' }))

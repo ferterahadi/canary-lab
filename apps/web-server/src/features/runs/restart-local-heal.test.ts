@@ -220,6 +220,19 @@ function runnerLogText(runId: string): string {
 }
 
 describe('makeRestartLocalHeal — rejections', () => {
+  it('refuses a claimed legacy suite attempt before spawning a heal agent', async () => {
+    const featureDir = writeFeature('demo')
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'),
+      "module.exports = { config: { name: 'demo', singleAttempt: { receipt: 'runtime/effect-attempt/attempt.json' }, featureDir: __dirname } }\n")
+    const runDir = seedRun('spent', { featureDir })
+    const receipt = path.join(runDir, 'runtime/effect-attempt/attempt.json')
+    fs.mkdirSync(path.dirname(receipt), { recursive: true })
+    fs.writeFileSync(receipt, '{}')
+
+    expect(await harness().restart('spent', 'go')).toEqual({ ok: false, reason: 'new-run-required' })
+    expect(fakeOrch.built).toHaveLength(0)
+  })
+
   it('reports run-not-found when no manifest exists on disk', async () => {
     const h = harness()
 

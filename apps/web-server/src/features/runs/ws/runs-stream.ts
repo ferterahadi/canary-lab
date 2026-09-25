@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { RunStore, RunStoreEvent, RunDetail } from '../logic/run-store'
 import type { RunIndexEntry } from '../logic/runtime/manifest'
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
+import { withSingleAttemptDetailState, withSingleAttemptIndexState } from '../logic/single-attempt-view'
 
 // `/ws/runs` — the browser's primary live-update channel. On connect, it sends
 // a single `snapshot` frame with the runs index. Subsequent mutations from
@@ -15,6 +16,7 @@ import { isActiveRunStatus } from '../../../../../../shared/run-state'
 
 export interface RunsStreamDeps {
   store: RunStore
+  featuresDir: string
 }
 
 // Wire-format frames. Stable: the web client treats unknown `type` values as
@@ -50,12 +52,12 @@ export async function runsStreamRoutes(
     // (where the client is most likely to render extended info immediately);
     // terminal runs' details are loaded lazily via the first `update` frame
     // for them. This keeps the snapshot small for users with long history.
-    const runs = deps.store.list()
+    const runs = withSingleAttemptIndexState(deps.store.list(), deps.store.logsDir, deps.featuresDir)
     const details: Record<string, RunDetail> = {}
     for (const entry of runs) {
       if (isActiveRunStatus(entry.status)) {
         const detail = deps.store.get(entry.runId)
-        if (detail) details[entry.runId] = detail
+        if (detail) details[entry.runId] = withSingleAttemptDetailState(detail, deps.store.logsDir)
       }
     }
     send({ type: 'snapshot', runs, details })
@@ -66,7 +68,7 @@ export async function runsStreamRoutes(
         return
       }
       if (event.kind === 'index-changed') {
-        send({ type: 'list-changed', runs: deps.store.list() })
+        send({ type: 'list-changed', runs: withSingleAttemptIndexState(deps.store.list(), deps.store.logsDir, deps.featuresDir) })
         return
       }
       if (event.kind === 'journal-changed') {
@@ -78,7 +80,7 @@ export async function runsStreamRoutes(
       if (!event.runId) return
       const detail = deps.store.get(event.runId)
       if (!detail) return
-      send({ type: 'update', runId: event.runId, detail })
+      send({ type: 'update', runId: event.runId, detail: withSingleAttemptDetailState(detail, deps.store.logsDir) })
     }
 
     deps.store.onEvent(onEvent)

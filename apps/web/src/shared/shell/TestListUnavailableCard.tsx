@@ -18,23 +18,9 @@ import { StatusDot } from '@/shared/ui/atoms'
  * absent when there is no rest. Before this, every failure cost a click before
  * it said anything.
  */
-export function TestListUnavailableCard({
-  title,
-  lead,
-  error,
-  retryLabel,
-  onRetry,
-  repair,
-  testId,
-}: {
-  title: string
-  /** One sentence of cause. Never a restatement of what the buttons do. */
-  lead: string
-  /** What actually failed, as the server reported it. */
-  error: string
+type RetryActions = {
   retryLabel: string
   onRetry: () => void
-  /** Workspace only — see the note above on why this is an absence. */
   repair?: {
     starting: boolean
     /** A previous repair failed, so the button offers to continue it. */
@@ -46,15 +32,33 @@ export function TestListUnavailableCard({
      *  use the command below it, so it renders directly above that field. */
     startError: string | null
   }
+} | { retryLabel?: never; onRetry?: never; repair?: never }
+
+export function TestListUnavailableCard({
+  title,
+  lead,
+  error,
+  retryLabel,
+  onRetry,
+  repair,
+  testId,
+  status = 'failed',
+}: {
+  title: string
+  /** One sentence of cause. Never a restatement of what the buttons do. */
+  lead: string
+  /** What actually failed, as the server reported it. */
+  error: string
   testId?: string
-}) {
+  status?: 'failed' | 'idle'
+} & RetryActions) {
   const [summary, ...rest] = error.split('\n')
   const hasFullOutput = rest.some((line) => line.trim().length > 0)
   return (
     <div className="cl-card mb-3 p-3 text-xs" data-testid={testId} style={{ color: 'var(--text-secondary)' }}>
       <div role="status">
         <div className="flex items-center gap-2">
-          <StatusDot state="failed" />
+          <StatusDot state={status} />
           <span className="text-[13px] font-medium text-primary">{title}</span>
         </div>
         <p className="mt-1.5 leading-relaxed">{lead}</p>
@@ -72,14 +76,14 @@ export function TestListUnavailableCard({
       >
         {summary}
       </p>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      {onRetry && <div className="mt-3 flex flex-wrap items-center gap-2">
         {repair && (
           <button type="button" className="cl-button-primary px-3 py-1.5" disabled={repair.starting} onClick={repair.onStart}>
             {repair.starting ? 'Starting…' : repair.resume ? 'Resume repair' : 'Repair in Canary Lab'}
           </button>
         )}
-        <button type="button" className="cl-button px-2 py-1" onClick={onRetry}>{retryLabel}</button>
-      </div>
+        <button type="button" className="cl-button px-3 py-1.5" onClick={onRetry}>{retryLabel}</button>
+      </div>}
       {repair && (
         // A peer of the buttons, not a drawer item: handing the job to your own
         // agent is the third way out of this state, and it was unfindable while
