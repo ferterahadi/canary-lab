@@ -39,4 +39,22 @@ describe('suite single-attempt receipt', () => {
     expect(policyForRunManifest({ feature: 'demo', featureDir, singleAttempt: { receipt: 'pinned.json' } }))
       .toEqual({ receipt: 'pinned.json' })
   })
+
+  it('does not infer a legacy policy from a missing or malformed suite config', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-legacy-attempt-'))
+    dirs.push(root)
+    const featureDir = path.join(root, 'features', 'demo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    expect(policyForRunManifest({ feature: 'demo' })).toBeUndefined()
+    expect(policyForRunManifest({ feature: 'demo', featureDir })).toBeUndefined()
+
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), "module.exports = { config: { name: 'other' } }\n")
+    expect(policyForRunManifest({ feature: 'demo', featureDir })).toBeUndefined()
+
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), 'throw new Error("broken config")\n')
+    expect(policyForRunManifest({ feature: 'demo', featureDir })).toBeUndefined()
+
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), "module.exports.default = { name: 'demo', singleAttempt: { receipt: 'default.json' } }\n")
+    expect(policyForRunManifest({ feature: 'demo', featureDir })).toEqual({ receipt: 'default.json' })
+  })
 })

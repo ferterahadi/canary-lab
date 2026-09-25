@@ -1312,6 +1312,18 @@ describe('restartRun — refusals', () => {
     expect(await h.deps.restartRun!('p1')).toEqual({ ok: false, reason: 'not-restartable' })
   })
 
+  it('refuses restart when the run already claimed its single attempt receipt', async () => {
+    const h = harness()
+    writeFeature('demo')
+    seedRun(h.runStore, 'claimed', { singleAttempt: { receipt: 'runtime/attempt.json' } })
+    const receipt = path.join(runDirFor(logsDir, 'claimed'), 'runtime', 'attempt.json')
+    fs.mkdirSync(path.dirname(receipt), { recursive: true })
+    fs.writeFileSync(receipt, '{}')
+
+    expect(await h.deps.restartRun!('claimed')).toEqual({ ok: false, reason: 'new-run-required' })
+    expect(orchHarness.options).toEqual([])
+  })
+
   it('refuses when the run names a feature that no longer exists', async () => {
     const h = harness()
     seedRun(h.runStore, 'f1', { feature: 'deleted-feature' })

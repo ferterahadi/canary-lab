@@ -407,6 +407,24 @@ describe('open-repo + apply-preflight routes', () => {
     expect((await app.inject({ method: 'POST', url: '/api/runs/r1/open-repo', payload: { repoName: 'prod' } })).statusCode).toBe(410)
   })
 
+  it('410s a provisional capture whose live worktree was already removed', async () => {
+    writeManifestWithCapture('r1', undefined, {
+      fixCapture: {
+        provisional: true,
+        capturedAt: 'now',
+        repos: [{ repoName: 'prod', patchPath: '/p.patch', patchFile: 'p.patch', repoRoot: tmpDir, baseSha: 'abc', files: 1 }],
+      },
+    })
+    const { app } = await build()
+    vi.mocked(launchEditorDir).mockClear()
+
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/open-repo', payload: { repoName: 'prod' } })
+
+    expect(res.statusCode).toBe(410)
+    expect(res.json().error).toContain('live run worktree')
+    expect(vi.mocked(launchEditorDir)).not.toHaveBeenCalled()
+  })
+
   it('reports an editor that would not launch instead of throwing', async () => {
     const repoRoot = fs.mkdtempSync(path.join(tmpDir, 'prod-'))
     writeManifestWithCapture('r1', [{ repoName: 'prod', patchPath: '/p.patch', patchFile: 'p.patch', repoRoot, baseSha: 'abc', files: 1 }])

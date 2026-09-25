@@ -404,6 +404,17 @@ describe('makeRestartExternalRun — rejections', () => {
     })
   })
 
+  it('refuses an external restart after the run claimed its one receipt', async () => {
+    writeFeature('foo')
+    writeRunManifest({ runId: 'r-1', singleAttempt: { receipt: 'runtime/attempt.json' } })
+    const receipt = path.join(runDirFor(logsDir, 'r-1'), 'runtime', 'attempt.json')
+    fs.mkdirSync(path.dirname(receipt), { recursive: true })
+    fs.writeFileSync(receipt, '{}')
+
+    await expect(build()('r-1', healReq())).rejects.toMatchObject({ statusCode: 409, message: expect.stringContaining('fresh run') })
+    expect(orchHarness.options).toEqual([])
+  })
+
   it('404s when the run\'s feature is no longer in the workspace', async () => {
     writeRunManifest({ runId: 'r-1', feature: 'ghost' })
     await expect(build()('r-1', healReq())).rejects.toMatchObject({

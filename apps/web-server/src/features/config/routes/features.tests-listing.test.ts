@@ -156,6 +156,19 @@ describe('GET /api/features/:name/tests', () => {
     return `test('deep', async () => { const a = ${open}x${close} })\n`
   }
 
+  it('shows an AST parse error in preview before Playwright discovery runs', async () => {
+    writeFeature('deep-preview', { spec: deepNestedSpec() })
+    const spawner = vi.fn(failingSpawner)
+    const app = await build({ spawner })
+
+    const res = await app.inject('/api/features/deep-preview/tests?preview=1')
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual([expect.objectContaining({ tests: [], parseError: expect.any(String) })])
+    expect(spawner).not.toHaveBeenCalled()
+    await app.close()
+  })
+
   it('returns display-only formatted code with absolute source rows without mutating the spec', async () => {
     const source = "test('formatted', async () => { const payload={kind:'retry',attempt:2}; /* keep this reason */ await send(payload) })\n"
     const dir = writeFeature('formatted-code', { spec: source })

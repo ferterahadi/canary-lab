@@ -306,7 +306,7 @@ describe('pollUntilReady', () => {
   it('stops polling immediately when the run was cancelled', async () => {
     const attempt = vi.fn(async () => false)
     const { ctx } = ctxFor({ stopped: true, servicePtys: new Map([['api', {} as never]]) })
-    await pollUntilReady(ctx, svcSpec(), 'tcp', attempt)
+    await pollUntilReady(ctx, svcSpec({ healthProbe: { tcp: { port: 5999, deadlineMs: 1_000 } } }), 'tcp', attempt)
     expect(attempt).not.toHaveBeenCalled()
     expect(ctx.bootFailure).toBeUndefined()
   })
@@ -387,6 +387,35 @@ describe('confirmed service failures', () => {
     expect(watcher.kill).toHaveBeenCalledWith('SIGTERM')
     watcher.exit({ exitCode: 0, signal: 15 })
     expect(events.filter((event) => event.event === 'service-exit')).toHaveLength(1)
+  })
+
+  it('keeps the watcher alive for a boot-only failure so its evidence remains visible', () => {
+    const watcher = capturedPty()
+    const { ctx } = ctxFor({ ptyFactory: () => watcher.handle, executionType: 'boot' })
+    const svc = svcSpec()
+    spawnService(ctx, svc)
+
+    watcher.data('webpack 5.89.0 compiled with 1 error in 100 ms\n')
+
+    expect(ctx.bootFailure?.reason).toBe('compiler-failed')
+    expect(watcher.kill).not.toHaveBeenCalled()
+    expect(ctx.servicePtys.get(svc.name)).toBe(watcher.handle)
+  })
+
+  it.each(['passed', 'aborted'] as const)('ignores compiler output and exit after the run is %s', async (status) => {
+    const watcher = capturedPty()
+    const { ctx } = ctxFor({ ptyFactory: () => watcher.handle })
+    const svc = svcSpec({ healthProbe: { http: { url: 'http://127.0.0.1:3000/health' } } })
+    ctx.healthCheck = async () => true
+    spawnService(ctx, svc)
+    await waitForServiceReady(ctx, svc)
+    ctx.status = status
+
+    watcher.data('webpack 5.89.0 compiled with 1 error in 100 ms\n')
+    watcher.exit({ exitCode: 1 })
+
+    expect(ctx.serviceFailure).toBeUndefined()
+    expect(ctx.bootFailure).toBeUndefined()
   })
 
   it('rejects a green probe if the service exited while it was in flight', async () => {

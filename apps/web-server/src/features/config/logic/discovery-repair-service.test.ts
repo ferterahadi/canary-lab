@@ -42,6 +42,31 @@ describe('discovery repair lifecycle', () => {
     expect(service.get(repair.id)).toMatchObject({ status: 'succeeded', discoveredCount: 1 })
   })
 
+  it.each(['missing', 'invalid'] as const)('fails verification while the %s suite configuration remains broken', async (condition) => {
+    const repair = service.start('suite', owner)
+    await service.settled()
+    const configPath = path.join(root, 'features', 'suite', 'feature.config.cjs')
+    if (condition === 'missing') fs.unlinkSync(configPath)
+    else fs.writeFileSync(configPath, 'throw new Error("bad config")')
+
+    service.update(repair.id, 'owner', 'verify')
+    await service.settled()
+    expect(service.get(repair.id)).toMatchObject({ status: 'failed', diagnostic: expect.stringContaining('Suite configuration') })
+    expect(listTests).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails verification when the suite was removed after repair started', async () => {
+    const repair = service.start('suite', owner)
+    await service.settled()
+    fs.rmSync(path.join(root, 'features', 'suite'), { recursive: true, force: true })
+
+    service.update(repair.id, 'owner', 'verify')
+    await service.settled()
+
+    expect(service.get(repair.id)).toMatchObject({ status: 'failed', diagnostic: 'Feature not found' })
+    expect(listTests).toHaveBeenCalledTimes(1)
+  })
+
   it('reserves one owner before async discovery, records progress, and only Canary can verify success', async () => {
     const repair = service.start('suite', owner)
     expect(service.start('suite', owner).id).toBe(repair.id)

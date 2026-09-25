@@ -249,6 +249,17 @@ describe('signal_run', () => {
     expect(broker.touch).toHaveBeenCalledWith('run-1', 'sess-1')
   })
 
+  it('marks a signal as requiring a new run after the suite claimed its one attempt', async () => {
+    const runDir = path.join(logsDir, 'runs', 'run-1')
+    fs.mkdirSync(path.join(runDir, 'runtime'), { recursive: true })
+    fs.writeFileSync(path.join(runDir, 'runtime', 'attempt.json'), '{}')
+    const { call } = signalHarness({ store: { get: () => runDetail({ singleAttempt: { receipt: 'runtime/attempt.json' } }) } })
+
+    const out = await call('signal_run', { ...SESSION, kind: 'restart', ...DIAGNOSIS })
+
+    expect(out).toMatchObject({ accepted: true, disposition: 'new_run_required', message: expect.stringContaining('fresh run') })
+  })
+
   it('writes a bare heal signal with no diagnosis, and without a session id', async () => {
     const { call, broker } = signalHarness()
 

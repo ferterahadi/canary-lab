@@ -161,4 +161,17 @@ describe('suiteAvailability', () => {
     expect(fs.existsSync(suiteDir)).toBe(true)
     expect(suiteAvailability(featuresDir, 'linked').kind).toBe('removed')
   })
+
+  it('finds a named suite through a differently named discovery folder', () => {
+    const featuresDir = path.join(tmpDir, 'features')
+    const linked = path.join(tmpDir, 'linked-tests')
+    fs.mkdirSync(linked)
+    writeFeature('alias', `module.exports = { config: { name: 'shop', featureDir: ${JSON.stringify(linked)}, repos: [] } }`)
+
+    expect(suiteAvailability(featuresDir, 'shop')).toMatchObject({
+      kind: 'ready',
+      feature: { name: 'shop', featureDir: linked },
+      configPath: path.join(linked, 'feature.config.cjs'),
+    })
+  })
 })

@@ -54,3 +54,21 @@ it('uses a run-pinned receipt when the current suite config no longer declares t
   expect(withSingleAttemptIndexState([entry], logsDir, featuresDir)[0].newRunRequired).toBe(true)
   expect(withSingleAttemptDetailState(detail, logsDir).newRunRequired).toBe(true)
 })
+
+it('leaves an older run restartable when its suite has no receipt policy', () => {
+  const featuresDir = path.join(root, 'features')
+  const logsDir = path.join(root, 'logs')
+  const featureDir = path.join(featuresDir, 'demo')
+  const runDir = path.join(logsDir, 'runs', 'run-3')
+  fs.mkdirSync(featureDir, { recursive: true })
+  fs.mkdirSync(runDir, { recursive: true })
+  fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), "module.exports = { config: { name: 'demo' } }\n")
+  const manifest = { runId: 'run-3', feature: 'demo', featureDir, startedAt: 'now', status: 'failed', healCycles: 0, services: [] } as const
+  fs.writeFileSync(path.join(runDir, 'manifest.json'), JSON.stringify(manifest))
+  const entry: RunIndexEntry = { runId: 'run-3', feature: 'demo', startedAt: 'now', status: 'failed' }
+
+  expect(withSingleAttemptIndexState([entry, entry], logsDir, featuresDir)).toEqual([entry, entry])
+  const alreadyRequired = { ...entry, newRunRequired: true }
+  expect(withSingleAttemptIndexState([alreadyRequired], logsDir, featuresDir)).toEqual([alreadyRequired])
+  expect(withSingleAttemptDetailState({ runId: 'run-3', manifest }, logsDir).newRunRequired).toBeUndefined()
+})

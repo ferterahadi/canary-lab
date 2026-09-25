@@ -95,6 +95,23 @@ function makeFeature(over: Partial<FeatureConfig> = {}): FeatureConfig {
 }
 
 describe('RunOrchestrator.start', () => {
+  it('refuses to start after a suite claimed its one external-effect receipt', async () => {
+    const { factory, spawned } = makeFakeFactory()
+    const receipt = path.join(runDir, 'runtime', 'attempt.json')
+    fs.mkdirSync(path.dirname(receipt), { recursive: true })
+    fs.writeFileSync(receipt, '{}')
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ repos: [], singleAttempt: { receipt: 'runtime/attempt.json' } }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+    })
+
+    await expect(orch.start()).rejects.toThrow('fresh run')
+    expect(spawned).toHaveLength(0)
+    expect(readManifest(orch.paths.manifestPath)).toBeNull()
+  })
+
   it('starts cleanly when a feature has no services', async () => {
     const { factory, spawned } = makeFakeFactory()
     const orch = new RunOrchestrator({

@@ -65,6 +65,22 @@ describe('test review human gate', () => {
     expect(result.request_id).toBe('request1')
   })
 
+  it('routes an approved external request back to its original session', async () => {
+    const { tools, send } = fixture()
+    const fallback = send.getMockImplementation()!
+    send.mockImplementation(async (request) => {
+      if ((request as { url?: string }).url === '/api/run-requests/request1') return { statusCode: 200, body: {
+        requestId: 'request1', feature: 'checkout', status: 'ready', review: { runId: args.runId, revision: args.review_revision },
+        owner: { kind: 'external', clientKind: 'codex', sessionId: 'original-session' },
+      } } as never
+      return fallback(request)
+    })
+
+    const result = await tools.call('get_test_review', { runId: args.runId, request_id: 'request1' })
+    expect(result.nextSteps).toEqual(['start_run'])
+    expect(result.next).toContain('original-session')
+  })
+
   it('keeps a missing or cross-run continuation explicit rather than guessing a replacement', async () => {
     const { tools, send } = fixture()
     const fallback = send.getMockImplementation()!

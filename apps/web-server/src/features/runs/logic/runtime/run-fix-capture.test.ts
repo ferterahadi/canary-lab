@@ -54,6 +54,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
   fs.rmSync(tmpDir, { recursive: true, force: true })
 })
@@ -229,6 +230,68 @@ describe('captureFixes', () => {
     ]))
     await monitor.close()
     expect(watcher.close).toHaveBeenCalledOnce()
+  })
+
+  it('reports watcher setup, runtime, and close failures without losing the run', async () => {
+    const log = fakeRunnerLog()
+    const { ctx } = withBaseline(log)
+    const broken = startLiveFixCapture(ctx, { watchPath: () => { throw new Error('watch unavailable') } })
+    expect(log.warnings).toContain('Live fix watcher failed: watch unavailable')
+    await broken.close()
+
+    const watcher = Object.assign(new EventEmitter(), { close: () => { throw new Error('close unavailable') } }) as unknown as fs.FSWatcher
+    const monitor = startLiveFixCapture(ctx, { watchPath: () => watcher })
+    watcher.emit('error', new Error('watch stopped'))
+    await monitor.close()
+    expect(log.warnings).toContain('Live fix watcher failed: watch stopped')
+    expect(log.warnings).toContain('Live fix watcher close failed: close unavailable')
+  })
+
+  it('ignores dependency tree events and reports a failed capture', async () => {
+    const log = fakeRunnerLog()
+    const { ctx } = withBaseline(log)
+    let changed: fs.WatchListener<string> | undefined
+    const watcher = Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as fs.FSWatcher
+    const monitor = startLiveFixCapture(ctx, {
+      watchPath: (_root, listener) => { changed = listener; return watcher },
+      debounceMs: 1,
+      reconcileMs: 60_000,
+    })
+    h.diffContentSinceSnapshot.mockRejectedValueOnce(new Error('diff unavailable'))
+
+    changed?.('change', '.git/index')
+    expect(h.diffContentSinceSnapshot).not.toHaveBeenCalled()
+    changed?.('change', 'src/app.ts')
+    await vi.waitFor(() => expect(log.warnings).toContain('Live fix capture failed: diff unavailable'))
+    await monitor.close()
+  })
+
+  it('rescans after a second change arrives during an in-flight capture', async () => {
+    vi.useFakeTimers()
+    const { ctx } = withBaseline()
+    let changed: fs.WatchListener<string> | undefined
+    const watcher = Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as fs.FSWatcher
+    let releaseFirst: (patch: string) => void = () => {}
+    h.diffContentSinceSnapshot.mockImplementationOnce(() => new Promise<string>((resolve) => { releaseFirst = resolve }))
+    const monitor = startLiveFixCapture(ctx, {
+      watchPath: (_root, listener) => { changed = listener; return watcher },
+      debounceMs: 1,
+      reconcileMs: 60_000,
+    })
+
+    changed?.('change', 'src/first.ts')
+    changed?.('change', 'src/duplicate.ts')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(h.diffContentSinceSnapshot).toHaveBeenCalledTimes(1)
+    changed?.('change', 'src/second.ts')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(h.diffContentSinceSnapshot).toHaveBeenCalledTimes(1)
+    releaseFirst('diff --git a/x b/x\n')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(h.diffContentSinceSnapshot).toHaveBeenCalledTimes(2)
+    await monitor.close()
+    changed?.('change', 'src/after-close.ts')
+    expect(h.diffContentSinceSnapshot).toHaveBeenCalledTimes(2)
   })
 })
 
