@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { getNotifications, deleteNotification, readNotification } from './notifications'
+import { getNotifications, deleteNotification, readNotification, resolveNotificationAction } from './notifications'
 import { ok, fail } from './__fixtures__/response'
 
 describe('notifications api', () => {
@@ -25,5 +25,12 @@ describe('notifications api', () => {
       ['http://x/api/notifications/flight%3Af%2F1', { method: 'DELETE' }],
       ['/api/notifications/run%3Ar%201/read', { method: 'POST' }],
     ])
+  })
+
+  it('resolves an action for the encoded notification id', async () => {
+    const result = { status: 'resolved' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(result))
+    await expect(resolveNotificationAction('run:r 1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(result)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/notifications/run%3Ar%201/resolve-action', { method: 'POST' })
   })
 })

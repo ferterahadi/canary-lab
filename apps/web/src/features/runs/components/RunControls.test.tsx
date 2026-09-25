@@ -404,6 +404,23 @@ describe('run overview', () => {
     expect(onBootFailureOpenChange).toHaveBeenCalledWith(false)
   })
 
+  it('renders no boot-failure dialog when the failure has no compiler errors to list', async () => {
+    const { useRun } = await import('../state/RunsContext')
+    vi.mocked(useRun).mockReturnValue({
+      detail: runDetail({
+        status: 'failed',
+        bootFailure: { service: 'api', safeName: 'api', reason: 'process-exited', detail: 'Exited.', logPath: '/runs/run-1/svc-api.log', excerpt: 'Error: boom' },
+      }),
+      transient: null,
+      status: 'failed',
+      displayStatus: 'failed',
+      error: null,
+    })
+
+    await act(async () => { root.render(<RunDetailColumn runId="run-1" bootFailureOpen />) })
+    expect(document.body.querySelector('[data-testid="boot-failure-dialog"]')).toBeNull()
+  })
+
   it('renders no boot-failure dialog for a dependency blocker', async () => {
     const { useRun } = await import('../state/RunsContext')
     vi.mocked(useRun).mockReturnValue({

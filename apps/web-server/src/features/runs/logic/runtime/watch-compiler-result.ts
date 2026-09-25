@@ -6,7 +6,8 @@ const WEBPACK_FAILURE = /^(?:\[[^\]]+\]\s*)?webpack(?:\s+\d+(?:\.\d+)*)?\s+compi
 /** Returns the next incomplete line so PTY chunks cannot split a verdict. */
 export function readWatchCompilerFailure(tail: string, chunk: string): { tail: string; failed: boolean } {
   const lines = (tail + chunk).replace(ANSI, '').split(/[\r\n]+/)
-  const last = lines.pop() ?? ''
+  // Splitting any string yields at least one segment, including for empty input.
+  const last = lines.pop() as string
   return {
     tail: last.slice(-1024),
     failed: lines.some((line) => WEBPACK_FAILURE.test(line.trimStart())) || WEBPACK_FAILURE.test(last.trimStart()),

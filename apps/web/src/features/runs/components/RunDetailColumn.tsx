@@ -22,6 +22,7 @@ import { RunPane } from './RunPane'
 import type { PlaywrightView } from './RunPlaybackPanels'
 import { ServiceTabButton, TabButton } from './RunServicePanels'
 import { BootFailureDialog } from './BootFailureDialog'
+import { compilerErrors } from '@/shared/ui/BootEvidence'
 import { isTerminalRunStatus } from './run-export-links'
 
 export { canRestartHeal, repoServiceCount, servicePrimaryLabel, serviceTabLabelParts } from './RunOverviewTabs'
@@ -157,9 +158,10 @@ export function RunDetailColumn({
   const repoBranches = m.repoBranches ?? []
   const activeService = services[serviceIdx]
   const showAgentSession = isTerminalRunStatus(m.status) || agentPaneExited
-  // Only a failure a service card shows can open the dialog, so only that kind
-  // renders it; a dependency blocker has its own panel and no dialog.
+  // The dialog is the full compiler-error list, so only a card that shows such a
+  // list can open it. A dependency blocker has its own panel and no dialog.
   const bootFailure = m.bootFailure?.reason !== 'dependency-incompatible' ? m.bootFailure : undefined
+  const bootErrors = compilerErrors(bootFailure?.excerpt)
 
   return (
     <div className="cl-panel relative flex h-full flex-col">
@@ -343,12 +345,12 @@ export function RunDetailColumn({
       </div>
       {/* Mounted here, not in the Overview tab, so switching tabs can't strand
           an open dialog's route. */}
-      {bootFailure && (
+      {bootFailure && bootErrors.length > 0 && (
         <BootFailureDialog
           open={bootFailureDialogOpen}
           onClose={() => setBootFailureDialogOpen(false)}
-          service={services.find((service) => service.safeName === bootFailure.safeName)}
           failure={bootFailure}
+          errors={bootErrors}
         />
       )}
     </div>

@@ -21,7 +21,7 @@ export const STATUS_COLOR: Record<ServiceStatus, string> = {
 const EVIDENCE_LINE = /\b(error|failed|failure|exception|unauthorized|refused|denied|fatal)\b/i
 
 /** A small verbatim window for the first reading layer. The full bounded,
- * redacted excerpt remains in the boot-failure dialog and the MCP heal context. */
+ * redacted excerpt remains in the service log and the MCP heal context. */
 export function bootEvidencePreview(excerpt: string | undefined, maxLines = 3): string | null {
   const lines = (excerpt ?? '').split(/\r?\n/).map((line) => line.trimEnd()).filter((line) => line.trim())
   if (lines.length === 0) return null
@@ -155,9 +155,9 @@ export function ServiceCard({
 
 const PREVIEW_ERRORS = 3
 
-/** The first reading layer of a boot failure: what happened, what to do, and
- *  the evidence that says so. Everything else — every error in full, the
- *  diagnostic facts, the raw output — is one click away in the dialog. */
+/** A boot failure as the card shows it: what happened, what to do, and the
+ *  evidence that says so. Every compiler error in full is one click away in the
+ *  dialog; the raw output is the service log's job. */
 function ServiceBootFailure({ runId, failure, onOpenDetail }: { runId: string; failure: RunBootFailure; onOpenDetail: () => void }) {
   const errors = compilerErrors(failure.excerpt)
   const preview = errors.length === 0 ? bootEvidencePreview(failure.excerpt) : null
@@ -177,9 +177,12 @@ function ServiceBootFailure({ runId, failure, onOpenDetail }: { runId: string; f
       {nextAction && <p className="mt-1 text-secondary">{nextAction}</p>}
       {errors.length > 0 && (
         <div className="mt-2">
-          <EvidenceLabel action={`Show all ${errors.length}`} onAction={onOpenDetail}>
-            Compiler errors · {errors.length} in preserved output
-          </EvidenceLabel>
+          <div className="mb-1 flex items-baseline justify-between gap-2">
+            <span className="cl-rubric">Compiler errors · {errors.length} in preserved output</span>
+            <button type="button" className="shrink-0 text-[11px] text-accent underline-offset-2 transition-colors hover:underline" onClick={onOpenDetail}>
+              Show all {errors.length}
+            </button>
+          </div>
           <ul className="divide-y divide-line">
             {errors.slice(0, PREVIEW_ERRORS).map((error) => <CompilerErrorRow key={`${error.file}:${error.line}:${error.column}`} error={error} clamp />)}
           </ul>
@@ -187,20 +190,11 @@ function ServiceBootFailure({ runId, failure, onOpenDetail }: { runId: string; f
       )}
       {preview && (
         <div className="mt-2">
-          <EvidenceLabel action="Show full output" onAction={onOpenDetail}>Failure excerpt</EvidenceLabel>
+          <div className="cl-rubric mb-1">Failure excerpt</div>
           <pre className="whitespace-pre-wrap break-words rounded border border-line bg-canvas px-2 py-1.5 font-mono text-secondary">{preview}</pre>
         </div>
       )}
     </section>
-  )
-}
-
-function EvidenceLabel({ children, action, onAction }: { children: React.ReactNode; action: string; onAction: () => void }) {
-  return (
-    <div className="mb-1 flex items-baseline justify-between gap-2">
-      <span className="cl-rubric">{children}</span>
-      <button type="button" className="shrink-0 text-[11px] text-accent underline-offset-2 transition-colors hover:underline" onClick={onAction}>{action}</button>
-    </div>
   )
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { COMPILER_FAILURE_NEXT_ACTION } from '@shared/run-state'
-import { bootFailureSummary, bootNextAction, compilerErrors } from './BootEvidence'
+import { bootFailureSummary, bootNextAction, bootProcessLabel, compilerErrors } from './BootEvidence'
 
 describe('bootFailureSummary', () => {
   it('names a failed build over the timeout a live watcher reports', () => {
@@ -57,5 +57,13 @@ describe('compilerErrors', () => {
     expect(compilerErrors(undefined)).toEqual([])
     expect(compilerErrors('Error: listen EADDRINUSE')).toEqual([])
     expect(compilerErrors('ERROR in ./src/a.ts:1:1')).toEqual([{ file: 'src/a.ts', line: 1, column: 1, message: '' }])
+  })
+})
+
+describe('bootProcessLabel', () => {
+  it('prefers the signal, then the exit code, then says nothing was captured', () => {
+    expect(bootProcessLabel({ reason: 'process-exited', signal: 'SIGTERM', exitCode: 1 })).toBe('signal SIGTERM')
+    expect(bootProcessLabel({ reason: 'process-exited', exitCode: 1 })).toBe('exit 1')
+    expect(bootProcessLabel({ reason: 'health-timeout' })).toBe('not captured')
   })
 })

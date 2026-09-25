@@ -116,12 +116,12 @@ describe('ServiceCard', () => {
     expect(container.textContent).not.toContain('Canary preserved')
     expect(labels()).toEqual(['cmd', 'cwd', 'ref', 'url', 'Failure excerpt'])
 
+    // No compiler errors, so nothing for a dialog to add: the log holds the rest.
     const buttons = [...container.querySelectorAll('[data-testid="service-boot-failure"] button')] as HTMLButtonElement[]
-    expect(buttons.map((button) => button.textContent)).toEqual(['Open service log', 'Show full output'])
+    expect(buttons.map((button) => button.textContent)).toEqual(['Open service log'])
     act(() => buttons[0].click())
     expect(openRunLog).toHaveBeenCalledWith('r1', '/logs/service.log')
-    act(() => buttons[1].click())
-    expect(onOpenBootFailure).toHaveBeenCalledOnce()
+    expect(onOpenBootFailure).not.toHaveBeenCalled()
   })
 
   it('previews the first useful evidence window', () => {
