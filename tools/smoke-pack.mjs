@@ -103,10 +103,10 @@ if (!tarballName) {
 
 const tarballPath = path.join(tempRoot, tarballName)
 
-// Upgrade proof starts from the last supported npm release, not a hand-shaped
-// fixture. A patch release must migrate a real 2.2.0 workspace without rewriting
+// Upgrade proof starts from the preceding npm release, not a hand-shaped
+// fixture. A patch release must migrate a real 2.3.0 workspace without rewriting
 // its suites or user-owned files, then leave the documented upgrade retryable.
-const upgradeFromVersion = '2.2.0'
+const upgradeFromVersion = '2.3.0'
 const releaseVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version
 const upgradeHarnessDir = path.join(tempRoot, 'upgrade-harness')
 const upgradeProjectDir = path.join(upgradeHarnessDir, 'upgrade-project')
@@ -171,7 +171,7 @@ for (const client of ['codex', 'claude']) {
   const packaged = childDirectories(
     path.join(upgradeProjectDir, 'node_modules', 'canary-lab', 'dist', 'agent-integrations', client, 'skills'),
   )
-  const installed = childDirectories(path.join(upgradeHomeDir, `.${client}`, 'skills'))
+  const installed = childDirectories(path.join(upgradeHomeDir, client === 'codex' ? '.agents' : '.claude', 'skills'))
     .filter((name) => name.startsWith('canary-lab'))
   if (JSON.stringify(installed) !== JSON.stringify(packaged)) {
     throw new Error(`Smoke test failed: ${upgradeFromVersion} ${client} skills do not match its package`)
