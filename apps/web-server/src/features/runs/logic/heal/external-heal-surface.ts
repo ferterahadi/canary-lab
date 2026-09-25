@@ -6,7 +6,7 @@ import { loadProjectConfig } from '../runtime/launcher/project-config'
 import { buildRunPaths, runDirFor } from '../runtime/run-paths'
 import { stuckSlugsFromJournal } from '../runtime/log-enrichment'
 import { ESCALATION_THRESHOLD, buildHealEscalation, type HealEscalation } from '../runtime/heal-escalation'
-import type { HealSignalKind, RunBootFailure } from '../../../../../../../shared/run-state'
+import type { HealSignalKind, RunBootFailure, RunServiceFailure } from '../../../../../../../shared/run-state'
 import type { StrengthVerdict } from '../../../../../../../shared/verification-strength/types'
 import type { PendingSpecEdit } from '../dirty-specs/detect'
 import type { RunManifest } from '../runtime/manifest'
@@ -96,6 +96,8 @@ export interface ExternalHealContext {
   // service won't serve, fix the service/app code, then signal_run
   // kind:"restart". Absent on ordinary test-failure heals.
   bootFailure?: RunBootFailure
+  /** Confirmed service failure after readiness; tests may have partial results. */
+  serviceFailure?: RunServiceFailure
   /** The suite already used this run's external-effect budget. A signal records
    *  the repair and ends this run without restarting services or tests. */
   singleAttempt?: { claimed: true; message: string }
@@ -186,6 +188,7 @@ export interface ExternalRunSnapshot {
   counts: NormalizedRunCounts
   failedTests: ExternalHealFailedTest[]
   bootFailure?: RunBootFailure
+  serviceFailure?: RunServiceFailure
   healIndexMarkdown: string | null
   journalMarkdown: string | null
   artifactsBase: string
@@ -294,6 +297,16 @@ function bootFailureNextSteps(bf: RunBootFailure): readonly string[] {
   ]
 }
 
+function serviceFailureNextSteps(failure: RunServiceFailure): readonly string[] {
+  return [
+    `Service "${failure.service}" failed after readiness (${failure.kind}: ${failure.detail}). Read context.serviceFailure and its bounded excerpt, then the full log at ${failure.logPath} if needed.`,
+    'Playwright was stopped; its reported results are partial. Do not count unrun tests as failures or passes.',
+    'Fix the service/app code, not the tests. Then signal_run ONCE with kind:"restart", hypothesis and fixDescription.',
+    RUNNER_VERIFICATION_RULE,
+    'Call wait_for_heal_task again on this runId + session_id.',
+  ]
+}
+
 // The breadcrumb shipped on repeat heal cycles in place of the full nextSteps +
 // healPrompt map. The procedure and resource map are STATIC across cycles, so
 // they go out once on cycle 1 (and on any explicit get_heal_context re-fetch);
@@ -352,7 +365,11 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
       failedDir: paths.failedDir,
     })
     : undefined
-  const procedure = snapshot.bootFailure ? bootFailureNextSteps(snapshot.bootFailure) : EXTERNAL_HEAL_NEXT_STEPS
+  const procedure = snapshot.bootFailure
+    ? bootFailureNextSteps(snapshot.bootFailure)
+    : snapshot.serviceFailure
+      ? serviceFailureNextSteps(snapshot.serviceFailure)
+      : EXTERNAL_HEAL_NEXT_STEPS
   const attemptSteps = attemptClaimed
     ? [
         ...procedure.slice(0, 3),
@@ -380,6 +397,7 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     counts: compactCounts(snapshot.counts),
     failedTests: snapshot.failedTests,
     ...(snapshot.bootFailure ? { bootFailure: snapshot.bootFailure } : {}),
+    ...(snapshot.serviceFailure ? { serviceFailure: snapshot.serviceFailure } : {}),
     ...(attemptClaimed ? { singleAttempt: { claimed: true as const, message: NEW_RUN_REQUIRED_MESSAGE } } : {}),
     // Path only — the agent `Read`s the file when it needs the content. Presence
     // mirrors whether the markdown file exists on disk.
@@ -449,6 +467,7 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
     counts: normalizeRunCounts(summary ?? null),
     failedTests: buildFailedTests(detail, paths.failedDir),
     ...(detail.manifest.bootFailure ? { bootFailure: detail.manifest.bootFailure } : {}),
+    ...(detail.manifest.serviceFailure ? { serviceFailure: detail.manifest.serviceFailure } : {}),
     ...(specEdits ? { specEdits } : {}),
     healIndexMarkdown: safeRead(paths.healIndexPath),
     journalMarkdown: safeRead(paths.diagnosisJournalPath),

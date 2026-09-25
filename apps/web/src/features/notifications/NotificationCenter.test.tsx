@@ -156,15 +156,22 @@ it('opens the exact pending run without changing notification state', async () =
   expect(api.deleteNotification).not.toHaveBeenCalled()
 })
 
-it('deletes through the persistent API and removes the row only after success', async () => {
+it('keeps the row until deletion succeeds, then removes it without another inbox read', async () => {
   await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={vi.fn()} />))
   api.deleteNotification.mockRejectedValueOnce(new Error('Disk is read-only'))
   await act(async () => labelled('Delete permanently').click())
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Disk is read-only')
   expect(document.querySelector('[data-testid="notification-n1"]')).not.toBeNull()
+  let completeDelete!: () => void
+  api.deleteNotification.mockImplementationOnce((id: string) => new Promise<void>((resolve) => {
+    completeDelete = () => { rows = rows.filter((row) => row.id !== id); resolve() }
+  }))
   await act(async () => labelled('Delete permanently').click())
+  expect(document.querySelector('[data-testid="notification-n1"]')).not.toBeNull()
+  await act(async () => completeDelete())
   expect(document.querySelector('[data-testid="notification-n1"]')).toBeNull()
   expect(document.body.textContent).toContain('Nothing needs attention')
+  expect(api.getNotifications).toHaveBeenCalledTimes(1)
 })
 
 it('shows a retryable loading failure rather than an empty inbox', async () => {

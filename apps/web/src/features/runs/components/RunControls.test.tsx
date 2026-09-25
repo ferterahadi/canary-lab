@@ -371,6 +371,56 @@ describe('run overview', () => {
     expect(onOpenEvaluationReport).toHaveBeenCalledTimes(2)
   })
 
+  it('opens the boot-failure dialog from the failing card, by itself or through the route', async () => {
+    const { useRun } = await import('../state/RunsContext')
+    const service = { name: 'api', safeName: 'api', command: 'npm run dev', cwd: '/wt/api', logPath: '/runs/run-1/svc-api.log', status: 'timeout' }
+    vi.mocked(useRun).mockReturnValue({
+      detail: runDetail({
+        status: 'failed',
+        services: [service] as RunDetail['manifest']['services'],
+        bootFailure: {
+          service: 'api', safeName: 'api', reason: 'health-timeout', classification: 'compiler-failure',
+          detail: 'Timed out.', logPath: service.logPath, excerpt: 'ERROR in ./src/a.ts:1:2\nTS2322: Wrong.',
+        },
+      }),
+      transient: null,
+      status: 'failed',
+      displayStatus: 'failed',
+      error: null,
+    })
+    const dialog = () => document.body.querySelector('[data-testid="boot-failure-dialog"]')
+
+    await act(async () => { root.render(<RunDetailColumn runId="run-1" />) })
+    expect(dialog()).toBeNull()
+    await act(async () => { clickButton('Show all 1') })
+    expect(dialog()?.textContent).toContain('Boot failure · api')
+    await act(async () => { (dialog()!.querySelector('button[aria-label="Close"]') as HTMLButtonElement).click() })
+    expect(dialog()).toBeNull()
+
+    const onBootFailureOpenChange = vi.fn()
+    await act(async () => { root.render(<RunDetailColumn runId="run-1" bootFailureOpen onBootFailureOpenChange={onBootFailureOpenChange} />) })
+    expect(dialog()).not.toBeNull()
+    await act(async () => { (dialog()!.querySelector('button[aria-label="Close"]') as HTMLButtonElement).click() })
+    expect(onBootFailureOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('renders no boot-failure dialog for a dependency blocker', async () => {
+    const { useRun } = await import('../state/RunsContext')
+    vi.mocked(useRun).mockReturnValue({
+      detail: runDetail({
+        status: 'failed',
+        bootFailure: { service: 'api', safeName: 'api', reason: 'dependency-incompatible', detail: 'Blocked.', logPath: '/runs/run-1/svc-api.log' },
+      }),
+      transient: null,
+      status: 'failed',
+      displayStatus: 'failed',
+      error: null,
+    })
+
+    await act(async () => { root.render(<RunDetailColumn runId="run-1" bootFailureOpen />) })
+    expect(document.body.querySelector('[data-testid="boot-failure-dialog"]')).toBeNull()
+  })
+
   it('shows the envset recorded on the run manifest', async () => {
     const { useRun } = await import('../state/RunsContext')
     vi.mocked(useRun).mockReturnValue({

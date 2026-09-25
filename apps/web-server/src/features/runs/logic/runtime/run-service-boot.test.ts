@@ -270,6 +270,19 @@ describe('pollUntilReady', () => {
     expect(ctx.bootFailure?.nextAction).not.toContain('outer startup wrapper')
   })
 
+  it('points a timeout at the compiler errors when the log shows a failed build', async () => {
+    // A watcher the detector does not recognise keeps running, so readiness
+    // times out — but the evidence says compile, and so must the next step.
+    const { ctx } = ctxFor({ status: 'running', servicePtys: new Map([['api', {} as never]]) })
+    const svc = svcSpec()
+    fs.writeFileSync(ctx.paths.serviceLog(svc.safeName), 'ERROR in ./src/app.ts:3:1\nTS2322: wrong type\nFound 1 error. Watching for file changes.\n')
+
+    await pollUntilReady(ctx, svc, 'tcp', async () => false)
+
+    expect(ctx.bootFailure).toMatchObject({ reason: 'health-timeout', classification: 'compiler-failure' })
+    expect(ctx.bootFailure?.nextAction).toBe('Fix the compiler errors in the service log, then restart the service.')
+  })
+
   it('names the URL when an HTTP probe times out', async () => {
     const { ctx } = ctxFor({ status: 'running', servicePtys: new Map([['api', {} as never]]) })
     const svc = svcSpec({ healthProbe: { http: { url: 'http://127.0.0.1:5999/health', deadlineMs: 5 } } } as Partial<ServiceSpec>)
@@ -337,5 +350,128 @@ describe('waitForServiceReady', () => {
     })
     await ensureServicesRunning(ctx)
     expect(ctx.bootFailure?.nextAction).toContain('Prepare coherent dependencies')
+  })
+})
+
+describe('confirmed service failures', () => {
+  function capturedPty() {
+    let data: ((chunk: string) => void) | undefined
+    let exit: ((event: { exitCode: number; signal?: number }) => void) | undefined
+    const kill = vi.fn()
+    return {
+      handle: {
+        pid: 0,
+        onData(cb: typeof data) { data = cb; return { dispose() {} } },
+        onExit(cb: typeof exit) { exit = cb; return { dispose() {} } },
+        write() {}, resize() {}, kill,
+      },
+      data(chunk: string) { data?.(chunk) },
+      exit(event: { exitCode: number; signal?: number }) { exit?.(event) },
+      kill,
+    }
+  }
+
+  it('fails before readiness when a living watch process reports a completed compiler failure', () => {
+    const watcher = capturedPty()
+    const { ctx, sink, events } = ctxFor({ ptyFactory: () => watcher.handle })
+    const svc = svcSpec()
+    spawnService(ctx, svc)
+
+    watcher.data('ERROR in ./src/app.ts\nTS2322: wrong type\n')
+    expect(ctx.bootFailure).toBeUndefined()
+    watcher.data('webpack 5.89.0 compiled with 1 error in 960 ms\n')
+
+    expect(ctx.bootFailure).toMatchObject({ reason: 'compiler-failed', classification: 'compiler-failure' })
+    expect(ctx.serviceFailure).toBeUndefined()
+    expect(sink.patches).toContainEqual({ bootFailure: ctx.bootFailure })
+    expect(watcher.kill).toHaveBeenCalledWith('SIGTERM')
+    watcher.exit({ exitCode: 0, signal: 15 })
+    expect(events.filter((event) => event.event === 'service-exit')).toHaveLength(1)
+  })
+
+  it('rejects a green probe if the service exited while it was in flight', async () => {
+    const watcher = capturedPty()
+    const { ctx } = ctxFor({ ptyFactory: () => watcher.handle })
+    const svc = svcSpec({ healthProbe: { tcp: { port: 5999, deadlineMs: 100 } } })
+    spawnService(ctx, svc)
+
+    await pollUntilReady(ctx, svc, 'tcp', async () => {
+      watcher.exit({ exitCode: 1 })
+      return true
+    })
+
+    expect(ctx.serviceReady.has(svc.name)).toBe(false)
+    expect(ctx.bootFailure?.reason).toBe('process-exited')
+  })
+
+  it('stops other readiness polls when a ready service fails', async () => {
+    const { ctx } = ctxFor()
+    const svc = svcSpec({ name: 'web', safeName: 'web', healthProbe: { tcp: { port: 5999, deadlineMs: 100 } } })
+    await pollUntilReady(ctx, svc, 'tcp', async () => {
+      ctx.serviceFailure = {
+        service: 'api', safeName: 'api', kind: 'process-exited', detail: 'Exited after readiness.',
+        logPath: '/run/api.log', command: 'npm run dev', cwd: tmpDir, at: '2026-09-25T10:00:00Z',
+      }
+      return true
+    })
+    expect(ctx.serviceReady.has(svc.name)).toBe(false)
+    expect(ctx.bootFailure).toBeUndefined()
+  })
+
+  it('treats a confirmed compiler failure after readiness as a service failure and stops Playwright', async () => {
+    const watcher = capturedPty()
+    const playwright = capturedPty()
+    const { ctx, sink } = ctxFor({ ptyFactory: () => watcher.handle, playwrightPty: playwright.handle })
+    const svc = svcSpec({ healthProbe: { http: { url: 'http://127.0.0.1:3000/health' } } })
+    ctx.healthCheck = async () => true
+    spawnService(ctx, svc)
+    await waitForServiceReady(ctx, svc)
+    watcher.data('expected validation error from a request\n')
+    expect(ctx.serviceFailure).toBeUndefined()
+
+    watcher.data('webpack 5.89.0 compiled with 8 errors in 10819 ms\n')
+
+    expect(ctx.bootFailure).toBeUndefined()
+    expect(ctx.serviceFailure).toMatchObject({ kind: 'compiler', service: 'api' })
+    expect(sink.patches).toContainEqual({ serviceFailure: ctx.serviceFailure })
+    expect(playwright.kill).toHaveBeenCalledWith('SIGTERM')
+  })
+
+  it('retains a compiler failure during healing until the repaired service restarts', async () => {
+    const watcher = capturedPty()
+    const next = capturedPty()
+    const factory = vi.fn().mockReturnValueOnce(watcher.handle).mockReturnValueOnce(next.handle)
+    const { ctx, sink } = ctxFor({ ptyFactory: factory })
+    const svc = svcSpec({ healthProbe: { http: { url: 'http://127.0.0.1:3000/health' } } })
+    ctx.healthCheck = async () => true
+    spawnService(ctx, svc)
+    await waitForServiceReady(ctx, svc)
+    ctx.status = 'healing'
+
+    watcher.data('webpack 5.89.0 compiled with 1 error in 100 ms\n')
+
+    expect(ctx.serviceFailure?.kind).toBe('compiler')
+    expect(watcher.kill).toHaveBeenCalledWith('SIGTERM')
+    spawnService(ctx, svc)
+    await waitForServiceReady(ctx, svc)
+    expect(ctx.serviceFailure).toBeUndefined()
+    expect(sink.patches).toContainEqual({ serviceFailure: undefined })
+  })
+
+  it('records an unexpected exit after readiness, including exit zero, but ignores an old attempt', async () => {
+    const old = capturedPty()
+    const next = capturedPty()
+    const factory = vi.fn().mockReturnValueOnce(old.handle).mockReturnValueOnce(next.handle)
+    const { ctx } = ctxFor({ ptyFactory: factory })
+    const svc = svcSpec({ healthProbe: { http: { url: 'http://127.0.0.1:3000/health' } } })
+    ctx.healthCheck = async () => true
+    spawnService(ctx, svc)
+    await waitForServiceReady(ctx, svc)
+    spawnService(ctx, svc)
+    old.exit({ exitCode: 0 })
+    expect(ctx.serviceFailure).toBeUndefined()
+    await waitForServiceReady(ctx, svc)
+    next.exit({ exitCode: 0 })
+    expect(ctx.serviceFailure).toMatchObject({ kind: 'process-exited', exitCode: 0 })
   })
 })

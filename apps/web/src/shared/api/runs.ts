@@ -424,3 +424,23 @@ export type {
   FlightStageRemedy,
 } from '@shared/flights/types'
 export { deriveFeatureSlug } from '@shared/flights/types'
+
+// Build a readable copy of one of the run's logs (control codes stripped,
+// redraws resolved, repeats folded) and return its path. The raw log is never
+// rewritten — the finished-run terminal replay needs its control codes.
+export function createReadableRunLog(
+  runId: string,
+  file: string,
+  opts?: ClientOptions,
+): Promise<{ path: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ path: string }>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/readable-log`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ file }),
+    },
+    fetchImpl,
+  )
+}

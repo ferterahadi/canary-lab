@@ -3,7 +3,7 @@
 // Run-state primitives are shared with the server so recovery behavior has one
 // semantic model; feature/journal/wizard shapes remain web-local API mirrors.
 import type { StageModelChoice } from '@shared/agent-models'
-import type { HealEnd, RunBootFailure, RunFixCapture, RunPrAttempt, RunProposedPr, RunLifecycleEvent, RunLifecycleSnapshot, RunStatus, ServiceStatus } from '@shared/run-state'
+import type { HealEnd, RunBootFailure, RunServiceFailure, RunFixCapture, RunPrAttempt, RunProposedPr, RunLifecycleEvent, RunLifecycleSnapshot, RunStatus, ServiceStatus } from '@shared/run-state'
 import type { ExecutionType, VerificationRunMetadata } from '@shared/verification'
 import type { ClientKind } from '@shared/run-mode'
 import type { SpecDiff } from '@shared/verification-strength/types'
@@ -173,6 +173,7 @@ export interface RunManifest {
   /** Set when a service failed to come up, so the run was declared failed and
    *  (if heal is configured) routed into heal with the service log as context. */
   bootFailure?: RunBootFailure
+  serviceFailure?: RunServiceFailure
   /** Why the auto-heal loop stopped without passing. Drives the Test Run
    *  hero's "why heal stopped" line. Absent unless the run entered heal. */
   healEnd?: HealEnd

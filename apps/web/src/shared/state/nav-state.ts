@@ -39,6 +39,10 @@ export interface NavState {
    *  "Tests changed" pill and the run hero's snapshot link both open it. */
   specReviewOpen: boolean
   notificationsOpen: boolean
+  /** The run whose boot-failure detail is open (routed ?dialog=boot-failure on
+   *  that `run`). Stored as the run id, like `focusTest`, so selecting another
+   *  run closes it without a clearing effect. */
+  bootFailureFor: string | null
   /** The flight stage-entry launcher (routed ?dialog=flight-start), by feature. */
   flightStartFor: string | null
   /** R76: the launcher opened in START-FRESH intent (routed ?dialog=flight-fresh)
@@ -97,6 +101,7 @@ export function initialNavState(persisted: PersistedView): NavState {
     verifyOpen: persisted.dialog === 'verification',
     specReviewOpen: persisted.dialog === 'tests-review',
     notificationsOpen: persisted.dialog === 'notifications',
+    bootFailureFor: persisted.dialog === 'boot-failure' ? persisted.run : null,
     flightStartFor: persisted.dialog === 'flight-start' || persisted.dialog === 'flight-fresh'
       ? persisted.feature
       : null,
@@ -123,7 +128,8 @@ export function initialNavState(persisted: PersistedView): NavState {
  *  `tests-review` sits between them: it is a status-bar modal that paints over
  *  the columns (so above verify), but the run hero's link into it can be
  *  followed from a flight whose launcher is open, and then the launcher is
- *  what is on top.
+ *  what is on top. `boot-failure` is a run-detail modal, so it ranks with it,
+ *  and only while its run is still the selected one.
  *
  *  `demo` ranks BELOW flight-new deliberately: its own "Start a flight" action
  *  opens that launcher, and for the moment both are open the URL must name the
@@ -141,6 +147,7 @@ export function routedDialog(state: NavState): RouteDialog | null {
   if (state.demoOpen) return 'demo'
   if (state.notificationsOpen) return 'notifications'
   if (state.specReviewOpen) return 'tests-review'
+  if (state.bootFailureFor !== null && state.bootFailureFor === state.run) return 'boot-failure'
   if (state.verifyOpen) return 'verification'
   if (state.settingsOpen) return 'settings'
   return null

@@ -8,12 +8,9 @@ import type { RunManifest, ServiceManifestEntry } from '@/shared/api/types'
 import type { RunBootFailure } from '@shared/run-state'
 import type { RunDependencyProvenance } from '@shared/dependency-provenance'
 import { deriveRunViewModel } from '../utils/run-view-model'
-import { openEditor } from '@/shared/api/client'
+import { openRunLog } from '../utils/open-run-log'
 
-vi.mock('@/shared/api/client', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/shared/api/client')>(),
-  openEditor: vi.fn(async () => ({})),
-}))
+vi.mock('../utils/open-run-log', () => ({ openRunLog: vi.fn(async () => {}) }))
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -69,8 +66,32 @@ afterEach(() => {
 })
 
 describe('run overview evidence', () => {
+  it('shows a service failure when the open run receives updated manifest state', () => {
+    const services: ServiceManifestEntry[] = [{
+      repoName: 'app', name: 'api', safeName: 'api', command: 'npm run dev',
+      cwd: '/worktree/app', logPath: '/run/svc-api.log', status: 'ready',
+    }]
+    const manifest: RunManifest = {
+      runId: 'run-live', feature: 'demo', status: 'running',
+      startedAt: '2026-09-22T00:00:00Z', healCycles: 0, services,
+    }
+    act(() => root.render(<RunOverviewTab manifest={manifest} services={services} repoBranches={[]} view={deriveRunViewModel(undefined)} />))
+    expect(container.querySelector('[data-testid="service-failure-evidence"]')).toBeNull()
+
+    const failed = { ...manifest, status: 'healing' as const, serviceFailure: {
+      service: 'api', safeName: 'api', kind: 'compiler' as const,
+      detail: 'Watch compiler failed.', logPath: '/run/svc-api.log',
+      command: 'npm run dev', cwd: '/worktree/app', at: '2026-09-22T00:01:00Z',
+    } }
+    act(() => root.render(<RunOverviewTab manifest={failed} services={services} repoBranches={[]} view={deriveRunViewModel(undefined)} />))
+    expect(container.querySelector('[data-testid="service-failure-evidence"]')?.textContent).toContain('Watch compiler failed')
+    const button = Array.from(container.querySelectorAll('button')).find((item) => item.textContent?.includes('Open full service log'))
+    act(() => button?.click())
+    expect(openRunLog).toHaveBeenCalledWith('run-live', '/run/svc-api.log')
+  })
+
   it('shows structured boot evidence and names an unpreserved wrapper cause', () => {
-    act(() => root.render(<BootFailureEvidence failure={{
+    act(() => root.render(<BootFailureEvidence runId="run-1" failure={{
       service: 'api',
       safeName: 'api',
       reason: 'process-exited',
@@ -91,7 +112,7 @@ describe('run overview evidence', () => {
     expect(container.textContent).toContain('npm run dev')
     expect(container.textContent).not.toContain('/runs/1/svc-api.log')
     act(() => (container.querySelector('button') as HTMLButtonElement).click())
-    expect(openEditor).toHaveBeenCalledWith({ file: '/runs/1/svc-api.log' })
+    expect(openRunLog).toHaveBeenCalledWith('run-1', '/runs/1/svc-api.log')
   })
 
   it('moves a matched boot failure into the affected service card and orders that service first', () => {
@@ -159,7 +180,7 @@ describe('run overview evidence', () => {
     expect(container.textContent).not.toContain('Old duplicate dependency message')
     expect(container.textContent).not.toContain('Dependency evidence')
     act(() => (blockers[0].querySelector('button') as HTMLButtonElement).click())
-    expect(openEditor).toHaveBeenCalledWith({ file: '/run/dependency.log' })
+    expect(openRunLog).toHaveBeenCalledWith('run-1', '/run/dependency.log')
   })
 
   it('updates the already mounted overview when refreshed evidence clears or changes the block', () => {

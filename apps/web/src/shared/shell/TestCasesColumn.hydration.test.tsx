@@ -3,7 +3,7 @@
 import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, getFeatureDirtyDiff, getFeatureTests } from '../api/client'
+import { ApiError, getFeatureDirtyDiff, getFeatureTests, getFeatureTestsPreview } from '../api/client'
 import { readableTest } from '../api/__fixtures__/readable-test'
 import fixture from '@/features/runs/utils/__fixtures__/run-snapshot-review.json'
 import type { RunManifest, RunSummary } from '../api/types'
@@ -17,6 +17,7 @@ vi.mock('../api/client', async () => {
   return {
     ...actual,
     getFeatureTests: vi.fn(),
+    getFeatureTestsPreview: vi.fn(),
     getFeatureDirtyDiff: vi.fn(),
     getTestSourceComparison: vi.fn().mockResolvedValue({ state: 'ready', files: [], differences: [], changes: { added: [], changed: [], removed: [] } }),
   }
@@ -51,6 +52,7 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   vi.mocked(getFeatureTests).mockReset()
+  vi.mocked(getFeatureTestsPreview).mockReset().mockResolvedValue([])
   vi.mocked(getFeatureDirtyDiff).mockReset().mockResolvedValue({ tests: [] })
 })
 

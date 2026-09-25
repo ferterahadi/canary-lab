@@ -307,6 +307,13 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(localStorage.getItem(KEY)).not.toContain('tests-review')
   })
 
+  it('round-trips the run boot-failure dialog (URL-only, not mirrored)', () => {
+    persistView(view({ feature: 'checkout', run: 'run-1', dialog: 'boot-failure' }))
+    expect(window.location.search).toContain('dialog=boot-failure')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', run: 'run-1', dialog: 'boot-failure' }))
+    expect(localStorage.getItem(KEY)).not.toContain('boot-failure')
+  })
+
   it('round-trips the feature-scoped flight-start dialog (URL-only, not mirrored)', () => {
     persistView(view({ feature: 'checkout', dialog: 'flight-start' }))
     expect(window.location.search).toContain('dialog=flight-start')

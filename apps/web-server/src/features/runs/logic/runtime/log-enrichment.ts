@@ -461,3 +461,29 @@ export function stripAnsi(s: string): string {
     .replace(TERM_ESCAPE_RE, '')
     .replace(/\[\d+(?:;\d+)*m/g, '')
 }
+
+// What a person should see when they open a PTY-captured log in an editor:
+// control codes stripped, each carriage-return redraw resolved to its last
+// non-empty frame, blank runs collapsed to one blank line, and runs of an
+// identical line folded to `line  (×N)`. Order is kept — unlike the template
+// compressor, which regroups lines for an agent's cheaper read.
+export function readableTerminalLog(raw: string): string {
+  const out: string[] = []
+  let previous: string | null = null
+  let repeats = 0
+  const flush = () => {
+    if (previous === null) return
+    out.push(repeats > 1 ? `${previous}  (×${repeats})` : previous)
+  }
+  for (const physical of stripAnsi(raw).split('\n')) {
+    const frames = physical.split('\r').map((frame) => frame.trimEnd())
+    const line = frames.reverse().find((frame) => frame.trim()) ?? ''
+    if (!line && previous === '') continue
+    if (line === previous) { repeats++; continue }
+    flush()
+    previous = line
+    repeats = 1
+  }
+  flush()
+  return `${out.join('\n').trim()}\n`
+}

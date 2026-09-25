@@ -177,6 +177,20 @@ describe('buildOrchestratorHealPrompt', () => {
     expect(prompt).toBe(promptBody)
   })
 
+  it('renders the recorded post-readiness service failure for the local healer', () => {
+    writeRunManifest(runDir, { repoPaths: ['/worktree/app'], serviceFailure: {
+      service: 'api', safeName: 'api', kind: 'compiler', detail: 'Watch build failed.',
+      logPath: path.join(runDir, 'svc-api.log'), command: 'npm run dev', cwd: '/worktree/app',
+      at: '2026-09-25T00:00:00Z',
+    } })
+    const prompt = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })({
+      cycle: 1, outputDir: path.join(runDir, 'out'),
+    })
+    expect(prompt).toContain('Confirmed service failure after readiness: api (compiler)')
+    expect(prompt).toContain('Playwright results from this attempt may be partial')
+    expect(prompt).toContain('Fix service/app code, not tests.')
+  })
+
   it('tells a local heal agent when the suite attempt is already claimed', () => {
     const receipt = path.join(runDir, 'runtime/effect-attempt/attempt.json')
     fs.mkdirSync(path.dirname(receipt), { recursive: true })

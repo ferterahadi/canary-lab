@@ -470,3 +470,55 @@ describe('open-repo + apply-preflight routes', () => {
     expect(res.json().results).toHaveLength(1)
   })
 })
+
+describe('readable-log route', () => {
+  const rawLog = '\x1b[32mINFO\x1b[0m boot\r\nwebpack compiled with \x1b[31m6 errors\x1b[39m\r\n'
+
+  it('writes a readable copy under readable-logs/ and leaves the raw log untouched', async () => {
+    writeManifestForRun('r1')
+    const raw = path.join(runDirFor(logsDir, 'r1'), 'svc-api.log')
+    fs.writeFileSync(raw, rawLog)
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/readable-log', payload: { file: raw } })
+
+    expect(res.statusCode).toBe(200)
+    const target = path.join(runDirFor(logsDir, 'r1'), 'readable-logs', 'svc-api.log')
+    expect(res.json()).toEqual({ path: target })
+    expect(fs.readFileSync(target, 'utf-8')).toBe('INFO boot\nwebpack compiled with 6 errors\n')
+    expect(fs.readFileSync(raw, 'utf-8')).toBe(rawLog)
+  })
+
+  it('404s an unknown run and a missing log', async () => {
+    const { app } = await build()
+    const unknown = await app.inject({ method: 'POST', url: '/api/runs/nope/readable-log', payload: { file: '/x.log' } })
+    expect(unknown.statusCode).toBe(404)
+
+    writeManifestForRun('r1')
+    const missing = path.join(runDirFor(logsDir, 'r1'), 'svc-gone.log')
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/readable-log', payload: { file: missing } })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('rejects anything but a raw .log file inside the run', async () => {
+    writeManifestForRun('r1')
+    const runDir = runDirFor(logsDir, 'r1')
+    const outside = path.join(tmpDir, 'secret.log')
+    fs.writeFileSync(outside, 'secret')
+    fs.symlinkSync(outside, path.join(runDir, 'svc-link.log'))
+    const { app } = await build()
+
+    for (const file of [
+      undefined,
+      'svc-api.log',
+      outside,
+      path.join(runDir, 'manifest.json'),
+      path.join(runDir, 'readable-logs', 'svc-api.log'),
+      path.join(runDir, 'svc-link.log'),
+    ]) {
+      const res = await app.inject({ method: 'POST', url: '/api/runs/r1/readable-log', payload: { file } })
+      expect(res.statusCode, String(file)).toBe(400)
+    }
+    expect(fs.existsSync(path.join(runDir, 'readable-logs'))).toBe(false)
+  })
+})

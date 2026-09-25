@@ -16,6 +16,7 @@ import {
   getRunFixPatch,
   getRunApplyPreflight,
   openRunRepo,
+  createReadableRunLog,
   proposeRunPr,
   stopRun,
   getRunTestReview,
@@ -347,6 +348,16 @@ describe('runs api', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{"repoName":"mighty cns"}',
+    })
+  })
+
+  it('createReadableRunLog POSTs the raw log and returns the readable copy', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ path: '/runs/r 1/readable-logs/svc-api.log' }))
+    await expect(createReadableRunLog('r 1', '/runs/r 1/svc-api.log', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ path: '/runs/r 1/readable-logs/svc-api.log' })
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/r%201/readable-log', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"file":"/runs/r 1/svc-api.log"}',
     })
   })
 

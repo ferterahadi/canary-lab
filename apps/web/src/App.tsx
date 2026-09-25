@@ -71,7 +71,7 @@ export function App() {
     demoOpen, setDemoOpen,
     settingsOpen, setSettingsOpen, modelsFor, setModelsFor,
     resumePlanTaskId, setResumePlanTaskId,
-    focusTest, runTab,
+    focusTest, runTab, bootFailureFor, setBootFailureFor,
     openFlight, navigateToRun, navigateToCoverage, returnFlight, selectStartedRun,
     flightStage, setFlightStage,
     pendingRunSelectionRef, selectedFeatureRef, selectedRunIdRef,
@@ -529,6 +529,8 @@ export function App() {
             {...(focusTest && focusTest.runId === selectedRunId ? { focusTest: focusTest.test } : {})}
             /* Same pairing rule for the arrival tab a drill-through named. */
             {...(runTab && runTab.runId === selectedRunId ? { arriveTab: runTab.tab } : {})}
+            bootFailureOpen={bootFailureFor !== null && bootFailureFor === selectedRunId}
+            onBootFailureOpenChange={(open) => setBootFailureFor(open ? selectedRunId : null)}
           />
         )}
       />

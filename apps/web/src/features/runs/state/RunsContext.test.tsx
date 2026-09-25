@@ -216,6 +216,36 @@ describe('RunsProvider', () => {
     expect(api.getRunDetail).not.toHaveBeenCalled()
   })
 
+  it('shows a confirmed service failure in an open Overview from a run stream update', () => {
+    function OverviewProbe() {
+      const run = useRun('r1')
+      const manifest = run.detail?.manifest
+      return manifest ? <RunOverviewTab manifest={manifest} services={manifest.services} repoBranches={[]} view={deriveRunViewModel(run.detail)} /> : null
+    }
+    act(() => root.render(
+      <RunsProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}><OverviewProbe /></RunsProvider>,
+    ))
+    const current = detail({
+      services: [{ repoName: 'app', name: 'api', safeName: 'api', command: 'npm run dev', cwd: '/worktree', logPath: '/run/api.log', status: 'ready' }],
+    })
+    const socket = FakeWebSocket.instances[0]
+    act(() => socket.onmessage?.({ data: JSON.stringify({ type: 'snapshot', runs: [entry()], details: { r1: current } }) }))
+    expect(container.querySelector('[data-testid="service-failure-evidence"]')).toBeNull()
+
+    act(() => socket.onmessage?.({ data: JSON.stringify({
+      type: 'update', runId: 'r1', detail: { ...current, manifest: {
+        ...current.manifest,
+        services: [{ ...current.manifest.services[0], status: 'failed' }],
+        serviceFailure: {
+          service: 'api', safeName: 'api', kind: 'compiler', detail: 'Watch compiler reported a failed build.',
+          logPath: '/run/api.log', command: 'npm run dev', cwd: '/worktree', at: '2026-09-25T10:00:00Z',
+        },
+      } },
+    }) }))
+    expect(container.querySelector('[data-testid="service-failure-evidence"]')?.textContent).toContain('Watch compiler reported a failed build.')
+    expect(api.getRunDetail).not.toHaveBeenCalled()
+  })
+
   it('opens the run stream, applies frames, and exposes active run state', () => {
     const captured = renderProbe()
     const socket = FakeWebSocket.instances[0]

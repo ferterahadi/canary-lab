@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { loadFeatures, listSpecFiles } from './feature-loader'
+import { loadFeatures, listSpecFiles, suiteAvailability } from './feature-loader'
 
 let tmpDir: string
 
@@ -136,5 +136,29 @@ describe('listSpecFiles', () => {
     fs.mkdirSync(path.join(e2e, 'sub'))
     const files = listSpecFiles(tmpDir).map((f) => path.basename(f))
     expect(files).toEqual(['a.spec.ts', 'b.spec.ts'])
+  })
+})
+
+describe('suiteAvailability', () => {
+  it('distinguishes a removed suite from missing configuration and an unloadable configuration', () => {
+    const featuresDir = path.join(tmpDir, 'features')
+    expect(suiteAvailability(featuresDir, 'shop').kind).toBe('removed')
+    fs.mkdirSync(path.join(featuresDir, 'shop'), { recursive: true })
+    expect(suiteAvailability(featuresDir, 'shop')).toMatchObject({ kind: 'config-missing', diagnostic: expect.stringContaining('missing') })
+    const configPath = path.join(featuresDir, 'shop', 'feature.config.cjs')
+    fs.writeFileSync(configPath, 'throw new Error("broken")')
+    expect(suiteAvailability(featuresDir, 'shop')).toMatchObject({ kind: 'config-invalid', configPath })
+    fs.writeFileSync(configPath, 'module.exports = { config: { name: "shop", featureDir: __dirname, envs: [], description: "shop" } }')
+    expect(suiteAvailability(featuresDir, 'shop')).toMatchObject({ kind: 'ready', configPath })
+    fs.rmSync(path.join(featuresDir, 'shop'), { recursive: true })
+    expect(suiteAvailability(featuresDir, 'shop').kind).toBe('removed')
+    expect(suiteAvailability(featuresDir, '../outside').kind).toBe('removed')
+  })
+
+  it('reports a missing linked test directory as removed even when discovery config remains', () => {
+    const featuresDir = path.join(tmpDir, 'features')
+    const suiteDir = writeFeature('linked', `module.exports = { config: { name: 'linked', featureDir: ${JSON.stringify(path.join(tmpDir, 'external'))}, envs: [], description: 'linked' } }`)
+    expect(fs.existsSync(suiteDir)).toBe(true)
+    expect(suiteAvailability(featuresDir, 'linked').kind).toBe('removed')
   })
 })

@@ -5,6 +5,7 @@ import type {
   HealEnd,
   QueueReason,
   RunBootFailure,
+  RunServiceFailure,
   RunFixCapture,
   RunPrAttempt,
   RunProposedPr,
@@ -257,6 +258,8 @@ export interface RunManifest {
    *  service log as context. Absent on healthy/boot-only runs; cleared on a
    *  successful reboot during a heal cycle. */
   bootFailure?: RunBootFailure
+  /** Confirmed failure of a service after readiness, independent of test counts. */
+  serviceFailure?: RunServiceFailure
   /** Why the auto-heal loop stopped without passing. Written at every give-up
    *  site in `runAutoHealLoop`; absent on passing/boot-only/manual runs and on
    *  runs that never entered heal. */

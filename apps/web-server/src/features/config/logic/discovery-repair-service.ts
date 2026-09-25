@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
 import { discoveryRepairActive, type DiscoveryRepair, type DiscoveryRepairOwner } from '../../../../../../shared/discovery-repair'
-import { loadFeatures } from '../../../shared/feature-loader'
+import { suiteAvailability } from '../../../shared/feature-loader'
 import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { bridgeStoreEvents } from '../../../shared/store-event-bridge'
 import { listPlaywrightTests, type PlaywrightListEntry } from '../../runs/logic/playwright-list'
@@ -51,9 +51,10 @@ export class DiscoveryRepairService {
   }
 
   private feature(name: string): FeatureConfig {
-    const feature = loadFeatures(this.deps.featuresDir).find((f) => f.name === name)
-    if (!feature) throw Object.assign(new Error('Feature not found'), { statusCode: 404 })
-    return feature
+    const availability = suiteAvailability(this.deps.featuresDir, name)
+    if (availability.kind === 'removed') throw Object.assign(new Error('Feature not found'), { statusCode: 404 })
+    if (availability.kind !== 'ready') throw Object.assign(new Error(availability.diagnostic), { statusCode: 422 })
+    return availability.feature
   }
 
   private save(repair: DiscoveryRepair): DiscoveryRepair {
@@ -75,7 +76,11 @@ export class DiscoveryRepairService {
   async settled(): Promise<void> { await Promise.all(this.pending) }
 
   start(featureName: string, owner: DiscoveryRepairOwner): DiscoveryRepair {
-    const feature = this.feature(featureName)
+    const availability = suiteAvailability(this.deps.featuresDir, featureName)
+    if (availability.kind === 'removed') throw Object.assign(new Error('Feature not found'), { statusCode: 404 })
+    const feature: FeatureConfig = availability.kind === 'ready' ? availability.feature : {
+      name: featureName, description: '', envs: [], repos: [], featureDir: availability.featureDir,
+    }
     const active = this.list(featureName).find(discoveryRepairActive)
     if (active) {
       if (owner.kind === 'internal' || (active.owner.kind === 'external' && active.owner.sessionId === owner.sessionId)) return active
@@ -83,17 +88,17 @@ export class DiscoveryRepairService {
     }
     const id = `dr_${crypto.randomBytes(12).toString('hex')}`
     const now = new Date().toISOString()
-    const repair = this.save({ id, feature: featureName, featureDir: feature.featureDir, owner, status: 'repairing', createdAt: now, updatedAt: now, heartbeatAt: now, diagnostic: '', message: 'Checking the discovery error', log: ['[Canary] Checking current test discovery.'], promptPath: path.join(this.store.recordDir(id), 'prompt.md') })
+    const repair = this.save({ id, feature: featureName, featureDir: feature.featureDir, owner, status: 'repairing', createdAt: now, updatedAt: now, heartbeatAt: now, diagnostic: '', message: 'Checking suite availability', log: ['[Canary] Checking suite configuration and test discovery.'], promptPath: path.join(this.store.recordDir(id), 'prompt.md') })
     // Reserve ownership before the first asynchronous discovery check.
     this.detach(repair, async () => {
-      let diagnostic = ''
-      const tests = await this.discover(feature, (text) => { diagnostic = text })
+      let diagnostic = availability.kind === 'ready' ? '' : availability.diagnostic
+      const tests = availability.kind === 'ready' ? await this.discover(feature, (text) => { diagnostic = text }) : null
       if (tests !== null && tests.length > 0) {
         diagnostic = this.checkRoster(repair, tests)
         if (!diagnostic) { this.succeed(repair.id, tests); return }
       }
       if (tests?.length === 0) diagnostic = 'Discovery returned no test cases. Restore the complete suite.'
-      fs.writeFileSync(repair.promptPath, buildDiscoveryRepairPrompt(feature, diagnostic))
+      fs.writeFileSync(repair.promptPath, buildDiscoveryRepairPrompt(feature, diagnostic, { projectRoot: this.deps.projectRoot, configPath: availability.configPath }))
       const ready = this.save({ ...this.get(id), diagnostic, message: owner.kind === 'external' ? 'Waiting for your agent to inspect the error' : 'Repairing discovery', log: [...repair.log, '[Canary] Discovery failed; repair instructions are ready.'] })
       if (owner.kind === 'external') return
       await (this.deps.runAgent ?? runDiscoveryRepairAgent)(ready, this.deps.projectRoot, (sessionRef) => this.save({ ...this.get(id), sessionRef }))

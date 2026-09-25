@@ -234,8 +234,12 @@ existing review alert with a visible unavailable state. Test-source failures do 
 prevent healthy Flight transitions from reaching History.
 Canary's explicit suite deletion, or a committed Git deletion of its tracked config,
 marks the review source retired. The alert moves to History while the saved run
-remains available. A missing live suite without retirement evidence keeps the alert;
-its comparison dialog explains the unavailable source instead of offering review actions.
+remains available. A missing live suite directory or discovery configuration also settles its test-review notification,
+even when a saved run still records pending edits: there is no current suite to
+review. This changes inbox eligibility only; it never approves edits, deletes saved
+evidence, or bypasses the run-start review gate. A restored suite with real pending
+changes creates a fresh notification episode. An existing live suite whose saved
+comparison cannot be read stays unverified rather than being treated as settled.
 A possible test weakening also stays
 in the inbox as an advisory integrity review after the run ends. Ordinary edits,
 coverage freshness, verification readiness, and failed-run evidence remain on
@@ -429,6 +433,11 @@ The MCP `start_run` tool calls the same route through `app.inject()`, so it does
 own a second execution path. `orchestrator.ts` then boots services through the
 launcher/PTY layer, runs Playwright, and captures evidence. Service output is
 written directly to `svc-<name>.log`; it does not depend on a visible terminal.
+The runner treats a completed webpack watch result with errors or an unexpected
+service exit as a confirmed service failure. Before readiness this stops boot
+without running tests; after readiness it stops Playwright, retains partial test
+evidence, and enters the configured heal path. Readiness resets on each service
+restart. Generic log lines containing "error" are diagnostic output, not verdicts.
 
 On failure, the run either spawns a local heal agent or parks for an external
 client. The agent fixes code and signals `rerun` or `restart`; the orchestrator
@@ -1167,6 +1176,15 @@ or update a test run. One agent owns each suite repair until editing stops.
 Internal agents use the shared `runAgentProcess`; external agents use
 `start_discovery_repair`, `get_discovery_repair`, and `update_discovery_repair`
 through MCP. Both paths receive the same discovery-repair prompt template.
+
+The Tests API distinguishes a removed live suite from an existing suite whose
+configuration is missing or cannot load. A removed suite uses the same unavailable
+card layout without repair actions; no Playwright discovery was attempted.
+Missing or invalid configuration enters the discovery-error state with its exact
+diagnostic and the usual repair and retry actions. Discovery repair can start
+from the existing suite folder before its configuration loads, then verifies
+against the restored configuration and a fresh Playwright test list. A generic
+request failure has retry only and is not described as Playwright discovery.
 
 The Tests column has a discovery-error state and a repairing state. The latter
 uses `AgentSessionView` for internal session activity or external milestone

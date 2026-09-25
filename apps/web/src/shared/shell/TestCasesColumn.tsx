@@ -32,6 +32,7 @@ import { EmptyState } from '@/shared/ui/EmptyState'
 import { TestListUnavailableCard } from './TestListUnavailableCard'
 
 type TestCardExecutionHighlight = TestExecutionLineHighlight & { sourceLine: number }
+type TestLoadFailure = { kind: 'discovery' | 'config' | 'removed' | 'request'; message: string }
 
 interface ExpandedTestSelection {
   sourceKey: string
@@ -84,10 +85,14 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
   const activeRepair = runId ? undefined : repairState.repairs.find(discoveryRepairActive)
   const repairCompletion = latestRepair && !discoveryRepairActive(latestRepair) ? latestRepair.id + latestRepair.updatedAt : ''
   const [loaded, setLoaded] = useState<{ sourceKey: string; specs: FeatureSpecFile[]; revision?: string } | null>(null)
-  const specs = loaded?.sourceKey === sourceKey ? loaded.specs : null
+  const [preview, setPreview] = useState<{ sourceKey: string; specs: FeatureSpecFile[] } | null>(null)
+  const [loadError, setLoadError] = useState<TestLoadFailure | null>(null)
   const previousLists = useRef(new Map<string, FeatureSpecFile[]>())
+  const resolvedSpecs = loadError?.kind === 'removed' ? null
+    : loaded?.sourceKey === sourceKey ? loaded.specs : previousLists.current.get(sourceKey) ?? null
+  const isPreview = !resolvedSpecs && !loadError && preview?.sourceKey === sourceKey
+  const specs = resolvedSpecs ?? (isPreview ? preview?.specs ?? null : null)
   const [discovery, setDiscovery] = useState<{ feature: string; specs: FeatureSpecFile[] } | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
   const [retryKey, setRetryKey] = useState(0)
   const [manualRetryAfter, setManualRetryAfter] = useState('')
   const loadRevision = `${refreshKey}:${retryKey}`
@@ -97,6 +102,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
   useEffect(() => {
     if (!feature) {
       setLoaded(null)
+      setPreview(null)
       setLoadError(null)
       setExpandedTest(null)
       return
@@ -104,26 +110,35 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
     let cancelled = false
     let retryTimer: ReturnType<typeof setTimeout> | undefined
     let attempts = 0
+    let fullFinished = false
     setExpandedTest((current) => current?.sourceKey === sourceKey
       ? current
       : { sourceKey, key: null, autoExpandPending: true })
     setLoadError(null)
     setDiscovery(null)
+    setPreview(null)
     setLoaded(previousLists.current.has(sourceKey) ? { sourceKey, specs: previousLists.current.get(sourceKey)! } : null)
-    const failed = (message: string): void => {
+    const failed = (failure: TestLoadFailure): void => {
       if (cancelled) return
-      setLoadError(message)
+      setLoadError(failure)
+      setPreview(null)
+      if (failure.kind === 'removed') {
+        previousLists.current.delete(sourceKey)
+        setLoaded(null)
+        setDiscovery(null)
+      }
       // A file-save event can arrive while the author is still writing the
       // suite. Retry briefly, keeping the last resolved list visible.
-      if (attempts < 3) retryTimer = setTimeout(load, 1000)
+      if (failure.kind !== 'removed' && attempts < 3) retryTimer = setTimeout(load, 1000)
     }
     const load = (): void => {
       attempts += 1
       api.getFeatureTests(feature, undefined, runId)
         .then((data) => {
           if (cancelled) return
+          fullFinished = true
           const discoveryError = data.find((spec) => spec.discoveryError)?.discoveryError
-          if (discoveryError) { setDiscovery({ feature, specs: data }); failed(discoveryError); return }
+          if (discoveryError) { setDiscovery({ feature, specs: data }); failed({ kind: 'discovery', message: discoveryError }); return }
           const availableKeys = new Set(
             data.flatMap((spec) => spec.tests.map((test) => workspaceTestKey(spec.file, test))),
           )
@@ -145,11 +160,40 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
             return current
           })
         })
-        .catch((err) => failed(formatLoadError(err)))
+        .catch((err) => { fullFinished = true; failed(classifyLoadError(err)) })
     }
     load()
+    if (!runId && !workspaceAuthoring && !previousLists.current.has(sourceKey)) {
+      api.getFeatureTestsPreview(feature).then((data) => {
+        const firstSpec = data.find((spec) => spec.tests.length)
+        if (cancelled || fullFinished || !firstSpec
+          || data.some((spec) => spec.parseError || spec.tests.some((test) => test.name.includes('${')))) return
+        setPreview({ sourceKey, specs: data })
+        setExpandedTest((current) => current?.sourceKey === sourceKey
+          ? { ...current, key: current.key ?? workspaceTestKey(firstSpec.file, firstSpec.tests[0]) }
+          : current)
+      }).catch(() => { /* Full discovery remains the authoritative read. */ })
+    }
     return () => { cancelled = true; clearTimeout(retryTimer) }
   }, [feature, sourceKey, runId, recordedRosterKey, refreshKey, retryKey, workspaceAuthoring])
+
+  useEffect(() => {
+    if (!feature || runId || (loadError?.kind !== 'removed' && loadError?.kind !== 'config')) return
+    let checking = false
+    let cancelled = false
+    const timer = setInterval(() => {
+      if (checking) return
+      checking = true
+      api.getFeatureTests(feature).then(() => {
+        if (!cancelled) setRetryKey((key) => key + 1)
+      }).catch((error) => {
+        if (cancelled) return
+        const next = classifyLoadError(error)
+        if (next.kind !== loadError.kind || next.message !== loadError.message) setRetryKey((key) => key + 1)
+      }).finally(() => { checking = false })
+    }, 10_000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [feature, runId, loadError?.kind, loadError?.message])
 
   const dirtyRevision = JSON.stringify(dirtySpecs)
 
@@ -164,7 +208,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
   })
   const runDifferences = versions.comparison.differences
 
-  const totalTests = specs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
+  const totalTests = resolvedSpecs?.reduce((acc, s) => acc + s.tests.length, 0) ?? 0
   useEffect(() => {
     onTotalTestsChange?.(totalTests)
   }, [totalTests, onTotalTestsChange])
@@ -187,7 +231,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
   const displaySpecs = specs
   const incompleteSpecs = discovery?.feature === feature ? discovery.specs : []
   const repairFailure = !runId && latestRepair?.status === 'failed' && manualRetryAfter !== repairCompletion ? latestRepair.diagnostic : null
-  const discoveryError = loadError || repairFailure
+  const discoveryError = loadError?.message || repairFailure
   // What the card shows as the failure itself: Playwright's own diagnostics
   // when it produced any, the failed request otherwise. Its first line is the
   // diagnosis on the card; the rest opens behind `Full error output`.
@@ -223,10 +267,13 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
           {currentTests && <span className="shrink-0 text-[10px] text-secondary">Current source</span>}
           {runId && <span className="shrink-0 text-[10px] text-secondary">Recorded tests</span>}
           <TestsHeaderIndicator summary={activeRunSummary} totalTests={totalTests} passedCount={passedCount} skippedCount={skippedCount}
-            specsLoaded={Boolean(specs) && !workspaceAuthoring} isRunActivelyTesting={isRunActivelyTesting} />
+            specsLoaded={Boolean(resolvedSpecs) && !workspaceAuthoring} isRunActivelyTesting={isRunActivelyTesting} />
         </>}
       />
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3" style={{ scrollbarGutter: 'stable' }}>
+        {isPreview && <div role="status" data-testid="tests-source-preview" className="mb-3 text-[11px] text-muted">
+          Showing source tests while Playwright resolves the exact list…
+        </div>}
         {workspaceAuthoring ? (
           <div data-testid="tests-authoring-placeholder">
             <div role="status" className="mb-3 flex items-center gap-2 text-xs text-running">
@@ -238,9 +285,17 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
             </div>
           </div>
         ) : <>
-        {activeRepair ? <DiscoveryRepairActivity repair={activeRepair} /> : <>
+        {activeRepair && loadError?.kind !== 'removed' ? <DiscoveryRepairActivity repair={activeRepair} /> : <>
         {discoveryError && <>
-          {runId
+          {loadError?.kind === 'removed'
+            ? <TestListUnavailableCard
+                testId="tests-unavailable-card"
+                title="Suite removed"
+                lead="The live suite is no longer in this workspace. There are no current tests to discover."
+                error={loadError.message}
+                status="idle"
+              />
+            : runId
             ? <TestListUnavailableCard
                 testId="tests-unavailable-card"
                 title="Recorded tests unavailable"
@@ -249,10 +304,19 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
                 retryLabel="Reload recorded tests"
                 onRetry={retryDiscovery}
               />
+            : loadError?.kind === 'request'
+            ? <TestListUnavailableCard
+                testId="tests-unavailable-card"
+                title="Tests unavailable"
+                lead="Canary Lab could not load this suite’s tests."
+                error={errorOutput}
+                retryLabel="Retry loading tests"
+                onRetry={retryDiscovery}
+              />
             : <TestListUnavailableCard
                 testId="tests-unavailable-card"
                 title="Test discovery failed"
-                lead="Playwright couldn’t list this suite’s tests."
+                lead="Canary Lab couldn’t list this suite’s tests. The diagnostic identifies the cause."
                 error={errorOutput}
                 retryLabel="Retry discovery"
                 onRetry={retryDiscovery}
@@ -301,7 +365,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
                 .some((dir) => dir && spec.file === `${dir}/${difference.file}`) || spec.file === difference.file)
               return spec.tests.map((t) => {
                 const diff = baselineRunId ? undefined : t.sourceChanges
-                const modified = baselineRunId
+                const modified = isPreview ? false : baselineRunId
                   ? runDifference?.affectedTests.includes(t.name) ?? false
                   : diff ? diff.count > 0 : dirtySpec?.affectedTests.includes(t.name) ?? false
                 const changedLines = diff ? new Set(diff.changedLines.map((line) => line - (t.bodyLine ?? t.line) + 1)) : undefined
@@ -349,7 +413,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
                     test={t}
                     sourceUnavailable={spec.recordedSourceUnavailable}
                     status={statusForTest(testIdentity, activeRunSummary, isRunActivelyTesting)}
-                    showStatus={!currentTests && Boolean(runId || activeRunSummary)}
+                    showStatus={!isPreview && !currentTests && Boolean(runId || activeRunSummary)}
                     showNotRun={Boolean(runId) && !isRunActivelyTesting}
                     isRunningTest={isRunningTest}
                     runningStep={runningTest?.step}
@@ -436,6 +500,17 @@ function formatLoadError(err: unknown): string {
     return context
   }
   return 'Unable to load tests for this suite.'
+}
+
+function classifyLoadError(err: unknown): TestLoadFailure {
+  const body = err instanceof api.ApiError && err.body && typeof err.body === 'object'
+    ? err.body as { code?: unknown; error?: unknown } : undefined
+  const code = body?.code
+  return {
+    kind: code === 'suite-removed' ? 'removed' : code === 'discovery-failed' ? 'config' : 'request',
+    message: (code === 'suite-removed' || code === 'discovery-failed') && typeof body?.error === 'string'
+      ? body.error : formatLoadError(err),
+  }
 }
 
 /** The placeholder is the card it becomes — R83's rule from the flight stage

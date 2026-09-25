@@ -5,7 +5,7 @@ import { AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
 import { readManifest } from './manifest'
 import { buildRunPaths } from './run-paths'
 import { renderPersonalWikiMap } from '../../../../../../../shared/runtime/personal-wiki'
-import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
+import { promptPath, loadPromptTemplate, renderPrompt, renderPromptTemplate } from '../../../../shared/prompts'
 import {
   resolveAgentBinary,
   isAgentCliAvailable,
@@ -138,6 +138,14 @@ export function buildOrchestratorHealPrompt(
       runDirRel,
       singleAttemptGuidance: claimedSingleAttempt(opts.runDir, manifest?.singleAttempt)
         ? loadPromptTemplate(promptPath('heal-single-attempt.md'))
+        : '',
+      serviceFailureContext: manifest?.serviceFailure
+        ? renderPrompt('heal-service-failure.md', {
+            service: manifest.serviceFailure.service,
+            kind: manifest.serviceFailure.kind,
+            detail: manifest.serviceFailure.detail,
+            logPath: manifest.serviceFailure.logPath,
+          })
         : '',
       healIndexPath: paths.healIndexPath,
       summaryPath: paths.summaryPath,

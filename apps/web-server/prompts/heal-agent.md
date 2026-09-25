@@ -1,9 +1,11 @@
-Playwright failed. {{healingDirective}}
+This run needs repair. {{healingDirective}}
 
 Run directory:
 - `{{runDir}}` (`{{runDirRel}}` from the project root)
 
 {{singleAttemptGuidance}}
+
+{{serviceFailureContext}}
 
 Start here:
 - `{{healIndexPath}}` — first file to read when present. It lists failed tests, assertion errors, editable repos, and exact per-failure slice paths.

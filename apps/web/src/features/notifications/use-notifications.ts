@@ -32,18 +32,6 @@ export function useNotifications() {
     return () => clearInterval(interval)
   }, [refresh])
 
-  const act = async (action: () => Promise<unknown>): Promise<boolean> => {
-    setBusy(true)
-    try {
-      await action()
-      await refresh()
-      return true
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not update notifications')
-      return false
-    } finally { setBusy(false) }
-  }
-
   return {
     items, error, loading, busy, refresh,
     resolveAction: async (id: string): Promise<{ target: api.NotificationTarget; item: api.WorkspaceNotification } | undefined> => {
@@ -62,6 +50,19 @@ export function useNotifications() {
         return undefined
       } finally { setBusy(false) }
     },
-    remove: (id: string) => act(() => api.deleteNotification(id)),
+    remove: async (id: string): Promise<boolean> => {
+      setBusy(true)
+      try {
+        await api.deleteNotification(id)
+        // A list request started before the delete must not restore its stale row.
+        generation.current++
+        setItems((current) => current.filter((item) => item.id !== id))
+        setError(null)
+        return true
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not update notifications')
+        return false
+      } finally { setBusy(false) }
+    },
   }
 }

@@ -328,7 +328,7 @@ export class RunOrchestrator extends EventEmitter {
     // A service never came up — the Playwright suite would be meaningless.
     // Declare the run failed and route it into heal (the agent fixes the
     // service) instead of running tests against a dead service.
-    if (this.ctx.bootFailure) return await this.failRunForBootFailure()
+    if (this.ctx.bootFailure || this.ctx.serviceFailure) return await this.failRunForServiceFailure()
     let exitCode = await runPlaywright(this.ctx)
     // If the user clicked Abort while Playwright was running, bail out
     // immediately — don't compute a finalStatus from the killed pty's
@@ -346,11 +346,9 @@ export class RunOrchestrator extends EventEmitter {
     //   - Playwright catching SIGTERM/SIGINT, partial-flushing, and exiting 0.
     //   - Targeted re-runs that complete cleanly while earlier failures or
     //     pending tests are still recorded in the summary.
-    let finalStatus: RunManifest['status'] = decideRunStatus(
-      this.ctx.suiteDir,
-      this.ctx.paths.summaryPath,
-      exitCode,
-    )
+    let finalStatus: RunManifest['status'] = this.ctx.serviceFailure
+      ? 'failed'
+      : decideRunStatus(this.ctx.suiteDir, this.ctx.paths.summaryPath, exitCode)
     // If the user clicked Pause & Heal, Playwright was killed on purpose —
     // even a clean summary mustn't mark the run "passed". The
     // `markStoppedEarly('user-pause')` call inside `pauseAndHeal` is what
@@ -385,7 +383,7 @@ export class RunOrchestrator extends EventEmitter {
   async restartTerminalRun(userGuidance?: string): Promise<RunManifest['status']> {
     await this.start({ resume: true })
     if (this.ctx.stopped) return this.ctx.status
-    if (this.ctx.bootFailure) return await this.failRunForBootFailure()
+    if (this.ctx.bootFailure || this.ctx.serviceFailure) return await this.failRunForServiceFailure()
     if (userGuidance) {
       this.ctx.runnerLog?.info(`Terminal run restart guidance: ${userGuidance}`)
     }
@@ -406,7 +404,9 @@ export class RunOrchestrator extends EventEmitter {
     setStatus(this.ctx, 'running')
     const exitCode = await runPlaywright(this.ctx, selection)
     if (this.ctx.stopped) return this.ctx.status
-    const finalStatus = decideRunStatus(this.ctx.suiteDir, this.ctx.paths.summaryPath, exitCode)
+    const finalStatus = this.ctx.serviceFailure
+      ? 'failed'
+      : decideRunStatus(this.ctx.suiteDir, this.ctx.paths.summaryPath, exitCode)
     setStatus(this.ctx, finalStatus)
     return await continueAfterTestRun(this.ctx, this, finalStatus)
   }
@@ -417,7 +417,7 @@ export class RunOrchestrator extends EventEmitter {
   // service's log via the manifest's `bootFailure`); a run with no heal mode
   // ends terminal 'failed' — not 'aborted', because the app is broken, the user
   // didn't stop it.
-  private async failRunForBootFailure(): Promise<RunManifest['status']> {
+  private async failRunForServiceFailure(): Promise<RunManifest['status']> {
     setStatus(this.ctx, 'failed')
     return await continueAfterTestRun(this.ctx, this, 'failed')
   }

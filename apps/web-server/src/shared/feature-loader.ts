@@ -59,6 +59,29 @@ export function loadFeatures(featuresDir: string): FeatureConfig[] {
   return out
 }
 
+export type SuiteAvailability =
+  | { kind: 'ready'; feature: FeatureConfig; configPath: string }
+  | { kind: 'removed' }
+  | { kind: 'config-missing'; featureDir: string; configPath: string; diagnostic: string }
+  | { kind: 'config-invalid'; featureDir: string; configPath: string; diagnostic: string }
+
+/** Resolve the discovery folder separately from a configured, possibly linked,
+ * test directory. A suite omitted by loadFeatures is not necessarily deleted. */
+export function suiteAvailability(featuresDir: string, name: string): SuiteAvailability {
+  if (!name || name === '.' || name === '..' || path.basename(name) !== name || !fs.existsSync(featuresDir)) return { kind: 'removed' }
+  const feature = loadFeatures(featuresDir).find((item) => item.name === name)
+  const entry = fs.readdirSync(featuresDir, { withFileTypes: true }).find((item) => item.name === name && item.isDirectory())
+  if (!entry && !feature) return { kind: 'removed' }
+  const discoveryDir = entry ? path.join(featuresDir, name) : feature!.featureDir
+  const configPath = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
+    .map((file) => path.join(discoveryDir, file)).find((file) => fs.existsSync(file))
+  if (feature && fs.existsSync(feature.featureDir)) return { kind: 'ready', feature, configPath: configPath ?? path.join(discoveryDir, 'feature.config.cjs') }
+  if (feature) return { kind: 'removed' }
+  return configPath
+    ? { kind: 'config-invalid', featureDir: discoveryDir, configPath, diagnostic: `Suite configuration could not load: ${path.basename(configPath)} is invalid or names a different suite.` }
+    : { kind: 'config-missing', featureDir: discoveryDir, configPath: path.join(discoveryDir, 'feature.config.cjs'), diagnostic: 'Suite configuration is missing: feature.config.cjs, .js, or .ts was not found.' }
+}
+
 // Find a spec file glob result for a feature. Returns absolute paths.
 export function listSpecFiles(featureDir: string): string[] {
   const e2eDir = path.join(featureDir, 'e2e')

@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
 import { formatCodeForDisplayWithLineMap } from '../../../../../../shared/code-display-format'
-import { loadFeatures, listSpecFiles } from '../../../shared/feature-loader'
+import { loadFeatures, listSpecFiles, suiteAvailability } from '../../../shared/feature-loader'
 import { extractTestsFromSource, type ExtractedTest } from '../../../shared/ast-extractor'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { translateReadableTest } from '../../../shared/readable-tests/translator'
@@ -262,13 +262,11 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     return { error: 'config file not found' }
   })
 
-  app.get<{ Params: { name: string }; Querystring: { runId?: string } }>('/api/features/:name/tests', async (req, reply) => {
-    const features = loadFeatures(deps.featuresDir)
-    const feature = features.find((f) => f.name === req.params.name)
-    if (!feature) {
-      reply.code(404)
-      return { error: 'feature not found' }
-    }
+  app.get<{ Params: { name: string }; Querystring: { runId?: string; preview?: string } }>('/api/features/:name/tests', async (req, reply) => {
+    const availability = suiteAvailability(deps.featuresDir, req.params.name)
+    if (availability.kind === 'removed') return reply.code(404).send({ code: 'suite-removed', error: 'The live suite is no longer in this workspace.' })
+    if (availability.kind === 'config-missing' || availability.kind === 'config-invalid') return reply.code(422).send({ code: 'discovery-failed', error: availability.diagnostic })
+    const feature = availability.feature
     const recorded = req.query.runId ? recordedTestList(deps.logsDir, feature.name, req.query.runId) : undefined
     const codeDisplayCache = new Map<string, ReturnType<typeof formatCodeForDisplayWithLineMap>>()
     const withCodeDisplay = (test: ExtractedTest): ExtractedTest => {
@@ -293,11 +291,22 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       if (recorded && !recorded.dir) unavailableSources.add(file)
       else try { source = fs.readFileSync(file, 'utf-8') } catch { if (recorded) unavailableSources.add(file) }
       const result = extractTestsFromSource(file, source, feature.semanticRules)
-      try { if (!recorded) await attachSourceChanges(feature.featureDir, file, source, result.tests) } catch (err) {
+      try { if (!recorded && req.query.preview !== '1') await attachSourceChanges(feature.featureDir, file, source, result.tests) } catch (err) {
         app.log.warn({ err, file }, 'test source change markers unavailable')
       }
       astByFile.set(file, result)
     }
+
+    // The source view is provisional; the normal request still resolves the
+    // exact roster through Playwright before using it as test evidence.
+    if (req.query.preview === '1' && !recorded) return specFiles.map((file) => {
+      const result = astByFile.get(file)!
+      return {
+        file,
+        tests: result.tests.map(withCodeDisplay),
+        ...(result.parseError ? { parseError: result.parseError } : {}),
+      }
+    })
 
     // 2. Ask Playwright to enumerate the resolved test list (loops expanded,
     //    `${var}` substituted). On failure, fall back to AST-only output.

@@ -396,6 +396,28 @@ describe('runAutoHealLoop', () => {
     expect(ctx.status).not.toBe('passed')
   })
 
+  it('heals a confirmed service failure even when no test has failed', async () => {
+    const { ctx } = ctxFor({
+      serviceFailure: {
+        service: 'api', safeName: 'api', kind: 'compiler', detail: 'build failed',
+        logPath: '/tmp/svc-api.log', command: 'start', cwd: '/tmp', at: new Date().toISOString(),
+      },
+    }, { autoHeal: AUTO })
+    h.runHealAgent.mockResolvedValue({ signal: { kind: 'restart', body: {} }, reason: 'signal' })
+    h.runPlaywright.mockResolvedValue(0)
+    h.decideRunStatus.mockReturnValue('passed')
+    const host = makeLoopHost()
+    host.restart = vi.fn(async () => {
+      ctx.serviceFailure = undefined
+      return { restarted: ['api'], kept: [], startedBecauseMissing: [] }
+    })
+
+    expect(await runAutoHealLoop(ctx, host)).toBe('passed')
+    expect(h.runHealAgent).toHaveBeenCalledTimes(1)
+    expect(host.restart).toHaveBeenCalledTimes(1)
+    expect(h.runPlaywright).toHaveBeenCalledTimes(1)
+  })
+
   it('returns the live status when the run was aborted before the first cycle', async () => {
     const { ctx } = ctxFor({ stopped: true, status: 'aborted' }, { autoHeal: AUTO })
 
@@ -420,6 +442,28 @@ describe('runAutoHealLoop', () => {
   describe('pending-test rerun (no heal agent spawned)', () => {
     beforeEach(() => {
       h.verificationPlanForSummary.mockReturnValue(targeted(['skipped-one']))
+    })
+
+    it('enters service healing if a required service fails during the pending rerun', async () => {
+      const { ctx } = ctxFor({}, { autoHeal: AUTO })
+      h.runPlaywright.mockImplementationOnce(async () => {
+        ctx.serviceFailure = {
+          service: 'api', safeName: 'api', kind: 'process-exited', detail: 'exited',
+          logPath: '/tmp/svc-api.log', command: 'start', cwd: '/tmp', at: new Date().toISOString(),
+        }
+        return 0
+      }).mockResolvedValueOnce(0)
+      h.decideRunStatus.mockReturnValue('passed')
+      h.runHealAgent.mockResolvedValue({ signal: { kind: 'restart', body: {} }, reason: 'signal' })
+      const host = makeLoopHost()
+      host.restart = vi.fn(async () => {
+        ctx.serviceFailure = undefined
+        return { restarted: ['api'], kept: [], startedBecauseMissing: [] }
+      })
+
+      expect(await runAutoHealLoop(ctx, host)).toBe('passed')
+      expect(h.runHealAgent).toHaveBeenCalledTimes(1)
+      expect(h.runPlaywright).toHaveBeenCalledTimes(2)
     })
 
     it('does not rerun pending tests when the suite attempt was already claimed', async () => {

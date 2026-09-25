@@ -4,12 +4,12 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TestCasesColumn } from './TestCasesColumn'
 import { InvalidationProvider } from '../state/invalidation'
-import { getFeatureTests } from '../api/client'
+import { ApiError, getFeatureTests, getFeatureTestsPreview } from '../api/client'
 import { listDiscoveryRepairs, startDiscoveryRepair, type DiscoveryRepairView } from '../api/discovery-repair'
 import { connectReconnectingSocket } from '../api/reconnecting-socket'
 import { readableTest } from '../api/__fixtures__/readable-test'
 
-vi.mock('../api/client', async (original) => ({ ...await original<typeof import('../api/client')>(), getFeatureTests: vi.fn(), getFeatureDirtyDiff: vi.fn().mockResolvedValue({ tests: [] }) }))
+vi.mock('../api/client', async (original) => ({ ...await original<typeof import('../api/client')>(), getFeatureTests: vi.fn(), getFeatureTestsPreview: vi.fn(), getFeatureDirtyDiff: vi.fn().mockResolvedValue({ tests: [] }) }))
 vi.mock('../api/discovery-repair', () => ({ listDiscoveryRepairs: vi.fn(), startDiscoveryRepair: vi.fn() }))
 vi.mock('../api/reconnecting-socket', () => ({ defaultWsBase: () => 'ws://test', connectReconnectingSocket: vi.fn(() => ({ close: vi.fn() })) }))
 vi.mock('../ui/TestPresentation', () => ({ TestPresentation: () => null }))
@@ -31,6 +31,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(listDiscoveryRepairs).mockResolvedValue([])
   vi.mocked(getFeatureTests).mockResolvedValue(failedSpecs)
+  vi.mocked(getFeatureTestsPreview).mockResolvedValue([])
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -40,6 +41,51 @@ async function render(isAuthoringTests = false) {
   await act(async () => root.render(<InvalidationProvider><TestCasesColumn feature="suite" isAuthoringTests={isAuthoringTests} /></InvalidationProvider>))
 }
 describe('Tests column discovery repair', () => {
+  it('shows a removed suite in the same card layout without repair or retry actions', async () => {
+    vi.mocked(getFeatureTests).mockRejectedValue(new ApiError(404, { code: 'suite-removed', error: 'The live suite is no longer in this workspace.' }))
+    await render()
+    const card = container.querySelector('[data-testid="tests-unavailable-card"]')!
+    expect(card.textContent).toContain('Suite removed')
+    expect(card.textContent).toContain('The live suite is no longer in this workspace.')
+    expect(card.querySelector('[data-testid="test-list-error-summary"]')).not.toBeNull()
+    expect(card.querySelectorAll('button')).toHaveLength(0)
+    expect(getFeatureTests).toHaveBeenCalledTimes(1)
+  })
+
+  it('replaces the removed card when an external agent restores the suite without a page refresh', async () => {
+    let checkAvailability: (() => void) | undefined
+    const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation(((callback, delay) => {
+      if (delay === 10_000) checkAvailability = callback as () => void
+      return 1 as unknown as ReturnType<typeof setInterval>
+    }) as typeof setInterval)
+    try {
+      vi.mocked(getFeatureTests).mockRejectedValue(new ApiError(404, { code: 'suite-removed', error: 'The live suite is no longer in this workspace.' }))
+      await render()
+      expect(container.textContent).toContain('Suite removed')
+      expect(checkAvailability).toBeDefined()
+
+      vi.mocked(getFeatureTests).mockResolvedValue([{ file: '/features/suite/e2e/a.spec.ts', tests: [{ name: 'Restored case', line: 1, bodySource: '', steps: [], readable: readableTest('Restored case') }] }])
+      await act(async () => checkAvailability?.())
+      expect(container.textContent).toContain('Restored case')
+      expect(container.textContent).not.toContain('Suite removed')
+    } finally {
+      interval.mockRestore()
+    }
+  })
+
+  it.each(['missing', 'invalid'] as const)('shows %s configuration under discovery failure with working repair and retry actions', async (condition) => {
+    vi.mocked(getFeatureTests).mockRejectedValue(new ApiError(422, { code: 'discovery-failed', error: `Suite configuration is ${condition}.` }))
+    await render()
+    const card = container.querySelector('[data-testid="tests-unavailable-card"]')!
+    expect(card.textContent).toContain('Test discovery failed')
+    expect(card.textContent).toContain(`Suite configuration is ${condition}.`)
+    const buttons = [...card.querySelectorAll('button')]
+    expect(buttons.map((button) => button.textContent)).toContain('Repair in Canary Lab')
+    expect(buttons.map((button) => button.textContent)).toContain('Retry discovery')
+    expect(buttons[0].className).toContain('px-3 py-1.5')
+    expect(buttons[1].className).toContain('px-3 py-1.5')
+  })
+
   it('puts all three ways out on the card, with nothing to open for a one-line error', async () => {
     await render()
     const command = container.querySelector('[data-testid="discovery-repair-command"]')!

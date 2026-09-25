@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, getTestFileReview, getTestSourceComparison, getFeatureTests } from '../api/client'
+import { ApiError, getTestFileReview, getTestSourceComparison, getFeatureTests, getFeatureTestsPreview } from '../api/client'
 import { readableTest } from '../api/__fixtures__/readable-test'
 
 import type { FeatureTests } from '../api/types'
@@ -18,6 +18,7 @@ vi.mock('../api/client', async () => {
   return {
     ...actual,
     getFeatureTests: vi.fn(),
+    getFeatureTestsPreview: vi.fn(),
     getTestFileReview: vi.fn(),
     getTestSourceComparison: vi.fn(),
   }
@@ -52,6 +53,7 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   vi.mocked(getFeatureTests).mockReset()
+  vi.mocked(getFeatureTestsPreview).mockReset().mockResolvedValue([])
   vi.mocked(getTestSourceComparison).mockReset().mockResolvedValue({ state: 'ready', files: [], differences: [], changes: { added: [], changed: [], removed: [] } })
   vi.mocked(getTestFileReview).mockReset().mockRejectedValue(new Error('No baseline'))
 })
@@ -139,6 +141,42 @@ describe('TestCasesColumn', () => {
     })
 
     expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).not.toBeNull()
+  })
+
+  it('shows a provisional source card promptly, then replaces it with the resolved roster', async () => {
+    const file = '/tmp/features/alpha/e2e/a.spec.ts'
+    const source = [{ file, tests: [{ name: 'source title', line: 3, bodySource: '', steps: [], readable: readableTest('source title') }] }]
+    const resolved = [{ file, tests: [{ name: 'resolved title', line: 3, bodySource: '', steps: [], readable: readableTest('resolved title') }] }]
+    let finishDiscovery!: (specs: FeatureTests) => void
+    vi.mocked(getFeatureTests).mockReturnValue(new Promise((resolve) => { finishDiscovery = resolve }))
+    vi.mocked(getFeatureTestsPreview).mockResolvedValue(source)
+    const onTotalTestsChange = vi.fn()
+
+    await act(async () => { root.render(<TestCasesColumn feature="alpha" onTotalTestsChange={onTotalTestsChange} />) })
+    expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).toBeNull()
+    expect(container.querySelector('[data-testid="tests-source-preview"]')).not.toBeNull()
+    expect(container.textContent).toContain('source title')
+    expect(onTotalTestsChange).not.toHaveBeenCalledWith(1)
+
+    await act(async () => { finishDiscovery(resolved) })
+    expect(container.querySelector('[data-testid="tests-source-preview"]')).toBeNull()
+    expect(container.textContent).toContain('resolved title')
+    expect(container.textContent).not.toContain('source title')
+    expect(onTotalTestsChange).toHaveBeenCalledWith(1)
+  })
+
+  it('does not let a late source preview replace the resolved list', async () => {
+    const file = '/tmp/features/alpha/e2e/a.spec.ts'
+    const test = (name: string) => ({ name, line: 3, bodySource: '', steps: [], readable: readableTest(name) })
+    let finishPreview!: (specs: FeatureTests) => void
+    vi.mocked(getFeatureTests).mockResolvedValue([{ file, tests: [test('resolved title')] }])
+    vi.mocked(getFeatureTestsPreview).mockReturnValue(new Promise((resolve) => { finishPreview = resolve }))
+
+    await act(async () => { root.render(<TestCasesColumn feature="alpha" />) })
+    await act(async () => { finishPreview([{ file, tests: [test('old source title')] }]) })
+    expect(container.textContent).toContain('resolved title')
+    expect(container.textContent).not.toContain('old source title')
+    expect(container.querySelector('[data-testid="tests-source-preview"]')).toBeNull()
   })
 
   it('renders tests after loading succeeds', async () => {

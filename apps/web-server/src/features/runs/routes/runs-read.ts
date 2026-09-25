@@ -16,6 +16,7 @@ import { commitModelPlans } from '../logic/runtime/run-model-plan'
 import { EMPTY_AGENT_MODELS } from '../../agent-sessions/logic/agent-models'
 import { detectGhStatus } from '../../../shared/gh-cli'
 import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
+import { readableTerminalLog } from '../logic/runtime/log-enrichment'
 import {
   buildAgentSessionResponse,
   locateMostRecentAgentSessionRef,
@@ -25,6 +26,8 @@ import {
 import { ExternalHealAgentRequest, contentTypeFor } from './runs-route-support'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 import { withSingleAttemptDetailState, withSingleAttemptIndexState } from '../logic/single-attempt-view'
+
+const READABLE_LOGS_DIR = 'readable-logs'
 
 function captureIsFinal(manifest: RunManifest): boolean {
   return isTerminalRunStatus(manifest.status) && Boolean(manifest.endedAt) && manifest.fixCapture?.provisional !== true
@@ -140,6 +143,43 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     } catch (err) {
       return { opened: false, path: target, error: err instanceof Error ? err.message : String(err) }
     }
+  })
+
+  // A readable copy of one of this run's logs, for a person opening it in an
+  // editor. The raw file keeps PTY control codes because the finished-run xterm
+  // replay needs them, so it is never rewritten; the copy is rebuilt from it on
+  // every request (a restart truncates the raw log, so no copy goes stale) and
+  // lives under `readable-logs/`, outside every `svc-*.log` reader.
+  app.post<{ Params: { runId: string }; Body: { file?: string } }>('/api/runs/:runId/readable-log', async (req, reply) => {
+    if (!deps.store.get(req.params.runId)) {
+      reply.code(404)
+      return { error: 'run not found' }
+    }
+    const file = req.body?.file
+    const runDir = runDirFor(deps.store.logsDir, req.params.runId)
+    const relative = typeof file === 'string' && path.isAbsolute(file) ? path.relative(runDir, file) : ''
+    const inRun = (rel: string) => Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel)
+    if (!inRun(relative) || !relative.endsWith('.log') || relative.split(path.sep)[0] === READABLE_LOGS_DIR) {
+      reply.code(400)
+      return { error: 'file must be a raw .log file inside this run' }
+    }
+    let raw: string
+    try {
+      // The lexical check above names a run file; the real path must agree, so
+      // a symlink placed in the run dir cannot read something outside it.
+      if (!inRun(path.relative(fs.realpathSync(runDir), fs.realpathSync(file!)))) {
+        reply.code(400)
+        return { error: 'file must be a raw .log file inside this run' }
+      }
+      raw = fs.readFileSync(file!, 'utf-8')
+    } catch {
+      reply.code(404)
+      return { error: 'log not found' }
+    }
+    const target = path.join(runDir, READABLE_LOGS_DIR, relative)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.writeFileSync(target, readableTerminalLog(raw))
+    return { path: target }
   })
 
   // gh (GitHub CLI) connection status — detect-and-instruct only (never runs

@@ -21,22 +21,27 @@ export async function register(app: FastifyInstance, ctx: ServerContext): Promis
   const testSources = (unavailable: Set<string>): NotificationSource[] => {
     const changes = ctx.dirtySpecStore.list()
     const runs = ctx.runStore.list()
-    if (refreshError) throw refreshError
+    if (refreshError) throw refreshError instanceof Error ? refreshError : new Error(String(refreshError))
     const retired = new Set<string>()
     const missing = new Set<string>()
     const featureNames = new Set([...runs.map((run) => run.feature), ...changes.map((change) => change.featureId)])
     const reviews = [...featureNames].flatMap((feature) => {
-      const liveDir = featureDirs.get(feature) ?? path.join(ctx.featuresDir, feature)
-      const configExists = fs.existsSync(path.join(liveDir, 'feature.config.cjs'))
+      const discoveryDir = path.join(ctx.featuresDir, feature)
+      const liveDir = featureDirs.get(feature) ?? discoveryDir
+      // Config belongs to the discovery folder; featureDir may point to a
+      // linked suite that legitimately contains only tests and helpers.
+      const configExists = ['cjs', 'js', 'ts'].some((extension) => fs.existsSync(path.join(discoveryDir, `feature.config.${extension}`)))
       if (!configExists && (store.isRetired(feature) || isCommittedSuiteRetirement(ctx.featuresDir, feature))) {
         store.retire(feature)
         retired.add(feature)
         return []
       }
-      const latest = runs.find((run) => run.feature === feature)
-      const snapshot = !configExists && latest ? ctx.runStore.get(latest.runId)?.manifest.suiteSnapshot : undefined
-      if (!fs.existsSync(liveDir) || (!configExists && snapshot?.kind === 'taken' && fs.existsSync(path.join(snapshot.dir, 'feature.config.cjs')))) {
-        if (snapshot?.kind === 'taken') missing.add(feature)
+      if (!configExists || !fs.existsSync(liveDir)) {
+        // Historical edits remain evidence, but a missing live suite offers no
+        // current review action. Absence settles this episode without approving
+        // any bytes; restoring the suite can create a fresh review episode.
+        missing.add(feature)
+        unavailable.delete(`test-review:${feature}`)
         return []
       }
       store.restore(feature)
@@ -54,16 +59,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext): Promis
     })
     const reviewSources = testReviewNotificationSources(runs.filter((run) => !retired.has(run.feature)), changes.filter((change) => !retired.has(change.featureId)), reviews)
       .filter((source) => !missing.has(source.key.slice('test-review:'.length)))
-    const missingSources = [...missing].map((feature) => {
-      const run = runs.find((entry) => entry.feature === feature)
-      return { key: `test-review:${feature}`, signature: 'attention', message: {
-        title: `${feature}: suite unavailable`,
-        body: 'The live suite folder is missing. Restore it to review test changes; the saved run remains available.',
-        severity: 'warning' as const, toast: false,
-        target: { kind: 'test-review' as const, feature, ...(run ? { runId: run.runId } : {}) },
-      } }
-    })
-    return [...reviewSources, ...missingSources]
+    return reviewSources
   }
   const reconcile = (): void => {
     const unavailable = new Set(refreshFailures)

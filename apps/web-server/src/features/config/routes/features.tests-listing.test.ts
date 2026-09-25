@@ -86,6 +86,36 @@ async function build(opts: { spawner?: PlaywrightListSpawner; dirtySpecStore?: D
 }
 
 describe('GET /api/features/:name/tests', () => {
+  it('returns source cards without waiting for Playwright discovery', async () => {
+    const dir = writeFeature('preview', { spec: "test('opens checkout', async () => { await page.goto('/checkout') })\n" })
+    const spawner = vi.fn(failingSpawner)
+    const app = await build({ spawner })
+    const res = await app.inject('/api/features/preview/tests?preview=1')
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual([{ file: path.join(dir, 'e2e', 'a.spec.ts'), tests: [expect.objectContaining({ name: 'opens checkout' })] }])
+    expect(spawner).not.toHaveBeenCalled()
+    await app.close()
+  })
+
+  it('reports a removed suite without claiming Playwright discovery failed', async () => {
+    const app = await build()
+    const response = await app.inject('/api/features/deleted/tests')
+    expect(response.statusCode).toBe(404)
+    expect(response.json()).toMatchObject({ code: 'suite-removed', error: expect.stringContaining('no longer') })
+    await app.close()
+  })
+
+  it.each(['missing', 'invalid'] as const)('keeps a %s configuration in the repairable discovery state', async (condition) => {
+    const dir = path.join(featuresDir, 'broken')
+    fs.mkdirSync(dir, { recursive: true })
+    if (condition === 'invalid') fs.writeFileSync(path.join(dir, 'feature.config.cjs'), 'throw new Error("invalid config")')
+    const app = await build()
+    const response = await app.inject('/api/features/broken/tests')
+    expect(response.statusCode).toBe(422)
+    expect(response.json()).toMatchObject({ code: 'discovery-failed', error: expect.stringContaining('configuration') })
+    await app.close()
+  })
+
   it('keeps discovery repair available when the suite has no readable spec files', async () => {
     writeFeature('empty')
     const app = await build()
