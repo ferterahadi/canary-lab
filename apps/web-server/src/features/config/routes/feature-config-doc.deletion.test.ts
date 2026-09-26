@@ -74,6 +74,15 @@ afterEach(() => {
 })
 
 describe('feature deletion endpoint', () => {
+  it('preserves existence-first validation when the confirmation is also wrong', async () => {
+    const app = await makeApp()
+    try {
+      const response = await app.inject({ method: 'DELETE', url: '/api/features/missing', payload: { confirmName: 'wrong' } })
+      expect(response.statusCode).toBe(404)
+      expect(response.json()).toEqual({ error: 'feature not found' })
+    } finally { await app.close() }
+  })
+
   it('deletes the whole feature directory when the confirmation name matches', async () => {
     const events: WorkspaceEvent[] = []
     const featureDir = buildFeature('gone', {

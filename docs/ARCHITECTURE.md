@@ -117,6 +117,16 @@ stores that back them, for nothing but symmetry. The web side is named after the
 surface it consumes so the two are greppable together. (In the UI this is the
 **Cleanup** pill, with three tabs — Runs, Worktrees, Portify.)
 
+**Suite deletion** is owned by
+`apps/web-server/src/features/config/logic/feature-deletion.ts`. REST and MCP
+delegate to `deleteSuite`, which resolves the suite, validates confirmation and
+directory containment, then invokes the existing Flight guard/cleanup before
+removing the directory. Invalid targets cannot remove Flight history. The command
+publishes `feature-deleted` after directory removal; Flight events remain owned by
+the Flight store. The legacy `deleteFeature` helper preserves directory-only
+scaffold reset, which must retain the owning Flight. This sequence is not a
+filesystem transaction: an I/O failure after Flight cleanup does not roll it back.
+
 Key `apps/web-server/src/features/runs/logic/runtime/` modules:
 
 | Module | Role |
@@ -954,7 +964,8 @@ link, or the per-repo reason there is none.
   section (`reads`, `authoring`, `run-lifecycle`, `heal-flow`), each a thin wrapper
   over existing REST routes/helpers. `start_run`/`write_envset`/etc. reuse handlers
   via `app.inject()`; don't duplicate orchestrator logic. Author-profile tools call
-  `apps/web-server/src/features/config/logic/feature-authoring.ts` directly.
+  configuration-domain helpers directly, including `feature-authoring.ts` and
+  the shared `deleteSuite` operation described above.
   `tool-registry.ts` captures each group registration once as a schema + handler
   definition. `tools.ts` exposes selected definitions directly or registers
   `exec-tool.ts`, which validates with the original Zod schema and calls the same

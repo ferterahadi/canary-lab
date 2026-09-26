@@ -45,6 +45,7 @@ import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightSt
 
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
 import { stageContextStub } from './__fixtures__/stage-context'
+import { FlightRunStore } from '../store'
 
 let tmpDir: string
 
@@ -142,6 +143,8 @@ describe('stage reset (R78 restart wipe)', () => {
       createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
       const featureDir = path.join(featuresDir, 'checkout')
       const { ctx } = ctxFor(manifest())
+      const flightStore = new FlightRunStore(logsDir)
+      flightStore.save(ctx.manifest())
       fs.mkdirSync(ctx.flightDir, { recursive: true })
       fs.writeFileSync(path.join(ctx.flightDir, 'scaffolded-feature'), 'checkout')
       const { events, publisher } = eventSink()
@@ -151,6 +154,7 @@ describe('stage reset (R78 restart wipe)', () => {
       expect(fs.existsSync(featureDir)).toBe(false)
       expect(fs.existsSync(path.join(ctx.flightDir, 'scaffolded-feature'))).toBe(false)
       expect(events).toContainEqual({ type: 'feature-deleted', feature: 'checkout' })
+      expect(flightStore.get(ctx.manifest().flightId)).toEqual(ctx.manifest())
     })
 
     it('leaves a PRE-EXISTING feature alone (no marker — the enhance path)', async () => {

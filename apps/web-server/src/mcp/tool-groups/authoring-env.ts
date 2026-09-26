@@ -1,7 +1,8 @@
 // MCP tools — envset capture/inspection, feature deletion, and the feature repo
-// branch surface. Split out of authoring.ts; bodies are unchanged.
+// branch surface.
 import { z } from 'zod'
-import { captureFeatureEnvFiles, checkoutFeatureRepoBranch, deleteFeature, getFeatureEnvsetSummary, getFeatureRepoStatus, updateFeatureRepoBranch, type EnvFileSource } from '../../features/config/logic/feature-authoring'
+import { captureFeatureEnvFiles, checkoutFeatureRepoBranch, getFeatureEnvsetSummary, getFeatureRepoStatus, updateFeatureRepoBranch, type EnvFileSource } from '../../features/config/logic/feature-authoring'
+import { deleteSuite } from '../../features/config/logic/feature-deletion'
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
 import { type ToolGroupContext, asJsonResult, authoringCtx, errorResult, failureResult, isToolErrorPayload } from '../tool-support'
 
@@ -70,15 +71,12 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
     },
     annotations: { destructiveHint: true, idempotentHint: false },
   }, async ({ feature, confirmName }) => {
-    // Validate the confirm BEFORE the flight-history hook removes anything.
+    // Keep MCP's confirmation-first error even when the suite is missing.
     if (confirmName !== feature) return errorResult('confirmName must match the feature name')
-    // R76 guard — an active flight blocks the whole deletion before anything
-    // is removed.
-    const flights = deps.removeFlightRecordsFor?.(feature)
-    if (flights?.error) return errorResult(flights.error)
-    const result = deleteFeature(authoringCtx(deps), { feature, confirmName })
+    const result = deleteSuite({ featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents,
+      removeFlightRecordsFor: deps.removeFlightRecordsFor }, { feature, confirmName })
     if (!result.ok) return errorResult(result.error)
-    return asJsonResult({ deleted: true, feature, featureDir: result.featureDir, flightRecordsRemoved: flights?.removed ?? 0 })
+    return asJsonResult({ deleted: true, feature, featureDir: result.featureDir, flightRecordsRemoved: result.flightRecordsRemoved })
   })
 
   registerTool('get_feature_repo_status', {

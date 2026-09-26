@@ -5,7 +5,6 @@ import type { FastifyInstance } from 'fastify'
 import type { FeatureConfigRouteDeps } from './feature-config-deps'
 import fs from 'fs'
 import os from 'os'
-import path from 'path'
 import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
@@ -14,7 +13,7 @@ import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { overlayExists as portifyOverlayExists } from '../../portify/logic/runtime/overlay'
 import { revertPortification } from '../../portify/logic/runtime/unportify'
 import { FEATURE_CONFIG_NAMES, findExistingConfig, listEnvFolders } from './feature-config-support'
-import { isWithin } from '../logic/path-containment'
+import { deleteSuite } from '../logic/feature-deletion'
 
 export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
   // ─── feature.config.{cjs,js,ts} ───────────────────────────────────────
@@ -291,32 +290,11 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
   app.delete<{ Params: { name: string }; Body: { confirmName?: string } }>(
     '/api/features/:name',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
-      if (!feature?.featureDir) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
-      if (req.body?.confirmName !== feature.name) {
-        reply.code(400)
-        return { error: 'confirmName must match the feature name' }
-      }
-      const featuresRoot = path.resolve(deps.featuresDir)
-      const featureDir = path.resolve(feature.featureDir)
-      if (featureDir === featuresRoot || !isWithin(featuresRoot, featureDir)) {
-        reply.code(400)
-        return { error: 'feature directory is outside the features root' }
-      }
-      // R76: the suite's flight history goes with it — guarded first, so an
-      // active flight blocks the whole deletion before anything is removed.
-      const flights = deps.removeFlightRecordsFor?.(feature.name)
-      if (flights?.error) {
-        reply.code(409)
-        return { error: flights.error }
-      }
-      fs.rmSync(featureDir, { recursive: true, force: true })
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-deleted', feature: feature.name })
-      if ((flights?.removed ?? 0) > 0) {
+      const result = deleteSuite({ featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents,
+        removeFlightRecordsFor: deps.removeFlightRecordsFor }, { feature: req.params.name, confirmName: req.body?.confirmName })
+      if (!result.ok) {
+        reply.code(result.statusCode)
+        return { error: result.error }
       }
       reply.code(204)
       return null

@@ -26,6 +26,7 @@ import {
 } from '../../../shared/playwright-config'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { isWithin } from './path-containment'
+import { deleteSuite } from './feature-deletion'
 
 export { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
 
@@ -312,16 +313,11 @@ export function deleteFeature(ctx: FeatureAuthoringContext, input: {
   confirmName: string
 }): { ok: true; featureDir: string } | { ok: false; error: string; featureDir?: string } {
   if (input.confirmName !== input.feature) return { ok: false, error: 'confirmName must match the feature name' }
-  const feature = findFeature(ctx.featuresDir, input.feature)
-  if (!feature?.featureDir) return { ok: false, error: 'feature not found' }
-  const featuresRoot = path.resolve(ctx.featuresDir)
-  const featureDir = path.resolve(feature.featureDir)
-  if (featureDir === featuresRoot || !isWithin(featuresRoot, featureDir)) {
-    return { ok: false, error: 'feature directory is outside the features root', featureDir }
-  }
-  fs.rmSync(featureDir, { recursive: true, force: true })
-  publishWorkspaceEvent(ctx.workspaceEvents, { type: 'feature-deleted', feature: input.feature })
-  return { ok: true, featureDir }
+  // Scaffold reset keeps its owning Flight; preserve this directory-only API.
+  const result = deleteSuite({ featuresDir: ctx.featuresDir, workspaceEvents: ctx.workspaceEvents }, input)
+  if (result.ok) return { ok: true, featureDir: result.featureDir }
+  const { statusCode: _statusCode, ...failure } = result
+  return failure
 }
 
 export async function applyExternalDraftFiles(input: {

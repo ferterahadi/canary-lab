@@ -5,6 +5,8 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerFeatureEnvTools } from './authoring-env'
 import { captureTools } from './__fixtures__/tool-group-harness'
+import { FlightRunStore } from '../../features/flights/logic/store'
+import { removeFlightRecordsForFeature } from '../../features/flights/logic/flight-queue'
 
 // Envset capture/inspection, feature deletion, and the repo-branch surface.
 //
@@ -184,6 +186,40 @@ describe('write_envset', () => {
 })
 
 describe('delete_feature', () => {
+  it.each([
+    ['wrong', 'confirmName must match the feature name'],
+    ['missing', 'feature not found'],
+  ])('refuses a missing suite with confirmation %s before the Flight hook', async (confirmName, message) => {
+    const removeFlightRecordsFor = vi.fn(() => ({ error: 'active Flight', removed: 0 }))
+    const { text, published } = harness({ removeFlightRecordsFor })
+    expect(await text('delete_feature', { feature: 'missing', confirmName })).toBe(message)
+    expect(removeFlightRecordsFor).not.toHaveBeenCalled()
+    expect(published).toEqual([])
+  })
+
+  it('preserves real Flight history when a linked suite is outside the features root', async () => {
+    const discovery = writeFeature('linked')
+    const outside = path.join(tmpDir, 'linked-source')
+    fs.mkdirSync(outside)
+    fs.writeFileSync(path.join(discovery, 'feature.config.cjs'),
+      `exports.config = { name: 'linked', featureDir: ${JSON.stringify(outside)}, repos: [] }`)
+    const store = new FlightRunStore(path.join(tmpDir, 'logs'))
+    store.save({ flightId: 'saved-flight', feature: 'linked', repoPaths: [], description: 'fixture',
+      opts: { env: 'local', coverageTarget: 100, yolo: false }, status: 'done', currentStage: null, stages: [],
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' })
+    const before = store.get('saved-flight')
+    const remove = vi.fn((feature: string) => removeFlightRecordsForFeature(store, feature))
+    const { text, published } = harness({ removeFlightRecordsFor: remove })
+
+    expect(await text('delete_feature', { feature: 'linked', confirmName: 'linked' }))
+      .toBe('feature directory is outside the features root')
+    expect(store.get('saved-flight')).toEqual(before)
+    expect(remove).not.toHaveBeenCalled()
+    expect(fs.existsSync(outside)).toBe(true)
+    expect(fs.existsSync(discovery)).toBe(true)
+    expect(published).toEqual([])
+  })
+
   it('refuses a mismatched confirmation before removing any flight history', async () => {
     writeFeature('checkout')
     const removeFlightRecordsFor = vi.fn(() => ({ removed: 3 }))
