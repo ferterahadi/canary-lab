@@ -5,6 +5,7 @@ import type { FlightIndexEntry, FlightManifest, PlanFeaturesTask } from '../api/
 import { connectWorkspaceEvents } from '@/shared/api/workspace-socket'
 import { useFlightsStream } from '@/features/flights'
 import type { InvalidationTopic } from './invalidation-bus'
+import { useWorkspaceFeatures } from './use-workspace-features'
 
 // Owns the workspace's server-sourced data — the features list, the flights +
 // pre-flights indexes, the version status — plus the refresh helpers, the
@@ -54,7 +55,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   const onFeatureRenamedRef = useRef(onFeatureRenamed)
   useEffect(() => { onFeatureRenamedRef.current = onFeatureRenamed }, [onFeatureRenamed])
 
-  const [features, setFeatures] = useState<Feature[]>([])
+  const { features, refreshFeatures } = useWorkspaceFeatures(onInitialFeatures, onFeaturesRefreshed)
   // REST-loaded list, used until `/ws/flights` sends its first snapshot (and as
   // the fallback where no WebSocket exists at all — a component unit test).
   const [restFlights, setRestFlights] = useState<FlightIndexEntry[]>([])
@@ -69,13 +70,6 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   const flightsRef = useRef(flights)
   useEffect(() => { flightsRef.current = flights }, [flights])
 
-  const refreshFeatures = useCallback((preferredFeature?: string | null): void => {
-    api.listFeatures().then((data) => {
-      setFeatures(data)
-      onFeaturesRefreshed(data, preferredFeature)
-    }).catch(() => {})
-  }, [onFeaturesRefreshed])
-
   const refreshVersion = useCallback((): void => {
     api.getVersionStatus().then(setVersionStatus).catch(() => {})
   }, [])
@@ -85,17 +79,6 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   const refreshPreFlights = useCallback((): void => {
     api.listPlanFeatures().then((r) => setPreFlights(r.tasks)).catch(() => {})
   }, [])
-
-  // Initial features load + auto-select the first feature when none is hydrated.
-  useEffect(() => {
-    let cancelled = false
-    api.listFeatures().then((data) => {
-      if (cancelled) return
-      setFeatures(data)
-      onInitialFeatures(data)
-    }).catch(() => {})
-    return () => { cancelled = true }
-  }, [onInitialFeatures])
 
   // Initial flights / pre-flights / version loads (feed the pill + footer before
   // any event fires).

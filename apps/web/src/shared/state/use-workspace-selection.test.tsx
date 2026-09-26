@@ -99,6 +99,7 @@ afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimer
 
 describe('workspace selection through navigation, data, and run streams', () => {
   it('keeps a pending run selected while evidence falls back, then follows its arrival', async () => {
+    vi.useFakeTimers()
     await mount()
     const old = run('old')
     await index([old], { old: detail(old) })
@@ -110,6 +111,10 @@ describe('workspace selection through navigation, data, and run streams', () => 
     await event({ type: 'connected' })
     expect(nav.selectedRunId).toBe('new')
     expect(nav.pendingRunSelectionRef.current).toBe('new')
+    await act(async () => vi.advanceTimersByTimeAsync(10_000))
+    expect(nav.selectedRunId).toBe('new')
+    expect(nav.pendingRunSelectionRef.current).toBe('new')
+    expect(selection.selectedRunEvidence.manifest?.runId).toBe('old')
     const next = run('new', { status: 'running' })
     await index([next, old], { new: detail(next), old: detail(old) })
     expect(nav.pendingRunSelectionRef.current).toBeNull()
@@ -117,10 +122,12 @@ describe('workspace selection through navigation, data, and run streams', () => 
     expect(JSON.parse(container.textContent!)).toMatchObject({ run: 'new', evidence: 'new', status: 'running' })
   })
   it('retains a historical URL selection through newer runs and reconnect without changing recorded source', async () => {
+    vi.useFakeTimers()
     await mount({ run: 'old', currentTests: false })
     const old = run('old')
     await index([run('new'), old], { old: detail(old) })
     await event({ type: 'connected' })
+    await act(async () => vi.advanceTimersByTimeAsync(10_000))
     expect(nav.selectedRunId).toBe('old')
     expect(nav.currentTests).toBe(false)
     expect(selection.selectedRunEvidence.manifest?.runId).toBe('old')

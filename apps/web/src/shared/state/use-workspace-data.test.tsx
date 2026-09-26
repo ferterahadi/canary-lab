@@ -618,6 +618,10 @@ describe('useWorkspaceData — socket lifecycle', () => {
 
 it.each([{ allRuns: [] }, { allRuns: [run('newest', 'checkout'), run('historical', 'checkout')] }])('keeps the selected historical run across a feature refresh with runs $allRuns', async ({ allRuns }) => {
   api.listFeatures.mockResolvedValue([feature('checkout')])
+  // Hydrate before rendering: mutating only the mirror afterward makes the
+  // next render look like a new run selection to the composed controller.
+  harness.runIdRef.current = 'historical'
+  harness.pendingRef.current = 'historical'
   await mount({ allRuns, initialSelectedFeature: 'checkout' })
   harness.featureRef.current = 'checkout'
   harness.runIdRef.current = 'historical'

@@ -99,6 +99,16 @@ URL persistence, cross-tab state, selection refs, and explicit navigation action
 row arrives, while evidence falls back to the latest eligible indexed run; an
 indexed historical selection survives new runs and suite refreshes.
 
+`useWorkspaceFeatures` backs the suite list with the existing live-resource reader.
+Workspace events and reconnects still refresh immediately; a ten-second read while
+mounted also repairs missed events on a connected socket, with focus/online recovery.
+Failed reads retain the last successful list and retry, and superseded responses
+cannot restore deleted suites or reconcile selection. Initial hydration and explicit
+refresh preferences reach the selection controller only after an accepted read;
+preferences survive failed reads and are consumed after success. Unmount releases
+the recovery timer and listeners. The fallback adds six list reads per minute per
+mounted workspace in steady state; it does not poll run details or reconnect sockets.
+
 **Workspace Flight presentation** belongs to `useWorkspaceFlights` in the web
 Flights feature. It composes the existing activity and evidence readers for suite
 shortcuts, picker rails, pending suite rows, and the coverage ledger's generating

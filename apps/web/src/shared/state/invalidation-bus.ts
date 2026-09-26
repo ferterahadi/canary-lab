@@ -16,6 +16,7 @@
 // `invalidation.tsx`.
 
 export type InvalidationTopic =
+  | 'features'
   | 'coverage'
   | 'ports'
   | 'repos'

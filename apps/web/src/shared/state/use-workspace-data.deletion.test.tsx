@@ -88,17 +88,35 @@ it('updates selection and Flight rows in the mounted workspace from deletion eve
   expect(Socket.instances).toHaveLength(connects)
 })
 
-it('recovers a missed suite deletion on reconnect, with no feature polling while the socket stays open', async () => {
+it('recovers a missed suite deletion while the same workspace and sockets stay mounted', async () => {
   await frame('flights', { type: 'removed', flightId: 'saved' })
-  // Existing limitation: a lost workspace deletion frame leaves the suite list
-  // stale until another refresh trigger. Do not add a polling policy in this fix.
   const reads = api.listFeatures.mock.calls.length
-  await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+  const connects = Socket.instances.length
+  await act(async () => { await vi.advanceTimersByTimeAsync(9999) })
   expect(api.listFeatures).toHaveBeenCalledTimes(reads)
+  expect(rendered().selectedFeature).toBe('checkout')
+  await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+  expect(api.listFeatures).toHaveBeenCalledTimes(reads + 1)
+  expect(rendered()).toEqual({ selectedFeature: 'remaining', suites: ['remaining'], flights: [] })
+  expect(Socket.instances).toHaveLength(connects)
+})
+
+it('recovers a missed suite deletion on reconnect before the fallback interval', async () => {
+  await frame('flights', { type: 'removed', flightId: 'saved' })
   expect(rendered().selectedFeature).toBe('checkout')
   await act(async () => { latest('workspace').onclose?.(); latest('flights').onclose?.() })
   await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
   await frame('workspace', { type: 'connected' })
   await frame('flights', { type: 'snapshot', flights: [], details: {} })
   expect(rendered()).toEqual({ selectedFeature: 'remaining', suites: ['remaining'], flights: [] })
+})
+
+it('retains the last successful suite list during a failed recovery and retries', async () => {
+  api.listFeatures.mockRejectedValueOnce(new Error('offline'))
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+  expect(rendered().suites).toEqual(['checkout', 'remaining'])
+  expect(rendered().selectedFeature).toBe('checkout')
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+  expect(rendered().suites).toEqual(['remaining'])
+  expect(rendered().selectedFeature).toBe('remaining')
 })
