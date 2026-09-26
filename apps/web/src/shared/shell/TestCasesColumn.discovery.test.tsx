@@ -53,7 +53,7 @@ describe('Tests column discovery repair', () => {
 
   it('replaces the removed card when an external agent restores the suite without a page refresh', async () => {
     let checkAvailability: (() => void) | undefined
-    const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation(((callback, delay) => {
+    const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation(((callback: () => void, delay?: number) => {
       if (delay === 10_000) checkAvailability = callback as () => void
       return 1 as unknown as ReturnType<typeof setInterval>
     }) as typeof setInterval)

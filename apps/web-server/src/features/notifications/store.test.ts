@@ -1,3 +1,4 @@
+import { runManifest as makeRunManifest } from '../runs/logic/__fixtures__/run-manifest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -64,8 +65,8 @@ it('resolves a review as soon as its live suite config disappears, before a dele
   git('init', '-q')
   git('add', 'features')
   git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'add suite')
-  const manifest = { runId: 'old-run', feature: 'shop', status: 'failed', featureDir: live,
-    suiteSnapshot: { kind: 'taken', dir: snapshot } } as RunManifest
+  const manifest = makeRunManifest({ runId: 'old-run', feature: 'shop', status: 'failed', featureDir: live,
+    suiteSnapshot: { kind: 'taken', dir: snapshot, takenAt: '2026-01-01T00:00:00.000Z', digest: 'recorded' } })
   const app = Fastify()
   await register(app, {
     logsDir: dir, featuresDir, workspaceEvents: events,
@@ -115,7 +116,7 @@ it('resolves a review when Canary explicitly deletes its suite', async () => {
 describe('durable notifications', () => {
   it('keeps a retired review resolved across reload and allows a recreated suite to start a new episode', () => {
     const review: NotificationSource = { key: 'test-review:shop', signature: 'attention', message: {
-      title: 'shop: tests changed', target: { kind: 'test-review', feature: 'shop', runId: 'r1' },
+      title: 'shop: tests changed', body: 'Review the changed tests.', target: { kind: 'test-review', feature: 'shop', runId: 'r1' },
     } }
     const store = new NotificationStore(dir, events)
     store.reconcile([review])
@@ -376,7 +377,7 @@ it('persists terminal blockers before a start attempt and resolves exact approva
   }
   fs.writeFileSync(path.join(live, 'e2e', 'checkout.spec.ts'), "test('checkout', () => expect(2).toBe(2))")
   // No pendingSpecEdits: abort won the race with the dirty-file watcher.
-  const manifest = { runId: 'ended-run', feature: 'shop', status: 'aborted', featureDir: live, suiteSnapshot: { kind: 'taken', dir: snapshot } } as RunManifest
+  const manifest = makeRunManifest({ runId: 'ended-run', feature: 'shop', status: 'aborted', featureDir: live, suiteSnapshot: { kind: 'taken', dir: snapshot, takenAt: '2026-01-01T00:00:00.000Z', digest: 'recorded' } })
   const listeners = new Set<() => void>()
   const app = Fastify()
   await register(app, {
@@ -416,7 +417,7 @@ it.each(['snapshot', 'live'] as const)('distinguishes a missing %s from another 
       fs.writeFileSync(path.join(root, 'e2e', 'contract.spec.ts'), "test('contract', () => expect(1).toBe(1))")
     }
     fs.writeFileSync(path.join(live, 'e2e', 'contract.spec.ts'), "test('contract', () => expect(2).toBe(2))")
-    return { runId: `${feature}-run`, feature, featureDir: live, status: 'aborted', suiteSnapshot: { kind: 'taken', dir: snapshot } } as RunManifest
+    return makeRunManifest({ runId: `${feature}-run`, feature, featureDir: live, status: 'aborted', suiteSnapshot: { kind: 'taken', dir: snapshot, takenAt: '2026-01-01T00:00:00.000Z', digest: 'recorded' } })
   })
   const app = Fastify()
   await register(app, {
@@ -470,8 +471,8 @@ it.each([0, 1])('archives a legacy missing-suite alert with %i pending historica
   fs.mkdirSync(path.join(snapshot, 'e2e'), { recursive: true })
   fs.writeFileSync(path.join(snapshot, 'feature.config.cjs'), 'module.exports = { name: "archived-suite" }')
   fs.writeFileSync(path.join(snapshot, 'e2e', 'contract.spec.ts'), "test('contract', () => expect(1).toBe(1))")
-  const manifest = { runId: 'historical-run', feature: 'archived-suite', status: 'aborted', featureDir: live,
-    suiteSnapshot: { kind: 'taken', dir: snapshot }, specEdits: { pending: pendingCount ? [{ file: 'e2e/contract.spec.ts', change: 'modified' }] : [], adopted: [], checkedAt: 'then' } } as RunManifest
+  const manifest = makeRunManifest({ runId: 'historical-run', feature: 'archived-suite', status: 'aborted', featureDir: live,
+    suiteSnapshot: { kind: 'taken', dir: snapshot, takenAt: '2026-01-01T00:00:00.000Z', digest: 'recorded' }, specEdits: { pending: pendingCount ? [{ file: 'e2e/contract.spec.ts', change: 'modified', affectedTests: [] }] : [], adopted: [], checkedAt: 'then' } })
   const originalManifest = JSON.stringify(manifest)
   const store = new NotificationStore(dir, events)
   store.reconcile([{ key: 'test-review:archived-suite', signature: 'attention', message: {

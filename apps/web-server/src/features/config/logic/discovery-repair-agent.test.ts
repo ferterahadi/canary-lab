@@ -9,12 +9,18 @@ import type { RunAgentProcessOpts, AgentProcessResult } from '../../agent-sessio
 // One I/O edge is faked: the CLI subprocess. Everything this module owns — which
 // argv shape each agent gets, which directories the spawn may read, where the
 // transcript is teed, and what a non-zero exit means — runs for real.
-const amock = vi.hoisted(() => ({
-  calls: [] as RunAgentProcessOpts[],
-  result: { code: 0, signal: null, stopped: false } as AgentProcessResult,
-  /** Text the fake CLI emits before exiting, so the onChunk tee is exercised. */
-  chunk: null as string | null,
-}))
+const amock = vi.hoisted(() => {
+  const result = (overrides: Partial<AgentProcessResult> = {}): AgentProcessResult => ({
+    code: 0, signal: null, stdout: '', stderr: '', ...overrides,
+  })
+  return {
+    resultFor: result,
+    calls: [] as RunAgentProcessOpts[],
+    result: result(),
+    /** Text the fake CLI emits before exiting, so the onChunk tee is exercised. */
+    chunk: null as string | null,
+  }
+})
 vi.mock('../../agent-sessions/logic/agent-process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../agent-sessions/logic/agent-process')>()
   return {
@@ -60,7 +66,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), `module.exports = { config: { name: 'suite', featureDir: __dirname, repos: [{ name: 'product', localPath: ${JSON.stringify(path.join(root, 'product'))} }, { name: 'gone', localPath: ${JSON.stringify(path.join(root, 'not-cloned'))} }], envs: [] } }`)
   fs.writeFileSync(path.join(recordDir, 'prompt.md'), 'Fix test discovery.')
   amock.calls.length = 0
-  amock.result = { code: 0, signal: null, stopped: false }
+  amock.result = amock.resultFor()
   amock.chunk = null
 })
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
@@ -112,11 +118,11 @@ describe('runDiscoveryRepairAgent', () => {
   })
 
   it.each([
-    { name: 'a signal', result: { code: null, signal: 'SIGTERM', stopped: false }, reason: 'SIGTERM' },
-    { name: 'a non-zero exit', result: { code: 2, signal: null, stopped: false }, reason: '2' },
-    { name: 'a stop with no exit information at all', result: { code: null, signal: null, stopped: true }, reason: 'unknown exit' },
+    { name: 'a signal', result: amock.resultFor({ code: null, signal: 'SIGTERM' }), reason: 'SIGTERM' },
+    { name: 'a non-zero exit', result: amock.resultFor({ code: 2 }), reason: '2' },
+    { name: 'a stop with no exit information at all', result: amock.resultFor({ code: null, stopped: 'user' }), reason: 'unknown exit' },
   ])('treats %s as an unfinished repair rather than a verdict', async ({ result, reason }) => {
-    amock.result = result as AgentProcessResult
+    amock.result = result
     await expect(runDiscoveryRepairAgent(repair(), root, vi.fn()))
       .rejects.toThrow(`Repair agent stopped (${reason}). Review its activity before retrying.`)
   })

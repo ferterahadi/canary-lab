@@ -1,3 +1,4 @@
+import { runManifest } from '../__fixtures__/run-manifest'
 import { beforeEach, describe, expect, it } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -22,16 +23,12 @@ beforeEach(() => {
 })
 
 function manifest(over: Partial<RunManifest> = {}): RunManifest {
-  return {
-    runId: 'run-1',
-    feature: 'checkout',
+  return runManifest({
     env: 'local',
     startedAt: '2026-05-25T08:00:00.000Z',
     status: 'passed',
-    healCycles: 0,
-    services: [],
     ...over,
-  }
+  })
 }
 
 const weakerHint: IntegrityHint = {
@@ -72,7 +69,7 @@ describe('buildSpecEditsWarning', () => {
 
   it('is absent when every recorded edit was adopted', () => {
     const m = manifest({
-      specEdits: { checkedAt: 't', pending: [], adopted: [{ at: 't', files: ['e2e/voucher.spec.ts'] }] },
+      specEdits: { checkedAt: 't', pending: [], adopted: [{ at: 't', by: 'human', files: ['e2e/voucher.spec.ts'] }] },
       integrity: { hints: [], disclosure: INTEGRITY_HINT_DISCLOSURE },
     })
     expect(buildSpecEditsWarning(m)).toBeUndefined()

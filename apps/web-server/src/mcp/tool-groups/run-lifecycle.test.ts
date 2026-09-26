@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RunDetail } from '../../features/runs/logic/run-store'
+import { toolResultText } from '../__fixtures__/tool-result'
+import type { CanaryLabMcpDeps } from '../tool-schemas'
 import { CLAIM_SUPPRESSED_MESSAGE } from '../tool-support'
 import type { InputRequiredResult, ServerContext } from '@modelcontextprotocol/server'
 import type { McpClientFacts } from '../client-surface'
@@ -124,7 +126,7 @@ describe.each([
     expect(startRun.mock.calls.every((callArgs) => callArgs[3] === undefined)).toBe(true)
 
     const answered = await raw(tool, args, context(opened.requestState, { action: 'accept', content: { isolation: 'worktree' } }))
-    expect(JSON.parse((answered.content as Array<{ text: string }>)[0].text)).toMatchObject({ runId })
+    expect(JSON.parse(toolResultText(answered))).toMatchObject({ runId })
     expect(startRun.mock.lastCall?.[0]).toBe('checkout')
     expect(startRun.mock.lastCall?.[3]).toBe('worktree')
   })
@@ -133,7 +135,7 @@ describe.each([
     const startRun = vi.fn(async () => collision)
     const { raw } = harness({ startRun }, eliciting)
     const forged = await raw(tool, args, context('not-a-real-handle', { action: 'accept', content: { isolation: 'queue' } }))
-    expect(JSON.parse((forged.content as Array<{ text: string }>)[0].text)).toMatchObject({ status: 'needs-input', reason: expect.stringContaining('belongs to a different operation') })
+    expect(JSON.parse(toolResultText(forged))).toMatchObject({ status: 'needs-input', reason: expect.stringContaining('belongs to a different operation') })
     expect(startRun).not.toHaveBeenCalled()
   })
 })
@@ -446,7 +448,7 @@ describe('start_run: restarting a failed run in remaining-test mode', () => {
 
 describe('start_run: starting fresh', () => {
   it('starts nothing and tells a form-less client to ask when coverage mapping is stale', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { call } = harness({ startRun, coverageRequest: coverageRequest() })
 
     expect(await call('start_run', START)).toMatchObject({
@@ -459,7 +461,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('elicits stale coverage and leaves the run stopped when the user chooses the update', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
 
     const opened = await raw('start_run', START, context()) as InputRequiredResult
@@ -471,7 +473,7 @@ describe('start_run: starting fresh', () => {
       action: 'accept', content: { choice: 'Update coverage first' },
     }))
 
-    expect(JSON.parse((answered.content as Array<{ text: string }>)[0].text)).toMatchObject({
+    expect(JSON.parse(toolResultText(answered))).toMatchObject({
       type: 'coverage_update_required', runStarted: false,
     })
     expect(startRun).not.toHaveBeenCalled()
@@ -479,14 +481,14 @@ describe('start_run: starting fresh', () => {
 
   it('points update-first at the existing coverage owner instead of duplicating work', async () => {
     const body = coverageChange('stale', 'coverage-v1', { activeJobId: 'coverage-job-1', activeJobOwner: 'session-2' })
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({ startRun, coverageRequest: coverageRequest(body) }, eliciting)
     const opened = await raw('start_run', START, context()) as InputRequiredResult
 
     const answered = await raw('start_run', START, context(opened.requestState, {
       action: 'accept', content: { choice: 'Update coverage first' },
     }))
-    const result = JSON.parse((answered.content as Array<{ text: string }>)[0].text)
+    const result = JSON.parse(toolResultText(answered))
 
     expect(result).toMatchObject({
       type: 'coverage_update_required', activeJobId: 'coverage-job-1', activeJobOwner: 'session-2',
@@ -496,7 +498,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('identifies a flight owner and an ownerless active coverage job without duplicating either', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     for (const body of [
       coverageChange('stale', 'coverage-flight', { flightId: 'flight-1', flightStatus: 'running' }),
       coverageChange('stale', 'coverage-job', { activeJobId: 'coverage-job-1' }),
@@ -506,14 +508,14 @@ describe('start_run: starting fresh', () => {
       const answered = await raw('start_run', START, context(opened.requestState, {
         action: 'accept', content: { choice: 'Update coverage first' },
       }))
-      const result = JSON.parse((answered.content as Array<{ text: string }>)[0].text)
+      const result = JSON.parse(toolResultText(answered))
       expect(result.nextSteps).toEqual(['follow the existing coverage owner', 'confirm coverage freshness', 'retry start_run'])
     }
     expect(startRun).not.toHaveBeenCalled()
   })
 
   it('tells the caller to follow a Flight even when its status is not currently reported', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({
       startRun,
       coverageRequest: coverageRequest(coverageChange('stale', 'coverage-flight-no-status', { flightId: 'flight-1' })),
@@ -528,7 +530,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it.each(['decline', 'cancel'])('starts nothing when the client answers %s on the stale-coverage question', async (action) => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
     const opened = await raw('start_run', START, context()) as InputRequiredResult
 
@@ -537,21 +539,21 @@ describe('start_run: starting fresh', () => {
     // Reported as the CLIENT's answer: a client that declares elicitation and
     // wires no handler declines by itself, so naming the human here would invent
     // a decision about running against stale coverage that nobody made.
-    const { reason } = JSON.parse((answered as { content: [{ text: string }] }).content[0].text)
+    const { reason } = JSON.parse(toolResultText(answered))
     expect(reason).toContain(`The client answered "${action}"`)
     expect(reason).not.toMatch(/the user chose/i)
     expect(startRun).not.toHaveBeenCalled()
   })
 
   it('starts a diagnostic run only after the user accepts stale coverage, and qualifies the result', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { raw } = harness({ startRun, coverageRequest: coverageRequest() }, eliciting)
     const opened = await raw('start_run', START, context()) as InputRequiredResult
 
     const answered = await raw('start_run', START, context(opened.requestState, {
       action: 'accept', content: { choice: 'Run now with stale coverage' },
     }))
-    const result = JSON.parse((answered.content as Array<{ text: string }>)[0].text)
+    const result = JSON.parse(toolResultText(answered))
 
     expect(result).toMatchObject({
       runId: 'run-new', coverageStale: true, coverageRevision: 'coverage-v1',
@@ -577,7 +579,7 @@ describe('start_run: starting fresh', () => {
     const answered = await raw('start_run', START, context(isolationOpened.requestState, {
       action: 'accept', content: { isolation: 'worktree' },
     }))
-    expect(JSON.parse((answered.content as Array<{ text: string }>)[0].text)).toMatchObject({
+    expect(JSON.parse(toolResultText(answered))).toMatchObject({
       runId: 'run-new', coverageStale: true,
     })
     expect(startRun).toHaveBeenCalledTimes(2)
@@ -585,7 +587,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('rejects an approval when the coverage revision changes while the form is open', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const read = vi.fn()
       .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('stale', 'coverage-v1') })
       .mockResolvedValue({ statusCode: 200, body: coverageChange('stale', 'coverage-v2') })
@@ -601,7 +603,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('rejects a stale-coverage answer when the current check no longer requires a choice', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const read = vi.fn()
       .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('stale', 'coverage-v1') })
       .mockResolvedValueOnce({ statusCode: 200, body: coverageChange('current', 'coverage-v1') })
@@ -660,7 +662,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('starts normally when coverage is current', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { call } = harness({ startRun, coverageRequest: coverageRequest(coverageChange('current')) })
 
     expect(await call('start_run', START)).toMatchObject({ runId: 'run-new' })
@@ -668,7 +670,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('forwards the session, the claimability and the isolation choice', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { call } = harness({ startRun })
 
     const out = await call('start_run', {
@@ -687,7 +689,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('starts a blocked client\'s run unclaimed, so it waits for a Desktop/UI drive', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { call } = harness({ startRun })
 
     const out = await call('start_run', { ...START, client_kind: 'claude-pty' })
@@ -712,7 +714,7 @@ describe('start_run: starting fresh', () => {
   })
 
   it('forwards the update_repos choice as the sixth factory argument', async () => {
-    const startRun = vi.fn(async () => ({ kind: 'started', runId: 'run-new' }))
+    const startRun = vi.fn<NonNullable<CanaryLabMcpDeps['startRun']>>(async () => ({ kind: 'started', runId: 'run-new' }))
     const { call } = harness({ startRun })
 
     await call('start_run', { ...START, update_repos: false })
@@ -960,7 +962,7 @@ describe('abort_run', () => {
     expect(abort).not.toHaveBeenCalled()
     const accepted = context(question.requestState, { action: 'accept', content: { action: 'abort' } })
     const result = await raw('abort_run', args, accepted)
-    expect(JSON.parse((result.content as Array<{ text: string }>)[0].text)).toEqual({ aborted: true, runId: 'run-1' })
+    expect(JSON.parse(toolResultText(result))).toEqual({ aborted: true, runId: 'run-1' })
     expect(await raw('abort_run', args, accepted)).toEqual(result)
     expect(abort).toHaveBeenCalledTimes(1)
     expect(abort).toHaveBeenCalledWith('run-1')

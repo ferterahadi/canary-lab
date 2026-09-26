@@ -17,8 +17,8 @@ import type { FeatureConfig } from '../../../../../../../../shared/launcher/type
 /** Records every write instead of touching disk. Implements the whole
  *  `RunStateSink` surface so a caller that reaches for a method this fixture
  *  forgot fails loudly at the type level rather than at runtime. */
-export function fakeStateSink(): RunStateSink & { patches: Record<string, unknown>[] } {
-  const patches: Record<string, unknown>[] = []
+export function fakeStateSink(): RunStateSink & { patches: Parameters<RunStateSink['patchManifest']>[1][] } {
+  const patches: Parameters<RunStateSink['patchManifest']>[1][] = []
   const sink: RunStateSink = {
     bootstrap: vi.fn(),
     setStatus: vi.fn(),
@@ -27,7 +27,7 @@ export function fakeStateSink(): RunStateSink & { patches: Record<string, unknow
     recordHeartbeat: vi.fn(),
     recordLifecycleEvent: vi.fn(),
     recordJournalChange: vi.fn(),
-    patchManifest: vi.fn((_runId, patch) => { patches.push(patch as Record<string, unknown>) }),
+    patchManifest: vi.fn((_runId, patch) => { patches.push(patch) }),
   }
   return Object.assign(sink, { patches })
 }

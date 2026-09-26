@@ -89,6 +89,17 @@ entry. The three places that must agree for the web aliases are
 | `templates/project/` | Files copied into initialized workspaces. The storefront sample exercises Run and Heal, `flight-app/` starts without a suite so Flight has real onboarding work, and `workflow-app/` plus `features/workflow-workbench/` exercises Coverage, Author, Portify, and Verify. |
 | `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, the demo PRD-summary generators, `clean-dist`, `prepare-assets`, `smoke-pack`, `smoke-demo`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the repo gates. `tools/fixtures/` holds contributor-only fixtures; the storefront and workflow-workbench suites ship in the scaffold under `templates/project/features/`. |
 
+**Test contracts** use production-owned types and small domain-owned fixtures.
+Run-manifest defaults live in the Runs domain's `logic/__fixtures__/run-manifest.ts`;
+shared review scenarios and receipts live in `shared/__fixtures__/test-review.ts`.
+MCP tests narrow text results through `mcp/__fixtures__/tool-result.ts`, also used
+by the tool-group harness, so an input request cannot masquerade as a text result.
+Fixtures supply structural defaults; each test keeps its decisive evidence and
+expected outcome explicit. Run-start mocks use the actual dependency signature,
+and the reserved request ID must match both the persisted run and request.
+The existing `npm run typecheck:all` checks build, frontend, and server contracts,
+including test fixtures in their applicable projects.
+
 **Workspace selection** lives in `apps/web/src/shared/state/`.
 `workspace-selection.ts` defines eligible runs, index-order fallbacks, and suite/run
 reconciliation. `useWorkspaceSelection` applies those rules and obtains displayed

@@ -71,7 +71,9 @@ it('still marks a test the extractor gave no end line, by treating its declarati
   const edited = original.replace('  expect(1).toBe(1)', '  expect(1).toBe(3)')
   // `endLine` is optional on ExtractedTest, and a test arriving without one must
   // stay addressable — dropping it would silently leave a real edit unmarked.
-  const tests = [{ name: 'first', line: 2, bodySource: '{}', steps: [], readable: { version: 1, title: 'first', completeness: 'complete' as const, nodes: [] } }]
+  const { tests } = extractTestsFromSource(file, edited)
+  tests.splice(1)
+  tests[0].endLine = undefined
   await attachSourceChanges(root, file, edited, tests)
   expect(tests[0].sourceChanges).toEqual({ changedLines: [3], count: 1 })
 })

@@ -306,8 +306,7 @@ describe('snapshotSuite', () => {
     fs.rmSync(path.join(ctx.paths.suiteRuntimeInputsDir, '000.input'))
 
     expect(() => materializeSuiteRuntimeInputs(ctx)).toThrow(/runtime inputs are unavailable/)
-    const noEnv = ctxFor().ctx
-    noEnv.env = undefined
+    const noEnv = ctxFor({}, { env: undefined }).ctx
     expect(materializeSuiteRuntimeInputs(noEnv)).toEqual([])
     const liveEnv = ctxFor({}, { env: 'local' }).ctx
     liveEnv.suiteDir = liveEnv.feature.featureDir

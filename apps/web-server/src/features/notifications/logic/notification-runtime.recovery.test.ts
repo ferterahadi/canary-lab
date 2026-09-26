@@ -1,3 +1,4 @@
+import { runManifest as makeRunManifest } from '../../runs/logic/__fixtures__/run-manifest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -227,8 +228,8 @@ it('settles a removed linked suite without a browser request, then creates a fre
 it('keeps a real linked-suite review actionable when only its discovery folder and saved snapshot contain configuration', async () => {
   const snapshot = path.join(dir, 'snapshot')
   fs.writeFileSync(path.join(snapshot, 'feature.config.cjs'), 'exports.config = { name: "shop" }')
-  runManifest = { runId: 'linked-run', feature: 'shop', status: 'aborted', featureDir: path.dirname(path.dirname(spec)),
-    suiteSnapshot: { kind: 'taken', dir: snapshot }, specEdits: { checkedAt: 'then', pending: [{ file: 'e2e/checkout.spec.ts', change: 'modified' }], adopted: [] } } as RunManifest
+  runManifest = makeRunManifest({ runId: 'linked-run', feature: 'shop', status: 'aborted', featureDir: path.dirname(path.dirname(spec)),
+    suiteSnapshot: { kind: 'taken', dir: snapshot, takenAt: '2026-01-01T00:00:00.000Z', digest: 'recorded' }, specEdits: { checkedAt: 'then', pending: [{ file: 'e2e/checkout.spec.ts', change: 'modified', affectedTests: [] }], adopted: [] } })
   const id = persisted()[0].id
   const rows = (await app.inject('/api/notifications')).json() as WorkspaceNotification[]
   expect(rows).toEqual([expect.objectContaining({ id, target: { kind: 'test-review', feature: 'shop', runId: 'linked-run' } })])

@@ -1,10 +1,12 @@
+import { runManifest } from '../../runs/logic/__fixtures__/run-manifest'
 import { execFileSync, spawnSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { RunDetail } from '../../runs/logic/run-store'
-import type { RunManifest, RunSummary } from '../../runs/logic/run-detail'
+import type { RunSummary } from '../../runs/logic/run-detail'
+import type { RunManifest } from '../../runs/logic/runtime/manifest'
 import { suiteDigest } from '../../runs/logic/runtime/run-suite-snapshot'
 import type { CoverageLedger } from '../../../../../../shared/coverage/types'
 import { INTEGRITY_HINT_DISCLOSURE } from '../../../../../../shared/verification-strength/disclosure'
@@ -85,17 +87,14 @@ function summary(dir: string, over: Partial<RunSummary> = {}): RunSummary {
 }
 
 function manifest(over: Partial<RunManifest> = {}): RunManifest {
-  return {
-    runId: 'run-1',
-    feature: 'checkout',
+  return runManifest({
     featureDir,
     startedAt: '2026-09-07T08:00:00.000Z',
     endedAt: '2026-09-07T08:01:00.000Z',
     status: 'failed',
     healCycles: 1,
-    services: [],
     ...over,
-  }
+  })
 }
 
 function snapshotted(over: Partial<RunManifest> = {}): RunManifest {

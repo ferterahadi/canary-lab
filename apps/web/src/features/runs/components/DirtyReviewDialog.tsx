@@ -142,7 +142,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     ? run : undefined
   const reviewRevision = reviewRun ? runReview.value?.review_revision : undefined
   const featureReviewRevision = !reviewRun && featureReview.value?.files.length ? featureReview.value.review_revision : undefined
-  const displayedRunRevision = useRef<string>()
+  const displayedRunRevision = useRef<string | undefined>(undefined)
   const displayedFeatureReview = useRef(false)
   if (reviewRevision) displayedRunRevision.current = reviewRevision
   if (featureReviewRevision) displayedFeatureReview.current = true

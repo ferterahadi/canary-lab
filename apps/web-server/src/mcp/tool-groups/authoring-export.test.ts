@@ -630,7 +630,7 @@ describe('the behavior certificate through the export tools', () => {
       notProven: ['n1'],
     } as unknown as BehaviorCertificate
 
-    const digest = certificateDigest(certificate, '/logs/evaluation-exports/eval-1/certificate.json')
+    const digest = certificateDigest(certificate)
 
     expect(digest).toEqual({
       format: 'canary-lab/behavior-certificate@2',

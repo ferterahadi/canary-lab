@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { activeRunReview, settledRunReview, reviewReceipt } from '@shared/__fixtures__/test-review'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -16,22 +17,21 @@ vi.mock('../state/RunsContext', () => ({ useRun: () => ({ detail: undefined, err
 let root: Root
 let container: HTMLDivElement
 const feature = (name = 'alpha', files = ['e2e/a.spec.ts']): Feature => ({ name, description: '', envs: [], repos: [], dirty: { status: 'dirty', specs: files.map((file) => ({ file, affectedTests: ['a'] })) } })
-const run = { runId: 'run-1', feature: 'alpha', status: 'healing', pendingSpecEdits: 1 } as RunIndexEntry
-const detail = { manifest: { runId: 'run-1', feature: 'alpha', specEdits: { pending: [{ file: 'e2e/a.spec.ts', affectedTests: ['a'] }] } } } as RunDetail
+const run: RunIndexEntry = { runId: 'run-1', feature: 'alpha', startedAt: 'now', status: 'healing', pendingSpecEdits: 1 }
+const detail: RunDetail = { runId: 'run-1', manifest: { runId: 'run-1', feature: 'alpha', startedAt: 'now', status: 'healing', healCycles: 0, services: [], specEdits: { checkedAt: 'now', adopted: [], pending: [{ file: 'e2e/a.spec.ts', change: 'modified', affectedTests: ['a'] }] } } }
 const reviewRevision = 'a'.repeat(64)
 beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(api.getFeatureTests).mockResolvedValue([])
   vi.mocked(api.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [], differences: [], changes: { added: [], changed: [], removed: [] } })
   vi.mocked(api.getTestFileReview).mockResolvedValue(testFileReview())
-  vi.mocked(api.getRunTestReview).mockResolvedValue({ runId: 'run-1', feature: 'alpha', baseline: 'run-start', review_revision: reviewRevision,
-    files: [{ file: 'e2e/a.spec.ts', change: 'modified' }], canAdopt: true })
+  vi.mocked(api.getRunTestReview).mockResolvedValue(activeRunReview())
   vi.mocked(api.getFeatureTestReview).mockImplementation(async (name) => ({ feature: name, baseline: 'head', review_revision: reviewRevision,
     files: name === 'alpha' ? [{ file: 'e2e/a.spec.ts', change: 'modified' }] : [] }))
-  vi.mocked(api.acceptFeatureTestReview).mockResolvedValue({ decision: 'accepted', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], at: 'now', git: { status: 'committed', commit: 'abc' }, execution: { status: 'none' } })
-  vi.mocked(api.restoreFeatureTestReview).mockResolvedValue({ decision: 'restored', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], at: 'now', git: { status: 'not-requested' }, execution: { status: 'none' } })
-  vi.mocked(api.acceptRunTestReview).mockResolvedValue({ decision: 'accepted', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], at: 'now', git: { status: 'committed', commit: 'abc' }, execution: { status: 'rerun-requested', runId: 'run-1' } })
-  vi.mocked(api.restoreSpecEdits).mockResolvedValue({ decision: 'restored', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], at: 'now', git: { status: 'not-requested' }, execution: { status: 'none' } })
+  vi.mocked(api.acceptFeatureTestReview).mockResolvedValue(reviewReceipt({ decision: 'accepted', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], git: { status: 'committed', commit: 'abc' }, execution: { status: 'none' } }))
+  vi.mocked(api.restoreFeatureTestReview).mockResolvedValue(reviewReceipt({ decision: 'restored', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], git: { status: 'not-requested' }, execution: { status: 'none' } }))
+  vi.mocked(api.acceptRunTestReview).mockResolvedValue(reviewReceipt({ decision: 'accepted', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], git: { status: 'committed', commit: 'abc' }, execution: { status: 'rerun-requested', runId: 'run-1' } }))
+  vi.mocked(api.restoreSpecEdits).mockResolvedValue(reviewReceipt({ decision: 'restored', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], git: { status: 'not-requested' }, execution: { status: 'none' } }))
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(() => { act(() => root.unmount()); container.remove() })
@@ -134,6 +134,8 @@ it('does not replace an explicitly selected historical baseline with another pen
 })
 
 it('scopes the rail to the entry suite and keeps its file positions when the baseline changes', async () => {
+  // This run has settled; a pending alpha review would pin beta to run-start.
+  vi.mocked(api.getRunTestReview).mockResolvedValue(settledRunReview({ feature: 'beta' }))
   const features = [feature('beta', ['e2e/z.spec.ts', 'e2e/a.spec.ts']), feature('alpha')]
   const betaRun = { ...run, feature: 'beta', status: 'passed' as const, pendingSpecEdits: 0 }
   const betaDetail = { manifest: { runId: 'run-1', feature: 'beta', specEdits: { pending: [] } } } as unknown as RunDetail
@@ -159,8 +161,7 @@ it('scopes the rail to the entry suite and keeps its file positions when the bas
 })
 
 it('follows baseline navigation from the URL without moving the selected file', async () => {
-  vi.mocked(api.getRunTestReview).mockResolvedValue({ runId: 'run-1', feature: 'alpha', baseline: 'run-start', review_revision: reviewRevision,
-    files: [], canAdopt: false, reviewState: 'settled', allowedActions: [], nextAction: 'none' })
+  vi.mocked(api.getRunTestReview).mockResolvedValue(settledRunReview())
   const props = { pendingRuns: [run], focusRunDetail: detail, focusRunId: 'run-1', focusFeature: 'alpha' }
   await render({ ...props, focus: { file: 'e2e/a.spec.ts', baseline: 'run' } })
   expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', 'run-1')
@@ -361,7 +362,7 @@ it.each([
 })
 it('uses the same exact-revision acceptance label for a terminal run', async () => {
   const onAccepted = vi.fn()
-  const receipt = { decision: 'accepted' as const, review_revision: reviewRevision, files: ['e2e/a.spec.ts'], at: 'now', git: { status: 'committed' as const }, execution: { status: 'new-run-required' as const, runId: 'run-1' } }
+  const receipt = reviewReceipt({ decision: 'accepted', review_revision: reviewRevision, files: ['e2e/a.spec.ts'], git: { status: 'committed' }, execution: { status: 'new-run-required', runId: 'run-1' } })
   vi.mocked(api.acceptRunTestReview).mockResolvedValue(receipt)
   const terminal = { ...run, status: 'passed' as const }
   vi.mocked(api.getRunTestReview).mockResolvedValue({
@@ -380,13 +381,12 @@ it('uses the same exact-revision acceptance label for a terminal run', async () 
 })
 it('offers acceptance for an active supporting-only review even when no test declarations changed', async () => {
   const fixture = 'e2e/fixture.ts'
-  vi.mocked(api.getRunTestReview).mockResolvedValue({ runId: 'run-1', feature: 'alpha', baseline: 'run-start', review_revision: reviewRevision,
-    files: [{ file: fixture, change: 'modified' }], canAdopt: true })
+  vi.mocked(api.getRunTestReview).mockResolvedValue(activeRunReview({ files: [{ file: fixture, change: 'modified' }] }))
   vi.mocked(api.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: [fixture], differences: [{ file: fixture, affectedTests: [] }], changes: { added: [], changed: [], removed: [] } })
   const supportingOnly = { ...run, pendingSpecEdits: 0 }
   const onClose = vi.fn()
   await render({ features: [{ ...feature(), dirty: undefined }], pendingRuns: [supportingOnly], focusFeature: 'alpha', focusRunId: 'run-1',
-    focusRunDetail: { manifest: { ...detail.manifest, specEdits: { pending: [] } } } as RunDetail, focus: { file: fixture, baseline: 'run' }, onClose })
+    focusRunDetail: { ...detail, manifest: { ...detail.manifest, specEdits: { checkedAt: 'now', adopted: [], pending: [] } } }, focus: { file: fixture, baseline: 'run' }, onClose })
   expect(button('Accept & commit')).not.toBeUndefined()
   expect(button('Restore recorded files')).not.toBeUndefined()
   expect(document.body.textContent).toContain('1 changed file')

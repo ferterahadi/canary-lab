@@ -352,7 +352,7 @@ describe('POST /api/runs', () => {
 
   it('forwards a boolean updateRepos as the start option, and nothing when it is absent or malformed', async () => {
     writeFeature('foo')
-    const startRun = vi.fn(async () => ({ kind: 'started' as const, orch: makeStub('run-u') }))
+    const startRun = vi.fn<RunsRouteDeps['startRun']>(async () => ({ kind: 'started', orch: makeStub('run-u') }))
     const { app } = await build({ startRun })
 
     await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo', updateRepos: true } })
@@ -749,3 +749,4 @@ describe('POST /api/runs', () => {
     expect(res.json().error).toContain('Repo branch check failed')
   })
 })
+import type { RunsRouteDeps } from './runs-route-deps'

@@ -414,9 +414,8 @@ describe('confirmed service failures', () => {
 
   it.each(['passed', 'aborted'] as const)('ignores compiler output and exit after the run is %s', async (status) => {
     const watcher = capturedPty()
-    const { ctx } = ctxFor({ ptyFactory: () => watcher.handle })
+    const { ctx } = ctxFor({ healthCheck: async () => true, ptyFactory: () => watcher.handle })
     const svc = svcSpec({ healthProbe: { http: { url: 'http://127.0.0.1:3000/health' } } })
-    ctx.healthCheck = async () => true
     spawnService(ctx, svc)
     await waitForServiceReady(ctx, svc)
     ctx.status = status
@@ -460,9 +459,8 @@ describe('confirmed service failures', () => {
   it('treats a confirmed compiler failure after readiness as a service failure and stops Playwright', async () => {
     const watcher = capturedPty()
     const playwright = capturedPty()
-    const { ctx, sink } = ctxFor({ ptyFactory: () => watcher.handle, playwrightPty: playwright.handle })
+    const { ctx, sink } = ctxFor({ healthCheck: async () => true, ptyFactory: () => watcher.handle, playwrightPty: playwright.handle })
     const svc = svcSpec({ healthProbe: { http: { url: 'http://127.0.0.1:3000/health' } } })
-    ctx.healthCheck = async () => true
     spawnService(ctx, svc)
     await waitForServiceReady(ctx, svc)
     watcher.data('expected validation error from a request\n')
@@ -480,9 +478,8 @@ describe('confirmed service failures', () => {
     const watcher = capturedPty()
     const next = capturedPty()
     const factory = vi.fn().mockReturnValueOnce(watcher.handle).mockReturnValueOnce(next.handle)
-    const { ctx, sink } = ctxFor({ ptyFactory: factory })
+    const { ctx, sink } = ctxFor({ healthCheck: async () => true, ptyFactory: factory })
     const svc = svcSpec({ healthProbe: { http: { url: 'http://127.0.0.1:3000/health' } } })
-    ctx.healthCheck = async () => true
     spawnService(ctx, svc)
     await waitForServiceReady(ctx, svc)
     ctx.status = 'healing'
@@ -501,9 +498,8 @@ describe('confirmed service failures', () => {
     const old = capturedPty()
     const next = capturedPty()
     const factory = vi.fn().mockReturnValueOnce(old.handle).mockReturnValueOnce(next.handle)
-    const { ctx } = ctxFor({ ptyFactory: factory })
+    const { ctx } = ctxFor({ healthCheck: async () => true, ptyFactory: factory })
     const svc = svcSpec({ healthProbe: { http: { url: 'http://127.0.0.1:3000/health' } } })
-    ctx.healthCheck = async () => true
     spawnService(ctx, svc)
     await waitForServiceReady(ctx, svc)
     spawnService(ctx, svc)

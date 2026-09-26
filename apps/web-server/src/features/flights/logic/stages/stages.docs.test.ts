@@ -162,7 +162,7 @@ describe('docs stage', () => {
       expect(prompt).toContain(outPath)
       return { text: writeResult() }
     })
-    const regenerate = vi.fn<NonNullable<FlightStageDeps['coverage']>['regenerate']>()
+    const regenerate = vi.fn<NonNullable<NonNullable<FlightStageDeps['coverage']>['regenerate']>>()
     const d = deps({ spawnAgent, coverage: { regenerate } })
     const { ctx, setStage } = ctxFor(manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: producer } }))
     const adapter = docsStage(d)

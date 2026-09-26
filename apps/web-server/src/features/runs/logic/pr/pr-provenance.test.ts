@@ -1,20 +1,19 @@
 import { describe, it, expect } from 'vitest'
 import { prProvenanceFooter, verdictProvenanceOf } from './pr-provenance'
-import type { RunManifest } from '../runtime/manifest'
 
 const TAKEN = { kind: 'taken' as const, dir: '/logs/runs/run-9/suite', takenAt: '2026-09-07T01:00:00.000Z', digest: 'abcdef0123456789deadbeef' }
 
 describe('verdictProvenanceOf', () => {
   it('is nothing for a run recorded before the boundary existed — no claim about a snapshot it never took', () => {
     expect(verdictProvenanceOf(null)).toBeUndefined()
-    expect(verdictProvenanceOf({} as RunManifest)).toBeUndefined()
+    expect(verdictProvenanceOf({})).toBeUndefined()
     // specEdits without a snapshot cannot happen (recordSpecEdits returns early
     // on the live dir); a stray record still does not fabricate provenance.
-    expect(verdictProvenanceOf({ specEdits: { checkedAt: 't', pending: [], adopted: [] } } as RunManifest)).toBeUndefined()
+    expect(verdictProvenanceOf({ specEdits: { checkedAt: 't', pending: [], adopted: [] } })).toBeUndefined()
   })
 
   it('lifts exactly the three provenance fields and nothing else off the manifest', () => {
-    const m = { runId: 'run-9', status: 'passed', suiteSnapshot: TAKEN, specEdits: { checkedAt: 't', pending: [], adopted: [] } } as unknown as RunManifest
+    const m = { runId: 'run-9', status: 'passed', suiteSnapshot: TAKEN, specEdits: { checkedAt: 't', pending: [], adopted: [] } }
     expect(verdictProvenanceOf(m)).toEqual({ suiteSnapshot: TAKEN, specEdits: m.specEdits })
     // A snapshot alone (Playwright never exited, so no specEdits yet) is still
     // provenance; the hints ride along when the runner wrote them.

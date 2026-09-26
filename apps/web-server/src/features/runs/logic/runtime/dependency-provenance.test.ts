@@ -305,10 +305,10 @@ describe('prepareWorktreeDependencies', () => {
     const dependencyPath = path.join(handle.worktreeRoot, 'node_modules')
     fs.mkdirSync(dependencyPath)
     const realpath = fs.realpathSync
-    vi.spyOn(fs, 'realpathSync').mockImplementation(((target: fs.PathLike, options?: fs.RealPathOptions) => {
+    vi.spyOn(fs, 'realpathSync').mockImplementation((target, options) => {
       if (String(target) === dependencyPath) throw Object.assign(new Error('canonicalization denied'), { code: 'EACCES' })
       return realpath(target, options)
-    }) as typeof fs.realpathSync)
+    })
 
     const result = await prepareWorktreeDependencies({
       handle, runDir: path.join(root, 'run'), config: { mode: 'isolated', validateCommand: 'true' },

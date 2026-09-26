@@ -1,3 +1,4 @@
+import { runManifest } from '../__fixtures__/run-manifest'
 import { beforeEach, describe, expect, it } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -13,12 +14,9 @@ beforeEach(() => {
 })
 
 function manifest(overrides: Partial<RunManifest> = {}): RunManifest {
-  return {
-    runId: 'run-1',
-    feature: 'checkout',
+  return runManifest({
     startedAt: '2026-05-08T00:00:00.000Z',
     status: 'running',
-    healCycles: 0,
     services: [
       {
         name: 'API',
@@ -30,7 +28,7 @@ function manifest(overrides: Partial<RunManifest> = {}): RunManifest {
       },
     ],
     ...overrides,
-  }
+  })
 }
 
 describe('FileRunStateSink', () => {
@@ -220,7 +218,7 @@ describe('FileRunStateSink', () => {
     const sink = new FileRunStateSink(logsDir)
     sink.bootstrap(manifest())
     sink.patchManifest('run-1', {
-      specEdits: { checkedAt: 't', pending: [], adopted: [{ at: 't', files: ['e2e/a.spec.ts'] }] },
+      specEdits: { checkedAt: 't', pending: [], adopted: [{ at: 't', by: 'human', files: ['e2e/a.spec.ts'] }] },
       integrity: { hints: [], disclosure: 'd' },
     })
     sink.finalize('run-1', 'passed', '2026-05-08T00:01:00.000Z', 0)

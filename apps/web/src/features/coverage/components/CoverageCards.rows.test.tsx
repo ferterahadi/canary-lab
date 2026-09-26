@@ -140,7 +140,7 @@ describe('RequirementCard — the resting row', () => {
 // instead, which drew the identical fact two different ways depending on whether
 // the requirement happened to have a channel dimension.
 describe('RequirementCard — the disclosed detail', () => {
-  const withPaths = { id: 'R1', title: 'Totals', text: 'The total adds up.', pathTypes: ['happy', 'sad'], happyPath: 'The total matches the cart.', unhappyPath: 'A missing price is refused.' }
+  const withPaths: RequirementCoverage['requirement'] = { id: 'R1', title: 'Totals', text: 'The total adds up.', pathTypes: ['happy', 'sad'], happyPath: 'The total matches the cart.', unhappyPath: 'A missing price is refused.' }
   const expand = () => act(() => { container.querySelector<HTMLElement>('[data-testid="req-toggle-R1"]')?.click() })
   const detail = () => (container.querySelector('[data-testid="req-detail-R1"]') as HTMLElement).textContent ?? ''
 
@@ -226,7 +226,7 @@ describe('RequirementCard — the proof-health dot', () => {
     const enforcement: RequirementEnforcement = {
       ...PROVEN,
       state,
-      testsChangedAt: { at: '2026-09-02T00:00:00.000Z', tests: ['totals add up'], verdict: 'weakened', runId: 'run-8' },
+      testsChangedAt: { at: '2026-09-02T00:00:00.000Z', tests: ['totals add up'], verdict: 'weaker', runId: 'run-8' },
     }
     renderReq(req({ enforcement, gapType: 'covered', coverageStatus: 'covered', pathCoverage: [{ path: 'happy', covered: true, proven: true }] }))
     const dot = container.querySelector('[data-testid="enf-R1"]') as HTMLElement

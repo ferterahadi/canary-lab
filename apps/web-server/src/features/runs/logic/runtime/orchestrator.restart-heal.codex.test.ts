@@ -392,14 +392,14 @@ describe('defaultPlaywrightSpawner --max-failures', () => {
   it('appends --max-failures with feature threshold', async () => {
     const { defaultPlaywrightSpawner } = await import('./run-spawn')
     const f = makeFeature({ healOnFailureThreshold: 3 })
-    const inv = defaultPlaywrightSpawner({ feature: f, paths: buildRunPaths(runDir) })
+    const inv = defaultPlaywrightSpawner({ feature: f, suiteDir: f.featureDir, paths: buildRunPaths(runDir) })
     expect(inv.command).toContain('--max-failures=3')
   })
 
   it('omits --max-failures when threshold is unset', async () => {
     const { defaultPlaywrightSpawner } = await import('./run-spawn')
     const f = makeFeature()
-    const inv = defaultPlaywrightSpawner({ feature: f, paths: buildRunPaths(runDir) })
+    const inv = defaultPlaywrightSpawner({ feature: f, suiteDir: f.featureDir, paths: buildRunPaths(runDir) })
     expect(inv.command).not.toContain('--max-failures=')
   })
 
@@ -408,6 +408,7 @@ describe('defaultPlaywrightSpawner --max-failures', () => {
     const f = makeFeature({ healOnFailureThreshold: 5 })
     const inv = defaultPlaywrightSpawner({
       feature: f,
+      suiteDir: f.featureDir,
       paths: buildRunPaths(runDir),
       rerunTargets: ['e2e/a.spec.ts:10'],
     })
@@ -420,6 +421,7 @@ describe('defaultPlaywrightSpawner --max-failures', () => {
     const f = makeFeature({ healOnFailureThreshold: 2 })
     const inv = defaultPlaywrightSpawner({
       feature: f,
+      suiteDir: f.featureDir,
       paths: buildRunPaths(runDir),
       rerunGrep: 'en_SG: checkout',
     })
