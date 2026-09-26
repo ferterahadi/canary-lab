@@ -163,12 +163,19 @@ propagate. Valid object metadata retains unknown fields, with no nested schema
 validation. Raw slot-content and environment-directory operations remain
 independent of metadata. Event ownership and post-write publication are unchanged.
 
-The configuration dialog's document cache currently has no workspace-event
-subscription or missed-event recovery. An external mutation can update workspace
-metadata while an already-open Envsets tab retains its cached index. This is an
-existing consumer limitation, separate from the shared backend owner. Connected
-agents can obtain current redacted metadata through `get_feature_envset_summary`;
-this read path does not provide unsolicited wakeups to passive clients.
+The configuration dialog shares document reads through a dialog-local
+`config-doc-store`. Mounted readers use `useLiveResource` with suite-scoped
+`configuration` invalidations, global reconnect/bulk invalidations, and a
+five-second recovery interval. Equal reads retain document identity; failed
+reads retain the last snapshot and retry. Closing the reader releases recovery
+work, and closing the dialog releases its cache, including slot values.
+`useEditableSlice` updates clean forms while retaining dirty drafts and warning
+when their edited slice changed externally. Discard takes the latest snapshot;
+Save merges the draft into that snapshot, preserving unrelated fields. Envset
+pickers retain valid selections and fall back when a selected row disappears.
+Connected agents can obtain current redacted metadata through
+`get_feature_envset_summary`; this read path does not provide unsolicited wakeups
+to passive clients.
 
 Key `apps/web-server/src/features/runs/logic/runtime/` modules:
 

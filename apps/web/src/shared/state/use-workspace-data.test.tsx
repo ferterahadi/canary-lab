@@ -387,7 +387,7 @@ describe('useWorkspaceData — workspace events', () => {
 
     expect(harness.renames).toEqual([['old', 'new']])
     expect(harness.selectedFeature.at(-1)).toBe('new')
-    expect(harness.invalidated).toEqual([['flights', undefined], ['repos', undefined]])
+    expect(harness.invalidated).toEqual([['flights', undefined], ['repos', undefined], ['configuration', 'old'], ['configuration', 'new']])
   })
 
   it('keeps the current selection when some other suite is renamed', async () => {
@@ -442,7 +442,7 @@ describe('useWorkspaceData — workspace events', () => {
     await fire({ type: 'feature-deleted', feature: 'gone' })
 
     expect(harness.selectedFeature.at(-1)).toBe('remaining')
-    expect(harness.invalidated).toEqual([])
+    expect(harness.invalidated).toEqual([['configuration', 'gone']])
   })
 
   it('invalidates repos on a bulk features change', async () => {
@@ -450,7 +450,7 @@ describe('useWorkspaceData — workspace events', () => {
 
     await fire({ type: 'features-changed' })
 
-    expect(harness.invalidated).toEqual([['repos', undefined]])
+    expect(harness.invalidated).toEqual([['repos', undefined], ['configuration', undefined]])
   })
 
   it('invalidates tests only for the selected suite, but always re-reads features', async () => {
@@ -487,7 +487,7 @@ describe('useWorkspaceData — workspace events', () => {
     await fire({ type: 'tests-dirty-changed', feature: 'checkout' })
 
     expect(api.listFeatures.mock.calls.length).toBe(before + 2)
-    expect(harness.invalidated).toEqual([['coverage', undefined]])
+    expect(harness.invalidated).toEqual([['configuration', 'checkout'], ['coverage', undefined]])
   })
 
   it('invalidates coverage and re-reads features on a coverage change', async () => {
@@ -579,7 +579,7 @@ describe('useWorkspaceData — server reconnect resync', () => {
     await fire({ type: 'connected' })
 
     expect(harness.invalidated).toEqual([
-      ['repos', undefined], ['tests', undefined], ['coverage', undefined],
+      ['repos', undefined], ['configuration', undefined], ['tests', undefined], ['coverage', undefined],
       ['verification', undefined], ['journal', 'r1'], ['flights', undefined],
       ['project-config', undefined], ['onboarding', undefined], ['notifications', undefined],
     ])

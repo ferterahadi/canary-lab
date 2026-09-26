@@ -103,6 +103,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
     const resyncWorkspace = (): void => {
       refreshFeatures(selectedFeatureRef.current)
       invalidate('repos')
+      invalidate('configuration')
       invalidate('tests')
       invalidate('coverage')
       invalidate('verification')
@@ -138,11 +139,17 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
             refreshFlights()
             invalidate('flights')
             invalidate('repos')
+            invalidate('configuration', event.from)
+            invalidate('configuration', event.to)
             return
           }
           if (event.type === 'feature-created' || event.type === 'feature-deleted' || event.type === 'features-changed') {
             refreshFeatures(event.type === 'feature-created' ? event.feature : undefined)
-            if (event.type === 'features-changed') invalidate('repos')
+            if (event.type === 'features-changed') {
+              invalidate('repos')
+              invalidate('configuration')
+            }
+            if (event.type === 'feature-deleted') invalidate('configuration', event.feature)
             return
           }
           if (event.type === 'tests-changed') {
@@ -151,7 +158,10 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
             // Authored specs light the picker's derived rail (specs evidence).
             refreshFeatures(selectedFeatureRef.current)
           }
-          if (event.type === 'envsets-changed') refreshFeatures(selectedFeatureRef.current)
+          if (event.type === 'envsets-changed') {
+            refreshFeatures(selectedFeatureRef.current)
+            invalidate('configuration', event.feature)
+          }
           if (event.type === 'coverage-changed') {
             invalidate('coverage')
             // A generated PRD summary lights the derived rail (prdSummary evidence).

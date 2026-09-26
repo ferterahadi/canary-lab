@@ -95,7 +95,7 @@ export function PlaywrightTab({ feature }: { feature: string }) {
     save: (payload) => api.putPlaywrightConfig(feature, payload as ConfigValue),
   })
 
-  if (ed.error) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>{ed.error}</div>
+  if (ed.error && !ed.draft) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>{ed.error}</div>
   if (ed.loading || !ed.draft) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
 
   const numberOrExprField = (

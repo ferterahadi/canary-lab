@@ -17,6 +17,7 @@
 
 export type InvalidationTopic =
   | 'features'
+  | 'configuration'
   | 'coverage'
   | 'ports'
   | 'repos'

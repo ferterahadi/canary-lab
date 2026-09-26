@@ -30,13 +30,16 @@ export function EnvsetsTab({ feature }: { feature: string }) {
       .then((idx) => { setIndex(idx); setError(null) })
       .catch((e: unknown) => { setError(e instanceof Error ? e.message : 'Failed to load envsets') })
 
-  // Default the selection to the first env/slot once the index is known —
-  // whether it arrived from the network or straight out of the cache.
+  // Keep valid selections; deleted environments/slots fall back to available
+  // rows so an external removal cannot strand the open editor on a missing file.
   useEffect(() => {
-    if (env || !index || index.envs.length === 0) return
-    setEnv(index.envs[0].name)
-    setSlot(index.envs[0].slots[0] ?? null)
-  }, [env, index])
+    if (!index) return
+    const selectedEnv = index.envs.find((entry) => entry.name === env) ?? index.envs[0]
+    const nextEnv = selectedEnv?.name ?? null
+    const nextSlot = selectedEnv?.slots.find((name) => name === slot) ?? selectedEnv?.slots[0] ?? null
+    if (env !== nextEnv) setEnv(nextEnv)
+    if (slot !== nextSlot) setSlot(nextSlot)
+  }, [env, slot, index])
 
   const onAddEnv = async (): Promise<void> => {
     const name = newEnvName.trim()

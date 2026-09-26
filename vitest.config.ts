@@ -182,6 +182,7 @@ export default defineConfig({
         // are matched UNANCHORED (see the note above), so the `apps/web/src/`
         // prefix is what keeps them off the server's own trees.
         'apps/web/src/features/benchmark/state/**/*.ts',
+        'apps/web/src/features/config/state/**/*.ts',
         'apps/web/src/features/evaluation/state/**/*.ts',
         'apps/web/src/features/flights/state/**/*.ts',
         'apps/web/src/features/getting-started/state/**/*.ts',
