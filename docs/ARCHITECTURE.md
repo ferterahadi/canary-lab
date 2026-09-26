@@ -881,6 +881,12 @@ link, or the per-repo reason there is none.
 
 ## MCP Layer
 
+- `apps/web-server/src/mcp/rest-adapters.ts` owns request construction and response
+  translation for the eight REST-backed MCP callbacks. The server composition root
+  injects Fastify's request function and the existing Getting Started classifiers;
+  routes retain validation and execution. Adapter-specific JSON parsing, origin
+  headers, and error contracts are preserved. Direct store/runner callbacks stay
+  in the composition root.
 - The MCP HTTP server mounts at `localhost:<port>/mcp` (streamable HTTP) inside
   `canary-lab ui`. Health: `GET /mcp/health?profile=<p>`. The port is configured in
   `canary-lab.config.json` (`port` field) in the workspace directory — read it

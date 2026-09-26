@@ -9,7 +9,7 @@
 //
 // Hiding the buttons is not enough to make that true. The MCP tools do not have
 // a private API — `flightsRequest` injects into the SAME `/api/flights/:id/...`
-// routes the browser posts to (see server.ts), so from a route's point of view
+// routes the browser posts to (see mcp/rest-adapters.ts), so from a route's point of view
 // the agent and the UI are indistinguishable. This module is what tells them
 // apart: the MCP injection stamps `MCP_ORIGIN_HEADER`, and a decision route
 // refuses anything without it while the flight is externally driven and live.
@@ -21,7 +21,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import type { FlightManifest } from '../logic/types'
 
-/** Set by the MCP layer's `app.inject` (server.ts) and by nothing else — a
+/** Set by the MCP REST adapters and by nothing else — a
  *  browser cannot forge it into a same-origin fetch worth guarding against,
  *  and this is a local single-user server, so the header is an origin TAG
  *  rather than an authentication token. */
