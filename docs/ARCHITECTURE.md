@@ -230,6 +230,14 @@ within their existing task authority and respect active jobs/Flight ownership.
 
 ## Notifications
 
+The Notifications feature registrar composes the notification runtime and HTTP
+routes. `apps/web-server/src/features/notifications/logic/notification-runtime.ts`
+owns source reconciliation, availability tracking, action refresh, the recovery
+scan, and subscription disposal through explicit store, workspace-event, and
+logging dependencies. The routes own inbox operations and the bounded feature
+summary consumed by agents. The registrar starts recovery during registration
+and awaits runtime disposal on Fastify shutdown.
+
 The Notifications inbox stores messages and source-transition history together in
 `logs/notifications/state.json` inside each workspace. The notification store uses
 the shared atomic writer so a crash cannot persist a message without its deduplication

@@ -3,16 +3,18 @@ import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { register, NOTIFICATION_RECOVERY_MS } from './index'
-import { NotificationStore } from './store'
-import { DirtySpecStore } from '../runs/logic/dirty-specs/store'
-import { WorkspaceEventBus } from '../../shared/workspace-events'
-import type { RunManifest } from '../runs/logic/runtime/manifest'
-import type { ServerContext } from '../../server-context'
-import type { WorkspaceNotification } from '../../../../../shared/notifications/types'
+import { createNotificationRuntime, NOTIFICATION_RECOVERY_MS } from './notification-runtime'
+import { notificationRoutes, registerFeatureNotificationRoute } from '../routes/notifications'
+import { NotificationStore } from '../store'
+import { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
+import { WorkspaceEventBus } from '../../../shared/workspace-events'
+import type { RunManifest } from '../../runs/logic/runtime/manifest'
+import type { RunStore } from '../../runs/logic/run-store'
+import type { WorkspaceNotification } from '../../../../../../shared/notifications/types'
 
 let dir: string
 let app: FastifyInstance
+let runtime: ReturnType<typeof createNotificationRuntime>
 let dirty: DirtySpecStore
 let spec: string
 let recovery: () => void
@@ -49,8 +51,12 @@ beforeEach(async () => {
   const initialRefresh = vi.spyOn(dirty, 'recompute')
   app = Fastify()
   const empty = { list: () => [], get: () => null, onEvent: vi.fn(), offEvent: vi.fn() }
-  await register(app, { logsDir: path.join(dir, 'logs'), featuresDir, workspaceEvents: events,
-    dirtySpecStore: dirty, flightStore: empty, runStore: { ...empty, list: () => runManifest ? [{ runId: runManifest.runId, feature: runManifest.feature, status: runManifest.status, pendingSpecEdits: 1 }] : [], get: () => runManifest ? { manifest: runManifest } : null } } as unknown as ServerContext)
+  const runStore = { ...empty, list: () => runManifest ? [{ runId: runManifest.runId, feature: runManifest.feature, status: runManifest.status, pendingSpecEdits: 1 }] : [], get: () => runManifest ? { manifest: runManifest } : null } as unknown as Pick<RunStore, 'list' | 'get' | 'onEvent' | 'offEvent'>
+  runtime = createNotificationRuntime({ logsDir: path.join(dir, 'logs'), featuresDir, workspaceEvents: events,
+    dirtySpecStore: dirty, flightStore: empty, runStore, log: app.log })
+  runtime.start()
+  registerFeatureNotificationRoute(app, { store: runtime.store, reconcile: runtime.reconcile, listFlights: empty.list })
+  await app.register(notificationRoutes, { store: runtime.store, reconcile: runtime.reconcile, refresh: runtime.refreshAction })
   await app.ready()
   await initialRefresh.mock.results[0].value
   await new Promise<void>((resolve) => setImmediate(resolve))
@@ -59,6 +65,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  await runtime.dispose()
   await app.close()
   vi.restoreAllMocks()
   fs.rmSync(dir, { recursive: true, force: true })
@@ -126,7 +133,7 @@ it('stops refreshing additional suites once the server begins closing', async ()
 
   recovery()
   await vi.waitFor(() => expect(recompute).toHaveBeenCalledTimes(1))
-  const closing = app.close()
+  const closing = runtime.dispose()
   await new Promise<void>((resolve) => setImmediate(resolve))
   release()
   await closing
