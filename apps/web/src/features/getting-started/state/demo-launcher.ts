@@ -9,7 +9,7 @@ import type { StartFlightBody } from '@/shared/api/flights'
 import type { RunIndexEntry } from '@/shared/api/types'
 import type { FlightEntryOptions, FlightIndexEntry, FlightStageKey } from '@shared/flights/types'
 import { isTerminalRunStatus, isUnsettledRunStatus } from '@shared/run-state'
-import { useInvalidationKey } from './invalidation'
+import { useInvalidationKey } from '@/shared/state/invalidation'
 
 // The Getting Started launcher: one guided path plus the specialized workflows
 // and exact fixture actions that still exist in this workspace.
@@ -34,7 +34,7 @@ const SEEN_KEY = 'canary-lab:demo-seen'
 // 'coverage' is deliberately NOT here: the specs-coverage stage authors specs
 // toward the target, which would close the workbench's intentional R2 gap the
 // Coverage demo exists to expose — that demo runs the standalone mapping job
-// instead (see App.handleDemoAction).
+// instead (see useGettingStarted).
 export type DemoFlightActionKind = 'export' | 'author' | 'portify'
 
 export const DEMO_FLIGHT_STAGE: Record<DemoFlightActionKind, FlightStageKey> = {

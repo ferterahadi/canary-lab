@@ -707,24 +707,28 @@ this process still holds.
 
 ### Getting Started ownership
 
-The two core Getting Started workflows add a narrower workspace-level guard above
-normal run/Flight admission. `GettingStartedSessionStore` persists the current
-owner in `<logs>/getting-started/session.json`; both REST starts and MCP starts
-claim it before creating work, then attach the real run or Flight ID. A competing
-internal or external start receives the same typed `getting_started_busy` 409.
-Run/Flight store events reconcile the guard from persisted evidence, so closing
-the dialog never stops work and terminal evidence releases the owner. A failed
-Run gets a short settle grace because auto-heal records `failed` immediately
-before changing the same run to `healing`; releasing in that transition would
-allow two demos to overlap. Completed run and Flight targets remain in the file
-as navigation references.
+Getting Started adds a workspace-level guard above normal subsystem admission.
+`GettingStartedSessionStore` persists the current owner in
+`<logs>/getting-started/session.json`; REST and MCP starts claim it before
+creating work, then attach the real target. Competing internal and external
+starts receive the same typed `getting_started_busy` conflict. All seven demo
+workflows share this guard; ordinary user runs retain their existing admission.
+Historical `verify` session records remain readable.
 
-This guard does not serialize ordinary user runs. The smaller workflow demos use
-their existing subsystem locks. The Verify demo composes two existing run records:
-a held boot session supplies the allocated local URL to an observational verify
-run, and that verify run owns server-side cleanup of the boot session when it
-settles. The verification route permits that one named boot record beside the
-verify run while continuing to reject unrelated active executions.
+The frontend owner is `apps/web/src/features/getting-started/`: its controller
+combines the catalog/session reader with launch actions and destination routing.
+`App.tsx` supplies navigation callbacks and retains the routed dialog state and
+shell composition. The reader uses workspace invalidation and a five-second
+fallback to recover missed updates while live run evidence can settle run cards.
+
+The backend runtime in
+`apps/web-server/src/features/config/logic/getting-started-runtime.ts` resolves
+linked targets and subscribes to run, Flight, Portify, and workspace events.
+`server.ts` constructs it once, starts reconciliation after orphaned-run recovery,
+and detaches its subscriptions on close. Queued runs, spec-ready drafts, and
+Portify workflows awaiting save remain active; paused Flights release the claim.
+A failed run retains its short grace period so the transition into healing does
+not release the owner. Completed targets remain available for navigation.
 
 ### Multi-service limits (what concurrency can't auto-fix)
 

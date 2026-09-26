@@ -740,15 +740,19 @@ body {
 .cl-column-header.cl-tests-header {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 20px;
-  height: auto;
-  min-height: 40px;
+  flex-wrap: nowrap;
+  gap: 16px;
+  height: 40px;
   padding: 0 12px;
 }
 
 .cl-tests-tabs { display: flex; align-items: center; gap: 20px; }
 .cl-tests-tabs .cl-tab { display: inline-flex; align-items: center; gap: 5px; min-height: 39px; padding-bottom: 0; white-space: nowrap; }
+
+/* A cold suite switch holds the card slots still while Playwright discovers
+   tests. The authoring placeholder keeps its sweep because it represents work
+   actively writing the suite. */
+.cl-tests-loading .cl-skeleton { animation: none; }
 
 /* One numeral system across both tabs. The source total used the standalone
    count chip and the run ratio used a bare mono span, so the two halves of a
@@ -786,8 +790,18 @@ body {
   transform: translateY(-50%);
   background: var(--border-subtle);
 }
-.cl-test-version-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.cl-test-changes { display: flex; align-items: center; gap: 9px; }
+.cl-test-version-actions {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.cl-test-changes { display: flex; align-items: center; gap: 9px; margin-left: auto; flex: 0 0 auto; }
+.cl-test-version-actions > .cl-test-change { margin-left: auto; }
 
 /* A drift mark is a tinted glyph and a numeral, with no border of its own. The
    bordered version read as three more buttons competing with the tabs, when the

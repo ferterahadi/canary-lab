@@ -4,12 +4,12 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TestCasesColumn } from './TestCasesColumn'
 import { InvalidationProvider } from '../state/invalidation'
-import { ApiError, getFeatureTests, getFeatureTestsPreview } from '../api/client'
+import { ApiError, getFeatureTests } from '../api/client'
 import { listDiscoveryRepairs, startDiscoveryRepair, type DiscoveryRepairView } from '../api/discovery-repair'
 import { connectReconnectingSocket } from '../api/reconnecting-socket'
 import { readableTest } from '../api/__fixtures__/readable-test'
 
-vi.mock('../api/client', async (original) => ({ ...await original<typeof import('../api/client')>(), getFeatureTests: vi.fn(), getFeatureTestsPreview: vi.fn(), getFeatureDirtyDiff: vi.fn().mockResolvedValue({ tests: [] }) }))
+vi.mock('../api/client', async (original) => ({ ...await original<typeof import('../api/client')>(), getFeatureTests: vi.fn(), getFeatureDirtyDiff: vi.fn().mockResolvedValue({ tests: [] }) }))
 vi.mock('../api/discovery-repair', () => ({ listDiscoveryRepairs: vi.fn(), startDiscoveryRepair: vi.fn() }))
 vi.mock('../api/reconnecting-socket', () => ({ defaultWsBase: () => 'ws://test', connectReconnectingSocket: vi.fn(() => ({ close: vi.fn() })) }))
 vi.mock('../ui/TestPresentation', () => ({ TestPresentation: () => null }))
@@ -31,7 +31,6 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(listDiscoveryRepairs).mockResolvedValue([])
   vi.mocked(getFeatureTests).mockResolvedValue(failedSpecs)
-  vi.mocked(getFeatureTestsPreview).mockResolvedValue([])
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)

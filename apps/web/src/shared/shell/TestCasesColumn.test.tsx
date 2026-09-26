@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, getTestFileReview, getTestSourceComparison, getFeatureTests, getFeatureTestsPreview } from '../api/client'
+import { ApiError, getTestFileReview, getTestSourceComparison, getFeatureTests } from '../api/client'
 import { readableTest } from '../api/__fixtures__/readable-test'
 
 import type { FeatureTests } from '../api/types'
@@ -18,7 +18,6 @@ vi.mock('../api/client', async () => {
   return {
     ...actual,
     getFeatureTests: vi.fn(),
-    getFeatureTestsPreview: vi.fn(),
     getTestFileReview: vi.fn(),
     getTestSourceComparison: vi.fn(),
   }
@@ -53,7 +52,6 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   vi.mocked(getFeatureTests).mockReset()
-  vi.mocked(getFeatureTestsPreview).mockReset().mockResolvedValue([])
   vi.mocked(getTestSourceComparison).mockReset().mockResolvedValue({ state: 'ready', files: [], differences: [], changes: { added: [], changed: [], removed: [] } })
   vi.mocked(getTestFileReview).mockReset().mockRejectedValue(new Error('No baseline'))
 })
@@ -143,40 +141,22 @@ describe('TestCasesColumn', () => {
     expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).not.toBeNull()
   })
 
-  it('shows a provisional source card promptly, then replaces it with the resolved roster', async () => {
+  it('keeps one quiet loading state until the resolved roster arrives', async () => {
     const file = '/tmp/features/alpha/e2e/a.spec.ts'
-    const source = [{ file, tests: [{ name: 'source title', line: 3, bodySource: '', steps: [], readable: readableTest('source title') }] }]
     const resolved = [{ file, tests: [{ name: 'resolved title', line: 3, bodySource: '', steps: [], readable: readableTest('resolved title') }] }]
     let finishDiscovery!: (specs: FeatureTests) => void
     vi.mocked(getFeatureTests).mockReturnValue(new Promise((resolve) => { finishDiscovery = resolve }))
-    vi.mocked(getFeatureTestsPreview).mockResolvedValue(source)
     const onTotalTestsChange = vi.fn()
 
     await act(async () => { root.render(<TestCasesColumn feature="alpha" onTotalTestsChange={onTotalTestsChange} />) })
-    expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).toBeNull()
-    expect(container.querySelector('[data-testid="tests-source-preview"]')).not.toBeNull()
-    expect(container.textContent).toContain('source title')
+    expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).not.toBeNull()
+    expect(container.textContent).not.toContain('resolved title')
     expect(onTotalTestsChange).not.toHaveBeenCalledWith(1)
 
     await act(async () => { finishDiscovery(resolved) })
-    expect(container.querySelector('[data-testid="tests-source-preview"]')).toBeNull()
+    expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).toBeNull()
     expect(container.textContent).toContain('resolved title')
-    expect(container.textContent).not.toContain('source title')
     expect(onTotalTestsChange).toHaveBeenCalledWith(1)
-  })
-
-  it('does not let a late source preview replace the resolved list', async () => {
-    const file = '/tmp/features/alpha/e2e/a.spec.ts'
-    const test = (name: string) => ({ name, line: 3, bodySource: '', steps: [], readable: readableTest(name) })
-    let finishPreview!: (specs: FeatureTests) => void
-    vi.mocked(getFeatureTests).mockResolvedValue([{ file, tests: [test('resolved title')] }])
-    vi.mocked(getFeatureTestsPreview).mockReturnValue(new Promise((resolve) => { finishPreview = resolve }))
-
-    await act(async () => { root.render(<TestCasesColumn feature="alpha" />) })
-    await act(async () => { finishPreview([{ file, tests: [test('old source title')] }]) })
-    expect(container.textContent).toContain('resolved title')
-    expect(container.textContent).not.toContain('old source title')
-    expect(container.querySelector('[data-testid="tests-source-preview"]')).toBeNull()
   })
 
   it('renders tests after loading succeeds', async () => {
@@ -276,6 +256,38 @@ describe('TestCasesColumn', () => {
     expect(container.textContent).toContain('Run beta first step')
     expect(container.querySelectorAll('[data-testid="test-presentation-english"]')).toHaveLength(1)
     expect(container.textContent).not.toContain('Run alpha first step')
+  })
+
+  it('restores a cached suite and its chosen card before its refetch finishes', async () => {
+    const test = (name: string, line: number) => ({ name, line, bodySource: '', steps: [], readable: readableTest(name) })
+    const alpha = [{ file: '/alpha/a.spec.ts', tests: [test('alpha first', 1), test('alpha second', 2)] }]
+    const beta = [{ file: '/beta/b.spec.ts', tests: [test('beta first', 1)] }]
+    let alphaLoads = 0
+    vi.mocked(getFeatureTests).mockImplementation((feature) => {
+      if (feature === 'beta') return Promise.resolve(beta)
+      alphaLoads += 1
+      return alphaLoads === 1 ? Promise.resolve(alpha) : new Promise<FeatureTests>(() => {})
+    })
+    const render = (feature: string) => act(async () => root.render(<TestCasesColumn feature={feature} />))
+    const card = (name: string) => [...container.querySelectorAll<HTMLElement>('.cl-card')]
+      .find((element) => element.querySelector('button')?.textContent?.includes(name))
+
+    await render('alpha')
+    await act(async () => { card('alpha second')?.querySelector('button')?.click() })
+    expect(card('alpha second')?.children).toHaveLength(2)
+
+    await render('beta')
+    await render('alpha')
+    expect(container.querySelector('[data-testid="tests-loading-placeholder"]')).toBeNull()
+    expect(card('alpha second')?.children).toHaveLength(2)
+    expect(card('alpha first')?.children).toHaveLength(1)
+    expect(container.textContent).not.toContain('beta first')
+
+    await act(async () => { card('alpha second')?.querySelector('button')?.click() })
+    await render('beta')
+    await render('alpha')
+    expect(card('alpha second')?.children).toHaveLength(1)
+    expect(card('alpha first')?.children).toHaveLength(1)
   })
 
   it('numbers tests by source order and strips a baked-in ordinal from the title', async () => {

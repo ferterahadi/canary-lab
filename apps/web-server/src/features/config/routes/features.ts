@@ -257,7 +257,7 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     return { error: 'config file not found' }
   })
 
-  app.get<{ Params: { name: string }; Querystring: { runId?: string; preview?: string } }>('/api/features/:name/tests', async (req, reply) => {
+  app.get<{ Params: { name: string }; Querystring: { runId?: string } }>('/api/features/:name/tests', async (req, reply) => {
     const availability = suiteAvailability(deps.featuresDir, req.params.name)
     if (availability.kind === 'removed') return reply.code(404).send({ code: 'suite-removed', error: 'The live suite is no longer in this workspace.' })
     if (availability.kind === 'config-missing' || availability.kind === 'config-invalid') return reply.code(422).send({ code: 'discovery-failed', error: availability.diagnostic })
@@ -276,6 +276,24 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       return { ...test, codeDisplay }
     }
     const specFiles = recorded ? [...new Set(recorded.tests.map((test) => test.file))] : listSpecFiles(feature.featureDir)
+    // Playwright module discovery and source enrichment read the same suite
+    // independently. Starting both before either finishes avoids stacking their
+    // cold-start costs on every first visit.
+    let discoveryDiagnostics = 'Playwright could not enumerate the test cases.'
+    const discovery = recorded?.tests ?? listPlaywrightTests(feature.featureDir, {
+      spawner: deps.playwrightListSpawner,
+      onDiagnostics: (diagnostic) => {
+        discoveryDiagnostics = diagnostic
+        app.log.warn({ feature: feature.name, diagnostic }, 'test discovery failed')
+      },
+      env: envsetProcessEnv(feature.featureDir, feature.envs?.[0], (err) => {
+        app.log.warn({ err, feature: feature.name }, 'ignoring invalid feature envset config while listing tests')
+      }),
+    }).catch((err: unknown) => {
+      discoveryDiagnostics = err instanceof Error ? err.message : String(err)
+      app.log.warn({ err, feature: feature.name }, 'test discovery failed')
+      return null
+    })
 
     // 1. Run AST over each spec to gather (line -> { bodySource, steps }) for
     //    enrichment. This is the single source of body/step extraction.
@@ -286,43 +304,15 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       if (recorded && !recorded.dir) unavailableSources.add(file)
       else try { source = fs.readFileSync(file, 'utf-8') } catch { if (recorded) unavailableSources.add(file) }
       const result = extractTestsFromSource(file, source, feature.semanticRules)
-      try { if (!recorded && req.query.preview !== '1') await attachSourceChanges(feature.featureDir, file, source, result.tests) } catch (err) {
+      try { if (!recorded) await attachSourceChanges(feature.featureDir, file, source, result.tests) } catch (err) {
         app.log.warn({ err, file }, 'test source change markers unavailable')
       }
       astByFile.set(file, result)
     }
 
-    // The source view is provisional; the normal request still resolves the
-    // exact roster through Playwright before using it as test evidence.
-    if (req.query.preview === '1' && !recorded) return specFiles.map((file) => {
-      const result = astByFile.get(file)!
-      return {
-        file,
-        tests: result.tests.map(withCodeDisplay),
-        ...(result.parseError ? { parseError: result.parseError } : {}),
-      }
-    })
-
     // 2. Ask Playwright to enumerate the resolved test list (loops expanded,
     //    `${var}` substituted). On failure, fall back to AST-only output.
-    // Seeded, not left undefined: every path on which `listPlaywrightTests`
-    // resolves to null runs `onDiagnostics` first — a non-zero exit, a spawn
-    // failure, a timeout and unparseable JSON each carry their own text, and a
-    // null result is never cached — so the failure branch below always has a
-    // reason to show. Holding that as the variable's type keeps the fallback
-    // in one place instead of a `??` and a conditional spread whose empty arms
-    // nothing can reach.
-    let discoveryDiagnostics = 'Playwright could not enumerate the test cases.'
-    const discovered = recorded?.tests ?? await listPlaywrightTests(feature.featureDir, {
-      spawner: deps.playwrightListSpawner,
-      onDiagnostics: (diagnostic) => {
-        discoveryDiagnostics = diagnostic
-        app.log.warn({ feature: feature.name, diagnostic }, 'test discovery failed')
-      },
-      env: envsetProcessEnv(feature.featureDir, feature.envs?.[0], (err) => {
-        app.log.warn({ err, feature: feature.name }, 'ignoring invalid feature envset config while listing tests')
-      }),
-    })
+    const discovered = await discovery
 
     if (discovered === null) {
       const discoveryRepairPrompt = buildDiscoveryRepairPrompt(feature, discoveryDiagnostics)

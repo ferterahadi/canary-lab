@@ -14,15 +14,6 @@ export function getFeatureTests(name: string, opts?: ClientOptions, runId?: stri
   )
 }
 
-export function getFeatureTestsPreview(name: string, opts?: ClientOptions): Promise<FeatureTests> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<FeatureTests>(
-    `${baseUrl}/api/features/${encodeURIComponent(name)}/tests?preview=1`,
-    { method: 'GET' },
-    fetchImpl,
-  )
-}
-
 export interface FeatureConfigDoc {
   path: string
   content: string

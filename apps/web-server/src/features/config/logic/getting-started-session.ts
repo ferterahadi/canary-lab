@@ -54,7 +54,7 @@ export interface GettingStartedSessionState {
 
 /** Resolves a claim's linked record to its live status. One method pair over
  *  the target union (rather than one pair per kind) so adding a target kind is
- *  a compile error here and one `case` in server.ts, not six new methods. */
+ *  a compile error here and one `case` in getting-started-runtime.ts, not six new methods. */
 export interface GettingStartedStatusResolver {
   status(target: GettingStartedTarget): string | null
   isActive(target: GettingStartedTarget, status: string): boolean

@@ -22,7 +22,7 @@ const api = vi.hoisted(() => ({
 vi.mock('@/shared/api/client', () => api)
 
 const keys = { onboarding: 0, 'project-config': 0 } as Record<string, number>
-vi.mock('./invalidation', () => ({ useInvalidationKey: (topic: string) => keys[topic] ?? 0 }))
+vi.mock('@/shared/state/invalidation', () => ({ useInvalidationKey: (topic: string) => keys[topic] ?? 0 }))
 
 const { useDemoLauncher } = await import('./demo-launcher')
 

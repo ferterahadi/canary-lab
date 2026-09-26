@@ -26,7 +26,6 @@ import { register as registerBenchmark } from './features/benchmark/index'
 import { PortifyRunStore } from './features/portify/logic/runtime/store'
 import { coverageJobStore as sharedCoverageJobStore } from './features/coverage/logic/coverage/jobs/store'
 import { FlightRunStore } from './features/flights/logic/store'
-import { isActiveFlightStatus, type FlightStatus } from '../../../shared/flights/types'
 import { removeFlightRecordsForFeature } from './features/flights/logic/conductor'
 import { MCP_ORIGIN_HEADER } from './features/flights/routes/flight-decision-origin'
 import { PlanFeaturesStore } from './features/flights/logic/plan-features'
@@ -39,8 +38,9 @@ import {
 } from './features/agent-sessions/logic/agent-session-log'
 import { WorkspaceEventBus } from './shared/workspace-events'
 import { CoverageFreshnessMonitor } from './features/coverage/logic/coverage/freshness-monitor'
-import { GettingStartedBusyError, GettingStartedSessionStore, isGettingStartedRunActive } from './features/config/logic/getting-started-session'
+import { GettingStartedBusyError } from './features/config/logic/getting-started-session'
 import { WORKBENCH_SUITE, gettingStartedRunWorkflow, isGettingStartedFlightStart } from './features/config/routes/onboarding'
+import { createGettingStartedRuntime } from './features/config/logic/getting-started-runtime'
 import type { ServerContext } from './server-context'
 import { UpdateJobStore } from './features/version/logic/update-job'
 import { VersionState } from './features/version/logic/version-state'
@@ -166,38 +166,12 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   runStore.onEvent(refreshRunCoverage)
   app.addHook('onListen', () => coverageMonitor.start())
   app.addHook('onClose', async () => { runStore.offEvent(refreshRunCoverage); coverageMonitor.close() })
-  const gettingStarted = new GettingStartedSessionStore(logsDir, {
-    status: (target) => {
-      switch (target.kind) {
-        case 'run': return runStore.get(target.id)?.manifest.status ?? null
-        case 'flight': return flightStore.get(target.id)?.status ?? null
-        case 'draft': return readDraft(logsDir, target.id)?.status ?? null
-        case 'coverage-job': return coverageJobStore.get(target.id)?.status ?? null
-        case 'portify': return portifyStore.get(target.id)?.status ?? null
-        case 'export': return readEvaluationExportTask(logsDir, target.id)?.status ?? null
-      }
-    },
-    isActive: (target, status) => {
-      switch (target.kind) {
-        // NOT bare isActiveRunStatus: a queued demo run is still the demo's
-        // target (see isGettingStartedRunActive) — the bare predicate settled
-        // it as "completed: queued" and dropped the one-demo lock mid-run.
-        case 'run': return isGettingStartedRunActive(status)
-        // The cast is sound: a flight target's status comes from flightStore
-        // (typed FlightStatus); the resolver's 'missing' fallback simply isn't
-        // in ACTIVE_FLIGHT_STATUSES, so it reads as settled — the intent.
-        case 'flight': return isActiveFlightStatus(status as FlightStatus)
-        // Terminal draft statuses only — 'spec-ready' still awaits apply, so
-        // the author demo stays claimed until the tests actually land.
-        case 'draft': return !['accepted', 'cancelled', 'error'].includes(status)
-        case 'coverage-job': return status === 'running'
-        // 'ready-to-save' still awaits the save/cancel decision — the portify
-        // demo isn't done until the overlay is captured or discarded.
-        case 'portify': return !['saved', 'failed', 'aborted'].includes(status)
-        case 'export': return status === 'running'
-      }
-    },
-  }, () => workspaceEvents.publish({ type: 'getting-started-changed' }))
+  const gettingStartedRuntime = createGettingStartedRuntime({
+    logsDir, runStore, flightStore, portifyStore, coverageJobStore, workspaceEvents,
+    readDraft: (id) => readDraft(logsDir, id),
+    readExport: (id) => readEvaluationExportTask(logsDir, id),
+  })
+  const gettingStarted = gettingStartedRuntime.store
   // Test-file integrity ("dirty") tracking. One feature-scoped store is the
   // single source of truth both the UI feature list and the MCP run result read.
   // Its change events drive the live red cue; the watcher recomputes on spec
@@ -259,23 +233,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // not controllable by this process. Finalize it immediately instead of
   // waiting for the heartbeat staleness window or requiring a manual Stop.
   await runStore.abortAllActiveOrStale()
-  gettingStarted.reconcileInterrupted()
-  runStore.onEvent(() => gettingStarted.reconcile())
-  flightStore.onEvent(() => gettingStarted.reconcile())
-  portifyStore.onEvent(() => gettingStarted.reconcile())
-  // Draft, coverage-job, and export-task mutations already reach the workspace
-  // bus through their store bridges (both the GUI and MCP write through the
-  // same shared stores), so the settle trigger rides those events instead of a
-  // second per-store subscription. `getting-started-changed` itself is filtered
-  // out — reconcile publishes it, so reacting to it would ping-pong (harmlessly,
-  // since a settled state reconciles to a no-op, but pointlessly).
-  workspaceEvents.subscribe((event) => {
-    if (
-      event.type === 'draft-created' || event.type === 'draft-updated' || event.type === 'draft-deleted'
-      || event.type === 'coverage-changed'
-      || event.type === 'evaluation-export-created' || event.type === 'evaluation-export-updated' || event.type === 'evaluation-export-deleted'
-    ) gettingStarted.reconcile()
-  })
+  gettingStartedRuntime.start()
+  app.addHook('onClose', async () => gettingStartedRuntime.dispose())
   // Tracks which external AI client (Claude Desktop / Codex CLI etc.) holds
   // heal duty for each run. Routes hit this; the orchestrator subscribes to
   // claim-changed events through the run-store fan-out.

@@ -86,15 +86,27 @@ async function build(opts: { spawner?: PlaywrightListSpawner; dirtySpecStore?: D
 }
 
 describe('GET /api/features/:name/tests', () => {
-  it('returns source cards without waiting for Playwright discovery', async () => {
-    const dir = writeFeature('preview', { spec: "test('opens checkout', async () => { await page.goto('/checkout') })\n" })
-    const spawner = vi.fn(failingSpawner)
+  it('starts Playwright discovery while source change markers are still loading', async () => {
+    const dir = writeFeature('overlap', { spec: "test('opens checkout', async () => { await page.goto('/checkout') })\n" })
+    const specFile = path.join(dir, 'e2e', 'a.spec.ts')
+    const read = vi.spyOn(fs, 'readFileSync')
+    let sourceReadAtSpawn = true
+    const spawnJson = jsonSpawner((featureDir) => ({ config: { rootDir: featureDir }, suites: [] }))
+    const spawner = vi.fn((featureDir: string) => {
+      sourceReadAtSpawn = read.mock.calls.some(([file]) => file === specFile)
+      return spawnJson(featureDir)
+    })
     const app = await build({ spawner })
-    const res = await app.inject('/api/features/preview/tests?preview=1')
-    expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual([{ file: path.join(dir, 'e2e', 'a.spec.ts'), tests: [expect.objectContaining({ name: 'opens checkout' })] }])
-    expect(spawner).not.toHaveBeenCalled()
-    await app.close()
+    try {
+      const response = await app.inject('/api/features/overlap/tests')
+      expect(response.statusCode).toBe(200)
+      expect(spawner).toHaveBeenCalledOnce()
+      expect(sourceReadAtSpawn).toBe(false)
+      expect(read.mock.calls.some(([file]) => file === specFile)).toBe(true)
+    } finally {
+      read.mockRestore()
+      await app.close()
+    }
   })
 
   it('reports a removed suite without claiming Playwright discovery failed', async () => {
@@ -156,16 +168,16 @@ describe('GET /api/features/:name/tests', () => {
     return `test('deep', async () => { const a = ${open}x${close} })\n`
   }
 
-  it('shows an AST parse error in preview before Playwright discovery runs', async () => {
+  it('keeps an AST parse error attached to the authoritative response', async () => {
     writeFeature('deep-preview', { spec: deepNestedSpec() })
     const spawner = vi.fn(failingSpawner)
     const app = await build({ spawner })
 
-    const res = await app.inject('/api/features/deep-preview/tests?preview=1')
+    const res = await app.inject('/api/features/deep-preview/tests')
 
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual([expect.objectContaining({ tests: [], parseError: expect.any(String) })])
-    expect(spawner).not.toHaveBeenCalled()
+    expect(spawner).toHaveBeenCalledOnce()
     await app.close()
   })
 
