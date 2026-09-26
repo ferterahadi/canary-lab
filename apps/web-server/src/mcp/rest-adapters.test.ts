@@ -109,12 +109,14 @@ describe('MCP REST adapters', () => {
     respond(500, { message: 'unrecognized' })
     await expect(adapters.startRun('ordinary')).rejects.toThrow(`start_run failed (500): ${payload}`)
   })
-  it.each(['plain error', 'null'])('characterizes existing malformed run-error behavior: %s', async (body) => {
-    status = 500
-    payload = body
-    // The old adapter treats parsed bodies as records. Preserve its TypeError
-    // for primitives rather than smuggling error-hardening into this extraction.
-    await expect(adapters.startRun('ordinary')).rejects.toBeInstanceOf(TypeError)
+  it.each([400, 409, 500])('preserves status %i and raw text for unstructured run errors', async (code) => {
+    status = code
+    for (const body of ['plain error', 'null', 'false', 'true', '123', '"quoted error"', '[]', '[{"error":"nested"}]', '', '{broken']) {
+      payload = body
+      await expect(adapters.startRun('ordinary')).rejects.toMatchObject({
+        name: 'Error', message: `start_run failed (${code}): ${body}`,
+      })
+    }
   })
   it.each([200, 201])('forwards verification input and parses success %i strictly', async (code) => {
     respond(code, { runId: 'verify' })

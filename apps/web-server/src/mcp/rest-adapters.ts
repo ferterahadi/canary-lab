@@ -73,13 +73,20 @@ export function createMcpRestAdapters({
             : {}),
         },
       })
-      const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })() as Record<string, unknown>
+      const parsed: unknown = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })()
       if (resp.statusCode === 201 || resp.statusCode === 200) {
-        return { kind: 'started', runId: String(body.runId) }
+        return { kind: 'started', runId: String((parsed as { runId: unknown }).runId) }
       }
       if (resp.statusCode === 202) {
+        const body = parsed as { runId: unknown; queueReason?: unknown }
         return { kind: 'queued', runId: String(body.runId), reason: body.queueReason === 'repo-collision' ? 'repo-collision' : 'resources' }
       }
+      // Failed requests need not carry a JSON object. Keep the original status
+      // and body instead of replacing the route failure with a property error.
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`start_run failed (${resp.statusCode}): ${resp.payload}`)
+      }
+      const body = parsed as Record<string, unknown>
       if (resp.statusCode === 409 && body.type === 'repo_collision_requires_choice') {
         return {
           kind: 'collision',
@@ -104,7 +111,7 @@ export function createMcpRestAdapters({
           message: String(body.error ?? 'Another Getting Started demo is already running.'),
         }
       }
-      const message = body && 'error' in body ? String(body.error) : String(resp.payload)
+      const message = 'error' in body ? String(body.error) : String(resp.payload)
       if (body.type === 'test_review_required') throw Object.assign(new Error(message), { testReviewRequired: body })
       throw new Error(`start_run failed (${resp.statusCode}): ${message}`)
     },
