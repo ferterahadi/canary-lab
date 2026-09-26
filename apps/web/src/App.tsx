@@ -20,7 +20,7 @@ const CoverageLedgerPage = lazy(() => import('./features/coverage/components/Cov
 const FlightPage = lazy(() => import('./features/flights/components/FlightPage').then((m) => ({ default: m.FlightPage })))
 import { FlightStartDialog } from './features/flights/components/FlightStartDialog'
 import { runWaitingState } from './features/runs'
-import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsContext'
+import { useRuns, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useRunStart } from './features/runs/state/use-run-start'
 import { useFeatureWorkState, type FeatureActivity } from './features/flights/state/feature-activity'
 import { presentedIndexStages, resolveFeatureFlightAction, resolveFeatureFlightTarget, type FlightsPillProps } from './features/flights'
@@ -31,11 +31,10 @@ import { NotificationCenter } from './features/notifications/NotificationCenter'
 import { useInvalidation } from './shared/state/invalidation'
 import { useWorkspaceNavigation } from './shared/state/use-workspace-navigation'
 import { useWorkspaceData } from './shared/state/use-workspace-data'
+import { useWorkspaceSelection } from './shared/state/use-workspace-selection'
 import { resolveActivityTarget } from './shared/state/nav-state'
 import type { FlightStageKey, ModelStageKey } from './shared/api/client'
 import type { NotificationTarget } from './shared/api/notifications'
-import type { RunIndexEntry } from './shared/api/types'
-import { isAuxiliaryExecution } from '@shared/verification'
 
 // The two stages a suite run spawns — the models gate scopes its rows to them.
 const RUN_MODEL_STAGES: readonly ModelStageKey[] = ['heal', 'commit']
@@ -44,10 +43,6 @@ const WORKSPACE_PANELS = [
   { id: 'tests', minWidth: 280, defaultWidth: 360, collapsible: true, collapseButtonY: 'bottom' },
   { id: 'runs', minWidth: 400, defaultWidth: 500, collapsible: false },
 ] as const satisfies readonly PanelConfig[]
-
-function latestFeatureRunId(runs: readonly RunIndexEntry[], feature: string): string | null {
-  return runs.find((run) => run.feature === feature && !isAuxiliaryExecution(run.executionType))?.runId ?? null
-}
 
 export function App() {
   const [specTotalTests, setSpecTotalTests] = useState(0)
@@ -82,22 +77,25 @@ export function App() {
   // fetch-owning leaves subscribe to (replaces the drilled `*RefreshKey`s).
   const { invalidate } = useInvalidation()
 
-  // Server-sourced data (features / flights / pre-flights / version) + the
-  // refresh helpers + the /ws/workspace wiring live in one hook. The nav
-  // selection it must touch comes in as setters + refs; the render-coupled
-  // run-selection reconciliation stays below where `featureRuns` is derived.
+  const {
+    featureRuns, selectedRunForFeature, statusRunDetail, selectedRunEvidence,
+    onInitialFeatures, onFeaturesRefreshed, selectFeature, selectFeatureForReview,
+  } = useWorkspaceSelection({
+    allRuns, selectedFeature, selectedRunId, setSelectedFeature, setSelectedRunId,
+    selectedFeatureRef, selectedRunIdRef, pendingRunSelectionRef,
+  })
+
+  // The data hook owns fetches and workspace events; selection stays with
+  // the controller above so reconnects and manual navigation use one policy.
   const {
     features, flights, flightDetails, flightsRef, preFlights, versionStatus,
     refreshFeatures, refreshFlights, refreshPreFlights, refreshVersion,
   } = useWorkspaceData({
     invalidate,
-    allRuns,
-    initialSelectedFeature: selectedFeature,
-    setSelectedFeature,
-    setSelectedRunId,
+    onInitialFeatures,
+    onFeaturesRefreshed,
     selectedFeatureRef,
     selectedRunIdRef,
-    pendingRunSelectionRef,
     // A rename anywhere (this tab, another tab, an MCP client) must move the
     // open config dialog with the suite instead of leaving it on a name the
     // server no longer resolves.
@@ -191,58 +189,6 @@ export function App() {
     else openFlight(target.flightId)
   }, [navigateToRun, openFlight, openFlightStage, flightsRef])
 
-  // Column 3 lists runs scoped to the currently-selected feature. Boot-only
-  // sessions are excluded — they're not test runs and live in the global
-  // Services surface, not the Runs list.
-  const featureRuns = useMemo(
-    () => allRuns.filter((r) => r.feature === selectedFeature && !isAuxiliaryExecution(r.executionType)),
-    [allRuns, selectedFeature],
-  )
-
-  // Latest run for the selected feature — running, healing, OR terminal.
-  // Used as the default test-status source only until the user explicitly
-  // selects a run from the runs column.
-  const latestRunForFeature = featureRuns[0] ?? null
-  const selectedRunForFeature = selectedRunId
-    ? featureRuns.find((r) => r.runId === selectedRunId) ?? null
-    : null
-  const statusRunId = selectedRunForFeature?.runId ?? latestRunForFeature?.runId ?? null
-
-  useEffect(() => {
-    if (!selectedFeature) {
-      pendingRunSelectionRef.current = null
-      if (selectedRunId !== null) setSelectedRunId(null)
-      return
-    }
-
-    if (selectedRunForFeature) {
-      if (pendingRunSelectionRef.current === selectedRunForFeature.runId) {
-        pendingRunSelectionRef.current = null
-      }
-      return
-    }
-
-    if (selectedRunId && pendingRunSelectionRef.current === selectedRunId) return
-
-    const nextRunId = latestRunForFeature?.runId ?? null
-    if (selectedRunId !== nextRunId) setSelectedRunId(nextRunId)
-  }, [latestRunForFeature?.runId, selectedFeature, selectedRunForFeature, selectedRunId])
-
-  // The detail (and therefore the summary) for Column 2 lives in the shared
-  // run store. It is scoped to the selected run when there is one, so clicking
-  // Run 1 / Run 2 updates the test status pills to that run's result.
-  const statusRunDetail = useRun(statusRunId)
-  const summaryForSelectedFeature = statusRunDetail.detail?.summary
-  const statusForSelectedFeature =
-    statusRunDetail.detail?.manifest.status
-    ?? selectedRunForFeature?.status
-    ?? latestRunForFeature?.status
-  const selectedRunEvidence = {
-    manifest: statusRunDetail.detail?.manifest,
-    summary: summaryForSelectedFeature,
-    status: statusForSelectedFeature,
-  }
-
   // The run-start flow (collision prompt, branch-mismatch recovery, silent-
   // failure guard) lives in useRunStart — App just wires selection + the dialogs.
   const {
@@ -293,11 +239,6 @@ export function App() {
     setSelectedFeature(feature)
     setFlightStartFor(feature)
   }, [setSelectedFeature, setFlightStartFor])
-
-  const handleReviewFeature = useCallback((name: string): void => {
-    setSelectedFeature(name)
-    setSelectedRunId(latestFeatureRunId(allRuns, name))
-  }, [allRuns, setSelectedFeature, setSelectedRunId])
 
   // R14: the coverage ledger's content is generated by a flight's docs /
   // prd-summary / specs-coverage stages — hand the ledger that fact so it can
@@ -354,11 +295,7 @@ export function App() {
         activeRunStatus={globalActiveRunEntry?.status ?? null}
         activeRunWaiting={activeRunWaiting}
         activeRunExecutionType={globalActiveRunEntry?.executionType ?? null}
-        onSelectFeature={(name) => {
-          pendingRunSelectionRef.current = null
-          setSelectedFeature(name)
-          setSelectedRunId(latestFeatureRunId(allRuns, name))
-        }}
+        onSelectFeature={selectFeature}
         onReviewFeature={(name) => { setSelectedFeature(name); setReviewFocus(undefined); setSpecReviewOpen(true) }}
         onOpenConfig={openConfig}
         versionStatus={versionStatus}
@@ -457,7 +394,7 @@ export function App() {
     runDetail: statusRunDetail.detail,
     focus: reviewFocus,
     onFocus: setReviewFocus,
-    onChooseFeature: handleReviewFeature,
+    onChooseFeature: selectFeatureForReview,
     open: specReviewOpen,
     onOpenChange: setSpecReviewOpen,
   }

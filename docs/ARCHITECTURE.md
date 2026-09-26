@@ -89,6 +89,16 @@ entry. The three places that must agree for the web aliases are
 | `templates/project/` | Files copied into initialized workspaces. The storefront sample exercises Run and Heal, `flight-app/` starts without a suite so Flight has real onboarding work, and `workflow-app/` plus `features/workflow-workbench/` exercises Coverage, Author, Portify, and Verify. |
 | `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, the demo PRD-summary generators, `clean-dist`, `prepare-assets`, `smoke-pack`, `smoke-demo`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the repo gates. `tools/fixtures/` holds contributor-only fixtures; the storefront and workflow-workbench suites ship in the scaffold under `templates/project/features/`. |
 
+**Workspace selection** lives in `apps/web/src/shared/state/`.
+`workspace-selection.ts` defines eligible runs, index-order fallbacks, and suite/run
+reconciliation. `useWorkspaceSelection` applies those rules and obtains displayed
+evidence through the existing `useRun` detail hook. `useWorkspaceData` loads lists
+and reports successful loads to the controller; `useWorkspaceNavigation` retains
+URL persistence, cross-tab state, selection refs, and explicit navigation actions.
+`App.tsx` composes these hooks. A pending run keeps its selection until its index
+row arrives, while evidence falls back to the latest eligible indexed run; an
+indexed historical selection survives new runs and suite refreshes.
+
 **Web `cleanup` has no server twin, on purpose.** The `apps/web/src/features/cleanup`
 feature consumes `/api/cleanup/*`, but those routes stay with the features that own
 the data being deleted — `/api/cleanup/runs` and `/api/cleanup/worktrees` in

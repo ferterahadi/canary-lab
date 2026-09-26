@@ -43,7 +43,9 @@ vi.mock('../api/workspace-socket', () => ({
 const stream = { flights: [] as FlightIndexEntry[], details: {} as Record<string, FlightManifest>, hydrated: false }
 vi.mock('@/features/flights', () => ({ useFlightsStream: () => stream }))
 
+vi.mock('@/features/runs', () => ({ useRun: () => ({ detail: undefined }) }))
 const { useWorkspaceData } = await import('./use-workspace-data')
+const { useWorkspaceSelection } = await import('./use-workspace-selection')
 
 function feature(name: string): Feature {
   return { name, repos: [] } as unknown as Feature
@@ -78,31 +80,44 @@ const setSelectedFeature = (f: string | null): void => { harness.featureRef.curr
 const setSelectedRunId = (r: string | null): void => { harness.runIdRef.current = r; harness.selectedRunId.push(r) }
 const onRenamed = (from: string, to: string): void => { harness.renames.push([from, to]) }
 
-// The two nav mirrors the hook writes through are real refs owned by the probe,
-// so a test asserts the same way App observes them.
-function Probe({ config }: { config: Partial<WorkspaceDataDeps> & { withRenameHandler?: boolean } }) {
-  const featureRef = useRef<string | null>(harness.featureRef.current)
+// Compose the data hook with the real selection controller so the original
+// selection assertions still prove the behavior at their new owning boundary.
+interface HarnessConfig extends Partial<WorkspaceDataDeps> {
+  withRenameHandler?: boolean
+  allRuns?: RunIndexEntry[]
+  initialSelectedFeature?: string | null
+}
+
+function Probe({ config }: { config: HarnessConfig }) {
+  const featureRef = useRef<string | null>(config.initialSelectedFeature ?? harness.featureRef.current)
   const runIdRef = useRef<string | null>(harness.runIdRef.current)
   const pendingRef = useRef<string | null>(harness.pendingRef.current)
   harness.featureRef = featureRef
   harness.runIdRef = runIdRef
   harness.pendingRef = pendingRef
-  harness.data = useWorkspaceData({
-    invalidate,
-    allRuns: [],
-    initialSelectedFeature: null,
+  const selection = useWorkspaceSelection({
+    allRuns: config.allRuns ?? [],
+    selectedFeature: featureRef.current,
+    selectedRunId: runIdRef.current,
     setSelectedFeature,
     setSelectedRunId,
     selectedFeatureRef: featureRef,
     selectedRunIdRef: runIdRef,
     pendingRunSelectionRef: pendingRef,
+  })
+  harness.data = useWorkspaceData({
+    invalidate,
+    onInitialFeatures: selection.onInitialFeatures,
+    onFeaturesRefreshed: selection.onFeaturesRefreshed,
+    selectedFeatureRef: featureRef,
+    selectedRunIdRef: runIdRef,
     onFeatureRenamed: config.withRenameHandler ? onRenamed : undefined,
     ...config,
   })
   return null
 }
 
-async function mount(config: Partial<WorkspaceDataDeps> & { withRenameHandler?: boolean } = {}): Promise<void> {
+async function mount(config: HarnessConfig = {}): Promise<void> {
   await act(async () => { root.render(<Probe config={config} />) })
 }
 

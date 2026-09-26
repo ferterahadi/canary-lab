@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import * as api from '../api/client'
-import type { Feature, RunIndexEntry, VersionStatus } from '../api/types'
+import type { Feature, VersionStatus } from '../api/types'
 import type { FlightIndexEntry, FlightManifest, PlanFeaturesTask } from '../api/client'
 import { connectWorkspaceEvents } from '@/shared/api/workspace-socket'
 import { useFlightsStream } from '@/features/flights'
 import type { InvalidationTopic } from './invalidation-bus'
-import { isAuxiliaryExecution } from '@shared/verification'
 
 // Owns the workspace's server-sourced data — the features list, the flights +
 // pre-flights indexes, the version status — plus the refresh helpers, the
@@ -13,28 +12,18 @@ import { isAuxiliaryExecution } from '@shared/verification'
 // wiring that keeps them (and the invalidation bus) live. Lifted out of App so
 // the shell is layout + composition, not a fetch/socket controller.
 //
-// The nav selection it must touch (auto-select the first feature, re-select
-// when a feature is renamed/deleted/gone) comes in as injected setters + mirror
-// refs — the data layer stays free of nav STATE, and the render-coupled
-// run-selection reconciliation remains in App where `featureRuns` is derived.
-
-const NON_TEST = (r: RunIndexEntry) => !isAuxiliaryExecution(r.executionType)
+// Selection policy belongs to useWorkspaceSelection. The read-only navigation
+// mirrors here qualify event invalidations; loaded lists go to that controller.
 
 export interface WorkspaceDataDeps {
   invalidate: (topic: InvalidationTopic, scope?: string) => void
-  /** Live runs index — mirrored to a ref so refreshFeatures can pick a feature's
-   *  latest run without the WS connect effect churning on every run tick. */
-  allRuns: RunIndexEntry[]
-  /** The mount-time selected feature (auto-select fills it only when empty). */
-  initialSelectedFeature: string | null
-  setSelectedFeature: (f: string | null) => void
-  setSelectedRunId: (r: string | null) => void
-  selectedFeatureRef: MutableRefObject<string | null>
-  selectedRunIdRef: MutableRefObject<string | null>
-  pendingRunSelectionRef: MutableRefObject<string | null>
+  onInitialFeatures: (features: readonly Feature[]) => void
+  onFeaturesRefreshed: (features: readonly Feature[], preferredFeature?: string | null) => void
+  selectedFeatureRef: Readonly<MutableRefObject<string | null>>
+  selectedRunIdRef: Readonly<MutableRefObject<string | null>>
   /** A suite was renamed elsewhere (another tab, an MCP client, this tab's own
    *  save). Anything App holds keyed by the old name — an open config dialog —
-   *  must re-point at the new one; the selection itself is handled here. */
+   *  must re-point at the new one; selection goes through onFeaturesRefreshed. */
   onFeatureRenamed?: (from: string, to: string) => void
 }
 
@@ -55,9 +44,8 @@ export interface WorkspaceData {
 
 export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   const {
-    invalidate, allRuns, initialSelectedFeature,
-    setSelectedFeature, setSelectedRunId,
-    selectedFeatureRef, selectedRunIdRef, pendingRunSelectionRef,
+    invalidate, onInitialFeatures, onFeaturesRefreshed,
+    selectedFeatureRef, selectedRunIdRef,
     onFeatureRenamed,
   } = deps
 
@@ -78,37 +66,15 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   const [preFlights, setPreFlights] = useState<PlanFeaturesTask[]>([])
   const [versionStatus, setVersionStatus] = useState<VersionStatus | null>(null)
 
-  // allRuns changes on every run-progress tick; read it via a ref inside the
-  // stable refreshFeatures so the /ws/workspace connect effect (which depends on
-  // refreshFeatures) doesn't tear down + reconnect on every tick — the bus has
-  // no replay, so a mutation during that window would be lost ("only updates
-  // after a refresh"). Same trick for the flights index (openActivity reads it).
-  const allRunsRef = useRef(allRuns)
-  useEffect(() => { allRunsRef.current = allRuns }, [allRuns])
   const flightsRef = useRef(flights)
   useEffect(() => { flightsRef.current = flights }, [flights])
 
-  // Stable identity ([] deps) — reads current feature/runs via refs, not closure.
   const refreshFeatures = useCallback((preferredFeature?: string | null): void => {
     api.listFeatures().then((data) => {
       setFeatures(data)
-      const runs = allRunsRef.current
-      if (preferredFeature && data.some((f) => f.name === preferredFeature)) {
-        // Reconnect and metadata refreshes target the current suite too. Keep
-        // its explicit run selection, including one awaiting the runs snapshot.
-        if (selectedFeatureRef.current === preferredFeature && selectedRunIdRef.current) return
-        pendingRunSelectionRef.current = null
-        setSelectedFeature(preferredFeature)
-        setSelectedRunId(runs.find((r) => r.feature === preferredFeature && NON_TEST(r))?.runId ?? null)
-      } else if (!selectedFeatureRef.current || !data.some((f) => f.name === selectedFeatureRef.current)) {
-        const nextFeature = data[0]?.name ?? null
-        pendingRunSelectionRef.current = null
-        setSelectedFeature(nextFeature)
-        setSelectedRunId(nextFeature ? runs.find((r) => r.feature === nextFeature && NON_TEST(r))?.runId ?? null : null)
-      }
+      onFeaturesRefreshed(data, preferredFeature)
     }).catch(() => {})
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [onFeaturesRefreshed])
 
   const refreshVersion = useCallback((): void => {
     api.getVersionStatus().then(setVersionStatus).catch(() => {})
@@ -126,11 +92,10 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
     api.listFeatures().then((data) => {
       if (cancelled) return
       setFeatures(data)
-      if (data.length > 0 && !initialSelectedFeature) setSelectedFeature(data[0].name)
+      onInitialFeatures(data)
     }).catch(() => {})
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [onInitialFeatures])
 
   // Initial flights / pre-flights / version loads (feed the pill + footer before
   // any event fires).
