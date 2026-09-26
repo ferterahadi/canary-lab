@@ -8,7 +8,6 @@ import {
   buildAppRoots,
   findExistingConfig,
   isValidSlotName,
-  isWithin,
   listEnvFolders,
   readEnvsetsConfig,
   shortenHome,
@@ -118,19 +117,6 @@ describe('isValidSlotName', () => {
   it('rejects "." and ".." even though the character class allows them', () => {
     expect(isValidSlotName('.')).toBe(false)
     expect(isValidSlotName('..')).toBe(false)
-  })
-})
-
-describe('isWithin', () => {
-  it('is true for the root itself and for descendants', () => {
-    expect(isWithin('/a/b', '/a/b')).toBe(true)
-    expect(isWithin('/a/b', '/a/b/c/d')).toBe(true)
-  })
-
-  it('is false for a sibling, an ancestor, or an unrelated absolute path', () => {
-    expect(isWithin('/a/b', '/a/bb')).toBe(false)
-    expect(isWithin('/a/b', '/a')).toBe(false)
-    expect(isWithin('/a/b', '/x/y')).toBe(false)
   })
 })
 

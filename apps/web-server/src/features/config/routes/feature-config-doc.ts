@@ -13,7 +13,8 @@ import { describeFastForward, describeRepoCheckout, fastForwardToUpstream } from
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { overlayExists as portifyOverlayExists } from '../../portify/logic/runtime/overlay'
 import { revertPortification } from '../../portify/logic/runtime/unportify'
-import { FEATURE_CONFIG_NAMES, findExistingConfig, isWithin, listEnvFolders } from './feature-config-support'
+import { FEATURE_CONFIG_NAMES, findExistingConfig, listEnvFolders } from './feature-config-support'
+import { isWithin } from '../logic/path-containment'
 
 export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
   // ─── feature.config.{cjs,js,ts} ───────────────────────────────────────

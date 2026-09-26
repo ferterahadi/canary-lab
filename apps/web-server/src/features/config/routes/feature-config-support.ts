@@ -4,7 +4,6 @@ import path from 'path'
 import { readFeatureConfig, writeFeatureConfig } from '../../../shared/config-ast'
 import { PLAYWRIGHT_CONFIG_NAMES } from '../../../shared/playwright-config'
 import { getProjectRoot } from '../../../../../../shared/runtime/project-root'
-export { isWithin } from '../logic/path-containment'
 
 export const FEATURE_CONFIG_NAMES = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
 

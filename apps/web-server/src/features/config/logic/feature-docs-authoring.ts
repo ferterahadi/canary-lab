@@ -1,7 +1,8 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { FeatureAuthoringContext, findFeature, isWithin } from './feature-authoring'
+import { findFeature, type FeatureAuthoringContext } from './feature-authoring'
+import { isWithin } from './path-containment'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 
 // Docs feed the PRD summary, so every successful docs write announces

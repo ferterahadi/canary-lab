@@ -9,7 +9,8 @@ import { parseDotenv, writeDotenv, type KvEntry } from '../logic/dotenv-edit'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { resolveVars } from '../../runs/logic/runtime/env-switcher/switch'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
-import { EnvsetsConfigJson, buildAppRoots, isValidSlotName, isWithin, listEnvFolders, readEnvsetsConfig, shortenHome, syncEnvsInConfig, writeEnvsetsConfig } from './feature-config-support'
+import { EnvsetsConfigJson, buildAppRoots, isValidSlotName, listEnvFolders, readEnvsetsConfig, shortenHome, syncEnvsInConfig, writeEnvsetsConfig } from './feature-config-support'
+import { isWithin } from '../logic/path-containment'
 
 export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
   // Every envset mutation in this file writes files under

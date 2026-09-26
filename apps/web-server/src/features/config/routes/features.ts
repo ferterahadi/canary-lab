@@ -24,7 +24,6 @@ import { buildGitReview, commitReviewedFiles, restoreGitReview } from '../../run
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 
 export type { FeaturesRouteDeps } from './features-route-deps'
-export { envsetProcessEnv } from '../logic/envset-process-env'
 
 function reviewFailure(reply: FastifyReply, error: unknown, fallback: string) {
   const statusCode = (error as { statusCode?: number }).statusCode ?? 500
