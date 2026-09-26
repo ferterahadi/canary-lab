@@ -63,6 +63,51 @@ describe('production MCP REST adapter wiring', () => {
       expect(toolText(agentRead)).not.toContain('4100')
     } finally { socket.close() }
   })
+  it('rejects corrupt envset metadata before mutation and exposes recovered capture and slot changes to a connected agent', async () => {
+    const metadata = path.join(suiteDir, 'envsets', 'envsets.config.json')
+    const source = path.join(projectRoot, 'capture.env')
+    fs.writeFileSync(source, 'TOKEN=secret-value\n')
+    fs.writeFileSync(metadata, 'null')
+    const frames: Array<{ type: string; feature?: string }> = []
+    const socket = await app.injectWS('/ws/workspace', {}, {
+      onInit: (ws) => ws.on('message', (raw) => frames.push(JSON.parse(raw.toString()))),
+    })
+    try {
+      const capture = { feature: 'checkout', sources: [{ sourcePath: source, env: 'staging', slot: 'import.env' }] }
+      const refused = await client.callTool({ name: 'capture_feature_env_files', arguments: capture })
+      expect(refused.isError).toBe(true)
+      expect(toolText(refused)).toBe('envsets.config.json must contain a valid JSON object')
+      const readFailure = await client.callTool({ name: 'get_feature_envset_summary', arguments: { feature: 'checkout' } })
+      expect(readFailure.isError).toBe(true)
+      const removed = await app.inject({ method: 'DELETE', url: '/api/features/checkout/envsets/slots/app.env' })
+      expect(removed.statusCode).toBe(409)
+      expect(fs.existsSync(path.join(suiteDir, 'envsets', 'local', 'app.env'))).toBe(true)
+      expect(fs.existsSync(path.join(suiteDir, 'envsets', 'staging'))).toBe(false)
+      expect(fs.readFileSync(metadata, 'utf8')).toBe('null')
+      expect(frames.filter((frame) => frame.type === 'envsets-changed')).toEqual([])
+
+      fs.writeFileSync(metadata, '{}')
+      const captured = await client.callTool({ name: 'capture_feature_env_files', arguments: capture })
+      expect(captured.isError).not.toBe(true)
+      expect(toolText(captured)).not.toContain('secret-value')
+      await expect.poll(() => frames.some((frame) => frame.type === 'envsets-changed')).toBe(true)
+      const features = await app.inject({ method: 'GET', url: '/api/features' })
+      expect(features.json()).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'checkout', envs: ['local', 'staging'] })]))
+      const added = await app.inject({ method: 'POST', url: '/api/features/checkout/envsets/slots', payload: { sourcePath: source, slotName: 'shared.env' } })
+      expect(added.statusCode).toBe(201)
+      const agentRead = await client.callTool({ name: 'get_feature_envset_summary', arguments: { feature: 'checkout' } })
+      expect(JSON.parse(toolText(agentRead)).envs).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'staging', slots: expect.arrayContaining([
+          expect.objectContaining({ slot: 'shared.env', preview: [{ key: 'TOKEN', value: '********' }] }),
+        ]) }),
+      ]))
+      expect(toolText(agentRead)).not.toContain('secret-value')
+      expect((await app.inject({ method: 'DELETE', url: '/api/features/checkout/envsets/slots/shared.env' })).statusCode).toBe(204)
+      const catchup = await client.callTool({ name: 'get_feature_envset_summary', arguments: { feature: 'checkout' } })
+      expect(toolText(catchup)).not.toContain('shared.env')
+      expect(toolText(catchup)).toContain('import.env')
+    } finally { socket.close() }
+  })
   it('preserves the origin distinction between browser and MCP Flight decisions', async () => {
     const browser = await app.inject({ method: 'POST', url: '/api/flights/external-flight/pause' })
     expect(browser.statusCode).toBe(409)

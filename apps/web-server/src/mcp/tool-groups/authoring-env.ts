@@ -13,9 +13,13 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
     description: 'List a feature envset layout, slot targets, redacted key previews, and the feature\'s declared repos (name/localPath/branch — pass repo name to get_feature_repo_status / checkout_feature_repo_branch). Secret values are never returned.',
     inputSchema: { feature: z.string() },
   }, async ({ feature }) => {
-    const summary = getFeatureEnvsetSummary({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, feature)
-    if (!summary) return errorResult(`feature not found: ${feature}`)
-    return asJsonResult(summary)
+    try {
+      const summary = getFeatureEnvsetSummary({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, feature)
+      if (!summary) return errorResult(`feature not found: ${feature}`)
+      return asJsonResult(summary)
+    } catch (err) {
+      return failureResult(err)
+    }
   })
 
   registerTool('capture_feature_env_files', {

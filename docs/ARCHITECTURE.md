@@ -148,6 +148,28 @@ the Flight store. The legacy `deleteFeature` helper preserves directory-only
 scaffold reset, which must retain the owning Flight. This sequence is not a
 filesystem transaction: an I/O failure after Flight cleanup does not roll it back.
 
+**Envset configuration** is owned by
+`apps/web-server/src/features/config/logic/envset-config.ts`. REST and feature
+authoring share metadata reads/writes, directory discovery, and synchronization
+of the suite's environment list. The folders on disk are authoritative: capture
+now drops stale declarations and includes previously undeclared folders. Suite
+configs are written only when the AST writer produces changed content; config
+file discovery retains cjs/js/ts precedence in the configuration domain.
+
+Missing metadata means an empty configuration. Malformed JSON and non-object
+metadata produce a 409 error without echoing file contents. Capture and slot
+metadata mutations validate before touching files; read and write I/O failures
+propagate. Valid object metadata retains unknown fields, with no nested schema
+validation. Raw slot-content and environment-directory operations remain
+independent of metadata. Event ownership and post-write publication are unchanged.
+
+The configuration dialog's document cache currently has no workspace-event
+subscription or missed-event recovery. An external mutation can update workspace
+metadata while an already-open Envsets tab retains its cached index. This is an
+existing consumer limitation, separate from the shared backend owner. Connected
+agents can obtain current redacted metadata through `get_feature_envset_summary`;
+this read path does not provide unsolicited wakeups to passive clients.
+
 Key `apps/web-server/src/features/runs/logic/runtime/` modules:
 
 | Module | Role |

@@ -188,7 +188,8 @@ describe('feature-authoring', () => {
         ],
       }],
     })
-    expect(require(path.join(featureDir, 'feature.config.cjs')).config.envs).toEqual(['local', 'staging'])
+    // The declared local env has no folder; capture synchronizes from disk.
+    expect(require(path.join(featureDir, 'feature.config.cjs')).config.envs).toEqual(['staging'])
 
     const overwrite = captureFeatureEnvFiles(ctx(), {
       feature: 'checkout',
@@ -445,6 +446,8 @@ module.exports = { config }
     fs.writeFileSync(path.join(envsetsDir, 'envsets.config.json'), '{bad json', 'utf8')
     fs.writeFileSync(path.join(envsetsDir, 'local', 'checkout.env'), 'TOKEN=secret\n', 'utf8')
 
+    expect(() => getFeatureEnvsetSummary(ctx(), 'checkout')).toThrow('envsets.config.json must contain a valid JSON object')
+    fs.writeFileSync(path.join(envsetsDir, 'envsets.config.json'), '{}')
     expect(getFeatureEnvsetSummary(ctx(), 'checkout')).toMatchObject({
       configPath: path.join(envsetsDir, 'envsets.config.json'),
       envs: [{ name: 'local', slots: [{ slot: 'checkout.env', preview: [{ key: 'TOKEN', value: '********' }] }] }],
@@ -480,7 +483,7 @@ module.exports = { config }
     const nullConfigDir = writeFeatureConfig('null_config')
     fs.mkdirSync(path.join(nullConfigDir, 'envsets'), { recursive: true })
     fs.writeFileSync(path.join(nullConfigDir, 'envsets', 'envsets.config.json'), 'null', 'utf8')
-    expect(getFeatureEnvsetSummary(ctx(), 'null_config')).toMatchObject({ configPath: path.join(nullConfigDir, 'envsets', 'envsets.config.json') })
+    expect(() => getFeatureEnvsetSummary(ctx(), 'null_config')).toThrow('envsets.config.json must contain a valid JSON object')
 
     const raceDir = writeFeatureConfig('missing_env_dir')
     fs.mkdirSync(path.join(raceDir, 'envsets', 'local'), { recursive: true })

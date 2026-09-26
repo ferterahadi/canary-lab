@@ -18,7 +18,7 @@ import {
   fastForwardToUpstream,
   type RepoCheckoutStatus,
 } from '../../../shared/git-upstream'
-import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
+import { listEnvFolders, readEnvsetsConfig, writeEnvsetsConfig, syncEnvsInConfig } from './envset-config'
 import {
   SPEC_SELECTION_RULE,
   findVariableSpecSelection,
@@ -91,16 +91,6 @@ export interface FeatureEnvsetSummary {
   }>
 }
 
-interface EnvsetsConfigJson {
-  appRoots?: Record<string, string>
-  slots?: Record<string, { description?: string; target?: string }>
-  feature?: {
-    slots?: string[]
-    testCommand?: string
-    testCwd?: string
-  }
-}
-
 export function createFeatureSkeleton(input: FeatureAuthoringContext & {
   feature: string
   description?: string
@@ -154,12 +144,7 @@ export function getFeatureEnvsetSummary(ctx: FeatureAuthoringContext, featureNam
   const envsetsDir = path.join(feature.featureDir, 'envsets')
   const configPath = path.join(envsetsDir, 'envsets.config.json')
   const cfg = readEnvsetsConfig(envsetsDir)
-  const envs = fs.existsSync(envsetsDir)
-    ? fs.readdirSync(envsetsDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort()
-    : []
+  const envs = listEnvFolders(feature.featureDir)
   return {
     feature: feature.name,
     featureDir: feature.featureDir,
@@ -197,7 +182,6 @@ export function captureFeatureEnvFiles(ctx: FeatureAuthoringContext, input: {
   cfg.feature.slots ??= []
 
   const captured: CapturedEnvFile[] = []
-  const envs = new Set(feature.envs ?? [])
   for (const source of input.sources) {
     const sourcePath = path.resolve(source.sourcePath)
     if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
@@ -222,7 +206,6 @@ export function captureFeatureEnvFiles(ctx: FeatureAuthoringContext, input: {
       target,
     }
     if (!cfg.feature.slots.includes(slot)) cfg.feature.slots.push(slot)
-    envs.add(env)
     captured.push({
       env,
       slot,
@@ -233,7 +216,7 @@ export function captureFeatureEnvFiles(ctx: FeatureAuthoringContext, input: {
     })
   }
   writeEnvsetsConfig(envsetsDir, cfg)
-  syncFeatureEnvs(feature.featureDir, Array.from(envs).sort())
+  syncEnvsInConfig(feature.featureDir)
   const summary = getFeatureEnvsetSummary(ctx, input.feature)
   publishWorkspaceEvent(ctx.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
   return { ok: true, captured, summary: summary! }
@@ -413,33 +396,6 @@ export function parseRedactedEntries(raw: string): RedactedEntry[] {
 
 export function findFeature(featuresDir: string, featureName: string): FeatureConfig | undefined {
   return loadFeatures(featuresDir).find((feature) => feature.name === featureName)
-}
-
-function readEnvsetsConfig(envsetsDir: string): EnvsetsConfigJson {
-  const cfgPath = path.join(envsetsDir, 'envsets.config.json')
-  if (!fs.existsSync(cfgPath)) return {}
-  try {
-    const parsed = JSON.parse(fs.readFileSync(cfgPath, 'utf8')) as EnvsetsConfigJson
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
-}
-
-function writeEnvsetsConfig(envsetsDir: string, cfg: EnvsetsConfigJson): void {
-  fs.mkdirSync(envsetsDir, { recursive: true })
-  fs.writeFileSync(path.join(envsetsDir, 'envsets.config.json'), `${JSON.stringify(cfg, null, 2)}\n`, 'utf8')
-}
-
-function syncFeatureEnvs(featureDir: string, envs: string[]): void {
-  const configPath = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
-    .map((name) => path.join(featureDir, name))
-    .find((candidate) => fs.existsSync(candidate))
-  if (!configPath) return
-  const source = fs.readFileSync(configPath, 'utf8')
-  const parsed = readFeatureConfig(source)
-  const next: ConfigValue = { ...parsed.value, envs }
-  fs.writeFileSync(configPath, writeFeatureConfig(source, next), 'utf8')
 }
 
 function listSlotFiles(envDir: string): string[] {

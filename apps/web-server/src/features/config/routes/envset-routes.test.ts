@@ -113,7 +113,7 @@ describe('envsets endpoints', () => {
     }
   })
 
-  it('GET tolerates malformed envsets.config.json', async () => {
+  it('GET rejects malformed envsets.config.json', async () => {
     buildFeature('c', {
       envsets: { local: { 'app.env': 'A=1' } },
       envsetsConfig: '{ this is not json',
@@ -121,8 +121,8 @@ describe('envsets endpoints', () => {
     const app = await makeApp()
     try {
       const r = await app.inject({ method: 'GET', url: '/api/features/c/envsets' })
-      expect(r.statusCode).toBe(200)
-      expect((r.json() as { slotDescriptions: Record<string, string> }).slotDescriptions).toEqual({})
+      expect(r.statusCode).toBe(409)
+      expect(r.json().message).toBe('envsets.config.json must contain a valid JSON object')
     } finally {
       await app.close()
     }

@@ -125,11 +125,11 @@ describe('readEnvsetsConfig / writeEnvsetsConfig', () => {
     expect(readEnvsetsConfig(path.join(tmpDir, 'envsets'))).toEqual({})
   })
 
-  it('returns {} when the file is unparseable rather than throwing', () => {
+  it('rejects unparseable metadata rather than replacing it with an empty config', () => {
     const dir = path.join(tmpDir, 'envsets')
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, 'envsets.config.json'), '{ not json')
-    expect(readEnvsetsConfig(dir)).toEqual({})
+    expect(() => readEnvsetsConfig(dir)).toThrow('envsets.config.json must contain a valid JSON object')
   })
 
   it('round-trips through write, creating the dir if needed', () => {

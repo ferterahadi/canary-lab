@@ -293,13 +293,13 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
       }
       const envsetsDir = path.join(feature.featureDir, 'envsets')
       const envs = listEnvFolders(feature.featureDir)
+      const cfg = readEnvsetsConfig(envsetsDir)
       // Same reasoning as the create route: the validated slot name plus a real
       // env folder name cannot join to a path outside `envsetsDir`.
       for (const env of envs) {
         const slotPath = path.join(envsetsDir, env, slotName)
         if (fs.existsSync(slotPath)) fs.rmSync(slotPath, { force: true })
       }
-      const cfg = readEnvsetsConfig(envsetsDir)
       if (cfg.slots) delete cfg.slots[slotName]
       if (cfg.feature?.slots) {
         cfg.feature.slots = cfg.feature.slots.filter((s) => s !== slotName)
