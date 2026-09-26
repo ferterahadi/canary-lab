@@ -4,6 +4,7 @@ import path from 'path'
 import { readFeatureConfig, writeFeatureConfig } from '../../../shared/config-ast'
 import { PLAYWRIGHT_CONFIG_NAMES } from '../../../shared/playwright-config'
 import { getProjectRoot } from '../../../../../../shared/runtime/project-root'
+export { isWithin } from '../logic/path-containment'
 
 export const FEATURE_CONFIG_NAMES = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
 
@@ -62,12 +63,6 @@ export const SLOT_NAME_PATTERN = /^[a-zA-Z0-9._-]+$/
  *  re-check. Routes taking a raw `:slot` param still do — see `envset-routes`. */
 export function isValidSlotName(name: string): boolean {
   return SLOT_NAME_PATTERN.test(name) && name !== '.' && name !== '..'
-}
-
-/** True when `target` is the same as or a descendant of `root`. */
-export function isWithin(root: string, target: string): boolean {
-  const relative = path.relative(root, target)
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
 }
 
 export interface EnvsetsConfigJson {

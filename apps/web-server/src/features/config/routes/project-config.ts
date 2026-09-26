@@ -17,6 +17,7 @@ import {
   type ProjectConfig,
 } from '../../runs/logic/runtime/launcher/project-config'
 import { normalizeAgentModels } from '../../agent-sessions/logic/agent-models'
+import { isWithin } from '../logic/path-containment'
 
 export interface ProjectConfigRouteDeps {
   projectRoot: string
@@ -213,9 +214,9 @@ export async function projectConfigRoutes(
 
     // Linked project files may live elsewhere. Authorize the project entry path,
     // then launch its real target; an unrelated outside path is still rejected.
-    const projectEntry = isInside(path.resolve(file), path.resolve(deps.projectRoot))
-      || isInside(path.resolve(file), resolvedRoot)
-    if (!projectEntry && !isInside(resolvedFile, resolvedRoot)) {
+    const projectEntry = isWithin(deps.projectRoot, file)
+      || isWithin(resolvedRoot, file)
+    if (!projectEntry && !isWithin(resolvedRoot, resolvedFile)) {
       reply.code(400)
       return { error: 'file must be inside the project root' }
     }
@@ -242,11 +243,6 @@ function normalizeIncomingPersonalWikiPath(value: unknown): string | null | unde
 
 function normalPositiveInt(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback
-}
-
-function isInside(file: string, root: string): boolean {
-  const rel = path.relative(root, file)
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
 }
 
 function launchEditor(input: {

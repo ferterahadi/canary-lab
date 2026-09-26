@@ -259,16 +259,11 @@ describe('linkFeatureDoc', () => {
 
   it('expands a ~-relative target path', () => {
     writeFeatureConfig('link_home')
-    // Use a real file under the home dir via a relative spelling.
-    const home = os.homedir()
-    const target = path.join(home, `.cl-link-test-${process.pid}.md`)
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpDir)
+    const target = path.join(tmpDir, 'home-doc.md')
     fs.writeFileSync(target, 'home doc')
-    try {
-      const res = linkFeatureDoc(ctx(), { feature: 'link_home', targetPath: `~/${path.basename(target)}` })
-      expect(res).toMatchObject({ ok: true })
-    } finally {
-      fs.rmSync(target, { force: true })
-    }
+    const res = linkFeatureDoc(ctx(), { feature: 'link_home', targetPath: `~/${path.basename(target)}` })
+    expect(res).toMatchObject({ ok: true })
   })
 
   it('rejects a missing target, a directory, and a disallowed extension', () => {

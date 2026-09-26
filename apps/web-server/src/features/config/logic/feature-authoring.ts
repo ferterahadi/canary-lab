@@ -25,6 +25,7 @@ import {
   isPlaywrightConfigPath,
 } from '../../../shared/playwright-config'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { isWithin } from './path-containment'
 
 export { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
 
@@ -481,9 +482,4 @@ function sanitizeSlotName(slot: string): string {
     throw new Error(`invalid slot name: ${slot}`)
   }
   return clean
-}
-
-export function isWithin(root: string, candidate: string): boolean {
-  const rel = path.relative(path.resolve(root), path.resolve(candidate))
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
 }
