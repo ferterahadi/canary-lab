@@ -99,6 +99,14 @@ URL persistence, cross-tab state, selection refs, and explicit navigation action
 row arrives, while evidence falls back to the latest eligible indexed run; an
 indexed historical selection survives new runs and suite refreshes.
 
+**Workspace Flight presentation** belongs to `useWorkspaceFlights` in the web
+Flights feature. It composes the existing activity and evidence readers for suite
+shortcuts, picker rails, pending suite rows, and the coverage ledger's generating
+state. Changes to the ordered coverage job IDs/statuses refresh suite metadata and
+invalidate coverage, including completion discovered by the existing 2.5-second
+active-job fallback. The controller adds no fetch loop or store; navigation,
+dialogs, and component composition remain in `App.tsx`.
+
 **Web `cleanup` has no server twin, on purpose.** The `apps/web/src/features/cleanup`
 feature consumes `/api/cleanup/*`, but those routes stay with the features that own
 the data being deleted — `/api/cleanup/runs` and `/api/cleanup/worktrees` in

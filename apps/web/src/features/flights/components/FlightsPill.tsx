@@ -19,7 +19,7 @@ export interface FlightsPillProps {
   /** Pre-flight (plan-features) tasks in progress / awaiting review — rendered
    *  as their own rows above the feature rows (they precede any feature). */
   preFlights?: PlanFeaturesTask[]
-  /** Per-feature live activity (runs / portify / authoring) from useFeatureActivity — App owns it. */
+  /** Per-feature live activity (runs / portify / authoring) from the workspace Flight controller. */
   activity?: Map<string, FeatureActivity>
   coverageJobs?: CoverageJobIndexEntry[]
   portifyWorkflows?: PortifyIndexEntry[]
