@@ -1,9 +1,9 @@
-import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { COVERAGE_STATE_JSON } from '../../../coverage/logic/coverage/run-state'
 import { diffSourceText } from '../dirty-specs/text-diff'
 import { SUITE_TEST_ROSTER_FILE } from '../suite-test-roster'
+import { compareReviewFiles, reviewRevision } from '../test-review-comparison'
 
 // Match the snapshot copier: envsets and the runtime files it materializes are
 // live secrets, and symlinks are not copied. Coverage state is engine-owned
@@ -31,33 +31,36 @@ function readSuite(root: string, excludedPaths: Iterable<string> = []): Map<stri
   return files
 }
 
-function digest(files: Map<string, Buffer>): string {
-  const hash = createHash('sha256')
-  for (const name of [...files.keys()].sort()) {
-    hash.update(JSON.stringify([name, createHash('sha256').update(files.get(name)!).digest('hex')]))
-  }
-  return hash.digest('hex')
-}
-
-function revision(before: Map<string, Buffer>, after: Map<string, Buffer>): string {
-  return createHash('sha256').update(`${digest(before)}:${digest(after)}`).digest('hex')
-}
-
 /** Covers every reviewable copied byte, including helpers/config and unchanged
  * specs. Engine-owned runtime metadata follows the snapshot skip contract. */
 export function suiteReviewRevision(snapshotDir: string, liveDir: string, excludedPaths: Iterable<string> = []): string {
-  return revision(readSuite(snapshotDir, excludedPaths), readSuite(liveDir, excludedPaths))
+  return reviewRevision(readSuite(snapshotDir, excludedPaths), readSuite(liveDir, excludedPaths))
+}
+
+function executionInputs(files: ReadonlyMap<string, Buffer>): Map<string, Buffer> {
+  return new Map([...files].filter(([file]) =>
+    !file.startsWith('docs/') && file !== 'feature.config.cjs' &&
+    (file.startsWith('e2e/') || /\.(?:[cm]?[jt]sx?|json)$/.test(file)),
+  ))
 }
 
 /** Runtime env files and generated documentation change during a run. The
  * fresh-start gate watches test inputs, while human adoption still reviews
  * the complete copied suite. */
 export function suiteExecutionRevision(snapshotDir: string, liveDir: string, excludedPaths: Iterable<string> = []): string {
-  const inputs = (dir: string) => new Map([...readSuite(dir, excludedPaths)].filter(([file]) =>
-    !file.startsWith('docs/') && file !== 'feature.config.cjs' &&
-    (file.startsWith('e2e/') || /\.(?:[cm]?[jt]sx?|json)$/.test(file)),
-  ))
-  return revision(inputs(snapshotDir), inputs(liveDir))
+  return reviewRevision(executionInputs(readSuite(snapshotDir, excludedPaths)), executionInputs(readSuite(liveDir, excludedPaths)))
+}
+
+/** Reuse bytes only within one gate evaluation. Acceptance and copying still
+ * take fresh inventories at their existing revalidation boundaries. */
+export function suiteReviewAssessment(snapshotDir: string, liveDir: string, excludedPaths: Iterable<string> = []) {
+  const { before, after, revision, files } = suiteReviewFiles(snapshotDir, liveDir, excludedPaths)
+  const recordedInputs = executionInputs(before)
+  const currentInputs = executionInputs(after)
+  return {
+    revision, files,
+    executionChanged: reviewRevision(recordedInputs, currentInputs) !== reviewRevision(recordedInputs, recordedInputs),
+  }
 }
 
 export async function buildSuiteReview(snapshotDir: string, liveDir: string, excludedPaths: Iterable<string> = []) {
@@ -83,12 +86,5 @@ export async function buildSuiteReview(snapshotDir: string, liveDir: string, exc
 export function suiteReviewFiles(snapshotDir: string, liveDir: string, excludedPaths: Iterable<string> = []) {
   const before = readSuite(snapshotDir, excludedPaths)
   const after = readSuite(liveDir, excludedPaths)
-  const files: Array<{ file: string; change: 'added' | 'deleted' | 'modified' }> = []
-  for (const file of [...new Set([...before.keys(), ...after.keys()])].sort()) {
-    const old = before.get(file)
-    const current = after.get(file)
-    if (old?.equals(current ?? Buffer.alloc(0)) && current !== undefined) continue
-    files.push({ file, change: !old ? 'added' : !current ? 'deleted' : 'modified' })
-  }
-  return { revision: revision(before, after), files, before, after }
+  return { ...compareReviewFiles(before, after), before, after }
 }

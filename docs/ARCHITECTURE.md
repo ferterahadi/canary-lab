@@ -472,7 +472,18 @@ Flights adds search and an attention filter. Test review keeps suite/file select
 in a rail and presents complete source in two fixed before/after columns. The
 read-only test-review API reads Git HEAD or the explicitly selected run snapshot,
 then derives English, source alignment, and advisory checks from those same
-versions. English and Code share source-based change navigation across the whole
+versions. Run-domain `apps/web-server/src/features/runs/logic/test-review-comparison.ts`
+owns byte-level review fingerprints and sorted file-change classification for
+both Git-backed acceptance and snapshot review. Each reader keeps its own baseline,
+path selection, exclusions, and I/O errors. The fresh-run gate reads the snapshot
+and live suite once per evaluation, deriving execution changes, the full review
+revision, and changed-file count from that inventory. Approval revisions retain
+their existing encoding, including unchanged files. Inventories are not cached:
+patch generation, acceptance, and snapshot copying keep their fresh revalidation
+reads after asynchronous work or mutations. These reads do not provide an atomic
+filesystem snapshot.
+
+English and Code share source-based change navigation across the whole
 file, including imports and shared setup; the selected change's assessment appears
 below the source. File review uses `translateReadableSource` to include imports,
 declarations, lifecycle hooks, test registrations, and loops around generated tests.

@@ -1,14 +1,14 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { assertNoPendingRunReview } from './run-review-gate'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { assertNoPendingRunReview, pendingRunReview } from './run-review-gate'
 import { suiteReviewRevision } from './suite-review'
 import type { RunDetail, RunStore } from '../run-store'
 import type { RunManifest } from './manifest'
 
 const roots: string[] = []
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
+afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
 
 function setup(status: RunManifest['status'] = 'aborted') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-review-gate-'))
@@ -28,6 +28,45 @@ function setup(status: RunManifest['status'] = 'aborted') {
 }
 
 describe('fresh-run review boundary', () => {
+  it.each(['clean', 'pending', 'approved'] as const)('reads each suite file once when the gate is %s and observes later changes', (state) => {
+    const { store, live, snapshot, manifest } = setup()
+    const liveFile = path.join(live, 'e2e/contract.spec.ts')
+    const snapshotFile = path.join(snapshot, 'e2e/contract.spec.ts')
+    if (state !== 'clean') fs.writeFileSync(liveFile, 'review candidate')
+    const revision = suiteReviewRevision(snapshot, live)
+    if (state === 'approved') manifest.specEdits = {
+      checkedAt: 'now', pending: [], adopted: [],
+      reviewDecisions: [{ at: 'approved-at', revision, decision: 'approved-for-new-run' }],
+    }
+    const read = vi.spyOn(fs, 'readFileSync')
+    const review = pendingRunReview(store, 'example', live)
+    if (state === 'pending') expect(review).toMatchObject({ review_revision: revision, changedFileCount: 1, runId: 'original' })
+    else expect(review).toBeUndefined()
+    expect(read.mock.calls.filter(([file]) => file === snapshotFile)).toHaveLength(1)
+    expect(read.mock.calls.filter(([file]) => file === liveFile)).toHaveLength(1)
+    read.mockClear()
+    fs.writeFileSync(liveFile, 'a later edit')
+    const later = pendingRunReview(store, 'example', live)
+    expect(later).toMatchObject({ changedFileCount: 1, runId: 'original' })
+    expect(later?.review_revision).not.toBe(revision)
+    expect(read.mock.calls.filter(([file]) => file === snapshotFile)).toHaveLength(1)
+    expect(read.mock.calls.filter(([file]) => file === liveFile)).toHaveLength(1)
+  })
+
+  it('keeps legacy runs eligible and skips auxiliary executions and non-approval decisions', () => {
+    const { store, live, snapshot, manifest } = setup()
+    fs.writeFileSync(path.join(live, 'e2e/contract.spec.ts'), 'changed')
+    const original = store.list({ feature: 'example' })[0]
+    store.list = () => [{ ...original, runId: 'boot', executionType: 'boot' }, { ...original, executionType: undefined }]
+    manifest.specEdits = {
+      checkedAt: 'now', pending: [], adopted: [], reviewDecisions: [
+        { at: 'old', revision: 'old-revision', decision: 'approved-for-new-run' },
+        { at: 'now', revision: suiteReviewRevision(snapshot, live), decision: 'restored' },
+      ],
+    }
+    expect(pendingRunReview(store, 'example', live)).toMatchObject({ runId: 'original', changedFileCount: 1 })
+  })
+
   it.each(['aborted', 'failed', 'healing'] as const)('blocks edited specs after %s even when the watcher has not recorded them', (status) => {
     const { store, live } = setup(status)
     fs.writeFileSync(path.join(live, 'e2e', 'contract.spec.ts'), "test.skip('contract', () => {})")
