@@ -28,6 +28,32 @@ beforeEach(async () => {
 afterEach(() => { monitor.close(); vi.restoreAllMocks(); fixture.cleanup() })
 
 describe('shared coverage snapshots', () => {
+  it('invalidates discovery for added, removed and lower-priority config candidates', () => {
+    const cjs = path.join(fixture.featureDir, 'feature.config.cjs')
+    const js = path.join(fixture.featureDir, 'feature.config.js')
+    fs.renameSync(cjs, js)
+    const load = vi.spyOn(featureLoader, 'loadFeatures')
+    const cache = new CoverageSnapshotCache(fixture.args)
+    const initial = cache.features()
+    expect(cache.features()).toBe(initial)
+    expect(load).toHaveBeenCalledTimes(1)
+
+    fs.writeFileSync(cjs, "exports.config = { name: 'shop', featureDir: __dirname, description: 'higher priority' }")
+    expect(cache.features().find((feature) => feature.name === 'shop')?.description).toBe('higher priority')
+    expect(load).toHaveBeenCalledTimes(2)
+
+    fs.appendFileSync(js, '\n// lower-priority edit still invalidates discovery')
+    expect(cache.features().find((feature) => feature.name === 'shop')?.description).toBe('higher priority')
+    expect(load).toHaveBeenCalledTimes(3)
+
+    fs.unlinkSync(cjs)
+    expect(cache.features()).toEqual(initial)
+    expect(load).toHaveBeenCalledTimes(4)
+    fs.unlinkSync(js)
+    expect(cache.features().map((feature) => feature.name)).toEqual(['other'])
+    expect(load).toHaveBeenCalledTimes(5)
+  })
+
   it('shares calculation across REST ledgers, badges, observer scans and agent waits', async () => {
     const app = Fastify()
     await app.register(coverageRoutes, { ...fixture.args, projectRoot: fixture.root, coverageMonitor: monitor })

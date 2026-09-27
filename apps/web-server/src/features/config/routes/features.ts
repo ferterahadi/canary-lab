@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { formatCodeForDisplayWithLineMap } from '../../../../../../shared/code-display-format'
 import { loadFeatures, listSpecFiles, suiteAvailability } from '../../../shared/feature-loader'
+import { FEATURE_CONFIG_NAMES, findExistingConfig } from '../../../shared/config-file'
 import { extractTestsFromSource, type ExtractedTest } from '../../../shared/ast-extractor'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import { translateReadableTest } from '../../../shared/readable-tests/translator'
@@ -241,17 +242,10 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       reply.code(404)
       return { error: 'feature not found' }
     }
-    const candidates: Array<{ name: string; format: 'cjs' | 'js' | 'ts' }> = [
-      { name: 'feature.config.cjs', format: 'cjs' },
-      { name: 'feature.config.js', format: 'js' },
-      { name: 'feature.config.ts', format: 'ts' },
-    ]
-    for (const c of candidates) {
-      const p = path.join(feature.featureDir, c.name)
-      if (fs.existsSync(p)) {
-        const content = fs.readFileSync(p, 'utf-8')
-        return { path: p, content, format: c.format }
-      }
+    const config = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
+    if (config) {
+      const content = fs.readFileSync(config.path, 'utf-8')
+      return { path: config.path, content, format: config.format }
     }
     reply.code(404)
     return { error: 'config file not found' }

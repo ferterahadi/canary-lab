@@ -154,7 +154,13 @@ authoring share metadata reads/writes, directory discovery, and synchronization
 of the suite's environment list. The folders on disk are authoritative: capture
 now drops stale declarations and includes previously undeclared folders. Suite
 configs are written only when the AST writer produces changed content; config
-file discovery retains cjs/js/ts precedence in the configuration domain.
+file discovery lives in `apps/web-server/src/shared/config-file.ts`, with thin
+configuration-domain and route-support re-exports. It selects the first existing
+file in cjs/js/ts order; callers retain loading, cache invalidation, and error
+handling, so an invalid higher-priority file prevents fallback. Callers also retain
+their discovery-versus-linked-suite directory choice. Coverage records every
+candidate, including absent and lower-priority files, to invalidate discovery when
+any candidate changes. Playwright keeps its separate filename order.
 
 Missing metadata means an empty configuration. Malformed JSON and non-object
 metadata produce a 409 error without echoing file contents. Capture and slot

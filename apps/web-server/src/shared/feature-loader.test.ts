@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -17,7 +17,30 @@ beforeEach(() => {
   tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-fl-')))
 })
 
+afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }) })
+
 describe('loadFeatures', () => {
+  it('reloads each selected extension in precedence order and refuses a malformed first candidate', () => {
+    const featuresDir = path.join(tmpDir, 'features')
+    const dir = writeFeature('alpha', '')
+    for (const format of ['ts', 'js', 'cjs']) {
+      fs.writeFileSync(path.join(dir, `feature.config.${format}`),
+        `exports.config = { name: 'alpha', featureDir: __dirname, description: '${format}' }`)
+    }
+    for (const format of ['cjs', 'js', 'ts']) {
+      const configPath = path.join(dir, `feature.config.${format}`)
+      expect(loadFeatures(featuresDir)[0].description).toBe(format)
+      expect(suiteAvailability(featuresDir, 'alpha')).toMatchObject({ kind: 'ready', configPath })
+      fs.writeFileSync(configPath, `exports.config = { name: 'alpha', featureDir: __dirname, description: 'rewritten' }`)
+      expect(loadFeatures(featuresDir)[0].description).toBe('rewritten')
+      fs.writeFileSync(configPath, 'throw new Error("invalid first candidate")')
+      expect(loadFeatures(featuresDir)).toEqual([])
+      expect(suiteAvailability(featuresDir, 'alpha')).toMatchObject({ kind: 'config-invalid', configPath })
+      fs.unlinkSync(configPath)
+    }
+    expect(suiteAvailability(featuresDir, 'alpha').kind).toBe('config-missing')
+  })
+
   it('returns [] when features dir missing', () => {
     expect(loadFeatures(path.join(tmpDir, 'nope'))).toEqual([])
   })

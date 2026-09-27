@@ -1,5 +1,6 @@
 import path from 'path'
 import { loadFeatures } from '../../../../shared/feature-loader'
+import { FEATURE_CONFIG_NAMES } from '../../../../shared/config-file'
 import { readRunsIndex } from '../../../runs/logic/runtime/manifest'
 import { runDirFor } from '../../../runs/logic/runtime/run-paths'
 import { isAuxiliaryExecution } from '../../../../../../../shared/verification'
@@ -27,7 +28,7 @@ export class CoverageSnapshotCache {
     if (inputs.exists(this.paths.featuresDir)) {
       for (const entry of inputs.directory(this.paths.featuresDir)) {
         if (!entry.isDirectory()) continue
-        for (const name of ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']) {
+        for (const name of FEATURE_CONFIG_NAMES) {
           inputs.optional(path.join(this.paths.featuresDir, entry.name, name))
         }
       }

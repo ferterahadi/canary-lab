@@ -218,6 +218,45 @@ describe('GET /api/features', () => {
 })
 
 describe('GET /api/features/:name/config', () => {
+  it('preserves raw responses and candidate precedence without fallback past malformed configuration', async () => {
+    const dir = writeFeature('alpha')
+    const app = await build()
+    try {
+      for (const format of ['ts', 'js', 'cjs']) {
+        fs.writeFileSync(path.join(dir, `feature.config.${format}`),
+          `// ${format} formatting stays intact\nexports.config = { name: 'alpha', featureDir: __dirname }\n`)
+      }
+      for (const format of ['cjs', 'js', 'ts']) {
+        const configPath = path.join(dir, `feature.config.${format}`)
+        const response = await app.inject('/api/features/alpha/config')
+        expect(response.statusCode).toBe(200)
+        expect(response.json()).toEqual({ path: configPath, content: fs.readFileSync(configPath, 'utf8'), format })
+        fs.writeFileSync(configPath, 'throw new Error("malformed first candidate")')
+        const refused = await app.inject('/api/features/alpha/config')
+        expect(refused.statusCode).toBe(404)
+        expect(refused.json()).toEqual({ error: 'feature not found' })
+        fs.unlinkSync(configPath)
+      }
+    } finally { await app.close() }
+  })
+
+  it('reads configuration from a linked featureDir independently of the discovery directory', async () => {
+    const discovery = writeFeature('linked')
+    const linked = path.join(tmpDir, 'linked-source')
+    fs.mkdirSync(linked)
+    fs.writeFileSync(path.join(discovery, 'feature.config.cjs'),
+      `exports.config = { name: 'linked', featureDir: ${JSON.stringify(linked)} }`)
+    const configPath = path.join(linked, 'feature.config.js')
+    const content = '// raw linked configuration, not loaded for discovery\n'
+    fs.writeFileSync(configPath, content)
+    const app = await build()
+    try {
+      const response = await app.inject('/api/features/linked/config')
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual({ path: configPath, content, format: 'js' })
+    } finally { await app.close() }
+  })
+
   it('iterates through candidate file extensions and returns the .js variant', async () => {
     const dir = path.join(featuresDir, 'jsfeat')
     fs.mkdirSync(dir, { recursive: true })

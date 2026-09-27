@@ -1,18 +1,11 @@
-import fs from 'fs'
-import os from 'os'
-import path from 'path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
-import { FEATURE_CONFIG_NAMES, findExistingConfig } from './config-file'
+import { expect, it } from 'vitest'
+import * as shared from '../../../shared/config-file'
+import * as config from './config-file'
+import * as routes from '../routes/feature-config-support'
 
-let dir: string
-beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-config-file-')) })
-afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }) })
-
-it('keeps cjs, js, ts precedence and returns null when none exist', () => {
-  expect(findExistingConfig(dir, FEATURE_CONFIG_NAMES)).toBeNull()
-  for (const format of ['ts', 'js', 'cjs']) {
-    const file = path.join(dir, `feature.config.${format}`)
-    fs.writeFileSync(file, '')
-    expect(findExistingConfig(dir, FEATURE_CONFIG_NAMES)).toEqual({ path: file, format })
-  }
+it('keeps configuration and route support exports on the shared discovery owner', () => {
+  expect(config.FEATURE_CONFIG_NAMES).toBe(shared.FEATURE_CONFIG_NAMES)
+  expect(config.findExistingConfig).toBe(shared.findExistingConfig)
+  expect(routes.FEATURE_CONFIG_NAMES).toBe(shared.FEATURE_CONFIG_NAMES)
+  expect(routes.findExistingConfig).toBe(shared.findExistingConfig)
 })

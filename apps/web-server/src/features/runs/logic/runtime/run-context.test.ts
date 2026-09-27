@@ -38,6 +38,19 @@ function opts(over: Partial<OrchestratorOptions> = {}): OrchestratorOptions {
 }
 
 describe('createRunContext', () => {
+  it('selects dependency configuration in the declared suite directory by existence and precedence', () => {
+    const options = opts()
+    options.feature.featureDir = path.join(tmpDir, 'linked-suite')
+    expect(createRunContext(options, () => true).dependencyConfigPath).toBeUndefined()
+    fs.mkdirSync(options.feature.featureDir)
+    for (const format of ['ts', 'js', 'cjs']) {
+      const file = path.join(options.feature.featureDir, `feature.config.${format}`)
+      // Dependency provenance records the path; construction does not parse it.
+      fs.writeFileSync(file, 'invalid configuration')
+      expect(createRunContext(options, () => true).dependencyConfigPath).toBe(file)
+    }
+  })
+
   it('defaults the delay to a real timer that resolves after the requested wait', async () => {
     const ctx = createRunContext(opts(), () => true)
     const before = Date.now()

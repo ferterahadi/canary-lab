@@ -21,6 +21,7 @@ import { HealSignalGate, type RunBootFailure, type RunServiceFailure } from '../
 import { AgentSessionRefStore } from './agent-session-refs'
 import { FileRunStateSink, type RunStateSink } from './run-state-sink'
 import { isHealthy } from '../../../../shared/launcher-startup'
+import { FEATURE_CONFIG_NAMES, findExistingConfig } from '../../../../shared/config-file'
 import { defaultPlaywrightSpawner } from './run-spawn'
 import { buildServiceSpecs } from './service-specs'
 import type { ServiceSpec, OrchestratorOptions, OrchestratorEventMap, AutoHealConfig, DirtySpecHooks } from './run-orchestrator-types'
@@ -214,8 +215,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     portMap: opts.portMap,
     worktreeHandles,
     repoPathOverrides,
-    dependencyConfigPath: ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
-      .map((name) => path.join(opts.feature.featureDir, name)).find((candidate) => fs.existsSync(candidate)),
+    dependencyConfigPath: findExistingConfig(opts.feature.featureDir, FEATURE_CONFIG_NAMES)?.path,
     dependencyProvenance: opts.dependencyProvenance ?? [],
     portified: overlayExists(opts.feature.featureDir),
     services: buildServiceSpecs(opts.feature, opts.runDir, opts.env, {
