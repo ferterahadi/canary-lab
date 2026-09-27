@@ -58,8 +58,7 @@ import { RunScheduler, type SchedulerActiveRun } from './features/runs/logic/run
 import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './features/runs/logic/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from './features/runs/logic/runtime/repo-collision'
 import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from './features/runs/logic/runtime/repo-worktree'
-import { overlayExists as portifyOverlayExists } from './features/portify/logic/runtime/overlay'
-import { revertPortification } from './features/portify/logic/runtime/unportify'
+import { removeFeaturePortification } from './features/portify/logic/remove-portification'
 import {
   buildAgentSpawnCommand,
   buildOrchestratorHealPrompt,
@@ -370,14 +369,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       attach: (sessionId, target) => gettingStarted.attach(sessionId, target),
       abandon: (sessionId) => gettingStarted.abandon(sessionId),
     },
-    // Un-portify a saved feature: revert the config (snapshot or legacy strip) +
-    // delete the overlay, then emit so live clients update. Mirrors the REST route.
     removePortification: (feature) => {
-      const f = loadFeatures(featuresDir).find((x) => x.name === feature)
-      if (!f?.featureDir) throw Object.assign(new Error('feature not found'), { statusCode: 404 })
-      const { reverted } = revertPortification(f.featureDir)
-      workspaceEvents.publish({ type: 'features-changed' })
-      return { name: f.name, portified: portifyOverlayExists(f.featureDir), reverted }
+      const result = removeFeaturePortification({ featuresDir, workspaceEvents }, feature)
+      if (!result.ok) throw Object.assign(new Error(result.error), { statusCode: result.statusCode })
+      return result.value
     },
 	  })
 

@@ -198,7 +198,8 @@ export interface CanaryLabMcpDeps {
   savePortify?: (workflowId: string) => Promise<PortifyManifest>
   cancelPortify?: (workflowId: string) => Promise<PortifyManifest>
   /** Un-portify a saved feature: revert its config (snapshot or legacy strip) +
-   *  delete the overlay. Mirrors DELETE /api/features/:name/portify-overlay. */
+   *  delete the overlay. Mirrors DELETE /api/features/:name/portify-overlay.
+   *  The injected writer owns mutation events; the tool only translates its result. */
   removePortification?: (feature: string) => { name: string; portified: boolean; reverted: boolean }
   /** The Getting Started claim surface for the tools that create their work
    *  records through logic calls rather than REST (start_external_draft,

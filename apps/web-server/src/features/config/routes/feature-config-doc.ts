@@ -10,8 +10,7 @@ import { loadFeatures } from '../../../shared/feature-loader'
 import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
 import { describeFastForward, describeRepoCheckout, fastForwardToUpstream } from '../../../shared/git-upstream'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
-import { overlayExists as portifyOverlayExists } from '../../portify/logic/runtime/overlay'
-import { revertPortification } from '../../portify/logic/runtime/unportify'
+import { removeFeaturePortification } from '../../portify/logic/remove-portification'
 import { FEATURE_CONFIG_NAMES, findExistingConfig, listEnvFolders } from './feature-config-support'
 import { deleteSuite } from '../logic/feature-deletion'
 
@@ -121,15 +120,12 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
   // config. Successful restoration deletes the overlay without prompting.
   // Emits features-changed so the Portified badge flips live, no refresh.
   app.delete<{ Params: { name: string } }>('/api/features/:name/portify-overlay', async (req, reply) => {
-    const features = loadFeatures(deps.featuresDir)
-    const feature = features.find((f) => f.name === req.params.name)
-    if (!feature?.featureDir) {
-      reply.code(404)
-      return { error: 'feature not found' }
+    const result = removeFeaturePortification({ featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents }, req.params.name)
+    if (!result.ok) {
+      reply.code(result.statusCode)
+      return { error: result.error }
     }
-    const { reverted } = revertPortification(feature.featureDir)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
-    return { name: feature.name, portified: portifyOverlayExists(feature.featureDir), reverted }
+    return result.value
   })
 
   // `?fetch=1` contacts the remote first so `behindUpstream` describes its tip;

@@ -211,7 +211,6 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
     if (!deps.removePortification) return errorResult('removePortification dependency is not configured')
     try {
       const result = deps.removePortification(feature)
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       return asJsonResult(result)
     } catch (err) {
       return failureResult(err)

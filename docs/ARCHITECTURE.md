@@ -191,6 +191,15 @@ strips port slots on a best-effort basis. Synchronization failures retain the
 overlay backup for retry and propagate to the caller without a success event;
 the already-restored config is not rolled back.
 
+REST and MCP removal orchestration belongs to
+`apps/web-server/src/features/portify/logic/remove-portification.ts`: suite lookup,
+restoration, one `features-changed` event, and the existing result fields. Each
+successful call publishes once, including a repeat after the overlay is absent;
+missing suites and propagated failures publish nothing. MCP adds no event.
+Flight reset retains its missing-overlay guard and its own publication around
+the lower-level restoration core. Legacy best-effort failures retain that core's
+existing success behavior; no transaction or event deduplication is added.
+
 The configuration dialog shares document reads through a dialog-local
 `config-doc-store`. Mounted readers use `useLiveResource` with suite-scoped
 `configuration` invalidations, global reconnect/bulk invalidations, and a
