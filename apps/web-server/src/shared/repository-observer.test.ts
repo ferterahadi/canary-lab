@@ -17,13 +17,15 @@ function harness() {
   const spec: RepositoryWatchPath = { path: '/repo', recursive: true, accepts: (name) => name !== 'ignored' }
   const watchPaths = vi.fn(async () => [spec])
   const readTree = vi.fn(async () => ({ ok: true as const, stdout: '', lines: [] as string[] }))
+  const readStatus = vi.fn(async () => ({ isGitRepo: true, dirty: true, dirtyFiles: [' M app.ts'] }))
   const readRepo = vi.fn(async () => ({ currentBranch: 'main' }))
   const publish = vi.fn()
   const log = vi.fn()
   const deps = { events: { publish }, log, watchPath: watchPath as unknown as typeof fs.watch, watchPaths, readTree,
+    readStatus: readStatus as unknown as NonNullable<Parameters<typeof createRepositoryObserver>[0]['readStatus']>,
     readRepo: readRepo as unknown as NonNullable<Parameters<typeof createRepositoryObserver>[0]['readRepo']> }
   observer = createRepositoryObserver(deps)
-  return { handles, watchPath, watchPaths, readTree, readRepo, publish, log, deps }
+  return { handles, watchPath, watchPaths, readTree, readRepo, readStatus, publish, log, deps }
 }
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(0) })
 afterEach(() => { observer?.dispose(); vi.useRealTimers() })
@@ -172,4 +174,17 @@ it('does not publish an expired consumer if the event loop resumes after its dea
   vi.setSystemTime(100000)
   await tick(250)
   expect(h.publish).not.toHaveBeenCalled()
+})
+
+
+it('shares run preflight reads without upstream work and routes hints to the run consumer', async () => {
+  const h = harness()
+  await Promise.all([observer.readStatus('/repo', { runId: 'run' }), observer.readStatus('/repo', { runId: 'run' })])
+  expect(h.readStatus).toHaveBeenCalledTimes(1)
+  expect(h.readRepo).not.toHaveBeenCalled(); expect(h.readTree).not.toHaveBeenCalled()
+  h.handles[0].emitChange('change', 'app.ts')
+  await tick(250)
+  expect(h.publish).toHaveBeenCalledWith({ type: 'repos-changed', consumers: [{ runId: 'run' }] })
+  await observer.readStatus('/repo', { runId: 'run' })
+  expect(h.readStatus).toHaveBeenCalledTimes(2)
 })

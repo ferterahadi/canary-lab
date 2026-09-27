@@ -74,6 +74,7 @@ export function buildRunsRouteDeps(
 	    dirtySpecStore,
 	    broker: externalHealBroker,
       workspaceEvents,
+      repositoryObserver: ctx.repositoryObserver,
       gettingStarted,
       isWorktreeOwnerActive: (kind, id) => {
         if (kind === 'run') {

@@ -67,7 +67,7 @@ export interface PortifyEditProgress {
   /** Changes as the worktree changes — the stage's liveness key. */
   digest: string
   /** Files touched across every scratch worktree, for the UI. */
-  files: number
+  files: number | null
 }
 
 /** Liveness fingerprint of an IN-PROGRESS edit session, cheap enough to poll.
@@ -96,7 +96,7 @@ export async function editFingerprint(
   repos: Array<{ worktreePath?: string }>,
 ): Promise<PortifyEditProgress> {
   const parts: string[] = []
-  let files = 0
+  let files: number | null = 0
   for (const repo of repos) {
     if (!repo.worktreePath) continue
     const res = await readWorkingTree(repo.worktreePath, 'repository')
@@ -105,10 +105,11 @@ export async function editFingerprint(
       // abandonment this exists to prevent. Emit a stable marker instead, so the
       // fingerprint only freezes when the WORKTREE genuinely stops changing.
       parts.push('unreadable')
+      files = null
       continue
     }
     const lines = res.lines
-    files += lines.length
+    if (files !== null) files += lines.length
     // mtime is best-effort: deleted or inaccessible files still contribute their
     // pathname rather than breaking the fingerprint.
     const stamps = lines.map((line) => {

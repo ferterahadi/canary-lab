@@ -1,3 +1,4 @@
+import { normalizeFixCaptureNames } from '../fix-capture-names'
 import fs from 'fs'
 import path from 'path'
 import { runsIndexPath } from './run-paths'
@@ -290,7 +291,11 @@ export function writeManifest(manifestPath: string, manifest: RunManifest): void
 
 export function readManifest(manifestPath: string): RunManifest | null {
   try {
-    return JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as RunManifest
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as RunManifest
+    if (manifest.fixCapture) {
+      manifest.fixCapture.repos = manifest.fixCapture.repos.map(normalizeFixCaptureNames)
+    }
+    return manifest
   } catch {
     return null
   }

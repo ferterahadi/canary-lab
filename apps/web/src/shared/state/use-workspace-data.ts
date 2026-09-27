@@ -35,6 +35,8 @@ export interface WorkspaceData {
   /** Full manifests the flights channel pushed, by flight id. The open flight
    *  detail reads its own from here instead of polling for it. */
   flightDetails: Record<string, FlightManifest>
+  flightsHydrated: boolean
+  forgetFlight: (id: string) => void
   flightsRef: MutableRefObject<FlightIndexEntry[]>
   preFlights: PlanFeaturesTask[]
   versionStatus: VersionStatus | null
@@ -64,6 +66,11 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   // every flight write, so the list advances without a refetch and without the
   // 5s poll that used to cover a dropped `flights-changed`.
   const flightsStream = useFlightsStream()
+  const forgetStreamFlight = flightsStream.forgetFlight
+  const forgetFlight = useCallback((id: string) => {
+    forgetStreamFlight(id)
+    setRestFlights((rows) => rows.filter((row) => row.flightId !== id))
+  }, [forgetStreamFlight])
   const flights = flightsStream.hydrated ? flightsStream.flights : restFlights
   const [preFlights, setPreFlights] = useState<PlanFeaturesTask[]>([])
   const [versionStatus, setVersionStatus] = useState<VersionStatus | null>(null)
@@ -199,5 +206,5 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
     return () => conn?.close()
   }, [refreshFeatures, refreshVersion, refreshFlights, refreshPreFlights, invalidate, selectedFeatureRef, selectedRunIdRef])
 
-  return { features, flights, flightDetails: flightsStream.details, flightsRef, preFlights, versionStatus, refreshFeatures, refreshFlights, refreshPreFlights, refreshVersion }
+  return { features, flights, forgetFlight, flightsHydrated: flightsStream.hydrated, flightDetails: flightsStream.details, flightsRef, preFlights, versionStatus, refreshFeatures, refreshFlights, refreshPreFlights, refreshVersion }
 }

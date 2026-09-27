@@ -99,6 +99,7 @@ export async function captureFixes(ctx: RunContext, provisional = false): Promis
       // say WHICH files, so the user can pick them out of their own editor's
       // changed-files list after the patch lands in the real repo.
       fileNames: names.slice(0, FIX_CAPTURE_MAX_FILE_NAMES),
+      fileNamesFormat: 'literal',
     })
   }
   if (repos.length === 0) {

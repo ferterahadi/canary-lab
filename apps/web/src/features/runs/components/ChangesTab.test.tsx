@@ -318,14 +318,16 @@ describe('ChangesTab', () => {
     expect(text('changes-patch-error-mighty-cns')).toContain('no longer on disk')
   })
 
-  it('keeps the action alive when the preflight itself could not be read', async () => {
-    // An unreadable preflight must not produce a dead button — the apply
-    // reports its own failure, so the worst case is finding out on click.
+  it('withholds apply while preflight is unreadable and offers an explicit retry', async () => {
     mocks.getRunApplyPreflight.mockRejectedValue(new Error('offline'))
     await render(<ChangesTab runId="r1" fixCapture={{ ...fixCapture, repos: [fixCapture.repos[0]] }} />)
-    expect(container.querySelector<HTMLButtonElement>('[data-testid="changes-open-repo-mighty-cns"]')?.disabled).toBe(false)
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="changes-open-repo-mighty-cns"]')?.disabled).toBe(true)
+    expect(container.textContent).toContain('Repository status unavailable: offline')
     await click('changes-open-repo-mighty-cns')
-    expect(mocks.applyRunFixes).toHaveBeenCalled()
+    expect(mocks.applyRunFixes).not.toHaveBeenCalled()
+    mocks.getRunApplyPreflight.mockResolvedValue({ targets: [target()] })
+    await act(async () => { Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Refresh status')?.click() })
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="changes-open-repo-mighty-cns"]')?.disabled).toBe(false)
   })
 
   it('links the draft PR the run opened by itself', async () => {

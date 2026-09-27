@@ -211,6 +211,8 @@ export interface RunFixCaptureRepo {
    * pretending to be complete. Absent on captures written before this field.
    */
   fileNames?: string[]
+  /** Absent on legacy captures whose filenames use Git's C quoting. */
+  fileNamesFormat?: 'literal'
 }
 
 /** Name-list cap for RunFixCaptureRepo.fileNames. The manifest is re-read on

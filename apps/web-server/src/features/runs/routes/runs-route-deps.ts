@@ -1,3 +1,4 @@
+import type { RepositoryObserver } from '../../../shared/repository-observer'
 
 import type { RunQueueDiagnostics } from '../../../../../../shared/run-queue'
 import fs from 'fs'
@@ -27,6 +28,7 @@ export interface StartRunOptions {
 }
 
 export interface RunsRouteDeps {
+  repositoryObserver?: Pick<RepositoryObserver, 'readStatus'>
   runRequests?: RunStartRequests
   featuresDir: string
   projectRoot?: string

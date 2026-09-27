@@ -7,7 +7,7 @@ import { SkeletonBar, type AwaitingState } from '@/shared/ui/Skeleton'
 import { Tooltip, TOOLTIP_ANCHOR_ATTR } from '@/shared/ui/Tooltip'
 import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { AlertCircleIcon } from '@/shared/ui/Icons'
-import { STAGE_COLUMN, evidenceOf, num, specsCoverageProgress, str } from './stage-meta'
+import { STAGE_COLUMN, evidenceOf, num, portifyWorkflowId, progressOf, specsCoverageProgress, str } from './stage-meta'
 import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, overlayDiffStat, runHistoryStats, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
 
 // ─── Stage facts (R20) ──────────────────────────────────────────────────────
@@ -496,13 +496,15 @@ function measuredStageFacts(
           { label: 'Instances proven', value: '—', sub: 'nothing has started two copies yet' },
         ]
       }
-      if (typeof ev.workflowId !== 'string') return []
+      if (!portifyWorkflowId(stage)) return []
       // The old band was three sentences ("Safe — services boot side by side",
       // "Concurrent double boot, both green", "Applied (overlay)") — a verdict
       // restated three ways, with no way to see how much was edited or how hard
       // it was to get there. The verdict now rides the state line; the band
       // reports the size of the work and the strength of the proof.
       const wf = band.portify
+      const editing = stage.status === 'running' && (wf?.status === 'editing' || progressOf(stage).status === 'editing')
+      const editedFiles = num(progressOf(stage), 'editedFiles')
       const instances: PortifyBootInstance[] = wf?.verification?.instances ?? []
       const instancesOk = instances.filter((i) => i.ok).length
       const diff = overlayDiffStat(wf?.diff)
@@ -516,7 +518,9 @@ function measuredStageFacts(
               tone: 'good' as const,
             }]
           : []),
-        ...(diff
+        ...(editing || (stage.status === 'running' && !wf)
+          ? (editedFiles == null ? [] : [{ label: 'Files edited', value: String(editedFiles), big: true as const, sub: 'current working-tree changes' }])
+          : diff
           ? [{
               label: 'Files edited',
               value: String(diff.files),

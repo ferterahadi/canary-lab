@@ -1116,3 +1116,14 @@ describe('stageWorkMs / formatStageDuration — the work clock', () => {
     expect(formatStageDuration({}, {})).toBeNull()
   })
 })
+
+it('uses live Portify counts including zero instead of an old attempt diff, and reserves patch statistics for completed editing', () => {
+  const stage: FlightStage = { key: 'portify', status: 'running', progress: { workflowId: 'wf', status: 'editing', editedFiles: 2 } }
+  const files = (s: FlightStage, band?: StageBandData) => stageFacts(s, flight(), undefined, band).find((fact) => fact.label === 'Files edited')
+  const staleDiff: StageBandData = { portify: { workflowId: 'wf', feature: 'suite', agent: 'claude', branch: 'main', attempt: 1, maxAttempts: 3, startedAt: 'now', status: 'editing', repos: [], diff: 'diff --git a/old b/old\n--- a/old\n+++ b/old\n@@ -1 +1 @@\n-before\n+after\n' } }
+  expect(files(stage, staleDiff)).toMatchObject({ value: '2', sub: 'current working-tree changes' })
+  expect(files({ ...stage, progress: { workflowId: 'wf', status: 'editing', editedFiles: 0 } })).toMatchObject({ value: '0' })
+  expect(files({ ...stage, progress: { workflowId: 'wf', status: 'editing' } })).toMatchObject({ awaiting: true })
+  expect(files({ ...stage, status: 'done', evidence: { workflowId: 'wf', edits: true } }, staleDiff)?.sub).toContain('lines')
+  expect(files({ ...stage, status: 'done', evidence: { workflowId: 'wf', edits: false } })?.sub).toBe('ports were already swappable')
+})

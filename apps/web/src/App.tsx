@@ -86,7 +86,7 @@ export function App() {
   // The data hook owns fetches and workspace events; selection stays with
   // the controller above so reconnects and manual navigation use one policy.
   const {
-    features, flights, flightDetails, flightsRef, preFlights, versionStatus,
+    features, flights, flightDetails, flightsHydrated, forgetFlight, flightsRef, preFlights, versionStatus,
     refreshFeatures, refreshFlights, refreshPreFlights, refreshVersion,
   } = useWorkspaceData({
     invalidate,
@@ -401,6 +401,8 @@ export function App() {
               // one — an active flight then advances from the push instead of
               // the detail view polling for it.
               liveFlight={flightDetails[selectedFlightId] ?? null}
+              onFlightMissing={forgetFlight}
+              missing={flightsHydrated && !flights.some((f) => f.flightId === selectedFlightId)}
               // The index row seeds the header/strip/rail on a cold open of a
               // settled flight (which the push channel never snapshots).
               indexEntry={flights.find((f) => f.flightId === selectedFlightId) ?? null}

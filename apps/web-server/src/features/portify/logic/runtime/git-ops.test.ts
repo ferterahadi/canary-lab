@@ -212,11 +212,19 @@ describe('editFingerprint', () => {
     expect(fp.digest).not.toBe('unreadable')
   })
 
+  it('does not report a partial file count when one worktree is unreadable', async () => {
+    const root = await tmpRepo()
+    fs.writeFileSync(path.join(root, 'app.js'), 'changed')
+    const fp = await editFingerprint([{ worktreePath: path.join(root, 'missing') }, { worktreePath: root }])
+    expect(fp.files).toBeNull()
+    expect(fp.digest.split('|')).toHaveLength(2)
+  })
+
   it('reports an unreadable worktree as a marker, never as "no progress"', async () => {
     // A git failure resolving to an empty/stable fingerprint would resurrect the
     // abandonment this guards against, so it must be distinguishable.
     const fp = await editFingerprint([{ worktreePath: path.join(os.tmpdir(), 'definitely-not-a-repo-xyz') }])
     expect(fp.digest).toBe('unreadable')
-    expect(fp.files).toBe(0)
+    expect(fp.files).toBeNull()
   })
 })

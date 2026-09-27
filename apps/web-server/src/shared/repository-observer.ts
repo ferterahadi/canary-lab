@@ -1,12 +1,13 @@
 import fs from 'fs'
 import { REPOSITORY_RECONCILE_MS, repositoryConsumerKey, type RepositoryConsumer } from '../../../../shared/repository-observation'
 import type { RepoPrerequisite } from '../../../../shared/launcher/types'
-import { readWorkingTree, resolveRepoPath } from './git-repo'
+import { getGitStatus, readWorkingTree, resolveRepoPath } from './git-repo'
 import { describeRepoCheckout } from './git-upstream'
 import { repositoryWatchPaths, type RepositoryWatchPath } from './repository-watch-paths'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from './workspace-events'
 
 export interface RepositoryObserver {
+  readStatus(cwd: string, consumer: RepositoryConsumer): ReturnType<typeof getGitStatus>
   readWorkingTree(cwd: string, scope: 'repository' | 'directory', consumer: RepositoryConsumer): ReturnType<typeof readWorkingTree>
   readRepo(repo: RepoPrerequisite, consumer: RepositoryConsumer, opts: { fetch?: boolean }): ReturnType<typeof describeRepoCheckout>
   dispose(): void
@@ -17,6 +18,7 @@ interface ObserverDeps {
   log: (message: string, error: unknown) => void
   watchPath?: typeof fs.watch
   watchPaths?: typeof repositoryWatchPaths
+  readStatus?: typeof getGitStatus
   readTree?: typeof readWorkingTree
   readRepo?: typeof describeRepoCheckout
   maxWatches?: number
@@ -45,6 +47,7 @@ const MAX_DEBOUNCE_MS = 1000
 export function createRepositoryObserver(deps: ObserverDeps): RepositoryObserver {
   const watchPath = deps.watchPath ?? fs.watch
   const watchPaths = deps.watchPaths ?? repositoryWatchPaths
+  const readStatus = deps.readStatus ?? getGitStatus
   const readTree = deps.readTree ?? readWorkingTree
   const readRepo = deps.readRepo ?? describeRepoCheckout
   const observations = new Map<string, Observation>()
@@ -156,6 +159,10 @@ export function createRepositoryObserver(deps: ObserverDeps): RepositoryObserver
     return promise
   }
   return {
+    async readStatus(cwd, consumer) {
+      const entry = await observe(cwd, 'repository', consumer)
+      return join(entry, 'status', () => readStatus(cwd))
+    },
     async readWorkingTree(cwd, scope, consumer) {
       const entry = await observe(cwd, scope, consumer)
       return join(entry, 'tree', () => readTree(cwd, scope))

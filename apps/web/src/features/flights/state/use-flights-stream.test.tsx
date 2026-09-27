@@ -134,3 +134,13 @@ describe('useFlightsStream', () => {
     expect(FakeSocket.opened.at(-1)).toBe(`ws://${window.location.host}/ws/flights`)
   })
 })
+
+it('reconciles a confirmed detail 404 through the same removal reducer without reconnecting', async () => {
+  await act(async () => { root.render(<Probe />) })
+  const flight = manifest()
+  await push({ type: 'snapshot', flights: [flightIndexEntry(flight)], details: { fl_1: flight } })
+  await act(async () => { seen.at(-1)!.forgetFlight('fl_1') })
+  expect(rows()).toBe('')
+  expect(seen.at(-1)?.details).toEqual({})
+  expect(FakeSocket.opened).toEqual(['ws://test/ws/flights'])
+})

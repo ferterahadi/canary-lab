@@ -168,16 +168,20 @@ describe('buildApplyPreflight', () => {
     expect((await buildApplyPreflight(fix))[0].foreignDirty).toEqual(['café.txt'])
   })
 
-  it('retains the separate legacy capture-name mismatch without rewriting persisted names', async () => {
+  it('matches new literal and legacy quoted capture names without mutating saved input', async () => {
     const name = 'back\\slash.txt'
     fs.writeFileSync(path.join(repo, name), 'original')
     git(repo, ['add', '.']); git(repo, ['commit', '-qm', 'capture fixture'])
     fs.writeFileSync(path.join(repo, name), 'repair')
     const fileNames = await diffNamesSinceSnapshot(repo, 'HEAD')
-    expect(fileNames).toEqual(['"back\\\\slash.txt"'])
+    expect(fileNames).toEqual([name])
     const fix = capture(makePatch())
     fix.repos[0].fileNames = fileNames
-    expect((await buildApplyPreflight(fix))[0].foreignDirty).toContain(name)
+    expect((await buildApplyPreflight(fix))[0].foreignDirty).not.toContain(name)
+    fix.repos[0].fileNames = ['"back\\\\slash.txt"']
+    expect((await buildApplyPreflight(fix))[0].foreignDirty).not.toContain(name)
+    expect(fix.repos[0].fileNames).toEqual(['"back\\\\slash.txt"'])
+    fix.repos[0].fileNames = fileNames
     expect(fix.repos[0].fileNames).toEqual(fileNames)
   })
 

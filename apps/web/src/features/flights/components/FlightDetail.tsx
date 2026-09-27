@@ -29,6 +29,7 @@ import { FlightDrillThroughs, FlightPage } from './FlightPage'
 import { FlightSummaryStrip } from './FlightSummaryStrip'
 import { StageDetail, truncate } from './StageDetail'
 import { FLIGHT_STAGE_SECTIONS } from './flight-sections'
+import { useFlightRecord } from '../state/use-flight-record'
 import { useLiveCoverage } from '@/shared/state/use-live-coverage'
 import { coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { coverageStageWarning, isCoverageWarningRow } from './coverage-stage-warning'
@@ -75,6 +76,8 @@ export function FlightDetail({
   stage: routedStage,
   onSelectStage,
   indexEntry,
+  missing = false,
+  onFlightMissing,
 }: {
   flightId: string
   refreshKey: number
@@ -112,6 +115,8 @@ export function FlightDetail({
    *  status. The seed renders the header, strip and rail immediately; only the
    *  stage pane waits for the manifest. */
   indexEntry?: FlightIndexEntry | null
+  missing?: boolean
+  onFlightMissing?: (id: string) => void
 }) {
   // R81 — derived mode: `flightId` is a `feature:<name>` token, so there is no
   // record to GET. The rail comes from live workspace evidence and everything
@@ -119,8 +124,13 @@ export function FlightDetail({
   const derivedFeature = derivedFlightFeature(flightId)
   const derivedRail = derivedFeature ? derivedStages?.get(derivedFeature) : undefined
   const [derivedPrefill, setDerivedPrefill] = useState<{ repoPaths: string[]; description: string; env: string; evidence?: FlightEntryOptions['evidence'] } | null>(null)
-  const [fetched, setFlight] = useState<FlightManifest | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const record = useFlightRecord(derivedFeature ? null : flightId, liveFlight, !derivedFeature && missing, refreshKey)
+  useEffect(() => {
+    // A REST 404 can recover a lost removal frame for every index consumer too.
+    if (record.missing && !missing) onFlightMissing?.(flightId)
+  }, [record.missing, missing, flightId, onFlightMissing])
+  const fetched = record.manifest
+  const error = record.error
   const [ownStage, setOwnStage] = useState<FlightStageKey | null>(null)
   const selectedStage = onSelectStage ? routedStage ?? null : ownStage
   const setSelectedStage = onSelectStage ?? setOwnStage
@@ -150,35 +160,22 @@ export function FlightDetail({
     loadPortify,
   } = usePortify()
 
-  // Read through a ref so `refetch` keeps a stable identity across pushes (it
-  // is an effect dep and a control-call callback; churning it would re-run both
-  // on every frame).
-  const hasLiveRef = useRef(liveFlight != null)
-  hasLiveRef.current = liveFlight != null
-
-  const refetch = useCallback((): void => {
-    // The push channel is already carrying this flight — asking REST for what
-    // the server just sent is the round trip this channel exists to remove.
-    if (hasLiveRef.current) return
-    if (derivedFeature) {
-      // No record to load. One entry call supplies the repo/env prefill the
-      // panels show — and answers "has a record appeared since?", which is how
-      // the token self-heals: the moment a flight is minted for this feature
-      // (conducted from here, or from anywhere else), we hand over to it so the
-      // URL can never point at a stale derived view.
-      api.getFlightEntryOptions(derivedFeature)
-        .then((o) => {
-          setError(null)
-          setDerivedPrefill({ repoPaths: o.prefill.repoPaths, description: o.prefill.description, env: o.prefill.env, evidence: o.evidence })
-          if (o.flight) onNavigateFlight?.(o.flight.flightId)
-        })
-        .catch(() => { /* prefill is best-effort — the rail stands on its own */ })
-      return
-    }
-    api.getFlight(flightId)
-      .then((m) => { setFlight(m); setError(null) })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
-  }, [flightId, derivedFeature, onNavigateFlight])
+  const [entryRefresh, setEntryRefresh] = useState(0)
+  const refreshRecord = record.refresh
+  const refetch = useCallback(() => {
+    if (derivedFeature) setEntryRefresh((version) => version + 1)
+    else refreshRecord()
+  }, [derivedFeature, refreshRecord])
+  useEffect(() => {
+    if (!derivedFeature) return
+    let current = true
+    api.getFlightEntryOptions(derivedFeature).then((o) => {
+      if (!current) return
+      setDerivedPrefill({ repoPaths: o.prefill.repoPaths, description: o.prefill.description, env: o.prefill.env, evidence: o.evidence })
+      if (o.flight) onNavigateFlight?.(o.flight.flightId)
+    }).catch(() => { /* prefill is best-effort — the rail stands on its own */ })
+    return () => { current = false }
+  }, [derivedFeature, onNavigateFlight, refreshKey, docsRefreshKey, configRefreshKey, entryRefresh])
 
   const derivedManifest = useMemo(
     () => (derivedFeature && derivedRail ? buildDerivedManifest(derivedFeature, derivedRail, derivedPrefill ?? undefined) : null),
@@ -206,7 +203,7 @@ export function FlightDetail({
       ...(indexEntry.endedAt ? { endedAt: indexEntry.endedAt } : {}),
     }
   }, [indexEntry, flightId])
-  const flight = derivedManifest ?? (derivedFeature ? null : (liveFlight ?? fetched ?? seed))
+  const flight = derivedManifest ?? (derivedFeature ? null : (record.missing ? null : fetched ?? seed))
   const coverage = useLiveCoverage(flight?.feature ?? derivedFeature ?? null)
   const coverageWarningText = coverageWarning(coverage.value?.freshness, coverage.confirmed, coverage.error)
   const stageCoverageWarning = coverageStageWarning(coverage.value?.freshness, coverage.confirmed, coverage.error)
@@ -267,25 +264,6 @@ export function FlightDetail({
     seenFlightRef.current = flightId
     setSelectedStage(null)
   }, [flightId, setSelectedStage])
-
-  // WS `flights-changed` bumps refreshKey — still worth a re-read for a flight
-  // the push channel is not carrying (a settled one that an MCP tool just
-  // rewrote). A DERIVED flight has no flight record; its live facts come from
-  // the workspace-entry probe, so coverage invalidation must re-read that
-  // evidence too. Portify saves change feature config/evidence, so the repos
-  // topic joins coverage here. Reconnect invalidates all topics, providing
-  // reconciliation when a best-effort event was dropped.
-  const derivedEvidenceRefreshKey = derivedFeature ? docsRefreshKey : undefined
-  const derivedConfigRefreshKey = derivedFeature ? configRefreshKey : undefined
-  useEffect(() => { refetch() }, [refetch, refreshKey, derivedEvidenceRefreshKey, derivedConfigRefreshKey])
-  const active = flight?.status === 'running' || flight?.status === 'waiting-for-approval'
-  useEffect(() => {
-    // Only when the push channel is NOT carrying this flight: no socket (a
-    // component test), or a server too old to serve the channel.
-    if (!active || liveFlight) return
-    const id = setInterval(refetch, 2000)
-    return () => clearInterval(id)
-  }, [active, liveFlight, refetch])
 
   // The rail hides conductor plumbing (R21) and merges run+heal into one user
   // step (R22) — selection and auto-pick both work on these visible rows.
@@ -372,10 +350,10 @@ export function FlightDetail({
   // A read failure only blanks the view when there is nothing else to show.
   // With a pushed manifest in hand the record is NOT missing, and a transient
   // GET failure must not replace a live flight with "could not be loaded".
-  if (error && !flight) {
+  if ((record.missing || error) && !flight) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 text-xs text-muted">
-        <div>Couldn't open this flight. {error}</div>
+        <div>{record.missing ? 'This flight no longer exists.' : `Couldn't open this flight. ${error}`}</div>
         <button type="button" onClick={onBackToList} className="cl-button px-2.5 py-1">All flights</button>
       </div>
     )

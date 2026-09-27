@@ -23,6 +23,8 @@ export interface FlightDrillThroughs {
 export function FlightPage({
   flightId,
   liveFlight,
+  missing,
+  onFlightMissing,
   indexEntry,
   onSelectFlight,
   onClose,
@@ -47,6 +49,8 @@ export function FlightPage({
    *  for an ACTIVE flight (the server snapshots those and pushes every write),
    *  absent for a settled one — which reads its record once and never changes. */
   liveFlight?: FlightManifest | null
+  missing?: boolean
+  onFlightMissing?: (id: string) => void
   /** The flight's `/ws/flights` index row — seeds the header/strip/rail on a
    *  cold open of a settled flight, before its one-time REST read resolves. */
   indexEntry?: FlightIndexEntry | null
@@ -82,7 +86,7 @@ export function FlightPage({
   const docsRefreshKey = useInvalidationKey('coverage')
   return (
     <div className="flex h-full w-full flex-col bg-canvas text-primary">
-      <FlightDetail flightId={flightId} refreshKey={refreshKey} liveFlight={liveFlight} indexEntry={indexEntry} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} onOpenSpecReview={onOpenSpecReview} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} externalHistory={externalHistory} coverageJobs={coverageJobs} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage }} stage={stage} onSelectStage={onSelectStage} />
+      <FlightDetail flightId={flightId} refreshKey={refreshKey} liveFlight={liveFlight} missing={missing} onFlightMissing={onFlightMissing} indexEntry={indexEntry} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} onOpenSpecReview={onOpenSpecReview} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} externalHistory={externalHistory} coverageJobs={coverageJobs} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage }} stage={stage} onSelectStage={onSelectStage} />
     </div>
   )
 }

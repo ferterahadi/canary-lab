@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useApplyPreflight } from '../state/use-apply-preflight'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { ApplyTarget } from '@/shared/api/client'
 import type { RunFixCaptureRepo, RunProposedPr } from '@/shared/api/types'
@@ -39,7 +40,18 @@ type OpenState =
  * it. Callers render `confirm` once and spread `cardProps(repoName)` per card.
  */
 export function useRepoOpener(runId: string, enabled: boolean, provisional = false) {
-  const [targets, setTargets] = useState<ApplyTarget[] | null>(null)
+  const preflight = useApplyPreflight(runId, enabled && !provisional)
+  const targets = preflight.value?.targets
+  const refreshPreflight = preflight.refresh
+  const identity = JSON.stringify([runId, provisional, enabled])
+  const current = useRef({ identity, generation: 0 })
+  if (current.current.identity !== identity) current.current = { identity, generation: current.current.generation + 1 }
+  const generation = current.current.generation
+  const mounted = useRef(false)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
   const [state, setState] = useState<Record<string, OpenState>>({})
   const [pending, setPending] = useState<ApplyTarget | null>(null)
 
@@ -48,75 +60,64 @@ export function useRepoOpener(runId: string, enabled: boolean, provisional = fal
     setPending(null)
   }, [runId, provisional])
 
-  // The preflight reads the user's repos as they are RIGHT NOW, not as the run
-  // snapshotted them at boot — they have had the whole run to edit their tree,
-  // and whether it is dirty decides if opening it needs to ask first.
-  useEffect(() => {
-    if (!enabled) { setTargets(null); return }
-    let live = true
-    api.getRunApplyPreflight(runId)
-      .then((r) => { if (live) setTargets(r.targets) })
-      // A preflight we could not read must not disable the action: the apply
-      // itself reports its own failure, so the worst case is asking nothing
-      // and finding out on click, not a dead button.
-      .catch(() => { if (live) setTargets([]) })
-    return () => { live = false }
-  }, [runId, enabled])
-
   const run = useCallback(async (repoName: string) => {
-    setState((s) => ({ ...s, [repoName]: { kind: 'working' } }))
+    const alive = () => mounted.current && current.current.generation === generation
+    const update = (value: OpenState) => { if (alive()) setState((s) => ({ ...s, [repoName]: value })) }
+    update({ kind: 'working' })
     try {
       if (provisional) {
         const opened = await api.openRunRepo(runId, repoName)
-        setState((s) => ({
-          ...s,
-          [repoName]: opened.opened
-            ? { kind: 'done', provisional: true, ...(opened.editor ? { editor: opened.editor } : {}) }
-            : { kind: 'failed', reason: opened.error ?? 'the editor would not launch' },
-        }))
+        update(opened.opened
+          ? { kind: 'done', provisional: true, ...(opened.editor ? { editor: opened.editor } : {}) }
+          : { kind: 'failed', reason: opened.error ?? 'the editor would not launch' })
         return
       }
       const applied = await api.applyRunFixes(runId, repoName)
+      if (!alive()) return
       const failure = applied.results.find((r) => !r.ok)
       if (failure) {
-        setState((s) => ({ ...s, [repoName]: { kind: 'failed', reason: failure.reason ?? 'the patch did not apply' } }))
+        update({ kind: 'failed', reason: failure.reason ?? 'the patch did not apply' })
         return
       }
       // Only open once the edits are actually in the tree — opening first would
       // show the user an unchanged repo and read as "it did nothing".
       const opened = await api.openRunRepo(runId, repoName)
-      setState((s) => ({
-        ...s,
-        [repoName]: opened.opened
-          ? { kind: 'done', ...(opened.editor ? { editor: opened.editor } : {}) }
-          : { kind: 'failed', reason: opened.error ?? 'the editor would not launch' },
-      }))
+      update(opened.opened
+        ? { kind: 'done', ...(opened.editor ? { editor: opened.editor } : {}) }
+        : { kind: 'failed', reason: opened.error ?? 'the editor would not launch' })
     } catch (err) {
-      setState((s) => ({ ...s, [repoName]: { kind: 'failed', reason: err instanceof Error ? err.message : String(err) } }))
+      update({ kind: 'failed', reason: err instanceof Error ? err.message : String(err) })
+    } finally {
+      if (alive() && !provisional) refreshPreflight()
     }
-  }, [runId, provisional])
+  }, [runId, provisional, generation, refreshPreflight])
 
   const open = useCallback((repoName: string) => {
+    if (!provisional && !preflight.confirmed) return
     const target = targets?.find((t) => t.repoName === repoName)
     // Ask only when the repo carries edits that are NOT this repair. Warning on
     // raw dirtiness would nag on every re-open, because by then the tree is
     // dirty with our own patch.
     if (target && target.foreignDirty.length > 0) { setPending(target); return }
     void run(repoName)
-  }, [targets, run])
+  }, [targets, run, provisional, preflight.confirmed])
 
-  const confirm = pending && (
+  const pendingTarget = targets?.find((t) => t.repoName === pending?.repoName) ?? pending
+  const confirm = pendingTarget && (
     <ConfirmModal
       open
-      title={`${pending.repoName} already has uncommitted changes`}
+      title={pendingTarget.foreignDirty.length ? `${pendingTarget.repoName} already has uncommitted changes` : `${pendingTarget.repoName} has no unrelated changes`}
       confirmLabel="Apply and open"
+      confirmDisabled={!preflight.confirmed || !pendingTarget.ready}
       message={
         <>
           <p className="m-0 leading-relaxed">
-            {fileCountLabel(pending.foreignDirty.length)} in this repo
-            {pending.branch ? <> on <code style={{ fontFamily: 'var(--font-mono)' }}>{pending.branch}</code></> : null}
-            {' '}already changed before the repair lands. Both sets will show up together in your
-            editor’s changed-files list.
+            {pendingTarget.foreignDirty.length ? <>
+              {fileCountLabel(pendingTarget.foreignDirty.length)} in this repo
+              {pendingTarget.branch ? <> on <code style={{ fontFamily: 'var(--font-mono)' }}>{pendingTarget.branch}</code></> : null}
+              {' '}already changed before the repair lands. Both sets will show up together in your
+              editor’s changed-files list.
+            </> : 'The unrelated changes are gone. You can apply this repair and open it in your editor.'}
           </p>
           <p className="m-0 mt-2 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
             The files the repair touches are listed on the card, so you can tell them apart.
@@ -124,7 +125,7 @@ export function useRepoOpener(runId: string, enabled: boolean, provisional = fal
         </>
       }
       onCancel={() => setPending(null)}
-      onConfirm={() => { const t = pending; setPending(null); void run(t.repoName) }}
+      onConfirm={() => { const t = pendingTarget; setPending(null); void run(t.repoName) }}
     />
   )
 
@@ -134,6 +135,9 @@ export function useRepoOpener(runId: string, enabled: boolean, provisional = fal
     cardProps: (repoName: string) => ({
       runId,
       target: targets?.find((t) => t.repoName === repoName),
+      preflight: provisional ? undefined : {
+        confirmed: preflight.confirmed, error: preflight.error, refresh: preflight.refresh,
+      },
       openState: state[repoName] ?? { kind: 'idle' as const },
       onOpen: () => open(repoName),
     }),
@@ -154,6 +158,7 @@ export function RepairedRepoCard({
   repoName,
   repo,
   target,
+  preflight,
   openState,
   onOpen,
   pr,
@@ -170,6 +175,7 @@ export function RepairedRepoCard({
    *  "nothing changed here" is a stated fact rather than a missing row. */
   repo?: RunFixCaptureRepo
   target?: ApplyTarget
+  preflight?: { confirmed: boolean; error: string | null; refresh: () => void }
   openState: OpenState
   onOpen: () => void
   pr?: RunProposedPr
@@ -306,7 +312,7 @@ export function RepairedRepoCard({
                 type="button"
                 data-testid={`changes-open-repo-${repoName}`}
                 onClick={onOpen}
-                disabled={openState.kind === 'working' || (!provisional && !runStopped)}
+                disabled={openState.kind === 'working' || (!provisional && (!runStopped || preflight?.confirmed === false))}
                 title={provisional ? 'Opens this run’s isolated worktree without applying its edits' : 'Applies the repair into this repo as uncommitted changes, then opens it'}
                 className="cl-button cl-button-primary px-2.5 py-1 text-[11px]"
               >
@@ -341,6 +347,13 @@ export function RepairedRepoCard({
           </div>
 
           <div className="mt-2 flex flex-col gap-1">
+            {preflight && !preflight.confirmed && (
+              <div role="status" className="text-[11px] text-muted">
+                {preflight.error ? `Repository status unavailable: ${preflight.error}` : 'Checking current repository status…'}
+                {target && ' Last known status shown.'}
+                <button type="button" className="cl-button ml-2 px-2 py-0.5" onClick={preflight.refresh}>Refresh status</button>
+              </div>
+            )}
             <OpenOutcome repoName={repoName} state={openState} target={target} />
             <PrLine
               repoName={repoName}

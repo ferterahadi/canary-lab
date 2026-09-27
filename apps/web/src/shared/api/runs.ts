@@ -246,12 +246,7 @@ export interface ApplyTarget {
   branch: string | null
 }
 export function getRunApplyPreflight(runId: string, opts?: ClientOptions): Promise<{ targets: ApplyTarget[] }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<{ targets: ApplyTarget[] }>(
-    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/apply-preflight`,
-    { method: 'GET' },
-    fetchImpl,
-  )
+  return requestSnapshot(`/api/runs/${encodeURIComponent(runId)}/apply-preflight`, opts)
 }
 
 // Open a captured repo's working tree in the configured editor. The server

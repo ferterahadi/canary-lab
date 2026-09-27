@@ -126,7 +126,7 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
             ...(v.status ? { status: v.status } : {}),
             ...(v.attempt != null ? { attempt: v.attempt } : {}),
             ...(v.maxAttempts != null ? { maxAttempts: v.maxAttempts } : {}),
-            ...(edits === null ? {} : { editedFiles: edits.files }),
+            ...(edits?.files == null ? {} : { editedFiles: edits.files }),
           } satisfies PortifyStageProgress)
         }
         // Carried on the polled value so progressKey below can see it — the poll

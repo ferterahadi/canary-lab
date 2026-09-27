@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef } from 'react'
+import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
 import {
   EMPTY_FLIGHTS_STREAM,
@@ -24,8 +24,9 @@ export interface UseFlightsStreamOptions {
   onReconnect?: () => void
 }
 
-export function useFlightsStream(opts: UseFlightsStreamOptions = {}): FlightsStreamState {
+export function useFlightsStream(opts: UseFlightsStreamOptions = {}): FlightsStreamState & { forgetFlight: (id: string) => void } {
   const [state, dispatch] = useReducer(flightsStreamReducer, EMPTY_FLIGHTS_STREAM)
+  const forgetFlight = useCallback((flightId: string) => dispatch({ type: 'removed', flightId }), [])
   const onReconnectRef = useRef(opts.onReconnect)
   onReconnectRef.current = opts.onReconnect
   const { wsBase, WebSocketImpl } = opts
@@ -56,5 +57,5 @@ export function useFlightsStream(opts: UseFlightsStreamOptions = {}): FlightsStr
     return () => conn?.close()
   }, [wsBase, WebSocketImpl])
 
-  return state
+  return { ...state, forgetFlight }
 }

@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightManifest } from '@/shared/api/client'
+import { ApiError, type FlightManifest } from '@/shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
 
@@ -82,7 +82,7 @@ vi.mock('@/shared/api/client', () => ({
   stopRun: mocks.stopRun,
   restartRun: mocks.restartRun,
   ApiError: class ApiError extends Error {
-    constructor(message: string, public status = 500, public body: unknown = null) { super(message) }
+    constructor(public status: number, public body: unknown, message?: string) { super(message ?? `HTTP ${status}`) }
   },
 }))
 
@@ -613,4 +613,39 @@ describe('the open flight rides the push channel', () => {
     expect(container.querySelector('[data-testid="stage-rail-scaffold"]')).not.toBeNull()
     expect(mocks.getFlight).not.toHaveBeenCalled()
   })
+})
+
+describe('live edit counts and deleted details', () => {
+  it('updates the open Portify tile without reopening the step, then removes a deleted Running detail', async () => {
+    const live = (editedFiles: number): FlightManifest => manifest({
+      status: 'running', currentStage: 'portify',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'portify' ? 'running' : 'done',
+        ...(key === 'portify' ? { progress: { workflowId: 'editing', status: 'editing', editedFiles } } : {}),
+      })),
+    })
+    const render = (editedFiles: number, missing = false) => act(async () => {
+      root.render(<InvalidationProvider><FlightPage flightId="fl_1" liveFlight={missing ? null : live(editedFiles)} missing={missing}
+        stage="portify" onSelectStage={vi.fn()} onSelectFlight={vi.fn()} onClose={vi.fn()} /></InvalidationProvider>)
+    })
+    await render(1)
+    expect(container.textContent).toContain('current working-tree changes')
+    const tile = () => Array.from(container.querySelectorAll('[data-testid]')).find((el) => el.getAttribute('data-testid')?.includes('fact') && el.textContent?.includes('Files edited'))
+    expect(tile()?.textContent).toContain('1')
+    await render(2); expect(tile()?.textContent).toContain('2')
+    await render(0); expect(tile()?.textContent).toContain('0')
+    expect(container.textContent).not.toContain('ports were already swappable')
+    await render(0, true)
+    expect(container.textContent).toContain('This flight no longer exists.')
+    expect(container.textContent).not.toContain('Running')
+    expect(container.querySelector('[data-testid="stage-rail-portify"]')).toBeNull()
+  })
+})
+
+
+it('reports a confirmed missing detail to the shared Flight index owner', async () => {
+  mocks.getFlight.mockRejectedValue(new ApiError(404, { error: 'flight not found' }))
+  const onFlightMissing = vi.fn()
+  await act(async () => { root.render(<InvalidationProvider><FlightPage flightId="fl_1" onFlightMissing={onFlightMissing} onSelectFlight={vi.fn()} onClose={vi.fn()} /></InvalidationProvider>) })
+  expect(onFlightMissing).toHaveBeenCalledExactlyOnceWith('fl_1')
+  expect(container.textContent).toContain('This flight no longer exists.')
 })

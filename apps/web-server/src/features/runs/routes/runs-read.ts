@@ -108,7 +108,9 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(409)
       return { error: 'wait for the run to stop before applying its changes' }
     }
-    return { targets: await buildApplyPreflight(fixCapture) }
+    return { targets: await buildApplyPreflight(fixCapture, deps.repositoryObserver
+      ? (cwd) => deps.repositoryObserver!.readStatus(cwd, { runId: req.params.runId })
+      : undefined) }
   })
 
   // Open a captured repo's working tree in the user's editor. The path is

@@ -221,8 +221,12 @@ digest keeps the raw stdout plus best-effort file modification times. The pure
 paths, UTF-8 octal escapes, and rename/copy destinations for Portify and run fix
 preflight. Literal arrows and filename whitespace survive decoding; malformed
 payloads stay opaque. Fingerprint policy and recovery stash/commit remain with
-their domains. This does not normalize persisted repair filenames from
-`git diff --name-only`, which can still contain Git quoting.
+their domains. Repair capture reads `git diff --name-only -z` as literal paths
+and marks new filename lists with `fileNamesFormat: 'literal'`. Runs-domain
+`fix-capture-names.ts` decodes unmarked legacy names at manifest read and apply
+preflight boundaries, without rewriting files on read or decoding literal names
+a second time. Unreadable Portify worktrees produce no live file count; the
+Flight tile uses current counts during editing and patch statistics after it.
 `getGitStatus` uses repository scope without adding a second status subprocess.
 Background inspection does not refresh the index. Once a working repository is
 identified, failed branch, status, or reference reads reject with a diagnostic
@@ -233,6 +237,18 @@ snapshot. A completed checkout still announces its change if the subsequent
 status read fails; the response reports that read failure. Read failures before
 checkout prevent the mutation and produce no change event.
 
+Flight detail reads are coordinated by
+`apps/web/src/features/flights/state/use-flight-record.ts`. Recent pushed records
+avoid duplicate REST work; a quiet channel is reconciled after 30 seconds. A
+stream removal or confirmed REST 404 retires the mounted detail, including its
+controls. A recovered 404 also removes the row from the shared Flight stream
+state, so the active badge and picker do not retain the deleted record. Transient read failures retain evidence. Request identity and push
+identity prevent old responses from replacing another selection or a newer push.
+Repair apply controls require confirmed preflight evidence, retain read errors
+separately from action errors, and keep an open confirmation current. Provisional
+repairs only open their isolated worktree and do not request final apply preflight.
+
+
 REST and MCP removal orchestration belongs to
 `apps/web-server/src/features/portify/logic/remove-portification.ts`: suite lookup,
 restoration, one `features-changed` event, and the existing result fields. Each
@@ -242,7 +258,7 @@ Flight reset retains its missing-overlay guard and its own publication around
 the lower-level restoration core. Legacy best-effort failures retain that core's
 existing success behavior; no transaction or event deduplication is added.
 
-Repository display reads and Flight recovery use the server-owned
+Repository display reads, repair apply-preflight display reads, and Flight recovery use the server-owned
 `apps/web-server/src/shared/repository-observer.ts`. Reads lease scoped filesystem observation for
 90 seconds; overlapping consumers share native watches and simultaneous local
 reads. The observer watches working directories, their parent (replacement),
@@ -261,7 +277,8 @@ using fresh Git primitives directly; observation does not change their policies.
 
 Repository branch controls in the Service tab and Flight setup share
 `apps/web/src/features/config/state/use-repo-git-status.ts`; failed Flight stages
-use `apps/web/src/features/flights/state/use-flight-remedy.ts`. Both compose `useLiveResource`
+use `apps/web/src/features/flights/state/use-flight-remedy.ts`; repaired-repo cards
+use `apps/web/src/features/runs/state/use-apply-preflight.ts`. These compose `useLiveResource`
 with scoped repository hints, global/reconnect invalidation, 30-second local
 reconciliation, and a 45-second freshness lease. Hidden readers pause requests;
 focus, online and visibility restoration read immediately. Disabled/unmounted

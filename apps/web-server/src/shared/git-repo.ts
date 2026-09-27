@@ -360,11 +360,10 @@ export async function diffNamesSinceSnapshot(
   pathspecs?: readonly DiffPathspec[],
 ): Promise<string[]> {
   const target = resolveRepoPath(repoPath)
-  const result = await runGit(target, ['diff', '--name-only', ref, ...buildPathspecArgs(target, pathspecs)])
+  const result = await runGit(target, ['diff', '--name-only', '-z', ref, ...buildPathspecArgs(target, pathspecs)])
   if (result.code !== 0) return []
   return result.stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
+    .split('\0')
     .filter(Boolean)
 }
 

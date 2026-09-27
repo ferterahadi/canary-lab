@@ -46,7 +46,7 @@ it('publishes repeated quoted-path edits through the real Flight wiring and expo
   writeManifest(path.join(runDir, 'manifest.json'), {
     runId: 'path-run', feature: 'paths', featureDir, startedAt: '2026-01-01T00:00:00Z', endedAt: '2026-01-01T00:01:00Z',
     status: 'failed', healCycles: 1, services: [],
-    fixCapture: { capturedAt: '2026-01-01T00:01:00Z', repos: [{ repoName: 'app', repoRoot: repo, baseSha: 'HEAD', files: 1, patchFile: 'app.patch', patchPath: path.join(runDir, 'app.patch'), fileNames: [fileName] }] },
+    fixCapture: { capturedAt: '2026-01-01T00:01:00Z', repos: [{ repoName: 'app', repoRoot: repo, baseSha: 'HEAD', files: 1, patchFile: 'app.patch', patchPath: path.join(runDir, 'app.patch'), fileNames: [JSON.stringify(fileName)] }] },
   })
   ;({ app } = await createServer({ projectRoot: root }))
   // Seed after startup reconciliation. This represents an external producer's
@@ -59,7 +59,7 @@ it('publishes repeated quoted-path edits through the real Flight wiring and expo
   const address = await app.listen({ host: '127.0.0.1', port: 0 })
   client = new Client({ name: 'path-integration', version: '1' }, { capabilities: {} })
   await client.connect(new StreamableHTTPClientTransport(new URL('/mcp?profile=full', address)))
-  const frames: Array<{ type: string }> = []
+  const frames: Array<{ type: string; consumers?: Array<{ runId?: string }> }> = []
   const socket = await app.injectWS('/ws/workspace', {}, { onInit: (ws) => ws.on('message', (raw) => frames.push(JSON.parse(raw.toString()))) })
   const readFlight = async () => (await app.inject({ url: '/api/flights/path-fixture' })).json()
   const progress = (flight: Awaited<ReturnType<typeof readFlight>>) => flight.stages.find((stage: { key: string }) => stage.key === 'portify').progress
@@ -89,5 +89,22 @@ it('publishes repeated quoted-path edits through the real Flight wiring and expo
     const preflight = await app.inject({ url: '/api/runs/path-run/apply-preflight' })
     expect(preflight.statusCode).toBe(200)
     expect(preflight.json().targets[0].foreignDirty).toEqual(['tab\tforeign.ts'])
+    const runRead = await client.callTool({ name: 'get_run', arguments: { runId: 'path-run' } })
+    if (!Array.isArray(runRead.content) || runRead.content[0]?.type !== 'text') throw new Error('Expected MCP text')
+    expect(JSON.parse(runRead.content[0].text).manifest.fixCapture.repos[0]).toMatchObject({ fileNames: [fileName], fileNamesFormat: 'literal' })
+    frames.length = 0
+    fs.unlinkSync(path.join(repo, 'tab\tforeign.ts'))
+    await expect.poll(() => frames.some((frame) => frame.type === 'repos-changed' && frame.consumers?.some((c) => c.runId === 'path-run'))).toBe(true)
+    expect((await app.inject({ url: '/api/runs/path-run/apply-preflight' })).json().targets[0].foreignDirty).toEqual([])
+    const indexPath = path.join(repo, '.git', 'index')
+    const index = fs.readFileSync(indexPath)
+    fs.writeFileSync(indexPath, 'corrupted index')
+    expect((await app.inject({ url: '/api/runs/path-run/apply-preflight' })).statusCode).toBe(500)
+    fs.writeFileSync(indexPath, index)
+    expect((await app.inject({ url: '/api/runs/path-run/apply-preflight' })).statusCode).toBe(200)
+    expect((await app.inject({ method: 'POST', url: '/api/flights/path-fixture/pause' })).statusCode).toBe(200)
+    expect((await app.inject({ method: 'DELETE', url: '/api/flights/path-fixture' })).statusCode).toBe(200)
+    expect((await app.inject({ url: '/api/flights/path-fixture' })).statusCode).toBe(404)
+    expect((await client.callTool({ name: 'get_flight', arguments: { flightId: 'path-fixture' } })).isError).toBe(true)
   } finally { socket.close() }
 }, 20_000)
