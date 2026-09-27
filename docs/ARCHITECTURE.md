@@ -202,6 +202,16 @@ No-op and refused operations announce nothing. This corrects REST's duplicate
 checkout publication and MCP's missing active-work guard. The activity policy
 remains suite-scoped; it does not introduce cross-suite path locking.
 
+The shared Git status reader uses `--no-optional-locks` for porcelain status so
+background inspection does not refresh the index. Once a working repository is
+identified, failed branch, status, or reference reads reject with a diagnostic
+rather than reporting clean or empty evidence. Detached HEAD and an unborn
+branch remain valid states. Checkout-status assembly passes its existing status
+to the upstream reader, avoiding a second inspection without claiming an atomic
+snapshot. A completed checkout still announces its change if the subsequent
+status read fails; the response reports that read failure. Read failures before
+checkout prevent the mutation and produce no change event.
+
 REST and MCP removal orchestration belongs to
 `apps/web-server/src/features/portify/logic/remove-portification.ts`: suite lookup,
 restoration, one `features-changed` event, and the existing result fields. Each

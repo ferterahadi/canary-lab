@@ -80,6 +80,13 @@ function safeBranchName(branch: string): boolean {
     && !branch.includes('\r')
 }
 
+function requireGitRead(command: string, result: GitResult): void {
+  if (result.code !== 0) {
+    const diagnostic = result.stderr.trim() || result.stdout.trim() || 'git command failed'
+    throw Object.assign(new Error(`Unable to read Git status (${command}): ${diagnostic}`), { statusCode: 500 })
+  }
+}
+
 export async function getGitStatus(repoPath: string): Promise<GitStatus> {
   const target = resolveRepoPath(repoPath)
   if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
@@ -94,10 +101,21 @@ export async function getGitStatus(repoPath: string): Promise<GitStatus> {
   const [branch, head, status, locals, remotes] = await Promise.all([
     runGit(target, ['branch', '--show-current']),
     runGit(target, ['rev-parse', '--verify', '--quiet', 'HEAD']),
-    runGit(target, ['status', '--porcelain']),
+    // Background inspection must not refresh the index and contend with checkout.
+    runGit(target, ['--no-optional-locks', 'status', '--porcelain']),
     runGit(target, ['for-each-ref', '--format=%(refname:short)', 'refs/heads']),
     runGit(target, ['for-each-ref', '--format=%(refname:short)', 'refs/remotes']),
   ])
+
+  requireGitRead('branch --show-current', branch)
+  // --quiet reports an unborn HEAD with exit 1 and no diagnostic. Spawn errors
+  // also normalize to 1, but carry a diagnostic and must not become null evidence.
+  if (!(head.code === 1 && !head.stdout.trim() && !head.stderr.trim())) {
+    requireGitRead('rev-parse --verify --quiet HEAD', head)
+  }
+  requireGitRead('status --porcelain', status)
+  requireGitRead('for-each-ref refs/heads', locals)
+  requireGitRead('for-each-ref refs/remotes', remotes)
 
   const currentBranch = branch.stdout.trim() || null
   const dirtyFiles = parsePorcelainStatus(status.stdout)
@@ -151,9 +169,12 @@ export async function checkoutBranch(
       { statusCode: 500 },
     )
   }
-  const next = await getGitStatus(target)
-  publishWorkspaceEvent(events, { type: 'features-changed' })
-  return next
+  try {
+    return await getGitStatus(target)
+  } finally {
+    // Checkout already changed the tree, even if its follow-up read fails.
+    publishWorkspaceEvent(events, { type: 'features-changed' })
+  }
 }
 
 /** `updates` are the upstream fast-forwards run start performed just before

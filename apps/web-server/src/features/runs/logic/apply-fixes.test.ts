@@ -140,6 +140,16 @@ describe('porcelainPath', () => {
 })
 
 describe('buildApplyPreflight', () => {
+  it('rejects unreadable status and cannot apply a patch through a corrupt index', async () => {
+    const patchPath = makePatch()
+    const index = path.join(repo, '.git', 'index')
+    fs.writeFileSync(index, 'invalid index')
+    await expect(buildApplyPreflight(capture(patchPath))).rejects.toMatchObject({ statusCode: 500 })
+    expect(await applyFixCapture(capture(patchPath))).toMatchObject({ allOk: false, results: [{ ok: false }] })
+    expect(fs.readFileSync(path.join(repo, 'app.js'), 'utf8')).toBe('const x = 1\n')
+    expect(fs.readFileSync(index, 'utf8')).toBe('invalid index')
+  })
+
   it('reads the branch and reports a clean repo as having nothing foreign', async () => {
     const [t] = await buildApplyPreflight(capture(makePatch()))
     expect(t).toMatchObject({ repoName: 'repo', repoRoot: repo, ready: true, foreignDirty: [] })

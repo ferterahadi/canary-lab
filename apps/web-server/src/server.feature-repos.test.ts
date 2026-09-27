@@ -32,6 +32,48 @@ beforeEach(async () => {
 })
 afterEach(async () => { await client?.close(); await app?.close(); fs.rmSync(root, { recursive: true, force: true }) })
 
+it('rejects unreadable repository evidence across REST and MCP without writes, then recovers', async () => {
+  const frames: Array<{ type: string }> = []
+  const socket = await app.injectWS('/ws/workspace', {}, { onInit: (ws) => ws.on('message', (raw) => frames.push(JSON.parse(raw.toString()))) })
+  const index = path.join(repoDir, '.git', 'index')
+  const originalIndex = fs.readFileSync(index)
+  const config = path.join(root, 'features', 'checkout', 'feature.config.cjs')
+  const originalConfig = fs.readFileSync(config)
+  const head = git('rev-parse', 'HEAD')
+  try {
+    fs.writeFileSync(index, 'invalid index')
+    for (const url of ['/api/features/checkout/repos/app/git', `/api/workspace/git-status?path=${encodeURIComponent(repoDir)}`]) {
+      const response = await app.inject({ url })
+      expect(response.statusCode).toBe(500)
+      expect(response.json().message ?? response.json().error).toContain('status --porcelain')
+      expect(response.json()).not.toHaveProperty('dirty')
+    }
+    for (const url of ['/api/features/checkout/repos/app/checkout', '/api/features/checkout/repos/app/update', '/api/features/checkout/pin-current-branches']) {
+      const response = await app.inject({ method: 'POST', url, payload: { branch: 'other' } })
+      expect(response.statusCode).toBe(500)
+    }
+    for (const name of ['get_feature_repo_status', 'checkout_feature_repo_branch', 'update_feature_repo_branch']) {
+      const response = await client.callTool({ name, arguments: { feature: 'checkout', repo: 'app', fetch: false, branch: 'other', confirm: true } })
+      expect(response.isError).toBe(true)
+      expect(text(response)).toContain('status --porcelain')
+    }
+    await new Promise<void>((resolve) => { socket.once('pong', () => resolve()); socket.ping() })
+    expect(frames.filter((frame) => frame.type === 'features-changed')).toEqual([])
+    expect(fs.readFileSync(index, 'utf8')).toBe('invalid index')
+    expect(fs.readFileSync(config)).toEqual(originalConfig)
+    expect(git('branch', '--show-current')).toBe('main')
+    expect(git('rev-parse', 'HEAD')).toBe(head)
+
+    fs.writeFileSync(index, originalIndex)
+    const response = await app.inject({ url: '/api/features/checkout/repos/app/git' })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ currentBranch: 'main', dirty: false, headSha: head })
+    const read = await client.callTool({ name: 'get_feature_repo_status', arguments: { feature: 'checkout', repo: 'app', fetch: false } })
+    expect(read.isError).not.toBe(true)
+    expect(JSON.parse(text(read))).toMatchObject({ currentBranch: 'main', dirty: false, headSha: head })
+  } finally { socket.close() }
+})
+
 it.each(['rest', 'mcp'] as const)('shares checkout and update results, events, no-ops and refusals through %s', async (transport) => {
   const frames: Array<{ type: string }> = []
   const socket = await app.injectWS('/ws/workspace', {}, { onInit: (ws) => ws.on('message', (raw) => frames.push(JSON.parse(raw.toString()))) })

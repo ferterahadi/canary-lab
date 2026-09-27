@@ -100,8 +100,8 @@ export function porcelainPath(line: string): string {
 }
 
 /** Read every captured repo's current state, so the Changes tab knows which
- *  cards can offer to open and which need to warn first. Never throws: a repo
- *  git cannot describe comes back `ready:false` with the reason on it. */
+ *  cards can offer to open and which need to warn first. Missing/non-repo paths
+ *  are not ready; failed Git reads reject rather than present clean evidence. */
 export async function buildApplyPreflight(fixCapture: RunFixCapture): Promise<ApplyTarget[]> {
   return Promise.all(fixCapture.repos.map((repo) => applyTargetFor(repo)))
 }

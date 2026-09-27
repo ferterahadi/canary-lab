@@ -68,6 +68,7 @@ describe('git-repo helpers', () => {
     execFileSync('git', ['remote', 'add', 'origin', 'https://example.invalid/repo.git'], { cwd: repo })
     execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: repo })
     execFileSync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main'], { cwd: repo })
+    expect(detectBaseBranch(repo)).toBe('main')
     const status = await getGitStatus(repo)
     expect(status.isGitRepo).toBe(true)
     expect(status.currentBranch).toBe('main')

@@ -109,6 +109,14 @@ export async function getUpstreamStatus(
 ): Promise<UpstreamStatus> {
   const target = resolveRepoPath(repoPath)
   const status = await getGitStatus(target)
+  return readUpstreamStatus(target, status, opts)
+}
+
+async function readUpstreamStatus(
+  target: string,
+  status: GitStatus,
+  opts: { branch?: string; fetch?: boolean },
+): Promise<UpstreamStatus> {
   if (!status.isGitRepo) return emptyUpstream(null, null)
   const branch = opts.branch ?? status.currentBranch
   if (!branch) return emptyUpstream(null, status.headSha)
@@ -217,9 +225,7 @@ export async function describeRepoCheckout(
   opts: { fetch?: boolean } = {},
 ): Promise<RepoCheckoutStatus> {
   const status = await getGitStatus(repo.localPath)
-  const upstream = status.isGitRepo
-    ? await getUpstreamStatus(repo.localPath, { branch: repo.branch, fetch: opts.fetch })
-    : emptyUpstream(null, null)
+  const upstream = await readUpstreamStatus(resolveRepoPath(repo.localPath), status, { branch: repo.branch, fetch: opts.fetch })
   return {
     ...status,
     ...upstream,

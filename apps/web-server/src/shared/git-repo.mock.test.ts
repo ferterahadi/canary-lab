@@ -15,6 +15,61 @@ afterEach(() => {
 })
 
 describe('git-repo subprocess edge cases', () => {
+  it.each([
+    [1, 'branch --show-current'],
+    [2, 'rev-parse --verify --quiet HEAD'],
+    [3, 'status --porcelain'],
+    [4, 'for-each-ref refs/heads'],
+    [5, 'for-each-ref refs/remotes'],
+  ] as const)('rejects failed required read %s before checkout or merge', async (position, command) => {
+    const repo = tmpDir()
+    const results = successfulStatus()
+    results[position] = { code: 128, stderr: 'broken repository\n' }
+    const { checkoutBranch } = await import('./git-repo')
+    const { fastForwardToUpstream } = await import('./git-upstream')
+    for (const mutate of [() => checkoutBranch(repo, 'other'), () => fastForwardToUpstream(repo)]) {
+      mockGitSequence([...results])
+      await expect(mutate()).rejects.toMatchObject({
+        statusCode: 500,
+        message: `Unable to read Git status (${command}): broken repository`,
+      })
+    }
+    expect(execFileMock.mock.calls.some((call) => ['checkout', 'merge', 'fetch'].includes(call[1][0]))).toBe(false)
+  })
+
+  it.each([
+    { stdout: 'diagnostic\n', stderr: '', expected: 'diagnostic' },
+    { stdout: ' \n', stderr: ' \n', expected: 'git command failed' },
+  ])('uses the required-read diagnostic fallback $expected', async ({ stdout, stderr, expected }) => {
+    const results = successfulStatus()
+    results[3] = { code: 128, stdout, stderr }
+    mockGitSequence(results)
+    const { getGitStatus } = await import('./git-repo')
+    await expect(getGitStatus(tmpDir())).rejects.toThrow(`Unable to read Git status (status --porcelain): ${expected}`)
+  })
+
+  it.each([
+    { code: 1, stdout: '', stderr: 'spawn failed' },
+    { code: 1, stdout: 'unexpected output', stderr: '' },
+  ])('does not confuse HEAD failure $stderr$stdout with an unborn branch', async (failure) => {
+    const results = successfulStatus()
+    results[2] = failure
+    mockGitSequence(results)
+    const { getGitStatus } = await import('./git-repo')
+    await expect(getGitStatus(tmpDir())).rejects.toMatchObject({ statusCode: 500 })
+  })
+
+  it('announces a successful checkout once after a failed follow-up read', async () => {
+    const afterCheckout = successfulStatus()
+    afterCheckout[3] = { code: 128, stderr: 'index became unreadable' }
+    mockGitSequence([...successfulStatus(), { stdout: '' }, ...afterCheckout])
+    const { checkoutBranch } = await import('./git-repo')
+    const publish = vi.fn()
+    await expect(checkoutBranch(tmpDir(), 'other', { publish })).rejects.toThrow('index became unreadable')
+    expect(publish).toHaveBeenCalledExactlyOnceWith({ type: 'features-changed' })
+    expect(execFileMock.mock.calls.filter((call) => call[1][0] === 'checkout')).toHaveLength(1)
+  })
+
   it('returns null when git reports a blank working-tree root', async () => {
     const repo = tmpDir()
     mockGitSequence([{ stdout: '\n' }])
@@ -129,6 +184,10 @@ describe('git-repo subprocess edge cases', () => {
     })).rejects.toThrow('app: expected main, but checkout is detached')
   })
 })
+
+function successfulStatus(): Array<{ code?: number; stdout?: string; stderr?: string }> {
+  return [{ stdout: 'true\n' }, { stdout: 'main\n' }, { stdout: `${'a'.repeat(40)}\n` }, {}, { stdout: 'main\n' }, {}]
+}
 
 function tmpDir(): string {
   return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-git-mock-')))
