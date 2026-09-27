@@ -39,7 +39,6 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
     try {
       const result = captureFeatureEnvFiles(authoringCtx(deps), { feature, sources: sources as EnvFileSource[] })
       if (!result.ok) return errorResult(result.error)
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       return asJsonResult(result)
     } catch (err) {
       return failureResult(err)
@@ -60,7 +59,6 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
     if (!deps.writeEnvsetSlot) return errorResult('writeEnvsetSlot dependency is not configured')
     try {
       const result = await deps.writeEnvsetSlot(feature, env, slot, entries)
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature })
       return asJsonResult({ feature, env, slot, path: result.path, entries: result.entries, unparsedLines: result.unparsedLines })
     } catch (err) {
       return failureResult(err)

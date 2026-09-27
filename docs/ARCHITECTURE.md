@@ -161,7 +161,30 @@ metadata produce a 409 error without echoing file contents. Capture and slot
 metadata mutations validate before touching files; read and write I/O failures
 propagate. Valid object metadata retains unknown fields, with no nested schema
 validation. Raw slot-content and environment-directory operations remain
-independent of metadata. Event ownership and post-write publication are unchanged.
+independent of metadata.
+
+REST envset writes and capture share
+`apps/web-server/src/features/config/logic/envset-events.ts`.
+Writers announce only after successful persistence:
+slot operations publish one `envsets-changed`; environment creation/deletion and
+capture publish that event followed by `features-changed`. Capture uses this
+same pair for overwrite-only calls, feature creation, and Flights, including
+when a subsequent boot fails. MCP adapters do not add another announcement.
+Repeated successful writes remain separate events. Later filesystem failures
+can leave partial files without a success event; this is not a transaction.
+Environment removal belongs to
+`apps/web-server/src/features/config/logic/envset-removal.ts`. REST deletion and
+Flight env-capture reset both validate containment, remove the environment,
+synchronize the suite's declared environments from surviving folders, then
+publish the structural pair. Callers retain suite lookup (including renamed
+suites) and translate a missing environment: REST returns 404; Flight reset is
+an idempotent no-op. The envsets root itself cannot be removed as an environment.
+A config-write failure after removal propagates without rollback or a success
+announcement. Flight's existing restart coordinator catches reset failures and
+continues. A separate reset-ordering limitation remains: if Portify has a saved
+config snapshot, its later reset restores that snapshot verbatim and can
+reintroduce a removed environment declaration. Environment removal does not
+change Portify snapshot restoration.
 
 The configuration dialog shares document reads through a dialog-local
 `config-doc-store`. Mounted readers use `useLiveResource` with suite-scoped

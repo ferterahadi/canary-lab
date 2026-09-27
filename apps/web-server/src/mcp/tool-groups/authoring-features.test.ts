@@ -78,7 +78,7 @@ describe('create_feature', () => {
     const repoDir = path.join(tmpDir, 'repo-shop')
     fs.mkdirSync(repoDir, { recursive: true })
     fs.writeFileSync(path.join(repoDir, '.env.local'), 'API_KEY=secret\n')
-    const { call } = harness()
+    const { call, published } = harness()
 
     const out = await call('create_feature', {
       feature: 'checkout', envs: ['local'],
@@ -86,6 +86,7 @@ describe('create_feature', () => {
       envSources: [{ sourcePath: path.join(repoDir, '.env.local'), env: 'local', slot: 'shop.env' }],
     })
 
+    expect(published).toEqual([{ type: 'feature-created', feature: 'checkout' }, { type: 'envsets-changed', feature: 'checkout' }, { type: 'features-changed' }])
     expect(out).toHaveProperty('captured')
     expect(out).toHaveProperty('envsets')
     expect(fs.existsSync(path.join(featuresDir, 'checkout', 'envsets', 'local', 'shop.env'))).toBe(true)
@@ -94,7 +95,7 @@ describe('create_feature', () => {
   })
 
   it('reports a failed capture, having already made the skeleton', async () => {
-    const { text } = harness()
+    const { text, published } = harness()
 
     const out = await text('create_feature', {
       feature: 'checkout',
@@ -102,6 +103,7 @@ describe('create_feature', () => {
     })
 
     expect(out).toContain('source file not found')
+    expect(published).toEqual([{ type: 'feature-created', feature: 'checkout' }])
     // The skeleton is real: the client should fix the source and capture again,
     // not re-create the feature.
     expect(fs.existsSync(path.join(featuresDir, 'checkout', 'feature.config.cjs'))).toBe(true)

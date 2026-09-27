@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { plural } from '../../../../../../../shared/lib/plural'
 import { captureFeatureEnvFiles } from '../../../config/logic/feature-authoring'
-import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
+import { removeEnvironment } from '../../../config/logic/envset-removal'
 import type { RunManifest } from '../../../runs/logic/runtime/manifest'
 import type { RunBootFailure } from '../../../../../../../shared/run-state'
 import { diagnosticExcerpt } from '../../../runs/logic/runtime/diagnostic-redaction'
@@ -216,10 +216,8 @@ export function envCaptureStage(deps: FlightStageDeps): StageAdapter {
     // record cleanup belongs here.
     async reset(ctx) {
       const m = ctx.manifest()
-      const envsetDir = path.join(featureDirFor(deps, m.feature), 'envsets', m.opts.env)
-      if (!fs.existsSync(envsetDir)) return
-      fs.rmSync(envsetDir, { recursive: true, force: true })
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature: m.feature })
+      const result = removeEnvironment({ feature: m.feature, featureDir: featureDirFor(deps, m.feature), workspaceEvents: deps.workspaceEvents }, m.opts.env)
+      if (result === 'invalid') throw Object.assign(new Error('invalid env name'), { statusCode: 400 })
     },
   }
 }

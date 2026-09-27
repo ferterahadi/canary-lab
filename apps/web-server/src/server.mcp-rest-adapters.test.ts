@@ -18,6 +18,11 @@ let projectRoot: string
 let app: Awaited<ReturnType<typeof createServer>>['app']
 let client: Client
 let suiteDir: string
+// A pong follows earlier frames on the same connection, so exact-count checks
+// include queued deliveries instead of passing as soon as the first arrives.
+async function drainSocket(socket: Awaited<ReturnType<typeof app.injectWS>>): Promise<void> {
+  await new Promise<void>((resolve) => { socket.once('pong', () => resolve()); socket.ping() })
+}
 beforeEach(async () => {
   projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-adapters-'))
   suiteDir = path.join(projectRoot, 'features', 'checkout')
@@ -61,6 +66,25 @@ describe('production MCP REST adapter wiring', () => {
       const agentRead = await client.callTool({ name: 'get_feature_envset_summary', arguments: { feature: 'checkout' } })
       expect(JSON.parse(toolText(agentRead))).toMatchObject({ envs: [{ name: 'local', slots: [{ slot: 'app.env', preview: [{ key: 'APP_PORT', value: '********' }] }] }] })
       expect(toolText(agentRead)).not.toContain('4100')
+      await drainSocket(socket)
+      const change = { type: 'envsets-changed', feature: 'checkout' }
+      expect(frames.filter((frame) => frame.type === 'envsets-changed')).toEqual([change])
+      const repeated = await client.callTool({ name: 'write_envset', arguments: {
+        feature: 'checkout', env: 'local', slot: 'app.env', entries: [{ key: 'APP_PORT', value: '4100' }], confirm: true,
+      } })
+      expect(repeated.isError).not.toBe(true)
+      const restWrite = await app.inject({ method: 'PUT', url: '/api/features/checkout/envsets/local/app.env', payload: { entries: [{ key: 'APP_PORT', value: '4200' }] } })
+      expect(restWrite.statusCode).toBe(200)
+      const refused = await client.callTool({ name: 'write_envset', arguments: {
+        feature: 'checkout', env: 'local', slot: 'missing.env', entries: [], confirm: true,
+      } })
+      expect(refused.isError).toBe(true)
+      await drainSocket(socket)
+      expect(frames.filter((frame) => frame.type === 'envsets-changed')).toEqual([change, change, change])
+      expect(fs.readFileSync(path.join(suiteDir, 'envsets', 'local', 'app.env'), 'utf8')).toContain('APP_PORT=4200')
+      const catchup = await client.callTool({ name: 'get_feature_envset_summary', arguments: { feature: 'checkout' } })
+      expect(toolText(catchup)).toContain('APP_PORT')
+      expect(toolText(catchup)).not.toContain('4200')
     } finally { socket.close() }
   })
   it('rejects corrupt envset metadata before mutation and exposes recovered capture and slot changes to a connected agent', async () => {
@@ -91,6 +115,16 @@ describe('production MCP REST adapter wiring', () => {
       expect(captured.isError).not.toBe(true)
       expect(toolText(captured)).not.toContain('secret-value')
       await expect.poll(() => frames.some((frame) => frame.type === 'envsets-changed')).toBe(true)
+      await drainSocket(socket)
+      const captureEvents = [{ type: 'envsets-changed', feature: 'checkout' }, { type: 'features-changed' }]
+      const mutationFrames = () => frames.filter((frame) => frame.type === 'envsets-changed' || frame.type === 'features-changed')
+      expect(mutationFrames()).toEqual(captureEvents)
+      const repeated = await client.callTool({ name: 'capture_feature_env_files', arguments: {
+        ...capture, sources: [{ ...capture.sources[0], confirmOverwrite: true }],
+      } })
+      expect(repeated.isError).not.toBe(true)
+      await drainSocket(socket)
+      expect(mutationFrames()).toEqual([...captureEvents, ...captureEvents])
       const features = await app.inject({ method: 'GET', url: '/api/features' })
       expect(features.json()).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'checkout', envs: ['local', 'staging'] })]))
       const added = await app.inject({ method: 'POST', url: '/api/features/checkout/envsets/slots', payload: { sourcePath: source, slotName: 'shared.env' } })
@@ -106,6 +140,52 @@ describe('production MCP REST adapter wiring', () => {
       const catchup = await client.callTool({ name: 'get_feature_envset_summary', arguments: { feature: 'checkout' } })
       expect(toolText(catchup)).not.toContain('shared.env')
       expect(toolText(catchup)).toContain('import.env')
+      await drainSocket(socket)
+      expect(mutationFrames()).toEqual([...captureEvents, ...captureEvents,
+        { type: 'envsets-changed', feature: 'checkout' }, { type: 'envsets-changed', feature: 'checkout' }])
+    } finally { socket.close() }
+  })
+  it('keeps REST and Flight reset environment removal consistent through persisted state, events, and agent reads', async () => {
+    const created = await app.inject({ method: 'POST', url: '/api/features/checkout/envsets', payload: { env: 'staging' } })
+    expect(created.statusCode).toBe(201)
+    const frames: Array<{ type: string; feature?: string }> = []
+    const socket = await app.injectWS('/ws/workspace', {}, {
+      onInit: (ws) => ws.on('message', (raw) => frames.push(JSON.parse(raw.toString()))),
+    })
+    const changes = () => frames.filter((frame) => frame.type === 'envsets-changed' || frame.type === 'features-changed')
+    const pair = [{ type: 'envsets-changed', feature: 'checkout' }, { type: 'features-changed' }]
+    try {
+      const removed = await app.inject({ method: 'DELETE', url: '/api/features/checkout/envsets/staging' })
+      expect(removed.statusCode).toBe(204)
+      expect(removed.payload).toBe('')
+      await drainSocket(socket)
+      expect(changes()).toEqual(pair)
+      expect((await app.inject({ method: 'GET', url: '/api/features' })).json()).toEqual([
+        expect.objectContaining({ name: 'checkout', envs: ['local'] }),
+      ])
+      const missing = await app.inject({ method: 'DELETE', url: '/api/features/checkout/envsets/staging' })
+      expect(missing.statusCode).toBe(404)
+      expect(missing.json()).toEqual({ error: 'env not found' })
+      await drainSocket(socket)
+      expect(changes()).toEqual(pair)
+
+      // The seeded external Flight parks for its agent after reset; no agent
+      // subprocess or boot is needed to exercise the production reset wiring.
+      const paused = await client.callTool({ name: 'pause_flight', arguments: { flightId: 'external-flight' } })
+      expect(paused.isError, toolText(paused)).not.toBe(true)
+      const redone = await client.callTool({ name: 'start_flight', arguments: { feature: 'checkout', redo: true } })
+      expect(redone.isError, toolText(redone)).not.toBe(true)
+      await expect.poll(() => fs.existsSync(path.join(suiteDir, 'envsets', 'local'))).toBe(false)
+      await expect.poll(async () => (await app.inject({ method: 'GET', url: '/api/flights/external-flight' })).json().status).toBe('waiting-for-approval')
+      await drainSocket(socket)
+      expect(changes()).toEqual([...pair, ...pair])
+      expect((await app.inject({ method: 'GET', url: '/api/features' })).json()).toEqual([
+        expect.objectContaining({ name: 'checkout', envs: [] }),
+      ])
+      const read = await client.callTool({ name: 'get_feature_envset_summary', arguments: { feature: 'checkout' } })
+      expect(read.isError).not.toBe(true)
+      expect(JSON.parse(toolText(read))).toMatchObject({ envs: [] })
+      expect(toolText(read)).not.toContain('3000')
     } finally { socket.close() }
   })
   it('preserves the origin distinction between browser and MCP Flight decisions', async () => {

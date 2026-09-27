@@ -158,7 +158,8 @@ export interface CanaryLabMcpDeps {
   ) => Promise<{ runId: string }>
   /** PUT /api/features/:name/envsets/:env/:slot — overwrites a slot file's
    *  parsed entries. Provided as a dep so MCP `write_envset` can reuse the
-   *  REST handler's path-traversal and feature-resolution checks. */
+   *  REST handler's path-traversal and feature-resolution checks. The writer
+   *  owns mutation events; the MCP adapter only translates the response. */
   writeEnvsetSlot?: (
     feature: string,
     env: string,

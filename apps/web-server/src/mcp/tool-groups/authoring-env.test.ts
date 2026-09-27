@@ -85,10 +85,7 @@ describe('capture_feature_env_files', () => {
 
     expect(out.ok).toBe(true)
     expect(fs.existsSync(path.join(featuresDir, 'checkout', 'envsets', 'local', 'shop.env'))).toBe(true)
-    // The Envsets tab is derived from disk, so without an announcement it stays
-    // stale. The capture layer publishes its own envsets event too; what this
-    // tool adds is the feature-list refresh.
-    expect(published).toContainEqual({ type: 'features-changed' })
+    expect(published).toEqual([{ type: 'envsets-changed', feature: 'checkout' }, { type: 'features-changed' }])
     // Values are never echoed back — the whole point of the redacted preview.
     expect(JSON.stringify(out)).not.toContain('secret')
   })
@@ -150,7 +147,7 @@ describe('write_envset', () => {
     expect(await text('write_envset', ARGS)).toBe('writeEnvsetSlot dependency is not configured')
   })
 
-  it('writes through the REST handler and announces the envset change', async () => {
+  it('writes through the REST handler without adding an adapter-owned event', async () => {
     const writeEnvsetSlot = vi.fn(async () => ({
       path: '/features/checkout/envsets/local/shop.env',
       entries: [{ key: 'PORT', value: '4000' }],
@@ -167,7 +164,7 @@ describe('write_envset', () => {
       feature: 'checkout', env: 'local', slot: 'shop.env',
       path: '/features/checkout/envsets/local/shop.env', unparsedLines: [3],
     })
-    expect(published).toEqual([{ type: 'envsets-changed', feature: 'checkout' }])
+    expect(published).toEqual([])
   })
 
   it('surfaces the writer\'s rejection', async () => {

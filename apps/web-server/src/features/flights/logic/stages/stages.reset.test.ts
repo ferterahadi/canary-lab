@@ -32,6 +32,7 @@ vi.mock('child_process', async (importOriginal) => {
 import { scaffoldStage } from './scaffold'
 
 import { envCaptureStage } from './env-capture'
+import { loadFeatures } from '../../../../shared/feature-loader'
 
 import { attemptLogLine, describeAttempt, docsStage } from './docs'
 
@@ -207,7 +208,38 @@ describe('stage reset (R78 restart wipe)', () => {
       await envCaptureStage(deps({ workspaceEvents: publisher })).reset!(ctxFor(manifest()).ctx)
 
       expect(fs.existsSync(envsetDir)).toBe(false)
-      expect(events).toContainEqual({ type: 'envsets-changed', feature: 'checkout' })
+      expect(events).toEqual([{ type: 'envsets-changed', feature: 'checkout' }, { type: 'features-changed' }])
+      expect(loadFeatures(featuresDir).find((feature) => feature.name === 'checkout')?.envs).toEqual([])
+    })
+
+    it('resolves renamed suites and retains only surviving environments', async () => {
+      createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local', 'staging'] })
+      const featureDir = path.join(featuresDir, 'checkout')
+      const config = path.join(featureDir, 'feature.config.cjs')
+      fs.writeFileSync(config, "module.exports = { config: { name: 'renamed', envs: ['local', 'staging'], featureDir: __dirname } }")
+      fs.mkdirSync(path.join(featureDir, 'envsets', 'local'), { recursive: true })
+      fs.mkdirSync(path.join(featureDir, 'envsets', 'staging'), { recursive: true })
+      const { events, publisher } = eventSink()
+      const stage = envCaptureStage(deps({ workspaceEvents: publisher }))
+      const ctx = ctxFor(manifest({ feature: 'renamed' })).ctx
+
+      await stage.reset!(ctx)
+      expect(loadFeatures(featuresDir).find((feature) => feature.name === 'renamed')?.envs).toEqual(['staging'])
+      expect(fs.existsSync(path.join(featureDir, 'envsets', 'local'))).toBe(false)
+      expect(events).toEqual([{ type: 'envsets-changed', feature: 'renamed' }, { type: 'features-changed' }])
+      events.length = 0
+      await stage.reset!(ctx)
+      expect(events).toEqual([])
+    })
+
+    it('refuses a reset aimed at the envsets root', async () => {
+      createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+      const { events, publisher } = eventSink()
+      const m = manifest()
+      m.opts.env = '.'
+      await expect(envCaptureStage(deps({ workspaceEvents: publisher })).reset!(ctxFor(m).ctx)).rejects.toMatchObject({ statusCode: 400, message: 'invalid env name' })
+      expect(fs.existsSync(path.join(featuresDir, 'checkout', 'envsets'))).toBe(true)
+      expect(events).toEqual([])
     })
 
     it('is a no-op when the feature dir is already gone', async () => {

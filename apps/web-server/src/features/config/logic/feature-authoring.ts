@@ -25,6 +25,7 @@ import {
   isPlaywrightConfigPath,
 } from '../../../shared/playwright-config'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { publishEnvsetChange } from './envset-events'
 import { isWithin } from './path-containment'
 import { deleteSuite } from './feature-deletion'
 
@@ -218,7 +219,7 @@ export function captureFeatureEnvFiles(ctx: FeatureAuthoringContext, input: {
   writeEnvsetsConfig(envsetsDir, cfg)
   syncEnvsInConfig(feature.featureDir)
   const summary = getFeatureEnvsetSummary(ctx, input.feature)
-  publishWorkspaceEvent(ctx.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
+  publishEnvsetChange(ctx.workspaceEvents, feature.name, 'structure')
   return { ok: true, captured, summary: summary! }
 }
 

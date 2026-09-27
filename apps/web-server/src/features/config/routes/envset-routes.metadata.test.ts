@@ -87,3 +87,58 @@ it('keeps raw slot content and environment-directory operations independent of m
   expect((await app.inject({ method: 'DELETE', url: '/api/features/checkout/envsets/staging' })).statusCode).toBe(204)
   expect(fs.readFileSync(metadata, 'utf8')).toBe('null')
 })
+
+it('announces each REST mutation exactly once with the appropriate scope', async () => {
+  const slotEvent = { type: 'envsets-changed', feature: 'checkout' }
+  const url = '/api/features/checkout/envsets'
+  for (let attempt = 0; attempt < 2; attempt++) {
+    events.length = 0
+    const result = await app.inject({ method: 'PUT', url: `${url}/local/app.env`, payload: { entries: [{ key: 'TOKEN', value: 'same' }] } })
+    expect(result.statusCode).toBe(200)
+    expect(events).toEqual([slotEvent])
+  }
+  for (const method of ['POST', 'DELETE'] as const) {
+    events.length = 0
+    const result = await app.inject({ method, url: method === 'POST' ? url : `${url}/staging`, ...(method === 'POST' ? { payload: { env: 'staging' } } : {}) })
+    expect(result.statusCode).toBe(method === 'POST' ? 201 : 204)
+    expect(events).toEqual([slotEvent, { type: 'features-changed' }])
+  }
+  for (const method of ['POST', 'DELETE'] as const) {
+    events.length = 0
+    const result = await app.inject({ method, url: `${url}/slots${method === 'DELETE' ? '/new.env' : ''}`, ...(method === 'POST' ? { payload: { sourcePath: source, slotName: 'new.env' } } : {}) })
+    expect(result.statusCode).toBe(method === 'POST' ? 201 : 204)
+    expect(events).toEqual([slotEvent])
+  }
+  events.length = 0
+  expect((await app.inject({ method: 'POST', url, payload: { env: 'local' } })).statusCode).toBe(409)
+  expect((await app.inject({ method: 'PUT', url: `${url}/local/missing.env`, payload: { entries: [] } })).statusCode).toBe(404)
+  expect((await app.inject({ method: 'PUT', url: `${url}/local/app.env`, payload: {} })).statusCode).toBe(400)
+  expect(events).toEqual([])
+})
+
+it('does not announce a REST filesystem failure before persistence finishes', async () => {
+  const slotPath = path.join(suite, 'envsets', 'local', 'app.env')
+  fs.rmSync(slotPath)
+  fs.mkdirSync(slotPath)
+  const result = await app.inject({ method: 'PUT', url: '/api/features/checkout/envsets/local/app.env', payload: { entries: [] } })
+  expect(result.statusCode).toBe(500)
+  expect(events).toEqual([])
+})
+
+it('deletes a renamed suite environment and returns an empty declaration for the final environment', async () => {
+  const config = path.join(suite, 'feature.config.cjs')
+  fs.writeFileSync(config, fs.readFileSync(config, 'utf8').replace("name: 'checkout'", "name: 'renamed'"))
+  const response = await app.inject({ method: 'DELETE', url: '/api/features/renamed/envsets/local' })
+  expect(response.statusCode).toBe(204)
+  expect(response.payload).toBe('')
+  expect(readFeatureConfig(fs.readFileSync(config, 'utf8')).value.envs).toEqual([])
+  expect(fs.existsSync(path.join(suite, 'envsets', 'local'))).toBe(false)
+  expect(events).toEqual([{ type: 'envsets-changed', feature: 'renamed' }, { type: 'features-changed' }])
+})
+
+it.each(['%2e', '%2e%2e%2foutside'])('refuses invalid environment target %s without removal or announcements', async (env) => {
+  const response = await app.inject({ method: 'DELETE', url: `/api/features/checkout/envsets/${env}` })
+  expect(response.statusCode).toBe(404)
+  expect(fs.existsSync(path.join(suite, 'envsets', 'local', 'app.env'))).toBe(true)
+  expect(events).toEqual([])
+})

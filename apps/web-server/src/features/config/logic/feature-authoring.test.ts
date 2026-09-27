@@ -577,3 +577,44 @@ module.exports = { config }
     expect(summary!.repos).toEqual([])
   })
 })
+
+it('capture owns the full ordered announcement even for unchanged overwrites', () => {
+  createFeatureSkeleton({ ...ctx(), feature: 'checkout' })
+  const sourcePath = path.join(tmpDir, 'source.env')
+  fs.writeFileSync(sourcePath, 'TOKEN=synthetic\n')
+  const publish = vi.fn()
+  const input = { feature: 'checkout', sources: [{ sourcePath, slot: 'app.env', confirmOverwrite: true }] }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    publish.mockClear()
+    expect(captureFeatureEnvFiles({ ...ctx(), workspaceEvents: { publish } }, input).ok).toBe(true)
+    expect(publish.mock.calls).toEqual([
+      [{ type: 'envsets-changed', feature: 'checkout' }], [{ type: 'features-changed' }],
+    ])
+  }
+  publish.mockClear()
+  expect(captureFeatureEnvFiles({ ...ctx(), workspaceEvents: { publish } }, {
+    ...input, sources: [{ sourcePath, slot: 'app.env' }],
+  }).ok).toBe(false)
+  expect(publish).not.toHaveBeenCalled()
+})
+
+it.each(['missing source', 'filesystem failure'])('does not announce partial capture after a later %s', (failure) => {
+  createFeatureSkeleton({ ...ctx(), feature: 'checkout' })
+  const sourcePath = path.join(tmpDir, 'source.env')
+  fs.writeFileSync(sourcePath, 'TOKEN=synthetic\n')
+  const envDir = path.join(featuresDir, 'checkout', 'envsets', 'local')
+  // A directory at the second slot forces a real write failure after the first
+  // file was persisted. Capture is deliberately not a filesystem transaction.
+  fs.mkdirSync(path.join(envDir, 'blocked.env'))
+  const publish = vi.fn()
+  const capture = () => captureFeatureEnvFiles({ ...ctx(), workspaceEvents: { publish } }, {
+    feature: 'checkout', sources: [
+      { sourcePath, slot: 'first.env' },
+      { sourcePath: failure === 'missing source' ? path.join(tmpDir, 'missing.env') : sourcePath, slot: 'blocked.env', confirmOverwrite: true },
+    ],
+  })
+  if (failure === 'missing source') expect(capture().ok).toBe(false)
+  else expect(capture).toThrow()
+  expect(fs.readFileSync(path.join(envDir, 'first.env'), 'utf8')).toBe('TOKEN=synthetic\n')
+  expect(publish).not.toHaveBeenCalled()
+})
