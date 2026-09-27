@@ -438,18 +438,20 @@ export function BranchRow({ feature, repoName, value, refreshKey, onSave, testId
   return (
     <>
       <RowLabel label="Branch" />
-      <BranchSuggestInput
-        value={draft}
-        branches={branchSuggestions(status)}
-        placeholder={status?.currentBranch ?? undefined}
-        testId={testId}
-        inputClassName="cl-input w-full px-2 py-1 cl-type-data"
-        inputStyle={{ fontFamily: 'var(--font-mono)' }}
-        onChange={setDraft}
-        onSelect={commit}
-        onBlur={() => commit(draft)}
-      />
-      <RepoGitStatusNotice status={status} confirmed={confirmed} error={error} />
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <BranchSuggestInput
+          value={draft}
+          branches={branchSuggestions(status)}
+          placeholder={status?.currentBranch ?? undefined}
+          testId={testId}
+          inputClassName="cl-input w-full px-2 py-1 cl-type-data"
+          inputStyle={{ fontFamily: 'var(--font-mono)' }}
+          onChange={setDraft}
+          onSelect={commit}
+          onBlur={() => commit(draft)}
+        />
+        <RepoGitStatusNotice status={status} confirmed={confirmed} error={error} />
+      </div>
     </>
   )
 }
