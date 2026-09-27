@@ -62,6 +62,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     planStore,
     workspaceEvents,
     gettingStarted: ctx.gettingStarted,
+    repositoryObserver: ctx.repositoryObserver,
     adapters: buildFlightStageAdapters({
       featuresDir,
       logsDir,

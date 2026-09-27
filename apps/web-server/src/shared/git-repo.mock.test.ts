@@ -15,6 +15,34 @@ afterEach(() => {
 })
 
 describe('git-repo subprocess edge cases', () => {
+  it.each(['repository', 'directory'] as const)('inspects %s scope with one local status command and no path normalization', async (scope) => {
+    mockGitSequence([{ stdout: ' M first\r\n?? second  \n\n' }])
+    const { readWorkingTree } = await import('./git-repo')
+    await expect(readWorkingTree('~/untouched-path', scope)).resolves.toEqual({ ok: true, lines: [' M first', '?? second'] })
+    expect(execFileMock).toHaveBeenCalledExactlyOnceWith('git',
+      ['--no-optional-locks', 'status', '--porcelain', ...(scope === 'directory' ? ['--', '.'] : [])],
+      { cwd: '~/untouched-path' }, expect.any(Function))
+  })
+
+  it('preserves a failed status command exit code and both diagnostic streams', async () => {
+    const result = { code: 128, stdout: 'partial output\n', stderr: 'fatal: broken index\n' }
+    mockGitSequence([result])
+    const { readWorkingTree } = await import('./git-repo')
+    await expect(readWorkingTree('/repo', 'directory')).resolves.toEqual({ ok: false, result })
+    expect(execFileMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves subprocess spawn failures as failed inspections', async () => {
+    execFileMock.mockImplementationOnce(() => ({
+      on: (_event: string, callback: (error: Error) => void) => callback(new Error('spawn ENOENT')),
+    }))
+    const { readWorkingTree } = await import('./git-repo')
+    await expect(readWorkingTree('/missing', 'directory')).resolves.toEqual({
+      ok: false, result: { code: 1, stdout: '', stderr: 'spawn ENOENT' },
+    })
+    expect(execFileMock).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
     [1, 'branch --show-current'],
     [2, 'rev-parse --verify --quiet HEAD'],

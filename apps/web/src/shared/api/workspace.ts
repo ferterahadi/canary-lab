@@ -2,7 +2,7 @@
 // Split out of client.ts; see that barrel for the shared surface.
 
 import type { VersionStatus, UpdateJobManifest } from './types'
-import { defaultOpts, request, type ClientOptions } from './internal'
+import { defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
 import type { EditorChoice } from './config'
 
 // Current vs latest published version + the self-update job state.
@@ -172,12 +172,7 @@ export function getRepoGitStatus(
   repo: string,
   opts?: ClientOptions,
 ): Promise<GitRepoStatus> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<GitRepoStatus>(
-    `${baseUrl}/api/features/${encodeURIComponent(feature)}/repos/${encodeURIComponent(repo)}/git`,
-    { method: 'GET' },
-    fetchImpl,
-  )
+  return requestSnapshot(`/api/features/${encodeURIComponent(feature)}/repos/${encodeURIComponent(repo)}/git`, opts)
 }
 
 export function checkoutRepoBranch(

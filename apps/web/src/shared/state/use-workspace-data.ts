@@ -1,3 +1,4 @@
+import { repositoryConsumerKey } from '@shared/repository-observation'
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import * as api from '../api/client'
 import type { Feature, VersionStatus } from '../api/types'
@@ -125,6 +126,10 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
           // client-local "has this socket opened before?" classification.
           if (event.type === 'connected') {
             resyncWorkspace()
+            return
+          }
+          if (event.type === 'repos-changed') {
+            for (const consumer of event.consumers) invalidate('repos', repositoryConsumerKey(consumer))
             return
           }
           if (event.type === 'feature-renamed') {

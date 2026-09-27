@@ -103,6 +103,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     .some((run) => isActiveRunStatus(run.status))
   await app.register(featureConfigRoutes, {
     featuresDir,
+    repositoryObserver: ctx.repositoryObserver,
     workspaceEvents,
     isRepoActive,
     // R76: deleting a suite deletes its flight history with it.

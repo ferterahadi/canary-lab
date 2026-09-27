@@ -88,7 +88,7 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
       fetch: z.boolean().default(true).describe('Contact the remote first so the counts describe its current tip (default). false reads the last fetch only; a failed fetch is reported as fetchError beside the stale counts.'),
     },
   }, async ({ feature, repo, fetch }) => {
-    const status = await getFeatureRepoStatus({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, feature, repo, { fetch })
+    const status = await getFeatureRepoStatus({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir, repositoryObserver: deps.repositoryObserver }, feature, repo, { fetch })
     if (!status) return errorResult(`repo not found: ${feature}/${repo}`)
     return asJsonResult(status)
   })

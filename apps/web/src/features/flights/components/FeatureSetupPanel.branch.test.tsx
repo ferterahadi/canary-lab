@@ -29,13 +29,13 @@ it('refreshes Flight suggestions after events and missed events without changing
   await act(async () => { invalidate('repos') })
   expect(input.placeholder).toBe('other'); expect(input.value).toBe('my-draft'); expect(onSave).not.toHaveBeenCalled()
   vi.mocked(getRepoGitStatus).mockResolvedValue(status('main'))
-  await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(30000) })
   expect(input.placeholder).toBe('main'); expect(input.value).toBe('my-draft'); expect(onSave).not.toHaveBeenCalled()
 })
 it('marks retained suggestions stale but still allows pinning configuration, then recovers', async () => {
   await act(async () => { root.render(<InvalidationProvider><Editor /></InvalidationProvider>) })
   vi.mocked(getRepoGitStatus).mockRejectedValue(new Error('offline'))
-  await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(30000) })
   expect(container.textContent).toContain('Git status is stale')
   const input = container.querySelector('input')!
   expect(input.disabled).toBe(false); expect(input.placeholder).toBe('main')

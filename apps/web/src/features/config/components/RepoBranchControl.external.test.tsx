@@ -61,7 +61,7 @@ it('recovers an external branch change without an event and stops recovery when 
   await act(async () => { root.render(<InvalidationProvider><Workspace /></InvalidationProvider>) })
   expect(branch()).toBe('main')
   vi.mocked(api.getRepoGitStatus).mockResolvedValue(status('other'))
-  await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(30000) })
   expect(branch()).toBe('other')
   expect(connectWorkspaceEvents).toHaveBeenCalledTimes(1)
   await act(async () => { root.render(null) })

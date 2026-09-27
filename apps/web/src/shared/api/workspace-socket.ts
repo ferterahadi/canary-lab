@@ -1,3 +1,4 @@
+import type { RepositoryConsumer } from '@shared/repository-observation'
 import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
 import type { DraftRecord, EvaluationExportTask } from '@/shared/api/types'
 
@@ -7,6 +8,7 @@ export type WorkspaceEvent =
   | { type: 'feature-deleted'; feature: string }
   | { type: 'feature-renamed'; from: string; to: string }
   | { type: 'features-changed' }
+  | { type: 'repos-changed'; consumers: RepositoryConsumer[] }
   | { type: 'tests-changed'; feature: string }
   | { type: 'discovery-repair-changed'; feature: string }
   | { type: 'envsets-changed'; feature: string }

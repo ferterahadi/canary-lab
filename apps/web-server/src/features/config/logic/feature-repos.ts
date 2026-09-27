@@ -1,3 +1,4 @@
+import type { RepositoryObserver } from '../../../shared/repository-observer'
 import type { RepoPrerequisite } from '../../../../../../shared/launcher/types'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { checkoutBranch, findRepo, resolveRepoPath, type GitStatus } from '../../../shared/git-repo'
@@ -5,6 +6,7 @@ import { describeFastForward, describeRepoCheckout, fastForwardToUpstream, type 
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 export interface FeatureRepoDeps {
+  repositoryObserver?: RepositoryObserver
   featuresDir: string
   workspaceEvents?: WorkspaceEventPublisher
   isRepoActive?: (feature: string, repo: string) => boolean
@@ -27,7 +29,10 @@ function resolveRepo(deps: FeatureRepoDeps, target: RepoTarget, mutation: boolea
 export async function readFeatureRepo(deps: FeatureRepoDeps, target: RepoTarget, opts: { fetch?: boolean } = {}): Promise<RepoResult<RepoCheckoutStatus>> {
   const resolved = resolveRepo(deps, target, false)
   if (!resolved.ok) return resolved
-  return { ok: true, value: await describeRepoCheckout(resolved.value, opts) }
+  const value = deps.repositoryObserver
+    ? await deps.repositoryObserver.readRepo(resolved.value, target, opts)
+    : await describeRepoCheckout(resolved.value, opts)
+  return { ok: true, value }
 }
 
 export async function updateFeatureRepo(deps: FeatureRepoDeps, target: RepoTarget) {

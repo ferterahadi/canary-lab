@@ -65,6 +65,23 @@ export function parsePorcelainStatus(stdout: string): string[] {
     .filter(Boolean)
 }
 
+export type WorkingTreeRead =
+  | { ok: true; lines: string[] }
+  | { ok: false; result: GitResult }
+
+/** Inspect exactly the caller's scope without refreshing the Git index. */
+export async function readWorkingTree(
+  cwd: string,
+  scope: 'repository' | 'directory',
+): Promise<WorkingTreeRead> {
+  const args = ['--no-optional-locks', 'status', '--porcelain']
+  if (scope === 'directory') args.push('--', '.')
+  const result = await runGit(cwd, args)
+  return result.code === 0
+    ? { ok: true, lines: parsePorcelainStatus(result.stdout) }
+    : { ok: false, result }
+}
+
 export function parseRefList(stdout: string): string[] {
   return stdout
     .split(/\r?\n/)
@@ -80,11 +97,13 @@ function safeBranchName(branch: string): boolean {
     && !branch.includes('\r')
 }
 
+function gitReadError(command: string, result: GitResult) {
+  const diagnostic = result.stderr.trim() || result.stdout.trim() || 'git command failed'
+  return Object.assign(new Error(`Unable to read Git status (${command}): ${diagnostic}`), { statusCode: 500 })
+}
+
 function requireGitRead(command: string, result: GitResult): void {
-  if (result.code !== 0) {
-    const diagnostic = result.stderr.trim() || result.stdout.trim() || 'git command failed'
-    throw Object.assign(new Error(`Unable to read Git status (${command}): ${diagnostic}`), { statusCode: 500 })
-  }
+  if (result.code !== 0) throw gitReadError(command, result)
 }
 
 export async function getGitStatus(repoPath: string): Promise<GitStatus> {
@@ -101,8 +120,7 @@ export async function getGitStatus(repoPath: string): Promise<GitStatus> {
   const [branch, head, status, locals, remotes] = await Promise.all([
     runGit(target, ['branch', '--show-current']),
     runGit(target, ['rev-parse', '--verify', '--quiet', 'HEAD']),
-    // Background inspection must not refresh the index and contend with checkout.
-    runGit(target, ['--no-optional-locks', 'status', '--porcelain']),
+    readWorkingTree(target, 'repository'),
     runGit(target, ['for-each-ref', '--format=%(refname:short)', 'refs/heads']),
     runGit(target, ['for-each-ref', '--format=%(refname:short)', 'refs/remotes']),
   ])
@@ -113,12 +131,12 @@ export async function getGitStatus(repoPath: string): Promise<GitStatus> {
   if (!(head.code === 1 && !head.stdout.trim() && !head.stderr.trim())) {
     requireGitRead('rev-parse --verify --quiet HEAD', head)
   }
-  requireGitRead('status --porcelain', status)
+  if (!status.ok) throw gitReadError('status --porcelain', status.result)
   requireGitRead('for-each-ref refs/heads', locals)
   requireGitRead('for-each-ref refs/remotes', remotes)
 
   const currentBranch = branch.stdout.trim() || null
-  const dirtyFiles = parsePorcelainStatus(status.stdout)
+  const dirtyFiles = status.lines
   return {
     isGitRepo: true,
     currentBranch,

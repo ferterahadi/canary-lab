@@ -152,6 +152,7 @@ export default defineConfig({
         'shared/portify-overlay.ts',
         'shared/run-mode.ts',
         'shared/run-state.ts',
+        'shared/repository-observation.ts',
         'shared/verification.ts',
         // Frontend non-component modules: the API client, the pure utilities,
         // and every `state/` tree — the stores, the context providers and the

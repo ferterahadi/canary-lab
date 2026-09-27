@@ -25,13 +25,13 @@ beforeEach(() => {
 })
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); vi.restoreAllMocks(); vi.resetAllMocks() })
 
-it('reads immediately, reconciles every five seconds, and does not refetch for unrelated renders', async () => {
+it('reads immediately, reconciles every thirty seconds, and does not refetch for unrelated renders', async () => {
   await render()
   expect(live.status?.currentBranch).toBe('main'); expect(live.confirmed).toBe(true)
   const refresh = live.refresh
   await render()
   expect(live.refresh).toBe(refresh); expect(getRepoGitStatus).toHaveBeenCalledTimes(1)
-  await advance(4999); expect(getRepoGitStatus).toHaveBeenCalledTimes(1)
+  await advance(29999); expect(getRepoGitStatus).toHaveBeenCalledTimes(1)
   vi.mocked(getRepoGitStatus).mockResolvedValue(status('other'))
   await advance(1); expect(live.status?.currentBranch).toBe('other')
   await act(async () => { live.refresh() }); expect(getRepoGitStatus).toHaveBeenCalledTimes(3)
@@ -48,17 +48,17 @@ it.each([{ feature: '' }, { repo: '' }, { opts: { enabled: false } }, { opts: { 
 it('retains failed-read evidence and retries without certifying stale status', async () => {
   await render()
   vi.mocked(getRepoGitStatus).mockRejectedValue(new Error('offline'))
-  await advance(5000)
+  await advance(30000)
   expect(live.status?.currentBranch).toBe('main'); expect(live.error).toBe('offline'); expect(live.confirmed).toBe(false)
   vi.mocked(getRepoGitStatus).mockResolvedValue(status('other'))
-  await advance(5000)
+  await advance(30000)
   expect(live.status?.currentBranch).toBe('other'); expect(live.error).toBeNull(); expect(live.confirmed).toBe(true)
 })
 
 it('expires freshness when replacement reads hang and recovers after coming online', async () => {
   await render()
   vi.mocked(getRepoGitStatus).mockReturnValue(new Promise(() => {}))
-  await advance(15000)
+  await advance(45000)
   expect(live.status?.currentBranch).toBe('main'); expect(live.confirmed).toBe(false)
   vi.mocked(getRepoGitStatus).mockResolvedValue(status('other'))
   await act(async () => { window.dispatchEvent(new Event('online')) })
@@ -81,7 +81,7 @@ it('separates suite, repo and local-path identities and drops late reads from pr
   expect(live.status).toBeNull()
   vi.mocked(getRepoGitStatus).mockResolvedValue(status('new'))
   await render({ feature: 'billing', repo: 'server', opts: { localPath: '/workspace/new' } })
-  expect(getRepoGitStatus).toHaveBeenLastCalledWith('billing', 'server')
+  expect(getRepoGitStatus).toHaveBeenLastCalledWith('billing', 'server', expect.objectContaining({ readRevision: expect.any(String) }))
   expect(live.status?.currentBranch).toBe('new')
   await render({ opts: { enabled: false } })
   expect(live.status).toBeNull(); expect(vi.getTimerCount()).toBe(0)
@@ -99,4 +99,25 @@ it('releases timers and lifecycle listeners on unmount and keeps remounts uncach
   expect(removeDocument).toHaveBeenCalledWith('visibilitychange', expect.any(Function))
   vi.mocked(getRepoGitStatus).mockReturnValue(new Promise(() => {}))
   await render(); expect(live.status).toBeNull(); expect(live.confirmed).toBe(false)
+})
+
+it('isolates repository hints and pauses reads while the document is hidden', async () => {
+  await render()
+  await act(async () => { invalidate('repos', JSON.stringify(['repo', 'other', 'app'])) })
+  expect(getRepoGitStatus).toHaveBeenCalledTimes(1)
+  await act(async () => { invalidate('repos', JSON.stringify(['repo', 'checkout', 'app'])) })
+  expect(getRepoGitStatus).toHaveBeenCalledTimes(2)
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
+  await advance(90000)
+  expect(getRepoGitStatus).toHaveBeenCalledTimes(2); expect(live.confirmed).toBe(false)
+  visibility.mockReturnValue('visible')
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
+  expect(getRepoGitStatus).toHaveBeenCalledTimes(3); expect(live.confirmed).toBe(true)
+})
+
+it('keeps an absent repository name idle', async () => {
+  function Missing() { live = useRepoGitStatus('checkout', undefined); return null }
+  await act(async () => { root.render(<InvalidationProvider><Missing /></InvalidationProvider>) })
+  expect(getRepoGitStatus).not.toHaveBeenCalled(); expect(live.status).toBeNull()
 })

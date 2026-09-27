@@ -85,6 +85,8 @@ export function useLiveResource<T>(
     reconcileMs?: number
     leaseMs?: number
     refreshKey?: string | number
+    /** Demand-driven readers stop periodic work while the tab is hidden. */
+    pauseWhenHidden?: boolean
   } = {},
 ): LiveResource<T> {
   const cacheKey = opts.cache !== undefined && key !== null ? `${opts.cache}:${key}` : null
@@ -103,7 +105,7 @@ export function useLiveResource<T>(
   const pollWhileRef = useRef(opts.pollWhile)
   pollWhileRef.current = opts.pollWhile
   const polling = opts.pollWhile !== undefined || opts.reconcileMs !== undefined
-  const { reconcileMs, leaseMs, refreshKey } = opts
+  const { reconcileMs, leaseMs, refreshKey, pauseWhenHidden } = opts
   const readKey = JSON.stringify([key, version, refreshKey, refreshVersion])
   const [confirmedReadKey, setConfirmedReadKey] = useState<string | null>(null)
   const [valueKey, setValueKey] = useState(key)
@@ -131,6 +133,7 @@ export function useLiveResource<T>(
     let requested = 0
     let lease: ReturnType<typeof setTimeout> | undefined
     const fetch = (event?: Event) => {
+      if (pauseWhenHidden && document.visibilityState === 'hidden') return
       const request = ++requested
       // Join sibling readers, never a previous reconciliation round or a read
       // started before reconnect/focus. A hung HTTP request cannot stall recovery.
@@ -164,6 +167,7 @@ export function useLiveResource<T>(
     const offline = () => { requested++; setConfirmed(false); setError('Connection lost; freshness is unconfirmed.') }
     const visible = (event: Event) => {
       if (document.visibilityState === 'visible') { setConfirmed(false); fetch(event) }
+      else if (pauseWhenHidden) { requested++; setConfirmed(false) }
     }
     if (reconcileMs) {
       window.addEventListener('focus', fetch)
@@ -182,7 +186,7 @@ export function useLiveResource<T>(
     }
     // `cacheTag` is constant per call site (a literal), so it needs no dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, version, polling, reconcileMs, leaseMs, refreshKey, refreshVersion])
+  }, [key, version, polling, reconcileMs, leaseMs, refreshKey, refreshVersion, pauseWhenHidden])
 
   // Withdraw trust during the render receiving an invalidation/key change,
   // not one paint later when its replacement request starts.

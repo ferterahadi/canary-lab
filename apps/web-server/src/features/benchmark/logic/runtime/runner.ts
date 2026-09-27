@@ -3,7 +3,7 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { type ChildProcess } from 'child_process'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../../../shared/launcher/types'
-import { runGit, resolveRepoPath } from '../../../../shared/git-repo'
+import { runGit, readWorkingTree, resolveRepoPath } from '../../../../shared/git-repo'
 import { claudeSessionLogPath, writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import { addWorktree, type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
@@ -95,14 +95,14 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
     // nonexistent dir and git would (wrongly) report "not a git repository".
     // addWorktree() already resolves the same way (resolveRepoPath).
     const repoPath = resolveRepoPath(repo.localPath)
-    const repoStatus = await runGit(repoPath, ['status', '--porcelain', '--', '.'])
-    if (repoStatus.code !== 0) {
+    const repoStatus = await readWorkingTree(repoPath, 'directory')
+    if (!repoStatus.ok) {
       throw Object.assign(
         new Error(`repo "${repo.name}" at ${repo.localPath} is not a git repository (worktrees require git)`),
         { statusCode: 409 },
       )
     }
-    if (repoStatus.stdout.trim()) {
+    if (repoStatus.lines.length > 0) {
       throw Object.assign(
         new Error(
           `suite "${feature.name}" has uncommitted changes — commit or stash them before benchmarking (worktrees only see committed files)`,

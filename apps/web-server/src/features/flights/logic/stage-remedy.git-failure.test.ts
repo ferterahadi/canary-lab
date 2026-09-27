@@ -4,10 +4,11 @@ import type { FlightManifest } from '../../../../../../shared/flights/types'
 // A real repo can be made to fail `git commit` (no identity), but not to fail
 // with an empty stderr — and the reason line has a stdout fallback for exactly
 // that case. Faking the runner is the only way to pin both arms.
-const gitMocks = vi.hoisted(() => ({ runGit: vi.fn() }))
+const gitMocks = vi.hoisted(() => ({ runGit: vi.fn(), readWorkingTree: vi.fn() }))
 vi.mock('../../../shared/git-repo', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../shared/git-repo')>()),
   runGit: gitMocks.runGit,
+  readWorkingTree: gitMocks.readWorkingTree,
 }))
 
 const { applyFlightStageRemedy } = await import('./stage-remedy')
@@ -26,14 +27,13 @@ function manifest(): FlightManifest {
 
 /** `git status` always reports one modified file; the mutation reports `failure`. */
 function gitFailingWith(failure: { code: number; stdout: string; stderr: string }): void {
-  gitMocks.runGit.mockImplementation(async (_cwd: string, args: string[]) => {
-    if (args[0] === 'status') return { code: 0, stdout: ' M f.txt\n', stderr: '' }
-    return failure
-  })
+  gitMocks.readWorkingTree.mockResolvedValue({ ok: true, lines: [' M f.txt'] })
+  gitMocks.runGit.mockResolvedValue(failure)
 }
 
 beforeEach(() => {
   gitMocks.runGit.mockReset()
+  gitMocks.readWorkingTree.mockReset()
 })
 
 describe('applyFlightStageRemedy — a failing git command', () => {

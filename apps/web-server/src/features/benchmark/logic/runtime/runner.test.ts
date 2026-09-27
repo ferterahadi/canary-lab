@@ -192,6 +192,17 @@ describe('createBenchmarkRunner', () => {
         .rejects.toThrow(/not a git repository/)
     })
 
+    it('retains the unreadable-repository refusal for a corrupt index before sabotage', async () => {
+      const { appRepo, logsDir } = await flatFixture()
+      fs.writeFileSync(path.join(appRepo, '.git', 'index'), 'corrupt index')
+      const { deps } = makeDeps({ logsDir, loadFeatures: () => [feat({ repos: [{ name: 'app', localPath: appRepo }] })] })
+      const { startBenchmark } = createBenchmarkRunner(deps)
+      await expect(startBenchmark({ feature: 'bench-feat', iterations: 1, ...OFF_BY_ONE })).rejects.toMatchObject({
+        statusCode: 409, message: `repo "app" at ${appRepo} is not a git repository (worktrees require git)`,
+      })
+      expect(amock.calls).toBe(0)
+    })
+
     it('409s when the sabotaged repo has uncommitted changes', async () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-dirty-'))
       roots.push(dir)

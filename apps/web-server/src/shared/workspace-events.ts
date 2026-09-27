@@ -1,3 +1,4 @@
+import type { RepositoryConsumer } from '../../../../shared/repository-observation'
 import { EventEmitter } from 'events'
 import type { DraftRecord } from '../features/wizard/logic/draft-types'
 import type { EvaluationExportTaskView } from '../features/evaluation/logic/evaluation-export-types'
@@ -10,6 +11,7 @@ export type WorkspaceEvent =
    *  new one rather than go blank. */
   | { type: 'feature-renamed'; from: string; to: string }
   | { type: 'features-changed' }
+  | { type: 'repos-changed'; consumers: RepositoryConsumer[] }
   | { type: 'tests-changed'; feature: string }
   | { type: 'discovery-repair-changed'; feature: string }
   | { type: 'envsets-changed'; feature: string }

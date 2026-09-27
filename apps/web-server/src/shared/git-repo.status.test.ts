@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { afterEach, beforeEach, expect, it } from 'vitest'
-import { checkoutBranch, getGitStatus } from './git-repo'
+import { checkoutBranch, getGitStatus, readWorkingTree } from './git-repo'
 import { fastForwardToUpstream } from './git-upstream'
 
 let repo: string
@@ -59,4 +59,54 @@ it('rejects unreadable evidence before checkout or upstream update, and recovers
 
   fs.writeFileSync(index, bytes)
   expect(await getGitStatus(repo)).toMatchObject({ currentBranch: 'main', dirty: false })
+})
+
+it('preserves porcelain ordering for staged, unstaged, untracked, deleted and renamed files', async () => {
+  for (const name of ['deleted', 'renamed', 'staged']) fs.writeFileSync(path.join(repo, name), name)
+  git('add', '.'); git('commit', '-m', 'status variants')
+  fs.unlinkSync(path.join(repo, 'deleted'))
+  git('mv', 'renamed', 'renamed-new')
+  fs.writeFileSync(path.join(repo, 'staged'), 'staged edit')
+  git('add', 'staged')
+  fs.writeFileSync(path.join(repo, 'tracked'), 'unstaged edit')
+  fs.writeFileSync(path.join(repo, 'untracked'), 'untracked')
+  expect(await readWorkingTree(repo, 'repository')).toEqual({
+    ok: true,
+    lines: [' D deleted', 'R  renamed -> renamed-new', 'M  staged', ' M tracked', '?? untracked'],
+  })
+})
+
+it('limits directory inspection to its subtree while repository inspection includes siblings', async () => {
+  const service = path.join(repo, 'service')
+  fs.mkdirSync(service)
+  const file = path.join(service, 'tracked')
+  fs.writeFileSync(file, 'service')
+  git('add', '.'); git('commit', '-m', 'nested service')
+  const index = path.join(repo, '.git', 'index')
+  const bytes = fs.readFileSync(index)
+  const modified = fs.statSync(index, { bigint: true }).mtimeNs
+  const stat = fs.statSync(file)
+  fs.utimesSync(file, stat.atime, new Date(stat.mtimeMs + 2000))
+  fs.writeFileSync(path.join(repo, 'tracked'), 'sibling edit')
+  expect(await readWorkingTree(service, 'directory')).toEqual({ ok: true, lines: [] })
+  expect(await readWorkingTree(service, 'repository')).toEqual({ ok: true, lines: [' M tracked'] })
+  fs.writeFileSync(file, 'service edit')
+  expect(await readWorkingTree(service, 'directory')).toEqual({ ok: true, lines: [' M service/tracked'] })
+  expect(fs.readFileSync(index)).toEqual(bytes)
+  expect(fs.statSync(index, { bigint: true }).mtimeNs).toBe(modified)
+})
+
+it('reports failed inspections rather than clean evidence for missing paths, non-repositories and corrupt indexes', async () => {
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-status-plain-'))
+  try {
+    for (const scope of ['directory', 'repository'] as const) {
+      for (const cwd of [plain, path.join(plain, 'missing')]) {
+        const result = await readWorkingTree(cwd, scope)
+        expect(result).toMatchObject({ ok: false, result: { code: expect.any(Number), stdout: '', stderr: expect.any(String) } })
+        if (!result.ok) expect(result.result.code).not.toBe(0)
+      }
+      fs.writeFileSync(path.join(repo, '.git', 'index'), 'corrupt index')
+      expect(await readWorkingTree(repo, scope)).toMatchObject({ ok: false, result: { code: 128, stderr: expect.stringContaining('index') } })
+    }
+  } finally { fs.rmSync(plain, { recursive: true, force: true }) }
 })

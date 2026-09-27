@@ -186,7 +186,7 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
       reply.code(404)
       return { error: `flight not found: ${req.params.id}` }
     }
-    return { remedy: await flightStageRemedy(manifest) }
+    return { remedy: await flightStageRemedy(manifest, deps.repositoryObserver) }
   })
 
   // Execute the remedy (stash or commit every currently-dirty repo), then

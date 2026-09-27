@@ -15,7 +15,7 @@ function Editor({ feature = 'checkout', activeRun = false }: { feature?: string;
 }
 const render = (props: Parameters<typeof Editor>[0] = {}) => act(async () => { root.render(<Editor {...props} />) })
 const switchButton = () => [...container.querySelectorAll('button')].find((button) => /Switch/.test(button.textContent ?? ''))!
-const advance = (ms = 5000) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
+const advance = (ms = 30000) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(0)
   vi.mocked(api.getRepoGitStatus).mockResolvedValue(status())
@@ -49,7 +49,7 @@ it('expires the Switch decision when reads hang and preserves the open suggestio
   await act(async () => { container.querySelector('input')!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
   expect(container.textContent).toContain('main')
   vi.mocked(api.getRepoGitStatus).mockReturnValue(new Promise(() => {}))
-  await advance(15000)
+  await advance(45000)
   expect(switchButton().disabled).toBe(true); expect(container.textContent).toContain('stale')
   vi.mocked(api.getRepoGitStatus).mockResolvedValue(status('other'))
   await advance()

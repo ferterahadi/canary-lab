@@ -8,7 +8,7 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { type ChildProcess } from 'child_process'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../../../shared/launcher/types'
-import { runGit, resolveRepoPath, snapshotWorkingTree, getGitRoot } from '../../../../shared/git-repo'
+import { readWorkingTree, resolveRepoPath, snapshotWorkingTree, getGitRoot } from '../../../../shared/git-repo'
 import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import type { StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import { generateRunId } from '../../../runs/logic/runtime/run-id'
@@ -78,11 +78,11 @@ export async function prepareWorkflow(
   const dirty: string[] = []
   for (const repo of repos) {
     const repoPath = resolveRepoPath(repo.localPath)
-    const status = await runGit(repoPath, ['status', '--porcelain', '--', '.'])
-    if (status.code !== 0) {
+    const status = await readWorkingTree(repoPath, 'directory')
+    if (!status.ok) {
       throw Object.assign(new Error(`repo "${repo.name}" at ${repo.localPath} is not a git repository`), { statusCode: 409 })
     }
-    if (status.stdout.trim()) {
+    if (status.lines.length > 0) {
       dirty.push(repo.name)
       continue
     }

@@ -202,8 +202,16 @@ No-op and refused operations announce nothing. This corrects REST's duplicate
 checkout publication and MCP's missing active-work guard. The activity policy
 remains suite-scoped; it does not introduce cross-suite path locking.
 
-The shared Git status reader uses `--no-optional-locks` for porcelain status so
-background inspection does not refresh the index. Once a working repository is
+`readWorkingTree` in `apps/web-server/src/shared/git-repo.ts` owns the single
+`git --no-optional-locks status --porcelain` inspection and porcelain parsing.
+Callers explicitly choose repository scope or directory scope (`-- .`); the
+reader preserves their working directory and returns either status lines or the
+failed command's exit code and diagnostics. Portify preparation and benchmark
+startup retain their refusal policies; Flight recovery skips unreadable paths
+and counts scoped lines. Their directory scope excludes unrelated monorepo
+changes. Portify fingerprinting and recovery stash/commit remain separate.
+`getGitStatus` uses repository scope without adding a second status subprocess.
+Background inspection does not refresh the index. Once a working repository is
 identified, failed branch, status, or reference reads reject with a diagnostic
 rather than reporting clean or empty evidence. Detached HEAD and an unborn
 branch remain valid states. Checkout-status assembly passes its existing status
@@ -221,16 +229,42 @@ Flight reset retains its missing-overlay guard and its own publication around
 the lower-level restoration core. Legacy best-effort failures retain that core's
 existing success behavior; no transaction or event deduplication is added.
 
+Repository display reads and Flight recovery use the server-owned
+`apps/web-server/src/shared/repository-observer.ts`. Reads lease scoped filesystem observation for
+90 seconds; overlapping consumers share native watches and simultaneous local
+reads. The observer watches working directories, their parent (replacement),
+and Git metadata including linked-worktree references. Git-derived ignore rules
+filter hints while preserving tracked exceptions. Native recursive watches still
+observe the directory tree; filtering avoids status work for ignored activity.
+Bursts debounce for 250 ms, with a one-second maximum delay. Watch failures and
+the 256-handle budget leave authoritative reads available for recovery. Shutdown
+and the last expired lease release watches and timers.
+
+The observer publishes scoped `repos-changed` hints through the existing workspace
+socket, without running status in callbacks. Repository and directory scopes stay
+separate, newer generations never join older reads, and completed status is never
+cached. A hung read can be replaced after 30 seconds. Mutation preflights keep
+using fresh Git primitives directly; observation does not change their policies.
+
 Repository branch controls in the Service tab and Flight setup share
-`apps/web/src/features/config/state/use-repo-git-status.ts`. It composes
-`useLiveResource` on the global `repos` topic, with five-second local Git-status
-reconciliation and a fifteen-second freshness lease. Suite, repository name,
-and optional local path identify each read; disabled/unmounted readers release
-recovery work. Failed reads retain the last snapshot with a stale indication.
-The Service tab requires confirmed status before checkout; Flight's branch pin
-still edits configuration while stale. Checkout completion refreshes the shared
-reader rather than installing a second snapshot, and cannot update a replaced
-or closed control. Neither consumer performs a remote fetch.
+`apps/web/src/features/config/state/use-repo-git-status.ts`; failed Flight stages
+use `apps/web/src/features/flights/state/use-flight-remedy.ts`. Both compose `useLiveResource`
+with scoped repository hints, global/reconnect invalidation, 30-second local
+reconciliation, and a 45-second freshness lease. Hidden readers pause requests;
+focus, online and visibility restoration read immediately. Disabled/unmounted
+readers release recovery work. Failed reads retain the last snapshot with a stale
+indication, and recovery continues at zero dirty files. Concurrent browser reads
+share the existing snapshot request wrapper. Suite, repository name and optional
+local path identify repository reads; Flight and error detail identify remedies.
+
+Service checkout and Flight stash/commit require confirmed display evidence;
+server-side guards remain authoritative. Flight branch pinning stays editable
+while stale. Mutation completion refreshes the reader even after partial failure,
+retains action errors separately, and cannot update a replaced or closed control.
+Background reads perform no remote fetch. Connected agents obtain current status
+through `get_feature_repo_status` and `get_flight`; passive clients receive no
+unsolicited wakeup guarantee. Flight remedy retains its existing skip-on-Git-read-
+failure policy; a successful empty remedy is not a new repository-health claim.
 
 The configuration dialog shares document reads through a dialog-local
 `config-doc-store`. Mounted readers use `useLiveResource` with suite-scoped

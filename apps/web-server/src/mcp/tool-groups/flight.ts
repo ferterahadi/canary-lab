@@ -445,7 +445,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     const view = flightView(resp.body)
     // Read-time remedy for a failed stage (live git re-check, never stored):
     // give the agent the machine-actionable fix, not just the error prose.
-    const remedy = await flightStageRemedy(resp.body as FlightManifest).catch(() => null)
+    const remedy = await flightStageRemedy(resp.body as FlightManifest, deps.repositoryObserver).catch(() => null)
     if (remedy) {
       const fix = remedy.repos.length === 0
         ? `The failed ${remedy.stage} stage blamed uncommitted changes, but every repo is CLEAN now (fixed outside this conversation) — just start_flight(feature) to resume.`

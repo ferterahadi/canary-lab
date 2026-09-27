@@ -223,6 +223,8 @@ describe('createPortifyRunner (integration)', () => {
         fs.writeFileSync(path.join(mono, svc, 'src', 'server.js'), 'const PORT = process.env.PORT\n')
       }
       await gitInit(mono)
+      // A dirty sibling is outside both declared services and must not block setup.
+      fs.writeFileSync(path.join(mono, 'unrelated.txt'), 'leave untouched')
       fs.mkdirSync(featureDir, { recursive: true })
       writeConfig(featureDir, [
         { name: 'a', localPath: path.join(mono, 'svcA'), slot: 'a', env: 'PORT_A' },
@@ -236,6 +238,7 @@ describe('createPortifyRunner (integration)', () => {
       const ready = store.get(workflowId)!
       expect(new Set(ready.repos.map((r) => r.worktreePath)).size).toBe(1)
       await runner.cancel(workflowId)
+      expect(fs.readFileSync(path.join(mono, 'unrelated.txt'), 'utf8')).toBe('leave untouched')
     })
   })
 
@@ -278,6 +281,19 @@ describe('createPortifyRunner (integration)', () => {
       fs.writeFileSync(path.join(dir, 'f.txt'), 'changed') // now dirty
       const runner = await runnerWith([feat({ repos: [{ name: 'r', localPath: dir }] })])
       await expect(runner.startPortify({ feature: 'myfeat' })).rejects.toMatchObject({ statusCode: 409 })
+    })
+    it('retains the unreadable-repository refusal for a corrupt index before starting an agent', async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-corrupt-'))
+      roots.push(dir)
+      fs.writeFileSync(path.join(dir, 'f.txt'), 'a')
+      await gitInit(dir)
+      fs.writeFileSync(path.join(dir, '.git', 'index'), 'corrupt index')
+      const runner = await runnerWith([feat({ repos: [{ name: 'r', localPath: dir }] })])
+      vi.mocked(runPortifyAgent).mockClear()
+      await expect(runner.startPortify({ feature: 'myfeat' })).rejects.toMatchObject({
+        statusCode: 409, message: `repo "r" at ${dir} is not a git repository`,
+      })
+      expect(runPortifyAgent).not.toHaveBeenCalled()
     })
     it('names ALL dirty repos in one error, not just the first', async () => {
       const a = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-dirty-a-'))

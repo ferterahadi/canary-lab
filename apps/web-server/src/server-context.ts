@@ -1,3 +1,4 @@
+import type { RepositoryObserver } from './shared/repository-observer'
 import type { FastifyInstance } from 'fastify'
 import type { CoverageFreshnessMonitor } from './features/coverage/logic/coverage/freshness-monitor'
 import type { TestsDraftRouteDeps } from './features/wizard/routes/tests-draft'
@@ -87,6 +88,7 @@ export interface ServerContext {
   dirtySpecStore: DirtySpecStore
   updateStore: UpdateJobStore
   versionState: VersionState
+  repositoryObserver?: RepositoryObserver
   workspaceEvents: WorkspaceEventBus
   gettingStarted: GettingStartedSessionStore
   externalHealBroker: ExternalHealBroker

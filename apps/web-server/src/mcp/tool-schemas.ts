@@ -1,3 +1,4 @@
+import type { RepositoryObserver } from '../shared/repository-observer'
 // Shared surface for the MCP tool groups: input schemas, profile arrays, the
 // dependency interface, and the result/format helpers every group calls.
 //
@@ -113,6 +114,7 @@ export type McpStartRunOutcome =
     }
 
 export interface CanaryLabMcpDeps {
+  repositoryObserver?: RepositoryObserver
   /** Shared with REST; suite repository mutations refuse active runs or discovery repair. */
   isRepoActive?: (feature: string, repo: string) => boolean
   coverageRequest?: (opts: { method: 'GET'; url: string }) => Promise<{ statusCode: number; body: unknown }>

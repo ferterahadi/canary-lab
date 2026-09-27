@@ -631,3 +631,14 @@ it.each([{ allRuns: [] }, { allRuns: [run('newest', 'checkout'), run('historical
   expect(harness.selectedRunId).toEqual([])
   expect(harness.pendingRef.current).toBe('historical')
 })
+
+it('routes repository watch hints to exact consumers without fetching features or reconnecting', async () => {
+  await mount()
+  const listCalls = api.listFeatures.mock.calls.length
+  const connection = socket.opts
+  harness.invalidated.length = 0
+  await fire({ type: 'repos-changed', consumers: [{ feature: 'checkout', repo: 'service' }, { flightId: 'flight' }] })
+  expect(harness.invalidated).toEqual([['repos', JSON.stringify(['repo', 'checkout', 'service'])], ['repos', JSON.stringify(['flight', 'flight'])]])
+  expect(api.listFeatures).toHaveBeenCalledTimes(listCalls)
+  expect(socket.opts).toBe(connection); expect(socket.closes).toBe(0)
+})

@@ -68,6 +68,14 @@ describe('flightStageRemedy', () => {
     expect(remedy!.repos).toEqual([])
   })
 
+  it('skips corrupted indexes and missing paths while retaining readable dirty repositories', async () => {
+    const broken = makeRepo('remedy-corrupt-')
+    fs.writeFileSync(path.join(broken, '.git', 'index'), 'corrupt index')
+    const dirty = dirtyRepo('remedy-readable-')
+    const remedy = await flightStageRemedy(manifestWith([broken, path.join(broken, 'missing'), dirty], DIRTY_ERROR))
+    expect(remedy!.repos).toEqual([{ name: path.basename(dirty), path: dirty, modified: 2 }])
+  })
+
   it('skips paths that are not git repos instead of failing', async () => {
     const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'remedy-plain-'))
     roots.push(plain)

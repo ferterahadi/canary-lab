@@ -553,7 +553,7 @@ describe('trailer model (R14–R18)', () => {
     // current value; typing after focus is what filters.
     const branchInput = panel?.querySelector<HTMLInputElement>('[data-testid="setup-branch-shop"]')
     expect(branchInput?.value).toBe('develop')
-    expect(mocks.getRepoGitStatus).toHaveBeenCalledWith('checkout', 'shop')
+    expect(mocks.getRepoGitStatus).toHaveBeenCalledWith('checkout', 'shop', expect.objectContaining({ readRevision: expect.any(String) }))
     await act(async () => {
       branchInput!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
     })

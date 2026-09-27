@@ -1,3 +1,4 @@
+import { createRepositoryObserver } from './shared/repository-observer'
 import path from 'path'
 import fs from 'fs'
 import Fastify, { type FastifyInstance } from 'fastify'
@@ -159,6 +160,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // process's session and are deliberately left alone.
   reconcileInterruptedDrafts(logsDir, () => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
+  const repositoryObserver = createRepositoryObserver({ events: workspaceEvents, log: (message, error) => app.log.warn({ err: error }, message) })
+  app.addHook('onClose', async () => repositoryObserver.dispose())
   const coverageMonitor = new CoverageFreshnessMonitor({ featuresDir, logsDir }, workspaceEvents, (error) => app.log.warn({ error }, 'Coverage freshness reconciliation failed'))
   const refreshRunCoverage = () => coverageMonitor.schedule()
   runStore.onEvent(refreshRunCoverage)
@@ -283,6 +286,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     updateStore,
     versionState,
     workspaceEvents,
+    repositoryObserver,
     gettingStarted,
     externalHealBroker,
     brokers,
@@ -332,6 +336,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     workspaceEvents,
     dirtySpecStore,
     isRepoActive: config.isRepoActive,
+    repositoryObserver,
     // R76: deleting a suite deletes its flight history with it.
     removeFlightRecordsFor: (featureName) => removeFlightRecordsForFeature(flightStore, featureName),
     restartExternalRun: async (runId, healAgent, guidance) => {

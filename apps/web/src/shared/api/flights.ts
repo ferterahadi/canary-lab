@@ -11,7 +11,7 @@ import type {
   PlanFeaturesTask as PlanFeaturesTaskT,
 } from '@shared/flights/types'
 import type { AgentStagePlans as AgentStagePlansT } from '@shared/agent-models'
-import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
+import { ApiError, defaultOpts, request, requestSnapshot, type ClientOptions } from './internal'
 import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
 /** Stage-entry menu for one feature: latest flight record, per-stage
@@ -139,12 +139,7 @@ export function getFlightRemedy(
   flightId: string,
   opts?: ClientOptions,
 ): Promise<{ remedy: import('@shared/flights/types').FlightStageRemedy | null }> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request(
-    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/remedy`,
-    { method: 'GET' },
-    fetchImpl,
-  )
+  return requestSnapshot(`/api/flights/${encodeURIComponent(flightId)}/remedy`, opts)
 }
 
 /** Execute the remedy (stash or commit every dirty repo), then resume the
