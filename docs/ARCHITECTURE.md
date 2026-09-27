@@ -211,11 +211,18 @@ remains suite-scoped; it does not introduce cross-suite path locking.
 `readWorkingTree` in `apps/web-server/src/shared/git-repo.ts` owns the single
 `git --no-optional-locks status --porcelain` inspection and porcelain parsing.
 Callers explicitly choose repository scope or directory scope (`-- .`); the
-reader preserves their working directory and returns either status lines or the
+reader preserves their working directory and returns status lines plus raw stdout, or the
 failed command's exit code and diagnostics. Portify preparation and benchmark
 startup retain their refusal policies; Flight recovery skips unreadable paths
 and counts scoped lines. Their directory scope excludes unrelated monorepo
-changes. Portify fingerprinting and recovery stash/commit remain separate.
+changes. Portify edit fingerprinting also uses repository-scoped inspection; its
+digest keeps the raw stdout plus best-effort file modification times. The pure
+`apps/web-server/src/shared/git-status-path.ts` decoder owns porcelain-v1 quoted
+paths, UTF-8 octal escapes, and rename/copy destinations for Portify and run fix
+preflight. Literal arrows and filename whitespace survive decoding; malformed
+payloads stay opaque. Fingerprint policy and recovery stash/commit remain with
+their domains. This does not normalize persisted repair filenames from
+`git diff --name-only`, which can still contain Git quoting.
 `getGitStatus` uses repository scope without adding a second status subprocess.
 Background inspection does not refresh the index. Once a working repository is
 identified, failed branch, status, or reference reads reject with a diagnostic

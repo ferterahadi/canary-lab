@@ -66,7 +66,7 @@ export function parsePorcelainStatus(stdout: string): string[] {
 }
 
 export type WorkingTreeRead =
-  | { ok: true; lines: string[] }
+  | { ok: true; lines: string[]; stdout: string }
   | { ok: false; result: GitResult }
 
 /** Inspect exactly the caller's scope without refreshing the Git index. */
@@ -78,7 +78,7 @@ export async function readWorkingTree(
   if (scope === 'directory') args.push('--', '.')
   const result = await runGit(cwd, args)
   return result.code === 0
-    ? { ok: true, lines: parsePorcelainStatus(result.stdout) }
+    ? { ok: true, lines: parsePorcelainStatus(result.stdout), stdout: result.stdout }
     : { ok: false, result }
 }
 

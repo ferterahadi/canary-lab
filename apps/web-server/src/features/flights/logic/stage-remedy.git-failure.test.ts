@@ -27,7 +27,7 @@ function manifest(): FlightManifest {
 
 /** `git status` always reports one modified file; the mutation reports `failure`. */
 function gitFailingWith(failure: { code: number; stdout: string; stderr: string }): void {
-  gitMocks.readWorkingTree.mockResolvedValue({ ok: true, lines: [' M f.txt'] })
+  gitMocks.readWorkingTree.mockResolvedValue({ ok: true, lines: [' M f.txt'], stdout: ' M f.txt\n' })
   gitMocks.runGit.mockResolvedValue(failure)
 }
 

@@ -73,6 +73,7 @@ it('preserves porcelain ordering for staged, unstaged, untracked, deleted and re
   expect(await readWorkingTree(repo, 'repository')).toEqual({
     ok: true,
     lines: [' D deleted', 'R  renamed -> renamed-new', 'M  staged', ' M tracked', '?? untracked'],
+    stdout: ' D deleted\nR  renamed -> renamed-new\nM  staged\n M tracked\n?? untracked\n',
   })
 })
 
@@ -88,10 +89,10 @@ it('limits directory inspection to its subtree while repository inspection inclu
   const stat = fs.statSync(file)
   fs.utimesSync(file, stat.atime, new Date(stat.mtimeMs + 2000))
   fs.writeFileSync(path.join(repo, 'tracked'), 'sibling edit')
-  expect(await readWorkingTree(service, 'directory')).toEqual({ ok: true, lines: [] })
-  expect(await readWorkingTree(service, 'repository')).toEqual({ ok: true, lines: [' M tracked'] })
+  expect(await readWorkingTree(service, 'directory')).toEqual({ ok: true, lines: [], stdout: '' })
+  expect(await readWorkingTree(service, 'repository')).toEqual({ ok: true, lines: [' M tracked'], stdout: ' M tracked\n' })
   fs.writeFileSync(file, 'service edit')
-  expect(await readWorkingTree(service, 'directory')).toEqual({ ok: true, lines: [' M service/tracked'] })
+  expect(await readWorkingTree(service, 'directory')).toEqual({ ok: true, lines: [' M service/tracked'], stdout: ' M service/tracked\n' })
   expect(fs.readFileSync(index)).toEqual(bytes)
   expect(fs.statSync(index, { bigint: true }).mtimeNs).toBe(modified)
 })

@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
-import { runGit, diffContentSinceSnapshot } from '../../../../shared/git-repo'
+import { runGit, readWorkingTree, diffContentSinceSnapshot } from '../../../../shared/git-repo'
+import { porcelainPath } from '../../../../shared/git-status-path'
 import { addWorktree, removeWorktree, linkNodeModules, type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
 
 // Branch + worktree + diff + overlay-apply/reverse mechanics for the
@@ -98,27 +99,20 @@ export async function editFingerprint(
   let files = 0
   for (const repo of repos) {
     if (!repo.worktreePath) continue
-    const res = await runGit(repo.worktreePath, ['status', '--porcelain'])
-    if (res.code !== 0) {
+    const res = await readWorkingTree(repo.worktreePath, 'repository')
+    if (!res.ok) {
       // A git failure must not read as "no progress" — that would resurrect the
       // abandonment this exists to prevent. Emit a stable marker instead, so the
       // fingerprint only freezes when the WORKTREE genuinely stops changing.
       parts.push('unreadable')
       continue
     }
-    const lines = res.stdout.split(/\r?\n/).filter((l) => l.trim() !== '')
+    const lines = res.lines
     files += lines.length
-    // Porcelain columns are `XY <path>` (and `XY <old> -> <new>` for a rename, so
-    // take the LAST token). mtime is best-effort: a path we cannot stat just
-    // contributes nothing rather than breaking the fingerprint.
+    // mtime is best-effort: deleted or inaccessible files still contribute their
+    // pathname rather than breaking the fingerprint.
     const stamps = lines.map((line) => {
-      // A rename reads `R  old -> new`; everything else is just `XY path`. Written
-      // as an explicit ternary rather than `split(' -> ').pop() ?? ''` so both
-      // arms are reachable — the `??` fallback there was dead, since a split
-      // always yields at least one element.
-      const cells = line.slice(3).trim()
-      const arrow = cells.lastIndexOf(' -> ')
-      const rel = arrow === -1 ? cells : cells.slice(arrow + 4)
+      const rel = porcelainPath(line)
       try {
         return `${rel}@${fs.statSync(path.join(repo.worktreePath as string, rel)).mtimeMs}`
       } catch {

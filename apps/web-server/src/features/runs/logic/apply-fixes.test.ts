@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { applyFixCapture, buildApplyPreflight, porcelainPath } from './apply-fixes'
+import { diffNamesSinceSnapshot } from '../../../shared/git-repo'
 import type { RunFixCapture } from '../../../../../../shared/run-state'
 
 let root: string
@@ -124,19 +125,8 @@ describe('applyFixCapture', () => {
   })
 })
 
-describe('porcelainPath', () => {
-  it('drops the two status columns', () => {
-    expect(porcelainPath(' M src/app.ts')).toBe('src/app.ts')
-    expect(porcelainPath('?? new/file.ts')).toBe('new/file.ts')
-  })
-
-  it('takes the destination of a rename', () => {
-    expect(porcelainPath('R  old/name.ts -> new/name.ts')).toBe('new/name.ts')
-  })
-
-  it('unquotes a path git had to escape', () => {
-    expect(porcelainPath(' M "src/with space.ts"')).toBe('src/with space.ts')
-  })
+it('keeps the shared decoder available through the compatibility export', async () => {
+  expect(porcelainPath).toBe((await import('../../../shared/git-status-path')).porcelainPath)
 })
 
 describe('buildApplyPreflight', () => {
@@ -167,6 +157,28 @@ describe('buildApplyPreflight', () => {
     // `app.js` is dirty too, but it is OUR dirt — warning about it would nag on
     // every re-open of a repo the user already applied into.
     expect(t.foreignDirty).toEqual(['mine.js'])
+  })
+
+  it('compares decoded dirty paths with recorded repair paths and leaves other files foreign', async () => {
+    const names = ['café.txt', 'tab\tfile.txt', 'back\\slash.txt', 'quote"file.txt', 'left -> right.txt']
+    const fix = capture(makePatch())
+    git(repo, ['config', 'core.quotePath', 'true'])
+    for (const name of names) fs.writeFileSync(path.join(repo, name), 'work in progress')
+    fix.repos[0].fileNames = names.slice(1)
+    expect((await buildApplyPreflight(fix))[0].foreignDirty).toEqual(['café.txt'])
+  })
+
+  it('retains the separate legacy capture-name mismatch without rewriting persisted names', async () => {
+    const name = 'back\\slash.txt'
+    fs.writeFileSync(path.join(repo, name), 'original')
+    git(repo, ['add', '.']); git(repo, ['commit', '-qm', 'capture fixture'])
+    fs.writeFileSync(path.join(repo, name), 'repair')
+    const fileNames = await diffNamesSinceSnapshot(repo, 'HEAD')
+    expect(fileNames).toEqual(['"back\\\\slash.txt"'])
+    const fix = capture(makePatch())
+    fix.repos[0].fileNames = fileNames
+    expect((await buildApplyPreflight(fix))[0].foreignDirty).toContain(name)
+    expect(fix.repos[0].fileNames).toEqual(fileNames)
   })
 
   it('treats a capture with no recorded file names as all-foreign', async () => {

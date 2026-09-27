@@ -18,7 +18,7 @@ describe('git-repo subprocess edge cases', () => {
   it.each(['repository', 'directory'] as const)('inspects %s scope with one local status command and no path normalization', async (scope) => {
     mockGitSequence([{ stdout: ' M first\r\n?? second  \n\n' }])
     const { readWorkingTree } = await import('./git-repo')
-    await expect(readWorkingTree('~/untouched-path', scope)).resolves.toEqual({ ok: true, lines: [' M first', '?? second'] })
+    await expect(readWorkingTree('~/untouched-path', scope)).resolves.toEqual({ ok: true, lines: [' M first', '?? second'], stdout: ' M first\r\n?? second  \n\n' })
     expect(execFileMock).toHaveBeenCalledExactlyOnceWith('git',
       ['--no-optional-locks', 'status', '--porcelain', ...(scope === 'directory' ? ['--', '.'] : [])],
       { cwd: '~/untouched-path' }, expect.any(Function))

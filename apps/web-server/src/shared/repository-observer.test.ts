@@ -16,7 +16,7 @@ function harness() {
   })
   const spec: RepositoryWatchPath = { path: '/repo', recursive: true, accepts: (name) => name !== 'ignored' }
   const watchPaths = vi.fn(async () => [spec])
-  const readTree = vi.fn(async () => ({ ok: true as const, lines: [] as string[] }))
+  const readTree = vi.fn(async () => ({ ok: true as const, stdout: '', lines: [] as string[] }))
   const readRepo = vi.fn(async () => ({ currentBranch: 'main' }))
   const publish = vi.fn()
   const log = vi.fn()
@@ -60,17 +60,17 @@ it('debounces bursts, bounds continuous changes, and suppresses ignored-file hin
 
 it('does not join reads from an older filesystem generation or retain rejected reads', async () => {
   const h = harness()
-  let finish!: (value: { ok: true; lines: string[] }) => void
+  let finish!: (value: { ok: true; stdout: string; lines: string[] }) => void
   h.readTree.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
   const old = observer.readWorkingTree('/repo', 'directory', consumer)
   await tick(0)
   h.handles[0].emitChange('change', 'tracked')
-  h.readTree.mockResolvedValueOnce({ ok: true, lines: [' M new'] })
-  expect(await observer.readWorkingTree('/repo', 'directory', consumer)).toEqual({ ok: true, lines: [' M new'] })
-  finish({ ok: true, lines: [' M old'] }); await old
+  h.readTree.mockResolvedValueOnce({ ok: true, stdout: '', lines: [' M new'] })
+  expect(await observer.readWorkingTree('/repo', 'directory', consumer)).toEqual({ ok: true, stdout: '', lines: [' M new'] })
+  finish({ ok: true, stdout: '', lines: [' M old'] }); await old
   h.readTree.mockRejectedValueOnce(new Error('read failed'))
   await expect(observer.readWorkingTree('/repo', 'directory', consumer)).rejects.toThrow('read failed')
-  await expect(observer.readWorkingTree('/repo', 'directory', consumer)).resolves.toEqual({ ok: true, lines: [] })
+  await expect(observer.readWorkingTree('/repo', 'directory', consumer)).resolves.toEqual({ ok: true, stdout: '', lines: [] })
   expect(h.readTree).toHaveBeenCalledTimes(4)
 })
 
@@ -149,19 +149,19 @@ it('stops pending discovery and debounce publication on disposal or lease expiry
 
 it('retries a hung read next reconciliation without letting its late completion remove the newer read', async () => {
   const h = harness()
-  let finishOld!: (value: { ok: true; lines: string[] }) => void
-  let finishNew!: (value: { ok: true; lines: string[] }) => void
+  let finishOld!: (value: { ok: true; stdout: string; lines: string[] }) => void
+  let finishNew!: (value: { ok: true; stdout: string; lines: string[] }) => void
   h.readTree.mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve }))
   const old = observer.readWorkingTree('/repo', 'directory', consumer)
   await tick(30000)
   h.readTree.mockImplementationOnce(() => new Promise((resolve) => { finishNew = resolve }))
   const next = observer.readWorkingTree('/repo', 'directory', consumer)
   await tick(0)
-  finishOld({ ok: true, lines: [] }); await old
+  finishOld({ ok: true, stdout: '', lines: [] }); await old
   const sibling = observer.readWorkingTree('/repo', 'directory', consumer)
   await tick(0)
   expect(h.readTree).toHaveBeenCalledTimes(2)
-  finishNew({ ok: true, lines: [' M new'] })
+  finishNew({ ok: true, stdout: '', lines: [' M new'] })
   expect(await next).toEqual(await sibling)
 })
 

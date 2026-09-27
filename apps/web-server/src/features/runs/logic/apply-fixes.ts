@@ -1,6 +1,9 @@
 import fs from 'fs'
 import { getGitStatus, resolveRepoPath, runGit } from '../../../shared/git-repo'
+import { porcelainPath } from '../../../shared/git-status-path'
 import type { RunFixCapture, RunFixCaptureRepo } from '../../../../../../shared/run-state'
+
+export { porcelainPath } from '../../../shared/git-status-path'
 
 // Apply a run's captured heal-fix patches (see RunFixCapture) INTO the real
 // product repos on demand — the one place a run's edits reach the user's source
@@ -89,14 +92,6 @@ export interface ApplyTarget {
   foreignDirty: string[]
   /** Branch those edits would land on, so the confirm can name it. */
   branch: string | null
-}
-
-/** Path out of a `git status --porcelain` line: 2 status columns, a space, then
- *  the path — and for a rename, the destination after the ` -> `. */
-export function porcelainPath(line: string): string {
-  const withoutStatus = line.slice(3)
-  const arrow = withoutStatus.lastIndexOf(' -> ')
-  return (arrow >= 0 ? withoutStatus.slice(arrow + 4) : withoutStatus).replace(/^"|"$/g, '')
 }
 
 /** Read every captured repo's current state, so the Changes tab knows which
