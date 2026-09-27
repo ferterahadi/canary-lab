@@ -278,6 +278,24 @@ describe('the feature repo branch surface', () => {
     git('branch', 'feature-x')
   })
 
+  it('refuses both mutations during active work and keeps reads available', async () => {
+    writeFeature('checkout', [{ name: 'shop', localPath: repoDir }])
+    const { call, text, published } = harness({ isRepoActive: () => true })
+    for (const tool of ['checkout_feature_repo_branch', 'update_feature_repo_branch']) {
+      expect(await text(tool, { feature: 'checkout', repo: 'shop', branch: 'feature-x', confirm: true })).toBe('repo has an active service run')
+    }
+    expect(await call('get_feature_repo_status', { feature: 'checkout', repo: 'shop', fetch: false })).toMatchObject({ currentBranch: 'main' })
+    expect(git('branch', '--show-current')).toBe('main')
+    expect(published).toEqual([])
+  })
+
+  it('does not announce an unchanged checkout', async () => {
+    writeFeature('checkout', [{ name: 'shop', localPath: repoDir }])
+    const { call, published } = harness()
+    await call('checkout_feature_repo_branch', { feature: 'checkout', repo: 'shop', branch: 'main', confirm: true })
+    expect(published).toEqual([])
+  })
+
   it('reports an unknown repo rather than guessing a path', async () => {
     writeFeature('checkout', [{ name: 'shop', localPath: repoDir }])
     const { text } = harness()

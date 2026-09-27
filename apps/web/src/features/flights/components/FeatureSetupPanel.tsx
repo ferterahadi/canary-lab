@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
-import { BranchSuggestInput, branchSuggestions, useRepoGitStatus } from '@/features/config'
+import { BranchSuggestInput, branchSuggestions, useRepoGitStatus, RepoGitStatusNotice } from '@/features/config'
 import { HEAL_BEHAVIOR_INFO, HealBehaviorChoice } from '@/shared/ui/HealBehaviorChoice'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import {
@@ -430,7 +430,7 @@ export function BranchRow({ feature, repoName, value, refreshKey, onSave, testId
 }) {
   const [draft, setDraft] = useState(value)
   useEffect(() => { setDraft(value) }, [value])
-  const { status } = useRepoGitStatus(feature, repoName, { refreshKey })
+  const { status, confirmed, error } = useRepoGitStatus(feature, repoName, { refreshKey })
   const commit = (next: string): void => {
     const v = next.trim()
     if (v !== '' && v !== value) onSave(v)
@@ -449,6 +449,7 @@ export function BranchRow({ feature, repoName, value, refreshKey, onSave, testId
         onSelect={commit}
         onBlur={() => commit(draft)}
       />
+      <RepoGitStatusNotice status={status} confirmed={confirmed} error={error} />
     </>
   )
 }

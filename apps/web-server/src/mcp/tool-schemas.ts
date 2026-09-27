@@ -113,6 +113,8 @@ export type McpStartRunOutcome =
     }
 
 export interface CanaryLabMcpDeps {
+  /** Shared with REST; suite repository mutations refuse active runs or discovery repair. */
+  isRepoActive?: (feature: string, repo: string) => boolean
   coverageRequest?: (opts: { method: 'GET'; url: string }) => Promise<{ statusCode: number; body: unknown }>
   testReviewRequest?: (opts: { method: 'GET' | 'POST'; url: string; payload?: unknown }) => Promise<{ statusCode: number; body: unknown }>
   getUiUrl?: () => string | undefined

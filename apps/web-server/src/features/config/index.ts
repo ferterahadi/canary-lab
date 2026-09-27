@@ -98,12 +98,13 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     if (flight) return `flight ${flight.flightId} is ${flight.status} — pause it before renaming the suite`
     return null
   }
+  const isRepoActive = (featureName: string): boolean => Boolean(activeDiscoveryRepair(featureName)) || runStore
+    .list({ feature: featureName })
+    .some((run) => isActiveRunStatus(run.status))
   await app.register(featureConfigRoutes, {
     featuresDir,
     workspaceEvents,
-    isRepoActive: (featureName) => Boolean(activeDiscoveryRepair(featureName)) || runStore
-      .list({ feature: featureName })
-      .some((run) => isActiveRunStatus(run.status)),
+    isRepoActive,
     // R76: deleting a suite deletes its flight history with it.
     removeFlightRecordsFor: (featureName) => removeFlightRecordsForFeature(flightStore, featureName),
     featureRename: {
@@ -123,4 +124,5 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
   })
   await app.register(agentProbeRoutes)
   await app.register(onboardingRoutes, { projectRoot, featuresDir, sessionStore: ctx.gettingStarted })
+  return { isRepoActive }
 }

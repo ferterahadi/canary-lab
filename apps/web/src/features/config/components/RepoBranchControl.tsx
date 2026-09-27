@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
 import { FieldRow } from '@/shared/ui/atoms'
 import { BranchSuggestInput, branchSuggestions } from './BranchSuggestInput'
 import { RepoSlice, deriveRepoName } from './repo-slice'
+import { useRepoGitStatus } from '../state/use-repo-git-status'
+import { RepoGitStatusNotice } from './RepoGitStatusNotice'
 
 export function BranchControl({
   feature,
@@ -12,7 +14,6 @@ export function BranchControl({
   isExpr,
   activeRun,
   onChange,
-  refreshKey,
 }: {
   feature: string
   repo: RepoSlice
@@ -21,71 +22,44 @@ export function BranchControl({
   isExpr: boolean
   activeRun: boolean
   onChange: (next: RepoSlice) => void
-  refreshKey?: number
 }) {
-  const [status, setStatus] = useState<api.GitRepoStatus | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [switching, setSwitching] = useState(false)
   const [switchHovered, setSwitchHovered] = useState(false)
   const repoName = repoLookupName || repo.name || deriveRepoName(repo.localPath, repo.cloneUrl)
   const target = repo.branch ?? ''
-
-  const loadStatus = (): void => {
-    if (!repoName || isExpr || !localPathStr) {
-      setStatus(null)
-      setError(null)
-      return
-    }
-    api.getRepoGitStatus(feature, repoName)
-      .then((next) => {
-        setStatus(next)
-        setError(null)
-      })
-      .catch((e: unknown) => {
-        setStatus(null)
-        setError(e instanceof Error ? e.message : 'Failed to load git status')
-      })
-  }
-
+  const enabled = Boolean(repoName && localPathStr && !isExpr)
+  const { status, error, confirmed, refresh } = useRepoGitStatus(feature, repoName, { enabled, localPath: localPathStr })
+  const identity = JSON.stringify([feature, repoName, localPathStr, isExpr])
+  const [action, setAction] = useState<{ identity: string; switching: boolean; error: string | null } | null>(null)
+  const switching = action?.identity === identity && action.switching
+  const checkoutError = action?.identity === identity ? action.error : null
+  const generation = useRef({ version: 0 })
   useEffect(() => {
-    let cancelled = false
-    if (!repoName || isExpr || !localPathStr) {
-      setStatus(null)
-      setError(null)
-      return
-    }
-    api.getRepoGitStatus(feature, repoName)
-      .then((next) => {
-        if (cancelled) return
-        setStatus(next)
-        setError(null)
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return
-        setStatus(null)
-        setError(e instanceof Error ? e.message : 'Failed to load git status')
-      })
-    return () => { cancelled = true }
-    // refreshKey bumps on `features-changed` (e.g. an MCP/other-tab branch checkout)
-    // → re-pull git status so the displayed branch is never stale.
-  }, [feature, repoName, isExpr, localPathStr, refreshKey])
+    setAction(null)
+    const lifetime = generation.current
+    // A → B → A is still a different mounted target from the first A.
+    return () => { lifetime.version++ }
+  }, [identity])
 
+  const loadStatus = (): void => { setAction(null); refresh() }
   const doCheckout = async (): Promise<void> => {
-    const branch = target.trim()
-    if (!repoName || !branch) return
-    setSwitching(true)
-    setError(null)
+    if (!canSwitch) return
+    const request = ++generation.current.version
+    setAction({ identity, switching: true, error: null })
+    let checkoutError: string | null = null
     try {
-      const next = await api.checkoutRepoBranch(feature, repoName, branch)
-      setStatus(next)
+      await api.checkoutRepoBranch(feature, repoName, target.trim())
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Checkout failed')
+      checkoutError = e instanceof Error ? e.message : 'Checkout failed'
     } finally {
-      setSwitching(false)
+      if (request === generation.current.version) {
+        setAction({ identity, switching: false, error: checkoutError })
+        refresh()
+      }
     }
   }
 
-  const canSwitch = Boolean(repoName && target.trim())
+  const canSwitch = Boolean(enabled && target.trim())
+    && confirmed
     && status?.isGitRepo === true
     && !status.dirty
     && !activeRun
@@ -95,8 +69,9 @@ export function BranchControl({
   // Explain *why* Switch is disabled, surfaced as a native hover tooltip.
   const switchDisabledReason: string | undefined = (() => {
     if (canSwitch || switching) return undefined
-    if (!repoName) return 'Set a folder for this service first'
+    if (!enabled) return 'Set a folder for this service first'
     if (!target.trim()) return 'Enter a branch name to switch to'
+    if (!confirmed) return 'Waiting for current Git status'
     if (!status?.isGitRepo) return 'Not a git repository'
     if (status.dirty) {
       const n = status.dirtyFiles.length
@@ -160,6 +135,7 @@ export function BranchControl({
           <button
             type="button"
             onClick={loadStatus}
+            disabled={switching}
             aria-label="Refresh git status"
             title="Refresh git status"
             className="cl-button shrink-0 inline-flex items-center justify-center rounded-md px-2.5 py-1.5 text-xs leading-none"
@@ -177,7 +153,8 @@ export function BranchControl({
             Switch disabled while this suite is running
           </div>
         )}
-        {error && <div className="text-[10px]" style={{ color: 'var(--danger)' }}>{error}</div>}
+        {enabled && <RepoGitStatusNotice status={status} confirmed={confirmed} error={error} />}
+        {checkoutError && <div role="alert" className="text-[10px]" style={{ color: 'var(--danger)' }}>{checkoutError}</div>}
       </div>
     </FieldRow>
   )

@@ -3,7 +3,6 @@
 import { z } from 'zod'
 import { captureFeatureEnvFiles, checkoutFeatureRepoBranch, getFeatureEnvsetSummary, getFeatureRepoStatus, updateFeatureRepoBranch, type EnvFileSource } from '../../features/config/logic/feature-authoring'
 import { deleteSuite } from '../../features/config/logic/feature-deletion'
-import { publishWorkspaceEvent } from '../../shared/workspace-events'
 import { type ToolGroupContext, asJsonResult, authoringCtx, errorResult, failureResult, isToolErrorPayload } from '../tool-support'
 
 export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
@@ -95,7 +94,7 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('update_feature_repo_branch', {
-    description: 'Fast-forward a declared repo\'s checkout to its upstream tip (git fetch + merge --ff-only) so the next run boots the branch\'s latest commit. Targets the feature\'s pinned branch (else the checked-out one). Refused — nothing changes — when the checkout is dirty, detached, on another branch, has diverged from upstream, or the fetch fails; local commits ahead of upstream are left alone. Confirm-gated because it changes the user repo checkout.',
+    description: 'Fast-forward a declared repo\'s checkout to its upstream tip (git fetch + merge --ff-only) so the next run boots the branch\'s latest commit. Targets the feature\'s pinned branch (else the checked-out one). Refused — nothing changes — while the suite has an active run or discovery repair, or when the checkout is dirty, detached, on another branch, has diverged from upstream, or the fetch fails; local commits ahead of upstream are left alone. Confirm-gated because it changes the user repo checkout.',
     inputSchema: {
       feature: z.string(),
       repo: z.string(),
@@ -104,7 +103,7 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
     annotations: { destructiveHint: true, idempotentHint: true },
   }, async ({ feature, repo, confirm }) => {
     const result = await updateFeatureRepoBranch(
-      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents },
+      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents, isRepoActive: deps.isRepoActive },
       { feature, repo, confirm },
     )
     if (isToolErrorPayload(result)) return errorResult(result.error)
@@ -112,7 +111,7 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('checkout_feature_repo_branch', {
-    description: 'Checkout a branch in a repo declared in feature.config.cjs. Confirm-gated because it changes the user repo checkout. To bring an already-checked-out branch to its upstream tip use update_feature_repo_branch instead.',
+    description: 'Checkout a branch in a repo declared in feature.config.cjs. Refused while the suite has an active run or discovery repair. Confirm-gated because it changes the user repo checkout. To bring an already-checked-out branch to its upstream tip use update_feature_repo_branch instead.',
     inputSchema: {
       feature: z.string(),
       repo: z.string(),
@@ -122,12 +121,10 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
     annotations: { destructiveHint: true, idempotentHint: false },
   }, async ({ feature, repo, branch, confirm }) => {
     const result = await checkoutFeatureRepoBranch(
-      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents, isRepoActive: deps.isRepoActive },
       { feature, repo, branch, confirm },
     )
     if (isToolErrorPayload(result)) return errorResult(result.error)
-    // Branch moved; refresh the feature list + Repos tab git-status row live.
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
     return asJsonResult(result)
   })
 }

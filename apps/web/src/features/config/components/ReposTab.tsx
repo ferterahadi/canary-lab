@@ -7,7 +7,6 @@ import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
 import { useRuns } from '@/features/runs'
 import { isActiveRunStatus } from '@shared/run-state'
-import { useInvalidationKey } from '@/shared/state/invalidation'
 import { RepoCard } from './RepoCard'
 import { PortSlotSlice, RepoSlice, Slice, parseRepo, sameProbePath, serializeRepo } from './repo-slice'
 
@@ -15,9 +14,6 @@ export { deriveRepoName, parseRepo, serializeRepo } from './repo-slice'
 export type { CommandSlice, PortSlotSlice, ProbePath, RepoSlice } from './repo-slice'
 
 export function ReposTab({ feature }: { feature: string }) {
-  // Each repo's git-status row refetches on `features-changed` (an MCP/other-tab
-  // branch checkout) so it shows live.
-  const refreshKey = useInvalidationKey('repos')
   const { runs } = useRuns()
   const activeRun = runs.some((run) =>
     run.feature === feature && isActiveRunStatus(run.status))
@@ -84,7 +80,6 @@ export function ReposTab({ feature }: { feature: string }) {
                 repoLookupName={persistedRepo?.name}
                 rootEnvs={rootEnvs}
                 activeRun={activeRun}
-                refreshKey={refreshKey}
                 onChange={(next) => ed.setDraft((d) => ({
                   ...d,
                   repos: d.repos.map((r, j) => j === i ? next : r),

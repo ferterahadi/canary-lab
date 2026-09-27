@@ -88,7 +88,6 @@ export function RepoCard({
   activeRun,
   onChange,
   onRemove,
-  refreshKey,
 }: {
   feature: string
   repo: RepoSlice
@@ -97,7 +96,6 @@ export function RepoCard({
   activeRun: boolean
   onChange: (next: RepoSlice) => void
   onRemove: () => void
-  refreshKey?: number
 }) {
   const [open, setOpen] = useState(true)
   const [pathExists, setPathExists] = useState<boolean | null>(null)
@@ -242,7 +240,6 @@ export function RepoCard({
               isExpr={isExpr}
               activeRun={activeRun}
               onChange={onChange}
-              refreshKey={refreshKey}
             />
 
             {pathExists === false && repo.cloneUrl && !isExpr && (

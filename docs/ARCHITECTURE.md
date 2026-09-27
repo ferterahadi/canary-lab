@@ -191,6 +191,17 @@ strips port slots on a best-effort basis. Synchronization failures retain the
 overlay backup for retry and propagate to the caller without a success event;
 the already-restored config is not rolled back.
 
+Suite repository status, checkout, and upstream updates share
+`apps/web-server/src/features/config/logic/feature-repos.ts`. REST and MCP use the
+same suite/repository lookup and active-run/discovery-repair guard, composed by
+the configuration registrar. Transport adapters retain their response shapes and
+validation wording; feature-authoring exports remain compatibility wrappers.
+The existing Git checkout writer announces one `features-changed` only for an
+actual branch move; an upstream update announces only after a fast-forward.
+No-op and refused operations announce nothing. This corrects REST's duplicate
+checkout publication and MCP's missing active-work guard. The activity policy
+remains suite-scoped; it does not introduce cross-suite path locking.
+
 REST and MCP removal orchestration belongs to
 `apps/web-server/src/features/portify/logic/remove-portification.ts`: suite lookup,
 restoration, one `features-changed` event, and the existing result fields. Each
@@ -199,6 +210,17 @@ missing suites and propagated failures publish nothing. MCP adds no event.
 Flight reset retains its missing-overlay guard and its own publication around
 the lower-level restoration core. Legacy best-effort failures retain that core's
 existing success behavior; no transaction or event deduplication is added.
+
+Repository branch controls in the Service tab and Flight setup share
+`apps/web/src/features/config/state/use-repo-git-status.ts`. It composes
+`useLiveResource` on the global `repos` topic, with five-second local Git-status
+reconciliation and a fifteen-second freshness lease. Suite, repository name,
+and optional local path identify each read; disabled/unmounted readers release
+recovery work. Failed reads retain the last snapshot with a stale indication.
+The Service tab requires confirmed status before checkout; Flight's branch pin
+still edits configuration while stale. Checkout completion refreshes the shared
+reader rather than installing a second snapshot, and cannot update a replaced
+or closed control. Neither consumer performs a remote fetch.
 
 The configuration dialog shares document reads through a dialog-local
 `config-doc-store`. Mounted readers use `useLiveResource` with suite-scoped

@@ -11,13 +11,7 @@ import type { FeatureConfig } from '../../../../../../shared/launcher/types'
 import { describeReadabilityIssue, inspectTestReadability } from '../../../../../../shared/test-readability'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { loadPromptTemplate, promptPath } from '../../../shared/prompts'
-import { checkoutBranch, findRepo, resolveRepoPath } from '../../../shared/git-repo'
-import {
-  describeFastForward,
-  describeRepoCheckout,
-  fastForwardToUpstream,
-  type RepoCheckoutStatus,
-} from '../../../shared/git-upstream'
+import { checkoutFeatureRepo, readFeatureRepo, updateFeatureRepo, type FeatureRepoDeps } from './feature-repos'
 import { listEnvFolders, readEnvsetsConfig, writeEnvsetsConfig, syncEnvsInConfig } from './envset-config'
 import {
   SPEC_SELECTION_RULE,
@@ -31,7 +25,7 @@ import { deleteSuite } from './feature-deletion'
 
 export { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
 
-export interface FeatureAuthoringContext {
+export interface FeatureAuthoringContext extends FeatureRepoDeps {
   projectRoot: string
   featuresDir: string
   /** The workspace bus, so a write announces ITSELF.
@@ -223,73 +217,21 @@ export function captureFeatureEnvFiles(ctx: FeatureAuthoringContext, input: {
   return { ok: true, captured, summary: summary! }
 }
 
-export async function getFeatureRepoStatus(
-  ctx: FeatureAuthoringContext,
-  featureName: string,
-  repoName: string,
-  opts: { fetch?: boolean } = {},
-): Promise<RepoCheckoutStatus | null> {
-  const feature = findFeature(ctx.featuresDir, featureName)
-  if (!feature) return null
-  const repo = findRepo(feature, repoName)
-  if (!repo) return null
-  return describeRepoCheckout(repo, opts)
+// Compatibility entry points retain authoring's result shapes; suite repository
+// policy and publication belong to feature-repos for REST and MCP alike.
+export async function getFeatureRepoStatus(ctx: FeatureAuthoringContext, feature: string, repo: string, opts: { fetch?: boolean } = {}) {
+  const result = await readFeatureRepo(ctx, { feature, repo }, opts)
+  return result.ok ? result.value : null
 }
 
-/**
- * Fast-forward a declared repo's checkout to its upstream tip. The pinned
- * `branch` is the target when the feature has one; otherwise whatever branch is
- * checked out. Announces on the bus only when the checkout actually moved — an
- * up-to-date or ahead checkout changed nothing the Repos tab needs to refetch.
- */
-export async function updateFeatureRepoBranch(ctx: FeatureAuthoringContext, input: {
-  feature: string
-  repo: string
-  confirm: true
-}): Promise<Record<string, unknown> | { error: string; statusCode: number }> {
-  const feature = findFeature(ctx.featuresDir, input.feature)
-  if (!feature) return { error: 'feature not found', statusCode: 404 }
-  const repo = findRepo(feature, input.repo)
-  if (!repo) return { error: 'repo not found', statusCode: 404 }
-  const outcome = await fastForwardToUpstream(repo.localPath, { branch: repo.branch })
-  if (outcome.kind === 'refused') {
-    return { error: `${outcome.reason}: ${outcome.message}`, statusCode: 409 }
-  }
-  if (outcome.kind === 'fast-forwarded') publishWorkspaceEvent(ctx.workspaceEvents, { type: 'features-changed' })
-  return {
-    update: outcome,
-    summary: describeFastForward(outcome),
-    ...await describeRepoCheckout(repo),
-  }
+export async function updateFeatureRepoBranch(ctx: FeatureAuthoringContext, input: { feature: string; repo: string; confirm: true }) {
+  const result = await updateFeatureRepo(ctx, input)
+  return result.ok ? result.value : { error: result.error, statusCode: result.statusCode }
 }
 
-export async function checkoutFeatureRepoBranch(ctx: FeatureAuthoringContext, input: {
-  feature: string
-  repo: string
-  branch: string
-  confirm: true
-}): Promise<Record<string, unknown> | { error: string; statusCode: number }> {
-  const feature = findFeature(ctx.featuresDir, input.feature)
-  if (!feature) return { error: 'feature not found', statusCode: 404 }
-  const repo = findRepo(feature, input.repo)
-  if (!repo) return { error: 'repo not found', statusCode: 404 }
-  try {
-    return {
-      ...await checkoutBranch(repo.localPath, input.branch.trim(), ctx.workspaceEvents),
-      path: resolveRepoPath(repo.localPath),
-      expectedBranch: repo.branch ?? null,
-    }
-  } catch (err) {
-    // A rejection value is `unknown`, so neither an Error shape nor a statusCode
-    // is guaranteed here — both fallbacks are real. Pinned in
-    // feature-authoring.mock.test.ts.
-    return {
-      error: err instanceof Error ? err.message : String(err),
-      statusCode: typeof (err as { statusCode?: unknown }).statusCode === 'number'
-        ? (err as { statusCode: number }).statusCode
-        : 500,
-    }
-  }
+export async function checkoutFeatureRepoBranch(ctx: FeatureAuthoringContext, input: { feature: string; repo: string; branch: string; confirm: true }) {
+  const result = await checkoutFeatureRepo(ctx, input)
+  return result.ok ? result.value : { error: result.error, statusCode: result.statusCode }
 }
 
 export function deleteFeature(ctx: FeatureAuthoringContext, input: {

@@ -7,8 +7,9 @@
 export {
   BranchSuggestInput,
   branchSuggestions,
-  useRepoGitStatus,
 } from './components/BranchSuggestInput'
+export { useRepoGitStatus } from './state/use-repo-git-status'
+export { RepoGitStatusNotice } from './components/RepoGitStatusNotice'
 export { DeleteSuiteConfirm } from './components/DeleteSuiteConfirm'
 export { FeatureConfigEditor } from './components/FeatureConfigEditor'
 export {

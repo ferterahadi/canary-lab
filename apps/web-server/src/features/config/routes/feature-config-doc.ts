@@ -7,8 +7,8 @@ import fs from 'fs'
 import os from 'os'
 import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
 import { loadFeatures } from '../../../shared/feature-loader'
-import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
-import { describeFastForward, describeRepoCheckout, fastForwardToUpstream } from '../../../shared/git-upstream'
+import { getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
+import { checkoutFeatureRepo, readFeatureRepo, updateFeatureRepo } from '../logic/feature-repos'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { removeFeaturePortification } from '../../portify/logic/remove-portification'
 import { FEATURE_CONFIG_NAMES, findExistingConfig, listEnvFolders } from './feature-config-support'
@@ -133,18 +133,9 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
   app.get<{ Params: { name: string; repo: string }; Querystring: { fetch?: string } }>(
     '/api/features/:name/repos/:repo/git',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
-      if (!feature) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
-      const repo = findRepo(feature, req.params.repo)
-      if (!repo) {
-        reply.code(404)
-        return { error: 'repo not found' }
-      }
-      return describeRepoCheckout(repo, { fetch: req.query?.fetch === '1' || req.query?.fetch === 'true' })
+      const result = await readFeatureRepo(deps, { feature: req.params.name, repo: req.params.repo }, { fetch: req.query?.fetch === '1' || req.query?.fetch === 'true' })
+      if (!result.ok) { reply.code(result.statusCode); return { error: result.error } }
+      return result.value
     },
   )
 
@@ -155,75 +146,26 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
   app.post<{ Params: { name: string; repo: string } }>(
     '/api/features/:name/repos/:repo/update',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
-      if (!feature) {
-        reply.code(404)
-        return { error: 'feature not found' }
+      const result = await updateFeatureRepo(deps, { feature: req.params.name, repo: req.params.repo })
+      if (!result.ok) {
+        reply.code(result.statusCode)
+        return { error: result.error, ...(result.reason ? { reason: result.reason } : {}) }
       }
-      const repo = findRepo(feature, req.params.repo)
-      if (!repo) {
-        reply.code(404)
-        return { error: 'repo not found' }
-      }
-      if (deps.isRepoActive?.(feature.name, repo.name)) {
-        reply.code(409)
-        return { error: 'repo has an active service run' }
-      }
-      const outcome = await fastForwardToUpstream(repo.localPath, { branch: repo.branch })
-      if (outcome.kind === 'refused') {
-        reply.code(409)
-        return { error: `${outcome.reason}: ${outcome.message}`, reason: outcome.reason }
-      }
-      // Only a moved checkout changes what the Repos tab shows.
-      if (outcome.kind === 'fast-forwarded') publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
-      return {
-        update: outcome,
-        summary: describeFastForward(outcome),
-        ...await describeRepoCheckout(repo),
-      }
+      return result.value
     },
   )
 
   app.post<{ Params: { name: string; repo: string }; Body: { branch?: string } }>(
     '/api/features/:name/repos/:repo/checkout',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
-      if (!feature) {
-        reply.code(404)
-        return { error: 'feature not found' }
-      }
-      const repo = findRepo(feature, req.params.repo)
-      if (!repo) {
-        reply.code(404)
-        return { error: 'repo not found' }
-      }
-      if (deps.isRepoActive?.(feature.name, repo.name)) {
-        reply.code(409)
-        return { error: 'repo has an active service run' }
-      }
       const branch = req.body?.branch
-      if (typeof branch !== 'string' || branch.trim().length === 0) {
-        reply.code(400)
-        return { error: 'branch required' }
+      const result = await checkoutFeatureRepo(deps, { feature: req.params.name, repo: req.params.repo, branch: typeof branch === 'string' ? branch : '' })
+      if (!result.ok) {
+        reply.code(result.statusCode)
+        // Keep REST's body-validation wording and lookup/active-guard precedence.
+        return { error: result.statusCode === 400 && (typeof branch !== 'string' || !branch.trim()) ? 'branch required' : result.error }
       }
-      try {
-        const status = await checkoutBranch(repo.localPath, branch.trim(), deps.workspaceEvents)
-        // Branch moved; refresh the feature list + Repos tab git-status row live.
-        publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
-        return {
-          ...status,
-          path: resolveRepoPath(repo.localPath),
-          expectedBranch: repo.branch ?? null,
-        }
-      } catch (err) {
-        const code = typeof (err as { statusCode?: unknown }).statusCode === 'number'
-          ? (err as { statusCode: number }).statusCode
-          : 500
-        reply.code(code)
-        return { error: err instanceof Error ? err.message : String(err) }
-      }
+      return result.value
     },
   )
 

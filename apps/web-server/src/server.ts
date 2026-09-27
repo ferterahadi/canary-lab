@@ -293,7 +293,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // Feature registration. Order is Fastify plugin order; the static fallback
   // and the MCP mount below must stay last. Each feature reads what it needs
   // from `ctx` — adding or removing one should not touch anything else here.
-  await registerConfig(app, ctx)
+  const config = await registerConfig(app, ctx)
   await registerFlights(app, ctx)
   await registerNotifications(app, ctx)
   await registerVersion(app, ctx)
@@ -331,6 +331,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     projectRoot: opts.projectRoot,
     workspaceEvents,
     dirtySpecStore,
+    isRepoActive: config.isRepoActive,
     // R76: deleting a suite deletes its flight history with it.
     removeFlightRecordsFor: (featureName) => removeFlightRecordsForFeature(flightStore, featureName),
     restartExternalRun: async (runId, healAgent, guidance) => {
