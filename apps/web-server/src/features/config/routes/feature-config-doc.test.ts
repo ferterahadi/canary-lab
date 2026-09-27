@@ -126,7 +126,7 @@ describe('feature.config endpoints', () => {
   it('DELETE portify-overlay restores the pre-Portify config snapshot, then removes the overlay', async () => {
     const preConfig = `module.exports = { config: { name: 'porty', description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname, startCommands: [{ command: 'yarn start' }] }], featureDir: __dirname } }`
     const portifiedConfig = `module.exports = { config: { name: 'porty', description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname, startCommands: [{ command: 'yarn start', ports: [{ name: 'api', env: 'PORT' }] }] }], featureDir: __dirname } }`
-    const dir = buildFeature('porty', { config: portifiedConfig })
+    const dir = buildFeature('porty', { config: portifiedConfig, envsets: { local: {} } })
     writeOverlay(dir, {
       featureName: 'porty',
       agent: 'claude',

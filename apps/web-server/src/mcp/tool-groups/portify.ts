@@ -201,7 +201,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('remove_portification', {
-    description: "Un-portify a SAVED feature: reverts its feature config (the declared `ports` slots + the `${port.x}` health-check rewrites) and deletes the port overlay, so it boots on its hardcoded ports again and is no longer portified. Always auto-cleans — overlays carry a pre-Portify config snapshot, so the revert is exact. Legacy overlays (no snapshot) best-effort strip the slots; their health-check tokens need a re-run of Portify to regenerate. Requires confirm: true.",
+    description: "Un-portify a SAVED feature: reverts its feature config (the declared `ports` slots + the `${port.x}` health-check rewrites) and deletes the port overlay, so it boots on its hardcoded ports again and is no longer portified. Always auto-cleans — overlays carry a pre-Portify config snapshot. Settings are restored from that snapshot, then the environment list is synchronized from current envset folders. If synchronization fails, the overlay backup is retained for retry. Legacy overlays (no snapshot) best-effort strip the slots; their health-check tokens need a re-run of Portify to regenerate. Requires confirm: true.",
     inputSchema: {
       feature: z.string(),
       confirm: z.literal(true).describe('Must be true. Guards against discarding a saved overlay + reverting config.'),

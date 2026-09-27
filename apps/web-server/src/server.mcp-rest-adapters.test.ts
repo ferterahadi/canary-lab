@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createServer } from './server'
+import { writeOverlay, overlayExists } from './features/portify/logic/runtime/overlay'
 import { FlightRunStore } from './features/flights/logic/store'
 import { FLIGHT_STAGE_KEYS } from './features/flights/logic/types'
 import type { PtyFactory } from './features/runs/logic/runtime/pty-spawner'
@@ -145,7 +146,8 @@ describe('production MCP REST adapter wiring', () => {
         { type: 'envsets-changed', feature: 'checkout' }, { type: 'envsets-changed', feature: 'checkout' }])
     } finally { socket.close() }
   })
-  it('keeps REST and Flight reset environment removal consistent through persisted state, events, and agent reads', async () => {
+  it.each([false, true])('keeps environment removal consistent through Flight reset with a saved Portify snapshot: %s', async (withSnapshot) => {
+    if (withSnapshot) writeOverlay(suiteDir, { featureName: 'checkout', agent: 'claude', capturedAt: '2026-01-01T00:00:00Z', repos: [{ name: 'app', baseSha: 'fixture', patch: '', touchedFiles: [] }], originalConfig: fs.readFileSync(path.join(suiteDir, 'feature.config.cjs'), 'utf8') })
     const created = await app.inject({ method: 'POST', url: '/api/features/checkout/envsets', payload: { env: 'staging' } })
     expect(created.statusCode).toBe(201)
     const frames: Array<{ type: string; feature?: string }> = []
@@ -178,7 +180,8 @@ describe('production MCP REST adapter wiring', () => {
       await expect.poll(() => fs.existsSync(path.join(suiteDir, 'envsets', 'local'))).toBe(false)
       await expect.poll(async () => (await app.inject({ method: 'GET', url: '/api/flights/external-flight' })).json().status).toBe('waiting-for-approval')
       await drainSocket(socket)
-      expect(changes()).toEqual([...pair, ...pair])
+      expect(changes()).toEqual([...pair, ...pair, ...(withSnapshot ? [{ type: 'features-changed' }] : [])])
+      expect(overlayExists(suiteDir)).toBe(false)
       expect((await app.inject({ method: 'GET', url: '/api/features' })).json()).toEqual([
         expect.objectContaining({ name: 'checkout', envs: [] }),
       ])
@@ -186,6 +189,39 @@ describe('production MCP REST adapter wiring', () => {
       expect(read.isError).not.toBe(true)
       expect(JSON.parse(toolText(read))).toMatchObject({ envs: [] })
       expect(toolText(read)).not.toContain('3000')
+    } finally { socket.close() }
+  })
+  it.each(['REST', 'MCP'] as const)('restores a Portify snapshot through %s using current environments and retains the backup on failure', async (surface) => {
+    const config = path.join(suiteDir, 'feature.config.cjs')
+    writeOverlay(suiteDir, { featureName: 'checkout', agent: 'claude', capturedAt: '2026-01-01T00:00:00Z', repos: [{ name: 'app', baseSha: 'fixture', patch: '', touchedFiles: [] }], originalConfig: fs.readFileSync(config, 'utf8') })
+    fs.rmSync(path.join(suiteDir, 'envsets'), { recursive: true })
+    fs.writeFileSync(path.join(suiteDir, 'envsets'), 'not a directory')
+    const frames: Array<{ type: string }> = []
+    const socket = await app.injectWS('/ws/workspace', {}, { onInit: (ws) => ws.on('message', (raw) => frames.push(JSON.parse(raw.toString()))) })
+    const remove = async () => {
+      if (surface === 'REST') {
+        const response = await app.inject({ method: 'DELETE', url: '/api/features/checkout/portify-overlay' })
+        return { failed: response.statusCode !== 200, body: response.json() }
+      }
+      const response = await client.callTool({ name: 'remove_portification', arguments: { feature: 'checkout', confirm: true } })
+      return { failed: response.isError === true, body: response.isError ? toolText(response) : JSON.parse(toolText(response)) }
+    }
+    try {
+      expect((await remove()).failed).toBe(true)
+      await drainSocket(socket)
+      expect(frames.filter((frame) => frame.type === 'features-changed')).toEqual([])
+      expect(overlayExists(suiteDir)).toBe(true)
+      fs.rmSync(path.join(suiteDir, 'envsets'))
+      fs.mkdirSync(path.join(suiteDir, 'envsets', 'staging'), { recursive: true })
+      const recovered = await remove()
+      expect(recovered).toMatchObject({ failed: false, body: { name: 'checkout', portified: false, reverted: true } })
+      await drainSocket(socket)
+      expect(frames.some((frame) => frame.type === 'features-changed')).toBe(true)
+      expect(overlayExists(suiteDir)).toBe(false)
+      expect((await app.inject({ method: 'GET', url: '/api/features' })).json()).toEqual([expect.objectContaining({ name: 'checkout', envs: ['staging'] })])
+      const read = await client.callTool({ name: 'get_feature_envset_summary', arguments: { feature: 'checkout' } })
+      expect(read.isError).not.toBe(true)
+      expect(JSON.parse(toolText(read)).envs.map((env: { name: string }) => env.name)).toEqual(['staging'])
     } finally { socket.close() }
   })
   it('preserves the origin distinction between browser and MCP Flight decisions', async () => {

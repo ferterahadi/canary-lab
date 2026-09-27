@@ -181,10 +181,15 @@ suites) and translate a missing environment: REST returns 404; Flight reset is
 an idempotent no-op. The envsets root itself cannot be removed as an environment.
 A config-write failure after removal propagates without rollback or a success
 announcement. Flight's existing restart coordinator catches reset failures and
-continues. A separate reset-ordering limitation remains: if Portify has a saved
-config snapshot, its later reset restores that snapshot verbatim and can
-reintroduce a removed environment declaration. Environment removal does not
-change Portify snapshot restoration.
+continues. Portify snapshot restoration in
+`apps/web-server/src/features/portify/logic/runtime/unportify.ts` synchronizes
+`envs` from current folders before deleting the overlay. This shared operation
+covers REST, MCP, and Flight reset, so restoring an old snapshot cannot
+reintroduce removed environments or omit newly added ones. Other snapshot
+settings are restored as before; the legacy path without a snapshot still
+strips port slots on a best-effort basis. Synchronization failures retain the
+overlay backup for retry and propagate to the caller without a success event;
+the already-restored config is not rolled back.
 
 The configuration dialog shares document reads through a dialog-local
 `config-doc-store`. Mounted readers use `useLiveResource` with suite-scoped

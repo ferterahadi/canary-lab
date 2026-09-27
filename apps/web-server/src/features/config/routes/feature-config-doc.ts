@@ -112,13 +112,13 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
   // permanent edits to feature.config.cjs (the declared `ports` slots + the
   // `${port.x}` health-check / inter-service URL rewrites). So removal restores
   // the pre-Portify config — every overlay written since this shipped carries a
-  // snapshot (captured at save), so the restore is exact and lossless.
+  // snapshot (captured at save). Environments are then derived from current folders.
   //
   // Legacy overlays (saved before snapshots existed) have nothing to restore;
   // rather than leave the slots lingering we best-effort strip the declared
   // `ports` so they don't show. Their `${port.x}` health-check tokens can't be
   // un-rewritten without the snapshot — re-run Portify to regenerate a clean
-  // config. Either way the overlay is deleted and we never prompt the user.
+  // config. Successful restoration deletes the overlay without prompting.
   // Emits features-changed so the Portified badge flips live, no refresh.
   app.delete<{ Params: { name: string } }>('/api/features/:name/portify-overlay', async (req, reply) => {
     const features = loadFeatures(deps.featuresDir)
