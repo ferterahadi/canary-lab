@@ -795,7 +795,7 @@ describe('trailer model (R14–R18)', () => {
     }))
     await render('fl_1')
     const hero = container.querySelector('[data-testid="test-run-hero"]')?.textContent ?? ''
-    expect(hero).toContain('healing')
+    expect(hero).toContain('Healing')
     // The score is stated ONCE — by the Tests-passed tile, not also promoted
     // onto the identity row beside the status chip.
     expect(hero).toContain('1/3')

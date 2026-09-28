@@ -240,6 +240,7 @@ export function App() {
       <FeaturesColumn
         features={featuresWithPending}
         selectedFeature={selectedFeature}
+        activity={featureActivity}
         activeRunFeature={globalActiveRunEntry?.feature ?? null}
         activeRunStatus={globalActiveRunEntry?.status ?? null}
         activeRunWaiting={activeRunWaiting}

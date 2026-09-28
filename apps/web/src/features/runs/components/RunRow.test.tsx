@@ -89,7 +89,7 @@ describe('RunRow (R80 hero props)', () => {
     // Provenance, not an alarm: no danger hue on the companion chip.
     expect(chip?.getAttribute('style') ?? '').not.toContain('--danger')
     // The status chip itself is untouched.
-    expect(container.textContent).toContain('healing')
+    expect(container.textContent).toContain('Healing')
   })
 
   it('shows no pending chip when the run has none (and on runs recorded before the boundary)', () => {

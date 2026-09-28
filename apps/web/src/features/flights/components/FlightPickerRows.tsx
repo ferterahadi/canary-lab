@@ -7,7 +7,7 @@ import type { FeatureActivity } from '../state/feature-activity'
 import { Chip } from '@/shared/ui/StatusChip'
 import { Tooltip } from '@/shared/ui/Tooltip'
 import { useLiveCoverageStates } from '@/shared/state/use-live-coverage'
-import { FLIGHT_OVERVIEW, STAGE_STATUS_LABEL, stagePresentationStatus, stageStatusTone } from './stage-meta'
+import { FLIGHT_OVERVIEW, presentStageStatus, stageStatusTone } from './stage-meta'
 import { coverageStageWarning, isCoverageWarningRow, type CoverageStageWarning } from './coverage-stage-warning'
 import { readGroupOpen, writeGroupOpen } from '../lib/group-open-state'
 import { derivedFlightToken } from '../lib/derived-stages'
@@ -28,18 +28,17 @@ export function StageMiniRail({ rows, activity, coverageWarning }: { rows: Stage
   return (
     <span className="inline-flex items-center gap-[3px]" data-testid="stage-mini-rail">
       {rows.map((row) => {
-        const rowWaiting = row.key === activeRow ? activity?.waiting : undefined
-        const displayStatus = stagePresentationStatus(row.status, rowWaiting)
+        const presentation = presentStageStatus(row.status, row.key, row.key === activeRow ? activity : undefined)
         const currentCoverageWarning = isCoverageWarningRow(row.key, coverageWarning) ? coverageWarning?.message : undefined
         // Freshness qualifies the display; the saved stage status stays intact.
-        const label = `${row.label} — ${currentCoverageWarning ?? rowWaiting?.label ?? STAGE_STATUS_LABEL[displayStatus]}`
+        const label = `${row.label} — ${currentCoverageWarning ?? presentation.label}`
         return <Tooltip key={row.key} label={label}>
           <span
             data-testid={`stage-mini-cell-${row.key}`}
             className="inline-block h-[8px] w-[8px] rounded-[2px]"
             role="img"
             aria-label={label}
-            style={{ background: currentCoverageWarning ? 'var(--warning)' : toneFor(displayStatus) }}
+            style={{ background: currentCoverageWarning ? 'var(--warning)' : presentation.status === 'pending' && row.key !== activeRow ? toneFor(presentation.status) : presentation.tone }}
           />
         </Tooltip>
       })}

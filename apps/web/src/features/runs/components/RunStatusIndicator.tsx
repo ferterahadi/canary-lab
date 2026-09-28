@@ -1,5 +1,7 @@
 import type { DisplayStatus, ExecutionType } from '@/shared/api/types'
-import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
+import { StatusDot } from '@/shared/ui/atoms'
+import { presentRunStatus } from '../utils/run-presentation'
+import type { RunWaitingState } from '../utils/run-waiting-state'
 
 // Linear-style status indicator: a coloured dot + muted uppercase label.
 // Reads as data, not a button. Active states (`running`, `healing`) and
@@ -11,61 +13,27 @@ import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
 // on top of the persisted status by the caller for the duration of an
 // in-flight action — they are never sent to the server.
 
-interface Entry {
-  dot: StatusDotState
-  /** Tailwind text colour utilities for the label (light + dark). */
-  text: string
-  pulse?: boolean
-  /** Override for the rendered label. Defaults to the status string. */
-  label?: string
-}
-
-const PALETTE: Record<DisplayStatus, Entry> = {
-  queued:  { dot: 'idle',    text: 'text-secondary', label: 'queued' },
-  passed:  { dot: 'success', text: 'text-success/90' },
-  failed:  { dot: 'failed',  text: 'text-danger/90' },
-  aborted: { dot: 'idle',    text: 'text-secondary' },
-  running: { dot: 'running', text: 'text-running/90', pulse: true },
-  healing: { dot: 'warning', text: 'text-warning/90', pulse: true },
-  // Transient actions all share the amber pulsing palette so the user reads
-  // them as "this row is changing right now". Distinct labels disambiguate.
-  aborting:           { dot: 'warning', text: 'text-warning/90', pulse: true },
-  deleting:           { dot: 'failed',  text: 'text-danger/90', pulse: true },
-  'cancelling-heal':  { dot: 'warning', text: 'text-warning/90', pulse: true, label: 'cancelling' },
-  pausing:            { dot: 'warning', text: 'text-warning/90', pulse: true },
-}
-
-// Boot-only sessions reuse the same persisted statuses (a held boot run is
-// `running`; a stopped one is `aborted`) but read very differently from a test
-// run — teal "services up" while held, a neutral "stopped" once torn down — so
-// the user never mistakes a held app for a running test suite.
-const BOOT_PALETTE: Partial<Record<DisplayStatus, Entry>> = {
-  running:  { dot: 'booted', text: 'text-boot/90', label: 'services up' },
-  aborted:  { dot: 'idle',   text: 'text-secondary', label: 'stopped' },
-  aborting: { dot: 'booted', text: 'text-boot/90', pulse: true, label: 'stopping' },
-}
-
 export function RunStatusIndicator({
   status,
   executionType,
-  waitingLabel,
+  waiting,
 }: {
   status: DisplayStatus
   executionType?: ExecutionType
-  waitingLabel?: string
+  waiting?: RunWaitingState
 }) {
-  const p = (executionType === 'boot' ? BOOT_PALETTE[status] : undefined)
-    ?? PALETTE[status]
-    ?? PALETTE.aborted
+  const p = presentRunStatus({ status, executionType, waiting })
   return (
     <span
       data-testid="run-status-indicator"
       data-status={status}
       data-mode={executionType === 'boot' ? 'boot' : undefined}
-      className={`inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.08em] ${p.text}`}
+      title={p.title}
+      className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.08em]"
+      style={{ color: p.tone }}
     >
-      <StatusDot state={p.dot} pulse={p.pulse && !waitingLabel} halo={p.pulse && !waitingLabel} />
-      {waitingLabel ?? p.label ?? status}
+      <StatusDot state={p.dot} pulse={p.pulse} halo={p.pulse && p.dot !== 'booted'} />
+      {p.label}
     </span>
   )
 }

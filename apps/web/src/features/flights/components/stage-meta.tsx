@@ -1,4 +1,5 @@
 import type { RunWaitingState } from '@/features/runs'
+import { presentActivityRunStatus, type FeatureActivity } from '../state/feature-activity'
 import type { ReactNode } from 'react'
 import type { FlightStage, FlightStageKey, FlightStageStatus, SpecsCoverageProgress } from '@/shared/api/client'
 import { capitalizeFirst } from '@/shared/lib/format'
@@ -130,19 +131,34 @@ export function stagePresentationStatus(status: FlightStageStatus, waiting?: Run
   return waiting?.kind === 'queued' ? 'pending' : waiting ? 'waiting-for-approval' : status
 }
 
-export function StageStatusChip({ status: recordedStatus, waiting }: { status: FlightStageStatus; waiting?: RunWaitingState }) {
+/** Overlay one active run onto the Test run step without changing saved Flight
+ * stage evidence. The rail, detail chip, and mini rail share this resolver. */
+export function presentStageStatus(recordedStatus: FlightStageStatus, rowKey: string, activity?: FeatureActivity, fallbackWaiting?: RunWaitingState) {
+  const activeRun = rowKey === 'run' && activity?.runId != null
+  const waiting = activeRun ? activity.waiting : fallbackWaiting
   const status = stagePresentationStatus(recordedStatus, waiting)
-  const tone = stageStatusTone(status)
+  if (activeRun) {
+    const run = presentActivityRunStatus(activity)!
+    return { status, label: run.label, tone: run.tone, dot: run.dot, pulse: run.pulse, title: run.title }
+  }
+  return { status, label: waiting?.label ?? STAGE_STATUS_LABEL[status], tone: stageStatusTone(status),
+    dot: status === 'running' ? 'running' as const : undefined, pulse: false, title: undefined }
+}
+
+export function StageStatusChip({ status: recordedStatus, waiting, activity, rowKey }: { status: FlightStageStatus; waiting?: RunWaitingState; activity?: FeatureActivity; rowKey?: string }) {
+  const presentation = presentStageStatus(recordedStatus, rowKey ?? '', activity, waiting)
+  const status = presentation.status
   return (
     <Chip
       testId="stage-status-chip"
       chrome="fill"
-      tone={tone}
+      tone={presentation.tone}
       fontSize={10}
-      icon={status === 'running'
-        ? <StatusDot state="running" className="shrink-0" />
+      icon={presentation.dot
+        ? <StatusDot state={presentation.dot} pulse={presentation.pulse} className="shrink-0" />
         : <span aria-hidden="true">{STAGE_ICON[status]}</span>}
-      label={waiting?.label ?? capitalizeFirst(STAGE_STATUS_LABEL[status])}
+      label={capitalizeFirst(presentation.label)}
+      title={presentation.title}
     />
   )
 }

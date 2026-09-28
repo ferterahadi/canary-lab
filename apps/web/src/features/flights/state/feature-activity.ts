@@ -6,7 +6,7 @@ import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useEvaluationExports } from '@/features/evaluation'
 import { isActivePortify, usePortify } from '@/features/portify'
 import { useActiveRuns, useRunDetails, useRuns } from '@/features/runs'
-import { runWaitingState, type RunWaitingState } from '@/features/runs'
+import { presentRunStatus, runWaitingState, type RunPresentation, type RunWaitingState } from '@/features/runs'
 import { isActiveWizardTask, useWizardDrafts } from '@/features/wizard'
 import { isAuxiliaryExecution } from '@shared/verification'
 
@@ -39,6 +39,17 @@ export interface FeatureActivity {
    *  Activity row and the flight view's mutation lock. */
   external?: boolean
   waiting?: RunWaitingState
+}
+
+/** Turn a selected suite run into the same status contract used by its own row. */
+export function presentActivityRunStatus(activity: FeatureActivity | undefined): RunPresentation | null {
+  if (!activity) return null
+  const runKind = activity.kind === 'running' || activity.kind === 'healing' || activity.kind === 'verifying'
+  if (!activity.waiting && (!runKind || !activity.runId)) return null
+  return presentRunStatus({
+    status: activity.waiting?.kind === 'queued' ? 'queued' : activity.kind === 'healing' ? 'healing' : 'running',
+    waiting: activity.waiting,
+  })
 }
 
 /** Persistent provenance for one piece of work behind a Flight step. Live
@@ -125,6 +136,32 @@ export const ACTIVITY_STAGE: Record<FeatureActivityKind, FlightStageKey> = {
  *  and resumable in the wizard panel either way. */
 const EXTERNAL_DRAFT_ACTIVITY_TTL_MS = 60 * 60 * 1000
 
+/** Select the run that an aggregate suite badge describes. Individual run rows
+ * always describe their own run. */
+export function displayedActiveRuns(
+  runs: RunIndexEntry[],
+  details: Record<string, RunDetail> = {},
+): Map<string, RunIndexEntry> {
+  const selected = new Map<string, RunIndexEntry>()
+  const priority = (run: RunIndexEntry): number => {
+    const waiting = runWaitingState(details[run.runId] ?? run)
+    if (waiting?.kind === 'test-review' || waiting?.kind === 'agent') return 0
+    if (run.status === 'healing') return 1
+    if (run.status === 'running') return 2
+    return 3
+  }
+  for (const run of runs) {
+    if (isAuxiliaryExecution(run.executionType)) continue
+    const previous = selected.get(run.feature)
+    if (!previous || priority(run) < priority(previous)
+      || priority(run) === priority(previous) && (
+        run.startedAt.localeCompare(previous.startedAt) > 0
+        || run.startedAt === previous.startedAt && run.runId.localeCompare(previous.runId) > 0
+      )) selected.set(run.feature, run)
+  }
+  return selected
+}
+
 export function deriveFeatureActivity(input: {
   activeRuns: RunIndexEntry[]
   portifyWorkflows: PortifyIndexEntry[]
@@ -170,15 +207,15 @@ export function deriveFeatureActivity(input: {
       map.set(feature, { kind: 'exporting', taskId: t.taskId, runId: t.runId, external: t.producer === 'external' })
     }
   }
-  for (const r of input.activeRuns) {
+  for (const r of displayedActiveRuns(input.activeRuns, input.runDetails).values()) {
     // Boots are not runs (they have the Services pill) and benchmark runs
     // drive the benchmark window — neither is feature activity here. A
     // deployed-env verification IS: it's a run in verify mode, and the suite's
     // one live indicator must light for it like any other run.
     if (isAuxiliaryExecution(r.executionType)) continue
-    const kind: FeatureActivityKind = r.executionType === 'verify'
-      ? 'verifying'
-      : r.status === 'healing' ? 'healing' : 'running'
+    const kind: FeatureActivityKind = r.status === 'healing'
+      ? 'healing'
+      : r.executionType === 'verify' ? 'verifying' : 'running'
     const waiting = runWaitingState(input.runDetails?.[r.runId] ?? r)
     map.set(r.feature, {
       ...(waiting ? { waiting } : {}),

@@ -27,8 +27,21 @@ describe('ExternalHealPanel', () => {
       />,
     )
 
-    expect(html).toContain('Waiting')
+    expect(html).toContain('Waiting for agent')
+    expect(html).toContain('var(--warning)')
     expect(html).not.toContain('Aborted')
+  })
+
+  it('uses the same waiting label and amber tone before an external agent claims the run', () => {
+    const html = renderToStaticMarkup(<ExternalHealPanel runId="run-1" runStatus="healing" />)
+    expect(html).toContain('Waiting for agent')
+    expect(html).toContain('var(--warning)')
+  })
+
+  it('uses the run presentation for an actively healing external session', () => {
+    const html = renderToStaticMarkup(<ExternalHealPanel runId="run-1" runStatus="healing" session={session({ status: 'healing' })} />)
+    expect(html).toContain('Healing')
+    expect(html).toContain('var(--warning)')
   })
 
   it.each([

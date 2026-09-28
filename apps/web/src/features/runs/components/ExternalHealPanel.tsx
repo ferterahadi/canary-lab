@@ -7,6 +7,8 @@ import type {
 import { isTerminalRunStatus } from '@shared/run-state'
 import { clientKindToDesktopAgent, clientLabel as brandingClientLabel, clientTint } from '@/shared/ui/external-client-branding'
 import { ExternalAgentCard, ExternalClientCta, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
+import { presentRunStatus } from '../utils/run-presentation'
+import { AGENT_WAITING_STATE } from '../utils/run-waiting-state'
 
 interface Props {
   runId: string
@@ -116,32 +118,37 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
 type PanelStatus = ExternalHealSessionStatus | Extract<RunStatus, 'passed' | 'failed' | 'aborted'>
 
 function statusLabel(status: PanelStatus): string {
+  const runStatus = sharedRunPresentation(status)
+  if (runStatus) return runStatus.label
   switch (status) {
-    case 'passed': return 'Passed'
-    case 'failed': return 'Failed'
-    case 'aborted': return 'Aborted'
     case 'connected': return 'Connected'
-    case 'waiting': return 'Waiting'
-    case 'healing': return 'Healing'
     case 'running-tests': return 'Running tests'
     case 'paused': return 'Paused'
     case 'disconnected': return 'Disconnected'
+    default: return status
   }
 }
 
+function sharedRunPresentation(status: PanelStatus) {
+  if (status === 'waiting') return presentRunStatus({ status: 'healing', waiting: AGENT_WAITING_STATE })
+  if (status === 'healing' || status === 'passed' || status === 'failed' || status === 'aborted') {
+    return presentRunStatus({ status })
+  }
+  return null
+}
+
 function statusPalette(status: PanelStatus): { fg: string; bg: string; border: string } {
-  if (status === 'failed' || status === 'disconnected') {
+  const runStatus = sharedRunPresentation(status)
+  if (runStatus) return {
+    fg: runStatus.tone,
+    bg: runStatus.background,
+    border: `color-mix(in srgb, ${runStatus.tone} 40%, transparent)`,
+  }
+  if (status === 'disconnected') {
     return {
       fg: 'var(--danger)',
       bg: 'color-mix(in srgb, var(--danger) 12%, transparent)',
       border: 'color-mix(in srgb, var(--danger) 40%, transparent)',
-    }
-  }
-  if (status === 'aborted') {
-    return {
-      fg: 'var(--text-muted)',
-      bg: 'color-mix(in srgb, var(--text-muted) 12%, transparent)',
-      border: 'color-mix(in srgb, var(--text-muted) 34%, transparent)',
     }
   }
   if (status === 'paused') {
@@ -151,7 +158,7 @@ function statusPalette(status: PanelStatus): { fg: string; bg: string; border: s
       border: 'color-mix(in srgb, var(--warning) 40%, transparent)',
     }
   }
-  if (status === 'healing' || status === 'running-tests') {
+  if (status === 'running-tests') {
     return {
       fg: 'var(--border-focus)',
       bg: 'color-mix(in srgb, var(--border-focus) 12%, transparent)',

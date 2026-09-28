@@ -1,8 +1,9 @@
 import type { FlightIndexEntry, FlightStageKey, FlightStageStatus, FlightStatus, PlanFeaturesTask } from '@/shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
-import { ACTIVITY_STAGE, type FeatureActivity, type FeatureActivityKind } from '../state/feature-activity'
+import { ACTIVITY_STAGE, presentActivityRunStatus, type FeatureActivity, type FeatureActivityKind } from '../state/feature-activity'
 import { capitalizeFirst } from '@/shared/lib/format'
 import { Chip } from '@/shared/ui/StatusChip'
+import { presentRunStatus } from '@/features/runs'
 import { Tooltip } from '@/shared/ui/Tooltip'
 import { stageLabel } from './stage-meta'
 import { derivedFlightToken } from '../lib/derived-stages'
@@ -81,9 +82,14 @@ export function preFlightChipState(
  *
  *  Every kind states its tone rather than defaulting: an optional field with one
  *  exception is a fallback arm nothing exercises. */
+const runActivityChip = (status: 'healing' | 'running') => {
+  const run = presentRunStatus({ status })
+  return { label: run.label.toLowerCase(), title: run.title, tone: run.tone }
+}
+
 export const ACTIVITY_CHIP: Record<FeatureActivityKind, { label: string; title: string; tone: string }> = {
-  'healing': { label: 'repairing', title: 'A repair agent is fixing the app so the failing tests pass', tone: 'var(--warning)' },
-  'running': { label: 'running', title: 'Test run in progress', tone: FLIGHT_STATUS_TONE['running'] },
+  'healing': runActivityChip('healing'),
+  'running': runActivityChip('running'),
   'exporting': { label: 'exporting', title: 'Building the evaluation report', tone: FLIGHT_STATUS_TONE['running'] },
   'portifying': { label: 'port setup', title: 'Making the suite safe to run two at a time', tone: FLIGHT_STATUS_TONE['running'] },
   'authoring': { label: 'writing', title: 'Writing tests', tone: FLIGHT_STATUS_TONE['running'] },
@@ -104,12 +110,12 @@ export const ACTIVITY_CHIP: Record<FeatureActivityKind, { label: string; title: 
  *
  *  Verbs, not the stage titles, because that is this vocabulary's grammar
  *  (running / repairing / port setup); the full title reaches the tooltip via
- *  `stageLabel`. The four that overlap ACTIVITY_CHIP reuse ITS verb, so a job
- *  reads identically whether a flight stage or a standalone action started it.
+ *  `stageLabel`. A Flight's heal step can say "repairing" without claiming an
+ *  active run is healing; active runs use presentRunStatus above.
  *
- *  Kept short deliberately: the chip is fixed at 72px (see FeatureChipBadge), so
- *  nothing here may exceed the width of the pinned widest labels — "to approve",
- *  "port setup" and "condensing", all 10 characters. */
+ *  Kept short deliberately: ordinary chips are fixed at 72px (see
+ *  FeatureChipBadge), so stage verbs must fit. Qualified run waits reserve
+ *  enough width for the full status label. */
 export const RUNNING_STAGE_CHIP: Record<FlightStageKey, string> = {
   'similarity': 'checking',
   'scout': 'scanning',
@@ -119,7 +125,7 @@ export const RUNNING_STAGE_CHIP: Record<FlightStageKey, string> = {
   'prd-summary': 'condensing',
   'specs-coverage': 'writing',
   'portify': 'port setup',
-  'run': 'running',
+  'run': presentRunStatus({ status: 'running' }).label.toLowerCase(),
   'heal': 'repairing',
   'evaluation-export': 'exporting',
 }
@@ -141,14 +147,15 @@ export function activityStages(
 }
 
 export interface FeatureChipState {
-  /** Visible chip text — short labels only, the column is fixed-width. */
+  /** Visible chip text. Qualified run waits reserve enough room to stay whole. */
   label: string
+  chipWidth?: number
   tone: string
   /** True while something is actively happening (drives live treatments). */
   live: boolean
   /** Worst-first sort rank for rows (0 = needs the human most). */
   rank: number
-  /** Tooltip detail — the fuller story the fixed-width chip can't carry. */
+  /** Tooltip detail beyond the visible status label. */
   title: string
 }
 
@@ -161,7 +168,7 @@ export interface FeatureChipState {
  *      in progress and only the tooltip says where
  *   1. flight parked on any OTHER checkpoint → "to approve"  (amber — the human
  *      is the blocker; outranks live activity because nothing moves until they act)
- *   2. live activity on the feature  → "running" / "repairing" / "port setup" /
+ *   2. live activity on the feature  → "running" / "healing" / "port setup" /
  *      "authoring" (narrates the absorbed surfaces (runs / portify / wizard
  *      drafts) whether the job was started by a flight stage or standalone;
  *      sky, except the amber "healing" — see ACTIVITY_CHIP)
@@ -190,13 +197,18 @@ export function featureChipState(
   activity?: FeatureActivity,
   derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>,
 ): FeatureChipState {
-  if (activity?.waiting?.kind === 'queued') return {
-    label: 'queued', tone: 'var(--text-muted)', live: false, rank: 5.5,
-    title: `${activity.waiting.label}. ${activity.waiting.detail}`,
+  const externalPark = isExternalWorkPark(flight) || (flight?.status === 'waiting-for-approval' && isExternallyDriven(flight))
+  if (flight?.status === 'waiting-for-approval' && !externalPark) {
+    return { label: 'to approve', tone: FLIGHT_STATUS_TONE['waiting-for-approval'], live: false, rank: 0, title: 'Waiting on your answer' }
   }
-  if (activity?.waiting) return {
-    label: activity.waiting.shortLabel, tone: FLIGHT_STATUS_TONE['waiting-for-approval'],
-    live: false, rank: 0, title: `${activity.waiting.label}. ${activity.waiting.detail}`,
+  if (activity?.waiting) {
+    const run = presentActivityRunStatus(activity)!
+    return { label: run.label, chipWidth: run.chipWidth, tone: run.tone, live: false,
+      rank: activity.waiting.kind === 'queued' ? 5.5 : 0, title: `${run.label}. ${run.title}` }
+  }
+  if (activity?.runId && (activity.kind === 'healing' || activity.kind === 'running' || activity.kind === 'verifying')) {
+    const run = presentActivityRunStatus(activity)!
+    return { label: run.label.toLowerCase(), tone: run.tone, live: true, rank: 1, title: run.title }
   }
   // A hand-off to the client that started the flight is WORK, not a question —
   // it reads exactly like a running flight (same verb, same sky, same pulse,
@@ -206,12 +218,9 @@ export function featureChipState(
   // when the agent is the one who answers it. Only the flight's own pauses
   // (stage-failed, restart, user) fall through to the resting branches below,
   // because those are states, not demands.
-  if (isExternalWorkPark(flight) || (flight?.status === 'waiting-for-approval' && isExternallyDriven(flight))) {
+  if (externalPark) {
     const verb = flight?.currentStage ? RUNNING_STAGE_CHIP[flight.currentStage] ?? 'running' : 'running'
     return { label: verb, tone: FLIGHT_STATUS_TONE['running'], live: true, rank: 1, title: externalWorkChipTitle(verb) }
-  }
-  if (flight?.status === 'waiting-for-approval') {
-    return { label: 'to approve', tone: FLIGHT_STATUS_TONE['waiting-for-approval'], live: false, rank: 0, title: 'Waiting on your answer' }
   }
   // A queued sibling needs no attention — muted, and it sinks below every
   // resting state (only never-flown ranks lower). Checked before live activity
@@ -270,6 +279,7 @@ export interface FeatureFlightAction {
   tone: string
   /** Short state word, e.g. `done` / `idle` / `to approve` — for the tooltip. */
   label: string
+  chipWidth?: number
   /** The fuller story behind the label (chip tooltip copy). */
   title: string
   /** Something is happening on this suite right now (running flight or a live
@@ -316,6 +326,7 @@ export function resolveFeatureFlightAction(
     flightId,
     tone: chip.tone,
     label: chip.label,
+    ...(chip.chipWidth ? { chipWidth: chip.chipWidth } : {}),
     title: chip.title,
     live: chip.live,
     ...(activity?.waiting?.kind === 'queued' || (flight?.status === 'paused' && flight.pauseReason === 'queued') ? { queued: true } : {}),
@@ -326,11 +337,9 @@ export function resolveFeatureFlightAction(
   }
 }
 
-/** Fixed-width status chip for a feature row (landing list + picker): pinned
- *  to the widest labels ("to approve" / "portifying") so the mini-rail and
- *  chip stay aligned across rows, and a row doesn't jump sideways as its
- *  state changes. The fuller story only reaches the tooltip, never the
- *  visible text, so it can't widen the column. */
+/** Status chip for a feature row (landing list + picker). Ordinary states keep
+ * the 72px column; qualified run waits use the shared presentation's width so
+ * their full label remains visible. */
 export function FlightStatusChip({
   flight,
   activity,
@@ -347,9 +356,9 @@ export function FlightStatusChip({
  *  already holds a resolved state (the suites column, which gets one from
  *  `resolveFeatureFlightAction`) renders the IDENTICAL chip instead of a
  *  look-alike — one home for the width, tone and tooltip rules. */
-export function FeatureChipBadge({ chip }: { chip: Pick<FeatureChipState, 'label' | 'tone' | 'title'> }) {
+export function FeatureChipBadge({ chip }: { chip: Pick<FeatureChipState, 'label' | 'tone' | 'title' | 'chipWidth'> }) {
   return (
-    <Chip testId="flight-status-chip" chrome="fill" tone={chip.tone} fontSize={10} label={capitalizeFirst(chip.label)} width={72} title={chip.title} />
+    <Chip testId="flight-status-chip" chrome="fill" tone={chip.tone} fontSize={10} label={capitalizeFirst(chip.label)} width={chip.chipWidth ?? 72} title={chip.title} />
   )
 }
 

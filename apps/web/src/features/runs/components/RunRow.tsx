@@ -1,33 +1,14 @@
 import type { ExecutionType, RunDetail, RunIndexEntry, RunStatus } from '@/shared/api/types'
-import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
+import { StatusDot } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
-import { runWaitingState } from '../utils/run-waiting-state'
+import { runWaitingState, type RunWaitingState } from '../utils/run-waiting-state'
+import { presentRunStatus } from '../utils/run-presentation'
 import { shortTime } from '@/shared/lib/format'
 
 // One run row + its status chip, extracted verbatim from RunsListDialog (R64)
 // so the flight's run stage can render the same row as the runs list. Chrome
 // mirrors the EvaluationExportTaskToast / WizardTaskStatus dialogs (leading
 // status dot + pill chip) so run/task surfaces read as one family.
-
-// Pill chip palettes, keyed by run status. Colour families match
-// RunStatusIndicator / WizardTaskStatus so the surfaces stay in sync.
-const CHIP: Record<RunStatus, { bg: string; text: string }> = {
-  running: { bg: 'color-mix(in srgb, var(--running) 15%, transparent)', text: 'var(--running)' },
-  healing: { bg: 'color-mix(in srgb, var(--warning) 15%, transparent)', text: 'var(--warning)' },
-  queued:  { bg: 'var(--bg-selected)', text: 'var(--text-secondary)' },
-  passed:  { bg: 'color-mix(in srgb, var(--success) 15%, transparent)', text: 'var(--success)' },
-  failed:  { bg: 'color-mix(in srgb, var(--danger) 15%, transparent)', text: 'var(--danger)' },
-  aborted: { bg: 'var(--bg-selected)', text: 'var(--text-muted)' },
-}
-
-const DOT: Record<RunStatus, { state: StatusDotState; pulse: boolean }> = {
-  running: { state: 'running', pulse: true },
-  healing: { state: 'warning', pulse: true },
-  queued:  { state: 'idle', pulse: false },
-  passed:  { state: 'success', pulse: false },
-  failed:  { state: 'failed', pulse: false },
-  aborted: { state: 'idle', pulse: false },
-}
 
 const CHROME_CLASS = {
   row: 'rounded-md px-3 py-2 cl-hover-row',
@@ -97,9 +78,7 @@ export function RunRow({
   const ports = showPorts ? portsLabel(detail) : null
   const note = queueNote(run, detail)
   const waiting = runWaitingState(detail ?? run)
-  // A held boot session is status 'running' but reads as teal "services up".
-  const isBoot = run.executionType === 'boot'
-  const dot = isBoot && run.status === 'running' ? { state: 'booted' as const, pulse: true } : DOT[run.status]
+  const presentation = presentRunStatus({ status: run.status, executionType: run.executionType, waiting })
   const meta: Array<{ text: string; mono?: boolean }> = [{ text: shortTime(run.startedAt) }]
   // The envset sits next to the timestamp — when and where, before any outcome.
   // Spec selection cannot vary by envset, so sibling runs of one suite declare
@@ -120,7 +99,7 @@ export function RunRow({
         className={`group flex w-full items-center gap-2 text-left ${CHROME_CLASS[chrome]}`}
         title={`Go to run ${run.runId}`}
       >
-        <StatusDot state={dot.state} pulse={dot.pulse && !waiting} halo={dot.pulse && !waiting} className="shrink-0" />
+        <StatusDot state={presentation.dot} pulse={presentation.pulse} halo={presentation.pulse && presentation.dot !== 'booted'} className="shrink-0" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span
             className={`truncate text-[13px] ${chrome === 'row' ? '' : 'group-hover:underline'}`}
@@ -150,7 +129,7 @@ export function RunRow({
             {passLabel}
           </span>
         )}
-        <RunStatusChip status={run.status} executionType={run.executionType} pendingSpecEdits={run.pendingSpecEdits} waitingLabel={waiting?.label} />
+        <RunStatusChip status={run.status} executionType={run.executionType} pendingSpecEdits={run.pendingSpecEdits} waiting={waiting} />
         <span
           className={`shrink-0 transition-opacity ${arrow === 'always' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
           style={{ color: 'var(--accent)' }}
@@ -170,14 +149,8 @@ export function RunRow({
  *  chrome and muted tone: a fact about provenance, not an alarm (the danger
  *  reading, if any, is the features column's weaker badge). The count is
  *  mirrored onto the runs index by the server so this needs no detail read. */
-export function RunStatusChip({ status, executionType, pendingSpecEdits, waitingLabel }: { status: RunStatus; executionType?: ExecutionType; pendingSpecEdits?: number; waitingLabel?: string }) {
-  const boot = executionType === 'boot' && (status === 'running' || status === 'aborted')
-  const palette = boot
-    ? (status === 'running'
-        ? { bg: 'var(--boot-soft)', text: 'var(--boot)' }
-        : { bg: 'var(--bg-selected)', text: 'var(--text-muted)' })
-    : CHIP[status]
-  const label = boot ? (status === 'running' ? 'services up' : 'stopped') : waitingLabel ?? status
+export function RunStatusChip({ status, executionType, pendingSpecEdits, waiting }: { status: RunStatus; executionType?: ExecutionType; pendingSpecEdits?: number; waiting?: RunWaitingState }) {
+  const presentation = presentRunStatus({ status, executionType, waiting })
   const pending = pendingSpecEdits ?? 0
   return (
     <>
@@ -193,9 +166,10 @@ export function RunStatusChip({ status, executionType, pendingSpecEdits, waiting
       )}
       <Chip
         chrome="fill"
-        tone={palette.text}
-        background={palette.bg}
-        label={label}
+        tone={presentation.tone}
+        background={presentation.background}
+        label={presentation.label}
+        title={presentation.title}
         uppercase
         fontSize={10}
         fontWeight={600}

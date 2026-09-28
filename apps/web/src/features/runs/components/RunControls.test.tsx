@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunDetail } from '@/shared/api/types'
+import type { RunDetail, RunIndexEntry } from '@/shared/api/types'
 import { RunDetailColumn } from './RunDetailColumn'
 import { RunsColumn } from './RunsColumn'
 
@@ -98,6 +98,45 @@ function startEnvlessRun(container: HTMLDivElement): void {
 }
 
 describe('run launch controls', () => {
+  it('keeps the Run action available while this suite is healing', () => {
+    const onStartRun = vi.fn()
+    const healing: RunIndexEntry = {
+      runId: 'run-1', feature: 'alpha', status: 'healing', startedAt: '2026-01-01T00:00:00Z',
+    }
+    const render = (runs: RunIndexEntry[]) => {
+      act(() => {
+        root.render(
+          <RunsColumn
+            feature="alpha"
+            envs={['local']}
+            runs={runs}
+            selectedRunId={null}
+            onSelectRun={() => {}}
+            onStartRun={onStartRun}
+            onStartVerification={async () => {}}
+          />,
+        )
+      })
+    }
+
+    render([healing])
+    const launch = container.querySelector<HTMLButtonElement>('button[data-run-launch-menu]')
+    expect(launch?.textContent).toContain('Run')
+    expect(launch?.textContent).not.toContain('Healing')
+    expect(launch?.title).toBe('Run')
+    act(() => launch?.click())
+    expect(onStartRun).not.toHaveBeenCalled()
+    const localOption = [...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((button) => button.textContent?.includes('local'))
+    act(() => localOption?.click())
+    expect(onStartRun).toHaveBeenCalledExactlyOnceWith('local', 'test')
+
+    render([{ ...healing, status: 'passed' }])
+    expect(launch?.textContent).toContain('Run')
+    expect(launch?.textContent).not.toContain('Healing')
+    expect(launch?.title).toBe('Run')
+  })
+
   it('gates a run through the MCP promo before starting (env-less feature)', () => {
     const onStartRun = vi.fn()
     gatePromo.mockImplementationOnce(() => {})

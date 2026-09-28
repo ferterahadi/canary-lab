@@ -19,7 +19,7 @@ describe('runWaitingState', () => {
     expect(deriveRunViewModel(recorded, 'cancelling-heal').waiting).toBeUndefined()
   })
   it('has an index fallback before detail hydration, and does not relabel terminal/running runs', () => {
-    expect(runWaitingState({ runId: 'r', feature: 'f', status: 'healing', startedAt: '', pendingSpecEdits: 1 })?.shortLabel).toBe('to review')
+    expect(runWaitingState({ runId: 'r', feature: 'f', status: 'healing', startedAt: '', pendingSpecEdits: 1 })?.label).toBe('Awaiting test review')
     expect(runWaitingState({ runId: 'r', feature: 'f', status: 'healing', startedAt: '' })).toBeUndefined()
     for (const status of ['passed', 'failed', 'running', 'aborted'] as const) expect(runWaitingState(detail({ status }))).toBeUndefined()
     expect(runWaitingState(null)).toBeUndefined()
@@ -37,5 +37,8 @@ describe('runWaitingState', () => {
       expect(runWaitingState(detail({ specEdits: undefined, externalHealSession: { ...session, status } }))?.label).toBe('Waiting for agent')
     }
     expect(runWaitingState(detail({ specEdits: undefined, externalHealSession: undefined }))).toBeUndefined()
+    expect(runWaitingState(detail({ specEdits: undefined, healMode: 'external', externalHealSession: undefined, lifecycle: {
+      phase: 'waiting-for-signal', headline: 'Waiting for heal signal', updatedAt: '',
+    } }))?.label).toBe('Waiting for agent')
   })
 })

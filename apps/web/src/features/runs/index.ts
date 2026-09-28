@@ -19,6 +19,7 @@ export {
 } from './state/RunsContext'
 export { sourceFileInRun } from './utils/run-source-file'
 export { runWaitingState, type RunWaitingState } from './utils/run-waiting-state'
+export { presentRunStatus, type RunPresentation } from './utils/run-presentation'
 export { sourceLineForBodyLine } from './utils/editor-location'
 export { SPEC_TONE, featureTone, specTone, worstTone, type SpecEditTone } from './utils/spec-integrity'
 export {

@@ -4,7 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FeaturesColumn } from './FeaturesColumn'
-import type { FeatureFlightAction } from '@/features/flights'
+import { resolveFeatureFlightAction, type FeatureActivity, type FeatureFlightAction } from '@/features/flights'
 import { InvalidationProvider, useInvalidation } from '../state/invalidation'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -114,7 +114,33 @@ describe('FeaturesColumn MCP promo gate', () => {
 describe('FeaturesColumn active-run highlight', () => {
   const feature = (name: string) => ({ name, repos: [], envs: [] })
 
-  it('highlights the active row when healing and drops the visible chip', () => {
+  it('shows each suite’s selected run status even when the global run belongs to another suite', () => {
+    const activity = new Map<string, FeatureActivity>([
+      ['alpha', { kind: 'running', runId: 'run-alpha' }],
+      ['beta', { kind: 'healing', runId: 'run-beta' }],
+    ])
+    act(() => root.render(<FeaturesColumn onOpenConfig={onOpenConfig}
+      features={[feature('alpha'), feature('beta')]} selectedFeature="alpha"
+      activeRunFeature="alpha" activeRunStatus="running" activity={activity}
+      onSelectFeature={() => {}} onOpenFlight={() => {}}
+      flightAction={(name) => resolveFeatureFlightAction(name, [], activity.get(name))} />))
+    expect(featureRow('alpha').querySelector('[aria-label="Running"]')?.textContent).toBe('Running')
+    expect(featureRow('beta').querySelector('[aria-label="Healing"]')?.textContent).toBe('Healing')
+    expect(featureRow('beta').classList.contains('cl-list-row-healing')).toBe(true)
+    const nextActivity = new Map<string, FeatureActivity>([
+      ['alpha', { kind: 'running', runId: 'run-alpha' }],
+      ['beta', { kind: 'running', runId: 'run-beta' }],
+    ])
+    act(() => root.render(<FeaturesColumn onOpenConfig={onOpenConfig}
+      features={[feature('alpha'), feature('beta')]} selectedFeature="alpha"
+      activeRunFeature="alpha" activeRunStatus="running" activity={nextActivity}
+      onSelectFeature={() => {}} onOpenFlight={() => {}}
+      flightAction={(name) => resolveFeatureFlightAction(name, [], nextActivity.get(name))} />))
+    expect(featureRow('beta').querySelector('[aria-label="Running"]')?.textContent).toBe('Running')
+    expect(featureRow('beta').classList.contains('cl-list-row-running')).toBe(true)
+  })
+
+  it('highlights the active row and labels it Healing', () => {
     act(() => {
       root.render(
         <FeaturesColumn
@@ -133,9 +159,7 @@ describe('FeaturesColumn active-run highlight', () => {
     expect(beta.classList.contains('cl-list-row-running')).toBe(false)
     // The selected-but-idle row carries no run-state class.
     expect(featureRow('alpha').classList.contains('cl-list-row-healing')).toBe(false)
-    // The chip is gone, but the status stays available to screen readers.
-    expect(container.querySelector('.cl-run-chip')).toBeNull()
-    expect(beta.querySelector('.sr-only')?.textContent).toBe('Healing')
+    expect(beta.querySelector('[aria-label="Healing"]')?.textContent).toBe('Healing')
   })
 
   it('uses the running class for a non-healing active run', () => {
@@ -154,14 +178,13 @@ describe('FeaturesColumn active-run highlight', () => {
 
     const row = featureRow('alpha')
     expect(row.classList.contains('cl-list-row-running')).toBe(true)
-    expect(row.querySelector('.sr-only')?.textContent).toBe('Running')
+    expect(row.querySelector('[aria-label="Running"]')?.textContent).toBe('Running')
   })
 
   it('keeps a waiting heal visible with a steady row cue and compact label', () => {
     const waiting = {
       kind: 'agent' as const,
       label: 'Waiting for agent',
-      shortLabel: 'waiting',
       detail: 'Resume the external repair session.',
     }
     act(() => {
@@ -183,7 +206,8 @@ describe('FeaturesColumn active-run highlight', () => {
     expect(beta.classList.contains('cl-list-row-healing')).toBe(false)
     expect(beta.style.color).toBe('var(--text-primary)')
     expect(featureRow('alpha').classList.contains('cl-list-row-waiting')).toBe(false)
-    expect(beta.querySelector('[data-testid="run-waiting-beta"]')?.textContent).toBe('waiting')
+    expect(beta.querySelector('[data-testid="run-waiting-beta"]')?.textContent).toBe('Waiting for agent')
+    expect(beta.querySelector<HTMLElement>('[data-testid="run-waiting-beta"]')?.style.width).toBe('120px')
     expect(beta.querySelector('[aria-label="Waiting for agent"]')).toBeTruthy()
 
     // The run detail stream updates this prop in place. The open Suites column
@@ -224,7 +248,6 @@ describe('FeaturesColumn active-run highlight', () => {
           activeRunWaiting={{
             kind: 'test-review',
             label: 'Awaiting test review',
-            shortLabel: 'to review',
             detail: 'Review the unexecuted test edits.',
           }}
           onSelectFeature={() => {}}
@@ -236,7 +259,7 @@ describe('FeaturesColumn active-run highlight', () => {
     expect(row.classList.contains('cl-list-row-waiting')).toBe(true)
     expect(row.classList.contains('cl-list-row-changed')).toBe(false)
     expect(row.querySelector('[data-testid="dirty-badge-alpha"]')?.textContent).toBe('Review')
-    expect(row.querySelector('[data-testid="run-waiting-alpha"]')?.textContent).toBe('to review')
+    expect(row.querySelector('[data-testid="run-waiting-alpha"]')?.textContent).toBe('Awaiting test review')
   })
 
   it('labels a queued run without applying the amber waiting wash', () => {
@@ -251,7 +274,6 @@ describe('FeaturesColumn active-run highlight', () => {
           activeRunWaiting={{
             kind: 'queued',
             label: 'Queued',
-            shortLabel: 'queued',
             detail: 'Services and tests have not started.',
           }}
           onSelectFeature={() => {}}
@@ -262,7 +284,7 @@ describe('FeaturesColumn active-run highlight', () => {
     const row = featureRow('alpha')
     expect(row.classList.contains('cl-list-row-waiting')).toBe(false)
     expect(row.classList.contains('cl-list-row-running')).toBe(false)
-    expect(row.querySelector('[data-testid="run-waiting-alpha"]')?.textContent).toBe('queued')
+    expect(row.querySelector('[data-testid="run-waiting-alpha"]')?.textContent).toBe('Queued')
     expect(row.querySelector<HTMLElement>('[data-testid="run-waiting-alpha"]')?.style.color).toBe('var(--text-muted)')
   })
 })
@@ -792,6 +814,24 @@ describe('FeaturesColumn in-flight row cue', () => {
     const row = container.querySelector<HTMLElement>('li.feature-row')
     expect(row?.className).toContain('cl-list-row-inflight')
     expect(row?.className).toContain('cl-list-row-running')
+  })
+
+  it('uses the shared Flight chip for an actively healing run', () => {
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          onOpenConfig={onOpenConfig}
+          features={[feature('alpha')]}
+          selectedFeature="alpha"
+          activeRunFeature="alpha"
+          activeRunStatus="healing"
+          onSelectFeature={() => {}}
+          onOpenFlight={() => {}}
+          flightAction={() => flight({ live: true, label: 'healing' })}
+        />,
+      )
+    })
+    expect(container.querySelector('[data-testid="flight-chip-alpha"]')?.textContent).toBe('Healing')
   })
 })
 
