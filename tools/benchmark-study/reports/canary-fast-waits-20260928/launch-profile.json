@@ -1,0 +1,254 @@
+[
+  {
+    "repetition": 0,
+    "launcher": "npx",
+    "reporter": "source",
+    "seconds": 0.8618892499944195,
+    "exitCode": 0
+  },
+  {
+    "repetition": 0,
+    "launcher": "npx",
+    "reporter": "compiled",
+    "seconds": 0.918682458002877,
+    "exitCode": 0
+  },
+  {
+    "repetition": 0,
+    "launcher": "node-shell",
+    "reporter": "source",
+    "seconds": 0.6418380000031902,
+    "exitCode": 0
+  },
+  {
+    "repetition": 0,
+    "launcher": "node-shell",
+    "reporter": "compiled",
+    "seconds": 0.6298224170022877,
+    "exitCode": 0
+  },
+  {
+    "repetition": 0,
+    "launcher": "node-direct",
+    "reporter": "source",
+    "seconds": 0.20360558300308185,
+    "exitCode": 0
+  },
+  {
+    "repetition": 0,
+    "launcher": "node-direct",
+    "reporter": "compiled",
+    "seconds": 0.20851020799455,
+    "exitCode": 0
+  },
+  {
+    "repetition": 1,
+    "launcher": "node-direct",
+    "reporter": "compiled",
+    "seconds": 0.2096935419976944,
+    "exitCode": 0
+  },
+  {
+    "repetition": 1,
+    "launcher": "node-direct",
+    "reporter": "source",
+    "seconds": 0.21227387500402983,
+    "exitCode": 0
+  },
+  {
+    "repetition": 1,
+    "launcher": "node-shell",
+    "reporter": "compiled",
+    "seconds": 0.7093982919977861,
+    "exitCode": 0
+  },
+  {
+    "repetition": 1,
+    "launcher": "node-shell",
+    "reporter": "source",
+    "seconds": 0.7758422499973676,
+    "exitCode": 0
+  },
+  {
+    "repetition": 1,
+    "launcher": "npx",
+    "reporter": "compiled",
+    "seconds": 0.8592502500032424,
+    "exitCode": 0
+  },
+  {
+    "repetition": 1,
+    "launcher": "npx",
+    "reporter": "source",
+    "seconds": 0.7723890420020325,
+    "exitCode": 0
+  },
+  {
+    "repetition": 2,
+    "launcher": "npx",
+    "reporter": "source",
+    "seconds": 0.780706707999343,
+    "exitCode": 0
+  },
+  {
+    "repetition": 2,
+    "launcher": "npx",
+    "reporter": "compiled",
+    "seconds": 0.7676556250007707,
+    "exitCode": 0
+  },
+  {
+    "repetition": 2,
+    "launcher": "node-shell",
+    "reporter": "source",
+    "seconds": 0.6380054160035797,
+    "exitCode": 0
+  },
+  {
+    "repetition": 2,
+    "launcher": "node-shell",
+    "reporter": "compiled",
+    "seconds": 0.6370862080002553,
+    "exitCode": 0
+  },
+  {
+    "repetition": 2,
+    "launcher": "node-direct",
+    "reporter": "source",
+    "seconds": 0.20485679199919105,
+    "exitCode": 0
+  },
+  {
+    "repetition": 2,
+    "launcher": "node-direct",
+    "reporter": "compiled",
+    "seconds": 0.20909849999588914,
+    "exitCode": 0
+  },
+  {
+    "repetition": 3,
+    "launcher": "node-direct",
+    "reporter": "compiled",
+    "seconds": 0.20587299999897368,
+    "exitCode": 0
+  },
+  {
+    "repetition": 3,
+    "launcher": "node-direct",
+    "reporter": "source",
+    "seconds": 0.20494925000093644,
+    "exitCode": 0
+  },
+  {
+    "repetition": 3,
+    "launcher": "node-shell",
+    "reporter": "compiled",
+    "seconds": 0.6396600420048344,
+    "exitCode": 0
+  },
+  {
+    "repetition": 3,
+    "launcher": "node-shell",
+    "reporter": "source",
+    "seconds": 0.6404354999976931,
+    "exitCode": 0
+  },
+  {
+    "repetition": 3,
+    "launcher": "npx",
+    "reporter": "compiled",
+    "seconds": 0.7735990839937585,
+    "exitCode": 0
+  },
+  {
+    "repetition": 3,
+    "launcher": "npx",
+    "reporter": "source",
+    "seconds": 0.789811374997953,
+    "exitCode": 0
+  },
+  {
+    "repetition": 4,
+    "launcher": "npx",
+    "reporter": "source",
+    "seconds": 0.8132152909965953,
+    "exitCode": 0
+  },
+  {
+    "repetition": 4,
+    "launcher": "npx",
+    "reporter": "compiled",
+    "seconds": 0.8148046660062391,
+    "exitCode": 0
+  },
+  {
+    "repetition": 4,
+    "launcher": "node-shell",
+    "reporter": "source",
+    "seconds": 0.6572643750041607,
+    "exitCode": 0
+  },
+  {
+    "repetition": 4,
+    "launcher": "node-shell",
+    "reporter": "compiled",
+    "seconds": 0.6396577909981715,
+    "exitCode": 0
+  },
+  {
+    "repetition": 4,
+    "launcher": "node-direct",
+    "reporter": "source",
+    "seconds": 0.20282883400068386,
+    "exitCode": 0
+  },
+  {
+    "repetition": 4,
+    "launcher": "node-direct",
+    "reporter": "compiled",
+    "seconds": 0.206055374997959,
+    "exitCode": 0
+  },
+  {
+    "repetition": 5,
+    "launcher": "node-direct",
+    "reporter": "compiled",
+    "seconds": 0.20459691699943505,
+    "exitCode": 0
+  },
+  {
+    "repetition": 5,
+    "launcher": "node-direct",
+    "reporter": "source",
+    "seconds": 0.20399470900156302,
+    "exitCode": 0
+  },
+  {
+    "repetition": 5,
+    "launcher": "node-shell",
+    "reporter": "compiled",
+    "seconds": 0.6418313329995726,
+    "exitCode": 0
+  },
+  {
+    "repetition": 5,
+    "launcher": "node-shell",
+    "reporter": "source",
+    "seconds": 0.6364566660049604,
+    "exitCode": 0
+  },
+  {
+    "repetition": 5,
+    "launcher": "npx",
+    "reporter": "compiled",
+    "seconds": 0.7670774579964927,
+    "exitCode": 0
+  },
+  {
+    "repetition": 5,
+    "launcher": "npx",
+    "reporter": "source",
+    "seconds": 0.7653826250025304,
+    "exitCode": 0
+  }
+]

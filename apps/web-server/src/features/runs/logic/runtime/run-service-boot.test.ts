@@ -25,6 +25,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
@@ -234,6 +235,40 @@ describe('testPortEnv', () => {
 })
 
 describe('pollUntilReady', () => {
+  it('finds a fast service after 100ms and backs off to the configured ceiling', async () => {
+    vi.useFakeTimers()
+    const delays: number[] = []
+    const { ctx } = ctxFor({
+      healthPollIntervalMs: 1000,
+      servicePtys: new Map([['api', {} as never]]),
+      delay: async (ms) => { delays.push(ms); vi.advanceTimersByTime(ms) },
+    })
+    const svc = svcSpec({ healthProbe: { tcp: { port: 5999, deadlineMs: 10_000 } } })
+    const fastProbe = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true)
+    await pollUntilReady(ctx, svc, 'tcp', fastProbe)
+    expect(delays).toEqual([100])
+    expect(ctx.serviceReady.has('api')).toBe(true)
+
+    delays.length = 0
+    let probes = 0
+    await pollUntilReady(ctx, svc, 'tcp', async () => ++probes === 7)
+    expect(delays).toEqual([100, 200, 400, 800, 1000, 1000])
+  })
+
+  it('respects tighter intervals and never sleeps beyond the readiness deadline', async () => {
+    vi.useFakeTimers()
+    const delays: number[] = []
+    const { ctx } = ctxFor({
+      healthPollIntervalMs: 40,
+      servicePtys: new Map([['api', {} as never]]),
+      delay: async (ms) => { delays.push(ms); vi.advanceTimersByTime(ms) },
+    })
+    await pollUntilReady(ctx, svcSpec({ healthProbe: { tcp: { port: 5999, deadlineMs: 95 } } }), 'tcp', async () => false)
+    expect(delays).toEqual([40, 40, 15])
+    expect(ctx.serviceReady.has('api')).toBe(false)
+    expect(ctx.bootFailure?.reason).toBe('health-timeout')
+  })
+
   it('files a passing probe under the heal phase when a cycle is in flight', async () => {
     const { ctx } = ctxFor({ status: 'healing' })
     const svc = svcSpec()

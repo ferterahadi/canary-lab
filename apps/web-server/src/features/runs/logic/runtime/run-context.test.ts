@@ -112,6 +112,7 @@ describe('createRunContext', () => {
   })
 
   it('falls back to the health poll interval for the signal poll when none is given', () => {
+    expect(createRunContext(opts(), () => true).healSignalPollMs).toBe(100)
     expect(createRunContext(opts({ healthPollIntervalMs: 250 }), () => true).healSignalPollMs).toBe(250)
     expect(
       createRunContext(opts({ healthPollIntervalMs: 250, healSignalPollMs: 40 }), () => true).healSignalPollMs,

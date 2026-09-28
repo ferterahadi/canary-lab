@@ -693,6 +693,15 @@ without running tests; after readiness it stops Playwright, retains partial test
 evidence, and enters the configured heal path. Readiness resets on each service
 restart. Generic log lines containing "error" are diagnostic output, not verdicts.
 
+HTTP and TCP readiness checks probe immediately, then wait 100ms and back off
+to the configured health-poll ceiling (1s by default); shorter configured
+intervals and the readiness deadline remain bounds. Heal signal files are
+checked every 100ms by default, independently of that health-check ceiling.
+An explicitly configured health interval remains the signal interval fallback
+for existing callers. Once the signal gate accepts a file, it wakes the heal
+loop immediately. Timed wakeups still check cancellation and agent liveness,
+including the grace period for agents that write a signal just before exiting.
+
 On failure, the run either spawns a local heal agent or parks for an external
 client. The agent fixes code and signals `rerun` or `restart`; the orchestrator
 continues the same run until pass or terminal failure. At teardown, Canary Lab

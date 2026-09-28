@@ -88,8 +88,9 @@ export interface OrchestratorOptions {
    *  sees the "Healing via Claude Desktop" badge from the very first frame
    *  instead of after a follow-up patch round-trip. */
   externalHealSession?: ExternalHealSession
-  // Polling interval for the heal-cycle signal-wait loop. Defaults to
-  // healthPollIntervalMs.
+  // Signal-file polling and no-signal liveness checks. Accepted signals wake
+  // the consumer immediately. Defaults to an explicit healthPollIntervalMs,
+  // or 100ms when neither interval is supplied.
   healSignalPollMs?: number
   // Hard ceiling on a single heal cycle (signal-wait). Defaults to 60 min.
   // When the agent is actively producing output, this is the absolute upper

@@ -1,0 +1,141 @@
+diff --git a/apps/web-server/src/features/runs/logic/runtime/run-context.ts b/apps/web-server/src/features/runs/logic/runtime/run-context.ts
+index 2d6cf1a5..cb73e7d9 100644
+--- a/apps/web-server/src/features/runs/logic/runtime/run-context.ts
++++ b/apps/web-server/src/features/runs/logic/runtime/run-context.ts
+@@ -247,7 +247,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
+     manualHeal: opts.manualHeal ?? false,
+     externalHeal: opts.externalHeal ?? false,
+     externalHealSession: opts.externalHealSession,
+-    healSignalPollMs: opts.healSignalPollMs ?? healthPollIntervalMs,
++    healSignalPollMs: opts.healSignalPollMs ?? opts.healthPollIntervalMs ?? 100,
+     // Hard ceiling per cycle. Generous (2h) so a single heal cycle isn't cut
+     // off mid-work for a hard, agent-blind reason — the idle timeout below
+     // is the primary safety net.
+diff --git a/apps/web-server/src/features/runs/logic/runtime/run-heal-agent.ts b/apps/web-server/src/features/runs/logic/runtime/run-heal-agent.ts
+index dc11f20d..85b5bf81 100644
+--- a/apps/web-server/src/features/runs/logic/runtime/run-heal-agent.ts
++++ b/apps/web-server/src/features/runs/logic/runtime/run-heal-agent.ts
+@@ -304,11 +304,6 @@ export async function waitForHealSignal(ctx: RunContext,
+     activeCycle: ctx.healCycles,
+   })
+   const hardDeadline = startedAt + hardTimeoutMs
+-  // Always yield to the macrotask queue here — this loop runs concurrently
+-  // with the signal-watcher setInterval, and a microtask-only delay would
+-  // starve the timer queue.
+-  const yieldOnce = (ms: number) =>
+-    new Promise<void>((resolve) => setTimeout(resolve, ms))
+   // When the pty dies before we've seen a signal, give the signal-watcher
+   // a short grace window to surface any `.heal`/`.rerun`/`.restart` file
+   // the agent wrote just before exiting. Without this, the wait races the
+@@ -337,7 +332,7 @@ export async function waitForHealSignal(ctx: RunContext,
+         } else if (Date.now() >= postExitDeadline) {
+           return { signal: null, reason: 'pty-died' }
+         }
+-        await yieldOnce(Math.max(1, ctx.healSignalPollMs))
++        await ctx.signalGate.waitForSignal(ctx.healSignalPollMs)
+         continue
+       }
+       const now = Date.now()
+@@ -354,7 +349,7 @@ export async function waitForHealSignal(ctx: RunContext,
+         nudgeFloor = now
+         onSilence()
+       }
+-      await yieldOnce(Math.max(1, ctx.healSignalPollMs))
++      await ctx.signalGate.waitForSignal(ctx.healSignalPollMs)
+     }
+   } finally {
+     ctx.signalGate.endWaiting()
+diff --git a/apps/web-server/src/features/runs/logic/runtime/run-manifest-writer.ts b/apps/web-server/src/features/runs/logic/runtime/run-manifest-writer.ts
+index 07918402..76d47144 100644
+--- a/apps/web-server/src/features/runs/logic/runtime/run-manifest-writer.ts
++++ b/apps/web-server/src/features/runs/logic/runtime/run-manifest-writer.ts
+@@ -167,7 +167,7 @@ export function startSignalWatcher(ctx: RunContext): void {
+       ctx.emit('signal-detected', result.signal)
+       ctx.emit('signal-accepted', result.signal)
+     }
+-  }, ctx.healthPollIntervalMs)
++  }, Math.max(1, ctx.healSignalPollMs))
+ }
+ 
+ // Persist a `stoppedEarly` reason on the manifest. Surfaced to the heal-index
+diff --git a/apps/web-server/src/features/runs/logic/runtime/run-orchestrator-types.ts b/apps/web-server/src/features/runs/logic/runtime/run-orchestrator-types.ts
+index 85ae8e0b..ed7c40c2 100644
+--- a/apps/web-server/src/features/runs/logic/runtime/run-orchestrator-types.ts
++++ b/apps/web-server/src/features/runs/logic/runtime/run-orchestrator-types.ts
+@@ -88,8 +88,9 @@ export interface OrchestratorOptions {
+    *  sees the "Healing via Claude Desktop" badge from the very first frame
+    *  instead of after a follow-up patch round-trip. */
+   externalHealSession?: ExternalHealSession
+-  // Polling interval for the heal-cycle signal-wait loop. Defaults to
+-  // healthPollIntervalMs.
++  // Signal-file polling and no-signal liveness checks. Accepted signals wake
++  // the consumer immediately. Defaults to an explicit healthPollIntervalMs,
++  // or 100ms when neither interval is supplied.
+   healSignalPollMs?: number
+   // Hard ceiling on a single heal cycle (signal-wait). Defaults to 60 min.
+   // When the agent is actively producing output, this is the absolute upper
+diff --git a/apps/web-server/src/features/runs/logic/runtime/run-service-boot.ts b/apps/web-server/src/features/runs/logic/runtime/run-service-boot.ts
+index e62f5a93..5b6381e5 100644
+--- a/apps/web-server/src/features/runs/logic/runtime/run-service-boot.ts
++++ b/apps/web-server/src/features/runs/logic/runtime/run-service-boot.ts
+@@ -362,6 +362,10 @@ export async function pollUntilReady(ctx: RunContext,
+     ? (probe as { http: HttpProbe }).http.deadlineMs
+     : (probe as { tcp: TcpProbe }).tcp.deadlineMs) ?? ctx.healthDeadlineMs
+   const deadline = Date.now() + deadlineMs
++  // Fast local services should not pay a full one-second polling interval.
++  // Back off for slower boots, respecting callers' tighter polling bounds.
++  const maxPollMs = Math.max(1, ctx.healthPollIntervalMs)
++  let pollMs = Math.min(100, maxPollMs)
+ 
+   // `health-timeout` unless we observe the process die first (below), in
+   // which case there's no point polling a dead port until the deadline.
+@@ -392,7 +396,10 @@ export async function pollUntilReady(ctx: RunContext,
+       failureReason = 'process-exited'
+       break
+     }
+-    await ctx.delay(ctx.healthPollIntervalMs)
++    const remainingMs = deadline - Date.now()
++    if (remainingMs <= 0) break
++    await ctx.delay(Math.min(pollMs, remainingMs))
++    pollMs = Math.min(pollMs * 2, maxPollMs)
+   }
+   ctx.stateSink.setServiceStatus(ctx.runId, svc.safeName, 'timeout')
+   ctx.emit('health-check', { service: svc, healthy: false, transport })
+diff --git a/shared/run-state.ts b/shared/run-state.ts
+index cca9bb4d..574fae57 100644
+--- a/shared/run-state.ts
++++ b/shared/run-state.ts
+@@ -411,6 +411,7 @@ export type HealSignalGateResult =
+ export class HealSignalGate {
+   private waiting = false
+   private pending: HealSignal | null = null
++  private wakeups = new Set<() => void>()
+ 
+   beginWaiting(): void {
+     this.waiting = true
+@@ -438,9 +439,25 @@ export class HealSignalGate {
+     }
+     const signal = { kind, body }
+     this.pending = signal
++    for (const wake of this.wakeups) wake()
+     return { accepted: true, signal }
+   }
+ 
++  // Acceptance wakes the consumer immediately; the timeout still lets it
++  // notice cancellation, dead agents and deadlines when no signal arrives.
++  waitForSignal(timeoutMs: number): Promise<void> {
++    if (this.pending) return Promise.resolve()
++    return new Promise((resolve) => {
++      const wake = () => {
++        clearTimeout(timer)
++        this.wakeups.delete(wake)
++        resolve()
++      }
++      const timer = setTimeout(wake, Math.max(1, timeoutMs))
++      this.wakeups.add(wake)
++    })
++  }
++
+   consume(): HealSignal | null {
+     const signal = this.pending
+     this.pending = null

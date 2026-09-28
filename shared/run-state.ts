@@ -411,6 +411,7 @@ export type HealSignalGateResult =
 export class HealSignalGate {
   private waiting = false
   private pending: HealSignal | null = null
+  private wakeups = new Set<() => void>()
 
   beginWaiting(): void {
     this.waiting = true
@@ -438,7 +439,23 @@ export class HealSignalGate {
     }
     const signal = { kind, body }
     this.pending = signal
+    for (const wake of this.wakeups) wake()
     return { accepted: true, signal }
+  }
+
+  // Acceptance wakes the consumer immediately; the timeout still lets it
+  // notice cancellation, dead agents and deadlines when no signal arrives.
+  waitForSignal(timeoutMs: number): Promise<void> {
+    if (this.pending) return Promise.resolve()
+    return new Promise((resolve) => {
+      const wake = () => {
+        clearTimeout(timer)
+        this.wakeups.delete(wake)
+        resolve()
+      }
+      const timer = setTimeout(wake, Math.max(1, timeoutMs))
+      this.wakeups.add(wake)
+    })
   }
 
   consume(): HealSignal | null {

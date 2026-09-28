@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { captureDirtySpecBaseline, detectForeignTerminalWrite, setStatus, startHeartbeat, stopHeartbeat, writeInitialManifest } from './run-manifest-writer'
+import { captureDirtySpecBaseline, detectForeignTerminalWrite, setStatus, startHeartbeat, stopHeartbeat, startSignalWatcher, writeInitialManifest } from './run-manifest-writer'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { RunManifest } from './manifest'
@@ -31,6 +31,29 @@ function ctxFor(state: Partial<RunContext> = {}, opts: Record<string, unknown> =
 }
 
 describe('writeInitialManifest', () => {
+  it('delivers a signal at the signal interval and preserves acceptance evidence', async () => {
+    vi.useFakeTimers()
+    const { ctx } = ctxFor({ healthPollIntervalMs: 1000, healSignalPollMs: 100 })
+    fs.mkdirSync(path.dirname(ctx.paths.restartSignal), { recursive: true })
+    ctx.signalGate.beginWaiting()
+    startSignalWatcher(ctx)
+    const body = { hypothesis: 'fix', fixDescription: 'corrected app' }
+    fs.writeFileSync(ctx.paths.restartSignal, JSON.stringify(body))
+    const woke = vi.fn()
+    const waiting = ctx.signalGate.waitForSignal(1000).then(woke)
+    try {
+      await vi.advanceTimersByTimeAsync(99)
+      expect(woke).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      await waiting
+      expect(woke).toHaveBeenCalledOnce()
+      expect(ctx.signalGate.consume()).toEqual({ kind: 'restart', body })
+      expect(fs.existsSync(ctx.paths.restartSignal)).toBe(false)
+    } finally {
+      clearInterval(ctx.signalWatcher!)
+    }
+  })
+
   it('pins the prior attempt policy across a restart even if the suite changed', () => {
     const { ctx, sink } = ctxFor()
     ctx.feature.singleAttempt = { receipt: 'current.json' }

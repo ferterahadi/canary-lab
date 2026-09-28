@@ -167,7 +167,7 @@ export function startSignalWatcher(ctx: RunContext): void {
       ctx.emit('signal-detected', result.signal)
       ctx.emit('signal-accepted', result.signal)
     }
-  }, ctx.healthPollIntervalMs)
+  }, Math.max(1, ctx.healSignalPollMs))
 }
 
 // Persist a `stoppedEarly` reason on the manifest. Surfaced to the heal-index

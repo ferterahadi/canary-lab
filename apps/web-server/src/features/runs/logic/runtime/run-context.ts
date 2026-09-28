@@ -247,7 +247,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     manualHeal: opts.manualHeal ?? false,
     externalHeal: opts.externalHeal ?? false,
     externalHealSession: opts.externalHealSession,
-    healSignalPollMs: opts.healSignalPollMs ?? healthPollIntervalMs,
+    healSignalPollMs: opts.healSignalPollMs ?? opts.healthPollIntervalMs ?? 100,
     // Hard ceiling per cycle. Generous (2h) so a single heal cycle isn't cut
     // off mid-work for a hard, agent-blind reason — the idle timeout below
     // is the primary safety net.

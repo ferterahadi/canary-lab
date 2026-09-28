@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi, afterEach } from 'vitest'
 import {
   HEARTBEAT_STALE_MS,
   HealSignalGate,
@@ -126,6 +126,44 @@ describe('run lifecycle reducer', () => {
 })
 
 describe('HealSignalGate', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('wakes on acceptance without consuming the signal or leaving a timer', async () => {
+    vi.useFakeTimers()
+    const gate = new HealSignalGate()
+    gate.beginWaiting()
+    const woke = vi.fn()
+    const waiting = gate.waitForSignal(1000).then(woke)
+    await vi.advanceTimersByTimeAsync(10)
+    expect(woke).not.toHaveBeenCalled()
+    gate.observe('restart', { hypothesis: 'fixed' })
+    await waiting
+    expect(woke).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+    await gate.waitForSignal(1000)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(gate.consume()).toEqual({ kind: 'restart', body: { hypothesis: 'fixed' } })
+  })
+
+  it('times out for liveness checks and can then wait for another signal', async () => {
+    vi.useFakeTimers()
+    const gate = new HealSignalGate()
+    gate.beginWaiting()
+    const woke = vi.fn()
+    const waiting = gate.waitForSignal(100).then(woke)
+    await vi.advanceTimersByTimeAsync(99)
+    expect(woke).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    await waiting
+    expect(woke).toHaveBeenCalledOnce()
+    expect(gate.consume()).toBeNull()
+    const next = gate.waitForSignal(100)
+    gate.observe('rerun', {})
+    await next
+    expect(vi.getTimerCount()).toBe(0)
+    expect(gate.consume()?.kind).toBe('rerun')
+  })
+
   it('ignores signals when the runner is not waiting', () => {
     const gate = new HealSignalGate()
     expect(gate.observe('restart', {})).toEqual({

@@ -304,11 +304,6 @@ export async function waitForHealSignal(ctx: RunContext,
     activeCycle: ctx.healCycles,
   })
   const hardDeadline = startedAt + hardTimeoutMs
-  // Always yield to the macrotask queue here — this loop runs concurrently
-  // with the signal-watcher setInterval, and a microtask-only delay would
-  // starve the timer queue.
-  const yieldOnce = (ms: number) =>
-    new Promise<void>((resolve) => setTimeout(resolve, ms))
   // When the pty dies before we've seen a signal, give the signal-watcher
   // a short grace window to surface any `.heal`/`.rerun`/`.restart` file
   // the agent wrote just before exiting. Without this, the wait races the
@@ -337,7 +332,7 @@ export async function waitForHealSignal(ctx: RunContext,
         } else if (Date.now() >= postExitDeadline) {
           return { signal: null, reason: 'pty-died' }
         }
-        await yieldOnce(Math.max(1, ctx.healSignalPollMs))
+        await ctx.signalGate.waitForSignal(ctx.healSignalPollMs)
         continue
       }
       const now = Date.now()
@@ -354,7 +349,7 @@ export async function waitForHealSignal(ctx: RunContext,
         nudgeFloor = now
         onSilence()
       }
-      await yieldOnce(Math.max(1, ctx.healSignalPollMs))
+      await ctx.signalGate.waitForSignal(ctx.healSignalPollMs)
     }
   } finally {
     ctx.signalGate.endWaiting()
