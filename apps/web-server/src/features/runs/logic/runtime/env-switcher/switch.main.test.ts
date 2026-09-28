@@ -54,7 +54,7 @@ afterEach(() => {
   }
 })
 
-function seedFeature(root: string, featureName: string, sets: Record<string, Record<string, string>>) {
+function seedFeature(root: string, featureName: string, sets: Record<string, Record<string, string>>, alias = 'CANARY_LAB_PROJECT_ROOT') {
   const featureDir = path.join(root, 'features', featureName)
   const envSetsDir = path.join(featureDir, 'envsets')
   fs.mkdirSync(envSetsDir, { recursive: true })
@@ -64,13 +64,13 @@ function seedFeature(root: string, featureName: string, sets: Record<string, Rec
       appRoots: {},
       slots: {
         [`${featureName}.env`]: {
-          target: `$CANARY_LAB_PROJECT_ROOT/features/${featureName}/.env`,
+          target: `$${alias}/features/${featureName}/.env`,
         },
       },
       feature: {
         slots: [`${featureName}.env`],
         testCommand: 'echo hi',
-        testCwd: `$CANARY_LAB_PROJECT_ROOT/features/${featureName}`,
+        testCwd: `$${alias}/features/${featureName}`,
       },
     }),
   )
@@ -98,12 +98,12 @@ describe('main (switch orchestration)', () => {
     await expect(main([])).rejects.toThrow('__exit__1')
   })
 
-  it('--apply <set> backs up current target and copies the set file in', async () => {
+  it.each(['CANARY_LAB', 'CANARY_LAB_PROJECT_ROOT'])('--apply uses %s and reverts even after the source disappears', async (alias) => {
     const root = mkTmp()
     vi.stubEnv('CANARY_LAB_PROJECT_ROOT', root)
     const { featureDir } = seedFeature(root, 'feat', {
       staging: { 'feat.env': 'NEW=staging' },
-    })
+    }, alias)
     const target = path.join(featureDir, '.env')
     fs.writeFileSync(target, 'OLD=original')
     vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -114,6 +114,9 @@ describe('main (switch orchestration)', () => {
     const siblings = fs.readdirSync(featureDir).filter((f) => f.startsWith('.env.bak.'))
     expect(siblings).toHaveLength(1)
     expect(fs.readFileSync(path.join(featureDir, siblings[0]), 'utf-8')).toBe('OLD=original')
+    fs.rmSync(path.join(featureDir, 'envsets', 'staging', 'feat.env'))
+    await main(['feat', '--revert'])
+    expect(fs.readFileSync(target, 'utf8')).toBe('OLD=original')
   })
 
   it('--apply with unknown set exits 1', async () => {
@@ -153,13 +156,13 @@ describe('main (switch orchestration)', () => {
     expect(fs.existsSync(`${target}.bak.2`)).toBe(false)
   })
 
-  it('interactive mode: prompts, then spawns test command with resolved cwd/cmd/args', async () => {
+  it.each(['CANARY_LAB', 'CANARY_LAB_PROJECT_ROOT'])('interactive mode expands %s in its target and working directory', async (alias) => {
     const root = mkTmp()
     vi.stubEnv('CANARY_LAB_PROJECT_ROOT', root)
     const { featureDir } = seedFeature(root, 'feat', {
       local: { 'feat.env': 'LOCAL=1' },
       staging: { 'feat.env': 'STAGING=1' },
-    })
+    }, alias)
     const target = path.join(featureDir, '.env')
     fs.writeFileSync(target, 'OLD')
     vi.spyOn(console, 'log').mockImplementation(() => {})

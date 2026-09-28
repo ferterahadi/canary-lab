@@ -1,7 +1,5 @@
 import os from 'os'
 import path from 'path'
-import { getProjectRoot } from '../../../../../../shared/runtime/project-root'
-import type { EnvsetsConfigJson } from '../logic/envset-config'
 
 export { PLAYWRIGHT_CONFIG_NAMES } from '../../../shared/playwright-config'
 export { FEATURE_CONFIG_NAMES, findExistingConfig, type ResolvedConfigPath } from '../logic/config-file'
@@ -21,14 +19,7 @@ export function isValidSlotName(name: string): boolean {
   return SLOT_NAME_PATTERN.test(name) && name !== '.' && name !== '..'
 }
 
-export function buildAppRoots(cfg: EnvsetsConfigJson): Record<string, string> {
-  const root = getProjectRoot()
-  return {
-    CANARY_LAB_PROJECT_ROOT: root,
-    CANARY_LAB: root,
-    ...(cfg.appRoots ?? {}),
-  }
-}
+export { buildAppRoots } from '../logic/envset-runtime'
 
 export function shortenHome(p: string): string {
   const home = os.homedir()

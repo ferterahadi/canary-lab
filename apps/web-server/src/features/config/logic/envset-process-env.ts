@@ -1,7 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { getEnvSetsDir, loadConfig } from '../../runs/logic/runtime/env-switcher/switch'
-import type { EnvSetsConfig } from '../../runs/logic/runtime/env-switcher/types'
+import { getEnvSetsDir, loadConfig, selectedEnvsetSources, type EnvSetsConfig } from './envset-runtime'
 import { parseDotenv } from './dotenv-edit'
 
 export function envsetProcessEnv(
@@ -26,9 +25,7 @@ export function envsetProcessEnv(
   }
 
   const env: NodeJS.ProcessEnv = {}
-  for (const slot of config.feature.slots) {
-    const sourcePath = path.join(envSetsDir, envName, slot)
-    if (!fs.existsSync(sourcePath)) continue
+  for (const { sourcePath } of selectedEnvsetSources(envSetsDir, envName, config.feature.slots)) {
     try {
       const parsed = parseDotenv(fs.readFileSync(sourcePath, 'utf-8'))
       for (const entry of parsed.entries) {

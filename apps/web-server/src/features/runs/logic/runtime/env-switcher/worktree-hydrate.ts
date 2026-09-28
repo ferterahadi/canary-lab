@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { getEnvSetsDir, loadConfig, resolveVars } from './switch';
+import { getEnvSetsDir, loadConfig, selectedEnvsetTargets } from '../../../../config/logic/envset-runtime';
 
 /**
  * Hydrate a feature's captured envset into per-run / verify WORKTREES.
@@ -82,17 +82,14 @@ export function hydrateEnvsetIntoWorktrees(opts: {
   if (!fs.existsSync(path.join(envSetsDir, 'envsets.config.json'))) return NOOP_RESULT
 
   const config = loadConfig(opts.featureDir)
-  const setDir = path.join(envSetsDir, opts.setName)
   const rootsReal = opts.roots.map((r) => ({ ...r, sourceRootReal: realpathDeep(r.sourceRoot) }))
 
   const written: string[] = []
   const portTokenSlots: string[] = []
   const undo: Array<{ dest: string; prior: Buffer | null }> = []
 
-  for (const slot of config.feature.slots) {
-    const sourcePath = path.join(setDir, slot)
-    if (!fs.existsSync(sourcePath)) continue // slot absent from this set
-    const targetReal = realpathDeep(resolveVars(config.slots[slot].target, config.appRoots))
+  for (const { slot, sourcePath, targetPath } of selectedEnvsetTargets(envSetsDir, opts.setName, config)) {
+    const targetReal = realpathDeep(targetPath)
     const root = rootsReal.find((r) => isUnder(targetReal, r.sourceRootReal))
     // Targets outside every mapped root (e.g. the feature's own .env under
     // featureDir) are the real-path apply's business, not the worktree's.

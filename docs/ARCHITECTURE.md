@@ -169,6 +169,22 @@ propagate. Valid object metadata retains unknown fields, with no nested schema
 validation. Raw slot-content and environment-directory operations remain
 independent of metadata.
 
+Envset runtime resolution lives in
+`apps/web-server/src/features/config/logic/envset-runtime.ts`. Configuration
+presentation, CLI switching, run preparation, and worktree hydration share
+workspace-root aliases and variable expansion. Both `CANARY_LAB_PROJECT_ROOT`
+and `CANARY_LAB` default to the workspace root; explicit `appRoots` entries
+replace each default independently. Unknown variables retain their literal form.
+Runtime loading keeps its existing missing-file and parsing errors, separate
+from authoring's optional metadata and 409 validation policy.
+
+Selected sources retain declaration order and duplicates and skip absent files.
+Target iteration is lazy so worktree hydration retains its per-slot failure
+boundary; normal run application collects targets before backups. Discovery
+uses source-only selection without requiring target definitions. Each caller
+still owns content transforms, destination mapping, backups, and restoration.
+The former runtime and route-support exports remain compatibility forwards.
+
 REST envset writes and capture share
 `apps/web-server/src/features/config/logic/envset-events.ts`.
 Writers announce only after successful persistence:
