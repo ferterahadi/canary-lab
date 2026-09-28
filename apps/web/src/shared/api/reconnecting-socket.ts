@@ -14,12 +14,16 @@ export interface ReconnectingSocketOptions {
   url: string
   // Constructor injection for tests; falls back to globalThis.WebSocket.
   WebSocketImpl?: typeof WebSocket
-  // Raw string payloads only — non-string frames are dropped before this fires.
+  // Non-string frames are dropped unless the caller opts into legacy coercion.
   onMessage: (data: string) => void
+  coerceMessageData?: boolean
   onOpen?: () => void
   // Fires when an unexpected close (or constructor failure) schedules another
   // connection. `attempt` resets after a successful open.
-  onReconnect?: (attempt: number) => void
+  onReconnect?: (attempt: number, reason: 'close' | 'setup-error') => void
+  // Runs after the delay, just before opening the retry socket, so callers can
+  // distinguish waiting for a retry from actually attempting it.
+  onReconnectAttempt?: (attempt: number, delayMs: number) => void
   // Low-level transport error (ws.onerror). Frame-level errors stay the caller's.
   onError?: (message: string) => void
   // Constructor failures happen before a socket exists. Callers that need the
@@ -31,7 +35,7 @@ export interface ReconnectingSocketOptions {
   // Delay before each reconnect. Default 0 = synchronous (preserves the
   // per-task socket behaviour and their existing tests). Use a positive delay
   // for an always-on stream so an unreachable server isn't hammered.
-  reconnectDelayMs?: number
+  reconnectDelayMs?: number | ((attempt: number) => number)
 }
 
 export interface ReconnectingSocket {
@@ -63,16 +67,23 @@ export function connectReconnectingSocket(opts: ReconnectingSocketOptions): Reco
   let socket: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
-  const reconnect = (): void => {
+  const reconnect = (reason: 'close' | 'setup-error'): void => {
     socket = null
     if (closed || done || reconnectsLeft <= 0) return
     reconnectsLeft -= 1
     consecutiveReconnects += 1
-    opts.onReconnect?.(consecutiveReconnects)
-    if (reconnectDelayMs > 0) {
-      reconnectTimer = setTimeout(() => { reconnectTimer = null; open() }, reconnectDelayMs)
-    } else {
+    const attempt = consecutiveReconnects
+    const delayMs = typeof reconnectDelayMs === 'function' ? reconnectDelayMs(attempt) : reconnectDelayMs
+    opts.onReconnect?.(attempt, reason)
+    const retry = (): void => {
+      reconnectTimer = null
+      opts.onReconnectAttempt?.(attempt, delayMs)
       open()
+    }
+    if (delayMs > 0) {
+      reconnectTimer = setTimeout(retry, delayMs)
+    } else {
+      retry()
     }
   }
 
@@ -83,19 +94,20 @@ export function connectReconnectingSocket(opts: ReconnectingSocketOptions): Reco
     } catch (error) {
       if (opts.onSetupError) opts.onSetupError(error)
       else opts.onError?.('socket error')
-      reconnect()
+      reconnect('setup-error')
       return
     }
     socket = ws
     ws.onmessage = (ev: MessageEvent): void => {
       if (typeof ev.data === 'string') opts.onMessage(ev.data)
+      else if (opts.coerceMessageData) opts.onMessage(String(ev.data))
     }
     ws.onopen = (): void => {
       consecutiveReconnects = 0
       opts.onOpen?.()
     }
     ws.onclose = (): void => {
-      reconnect()
+      reconnect('close')
     }
     ws.onerror = (): void => { opts.onError?.('socket error') }
   }

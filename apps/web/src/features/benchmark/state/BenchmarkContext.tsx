@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import * as api from '@/shared/api/client'
-import { defaultWsBase } from '@/shared/api/reconnecting-socket'
+import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
 import type { BenchmarkManifest, SabotageLevel } from '../api/benchmark-types'
 import {
   benchmarkReducer,
@@ -59,65 +59,34 @@ export function BenchmarkProvider({
 
   useEffect(() => {
     const url = wsUrl ?? defaultWsUrl()
-    const Ctor = WebSocketImpl ?? WebSocket
-    let socket: WebSocket | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-    let backoff = RECONNECT_INITIAL_MS
-    let cancelled = false
-
-    // No `cancelled` guard of its own: its only callers are the initial call
-    // below and the reconnect timer, and cleanup clears that timer before its
-    // callback can fire. Same shape as RunsContext's socket lifecycle.
-    const connect = (): void => {
-      try {
-        socket = new Ctor(url)
-      } catch {
-        scheduleReconnect()
-        return
-      }
-      socket.onopen = () => {
-        backoff = RECONNECT_INITIAL_MS
+    const connection = connectReconnectingSocket({
+      url,
+      WebSocketImpl,
+      maxReconnects: Infinity,
+      reconnectDelayMs: (attempt) => Math.min(RECONNECT_INITIAL_MS * 2 ** (attempt - 1), RECONNECT_MAX_MS),
+      coerceMessageData: true,
+      onOpen: () => {
         dispatchRef.current({ type: 'connection', status: 'live' })
-      }
-      socket.onmessage = (e) => {
+      },
+      onReconnect: (_attempt, reason) => {
+        if (reason === 'close') dispatchRef.current({ type: 'connection', status: 'reconnecting' })
+      },
+      onReconnectAttempt: (_attempt, delayMs) => {
+        // Keep the existing label timing: the capped wait must elapse first.
+        if (delayMs >= RECONNECT_MAX_MS) dispatchRef.current({ type: 'connection', status: 'disconnected' })
+      },
+      onMessage: (data) => {
         let frame: BenchmarkStreamFrame
         try {
-          frame = JSON.parse(typeof e.data === 'string' ? e.data : String(e.data))
+          frame = JSON.parse(data)
         } catch {
           return
         }
         const action = frameToAction(frame)
         if (action) dispatchRef.current(action)
-      }
-      socket.onclose = () => {
-        if (cancelled) return
-        dispatchRef.current({ type: 'connection', status: 'reconnecting' })
-        scheduleReconnect()
-      }
-    }
-
-    // Same reasoning: the constructor's catch runs inside `connect`, and
-    // `onclose` checks `cancelled` before it gets here.
-    const scheduleReconnect = (): void => {
-      reconnectTimer = setTimeout(() => {
-        if (backoff >= RECONNECT_MAX_MS) {
-          dispatchRef.current({ type: 'connection', status: 'disconnected' })
-        }
-        backoff = Math.min(backoff * 2, RECONNECT_MAX_MS)
-        connect()
-      }, backoff)
-    }
-
-    connect()
-    return () => {
-      cancelled = true
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      try {
-        socket?.close()
-      } catch {
-        /* already closed */
-      }
-    }
+      },
+    })
+    return () => connection.close()
   }, [wsUrl, WebSocketImpl])
 
   const startBenchmark = useCallback(

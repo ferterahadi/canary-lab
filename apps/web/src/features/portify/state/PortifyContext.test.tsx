@@ -35,6 +35,7 @@ class FakeWebSocket {
   onmessage: ((event: { data: unknown }) => void) | null = null
   onclose: (() => void) | null = null
   closed = false
+  readyState = 0
 
   constructor(public url: string) {
     FakeWebSocket.instances.push(this)
@@ -42,6 +43,7 @@ class FakeWebSocket {
 
   close(): void {
     this.closed = true
+    this.readyState = 3
     this.onclose?.()
   }
 
@@ -204,6 +206,62 @@ describe('PortifyProvider — socket lifecycle', () => {
     }
 
     expect(portify.connection).toBe('disconnected')
+  })
+
+  it('preserves exact label timing, keeps retrying at the cap, and resets on open', async () => {
+    vi.useFakeTimers()
+    mount({ wsUrl: 'ws://test/stream' })
+    act(() => { socket().onopen?.() })
+    for (const [index, delay] of [500, 1000, 2000, 4000, 8000, 10000, 10000].entries()) {
+      act(() => { socket().onclose?.() })
+      expect(portify.connection).toBe('reconnecting')
+      await act(async () => { await vi.advanceTimersByTimeAsync(delay - 1) })
+      expect(portify.connection).toBe('reconnecting')
+      expect(FakeWebSocket.instances).toHaveLength(index + 1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(FakeWebSocket.instances).toHaveLength(index + 2)
+      expect(portify.connection).toBe(delay === 10000 ? 'disconnected' : 'reconnecting')
+    }
+    act(() => { socket().onopen?.() })
+    expect(portify.connection).toBe('live')
+    act(() => { socket().onclose?.() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(499) })
+    expect(FakeWebSocket.instances).toHaveLength(8)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(FakeWebSocket.instances).toHaveLength(9)
+  })
+
+  it('keeps the initial label during constructor failures until the capped retry fires', async () => {
+    vi.useFakeTimers()
+    const Broken = function Broken() { throw new Error('offline') } as unknown as typeof WebSocket
+    mount({ wsUrl: 'ws://test/stream', WebSocketImpl: Broken })
+    expect(portify.connection).toBe('connecting')
+    await act(async () => { await vi.advanceTimersByTimeAsync(25_499) })
+    expect(portify.connection).toBe('connecting')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(portify.connection).toBe('disconnected')
+  })
+
+  it('recovers missed changes from a new snapshot and preserves frame coercion', async () => {
+    vi.useFakeTimers()
+    mount({ wsUrl: 'ws://test/stream', detailId: 'wf-1' })
+    act(() => { socket().fire({ type: 'snapshot', workflows: [entry()], details: { 'wf-1': manifest() } }) })
+    act(() => { socket().onclose?.() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+    const recovered = manifest({ status: 'aborted' })
+    act(() => {
+      socket().onopen?.()
+      socket().onmessage?.({ data: { toString: () => JSON.stringify({
+        type: 'snapshot', workflows: [entry({ status: 'aborted' })], details: { 'wf-1': recovered },
+      }) } })
+    })
+    expect(portify.connection).toBe('live')
+    expect(portify.workflows).toHaveLength(1)
+    expect(portify.workflows[0].status).toBe('aborted')
+    expect(workflow?.status).toBe('aborted')
+    act(() => { socket().fire({ type: 'removed', workflowId: 'wf-1' }) })
+    expect(portify.workflows).toEqual([])
+    expect(workflow).toBeUndefined()
   })
 
   it('schedules a reconnect when the socket cannot even be constructed', async () => {

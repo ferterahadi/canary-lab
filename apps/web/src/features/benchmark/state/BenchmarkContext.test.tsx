@@ -29,6 +29,7 @@ class FakeWebSocket {
   onmessage: ((event: { data: unknown }) => void) | null = null
   onclose: (() => void) | null = null
   closed = false
+  readyState = 0
 
   constructor(public url: string) {
     FakeWebSocket.instances.push(this)
@@ -36,6 +37,7 @@ class FakeWebSocket {
 
   close(): void {
     this.closed = true
+    this.readyState = 3
     this.onclose?.()
   }
 
@@ -198,6 +200,62 @@ describe('BenchmarkProvider — socket lifecycle', () => {
     }
 
     expect(benchmarks.connection).toBe('disconnected')
+  })
+
+  it('preserves exact label timing, keeps retrying at the cap, and resets on open', async () => {
+    vi.useFakeTimers()
+    mount({ wsUrl: 'ws://test/stream' })
+    act(() => { socket().onopen?.() })
+    for (const [index, delay] of [500, 1000, 2000, 4000, 8000, 10000, 10000].entries()) {
+      act(() => { socket().onclose?.() })
+      expect(benchmarks.connection).toBe('reconnecting')
+      await act(async () => { await vi.advanceTimersByTimeAsync(delay - 1) })
+      expect(benchmarks.connection).toBe('reconnecting')
+      expect(FakeWebSocket.instances).toHaveLength(index + 1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(FakeWebSocket.instances).toHaveLength(index + 2)
+      expect(benchmarks.connection).toBe(delay === 10000 ? 'disconnected' : 'reconnecting')
+    }
+    act(() => { socket().onopen?.() })
+    expect(benchmarks.connection).toBe('live')
+    act(() => { socket().onclose?.() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(499) })
+    expect(FakeWebSocket.instances).toHaveLength(8)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(FakeWebSocket.instances).toHaveLength(9)
+  })
+
+  it('keeps the initial label during constructor failures until the capped retry fires', async () => {
+    vi.useFakeTimers()
+    const Broken = function Broken() { throw new Error('offline') } as unknown as typeof WebSocket
+    mount({ wsUrl: 'ws://test/stream', WebSocketImpl: Broken })
+    expect(benchmarks.connection).toBe('connecting')
+    await act(async () => { await vi.advanceTimersByTimeAsync(25_499) })
+    expect(benchmarks.connection).toBe('connecting')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(benchmarks.connection).toBe('disconnected')
+  })
+
+  it('recovers missed changes from a new snapshot and preserves frame coercion', async () => {
+    vi.useFakeTimers()
+    mount({ wsUrl: 'ws://test/stream', detailId: 'bm-1' })
+    act(() => { socket().fire({ type: 'snapshot', benchmarks: [entry()], details: { 'bm-1': manifest() } }) })
+    act(() => { socket().onclose?.() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+    const recovered = manifest({ status: 'aborted' })
+    act(() => {
+      socket().onopen?.()
+      socket().onmessage?.({ data: { toString: () => JSON.stringify({
+        type: 'snapshot', benchmarks: [entry({ status: 'aborted' })], details: { 'bm-1': recovered },
+      }) } })
+    })
+    expect(benchmarks.connection).toBe('live')
+    expect(benchmarks.benchmarks).toHaveLength(1)
+    expect(benchmarks.benchmarks[0].status).toBe('aborted')
+    expect(detail?.status).toBe('aborted')
+    act(() => { socket().fire({ type: 'removed', benchmarkId: 'bm-1' }) })
+    expect(benchmarks.benchmarks).toEqual([])
+    expect(detail).toBeUndefined()
   })
 
   it('schedules a reconnect when the socket cannot even be constructed', async () => {
