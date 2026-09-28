@@ -3,7 +3,8 @@ import type { RunDetail } from '../logic/run-store'
 import type { RunStore } from '../logic/run-store'
 import { loadFeatures } from '../../../shared/feature-loader'
 import type { ClientKind } from '../../../../../../shared/run-mode'
-import { getGitRoot, resolveRepoPath } from '../../../shared/git-repo'
+import { getGitRoot } from '../../../shared/git-repo'
+import { resolveRepoPath } from '../../../shared/repo-identity'
 
 export interface ExternalHealAgentRequest {
   kind: 'external'

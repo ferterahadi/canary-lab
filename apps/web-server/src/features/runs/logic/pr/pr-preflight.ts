@@ -1,5 +1,6 @@
 import { execFileSync } from 'child_process'
-import { detectBaseBranch, resolveRepoPath } from '../../../../shared/git-repo'
+import { detectBaseBranch } from '../../../../shared/git-repo'
+import { resolveRepoPath } from '../../../../shared/repo-identity'
 import {
   detectGhStatus,
   detectRepoPushRights,

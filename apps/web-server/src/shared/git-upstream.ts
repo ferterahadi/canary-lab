@@ -1,5 +1,6 @@
 import type { RepoPrerequisite } from '../../../../shared/launcher/types'
-import { getGitStatus, resolveRepoPath, runGit, type GitResult, type GitStatus } from './git-repo'
+import { getGitStatus, runGit, type GitResult, type GitStatus } from './git-repo'
+import { resolveRepoPath } from './repo-identity'
 
 /**
  * Where a checkout stands against its remote-tracking branch. A feature pins a

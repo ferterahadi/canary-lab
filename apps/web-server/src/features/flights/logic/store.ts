@@ -1,4 +1,5 @@
 import path from 'path'
+import { resolveRepoIdentity } from '../../../shared/repo-identity'
 import type { FlightIndexEntry, FlightManifest, FlightStage, FlightStageKey, FlightStatus } from './types'
 import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, isTerminalFlightStatus } from './types'
 import { stageHasEvidence } from '../../../../../../shared/flights/types'
@@ -86,7 +87,7 @@ function indexEntryFromManifest(m: FlightManifest): FlightIndexEntry {
 }
 
 function repoSetsIntersect(a: string[], b: string[]): boolean {
-  const norm = (p: string) => path.resolve(p)
+  const norm = (p: string) => resolveRepoIdentity(p, 'best-effort')
   const set = new Set(a.map(norm))
   return b.some((p) => set.has(norm(p)))
 }

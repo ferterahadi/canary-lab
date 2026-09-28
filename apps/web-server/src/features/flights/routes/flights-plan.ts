@@ -1,7 +1,6 @@
 // Flights REST — the multi-repo plan surface (propose a plan, poll the task,
 // launch the planned flights) plus stage evidence and abort. Bodies unchanged.
-import fs from 'fs'
-import os from 'os'
+import { resolveRepoIdentity } from '../../../shared/repo-identity'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
@@ -14,7 +13,7 @@ import { abortFlight, drainQueuedFlights } from '../logic/conductor'
 import { deriveFeatureSlug, isTerminalFlightStatus, type PlannedFeature, type PlanFeaturesTask } from '../../../../../../shared/flights/types'
 import { cancelPlanFeatures, startPlanFeatures } from '../logic/plan-features'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
-import { executePlannedLaunch, expandHome, resolveFlightModels } from './flight-route-support'
+import { executePlannedLaunch, resolveFlightModels } from './flight-route-support'
 
 export async function registerFlightPlanRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
   const { store, planStore, conductorDeps } = ctx
@@ -35,7 +34,7 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
       const resolved: string[] = []
       for (const p of repoPaths) {
         try {
-          resolved.push(fs.realpathSync(path.resolve(expandHome(p))))
+          resolved.push(resolveRepoIdentity(p, 'required'))
         } catch {
           reply.code(400)
           return { error: `repo path does not exist: ${p}` }

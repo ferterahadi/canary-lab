@@ -7,7 +7,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { parseDotenv } from '../logic/dotenv-edit'
-import { checkoutBranch, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
+import { checkoutBranch, getGitStatus } from '../../../shared/git-repo'
+import { resolveRepoPath } from '../../../shared/repo-identity'
 
 export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
   // ─── generic filesystem browser ────────────────────────────────────────

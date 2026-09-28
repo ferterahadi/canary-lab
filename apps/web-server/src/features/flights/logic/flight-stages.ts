@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
+import { resolveRepoIdentity } from '../../../shared/repo-identity'
 import { FLIGHT_EXECUTION_ORDER, FLIGHT_STAGE_KEYS, flightStagesResetByEntry, type AgentActivity, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightStage, type FlightStageAgentSession, type FlightStageErrorDetail, type FlightStageKey, type FlightStageTimingKey } from './types'
 import { FlightConductorDeps, StartFlightArgs, redoFlight, startFlight } from './conductor'
 import { drive } from './flight-drive'
@@ -352,7 +353,7 @@ export async function resetStagesForRestart(
 }
 
 export function sameRepoSet(a: string[], b: string[]): boolean {
-  const norm = (paths: string[]) => [...paths].map((p) => p.replace(/[\\/]+$/, '')).sort().join('\n')
+  const norm = (paths: string[]) => paths.map((p) => resolveRepoIdentity(p, 'best-effort')).sort().join('\n')
   return norm(a) === norm(b)
 }
 

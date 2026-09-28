@@ -6,7 +6,7 @@ import { findFeature, linkFeatureDoc } from '../features/config/logic/feature-au
 import { isWithin } from '../features/config/logic/path-containment'
 import { readDocsCollection } from '../features/coverage/logic/coverage/docs-collection'
 import { documentHash, documentResolutionInput, readDocumentSelection, writeDocumentSelection, type DocumentSource } from '../features/coverage/logic/coverage/document-resolution'
-import { resolveRepoPath } from '../shared/git-repo'
+import { resolveRepoPath } from '../shared/repo-identity'
 import { renderPrompt } from '../shared/prompts'
 import { publishWorkspaceEvent } from '../shared/workspace-events'
 import { elicitationAdviceFor } from './client-surface'

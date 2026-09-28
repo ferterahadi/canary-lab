@@ -1,6 +1,4 @@
-import fs from 'fs'
-import os from 'os'
-import path from 'path'
+import { resolveRepoIdentity } from '../../../../shared/repo-identity'
 import { loadFeatures } from '../../../../shared/feature-loader'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import type { FlightStageDeps } from './context'
@@ -12,15 +10,6 @@ import { CHECKPOINT_OPTIONS } from '../types'
 // new), the same ask-don't-guess philosophy as the run loop's repo-collision
 // choice; `--yolo` defaults to rerun (the no-duplication path).
 
-function real(p: string): string {
-  const expanded = p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p
-  try {
-    return fs.realpathSync(path.resolve(expanded))
-  } catch {
-    return path.resolve(expanded)
-  }
-}
-
 interface Match {
   feature: string
   description: string
@@ -28,13 +17,13 @@ interface Match {
 }
 
 function findMatch(deps: FlightStageDeps, repoPaths: string[]): { match: Match | null; scanned: number } {
-  const targets = new Set(repoPaths.map(real))
+  const targets = new Set(repoPaths.map((p) => resolveRepoIdentity(p, 'best-effort')))
   // loadFeatures itself skips (and console.errors) any feature with a broken
   // healthCheck config, so a bad unrelated feature never grounds this scan.
   const features = loadFeatures(deps.featuresDir)
   for (const feature of features) {
     for (const repo of feature.repos ?? []) {
-      if (targets.has(real(repo.localPath))) {
+      if (targets.has(resolveRepoIdentity(repo.localPath, 'best-effort'))) {
         return {
           match: { feature: feature.name, description: feature.description, repo: repo.localPath },
           scanned: features.length,

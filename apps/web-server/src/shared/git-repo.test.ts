@@ -14,10 +14,10 @@ import {
   getGitStatus,
   parsePorcelainStatus,
   parseRefList,
-  resolveRepoPath,
   snapshotWorkingTree,
   validateConfiguredRepoBranches,
 } from './git-repo'
+import { resolveRepoPath } from './repo-identity'
 
 function tmpRepo(): string {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-git-')))

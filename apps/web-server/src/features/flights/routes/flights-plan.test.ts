@@ -507,3 +507,31 @@ describe('~-relative repo paths (dialog picker parity)', () => {
     }
   })
 })
+
+
+it.each(['/api/flights', '/api/flights/plan-features'])('resolves aliases in order and preserves duplicate paths through %s', async (url) => {
+  const alias = path.join(tmpDir, 'alias')
+  fs.symlinkSync(repoDir, alias, 'dir')
+  app = await buildApp(allDone(), undefined, agentReturning(planText([
+    { name: 'first', description: 'one' }, { name: 'second', description: 'two' },
+  ])))
+  const result = await app.inject({ method: 'POST', url, payload: startBody({ repoPaths: [alias, tmpDir, repoDir] }) })
+  expect(result.statusCode, result.payload).toBe(url === '/api/flights' ? 201 : 202)
+  expect(result.json().repoPaths).toEqual([repoDir, tmpDir, repoDir])
+  if (url.endsWith('plan-features')) {
+    await vi.waitFor(async () => {
+      const read = await app.inject({ url: `${url}/${result.json().taskId}` })
+      expect(read.json().status).not.toBe('running')
+    })
+  }
+})
+
+it.each(['/api/flights', '/api/flights/plan-features'])('retains the unresolved-path error through %s', async (url) => {
+  const missing = path.join(tmpDir, 'missing')
+  const alias = path.join(tmpDir, 'dangling')
+  fs.symlinkSync(missing, alias)
+  app = await buildApp(allDone())
+  const result = await app.inject({ method: 'POST', url, payload: startBody({ repoPaths: [alias] }) })
+  expect(result.statusCode).toBe(400)
+  expect(result.json()).toEqual({ error: `repo path does not exist: ${alias}` })
+})

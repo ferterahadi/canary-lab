@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
-import { getGitRoot, resolveRepoPath, runGit } from '../../../../shared/git-repo'
+import { getGitRoot, runGit } from '../../../../shared/git-repo'
+import { resolveRepoPath } from '../../../../shared/repo-identity'
 import { removeWorktree } from '../../../runs/logic/runtime/repo-worktree'
 import { buildPortifyPaths, portifyDir } from './paths'
 import type { PortifyRunStore } from './store'

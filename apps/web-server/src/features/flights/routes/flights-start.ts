@@ -1,14 +1,12 @@
 // Flights REST — starting a flight and the plan-features task surface.
 // Split out of flights.ts; handler bodies are unchanged.
-import fs from 'fs'
-import os from 'os'
-import path from 'path'
+import { resolveRepoIdentity } from '../../../shared/repo-identity'
 import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
 import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightStageEntryError, startFlight, type FlightEntryMode } from '../logic/conductor'
 import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from '../logic/types'
-import { expandHome, parseFlightExternalAgentSession, reclaimGettingStartedFlight, resolveFlightModels } from './flight-route-support'
+import { parseFlightExternalAgentSession, reclaimGettingStartedFlight, resolveFlightModels } from './flight-route-support'
 import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedWorkflow } from '../../config/logic/getting-started-session'
 
 /** The author/portify/export demos launch a flight pinned to their stage, so
@@ -130,7 +128,7 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
     const resolved: string[] = []
     for (const p of repoPaths) {
       try {
-        resolved.push(fs.realpathSync(path.resolve(expandHome(p))))
+        resolved.push(resolveRepoIdentity(p, 'required'))
       } catch {
         reply.code(400)
         return { error: `repo path does not exist: ${p}` }

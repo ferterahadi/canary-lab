@@ -1,7 +1,8 @@
 import type { RepositoryObserver } from '../../../shared/repository-observer'
 import type { RepoPrerequisite } from '../../../../../../shared/launcher/types'
 import { loadFeatures } from '../../../shared/feature-loader'
-import { checkoutBranch, findRepo, resolveRepoPath, type GitStatus } from '../../../shared/git-repo'
+import { checkoutBranch, findRepo, type GitStatus } from '../../../shared/git-repo'
+import { resolveRepoPath } from '../../../shared/repo-identity'
 import { describeFastForward, describeRepoCheckout, fastForwardToUpstream, type RepoCheckoutStatus } from '../../../shared/git-upstream'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 

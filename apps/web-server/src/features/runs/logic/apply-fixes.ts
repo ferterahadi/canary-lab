@@ -1,5 +1,6 @@
 import fs from 'fs'
-import { getGitStatus, resolveRepoPath, runGit } from '../../../shared/git-repo'
+import { getGitStatus, runGit } from '../../../shared/git-repo'
+import { resolveRepoPath } from '../../../shared/repo-identity'
 import { porcelainPath } from '../../../shared/git-status-path'
 import { normalizeFixCaptureNames } from './fix-capture-names'
 import type { RunFixCapture, RunFixCaptureRepo } from '../../../../../../shared/run-state'

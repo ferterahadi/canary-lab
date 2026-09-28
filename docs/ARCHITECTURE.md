@@ -916,6 +916,15 @@ portified/collision-only behaviour — they don't heal, so there is nothing to c
 
 ### Same-repo collision
 
+`apps/web-server/src/shared/repo-identity.ts` owns configured-directory identity:
+expand `~`/`~/`, resolve an absolute path, and follow filesystem symlinks. Run
+admission, upstream ownership guards, and Flight matching use this identity, so
+an alias cannot hide an occupied directory. Flight start/planning require the
+path to resolve; historical comparisons retain an absolute-path fallback on
+resolution failure. Comparisons do not rewrite persisted records or execution
+paths. Sibling directories in one Git root and separate worktrees stay distinct.
+This is a current filesystem observation, not a lock against symlink retargeting.
+
 Worktrees isolate files, not fixed network listeners. Starting a non-portified
 run while another active run uses the same repo returns
 `repo_collision_requires_choice` (REST 409 / MCP result). The user may choose

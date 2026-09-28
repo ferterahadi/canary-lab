@@ -1,6 +1,7 @@
 import path from 'path'
 import type { FeatureConfig, PortSlot } from '../../../../../../../shared/launcher/types'
-import { resolveRepoPath, getGitRoot } from '../../../../shared/git-repo'
+import { getGitRoot } from '../../../../shared/git-repo'
+import { resolveRepoPath } from '../../../../shared/repo-identity'
 import { type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
 import { computeSlotBudget, readSystemResources, resolveAdmissionConfig } from '../../../runs/logic/runtime/admission'
 import { readOverlay } from './overlay'

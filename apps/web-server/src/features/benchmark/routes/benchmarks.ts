@@ -14,7 +14,8 @@ import { addWorktree, removeWorktree } from '../../runs/logic/runtime/repo-workt
 import { listWorktrees } from '../../runs/logic/runtime/worktree-inventory'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { computePortPreflight } from '../../runs/logic/runtime/port-preflight'
-import { getGitRoot, resolveRepoPath } from '../../../shared/git-repo'
+import { getGitRoot } from '../../../shared/git-repo'
+import { resolveRepoPath } from '../../../shared/repo-identity'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/launcher/project-config'
 

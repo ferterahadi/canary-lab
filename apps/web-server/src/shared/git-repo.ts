@@ -1,9 +1,9 @@
 import { execFile, execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../shared/launcher/types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from './workspace-events'
+import { resolveRepoPath } from './repo-identity'
 
 export interface GitStatus {
   isGitRepo: boolean
@@ -50,12 +50,6 @@ export function runGit(cwd: string, args: string[]): Promise<GitResult> {
     })
     child.on('error', (err) => resolve({ code: 1, stdout: '', stderr: err.message }))
   })
-}
-
-export function resolveRepoPath(localPath: string): string {
-  if (localPath === '~') return os.homedir()
-  if (localPath.startsWith('~/')) return path.join(os.homedir(), localPath.slice(2))
-  return localPath
 }
 
 export function parsePorcelainStatus(stdout: string): string[] {

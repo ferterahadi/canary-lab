@@ -10,6 +10,7 @@ import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
 import type { RunManifest } from './manifest'
 import type { ServiceSpec } from './orchestrator'
+import { detectRepoCollision } from './repo-collision'
 
 let tmpDir: string
 
@@ -238,4 +239,20 @@ describe('setStatus', () => {
 
     expect(finalizeRun).not.toHaveBeenCalled()
   })
+})
+
+
+it('records the occupied worktree path without claiming its source checkout', () => {
+  const source = path.join(tmpDir, 'source')
+  const worktree = path.join(tmpDir, 'worktree')
+  const alias = path.join(tmpDir, 'worktree-alias')
+  fs.mkdirSync(source); fs.mkdirSync(worktree); fs.symlinkSync(worktree, alias, 'dir')
+  const { ctx, sink } = ctxFor({}, { worktrees: [{ repoName: 'app', localPath: alias, sourceRoot: source, worktreeRoot: worktree }] })
+  ctx.feature.repos = [{ name: 'app', localPath: source }]
+  writeInitialManifest(ctx)
+  const written = vi.mocked(sink.bootstrap).mock.calls[0][0]
+  expect(written.repoPaths).toEqual([alias])
+  const active = [{ runId: written.runId, feature: written.feature, repoPaths: written.repoPaths! }]
+  expect(detectRepoCollision([source], active)).toBeNull()
+  expect(detectRepoCollision([worktree], active)?.conflictingRunId).toBe(written.runId)
 })

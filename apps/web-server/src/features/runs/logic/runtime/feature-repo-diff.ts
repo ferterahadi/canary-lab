@@ -15,10 +15,10 @@ import {
   diffContentSinceSnapshot,
   diffNamesSinceSnapshot,
   getGitRoot,
-  resolveRepoPath,
   snapshotWorkingTree,
   type DiffPathspec,
 } from '../../../../shared/git-repo'
+import { resolveRepoPath } from '../../../../shared/repo-identity'
 
 export interface FeatureRepoSnapshot {
   ref: string

@@ -9,8 +9,8 @@ import type { QueueReason } from '../../../../../../../shared/run-state'
  * active run on the same repo — is parked here and promoted FIFO when capacity
  * frees up (the server calls promote() on every run-end).
  *
- * The fit decision composes the two pure modules: collision detection
- * (repo-collision.ts) gates first so the user gets the right queue reason, then
+ * The fit decision composes repository identity checks and resource admission:
+ * collision detection gates first so the user gets the right queue reason, then
  * the resource heuristic (admission.ts). The scheduler itself is dependency-
  * injected (active-run snapshot, resources, config) so it's deterministic to
  * test without a live orchestrator.

@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { type FlightStore } from '../logic/store'
 import { FlightConflictError, startFlight, enqueueFlight, type FlightConductorDeps } from '../logic/conductor'
@@ -147,8 +146,6 @@ export function buildStageEntryLinkResolver(logsDir?: string) {
   }
 }
 
-/** Expand a leading `~` the way the entry prefill does — feature configs (and
- *  therefore the dialog's repo picker) may declare repos home-relative. */
 /** The plan a new flight (or a redo) runs its internal stage spawns on:
  *  launch-gate override entries laid over the workspace `agentModels` config
  *  for the conducting agent. Callers persist the result on the record, so a
@@ -161,10 +158,6 @@ export function resolveFlightModels(
 ): AgentStagePlans {
   const configured = loadProjectConfig(projectRoot).agentModels[agent]
   return { ...configured, ...normalizeStagePlans(agent, override) }
-}
-
-export function expandHome(p: string): string {
-  return p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p
 }
 
 /** Validate the untrusted REST form of an MCP-owned Flight session. The ID is
