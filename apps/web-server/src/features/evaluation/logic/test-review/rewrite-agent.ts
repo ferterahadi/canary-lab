@@ -2,9 +2,11 @@ import crypto from 'crypto'
 import ts from 'typescript'
 import type { RunDetail } from '../../../runs/logic/run-store'
 import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import { AGENT_DEFAULT_CHOICE, agentModelArgs, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
+import { AGENT_DEFAULT_CHOICE, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { runAgentCompletion } from '../../../agent-sessions/logic/agent-completion'
+import { resolveAvailableAgentOrder } from '../../../agent-sessions/logic/agent-selection'
+import { buildReadOnlyCodexArgs } from '../../../agent-sessions/logic/agent-read-only-args'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import { promptPath } from '../../../../shared/prompts'
@@ -58,15 +60,7 @@ export const EVALUATION_REWRITE_SCHEMA_PATH = promptPath('evaluation-rewrite.sch
 
 export function resolveEvaluationAgents(adapter: AssertionHtmlOptions['audienceAdapter']): HealAgent[] {
   if (adapter === 'deterministic') return []
-  const preferred = adapter === 'claude' || adapter === 'codex'
-    ? pickAvailableHealAgent(adapter)
-    : pickAvailableHealAgent()
-  const agents = [
-    preferred,
-    pickAvailableHealAgent('claude'),
-    pickAvailableHealAgent('codex'),
-  ].filter((agent): agent is HealAgent => agent === 'claude' || agent === 'codex')
-  return [...new Set(agents)]
+  return resolveAvailableAgentOrder(adapter === 'claude' || adapter === 'codex' ? adapter : undefined, pickAvailableHealAgent)
 }
 
 export function evaluationAgentModel(models: StageModelChoice): string | null {
@@ -127,16 +121,7 @@ export function runEvaluationAgent(
 }
 
 export function evaluationCodexArgs(prompt: string, outputPath?: string, outputSchemaPath?: string, models: StageModelChoice = AGENT_DEFAULT_CHOICE): string[] {
-  return [
-    'exec',
-    '--skip-git-repo-check',
-    '--sandbox',
-    'read-only',
-    ...agentModelArgs('codex', models),
-    ...(outputPath ? ['--output-last-message', outputPath] : []),
-    ...(outputSchemaPath ? ['--output-schema', outputSchemaPath] : []),
-    prompt,
-  ]
+  return buildReadOnlyCodexArgs({ prompt, models, outputPath, outputSchemaPath })
 }
 
 export function previewAgentOutput(output: string): string {

@@ -86,6 +86,21 @@ describe('evaluation rewrite agent + highlight fallback (isolated module mocks)'
     cases: [{ title: 't', whatWasChecked: 'w', whyItMatters: 'm', confidence: 'c' }],
   })
 
+  it.each(['auto', 'manual', undefined] as const)('preserves auto selection for %s', async (adapter) => {
+    availableAgents = ['codex', 'claude']
+    mockAgentModules()
+    const { resolveEvaluationAgents } = await import('./test-review/rewrite-agent')
+    expect(resolveEvaluationAgents(adapter)).toEqual(['codex', 'claude'])
+  })
+
+  it('does not discover agents for deterministic evaluation', async () => {
+    const pick = vi.fn(() => { throw new Error('must not discover') })
+    vi.doMock('../../runs/logic/runtime/auto-heal', () => ({ pickAvailableHealAgent: pick }))
+    const { resolveEvaluationAgents } = await import('./test-review/rewrite-agent')
+    expect(resolveEvaluationAgents('deterministic')).toEqual([])
+    expect(pick).not.toHaveBeenCalled()
+  })
+
   it('surfaces the pinned claude session ref to onSession', async () => {
     availableAgents = ['claude']
     const sessions: Array<{ agent: string; sessionId: string }> = []

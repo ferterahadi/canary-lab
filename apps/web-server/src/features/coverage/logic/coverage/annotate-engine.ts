@@ -1,11 +1,13 @@
 import crypto from 'crypto'
 import path from 'path'
 import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import { AGENT_DEFAULT_CHOICE, agentModelArgs, type PerAgentStageChoices, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
+import { AGENT_DEFAULT_CHOICE, type PerAgentStageChoices, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
 import { runAgentCompletion } from '../../../agent-sessions/logic/agent-completion'
+import { resolveAvailableAgentOrder } from '../../../agent-sessions/logic/agent-selection'
+import { buildReadOnlyCodexArgs } from '../../../agent-sessions/logic/agent-read-only-args'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 import type { PathType, ProposedMapping, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
@@ -256,22 +258,7 @@ export function buildAnnotatePrompt(
 // ---------------------------------------------------------------------------
 
 function defaultResolveAgents(adapter: AnnotateAdapter): HealAgent[] {
-  const preferred = adapter === 'claude' || adapter === 'codex'
-    ? pickAvailableHealAgent(adapter)
-    : pickAvailableHealAgent()
-  const agents = [preferred, pickAvailableHealAgent('claude'), pickAvailableHealAgent('codex')]
-    .filter((a): a is HealAgent => a === 'claude' || a === 'codex')
-  return [...new Set(agents)]
-}
-
-function codexArgs(outputPath: string, models: StageModelChoice): string[] {
-  return [
-    'exec', '--skip-git-repo-check', '--sandbox', 'read-only',
-    ...agentModelArgs('codex', models),
-    '--output-last-message', outputPath,
-    '--output-schema', ANNOTATE_SCHEMA_PATH,
-    '-',
-  ]
+  return resolveAvailableAgentOrder(adapter === 'claude' || adapter === 'codex' ? adapter : undefined, pickAvailableHealAgent)
 }
 
 function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): Promise<string> {
@@ -296,7 +283,7 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
         // returns the edits it wants as data for canary to apply, so it must not be
         // able to reach into the spec files itself.
         ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
-        : codexArgs(outputPath!, models)
+        : buildReadOnlyCodexArgs({ prompt: '-', models, outputPath, outputSchemaPath: ANNOTATE_SCHEMA_PATH })
       opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
 
       return runAgentProcess({

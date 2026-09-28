@@ -1,9 +1,10 @@
 import fs from 'fs'
 import crypto from 'crypto'
 import { pickAvailableHealAgent, type HealAgent } from '../runtime/auto-heal'
-import { AGENT_DEFAULT_CHOICE, agentModelArgs, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
+import { AGENT_DEFAULT_CHOICE, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { runAgentCompletion } from '../../../agent-sessions/logic/agent-completion'
+import { buildReadOnlyCodexArgs } from '../../../agent-sessions/logic/agent-read-only-args'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import { promptPath, renderPrompt } from '../../../../shared/prompts'
@@ -149,21 +150,6 @@ function isFilled(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0
 }
 
-/** Codex argv. Takes the answer-file path rather than re-deriving it, so the
- *  "codex arm ⇒ there is an output file" pairing is a parameter rather than a
- *  guard the caller has to keep true. */
-function codexArgs(outputPath: string, models: StageModelChoice): string[] {
-  return [
-    'exec',
-    '--skip-git-repo-check',
-    '--sandbox', 'read-only',
-    ...agentModelArgs('codex', models),
-    '--output-last-message', outputPath,
-    '--output-schema', COMMIT_MESSAGE_SCHEMA_PATH,
-    '-',
-  ]
-}
-
 /** Spawn via the shared runner — same argv builder, idle clock and answer
  *  recovery as every other non-interactive agent here. Read-only on both arms:
  *  this pass describes a diff, and one that could edit the repo it is
@@ -186,7 +172,7 @@ export function runCommitMessageAgent(
       const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
       const args = agent === 'claude'
         ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
-        : codexArgs(outputPath!, models)
+        : buildReadOnlyCodexArgs({ prompt: '-', models, outputPath, outputSchemaPath: COMMIT_MESSAGE_SCHEMA_PATH })
       return runAgentProcess({
         command: agent,
         args,
