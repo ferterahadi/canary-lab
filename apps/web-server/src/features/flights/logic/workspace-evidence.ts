@@ -3,7 +3,7 @@ import path from 'path'
 import type { FlightStage, FlightStageKey } from './types'
 import { readDocsCollection } from '../../coverage/logic/coverage/docs-collection'
 import { readPrdSummary } from '../../coverage/logic/coverage/prd-summary-render'
-import { computeFeatureCoverage, resolveFeatureDir } from '../../coverage/logic/coverage/service'
+import { computeFeatureCoverage } from '../../coverage/logic/coverage/service'
 import { listEvaluationExportTasks } from '../../evaluation/logic/evaluation-export-store'
 import { readOverlay } from '../../portify/logic/runtime/overlay'
 import { PortifyRunStore } from '../../portify/logic/runtime/store'
@@ -15,6 +15,7 @@ import { findBootProof } from './stage-evidence'
 import { readManifest } from '../../runs/logic/runtime/manifest'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
 import { isAuxiliaryExecution } from '../../../../../../shared/verification'
+import type { FeatureConfig } from '../../../../../../shared/launcher/types'
 
 // Read-time stage evidence, probed from the workspace for stages that never
 // recorded their own. Stored evidence is a CACHE of what the conductor measured;
@@ -38,6 +39,15 @@ export interface WorkspaceEvidenceDeps {
 }
 
 export type EvidenceBlock = Record<string, unknown>
+
+interface EvidenceContext {
+  deps: WorkspaceEvidenceDeps
+  feature: string
+  config: FeatureConfig
+  featureDir: string
+  env: string | undefined
+  settledRun: () => ReturnType<typeof latestSettledRun>
+}
 
 /** The number of files in the captured envset — `env` when named, otherwise the
  *  first non-empty envset directory (the derived rail asks "was the environment
@@ -73,7 +83,7 @@ function capturedEnvsetCount(featureDir: string, env?: string): number | undefin
  *  evidence: what was captured, and the boot that proved it. Either half alone
  *  is a real answer — an app with no env files reports the boot and nothing
  *  captured, which is the whole reason this stage stopped being envset-gated. */
-function envCaptureEvidence(deps: WorkspaceEvidenceDeps, feature: string, featureDir: string, env?: string): EvidenceBlock | undefined {
+function envCaptureEvidence({ deps, feature, featureDir, env }: EvidenceContext): EvidenceBlock | undefined {
   const captured = capturedEnvsetCount(featureDir, env)
   const proof = findBootProof(deps.logsDir, feature)
   if (captured === undefined && !proof) return undefined
@@ -85,12 +95,12 @@ function envCaptureEvidence(deps: WorkspaceEvidenceDeps, feature: string, featur
 
 /** Source requirement docs — the same collection the coverage ledger reads, so
  *  the stage's count and the ledger's can't disagree. */
-function docsEvidence(featureDir: string): EvidenceBlock | undefined {
+function docsEvidence({ featureDir }: EvidenceContext): EvidenceBlock | undefined {
   const docs = readDocsCollection(featureDir).entries.map((e) => e.relPath)
   return docs.length > 0 ? { docs } : undefined
 }
 
-function prdSummaryEvidence(featureDir: string): EvidenceBlock | undefined {
+function prdSummaryEvidence({ featureDir }: EvidenceContext): EvidenceBlock | undefined {
   const summary = readPrdSummary(featureDir)
   const requirementCount = summary?.requirements?.length
   return requirementCount ? { requirementCount } : undefined
@@ -99,8 +109,8 @@ function prdSummaryEvidence(featureDir: string): EvidenceBlock | undefined {
 /** Live authoring and mapping evidence. The spec count proves tests exist; the
  *  ledger state says whether requirement mapping ran; the percentage is only a
  *  claim after that point. */
-function specsCoverageEvidence(deps: WorkspaceEvidenceDeps, feature: string): EvidenceBlock | undefined {
-  const ledger = computeFeatureCoverage({ featuresDir: deps.featuresDir, logsDir: deps.logsDir, feature })
+function specsCoverageEvidence({ deps, feature, featureDir }: EvidenceContext): EvidenceBlock | undefined {
+  const ledger = computeFeatureCoverage({ featuresDir: deps.featuresDir, logsDir: deps.logsDir, feature, featureDir })
   return {
     coveragePct: ledger.coveragePct,
     mappingState: ledger.state?.coverage,
@@ -133,7 +143,7 @@ function savedPortifyWorkflowId(logsDir: string, feature: string): string | unde
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0]?.workflowId
 }
 
-function portifyEvidence(deps: WorkspaceEvidenceDeps, feature: string, featureDir: string): EvidenceBlock | undefined {
+function portifyEvidence({ deps, feature, featureDir, config }: EvidenceContext): EvidenceBlock | undefined {
   const workflowId = savedPortifyWorkflowId(deps.logsDir, feature)
   const overlay = readOverlay(featureDir)
   if (!overlay) {
@@ -150,8 +160,7 @@ function portifyEvidence(deps: WorkspaceEvidenceDeps, feature: string, featureDi
     // and correctly leaves no artifact. Reading that as absent left the stage
     // ticked and its panel completely blank. The config is the evidence in that
     // case: how many services take their port from the run.
-    const config = loadFeatures(deps.featuresDir).find((c) => c.name === feature)
-    const { total, slotted } = startCommandPortSlotCounts(config?.repos)
+    const { total, slotted } = startCommandPortSlotCounts(config.repos)
     return total > 0 && slotted === total ? { declaredInjectable: slotted, serviceCount: total } : undefined
   }
   const edits = overlay.meta.repos.reduce((n, r) => n + (r.touchedFiles?.length ?? 0), 0)
@@ -171,8 +180,8 @@ function latestSettledRun(deps: WorkspaceEvidenceDeps, feature: string): { runId
   return latest ? { runId: latest.runId, status: latest.status } : undefined
 }
 
-function runEvidence(deps: WorkspaceEvidenceDeps, feature: string): EvidenceBlock | undefined {
-  const latest = latestSettledRun(deps, feature)
+function runEvidence({ deps, settledRun }: EvidenceContext): EvidenceBlock | undefined {
+  const latest = settledRun()
   if (!latest) return undefined
   const runDir = runDirFor(deps.logsDir, latest.runId)
   const counts = runCounts(readRunSummary(runDir))
@@ -181,8 +190,8 @@ function runEvidence(deps: WorkspaceEvidenceDeps, feature: string): EvidenceBloc
 
 /** The heal half of the run↔heal pair mirrors the run's manifest — it never
  *  re-runs anything, so its evidence is a read of what the run's heal loop did. */
-function healEvidence(deps: WorkspaceEvidenceDeps, feature: string): EvidenceBlock | undefined {
-  const latest = latestSettledRun(deps, feature)
+function healEvidence({ deps, settledRun }: EvidenceContext): EvidenceBlock | undefined {
+  const latest = settledRun()
   if (!latest) return undefined
   const manifest = readManifest(buildRunPaths(runDirFor(deps.logsDir, latest.runId)).manifestPath)
   if (!manifest) return undefined
@@ -197,7 +206,7 @@ function healEvidence(deps: WorkspaceEvidenceDeps, feature: string): EvidenceBlo
  *  the task ID, not a filesystem path: the client already holds the export tasks
  *  and builds its download from the id, so an absolute server path would be both
  *  redundant and a leak. */
-function evaluationExportEvidence(deps: WorkspaceEvidenceDeps, feature: string): EvidenceBlock | undefined {
+function evaluationExportEvidence({ deps, feature }: EvidenceContext): EvidenceBlock | undefined {
   const done = listEvaluationExportTasks(deps.logsDir)
     .filter((t) => t.feature === feature && t.status === 'completed' && t.downloadReady)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -215,10 +224,9 @@ function evaluationExportEvidence(deps: WorkspaceEvidenceDeps, feature: string):
  *  resumed past this step marked the row ↷ over a fully populated pane.
  *  Deduplicated for the reason `distinctRepoPaths` exists: services sharing one
  *  source tree are one repository. */
-function scoutEvidence(deps: WorkspaceEvidenceDeps, feature: string): EvidenceBlock | undefined {
-  const config = loadFeatures(deps.featuresDir).find((c) => c.name === feature)
+function scoutEvidence({ config }: EvidenceContext): EvidenceBlock | undefined {
   const paths = new Set(
-    (config?.repos ?? [])
+    (config.repos ?? [])
       .map((r) => r.localPath)
       .filter((p): p is string => typeof p === 'string' && p.length > 0)
       .map((p) => p.replace(/[\\/]+$/, '')),
@@ -228,16 +236,16 @@ function scoutEvidence(deps: WorkspaceEvidenceDeps, feature: string): EvidenceBl
 
 /** Per-stage probe. `similarity` is deliberately absent: it reports which suites
  *  a scan compared, and no artifact on disk records that. */
-const PROBES: Partial<Record<FlightStageKey, (deps: WorkspaceEvidenceDeps, feature: string, featureDir: string, env?: string) => EvidenceBlock | undefined>> = {
-  'scout': (deps, feature) => scoutEvidence(deps, feature),
-  'env-capture': (deps, feature, featureDir, env) => envCaptureEvidence(deps, feature, featureDir, env),
-  'docs': (_d, _f, featureDir) => docsEvidence(featureDir),
-  'prd-summary': (_d, _f, featureDir) => prdSummaryEvidence(featureDir),
-  'specs-coverage': (deps, feature) => specsCoverageEvidence(deps, feature),
-  'portify': (deps, feature, featureDir) => portifyEvidence(deps, feature, featureDir),
-  'run': (deps, feature) => runEvidence(deps, feature),
-  'heal': (deps, feature) => healEvidence(deps, feature),
-  'evaluation-export': (deps, feature) => evaluationExportEvidence(deps, feature),
+const PROBES: Partial<Record<FlightStageKey, (context: EvidenceContext) => EvidenceBlock | undefined>> = {
+  'scout': scoutEvidence,
+  'env-capture': envCaptureEvidence,
+  'docs': docsEvidence,
+  'prd-summary': prdSummaryEvidence,
+  'specs-coverage': specsCoverageEvidence,
+  'portify': portifyEvidence,
+  'run': runEvidence,
+  'heal': healEvidence,
+  'evaluation-export': evaluationExportEvidence,
 }
 
 /** Probe the workspace for the named stages only. A probe that throws is
@@ -252,16 +260,26 @@ export function workspaceStageEvidence(
 ): Partial<Record<FlightStageKey, EvidenceBlock>> {
   const wanted = keys.filter((k) => PROBES[k])
   if (wanted.length === 0) return {}
-  let featureDir: string
+  let config: FeatureConfig | undefined
   try {
-    featureDir = resolveFeatureDir(deps.featuresDir, feature)
+    config = loadFeatures(deps.featuresDir).find((c) => c.name === feature)
   } catch {
     return {}
+  }
+  if (!config?.featureDir) return {}
+  let settled: { value: ReturnType<typeof latestSettledRun> } | undefined
+  const context: EvidenceContext = {
+    deps, feature, config, featureDir: config.featureDir, env,
+    settledRun: () => {
+      // Cache absence too, but leave thrown reads retryable by the next probe.
+      settled ??= { value: latestSettledRun(deps, feature) }
+      return settled.value
+    },
   }
   const out: Partial<Record<FlightStageKey, EvidenceBlock>> = {}
   for (const key of wanted) {
     try {
-      const block = PROBES[key]!(deps, feature, featureDir, env)
+      const block = PROBES[key]!(context)
       if (block) out[key] = block
     } catch {
       // Probe failed — leave the stage as it was.
