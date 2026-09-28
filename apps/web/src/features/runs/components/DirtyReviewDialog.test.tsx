@@ -18,7 +18,7 @@ let root: Root
 let container: HTMLDivElement
 const feature = (name = 'alpha', files = ['e2e/a.spec.ts']): Feature => ({ name, description: '', envs: [], repos: [], dirty: { status: 'dirty', specs: files.map((file) => ({ file, affectedTests: ['a'] })) } })
 const run: RunIndexEntry = { runId: 'run-1', feature: 'alpha', startedAt: 'now', status: 'healing', pendingSpecEdits: 1 }
-const detail: RunDetail = { runId: 'run-1', manifest: { runId: 'run-1', feature: 'alpha', startedAt: 'now', status: 'healing', healCycles: 0, services: [], specEdits: { checkedAt: 'now', adopted: [], pending: [{ file: 'e2e/a.spec.ts', change: 'modified', affectedTests: ['a'] }] } } }
+const detail: RunDetail = { runId: 'run-1', manifest: { runId: 'run-1', feature: 'alpha', startedAt: 'now', status: 'healing', healCycles: 0, services: [], suiteSnapshot: { kind: 'taken', dir: '/recorded', takenAt: 'now', digest: 'd' }, specEdits: { checkedAt: 'now', adopted: [], pending: [{ file: 'e2e/a.spec.ts', change: 'modified', affectedTests: ['a'] }] } } }
 const reviewRevision = 'a'.repeat(64)
 beforeEach(() => {
   vi.resetAllMocks()
@@ -646,6 +646,35 @@ it('shows unavailable counts rather than a fabricated zero when a comparison fai
   expect(changeMarks()).toEqual([])
   expect(button('Next test change').disabled).toBe(true)
   expect(document.querySelector('[aria-label="Edit blocks in this file"]')).toBeNull()
+})
+
+it('explains a historical run without a saved snapshot and compares against Git HEAD', async () => {
+  const historical = { ...detail, manifest: { ...detail.manifest, status: 'passed' as const, suiteSnapshot: undefined } }
+  const onFocus = vi.fn()
+  await render({ pendingRuns: [{ ...run, status: 'passed' }], focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: historical,
+    focus: { file: 'e2e/a.spec.ts', baseline: 'run' }, onFocus })
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('This run has no saved test snapshot')
+  expect(document.body.textContent).toContain('start a new run to verify them')
+  expect(api.getTestSourceComparison).not.toHaveBeenCalled()
+  expect(api.getRunTestReview).not.toHaveBeenCalled()
+  expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', undefined)
+  expect(document.querySelector<HTMLSelectElement>('select[aria-label="Compare current test with"]')?.value).toBe('head')
+  expect(document.querySelector<HTMLOptionElement>('option[value="run"]')?.disabled).toBe(true)
+  expect(button('Accept & commit')).toBeUndefined()
+  expect(button('Restore recorded files')).toBeUndefined()
+  await act(async () => document.querySelector<HTMLButtonElement>('.cl-review-file[title="e2e/a.spec.ts"]')!.click())
+  expect(onFocus).toHaveBeenLastCalledWith({ file: 'e2e/a.spec.ts', mode: undefined })
+})
+
+it('recovers to Git HEAD when a recorded snapshot directory has disappeared', async () => {
+  vi.mocked(api.getTestSourceComparison).mockRejectedValue(new ApiError(409, { error: 'This run’s test snapshot is unavailable.' }, 'This run’s test snapshot is unavailable.'))
+  vi.mocked(api.getRunTestReview).mockRejectedValue(new ApiError(409, { error: 'Run snapshot unavailable' }, 'Run snapshot unavailable'))
+  await render({ pendingRuns: [{ ...run, status: 'passed' }], focusFeature: 'alpha', focusRunId: 'run-1', focusRunDetail: detail,
+    focus: { file: 'e2e/a.spec.ts', baseline: 'run' } })
+  expect(document.body.textContent).toContain('This run has no saved test snapshot')
+  expect(document.body.textContent).not.toContain('Could not confirm this run’s review state')
+  expect(api.getTestFileReview).toHaveBeenLastCalledWith('alpha', 'e2e/a.spec.ts', undefined)
+  expect(document.querySelector<HTMLSelectElement>('select[aria-label="Compare current test with"]')?.value).toBe('head')
 })
 
 it('explains a removed live suite and returns to the saved run', async () => {

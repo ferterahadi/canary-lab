@@ -61,5 +61,5 @@ export const WEAKER_HINT_COPY = INTEGRITY_HINT_COPY
 
 /** What a pending file's edit reaches, for the file list. */
 export function pendingFileScope(file: Pick<DirtySpecSummary, 'file' | 'affectedTests'>): string {
-  return `${file.affectedTests.length} ${file.affectedTests.length === 1 ? 'test' : 'tests'}`
+  return `${file.affectedTests.length} affected ${file.affectedTests.length === 1 ? 'test' : 'tests'}`
 }

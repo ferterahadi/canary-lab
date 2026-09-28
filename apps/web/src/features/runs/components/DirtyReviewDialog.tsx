@@ -51,7 +51,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   useEffect(() => { setFocus(routedFocus) }, [routedFocus])
   const updateFocus = (next: ReviewFocus): void => { setFocus(next); onFocus?.(next) }
   const [navigationTarget, setNavigationTarget] = useState<HTMLDivElement | null>(null)
-  const [runFiles, setRunFiles] = useState<{ feature: string; runId: string; revision: number; rootsKey: string; files: string[]; changedFiles: string[]; changes?: TestVersionChanges; error?: string; missingSuite?: boolean } | null>(null)
+  const [runFiles, setRunFiles] = useState<{ feature: string; runId: string; revision: number; rootsKey: string; files: string[]; changedFiles: string[]; changes?: TestVersionChanges; error?: string; missingSuite?: boolean; missingSnapshot?: boolean } | null>(null)
   const pendingByFeature = new Map<string, RunIndexEntry>()
   for (const run of pendingRuns) {
     if (!pendingByFeature.has(run.feature) || run.runId === focusRunId) pendingByFeature.set(run.feature, run)
@@ -102,10 +102,19 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     setPicked({ feature, file })
     if (feature !== focusFeature) onChooseFeature?.(feature)
     setError(null)
-    updateFocus({ file, mode: focus?.mode, ...(againstRun ? { baseline: 'run' } : {}) })
+    updateFocus({ file, mode: focus?.mode, ...(useRunBaseline ? { baseline: 'run' } : {}) })
   }
   const tone = spec ? specTone(spec) : selected?.feature ? featureTone(selected.feature) : null
   const run = selected?.run
+  const comparisonRunId = againstRun && selected && selected.name === focusFeature && focusRunId && (!focusRunDetail || focusRunDetail.manifest.feature === selected.name) ? focusRunId
+    : run?.runId ?? (focusRunDetail?.manifest.feature === selected?.name ? focusRunId ?? undefined : undefined)
+  const comparisonManifest = focusRunDetail?.manifest.runId === comparisonRunId ? focusRunDetail?.manifest
+    : detail?.manifest.runId === comparisonRunId ? detail?.manifest : undefined
+  const comparisonDir = comparisonManifest?.featureDir
+  const snapshotDir = comparisonManifest?.suiteSnapshot?.kind === 'taken' ? comparisonManifest.suiteSnapshot.dir : undefined
+  const rootsKey = JSON.stringify([comparisonDir, snapshotDir])
+  const currentRunFiles = runFiles && runFiles.feature === selected?.name && runFiles.runId === comparisonRunId && runFiles.revision === testChanges && runFiles.rootsKey === rootsKey ? runFiles : null
+  const missingSnapshot = !!comparisonRunId && ((!!comparisonManifest && !snapshotDir) || !!currentRunFiles?.missingSnapshot)
   // RunStore decisions arrive through the run WebSocket as a new manifest.
   // Use that pushed revision to refetch the REST-only review immediately;
   // bounded reconciliation below remains the missed-event recovery path.
@@ -113,19 +122,17 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     detail?.manifest.specEdits?.checkedAt,
     detail?.manifest.specEdits?.reviewDecisions,
   ])
-  const runReview = useLiveResource<RunTestReview>('tests', run?.runId ?? null, api.getRunTestReview, {
+  const runReview = useLiveResource<RunTestReview>('tests', missingSnapshot ? null : run?.runId ?? null, api.getRunTestReview, {
     reconcileMs: 5000,
     leaseMs: 15000,
     refreshKey: reviewRefreshKey,
   })
   const reviewState = runReview.value?.reviewState ?? (runReview.value?.canAdopt && run && ['running', 'healing'].includes(run.status) ? 'pending-active' : undefined)
   const pendingRunReview = reviewState === 'pending-active' || reviewState === 'pending-terminal'
-  const comparisonRunId = againstRun && selected && selected.name === focusFeature && focusRunId && (!focusRunDetail || focusRunDetail.manifest.feature === selected.name) ? focusRunId
-    : run?.runId ?? (focusRunDetail?.manifest.feature === selected?.name ? focusRunId ?? undefined : undefined)
   // A decision must display the same recorded-run boundary its exact revision
   // will settle. Otherwise a cold pending-review link can show Git changes
   // while Accept & commit targets a different run-scoped file set.
-  const useRunBaseline = !!comparisonRunId && (againstRun || !selected?.feature || pendingRunReview)
+  const useRunBaseline = !!comparisonRunId && !missingSnapshot && (againstRun || !selected?.feature || pendingRunReview)
   const featureReview = useLiveResource<FeatureTestReview>('tests', !run && selected?.feature ? selected.name : null, api.getFeatureTestReview, {
     reconcileMs: 5000,
     leaseMs: 15000,
@@ -155,13 +162,8 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   }, [featureReview.confirmed, featureReview.value?.files.length, onClose, run])
   const reviewKey = JSON.stringify([selected?.name, spec?.file])
   const comparisonFeature = selected?.name
-  const comparisonManifest = focusRunDetail?.manifest.runId === comparisonRunId ? focusRunDetail?.manifest
-    : detail?.manifest.runId === comparisonRunId ? detail?.manifest : undefined
-  const comparisonDir = comparisonManifest?.featureDir
-  const snapshotDir = comparisonManifest?.suiteSnapshot?.kind === 'taken' ? comparisonManifest.suiteSnapshot.dir : undefined
-  const rootsKey = JSON.stringify([comparisonDir, snapshotDir])
   useEffect(() => {
-    if (!comparisonFeature || !comparisonRunId) return
+    if (!comparisonFeature || !comparisonRunId || !snapshotDir) return
     let cancelled = false
     let requested = 0
     const load = (): void => {
@@ -178,7 +180,9 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
         setRunFiles({ feature: comparisonFeature, runId: comparisonRunId, revision: testChanges, rootsKey, files: [], changedFiles: [],
           ...(err instanceof ApiError && err.status === 404 && err.message === 'Suite not found'
             ? { missingSuite: true }
-            : { error: 'Could not list all comparison files. Showing the available files.' }),
+            : err instanceof ApiError && err.status === 409 && /snapshot/i.test(err.message)
+              ? { missingSnapshot: true }
+              : { error: 'Could not list all comparison files. Showing the available files.' }),
         })
       })
     }
@@ -188,7 +192,6 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     const interval = setInterval(load, 10_000)
     return () => { cancelled = true; clearInterval(interval) }
   }, [comparisonFeature, comparisonRunId, comparisonDir, snapshotDir, rootsKey, testChanges])
-  const currentRunFiles = runFiles && runFiles.feature === selected?.name && runFiles.runId === comparisonRunId && runFiles.revision === testChanges && runFiles.rootsKey === rootsKey ? runFiles : null
   const suiteUnavailable = !!currentRunFiles?.missingSuite
   const changedFiles = new Set(useRunBaseline
     ? currentRunFiles?.changedFiles ?? []
@@ -266,7 +269,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
               <button className="cl-button-primary px-3 py-1.5 text-xs" disabled={busy || (reviewRun ? !runReview.confirmed : !featureReview.confirmed)} onClick={() => { void act(acceptChanges) }}>Accept &amp; commit</button>
             </>}
           </div>
-          {run && !suiteUnavailable && runReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this run’s review state. {runReview.error}</p>}
+          {run && !suiteUnavailable && !missingSnapshot && runReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this run’s review state. {runReview.error}</p>}
           {!run && !suiteUnavailable && featureReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this suite’s review state. {featureReview.error}</p>}
           {error && <p role="alert" className="cl-review-action-message text-danger">{error}</p>}
         </div>}
@@ -294,6 +297,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
             </div>
           </nav>
           <section className="cl-review-content" data-testid={`dirty-review-card-${selected.name}`} data-pending={run ? 'true' : undefined} data-tone={tone ?? undefined}>
+            {missingSnapshot && <p role="status" className="border-b border-line px-4 py-2 text-xs text-warning">This run has no saved test snapshot. The comparison below uses Git HEAD, not the tests this run executed. Review the related suite edits, then start a new run to verify them.</p>}
             {spec ? <FullTestReview key={`${reviewKey}:${useRunBaseline}`} feature={selected.name} file={spec.file} runId={useRunBaseline ? comparisonRunId : undefined} focus={reviewFocus} onFocus={updateFocus} selectedTest={selectedTest} comparisonReady={Boolean(changes)} revision={JSON.stringify(spec)} navigationTarget={useRunBaseline ? null : navigationTarget} baselineControl={<label className="cl-review-baseline">
               <span>Compare current test with</span>
               <select aria-label="Compare current test with" className="cl-input px-2 py-1 text-xs" value={useRunBaseline ? 'run' : 'head'} onChange={(event) => {
@@ -302,7 +306,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
                 updateFocus({ ...focus, file: spec.file, change: undefined, test: undefined, baseline: next ? 'run' : undefined })
               }}>
                 <option value="head" disabled={!selected.feature || pendingRunReview}>Git HEAD</option>
-                <option value="run" disabled={!comparisonRunId}>{comparisonRunId ? `Run ${shortRunRef(comparisonRunId)}` : 'No run selected'}</option>
+                <option value="run" disabled={!comparisonRunId || missingSnapshot}>{comparisonRunId ? `Run ${shortRunRef(comparisonRunId)}` : 'No run selected'}</option>
               </select>
             </label>} /> : <p role={runError ? 'alert' : 'status'} className="p-4 text-sm">{runError ?? 'No test file selected. Close this dialog and open a comparison from the Tests panel.'}</p>}
           </section>
