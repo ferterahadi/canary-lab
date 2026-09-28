@@ -1,11 +1,10 @@
 import crypto from 'crypto'
-import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import { AGENT_DEFAULT_CHOICE, agentModelArgs, type PerAgentStageChoices, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import type { CoverageAgentSession } from './annotate-engine'
-import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
+import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
+import { runAgentCompletion } from '../../../agent-sessions/logic/agent-completion'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
 import type { PrdSummary, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
@@ -146,75 +145,46 @@ function codexArgs(outputPath: string, models: StageModelChoice): string[] {
 }
 
 function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): Promise<string> {
-  const outputDir = agent === 'codex'
-    ? fs.mkdtempSync(path.join(os.tmpdir(), 'canary-prd-summary-'))
-    : undefined
-  const outputPath = outputDir ? path.join(outputDir, 'last-message.txt') : undefined
-  // Pin a claude session id so the CLI's JSONL session log is locatable and
-  // AgentSessionView can tail it (the live view comes from that JSONL, not stdout).
-  const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
-  // Agentic spawn via the shared runner. claude: stream-json for liveness +
-  // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
-  // from stdin (`-`) and writes the final message to --output-last-message.
-  const models = opts.models ?? AGENT_DEFAULT_CHOICE
-  const args = agent === 'claude'
-    // `readOnly` matches what the codex arm below already declares with
-    // `--sandbox read-only`: this agent reads docs and answers with JSON, so it
-    // has no business holding a write tool on either arm.
-    ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
-    : codexArgs(outputPath!, models)
-  opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
-
-  let idled = false
-  const handle = runAgentProcess({
-    command: agent,
-    args,
-    cwd: opts.cwd,
-    stdin: agent === 'codex' ? prompt : undefined,
-    onChunk: (text) => opts.onOutput?.(text),
+  return runAgentCompletion({
+    agent,
+    signal: opts.signal,
     idleMs: PRD_SUMMARY_IDLE_TIMEOUT_MS,
-    activityPath: agentActivityPath(agent, opts.cwd, claudeSessionId),
-    onIdle: () => { idled = true },
-    spawnScope: opts.spawnScope,
-    ...(opts.agentJob
-      ? { record: { ...opts.agentJob.record, agent, ...(claudeSessionId ? { sessionId: claudeSessionId } : {}) }, agentJobLogsDir: opts.agentJob.logsDir }
-      : {}),
+    outputDirectoryPrefix: 'canary-prd-summary-',
+    errorLabel: 'prd summary agent',
+    cancellationMessage: 'prd summary cancelled',
+    cancellationMode: 'after-close',
+    start: ({ outputPath, onIdle }) => {
+      // Pin a claude session id so the CLI's JSONL session log is locatable and
+      // AgentSessionView can tail it (the live view comes from that JSONL, not stdout).
+      const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
+      // Agentic spawn via the shared runner. claude: stream-json for liveness +
+      // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
+      // from stdin (`-`) and writes the final message to --output-last-message.
+      const models = opts.models ?? AGENT_DEFAULT_CHOICE
+      const args = agent === 'claude'
+        // `readOnly` matches what the codex arm below already declares with
+        // `--sandbox read-only`: this agent reads docs and answers with JSON, so it
+        // has no business holding a write tool on either arm.
+        ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
+        : codexArgs(outputPath!, models)
+      opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
+
+      return runAgentProcess({
+        command: agent,
+        args,
+        cwd: opts.cwd,
+        stdin: agent === 'codex' ? prompt : undefined,
+        onChunk: (text) => opts.onOutput?.(text),
+        idleMs: PRD_SUMMARY_IDLE_TIMEOUT_MS,
+        activityPath: agentActivityPath(agent, opts.cwd, claudeSessionId),
+        onIdle,
+        spawnScope: opts.spawnScope,
+        ...(opts.agentJob
+          ? { record: { ...opts.agentJob.record, agent, ...(claudeSessionId ? { sessionId: claudeSessionId } : {}) }, agentJobLogsDir: opts.agentJob.logsDir }
+          : {}),
+      })
+    },
   })
-
-  const onAbort = (): void => handle.stop()
-  if (opts.signal?.aborted) handle.stop()
-  else opts.signal?.addEventListener('abort', onAbort, { once: true })
-  const detach = (): void => opts.signal?.removeEventListener('abort', onAbort)
-  const rmOutputDir = (): void => { if (outputDir) fs.rmSync(outputDir, { recursive: true, force: true }) }
-
-  return handle.done.then(
-    ({ code, signal, stdout, stderr }) => {
-      detach()
-      try {
-        if (opts.signal?.aborted) throw new Error('prd summary cancelled')
-        if (idled) throw new Error(`prd summary agent idle for ${PRD_SUMMARY_IDLE_TIMEOUT_MS}ms`)
-        if (code !== 0) {
-          throw new Error(`prd summary agent failed with ${signal ?? `exit code ${code}`}${stderr ? `\n${stderr}` : ''}`)
-        }
-        // codex's --output-last-message file is the authoritative final answer;
-        // claude's stdout is stream-json envelopes → recover the final message.
-        // Read it BEFORE rmOutputDir() (in finally) clears the temp dir.
-        let finalOutput = recoverAgentAnswer(agent, stdout)
-        if (outputPath && fs.existsSync(outputPath)) {
-          const fromFile = fs.readFileSync(outputPath, 'utf-8')
-          if (fromFile.trim()) finalOutput = fromFile
-        }
-        return finalOutput
-      } finally {
-        rmOutputDir()
-      }
-    },
-    (err: Error) => {
-      detach()
-      rmOutputDir()
-      throw new Error(`prd summary agent failed: ${err.message}`)
-    },
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -223,9 +193,8 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
 
 /**
  * Summarize a docs collection into a `PrdSummary`. Tries the configured
- * agent(s); on no-agent / parse-failure / error it falls back to deterministic
- * heading extraction. Either way ids are reconciled against `previous` so the
- * spine survives. The `%` and strictness are computed later from runs — this
+ * agent(s); no usable agent answer is an error. Requirement ids are reconciled
+ * against `previous` so the spine survives. The `%` and strictness are computed later from runs — this
  * only produces the requirement model.
  */
 export async function summarizePrd(

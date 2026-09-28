@@ -16,6 +16,7 @@ const answer: AgentProcessResult = { code: 0, signal: null, stdout: 'stdout answ
 function launch(options: {
   agent?: 'claude' | 'codex'
   signal?: AbortSignal
+  cancellationMode?: 'immediate' | 'after-close'
   setup?: (outputPath: string | undefined) => void
 } = {}) {
   let resolve!: (result: AgentProcessResult) => void
@@ -34,6 +35,7 @@ function launch(options: {
   const promise = runAgentCompletion({
     agent: options.agent ?? 'codex',
     signal: options.signal,
+    cancellationMode: options.cancellationMode,
     idleMs: 500,
     outputDirectoryPrefix: 'cl-completion-test-',
     errorLabel: 'test agent',
@@ -48,6 +50,63 @@ function expectCleaned(run: ReturnType<typeof launch>): void {
 }
 
 describe('runAgentCompletion', () => {
+  it.each([0, 2])('waits for closure after cancellation, even with exit code %i', async (code) => {
+    const controller = new AbortController()
+    const remove = vi.spyOn(controller.signal, 'removeEventListener')
+    const run = launch({ signal: controller.signal, cancellationMode: 'after-close' })
+    const settled = vi.fn()
+    const observed = run.promise.then(settled, settled)
+    controller.abort()
+    run.idle()
+    await Promise.resolve()
+    expect(run.stop).toHaveBeenCalledTimes(1)
+    expect(settled).not.toHaveBeenCalled()
+    expect(remove).not.toHaveBeenCalled()
+    expect(fs.existsSync(path.dirname(run.outputPath!))).toBe(true)
+    // Neither idle nor a successful exit may bypass cancellation and read this.
+    fs.mkdirSync(run.outputPath!)
+    run.resolve({ ...answer, code })
+    await expect(run.promise).rejects.toThrow('test cancelled')
+    await observed
+    expect(settled).toHaveBeenCalledTimes(1)
+    expect(remove).toHaveBeenCalledTimes(1)
+    expectCleaned(run)
+  })
+
+  it('starts and stops an already-aborted after-close operation, then waits', async () => {
+    const run = launch({ signal: AbortSignal.abort(), cancellationMode: 'after-close' })
+    const settled = vi.fn()
+    const observed = run.promise.then(settled, settled)
+    await Promise.resolve()
+    expect(run.start).toHaveBeenCalledTimes(1)
+    expect(run.stop).toHaveBeenCalledTimes(1)
+    expect(settled).not.toHaveBeenCalled()
+    expect(fs.existsSync(path.dirname(run.outputPath!))).toBe(true)
+    run.resolve(answer)
+    await expect(run.promise).rejects.toThrow('test cancelled')
+    await observed
+    expectCleaned(run)
+  })
+
+  it('retains the launch error when an after-close operation rejects after abort', async () => {
+    const controller = new AbortController()
+    const run = launch({ signal: controller.signal, cancellationMode: 'after-close' })
+    controller.abort()
+    run.reject(new Error('spawn ENOENT'))
+    await expect(run.promise).rejects.toThrow('test agent failed: spawn ENOENT')
+    expectCleaned(run)
+  })
+
+  it.each([false, true])('completes normally in after-close mode (signal present: %s)', async (withSignal) => {
+    const controller = new AbortController()
+    const run = launch({ signal: withSignal ? controller.signal : undefined, cancellationMode: 'after-close' })
+    run.resolve(answer)
+    await expect(run.promise).resolves.toBe('stdout answer')
+    controller.abort()
+    expect(run.stop).not.toHaveBeenCalled()
+    expectCleaned(run)
+  })
+
   it('recovers Claude stream-json without allocating an answer directory', async () => {
     const run = launch({ agent: 'claude' })
     run.resolve({ ...answer, stdout: JSON.stringify({ type: 'result', result: 'recovered answer' }) + '\n' })

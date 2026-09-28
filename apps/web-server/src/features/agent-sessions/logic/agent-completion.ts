@@ -11,13 +11,14 @@ interface AgentCompletionOptions {
   outputDirectoryPrefix: string
   errorLabel: string
   cancellationMessage: string
+  cancellationMode?: 'immediate' | 'after-close'
   start(context: { outputPath: string | undefined; onIdle: () => void }): AgentProcessHandle
 }
 
 type Completion = { ok: true; output: string } | { ok: false; error: unknown }
 
-/** Own the answer-file lifetime independently of process closure: cancellation
- *  must release the caller immediately, while the process may still be draining. */
+/** Own the answer-file lifetime. Most callers cancel immediately; coverage waits
+ *  for process closure and its persisted job record before returning control. */
 export function runAgentCompletion(options: AgentCompletionOptions): Promise<string> {
   return new Promise((resolve, reject) => {
     let outputDir: string | undefined
@@ -43,7 +44,9 @@ export function runAgentCompletion(options: AgentCompletionOptions): Promise<str
       try {
         handle.stop()
       } finally {
-        finish({ ok: false, error: new Error(options.cancellationMessage) })
+        if (options.cancellationMode !== 'after-close') {
+          finish({ ok: false, error: new Error(options.cancellationMessage) })
+        }
       }
     }
 
@@ -59,6 +62,9 @@ export function runAgentCompletion(options: AgentCompletionOptions): Promise<str
         ({ code, signal, stdout, stderr }) => {
           if (settled) return
           try {
+            if (options.cancellationMode === 'after-close' && options.signal?.aborted) {
+              throw new Error(options.cancellationMessage)
+            }
             if (idled) throw new Error(`${options.errorLabel} idle for ${options.idleMs}ms`)
             if (code !== 0) {
               throw new Error(`${options.errorLabel} failed with ${signal ?? `exit code ${code}`}${stderr ? `\n${stderr}` : ''}`)

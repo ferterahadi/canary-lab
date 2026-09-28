@@ -545,3 +545,39 @@ describe('agentJob descriptor', () => {
     fs.rmSync(logsDir, { recursive: true, force: true })
   })
 })
+
+
+describe('cancellation waits for the persisted agent job', () => {
+  it('keeps the operation and record running until the process closes', async () => {
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-coverage-close-'))
+    const controller = new AbortController()
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(), stderr: new EventEmitter(),
+      stdin: { end: vi.fn() }, kill: vi.fn(),
+    })
+    mockSpawn.mockReturnValue(child)
+    const agentJob = {
+      record: { jobId: 'wait-for-close', feature: 'checkout', stage: 'coverage-map', agent: 'codex' as const },
+      logsDir,
+    }
+    const pending = proposeCoverageMappings({ requirements: REQS, tests: [{ name: 'creates a todo' }], signal: controller.signal, agentJob }, { resolveAgents: () => ['codex'] })
+    const finished = vi.fn()
+    const observed = pending.then(finished, finished)
+    try {
+      controller.abort()
+      await Promise.resolve()
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+      expect(finished).not.toHaveBeenCalled()
+      expect(agentJobStore(logsDir).get('wait-for-close')).toMatchObject({ status: 'running' })
+      child.emit('close', null, 'SIGTERM')
+      await expect(pending).rejects.toThrow('coverage annotate cancelled')
+      await observed
+      expect(finished).toHaveBeenCalledTimes(1)
+      expect(agentJobStore(logsDir).get('wait-for-close')).toMatchObject({
+        status: 'failed', endedAt: expect.any(String),
+      })
+    } finally {
+      fs.rmSync(logsDir, { recursive: true, force: true })
+    }
+  })
+})

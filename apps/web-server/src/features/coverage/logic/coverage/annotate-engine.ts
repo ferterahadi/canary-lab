@@ -1,12 +1,11 @@
 import crypto from 'crypto'
-import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import { AGENT_DEFAULT_CHOICE, agentModelArgs, type PerAgentStageChoices, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
-import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
+import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
+import { runAgentCompletion } from '../../../agent-sessions/logic/agent-completion'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 import type { PathType, ProposedMapping, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
@@ -276,75 +275,46 @@ function codexArgs(outputPath: string, models: StageModelChoice): string[] {
 }
 
 function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): Promise<string> {
-  const outputDir = agent === 'codex'
-    ? fs.mkdtempSync(path.join(os.tmpdir(), 'canary-coverage-annotate-'))
-    : undefined
-  const outputPath = outputDir ? path.join(outputDir, 'last-message.txt') : undefined
-  // Pin a session id for claude so the CLI's JSONL session log is locatable and
-  // AgentSessionView can tail it (the live view comes from that JSONL, not stdout).
-  const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
-  // Agentic spawn via the shared runner. claude: stream-json for liveness +
-  // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
-  // from stdin (`-`) and writes the final message to --output-last-message.
-  const models = opts.models ?? AGENT_DEFAULT_CHOICE
-  const args = agent === 'claude'
-    // `readOnly` matches the codex arm's `--sandbox read-only`: the annotator
-    // returns the edits it wants as data for canary to apply, so it must not be
-    // able to reach into the spec files itself.
-    ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
-    : codexArgs(outputPath!, models)
-  opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
-
-  let idled = false
-  const handle = runAgentProcess({
-    command: agent,
-    args,
-    cwd: opts.cwd,
-    stdin: agent === 'codex' ? prompt : undefined,
-    onChunk: (text) => opts.onOutput?.(text),
+  return runAgentCompletion({
+    agent,
+    signal: opts.signal,
     idleMs: ANNOTATE_IDLE_TIMEOUT_MS,
-    activityPath: agentActivityPath(agent, opts.cwd, claudeSessionId),
-    onIdle: () => { idled = true },
-    spawnScope: opts.spawnScope,
-    ...(opts.agentJob
-      ? { record: { ...opts.agentJob.record, agent, ...(claudeSessionId ? { sessionId: claudeSessionId } : {}) }, agentJobLogsDir: opts.agentJob.logsDir }
-      : {}),
+    outputDirectoryPrefix: 'canary-coverage-annotate-',
+    errorLabel: 'coverage annotate agent',
+    cancellationMessage: 'coverage annotate cancelled',
+    cancellationMode: 'after-close',
+    start: ({ outputPath, onIdle }) => {
+      // Pin a session id for claude so the CLI's JSONL session log is locatable and
+      // AgentSessionView can tail it (the live view comes from that JSONL, not stdout).
+      const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
+      // Agentic spawn via the shared runner. claude: stream-json for liveness +
+      // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
+      // from stdin (`-`) and writes the final message to --output-last-message.
+      const models = opts.models ?? AGENT_DEFAULT_CHOICE
+      const args = agent === 'claude'
+        // `readOnly` matches the codex arm's `--sandbox read-only`: the annotator
+        // returns the edits it wants as data for canary to apply, so it must not be
+        // able to reach into the spec files itself.
+        ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
+        : codexArgs(outputPath!, models)
+      opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
+
+      return runAgentProcess({
+        command: agent,
+        args,
+        cwd: opts.cwd,
+        stdin: agent === 'codex' ? prompt : undefined,
+        onChunk: (text) => opts.onOutput?.(text),
+        idleMs: ANNOTATE_IDLE_TIMEOUT_MS,
+        activityPath: agentActivityPath(agent, opts.cwd, claudeSessionId),
+        onIdle,
+        spawnScope: opts.spawnScope,
+        ...(opts.agentJob
+          ? { record: { ...opts.agentJob.record, agent, ...(claudeSessionId ? { sessionId: claudeSessionId } : {}) }, agentJobLogsDir: opts.agentJob.logsDir }
+          : {}),
+      })
+    },
   })
-
-  const onAbort = (): void => handle.stop()
-  if (opts.signal?.aborted) handle.stop()
-  else opts.signal?.addEventListener('abort', onAbort, { once: true })
-  const detach = (): void => opts.signal?.removeEventListener('abort', onAbort)
-  const rmOutputDir = (): void => { if (outputDir) fs.rmSync(outputDir, { recursive: true, force: true }) }
-
-  return handle.done.then(
-    ({ code, signal, stdout, stderr }) => {
-      detach()
-      try {
-        if (opts.signal?.aborted) throw new Error('coverage annotate cancelled')
-        if (idled) throw new Error(`coverage annotate agent idle for ${ANNOTATE_IDLE_TIMEOUT_MS}ms`)
-        if (code !== 0) {
-          throw new Error(`coverage annotate agent failed with ${signal ?? `exit code ${code}`}${stderr ? `\n${stderr}` : ''}`)
-        }
-        // codex's --output-last-message file is the authoritative final answer;
-        // claude's stdout is stream-json envelopes → recover the final message.
-        // Read it BEFORE rmOutputDir() (in finally) clears the temp dir.
-        let finalOutput = recoverAgentAnswer(agent, stdout)
-        if (outputPath && fs.existsSync(outputPath)) {
-          const fromFile = fs.readFileSync(outputPath, 'utf-8')
-          if (fromFile.trim()) finalOutput = fromFile
-        }
-        return finalOutput
-      } finally {
-        rmOutputDir()
-      }
-    },
-    (err: Error) => {
-      detach()
-      rmOutputDir()
-      throw new Error(`coverage annotate agent failed: ${err.message}`)
-    },
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -368,8 +338,7 @@ export function missingFromRoster(tests: AnnotateTestInput[], answer: AnnotateAn
 
 /**
  * Propose `covers` mappings for the given (untagged) tests. Tries the configured
- * agent(s); on no-agent / parse-failure / error it falls back to the deterministic
- * token-overlap heuristic so the engine always returns SOMETHING actionable.
+ * agent(s); no usable agent answer is an error, never a guessed mapping.
  * Mappings pointing at unknown requirement ids are dropped at parse time.
  */
 export async function proposeCoverageMappings(
