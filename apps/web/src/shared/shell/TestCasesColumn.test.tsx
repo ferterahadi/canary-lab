@@ -695,9 +695,31 @@ describe('TestCasesColumn', () => {
         />,
       )
     })
-    await waitFor(() => container.querySelector('[data-active-line="true"]') === null)
-    expect(container.textContent).toContain('Running now · pw:api · source line unavailable')
-    expect(container.textContent).not.toContain('Running now · line 8')
+    expect(container.querySelector('[data-active-line="true"]')?.textContent).toContain('await send(payload)')
+    expect(container.textContent).toContain('Running now · line 8 · pw:api')
+
+    await act(async () => {
+      ;(container.querySelector('[data-testid="test-presentation-english-tab"]') as HTMLButtonElement).click()
+    })
+    expect(container.querySelector('[data-execution-highlight="running"]')?.textContent).toContain('Send the payload')
+
+    for (const location of [undefined, '/tmp/features/alpha/e2e/a.spec.ts:999:5', '/tmp/features/alpha/e2e/a.spec.ts:7:5']) {
+      await act(async () => {
+        root.render(<TestCasesColumn feature="alpha" runEvidence={{ summary: {
+          complete: false, total: 1, passed: 0, passedNames: [], failed: [],
+          running: {
+            name: 'test-case-sends-message', location: '/tmp/features/alpha/e2e/a.spec.ts:3:1',
+            step: { title: 'next step', category: 'expect', location },
+          },
+        }, status: 'running' }} />)
+      })
+      expect(container.querySelector('[data-execution-highlight="running"]')?.textContent)
+        .toContain(location?.includes(':7:') ? 'Create the payload' : 'Send the payload')
+    }
+    await act(async () => {
+      ;(container.querySelector('[data-testid="test-presentation-code-tab"]') as HTMLButtonElement).click()
+    })
+    await waitFor(() => container.querySelector('[data-active-line="true"]')?.textContent?.includes('createPayload') === true)
 
     await act(async () => {
       root.render(
@@ -731,6 +753,45 @@ describe('TestCasesColumn', () => {
     expect(failedEnglish?.textContent).toContain('Create the payload')
     expect(failedEnglish?.textContent).toContain('FAILED HERE')
     expect(failedEnglish?.getAttribute('style')).toContain('var(--danger)')
+  })
+
+  it('clears retained running rows on completion and does not carry them into another run', async () => {
+    const file = '/tmp/features/alpha/e2e/a.spec.ts'
+    vi.mocked(getFeatureTests).mockResolvedValue([{
+      file,
+      tests: [{ name: 'sends message', line: 3, bodyLine: 5, bodySource: '{\n  await send()\n}', steps: [],
+        readable: readableTest('sends message', [{
+          id: 'send', kind: 'leaf', role: 'action', text: 'Send the message', fidelity: 'derived',
+          source: { file, startLine: 6, endLine: 6, snippet: 'await send()' },
+        }]),
+      }],
+    }])
+    const render = async (runId: string, running: boolean, location?: string) => {
+      await act(async () => {
+        root.render(<TestCasesColumn feature="alpha" runEvidence={{ manifest: { runId }, summary: {
+          complete: !running, total: 1, passed: running ? 0 : 1, failed: [],
+          passedNames: running ? [] : ['test-case-sends-message'],
+          running: running ? {
+            name: 'test-case-sends-message', location: `${file}:3:1`,
+            step: { title: 'send', category: 'pw:api', location },
+          } : undefined,
+        }, status: running ? 'running' : 'passed' }} />)
+      })
+    }
+    await render('first', true, `${file}:6:3`)
+    expect(container.querySelector('[data-execution-highlight="running"]')?.textContent).toContain('Send the message')
+    await render('first', true)
+    expect(container.querySelector('[data-execution-highlight="running"]')?.textContent).toContain('Send the message')
+    await render('first', false)
+    expect(container.querySelector('[data-execution-highlight="running"]')).toBeNull()
+    await render('first', true)
+    expect(container.querySelector('[data-execution-highlight="running"]')).toBeNull()
+    expect(container.textContent).toContain('source line unavailable')
+    await render('first', true, `${file}:6:3`)
+    expect(container.querySelector('[data-execution-highlight="running"]')).not.toBeNull()
+    await render('second', true)
+    expect(container.querySelector('[data-execution-highlight="running"]')).toBeNull()
+    expect(container.textContent).toContain('source line unavailable')
   })
 
   it('marks edited tests without a review control anywhere in the Tests column', async () => {

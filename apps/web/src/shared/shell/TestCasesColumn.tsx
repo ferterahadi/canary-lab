@@ -371,7 +371,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
                   : undefined
                 return (
                   <TestCard
-                    key={key}
+                    key={`${sourceKey}:${key}`}
                     sourceFile={sourceFile}
                     testNumber={testNumbering.get(testNumberKey(sourceFile, t.line))}
                     test={t}
@@ -519,7 +519,7 @@ function TestCard({
   showNotRun,
   isRunningTest,
   runningStep,
-  executionHighlight,
+  executionHighlight: nextExecutionHighlight,
   expanded,
   modified,
   modifiedLabel,
@@ -544,6 +544,36 @@ function TestCard({
   changedLines?: Set<number>
   onToggle: () => void
 }) {
+  const [lastRunningHighlight, setLastRunningHighlight] = useState<{
+    bodySource: string
+    bodyLine: number
+    highlight: TestCardExecutionHighlight
+  } | null>(null)
+  const bodyLine = test.bodyLine ?? test.line
+  const retainedHighlight = isRunningTest
+    && lastRunningHighlight?.bodySource === test.bodySource
+    && lastRunningHighlight.bodyLine === bodyLine
+      ? lastRunningHighlight.highlight
+      : undefined
+  // Helper steps may have no location in this test. Replace the visible row
+  // only once the new location resolves, keeping both presentation modes aligned.
+  const executionHighlight = nextExecutionHighlight ?? retainedHighlight
+  const nextKind = nextExecutionHighlight?.kind
+  const nextBodyLine = nextExecutionHighlight?.bodyLine
+  const nextSourceLine = nextExecutionHighlight?.sourceLine
+  useEffect(() => {
+    if (!isRunningTest) {
+      setLastRunningHighlight(null)
+    } else if (nextKind === 'running' && nextBodyLine != null && nextSourceLine != null) {
+      setLastRunningHighlight({
+        bodySource: test.bodySource,
+        bodyLine,
+        highlight: { kind: 'running', bodyLine: nextBodyLine, sourceLine: nextSourceLine },
+      })
+    } else {
+      setLastRunningHighlight((previous) => previous?.bodySource === test.bodySource && previous.bodyLine === bodyLine ? previous : null)
+    }
+  }, [isRunningTest, nextKind, nextBodyLine, nextSourceLine, test.bodySource, bodyLine])
   const lineMessage = executionHighlight?.kind === 'running'
     ? `Running now · line ${executionHighlight.sourceLine}${runningStep?.category ? ` · ${runningStep.category}` : ''}`
     : isRunningTest
