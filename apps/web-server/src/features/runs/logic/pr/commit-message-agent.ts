@@ -1,10 +1,9 @@
 import fs from 'fs'
-import path from 'path'
-import os from 'os'
 import crypto from 'crypto'
 import { pickAvailableHealAgent, type HealAgent } from '../runtime/auto-heal'
 import { AGENT_DEFAULT_CHOICE, agentModelArgs, type StageModelChoice } from '../../../agent-sessions/logic/agent-models'
-import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
+import { agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
+import { runAgentCompletion } from '../../../agent-sessions/logic/agent-completion'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import { promptPath, renderPrompt } from '../../../../shared/prompts'
@@ -150,10 +149,6 @@ function isFilled(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0
 }
 
-/** Spawn via the shared runner — same argv builder, idle clock and answer
- *  recovery as every other non-interactive agent here. Read-only on both arms:
- *  this pass describes a diff, and one that could edit the repo it is
- *  describing would be able to make its own description true. */
 /** Codex argv. Takes the answer-file path rather than re-deriving it, so the
  *  "codex arm ⇒ there is an output file" pairing is a parameter rather than a
  *  guard the caller has to keep true. */
@@ -169,6 +164,10 @@ function codexArgs(outputPath: string, models: StageModelChoice): string[] {
   ]
 }
 
+/** Spawn via the shared runner — same argv builder, idle clock and answer
+ *  recovery as every other non-interactive agent here. Read-only on both arms:
+ *  this pass describes a diff, and one that could edit the repo it is
+ *  describing would be able to make its own description true. */
 export function runCommitMessageAgent(
   agent: HealAgent,
   prompt: string,
@@ -176,61 +175,27 @@ export function runCommitMessageAgent(
   signal?: AbortSignal,
   models: StageModelChoice = AGENT_DEFAULT_CHOICE,
 ): Promise<string> {
-  const outputDir = agent === 'codex' ? fs.mkdtempSync(path.join(os.tmpdir(), 'canary-commit-msg-')) : undefined
-  const outputPath = outputDir ? path.join(outputDir, 'last-message.txt') : undefined
-  const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
-  const args = agent === 'claude'
-    ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
-    : codexArgs(outputPath!, models)
-
-  let idled = false
-  const handle = runAgentProcess({
-    command: agent,
-    args,
-    ...(cwd ? { cwd } : {}),
-    ...(agent === 'codex' ? { stdin: prompt } : {}),
+  return runAgentCompletion({
+    agent,
+    signal,
     idleMs: COMMIT_MESSAGE_IDLE_TIMEOUT_MS,
-    ...(agentActivityPath(agent, cwd, claudeSessionId) ? { activityPath: agentActivityPath(agent, cwd, claudeSessionId)! } : {}),
-    onIdle: () => { idled = true },
-  })
-
-  return new Promise<string>((resolve, reject) => {
-    let settled = false
-    const rmOutputDir = (): void => { if (outputDir) fs.rmSync(outputDir, { recursive: true, force: true }) }
-    const settleErr = (err: Error): void => {
-      if (settled) return
-      settled = true
-      signal?.removeEventListener('abort', onAbort)
-      rmOutputDir()
-      reject(err)
-    }
-    const settleOk = (output: string): void => {
-      if (settled) return
-      settled = true
-      signal?.removeEventListener('abort', onAbort)
-      rmOutputDir()
-      resolve(output)
-    }
-    function onAbort(): void { handle.stop(); settleErr(new Error('commit message generation cancelled')) }
-    if (signal?.aborted) { onAbort(); return }
-    signal?.addEventListener('abort', onAbort, { once: true })
-
-    handle.done.then(
-      ({ code, signal: sig, stdout, stderr }) => {
-        if (idled) { settleErr(new Error(`commit message agent idle for ${COMMIT_MESSAGE_IDLE_TIMEOUT_MS}ms`)); return }
-        if (code !== 0) {
-          settleErr(new Error(`commit message agent failed with ${sig ?? `exit code ${code}`}${stderr ? `\n${stderr}` : ''}`))
-          return
-        }
-        // Read codex's output file BEFORE settleOk() removes the temp dir.
-        let finalOutput = recoverAgentAnswer(agent, stdout)
-        if (outputPath && fs.existsSync(outputPath)) {
-          const fromFile = fs.readFileSync(outputPath, 'utf-8')
-          if (fromFile.trim()) finalOutput = fromFile
-        }
-        settleOk(finalOutput)
-      },
-      (err: Error) => settleErr(new Error(`commit message agent failed: ${err.message}`)),
-    )
+    outputDirectoryPrefix: 'canary-commit-msg-',
+    errorLabel: 'commit message agent',
+    cancellationMessage: 'commit message generation cancelled',
+    start: ({ outputPath, onIdle }) => {
+      const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
+      const args = agent === 'claude'
+        ? buildClaudeAgenticArgs(prompt, { model: models.model, effort: models.effort, sessionId: claudeSessionId, readOnly: true })
+        : codexArgs(outputPath!, models)
+      return runAgentProcess({
+        command: agent,
+        args,
+        ...(cwd ? { cwd } : {}),
+        ...(agent === 'codex' ? { stdin: prompt } : {}),
+        idleMs: COMMIT_MESSAGE_IDLE_TIMEOUT_MS,
+        activityPath: agentActivityPath(agent, cwd, claudeSessionId),
+        onIdle,
+      })
+    },
   })
 }
