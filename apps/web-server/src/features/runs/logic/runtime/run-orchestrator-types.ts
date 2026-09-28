@@ -1,3 +1,4 @@
+import type { DiagnosisPolicy } from '../../../../../../../shared/diagnosis-policy'
 import path from 'path'
 import type { FeatureConfig, HealthProbe } from '../../../../../../../shared/launcher/types'
 import type { ExecutionType, VerificationRunMetadata } from '../../../../../../../shared/verification'
@@ -214,6 +215,7 @@ export interface LifecycleRecordOptions {
 export type AutoHealAgent = 'claude' | 'codex'
 
 export interface AutoHealConfig {
+  diagnosisPolicy?: DiagnosisPolicy
   agent: AutoHealAgent
   // Optional 1-based cap on heal cycles. Omit for the production default
   // (AUTO_HEAL_MAX_CYCLES = 10). The loop also gives up earlier when the

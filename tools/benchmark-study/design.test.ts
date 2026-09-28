@@ -1,8 +1,57 @@
 import { expect, it } from 'vitest'
-import { pairedInterval, validateDesign } from './design'
+import { blockIntervals, pairedInterval, validateDesign } from './design'
 import { schedule } from './scenarios'
 import { totalTokens, summarize } from './report'
 import type { StudyDesign, StudyManifest } from './types'
+import { summarizeVariants } from './variant-report'
+import { configurationDigest, assertExperiment, policyDigests } from './experiment'
+
+const screening: StudyDesign = { mode: 'live', repetitions: 5, seed: 29, variants: [
+  { id: 'control', diagnosisPolicy: 'per-failure' }, { id: 'parent', diagnosisPolicy: 'parent-only' }, { id: 'adaptive', diagnosisPolicy: 'adaptive' },
+] }
+
+it('keeps all three variant arms adjacent, balances every position and preserves legacy schedules', () => {
+  const attempts = schedule({ agent: 'codex' }, screening)
+  expect(attempts).toHaveLength(30)
+  expect(new Set(attempts.map((a) => a.id)).size).toBe(30)
+  expect(attempts).toEqual(schedule({ agent: 'codex' }, screening))
+  for (let i = 0; i < attempts.length; i += 3) {
+    expect(new Set(attempts.slice(i, i + 3).map((a) => `${a.agent}/${a.scenario}/${a.repetition}`)).size).toBe(1)
+    expect(new Set(attempts.slice(i, i + 3).map((a) => a.variant!.id)).size).toBe(3)
+  }
+  for (const scenario of ['single-service', 'cross-service']) for (const arm of screening.variants!) {
+    const counts = [0, 1, 2].map((position) => attempts.filter((a, i) => i % 3 === position && a.scenario === scenario && a.variant!.id === arm.id).length)
+    expect(Math.max(...counts) - Math.min(...counts)).toBeLessThanOrEqual(1)
+  }
+  expect(schedule()).toHaveLength(16)
+  expect(() => validateDesign({ ...screening, variants: [screening.variants![1], screening.variants![1]] })).toThrow()
+  expect(() => validateDesign({ ...screening, mode: 'replay' })).toThrow()
+})
+
+it('resamples whole multi-arm blocks, excludes incomplete comparisons and retains failed-arm totals', () => {
+  const blocks = Array.from({ length: 5 }, (_, i) => ({ control: 100 + i, parent: 80 + i, adaptive: 70 + i }))
+  const stats = blockIntervals(blocks, 'control', ['control', 'parent', 'adaptive'], 42)
+  expect(stats.every((stat) => stat.blocks === 5 && stat.bootstrap95 !== null)).toBe(true)
+  expect(stats).toEqual(blockIntervals(blocks, 'control', ['control', 'parent', 'adaptive'], 42))
+  expect(blockIntervals([...blocks, { control: 1, parent: 1 }], 'control', ['control', 'parent', 'adaptive'], 42)).toEqual(stats)
+  const attempts = schedule({ agent: 'codex' }, screening)
+  const manifest = { attempts, design: screening, results: attempts.slice(0, 3).map((a, i) => ({ ...a, outcome: i ? 'success' : 'failed', repairMs: 100, usage: { input: 50, output: 10 } })) } as StudyManifest
+  const summary = summarizeVariants(manifest).find((g) => g.scenario === attempts[0].scenario)!
+  expect(summary.successfulBlocks).toBe(0)
+  expect(summary.arms.reduce((n, a) => n + a.recorded, 0)).toBe(3)
+  expect(summary.arms.reduce((n, a) => n + a.tokens!, 0)).toBe(180)
+  expect(summarize(manifest)).toEqual([])
+})
+
+it('freezes settings and prompt digests without including mutable results', () => {
+  const manifest = { design: screening, attempts: schedule({ agent: 'codex' }, screening), results: [], pins: {}, experiment: { maxTokens: 1000, configurationDigest: '', promptDigests: policyDigests({ design: screening }) } } as unknown as StudyManifest
+  manifest.experiment!.configurationDigest = configurationDigest(manifest)
+  expect(() => assertExperiment(manifest, true)).not.toThrow()
+  expect(() => assertExperiment({ ...manifest, status: 'running' }, true)).not.toThrow()
+  expect(() => assertExperiment({ ...manifest, budgetMs: 1 })).toThrow('configuration')
+  expect(Object.values(manifest.experiment!.promptDigests)).toHaveLength(3)
+  expect(new Set(Object.values(manifest.experiment!.promptDigests)).size).toBe(3)
+})
 
 it('randomizes complete adjacent pairs reproducibly and balances order within every stratum', () => {
   const design: StudyDesign = { mode: 'live', repetitions: 10, seed: 42 }

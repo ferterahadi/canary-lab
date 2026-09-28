@@ -31,6 +31,12 @@ function ctxFor(state: Partial<RunContext> = {}, opts: Record<string, unknown> =
 }
 
 describe('writeInitialManifest', () => {
+  it('retains the diagnosis policy through the owning state sink when resuming a run', () => {
+    const { ctx, sink } = ctxFor({ autoHeal: { agent: 'codex', diagnosisPolicy: 'parent-only' } })
+    writeInitialManifest(ctx, 'starting', { diagnosisPolicy: 'adaptive' } as RunManifest)
+    const written = (sink.bootstrap as unknown as { mock: { calls: [RunManifest][] } }).mock.calls[0][0]
+    expect(written.diagnosisPolicy).toBe('adaptive')
+  })
   it('delivers a signal at the signal interval and preserves acceptance evidence', async () => {
     vi.useFakeTimers()
     const { ctx } = ctxFor({ healthPollIntervalMs: 1000, healSignalPollMs: 100 })

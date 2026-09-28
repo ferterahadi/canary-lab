@@ -5,7 +5,8 @@ import { canaryRunDir, changed, checked, command, copy, digest, hashes, json, re
 import { dependencies, evaluate } from './evaluator'
 import { dependencyFingerprint, sourceFingerprint } from './prepare'
 import { schedule } from './scenarios'
-import { report } from './report'
+import { report, totalTokens } from './report'
+import { assertExperiment, preflightTokens } from './experiment'
 import { verifyCodexToolArgs } from './tool-policy'
 import { runtimePreflight } from './runtime-preflight'
 
@@ -15,6 +16,7 @@ export function loadStudy(root: string): StudyManifest {
   if (manifest.schemaVersion !== 1 || manifest.root !== actual || JSON.stringify(manifest.attempts) !== JSON.stringify(schedule(manifest.selection, manifest.design)) || manifest.budgetMs !== 900_000) {
     throw new Error('Invalid study manifest or study moved; prepare a new study')
   }
+  assertExperiment(manifest)
   if (manifest.status === 'preparing') throw new Error('Preparation did not complete; inspect preparation evidence')
   return manifest
 }
@@ -41,10 +43,12 @@ export async function executeWorker(manifest: StudyManifest, attempt: Attempt, r
     cwd: sourceRoot, timeoutMs: manifest.budgetMs + 15_000, log: path.join(root, 'worker.log'), signal,
   })
   const output = path.join(root, 'execution.json')
-  if (signal.aborted) return { status: 'interrupted', reason: 'Study interrupted', usage: null, testExecutions: null }
-  if (result.timedOut) return { status: 'timeout', reason: 'Worker exceeded wall-clock limit', usage: null, testExecutions: null }
-  if (result.code !== 0 || !fs.existsSync(output)) return { status: 'infrastructure-error', reason: 'Worker failed without an execution receipt', usage: null, testExecutions: null }
-  return readJson<ExecutionResult>(output)
+  const execution: ExecutionResult = fs.existsSync(output) ? readJson<ExecutionResult>(output)
+    : { status: 'infrastructure-error', reason: 'Worker failed without an execution receipt', usage: null, testExecutions: null }
+  if (signal.aborted) return { ...execution, status: 'interrupted', reason: 'Study interrupted' }
+  if (result.timedOut) return { ...execution, status: 'timeout', reason: 'Worker exceeded wall-clock limit' }
+  if (result.code !== 0) return { ...execution, status: 'infrastructure-error', reason: `Worker exit: ${result.code}; ${execution.reason}` }
+  return execution
 }
 
 export async function runStudy(root: string, options: {
@@ -66,6 +70,7 @@ export async function runStudy(root: string, options: {
   const save = (): void => json(path.join(root, 'study.json'), manifest)
   try {
     if (options.checkFingerprints !== false) {
+      assertExperiment(manifest, true)
       if (manifest.sourceDigest !== sourceFingerprint() || manifest.frozenDigest !== digest(path.join(root, 'frozen')) ||
           manifest.dependencyDigest !== dependencyFingerprint(path.join(root, 'runtime/node_modules'))) throw new Error('Frozen inputs, dependencies, or study implementation changed; prepare again')
       for (const agent of manifest.design?.mode === 'replay' ? [] : ['codex', 'claude'] as const) {
@@ -90,6 +95,14 @@ export async function runStudy(root: string, options: {
     for (const attempt of manifest.attempts) {
       if (manifest.results.some((result) => result.id === attempt.id)) continue
       if (options.signal?.aborted) break
+      if (manifest.experiment) {
+        const totals = [preflightTokens(manifest), ...manifest.results.map((row) => totalTokens(row.agent, row.usage))]
+        const failed = manifest.results.find((row) => row.outcome !== 'success')
+        if (failed || totals.includes(null) || totals.reduce<number>((n, value) => n + (value ?? 0), 0) >= manifest.experiment.maxTokens) {
+          manifest.stopReason = failed ? `Stopped after ${failed.id}: ${failed.outcome}; investigate in a new campaign` : totals.includes(null) ? 'Usage unknown; cannot enforce dispatch ceiling' : 'Token dispatch ceiling reached'
+          break
+        }
+      }
       if (options.checkFingerprints !== false && (manifest.sourceDigest !== sourceFingerprint() ||
           manifest.dependencyVersions.node !== process.version || (manifest.design?.mode !== 'replay' && await checked(manifest.pins[attempt.agent].executable ?? attempt.agent, ['--version'], root) !== manifest.pins[attempt.agent].version))) {
         throw new Error('Implementation, Node, or agent CLI changed during the campaign; prepare a new study')
@@ -97,21 +110,29 @@ export async function runStudy(root: string, options: {
       const attemptRoot = path.join(root, 'attempts', attempt.id)
       if (options.checkFingerprints !== false && manifest.design?.mode !== 'replay' && attempt.agent === 'codex') await verifyCodexToolArgs(manifest.codexToolArgs, root, manifest.pins.codex.executable)
       if (fs.existsSync(attemptRoot)) throw new Error(`Attempt directory already exists without a receipt: ${attemptRoot}`)
+      const dispatch = performance.now()
+      const dispatchedAt = new Date().toISOString()
       const snapshot = path.join(root, 'frozen', attempt.scenario)
       const suite = path.join(root, 'frozen', attempt.workflow === 'canary' ? 'original-suite' : 'plain-suite')
-      copy(snapshot, path.join(attemptRoot, 'app')); copy(suite, path.join(attemptRoot, 'suite')); dependencies(attemptRoot, root)
-      write(path.join(attemptRoot, 'app/.gitignore'), '.state/\nnode_modules/\n')
-      await checked('git', ['init', '-q'], path.join(attemptRoot, 'app'))
-      await checked('git', ['add', '.'], path.join(attemptRoot, 'app'))
-      await checked('git', ['-c', 'user.name=Study', '-c', 'user.email=study@example.invalid', 'commit', '-qm', 'Frozen broken snapshot'], path.join(attemptRoot, 'app'))
       const startedAt = new Date().toISOString()
       manifest.active = { attempt, startedAt }; save()
-      const started = Date.now()
-      const receipt: AttemptResult = { ...attempt, startedAt, outcome: 'infrastructure-error', repairMs: 0, verificationMs: 0,
-        usage: null, testExecutions: null, humanInterventions: 0, changedFiles: [], reason: '', evidence: `attempts/${attempt.id}` }
+      let started: number | null = null
+      const receipt: AttemptResult = { ...attempt, startedAt, outcome: 'infrastructure-error', repairMs: null, verificationMs: 0,
+        usage: null, testExecutions: null, humanInterventions: 0, changedFiles: [], reason: '', evidence: `attempts/${attempt.id}`,
+        timing: { dispatchedAt, workerReturnedAt: null, evaluatorStartedAt: null, evaluatorCompletedAt: null, independentVerdictMs: null, elapsedMs: 0 } }
       try {
+        copy(snapshot, path.join(attemptRoot, 'app')); copy(suite, path.join(attemptRoot, 'suite')); dependencies(attemptRoot, root)
+        write(path.join(attemptRoot, 'app/.gitignore'), '.state/\nnode_modules/\n')
+        await checked('git', ['init', '-q'], path.join(attemptRoot, 'app'))
+        await checked('git', ['add', '.'], path.join(attemptRoot, 'app'))
+        await checked('git', ['-c', 'user.name=Study', '-c', 'user.email=study@example.invalid', 'commit', '-qm', 'Frozen broken snapshot'], path.join(attemptRoot, 'app'))
+        started = Date.now()
+        receipt.startedAt = new Date().toISOString()
+        manifest.active = { attempt, startedAt: receipt.startedAt }; save()
         const execution = await (options.execute ?? executeWorker)(manifest, attempt, attemptRoot, options.signal ?? new AbortController().signal)
         receipt.repairMs = Date.now() - started
+        receipt.timing!.workerReturnedAt = new Date().toISOString()
+        receipt.attribution = execution.attribution; receipt.adherence = execution.adherence
         receipt.telemetry = execution.telemetry; receipt.reason = execution.reason; receipt.usage = execution.usage; receipt.testExecutions = execution.testExecutions
         if (options.checkFingerprints !== false && (manifest.sourceDigest !== sourceFingerprint() || manifest.frozenDigest !== digest(path.join(root, 'frozen')))) {
           throw new Error('Study inputs changed during the attempt; its comparison is invalid')
@@ -130,18 +151,22 @@ export async function runStudy(root: string, options: {
         else if (execution.status !== 'finished') receipt.outcome = execution.status
         else {
           const verificationStart = Date.now()
+          receipt.timing!.evaluatorStartedAt = new Date().toISOString()
           try {
             const evidence = await (options.verify ?? evaluate)(root, appRoot, path.join(root, 'frozen/original-suite'), path.join(root, 'evaluation', attempt.id), true)
+            receipt.timing!.evaluatorCompletedAt = new Date().toISOString()
+            receipt.timing!.independentVerdictMs = performance.now() - dispatch
             receipt.outcome = evidence.code === 0 && evidence.roster.length === 7 && evidence.passed.length === 7 && evidence.extras === true ? 'success' : 'failed'
             if (options.signal?.aborted) receipt.outcome = 'interrupted'
             receipt.reason += `; independent evaluator: ${receipt.outcome}`
           } finally { receipt.verificationMs = Date.now() - verificationStart }
         }
       } catch (error) {
-        receipt.repairMs ||= Date.now() - started
+        if (receipt.repairMs === null && started !== null) receipt.repairMs = Date.now() - started
         receipt.reason = String(error)
         receipt.outcome = options.signal?.aborted ? 'interrupted' : 'infrastructure-error'
       }
+      receipt.timing!.elapsedMs = performance.now() - dispatch
       if (options.signal?.aborted) receipt.humanInterventions++
       json(path.join(root, 'receipts', `${attempt.id}.json`), receipt)
       manifest.results.push(receipt); manifest.active = null; save(); report(manifest)

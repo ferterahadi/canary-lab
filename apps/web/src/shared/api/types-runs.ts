@@ -10,6 +10,7 @@ import type { SpecDiff } from '@shared/verification-strength/types'
 import type { RunTestReviewApproval, TestReviewDecision } from '@shared/test-review'
 import type { SingleAttemptPolicy } from '@shared/launcher/types'
 import type { RunDependencyProvenance } from '@shared/dependency-provenance'
+import type { DiagnosisPolicy } from '@shared/diagnosis-policy'
 
 export interface RunIndexEntry {
   runId: string
@@ -143,6 +144,7 @@ export interface RunIntegrity {
 }
 
 export interface RunManifest {
+  diagnosisPolicy?: DiagnosisPolicy
   runId: string
   executionType?: ExecutionType
   feature: string

@@ -10,6 +10,7 @@ import { parseResults } from './evaluator'
 import { report, summarize } from './report'
 import type { StudyManifest } from './types'
 import { validatePins } from './prepare'
+import { configurationDigest, policyDigests } from './experiment'
 
 const roots: string[] = []
 function temp(): string { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-study-test-')); roots.push(root); return root }
@@ -123,6 +124,44 @@ describe('session usage', () => {
 })
 
 describe('campaign persistence and independent verdicts', () => {
+  function experimentalFixture(maxTokens = 1000): StudyManifest {
+    const manifest = fixture()
+    manifest.selection = { agent: 'codex' }
+    manifest.design = { mode: 'live', repetitions: 2, seed: 29, variants: [
+      { id: 'control', diagnosisPolicy: 'per-failure' }, { id: 'parent', diagnosisPolicy: 'parent-only' },
+    ] }
+    manifest.attempts = schedule(manifest.selection, manifest.design)
+    manifest.experiment = { maxTokens, promptDigests: policyDigests(manifest), configurationDigest: '' }
+    manifest.experiment.configurationDigest = configurationDigest(manifest)
+    json(path.join(manifest.root, 'study.json'), manifest)
+    return manifest
+  }
+
+  it('retains the first unsuccessful variant and stops subsequent dispatch, including on resume', async () => {
+    const manifest = experimentalFixture()
+    const execute = vi.fn().mockResolvedValue({ status: 'timeout', reason: 'Timed out', usage: null, testExecutions: 1 })
+    const result = await runStudy(manifest.root, { execute, checkFingerprints: false })
+    expect(result.results).toHaveLength(1)
+    expect(result.results[0]).toMatchObject({ outcome: 'timeout', variant: manifest.attempts[0].variant })
+    expect(result.stopReason).toContain('timeout')
+    await runStudy(manifest.root, { execute, resume: true, checkFingerprints: false })
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(fs.readFileSync(path.join(manifest.root, 'report.json'), 'utf8')).variants).not.toHaveLength(0)
+  })
+
+  it('stops at the usage dispatch ceiling and records a separate monotonic time to independent verdict', async () => {
+    const manifest = experimentalFixture(100)
+    const execute = vi.fn().mockResolvedValue({ status: 'finished', reason: 'Finished', usage: { input: 90, output: 10, cacheRead: 50, cacheWrite: null }, testExecutions: 2 })
+    const verify = vi.fn().mockResolvedValue({ code: 0, roster: Array(7).fill('journey'), passed: Array(7).fill('journey'), extras: true })
+    const result = await runStudy(manifest.root, { execute, verify, checkFingerprints: false })
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(result.stopReason).toContain('ceiling')
+    const timing = result.results[0].timing!
+    expect(timing.independentVerdictMs).toBeGreaterThanOrEqual(0)
+    expect(timing.elapsedMs).toBeGreaterThanOrEqual(timing.independentVerdictMs!)
+    expect(timing.evaluatorCompletedAt).not.toBeNull()
+  })
+
   it('runs a selected agent/scenario as four fresh counterbalanced attempts and rejects an incomplete schedule', async () => {
     const manifest = fixture()
     manifest.selection = { agent: 'claude', scenario: 'cross-service' }

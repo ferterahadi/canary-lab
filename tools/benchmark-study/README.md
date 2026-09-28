@@ -87,3 +87,38 @@ npx tsc -p tools/benchmark-study/tsconfig.json --noEmit
 ```
 
 Integration tests use shipped repository fixtures, local service ports, and scripted repair subprocesses. They do not read a contributor's live workspace or invoke paid coding agents. A source build must exist for the published fixture export used in the integration tests.
+
+## Experimental diagnosis policies
+
+The production policy remains `per-failure`. Experimental runs record their policy in the run manifest and use the same prompt loader, runner verification and MCP recovery paths. `parent-only` asks the parent to diagnose every failure. `adaptive` asks the parent to read the index, group evidence-supported causes, and delegate distinct unresolved investigations to at most two concurrent children initially. Both preserve one editing/signalling owner, a complete failure-ID ledger, read-only children, and explicit escalation after contradictory evidence or failed verification. An explicit run policy takes precedence over the default in shipped skills. Existing runs keep their recorded policy on resume.
+
+Prepare a separate screening campaign after reviewing its source, destinations, pins and exposure:
+
+```sh
+npm run benchmark:study -- prepare \
+  --workspace '/absolute/path/to/demo-project' \
+  --out '/absolute/path/to/new-screening-study' \
+  --codex-model '<exact-model-id>' --codex-effort high \
+  --claude-model '<exact-model-id>' --claude-effort high \
+  --agent codex --repetitions 5 --seed 29 \
+  --diagnosis-policies per-failure,parent-only,adaptive \
+  --max-tokens 35000000
+```
+
+This prepares 30 attempts: two scenarios × five adjacent serial blocks × three Canary variants. `--agent` alone selects both scenarios; `--scenario` still narrows it. Arm IDs are explicit in receipts; variant results never masquerade as plain/Canary pairs. The seeded schedule balances every arm's position within one observation. Existing pair schedules and historical manifests retain their meaning.
+
+Preparation freezes a configuration digest covering schedule, policies, source/dependency fingerprints, model/effort/CLI pins, tool restrictions, deadline and token dispatch ceiling. It also hashes each composed prompt template. Each actual cycle retains its rendered prompt, bytes and hash under `attempts/<id>/prompts/`. The worker records monotonic stage boundaries and non-overlapping intervals, while the controller records dispatch → independent evaluator completion separately from historical repair time. Agent request durations and child spans can overlap; never add them to exclusive elapsed stages. Parent waiting time and semantic adherence remain unknown unless independently reviewed.
+
+Native attribution records primary repair sessions, diagnosis children, approval reviewers and unknown sessions in `usage-breakdown.json`. Parentage comes from native metadata or Claude launch metadata, never directory order. Session copies and Claude message IDs are deduplicated. Missing required usage or ambiguous parentage makes the aggregate unknown. Policy adherence reports the assigned policy, observed children and required transcript review; counts alone never certify grouping, read-only behavior or justified escalation. All assigned outcomes stay in reports. Intervals resample complete successful multi-arm blocks separately by agent/scenario; unsuccessful blocks remain in totals.
+
+For variant campaigns, any unsuccessful attempt stops further dispatch. Unknown usage or reaching `--max-tokens` also stops dispatch; successful native runtime preflight usage counts toward this threshold. **This is a dispatch ceiling, not a hard billing/token cap:** an in-flight attempt or preflight can overshoot it, and the CLI does not stream a reliable account-wide spend limit. Select and approve that exposure before running. A failed campaign cannot be resumed past the failure; investigate and prepare a newly fingerprinted campaign. No default policy is promoted automatically.
+
+Audit saved campaigns without models or modifying historical receipts:
+
+```sh
+npm run benchmark:study -- audit \
+  --study '/absolute/path/to/historical-study' \
+  --out '/absolute/path/to/new-audit'
+```
+
+The audit copies captured native logs into its output, reconciles receipt totals, and lists every included/missing session. Raw logs remain workspace artifacts; repository tests use synthetic fixtures. Missing historical stage boundaries are not reconstructed from request-duration sums. The later child-context, effort and direct-launch experiments remain outside this implementation.

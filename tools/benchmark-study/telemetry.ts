@@ -10,6 +10,21 @@ interface Attribute { key: string; value: Value }
 interface LogRecord { timeUnixNano?: string; body?: Value; attributes?: Attribute[] }
 interface Batch { resourceLogs?: Array<{ scopeLogs?: Array<{ logRecords?: LogRecord[] }> }> }
 export interface Measurement { name: string; timestamp: string; durationMs: number | null; attempt: number | null; error: boolean }
+export interface StageBoundary { name: string; at: string; elapsedMs: number }
+
+export function stageIntervals(events: StageBoundary[]) {
+  const ordered = [...events].sort((a, b) => a.elapsedMs - b.elapsedMs)
+  let stage = 'setup/boot'
+  let tests = 0
+  return ordered.slice(0, -1).map((event, index) => {
+    if (event.name === 'playwright-started') stage = tests++ === 0 ? 'initial-test' : 'verification-cycle'
+    else if (event.name === 'playwright-exit') stage = 'result-processing'
+    else if (event.name === 'heal-cycle-started') stage = 'agent-diagnosis/edit'
+    else if (event.name === 'signal-accepted') stage = 'signal/restart/readiness'
+    else if (event.name === 'run-complete') stage = 'capture/cleanup'
+    return { stage, from: event.at, to: ordered[index + 1].at, durationMs: ordered[index + 1].elapsedMs - event.elapsedMs }
+  })
+}
 const number = (value: unknown): number | null => (typeof value === 'number' || typeof value === 'string') && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null
 const scalar = (value: Value): unknown => value.stringValue ?? value.intValue ?? value.doubleValue ?? value.boolValue
 

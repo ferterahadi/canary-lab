@@ -9,13 +9,17 @@ import { listCodexSessionLogs } from '../../apps/web-server/src/features/agent-s
 import { signalProcessTree } from '../../apps/web-server/src/shared/process-tree'
 import { services, testEnvironment, ports } from './evaluator'
 import { releasePorts } from '../../apps/web-server/src/features/runs/logic/runtime/port-allocator'
-import { canaryRunDir, json, quote, write } from './files'
+import { canaryRunDir, json, quote, readJson, sha, write } from './files'
 import { prepareIsolation, prepareNativeIsolation, isolatedShell } from './isolation'
-import type { Attempt, ExecutionResult, StudyManifest, Usage } from './types'
+import type { Attempt, ExecutionResult, StudyManifest, Usage, UsageAttribution } from './types'
 import type { AgentSpawnArgs } from '../../apps/web-server/src/features/runs/logic/runtime/heal-agent-spawn'
 import { loadPromptTemplate, promptPath } from '../../apps/web-server/src/shared/prompts'
 import { runtimeEnvironment, serviceCommand, writeRunbook } from './runtime'
 import { stopAttemptServices } from './cleanup'
+import { stageIntervals, type StageBoundary } from './telemetry'
+import { parseUsage, sessionRole } from './usage'
+import { attributeUsage, assessPolicy, type SessionInput } from './attribution'
+export { parseUsage, sessionRole, groupUsage } from './usage'
 
 export function freezeToolConfig(command: string, agent: 'claude' | 'codex', args: AgentSpawnArgs, codexToolArgs: string[] = []): string {
   const suffix = args.promptFile ? ` -- ${JSON.stringify(`@${args.promptFile}`)}` : ''
@@ -23,41 +27,6 @@ export function freezeToolConfig(command: string, agent: 'claude' | 'codex', arg
   const head = suffix ? command.slice(0, -suffix.length) : command
   if (agent === 'codex' && !codexToolArgs.length) throw new Error('Missing frozen Codex tool policy')
   return `${head} ${agent === 'claude' ? '--strict-mcp-config' : codexToolArgs.map(quote).join(' ')}${suffix}`
-}
-
-export function parseUsage(agent: 'codex' | 'claude', raw: string): Usage | null {
-  const messages = new Map<string, Usage>()
-  let codex: Usage | null = null
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue
-    let row
-    try { row = JSON.parse(line) } catch { continue }
-    if (agent === 'codex') {
-      const usage = row.type === 'event_msg' && row.payload?.type === 'token_count' ? row.payload.info?.total_token_usage : null
-      if (usage && typeof usage.input_tokens === 'number' && typeof usage.output_tokens === 'number') {
-        codex = { input: usage.input_tokens, output: usage.output_tokens, cacheRead: usage.cached_input_tokens ?? null, cacheWrite: usage.cache_write_input_tokens ?? null }
-      }
-    } else {
-      const usage = row.type === 'assistant' ? row.message?.usage : null
-      if (usage && typeof usage.input_tokens === 'number' && typeof usage.output_tokens === 'number' && row.message.id) {
-        messages.set(row.message.id, { input: usage.input_tokens, output: usage.output_tokens,
-          cacheRead: usage.cache_read_input_tokens ?? null, cacheWrite: usage.cache_creation_input_tokens ?? null })
-      }
-    }
-  }
-  if (agent === 'codex') return codex
-  if (!messages.size) return null
-  const rows = [...messages.values()]
-  const sum = (key: keyof Usage): number | null => rows.every((row) => row[key] !== null) ? rows.reduce((n, row) => n + row[key]!, 0) : null
-  return { input: sum('input')!, output: sum('output')!, cacheRead: sum('cacheRead'), cacheWrite: sum('cacheWrite') }
-}
-export function sessionRole(agent: 'codex' | 'claude', raw: string): 'repair' | 'approval-review' {
-  if (agent === 'codex') for (const line of raw.split('\n')) {
-    let row
-    try { row = JSON.parse(line) } catch { continue }
-    if (row.type === 'session_meta') return row.payload?.thread_source === 'guardian_review' || row.payload?.source?.subagent?.other === 'guardian' ? 'approval-review' : 'repair'
-  }
-  return 'repair'
 }
 
 export function sessionEvidence(ref: AgentSessionRef | null, output: string, pin?: { model: string; effort: string }): Usage | null {
@@ -72,49 +41,35 @@ export function sessionEvidence(ref: AgentSessionRef | null, output: string, pin
   return parseUsage(ref.agent, raw)
 }
 
-export function groupUsage(agent: 'codex' | 'claude', raws: string[]): Usage | null {
-  const spawns = new Set<string>()
-  const rejected = new Set<string>()
-  for (const raw of raws) for (const line of raw.split('\n')) {
-    let row
-    try { row = JSON.parse(line) } catch { continue }
-    if (row.type === 'response_item' && row.payload?.type === 'function_call' && row.payload.name === 'spawn_agent') spawns.add(row.payload.call_id)
-    if (row.type === 'response_item' && row.payload?.type === 'function_call_output' &&
-      typeof row.payload.output === 'string' && row.payload.output.startsWith('collab spawn failed:')) rejected.add(row.payload.call_id)
-    if (row.type === 'assistant') for (const block of row.message?.content ?? []) {
-      if (block.type === 'tool_use' && ['Agent', 'Task'].includes(block.name)) spawns.add(block.id)
-    }
-  }
-  for (const id of rejected) spawns.delete(id)
-  // Approval reviewers are platform sessions, not missing diagnosis agents.
-  // Only explicit launch rejection proves a requested child never started.
-  const repairRaws = raws.filter((raw) => sessionRole(agent, raw) === 'repair')
-  if (!repairRaws.length || spawns.size >= repairRaws.length) return null
-  const rows = agent === 'claude' ? [parseUsage(agent, raws.join('\n'))] : raws.map((raw) => parseUsage(agent, raw))
-  if (rows.some((row) => row === null)) return null
-  const sum = (key: keyof Usage): number | null => rows.every((row) => row![key] !== null) ? rows.reduce((total, row) => total + row![key]!, 0) : null
-  return { input: sum('input')!, output: sum('output')!, cacheRead: sum('cacheRead'), cacheWrite: sum('cacheWrite') }
-}
-
 export function captureAttemptSessions(agent: 'codex' | 'claude', cwd: string, startedAt: string, output: string,
   pin: { model: string; effort: string }, claudeRef: AgentSessionRef | null): Usage | null {
-  const refs = agent === 'codex' ? listCodexSessionLogs(cwd, startedAt).reverse() : claudeRef ? [claudeRef] : []
-  if (agent === 'claude' && claudeRef) refs.push(...loadSubagentThreads(claudeRef).map((thread) => ({ agent: 'claude' as const, sessionId: thread.agentId, logPath: thread.logPath })))
+  const refs = agent === 'codex' ? listCodexSessionLogs(cwd, startedAt) : claudeRef ? [claudeRef] : []
+  const threads = agent === 'claude' && claudeRef ? loadSubagentThreads(claudeRef) : []
+  refs.push(...threads.map((thread) => ({ agent: 'claude' as const, sessionId: thread.agentId, logPath: thread.logPath })))
   const unique = [...new Map(refs.map((ref) => [ref.sessionId, ref])).values()]
-  const raws: string[] = []
-  for (const ref of unique) {
-    sessionEvidence(ref, path.join(output, 'sessions', ref.sessionId), pin)
-    if (fs.existsSync(ref.logPath)) raws.push(fs.readFileSync(ref.logPath, 'utf8'))
-  }
-  const primary = unique.find((ref) => fs.existsSync(ref.logPath) && sessionRole(agent, fs.readFileSync(ref.logPath, 'utf8')) === 'repair')
-  if (primary) sessionEvidence(primary, output, pin)
-  json(path.join(output, 'sessions/index.json'), unique.map((ref) => ({ agent: ref.agent, sessionId: ref.sessionId,
-    role: fs.existsSync(ref.logPath) ? sessionRole(agent, fs.readFileSync(ref.logPath, 'utf8')) : 'unknown', evidence: `sessions/${ref.sessionId}` })))
-  const total = groupUsage(agent, raws)
-  const approvalRaws = raws.filter((raw) => sessionRole(agent, raw) === 'approval-review')
-  json(path.join(output, 'usage-breakdown.json'), { total, repair: groupUsage(agent, raws.filter((raw) => sessionRole(agent, raw) === 'repair')),
-    approvalReviews: approvalRaws.map((raw) => parseUsage(agent, raw)), approvalSessionCount: approvalRaws.length })
-  return total
+  const inputs: SessionInput[] = unique.map((ref) => {
+    sessionEvidence(ref, path.join(output, 'sessions', ref.sessionId))
+    const thread = threads.find((item) => item.agentId === ref.sessionId)
+    return { sessionId: ref.sessionId, evidence: `sessions/${ref.sessionId}`, raw: fs.existsSync(ref.logPath) ? fs.readFileSync(ref.logPath, 'utf8') : null,
+      ...(thread && claudeRef ? { parentSessionId: claudeRef.sessionId, parentToolId: thread.parentToolId } : {}) }
+  })
+  const attribution = attributeUsage(agent, inputs)
+  const primary = unique.find((ref) => attribution.sessions.some((row) => row.sessionId === ref.sessionId && row.role === 'primary'))
+  if (primary) sessionEvidence(primary, output)
+  json(path.join(output, 'sessions/index.json'), inputs.map(({ raw: _raw, ...input }) => ({ agent, ...input,
+    role: attribution.sessions.find((row) => row.sessionId === input.sessionId.replace(/^agent-/, ''))?.role ?? 'unknown' })))
+  json(path.join(output, 'usage-breakdown.json'), attribution)
+  // Capture every available transcript before rejecting a pin violation.
+  for (const ref of unique) sessionEvidence(ref, path.join(output, 'sessions', ref.sessionId), pin)
+  return attribution.total
+}
+
+function captureExecutionEvidence(manifest: StudyManifest, attempt: Attempt, cwd: string, startedAt: string, root: string, ref: AgentSessionRef | null) {
+  const usage = captureAttemptSessions(attempt.agent, cwd, startedAt, root, manifest.pins[attempt.agent], ref)
+  const attribution = readJson<UsageAttribution>(path.join(root, 'usage-breakdown.json'))
+  const adherence = attempt.variant ? assessPolicy(attempt.variant.diagnosisPolicy, attribution) : undefined
+  if (adherence) json(path.join(root, 'policy-adherence.json'), adherence)
+  return { usage, attribution, ...(adherence ? { adherence } : {}) }
 }
 
 export async function runPlain(manifest: StudyManifest, attempt: Attempt, root: string, signal: AbortSignal,
@@ -149,7 +104,7 @@ export async function runPlain(manifest: StudyManifest, attempt: Attempt, root: 
     const ref = attempt.agent === 'claude' ? { agent: attempt.agent, sessionId, logPath: claudeSessionLogPath(root, sessionId) } : null
     const observedTests = path.join(root, 'test-executions.jsonl')
     return { status: signal.aborted ? 'interrupted' : result.code === 0 ? 'finished' : 'infrastructure-error',
-      reason: `Agent exit: ${result.code}; signal: ${result.signal}`, usage: scriptedAgent ? null : captureAttemptSessions(attempt.agent, root, startedAt, root, pin, ref),
+      reason: `Agent exit: ${result.code}; signal: ${result.signal}`, ...(scriptedAgent ? { usage: null } : captureExecutionEvidence(manifest, attempt, root, startedAt, root, ref)),
       testExecutions: fs.existsSync(observedTests) ? fs.readFileSync(observedTests, 'utf8').trim().split('\n').filter(Boolean).length : null }
   } finally {
     signal.removeEventListener('abort', stop)
@@ -193,6 +148,15 @@ export async function runCanary(manifest: StudyManifest, attempt: Attempt, root:
   const buildSpawn = makeAgentSpawnCommandBuilder(attempt.agent, { models: pin, mcpConfigFile: path.join(runDir, 'mcp-config.json') })
   const real = realPtyFactory()
   const ptyFactory: typeof real = (opts) => real({ ...opts, env: { ...opts.env, ...runtimeEnvironment(root), ...testEnvironment(root, allocated), CANARY_LAB_PROJECT_ROOT: root } })
+  const buildPrompt = buildOrchestratorHealPrompt({ agent: attempt.agent, projectRoot: root, runDir, promptPath: templatePath, diagnosisPolicy: attempt.variant?.diagnosisPolicy })
+  const clockStart = performance.now()
+  const stageEvents: StageBoundary[] = []
+  const event = (name: string): void => {
+    const boundary = { name, at: new Date().toISOString(), elapsedMs: performance.now() - clockStart }
+    stageEvents.push(boundary)
+    fs.appendFileSync(path.join(root, 'stage-events.jsonl'), JSON.stringify(boundary) + '\n')
+  }
+  event('adapter-started')
   let testExecutions = 0
   const orchestrator = new RunOrchestrator({
     feature, projectRoot: root, runId: attempt.id, runDir, portMap: new Map(Object.entries(allocated)), ptyFactory,
@@ -204,7 +168,13 @@ export async function runCanary(manifest: StudyManifest, attempt: Attempt, root:
       // intentionally points at its sibling JS reporter in dist/.
       return { ...invocation, command: invocation.command.replace('summary-reporter.js', 'summary-reporter.ts') }
     },
-    autoHeal: { agent: attempt.agent, buildCyclePrompt: buildOrchestratorHealPrompt({ agent: attempt.agent, projectRoot: root, runDir, promptPath: templatePath }),
+    autoHeal: { agent: attempt.agent, diagnosisPolicy: attempt.variant?.diagnosisPolicy, buildCyclePrompt: (args) => {
+      const prompt = buildPrompt(args)
+      const receipt = { cycle: args.cycle, diagnosisPolicy: attempt.variant?.diagnosisPolicy ?? 'per-failure', digest: sha(prompt), bytes: Buffer.byteLength(prompt) }
+      write(path.join(root, `prompts/cycle-${args.cycle}.md`), prompt)
+      json(path.join(root, `prompts/cycle-${args.cycle}.json`), receipt)
+      return prompt
+    },
       buildSpawnCommand: (args) => {
         if (scriptedAgent && isolation) return isolatedShell(isolation, scriptedAgent(args))
         const built = buildSpawn({ ...args, binaryPath: pin.executable, workspaceRoot: runDir, mcpOutputDir: undefined, isolationSettingsFile: native!.claudeSettings })
@@ -214,6 +184,9 @@ export async function runCanary(manifest: StudyManifest, attempt: Attempt, root:
           attempt.agent, args, [...(manifest.codexToolArgs ?? []), ...native!.codexArgs])
       } },
   })
+  for (const name of ['service-started', 'health-check', 'playwright-started', 'playwright-exit', 'heal-cycle-started', 'agent-started', 'agent-exit', 'signal-accepted', 'run-complete'] as const) {
+    orchestrator.on(name, () => event(name))
+  }
   orchestrator.on('playwright-started', () => { testExecutions++ })
   orchestrator.on('agent-output', ({ chunk }) => fs.appendFileSync(path.join(root, 'agent-terminal.log'), chunk))
   const stop = (): void => { void orchestrator.stop('aborted').catch((error) => write(path.join(root, 'stop-error.txt'), String(error))) }
@@ -223,10 +196,12 @@ export async function runCanary(manifest: StudyManifest, attempt: Attempt, root:
     const status = await orchestrator.runFullCycle()
     await orchestrator.stop(status)
     return { status: signal.aborted ? 'interrupted' : 'finished', reason: `Canary terminal status: ${status}`,
-      testExecutions, usage: scriptedAgent ? null : captureAttemptSessions(attempt.agent, runDir, startedAt, root, pin, attempt.agent === 'claude' ? locateMostRecentAgentSessionRef(runDir) : null) }
+      testExecutions, ...(scriptedAgent ? { usage: null } : captureExecutionEvidence(manifest, attempt, runDir, startedAt, root, attempt.agent === 'claude' ? locateMostRecentAgentSessionRef(runDir) : null)) }
   } finally {
     signal.removeEventListener('abort', stop)
     await orchestrator.stop('aborted')
     releasePorts(Object.values(allocated))
+    event('capture-complete')
+    json(path.join(root, 'stage-intervals.json'), stageIntervals(stageEvents))
   }
 }

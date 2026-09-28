@@ -1,9 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { json, readJson } from './files'
-import type { Attempt, ExecutionResult, StudyManifest } from './types'
+import type { Attempt, ExecutionResult, StudyManifest, UsageAttribution } from './types'
 import { runtimeEnvironment } from './runtime'
 import { startTelemetry } from './telemetry'
+import { assessPolicy } from './attribution'
 
 async function main(): Promise<void> {
   const [study, id] = process.argv.slice(2)
@@ -38,6 +39,12 @@ async function main(): Promise<void> {
   } catch (error) {
     result = { status: controller.signal.aborted ? 'interrupted' : 'infrastructure-error', reason: String(error), usage: null, testExecutions: null }
   } finally { clearTimeout(timer) }
+  const usageFile = path.join(root, 'usage-breakdown.json')
+  if (fs.existsSync(usageFile)) {
+    result.attribution = readJson<UsageAttribution>(usageFile)
+    result.usage = result.attribution.total
+    if (attempt.variant) result.adherence = assessPolicy(attempt.variant.diagnosisPolicy, result.attribution)
+  }
   if (telemetry) result.telemetry = await telemetry.close()
   json(path.join(root, 'execution.json'), result)
 }

@@ -1,3 +1,4 @@
+import { diagnosisPolicy } from '../../../../../../../shared/diagnosis-policy'
 // What a run records about itself while it happens: the initial manifest, every
 // lifecycle event, the status transitions the UI and the stores read, the
 // heartbeat, and the signal-file watcher. Split out of orchestrator.ts; the
@@ -65,6 +66,8 @@ export function writeInitialManifest(ctx: RunContext, serviceStatus: ServiceMani
   const manifest: RunManifest = {
     runId: ctx.runId,
     executionType: ctx.executionType,
+    ...(previous || ctx.autoHeal?.diagnosisPolicy
+      ? { diagnosisPolicy: diagnosisPolicy(previous ? previous.diagnosisPolicy : ctx.autoHeal?.diagnosisPolicy) } : {}),
     feature: ctx.feature.name,
     featureDir: ctx.feature.featureDir,
     env: ctx.env,

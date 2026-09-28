@@ -8,6 +8,7 @@ import type { Agent, ModelPin, ScenarioId, StudyManifest, StudySelection, StudyD
 import { EFFORT_LEVELS, KNOWN_MODEL_OPTIONS } from '../../shared/agent-models'
 import { resolveCodexToolArgs } from './tool-policy'
 import { resolveAgentBinary } from '../../apps/web-server/src/features/agent-sessions/logic/agent-binary'
+import { configurationDigest, policyDigests } from './experiment'
 
 export function sourceFingerprint(): string {
   const study = path.join(sourceRoot, 'tools/benchmark-study')
@@ -34,9 +35,10 @@ export function validatePins(pins: Record<Agent, { model: string; effort: string
     if (KNOWN_MODEL_OPTIONS[agent].some((option) => option.value === pin.model) || /^(auto|default|latest)$/.test(pin.model)) throw new Error(`Use an exact ${agent} model identifier, not the moving alias ${pin.model}`)
   }
 }
-export async function prepare(options: { workspace: string; output: string; pins: Record<Agent, { model: string; effort: string }>; selection?: StudySelection; design?: StudyDesign }): Promise<StudyManifest> {
+export async function prepare(options: { workspace: string; output: string; pins: Record<Agent, { model: string; effort: string }>; selection?: StudySelection; design?: StudyDesign; maxTokens?: number }): Promise<StudyManifest> {
   if (options.design?.mode !== 'replay') validatePins(options.pins)
   const attempts = schedule(options.selection, options.design)
+  if (options.design?.variants && (!Number.isSafeInteger(options.maxTokens) || options.maxTokens! <= 0)) throw new Error('Variant campaigns require a positive --max-tokens dispatch ceiling')
   const started = Date.now()
   const workspace = fs.realpathSync(options.workspace)
   const root = path.join(fs.realpathSync(path.dirname(path.resolve(options.output))), path.basename(options.output))
@@ -120,6 +122,10 @@ export async function prepare(options: { workspace: string; output: string; pins
   manifest.preparation.toolPolicy = 'Shell and installed Playwright CLI in both workflows; optional browser MCP and inherited connectors disabled'
   manifest.preparation.repairsHash = sha(fs.readFileSync(path.join(sourceRoot, 'tools/storefront-repairs.mjs')))
   manifest.frozenDigest = digest(frozen)
+  if (options.design?.variants) {
+    manifest.experiment = { configurationDigest: '', promptDigests: policyDigests(manifest), maxTokens: options.maxTokens! }
+    manifest.experiment.configurationDigest = configurationDigest(manifest)
+  }
   manifest.preparationMs = Date.now() - started
   manifest.status = 'ready'
   json(path.join(root, 'study.json'), manifest)

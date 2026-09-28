@@ -1,5 +1,6 @@
 import { normalizeFixCaptureNames } from '../fix-capture-names'
 import fs from 'fs'
+import type { DiagnosisPolicy } from '../../../../../../../shared/diagnosis-policy'
 import path from 'path'
 import { runsIndexPath } from './run-paths'
 import type {
@@ -183,6 +184,8 @@ export interface ExternalHealSession extends ExternalSessionMeta {
 }
 
 export interface RunManifest {
+  /** Frozen experimental policy; absent means the production per-failure default. */
+  diagnosisPolicy?: DiagnosisPolicy
   runId: string
   executionType?: ExecutionType
   feature: string

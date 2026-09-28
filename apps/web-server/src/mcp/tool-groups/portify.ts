@@ -241,7 +241,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
 
   registerTool('get_failure_detail', {
     description:
-      'One failing test\'s detail: error, location, resolved pointer dirs (trace-extract, playwright-mcp), curated trace summary, and the full error text — both inlined in full (never truncated; a large file over the inline budget is swapped for a `traceSummaryPath`/`errorTextPath` to Read in chunks). Use `failureId` from a failedTests[] entry (get_heal_context / wait_for_heal_task). Built for fan-out: hand each failureId to its own read-only sub-agent to investigate AND draft a proposed patch in parallel; the claim owner then applies the patches serially and signals once.',
+      'One failing test\'s detail: error, location, resolved pointer dirs (trace-extract, playwright-mcp), curated trace summary, and the full error text — both inlined in full (never truncated; a large file over the inline budget is swapped for a `traceSummaryPath`/`errorTextPath` to Read in chunks). Use `failureId` from a failedTests[] entry (get_heal_context / wait_for_heal_task). Follow the run diagnosis policy in context.nextSteps or its heal prompt. Under the default per-failure policy, hand each failureId to its own read-only sub-agent to investigate AND draft a proposed patch in parallel; the claim owner then applies the patches serially and signals once.',
     inputSchema: {
       runId: z.string(),
       failureId: z.string().describe('The failureId (== failed test name) from a failedTests[] entry.'),

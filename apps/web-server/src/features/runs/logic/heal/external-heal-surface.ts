@@ -1,4 +1,6 @@
 import fs from 'fs'
+import { diagnosisPolicy, type DiagnosisPolicy } from '../../../../../../../shared/diagnosis-policy'
+import { renderDiagnosisPolicy } from '../runtime/heal-diagnosis-policy'
 import path from 'path'
 import type { RunDetail } from '../run-store'
 import { buildHealPromptMap, type HealPromptMap } from '../runtime/auto-heal'
@@ -70,6 +72,7 @@ export function buildDependencyBlockers(manifest: RunManifest): DependencyBlocke
 const DEPENDENCY_RECOVERY_GUIDANCE = loadPromptTemplate(promptPath('dependency-recovery.md'))
 
 export interface ExternalHealContext {
+  diagnosisPolicy?: DiagnosisPolicy
   runId: string
   feature: string
   env: string | null
@@ -365,11 +368,12 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
       failedDir: paths.failedDir,
     })
     : undefined
+  const policy = diagnosisPolicy(input.detail.manifest.diagnosisPolicy)
   const procedure = snapshot.bootFailure
     ? bootFailureNextSteps(snapshot.bootFailure)
     : snapshot.serviceFailure
       ? serviceFailureNextSteps(snapshot.serviceFailure)
-      : EXTERNAL_HEAL_NEXT_STEPS
+      : EXTERNAL_HEAL_NEXT_STEPS.map((step, index) => index === 2 && policy !== 'per-failure' ? renderDiagnosisPolicy(policy) : step)
   const attemptSteps = attemptClaimed
     ? [
         ...procedure.slice(0, 3),
@@ -385,6 +389,7 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     env: snapshot.env,
     status: snapshot.status,
     healCycles: snapshot.healCycles,
+    ...(input.detail.manifest.diagnosisPolicy ? { diagnosisPolicy: policy } : {}),
     repoBranches: snapshot.repoBranches,
     ...(snapshot.worktrees ? { worktrees: snapshot.worktrees } : {}),
     // Only the records an agent can act on: a `compatible` verdict says the

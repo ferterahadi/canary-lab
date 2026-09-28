@@ -40,7 +40,9 @@ it('runs real Canary and independent plain adapters with scripted repair process
   plainSuite(sourceSuite, path.join(root, 'frozen/plain-suite'), { ...baseConfig, workers: 4, maxFailures: 4, use: { ...baseConfig.use, video: 'off' } })
   const manifest = { root, pins: { codex: { model: 'fixture', effort: 'medium' }, claude: { model: 'fixture', effort: 'high' } }, budgetMs: 60_000 } as StudyManifest
   json(path.join(root, 'study.json'), manifest)
-  for (const attempt of schedule().filter((item) => item.scenario === 'single-service' && item.repetition === 1)) {
+  for (const scheduled of schedule().filter((item) => item.scenario === 'single-service' && item.repetition === 1)) {
+    const policy = scheduled.agent === 'codex' ? 'parent-only' as const : 'adaptive' as const
+    const attempt = { ...scheduled, ...(scheduled.workflow === 'canary' ? { variant: { id: policy, diagnosisPolicy: policy } } : {}) }
     const work = path.join(root, 'attempts', attempt.id)
     const suite = path.join(root, 'frozen', attempt.workflow === 'canary' ? 'original-suite' : 'plain-suite')
     copy(path.join(root, 'frozen/single-service'), path.join(work, 'app')); copy(suite, path.join(work, 'suite')); dependencies(work, root)
@@ -58,6 +60,12 @@ it('runs real Canary and independent plain adapters with scripted repair process
         expect(fs.readFileSync(path.join(work, 'agent-terminal.log'), 'utf8')).toContain('scripted agent started')
         const run = JSON.parse(fs.readFileSync(path.join(canaryRunDir(work), 'manifest.json'), 'utf8'))
         expect(run.services).toHaveLength(3)
+        expect(run.diagnosisPolicy).toBe(policy)
+        expect(fs.readFileSync(path.join(work, 'prompts/cycle-1.md'), 'utf8')).toContain(`Diagnosis policy: ${policy}`)
+        const promptReceipt = JSON.parse(fs.readFileSync(path.join(work, 'prompts/cycle-1.json'), 'utf8'))
+        expect(promptReceipt.diagnosisPolicy).toBe(policy)
+        expect(promptReceipt.digest).toMatch(/^[a-f0-9]{64}$/)
+        expect(JSON.parse(fs.readFileSync(path.join(work, 'stage-intervals.json'), 'utf8')).length).toBeGreaterThan(0)
         const tail = path.join(canaryRunDir(work), 'heal-agent-tail.txt')
         const diagnostic = fs.readFileSync(path.join(canaryRunDir(work), 'runner.log'), 'utf8') + (fs.existsSync(tail) ? fs.readFileSync(tail, 'utf8') : '')
         expect(result.reason, diagnostic).toContain('passed')

@@ -2,7 +2,16 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { expect, it } from 'vitest'
-import { measurements, startTelemetry, summarizeTelemetry, telemetryConfig } from './telemetry'
+import { measurements, stageIntervals, startTelemetry, summarizeTelemetry, telemetryConfig } from './telemetry'
+
+it('accounts for exclusive stage intervals without adding overlapping agent or service spans', () => {
+  const names = ['adapter-started', 'playwright-started', 'playwright-exit', 'heal-cycle-started', 'agent-started', 'signal-accepted', 'playwright-started', 'playwright-exit', 'run-complete', 'capture-complete']
+  const intervals = stageIntervals(names.map((name, i) => ({ name, at: String(i), elapsedMs: i * 10 })))
+  expect(intervals.reduce((n, interval) => n + interval.durationMs, 0)).toBe(90)
+  expect(intervals.filter((interval) => interval.stage === 'agent-diagnosis/edit')).toHaveLength(2)
+  expect(intervals.filter((interval) => interval.stage === 'verification-cycle')).toHaveLength(1)
+  expect(stageIntervals([])).toEqual([])
+})
 
 const batch = (name: string, duration = 120, extra = {}) => ({ resourceLogs: [{ scopeLogs: [{ logRecords: [{
   timeUnixNano: '1000000000', body: { stringValue: name }, attributes: Object.entries({ duration_ms: duration, ...extra }).map(([key, value]) =>

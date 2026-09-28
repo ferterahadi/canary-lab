@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Attempt, ScenarioId, StudySelection, StudyDesign, Workflow, Agent } from './types'
-import { random, shuffle, validateDesign } from './design'
+import { balancedOrders, random, shuffle, validateDesign } from './design'
 import { changed, copy, hashes, write } from './files'
 // The smoke gate and study must derive fixes from the same authoritative recipes.
 // @ts-expect-error The contributor repair recipes are an existing JavaScript module.
@@ -12,7 +12,7 @@ export const scenarios: Record<ScenarioId, { omitted: number[]; failedJourneys: 
   'cross-service': { omitted: [0, 1, 2], failedJourneys: ['J1', 'J2', 'J4', 'J5'] },
 }
 export function schedule(selection?: StudySelection, design?: StudyDesign): Attempt[] {
-  if (selection && (!['codex', 'claude'].includes(selection.agent) || !Object.hasOwn(scenarios, selection.scenario))) throw new Error('Invalid study agent/scenario selection')
+  if (selection && (!['codex', 'claude'].includes(selection.agent) || (selection.scenario !== undefined && !Object.hasOwn(scenarios, selection.scenario)))) throw new Error('Invalid study agent/scenario selection')
   if (design) {
     validateDesign(design)
     const next = random(design.seed)
@@ -20,7 +20,13 @@ export function schedule(selection?: StudySelection, design?: StudyDesign): Atte
     // Replay uses one structural agent slot; reports label it scripted, not Codex.
     const agents: Agent[] = design.mode === 'replay' ? [selection?.agent ?? 'codex'] : ['codex', 'claude']
     for (const agent of agents) for (const scenario of Object.keys(scenarios) as ScenarioId[]) {
-      if (selection && (selection.agent !== agent || selection.scenario !== scenario)) continue
+      if (selection && (selection.agent !== agent || (selection.scenario !== undefined && selection.scenario !== scenario))) continue
+      if (design.variants) {
+        balancedOrders(design.variants, design.repetitions, next).forEach((order, index) => pairs.push(order.map((variant) => ({
+          id: `${agent}-${scenario}-${index + 1}-canary-${variant.id}`, agent, scenario, repetition: index + 1, workflow: 'canary', variant: { ...variant },
+        }))))
+        continue
+      }
       const first = shuffle(Array.from({ length: design.repetitions }, (_, i): Workflow => i % 2 ? 'plain' : 'canary'), next)
       first.forEach((workflow, index) => pairs.push([workflow, workflow === 'canary' ? 'plain' : 'canary'].map((arm) => ({
         id: `${agent}-${scenario}-${index + 1}-${arm}`, agent, scenario, repetition: index + 1, workflow: arm as Workflow,
@@ -34,7 +40,7 @@ export function schedule(selection?: StudySelection, design?: StudyDesign): Atte
         id: `${agent}-${scenario}-${repetition}-${workflow}`, agent, scenario, repetition, workflow,
       })),
     )),
-  ).filter((attempt) => !selection || (attempt.agent === selection.agent && attempt.scenario === selection.scenario))
+  ).filter((attempt) => !selection || (attempt.agent === selection.agent && (selection.scenario === undefined || attempt.scenario === selection.scenario)))
 }
 export function buildScenario(source: string, target: string, omitted: number[]): void {
   copy(source, target)

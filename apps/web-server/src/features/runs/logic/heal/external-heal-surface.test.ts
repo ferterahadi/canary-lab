@@ -82,6 +82,19 @@ function detailFor(runId: string): RunDetail {
 }
 
 describe('buildExternalHealContext', () => {
+  it('recovers frozen diagnosis guidance on reads and repeat waits without a client refresh', () => {
+    const detail = detailFor('run-policy')
+    for (const policy of ['parent-only', 'adaptive'] as const) {
+      detail.manifest.diagnosisPolicy = policy
+      const context = buildExternalHealContext({ detail, logsDir })
+      expect(context.diagnosisPolicy).toBe(policy)
+      expect(context.nextSteps!.join('\n')).toContain(`Diagnosis policy: ${policy}`)
+      expect(context.nextSteps!.join('\n')).not.toContain('sub-agent per failure')
+      expect(context.nextSteps!.join('\n')).toContain('Never delete, skip, weaken, or loosen')
+      expect(slimRepeatHealContext(context).diagnosisPolicy).toBe(policy)
+      expect(buildExternalHealContext({ detail, logsDir }).nextSteps).toEqual(context.nextSteps)
+    }
+  })
   it('keeps every incompatible repository and all affected services actionable on repeat waits', () => {
     const detail = detailFor('run-1')
     const dependency = (repoName: string, verdict: RunDependencyProvenance['verdict']): RunDependencyProvenance => ({
