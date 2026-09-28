@@ -49,11 +49,13 @@ export class NotificationStore {
     return Object.keys(this.read().sources).filter((key) => key.startsWith(prefix))
   }
 
-  markUnavailable(): void {
+  markUnavailable(keys?: ReadonlySet<string>): void {
     const data = this.read()
     let changed = false
-    for (const item of data.items) {
-      if (!item.resolvedAt && !item.unavailable) { item.unavailable = true; changed = true }
+    for (const [key, source] of Object.entries(data.sources)) {
+      if (keys && !keys.has(key)) continue
+      const item = data.items.find((entry) => entry.id === source.notificationId)
+      if (item && !item.resolvedAt && !item.unavailable) { item.unavailable = true; changed = true }
     }
     if (changed) this.save(data)
   }
@@ -98,15 +100,16 @@ export class NotificationStore {
     this.save(data)
   }
 
-  reconcile(sources: NotificationSource[], unavailableSourceKeys: ReadonlySet<string> = new Set()): void {
+  reconcile(sources: NotificationSource[], unavailableSourceKeys: ReadonlySet<string> = new Set(), scope?: ReadonlySet<string>, checkingSourceKeys: ReadonlySet<string> = new Set()): void {
     const data = this.read()
     const now = new Date().toISOString()
     let changed = false
     const seen = new Set(sources.map((source) => source.key))
     for (const [key, previous] of Object.entries(data.sources)) {
+      if (scope && !scope.has(key)) continue
       const item = data.items.find((entry) => entry.id === previous.notificationId)
       if (!item || item.resolvedAt) continue
-      const unavailable = unavailableSourceKeys.has(key)
+      const unavailable = unavailableSourceKeys.has(key) || checkingSourceKeys.has(key)
       if (unavailable && !item.unavailable) { item.unavailable = true; changed = true }
       if (!unavailable && item.unavailable) { delete item.unavailable; changed = true }
     }
@@ -115,7 +118,11 @@ export class NotificationStore {
       if (item && !item.resolvedAt) { item.resolvedAt = now; changed = true }
     }
     for (const source of sources) {
+      if (scope && !scope.has(source.key)) continue
       if (unavailableSourceKeys.has(source.key)) continue
+      // Known attention transitions still belong in history during a byte
+      // check. Quiet/absent observations cannot settle an unverified source.
+      if (checkingSourceKeys.has(source.key) && !source.message) continue
       const previous = data.sources[source.key]
       if (previous?.signature === source.signature) {
         const item = data.items.find((item) => item.id === previous.notificationId)
@@ -136,13 +143,14 @@ export class NotificationStore {
         continue
       }
       settle(previous?.notificationId)
-      const item = source.message ? { ...source.message, id: randomUUID(), createdAt: now } : undefined
+      const item = source.message ? { ...source.message, id: randomUUID(), createdAt: now, ...(checkingSourceKeys.has(source.key) ? { unavailable: true } : {}) } : undefined
       if (item) data.items.push(item)
       data.sources[source.key] = { signature: source.signature, ...(item ? { notificationId: item.id } : {}) }
       changed = true
     }
     for (const [key, previous] of Object.entries(data.sources)) {
-      if (!seen.has(key) && !unavailableSourceKeys.has(key) && previous.signature !== 'absent' && previous.signature !== 'retired') {
+      if (scope && !scope.has(key)) continue
+      if (!seen.has(key) && !unavailableSourceKeys.has(key) && !checkingSourceKeys.has(key) && previous.signature !== 'absent' && previous.signature !== 'retired') {
         settle(previous.notificationId)
         data.sources[key] = { signature: 'absent' }
         changed = true

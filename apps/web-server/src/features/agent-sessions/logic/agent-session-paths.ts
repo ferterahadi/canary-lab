@@ -236,12 +236,21 @@ export function locateCodexSessionLog(
   cycleStartedAt: string,
   homeDir: string = os.homedir(),
 ): AgentSessionRef | null {
+  return listCodexSessionLogs(runDir, cycleStartedAt, homeDir)[0] ?? null
+}
+
+/** Return every session in a workflow, including delegated diagnostic sessions. */
+export function listCodexSessionLogs(
+  runDir: string,
+  cycleStartedAt: string,
+  homeDir: string = os.homedir(),
+): AgentSessionRef[] {
   const startMs = Date.parse(cycleStartedAt)
-  if (!Number.isFinite(startMs)) return null
+  if (!Number.isFinite(startMs)) return []
   const wantedCwd = realpathOrSelf(runDir)
 
   const sessionsRoot = path.join(codexConfigDir(homeDir), 'sessions')
-  if (!fs.existsSync(sessionsRoot)) return null
+  if (!fs.existsSync(sessionsRoot)) return []
 
   const startDate = new Date(startMs)
   const datesToScan: Array<{ y: string; m: string; d: string }> = []
@@ -254,7 +263,7 @@ export function locateCodexSessionLog(
     })
   }
 
-  let best: { logPath: string; sessionId: string; ts: number } | null = null
+  const matches: Array<{ logPath: string; sessionId: string; ts: number }> = []
   for (const { y, m, d } of datesToScan) {
     const dir = path.join(sessionsRoot, y, m, d)
     for (const name of readDirNames(dir)) {
@@ -265,13 +274,10 @@ export function locateCodexSessionLog(
       const metaTs = Date.parse(meta.timestamp)
       if (!Number.isFinite(metaTs) || metaTs < startMs) continue
       if (realpathOrSelf(meta.cwd) !== wantedCwd) continue
-      if (!best || metaTs > best.ts) {
-        best = { logPath: candidate, sessionId: meta.id, ts: metaTs }
-      }
+      matches.push({ logPath: candidate, sessionId: meta.id, ts: metaTs })
     }
   }
-  if (!best) return null
-  return { agent: 'codex', sessionId: best.sessionId, logPath: best.logPath }
+  return matches.sort((a, b) => b.ts - a.ts).map(({ logPath, sessionId }) => ({ agent: 'codex', sessionId, logPath }))
 }
 
 // ─── Workflow-dir agent-session ref (benchmark, portify) ─────────────────────

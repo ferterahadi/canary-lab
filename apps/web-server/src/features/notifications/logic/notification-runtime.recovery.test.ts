@@ -61,6 +61,7 @@ beforeEach(async () => {
   await app.ready()
   await initialRefresh.mock.results[0].value
   await new Promise<void>((resolve) => setImmediate(resolve))
+  await runtime.refresh()
   initialRefresh.mockRestore()
   await vi.waitFor(() => expect(persisted()[0]?.title).toBe('shop: possible test weakening'))
 })
@@ -235,4 +236,77 @@ it('keeps a real linked-suite review actionable when only its discovery folder a
   expect(rows).toEqual([expect.objectContaining({ id, target: { kind: 'test-review', feature: 'shop', runId: 'linked-run' } })])
   expect(rows[0].resolvedAt).toBeUndefined()
   expect(fs.existsSync(path.join(runManifest.featureDir!, 'feature.config.cjs'))).toBe(false)
+})
+
+it('rechecks a newer edit before publishing, keeping actions unavailable while the first check is pending', async () => {
+  const id = persisted()[0].id
+  const record = dirty.get('shop')!
+  let release!: () => void
+  const pending = new Promise<typeof record>((resolve) => { release = () => resolve(record) })
+  const recompute = vi.spyOn(dirty, 'recompute').mockImplementationOnce(() => pending)
+  fs.writeFileSync(spec, original)
+  events.publish({ type: 'tests-changed', feature: 'shop' })
+  await vi.waitFor(() => expect(recompute).toHaveBeenCalledTimes(1))
+  expect(persisted()[0]).toMatchObject({ id, unavailable: true })
+  expect(persisted()[0].resolvedAt).toBeUndefined()
+
+  // A second edit arrives after the first check started. Its completion must
+  // not publish the first revision as current or settle the outstanding alert.
+  fs.writeFileSync(spec, weakened)
+  events.publish({ type: 'tests-changed', feature: 'shop' })
+  events.publish({ type: 'tests-changed', feature: 'shop' })
+  expect(recompute).toHaveBeenCalledTimes(1)
+  release()
+  await vi.waitFor(() => expect(recompute).toHaveBeenCalledTimes(2))
+  await vi.waitFor(() => expect(persisted()[0].unavailable).toBeUndefined())
+  expect(persisted()[0]).toMatchObject({ id, title: 'shop: possible test weakening' })
+  expect(persisted()[0].resolvedAt).toBeUndefined()
+})
+
+it('refreshes only the changed suite while keeping another suite notification intact', async () => {
+  const second = path.join(dir, 'features', 'second')
+  fs.mkdirSync(second, { recursive: true })
+  fs.writeFileSync(path.join(second, 'feature.config.cjs'), "exports.config = { name: 'second', featureDir: __dirname }")
+  await runtime.refresh()
+  const id = persisted()[0].id
+  const recompute = vi.spyOn(dirty, 'recompute')
+  events.publish({ type: 'tests-changed', feature: 'second' })
+  await vi.waitFor(() => expect(recompute).toHaveBeenCalledExactlyOnceWith('second', fs.realpathSync(second)))
+  await runtime.refreshAction('missing-id')
+  expect(persisted().find((item) => item.id === id)).toMatchObject({ title: 'shop: possible test weakening' })
+  expect(persisted().find((item) => item.id === id)?.resolvedAt).toBeUndefined()
+})
+
+it.each(['tests-changed', 'features-changed'] as const)('retains the alert when discovery fails during %s and recovers later', async (type) => {
+  const id = persisted()[0].id
+  const read = vi.spyOn(fs, 'readdirSync').mockImplementation(() => { throw new Error('discovery unavailable') })
+  events.publish({ type, feature: 'shop' })
+  await vi.waitFor(() => expect(persisted()[0]).toMatchObject({ id, unavailable: true }))
+  expect(persisted()[0].resolvedAt).toBeUndefined()
+  await runtime.refresh()
+  read.mockRestore()
+  await runtime.refresh()
+  expect(persisted()[0].unavailable).toBeUndefined()
+})
+
+it('retries a stale failed check after a broad workspace change', async () => {
+  let reject!: (error: Error) => void
+  const recompute = vi.spyOn(dirty, 'recompute').mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+  recovery()
+  await vi.waitFor(() => expect(recompute).toHaveBeenCalledTimes(1))
+  events.publish({ type: 'features-changed' })
+  reject(new Error('old revision unreadable'))
+  await runtime.refresh()
+  expect(recompute).toHaveBeenCalledTimes(2)
+  expect(persisted()[0].unavailable).toBeUndefined()
+  expect(persisted()[0].resolvedAt).toBeUndefined()
+})
+
+it('handles an unexpected asynchronous refresh failure without leaking a rejection', async () => {
+  vi.spyOn(dirty, 'recompute').mockRejectedValueOnce(new Error('read failed'))
+  vi.spyOn(app.log, 'warn').mockImplementationOnce(() => { throw new Error('warning sink failed') })
+  const logged = vi.spyOn(app.log, 'error')
+  events.publish({ type: 'tests-changed', feature: 'shop' })
+  await vi.waitFor(() => expect(logged).toHaveBeenCalledWith({ err: expect.objectContaining({ message: 'warning sink failed' }) }, 'Could not update notifications'))
+  expect(persisted()[0].unavailable).toBe(true)
 })

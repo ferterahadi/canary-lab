@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { listCodexSessionLogs } from './agent-session-paths'
 import {
   encodeClaudeProjectDir,
   claudeConfigDir,
@@ -61,6 +62,15 @@ describe('locateCodexSessionLog', () => {
     fs.writeFileSync(file, JSON.stringify(meta) + '\n')
     return file
   }
+
+  it('lists every matching session while the existing locator still returns the newest', () => {
+    for (const [id, timestamp] of [['parent', '2026-05-11T01:20:00.000Z'], ['child', '2026-05-11T01:21:00.000Z']]) {
+      writeCodexSession({ yyyy: '2026', mm: '05', dd: '11', fileBase: id, payload: { id, cwd: homeDir, timestamp } })
+    }
+    const sessions = listCodexSessionLogs(homeDir, '2026-05-11T01:00:00.000Z', homeDir)
+    expect(sessions.map((session) => session.sessionId)).toEqual(['child', 'parent'])
+    expect(locateCodexSessionLog(homeDir, '2026-05-11T01:00:00.000Z', homeDir)).toEqual(sessions[0])
+  })
 
   it('finds the session whose cwd + timestamp match', () => {
     const runDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-asl-run-')))

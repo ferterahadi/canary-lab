@@ -6,12 +6,12 @@ import { notificationTarget } from '../../../../../../shared/notifications/types
 
 export function registerFeatureNotificationRoute(app: FastifyInstance, { store, reconcile, listFlights }: {
   store: NotificationStore
-  reconcile: () => void
+  reconcile: (feature?: string) => void
   listFlights: FlightRunStore['list']
 }): void {
   app.get<{ Params: { feature: string } }>('/api/notifications/feature/:feature', async (request) => {
-    reconcile()
     const feature = request.params.feature
+    reconcile(feature)
     const flights = new Set(listFlights().filter((flight) => flight.feature === feature).map((flight) => flight.flightId))
     const relevant = store.list().filter((item) => item.target?.kind === 'flight'
       ? flights.has(item.target.flightId) : item.target && 'feature' in item.target && item.target.feature === feature)

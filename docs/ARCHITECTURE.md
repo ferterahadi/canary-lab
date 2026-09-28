@@ -466,10 +466,23 @@ Flight attention transitions and test changes that block an active run or a fres
 start after an ended run create messages even when the browser is closed. Terminal
 blockers use the same byte-level review gate as run start, including exact-revision
 approval and restoration, rather than relying on a pending-file count in the run
-index. Each inbox read also reconciles these sources. A server recovery scan starts
+index. Run and dirty-store events reconcile only the affected suite; Flight events
+reconcile only Flight sources. Scoped reconciliation leaves every other source and
+its availability unchanged. Cheap source projections remain synchronous to retain
+attention transitions. Inbox reads repair missed source events; feature reads scope
+the test projection to that suite. Neither path performs historical Git checks.
+A server recovery scan starts
 every ten seconds when no scan is running, reloads configured suite paths, and
 recomputes test integrity from disk. It yields between suites and does not queue
-overlapping scans. This repairs missed filesystem events even with no browser open.
+overlapping scans. Suite edits request their own asynchronous integrity refresh;
+requests for the same suite share one check. A newer file/config event invalidates
+the check and forces another pass before its result becomes current. Retained
+alerts remain visibly unavailable during checking; known attention can still be
+recorded, but a quiet result cannot settle an unverified source. This repairs
+missed filesystem events even with no browser open. Historical Git retirement
+checks run asynchronously, one suite at a time, during the full audit. A newer
+suite revision or restored config prevents a delayed retirement result from
+being applied. Negative Git results are retried on later audits, not cached.
 The open client's ten-second reconciliation repairs missed notification pushes.
 Recovery latency includes scan duration; these intervals are not instantaneous
 delivery guarantees. An unreadable suite or historical snapshot preserves its

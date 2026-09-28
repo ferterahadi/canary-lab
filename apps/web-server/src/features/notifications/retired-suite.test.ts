@@ -8,7 +8,7 @@ import { isCommittedSuiteRetirement } from './retired-suite'
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'suite-retirement-'))
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }))
 
-it('recognizes a committed suite deletion but not a missing working-tree folder', () => {
+it('recognizes a committed suite deletion but not a missing working-tree folder', async () => {
   const git = (...args: string[]): void => { execFileSync('git', args, { cwd: root, stdio: 'ignore' }) }
   const featuresDir = path.join(root, 'features')
   const suite = path.join(featuresDir, 'shop')
@@ -19,14 +19,14 @@ it('recognizes a committed suite deletion but not a missing working-tree folder'
   git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'add suite')
 
   fs.rmSync(suite, { recursive: true })
-  expect(isCommittedSuiteRetirement(featuresDir, 'shop')).toBe(false)
+  expect(await isCommittedSuiteRetirement(featuresDir, 'shop')).toBe(false)
 
   git('add', '-u')
   git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'retire suite')
-  expect(isCommittedSuiteRetirement(featuresDir, 'shop')).toBe(true)
-  expect(isCommittedSuiteRetirement(featuresDir, '../shop')).toBe(false)
+  expect(await isCommittedSuiteRetirement(featuresDir, 'shop')).toBe(true)
+  expect(await isCommittedSuiteRetirement(featuresDir, '../shop')).toBe(false)
 
   fs.mkdirSync(suite)
   fs.writeFileSync(path.join(suite, 'feature.config.cjs'), "module.exports = { name: 'shop' }\n")
-  expect(isCommittedSuiteRetirement(featuresDir, 'shop')).toBe(false)
+  expect(await isCommittedSuiteRetirement(featuresDir, 'shop')).toBe(false)
 })

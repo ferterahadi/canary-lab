@@ -525,3 +525,57 @@ it('settles stale dirty and pending metadata when only the suite config disappea
     expect((await app.inject('/api/notifications/feature/shop')).json().attentionCount).toBe(0)
   } finally { await app.close() }
 })
+
+it('reconciles only the named sources, including availability and absence', () => {
+  const store = new NotificationStore(dir, events)
+  const other = { ...source, key: 'flight:f2', message: { ...source.message!, title: 'other' } }
+  store.reconcile([source, other])
+  const original = store.list().find((item) => item.title === 'other')!
+  store.markUnavailable(new Set([other.key]))
+  store.reconcile([], new Set(), new Set([source.key]))
+  expect(store.list().find((item) => item.id === original.id)).toMatchObject({ unavailable: true })
+  expect(store.list().find((item) => item.id === original.id)?.resolvedAt).toBeUndefined()
+  expect(store.list().find((item) => item.title === source.message!.title)?.resolvedAt).toEqual(expect.any(String))
+})
+
+it('records attention during a check but waits for verification before settling it', () => {
+  const store = new NotificationStore(dir, events)
+  const keys = new Set([source.key])
+  store.reconcile([source], new Set(), keys, keys)
+  const original = store.list()[0]
+  expect(original.unavailable).toBe(true)
+  store.markRead(original.id)
+  store.reconcile([{ key: source.key, signature: 'quiet' }], new Set(), keys, keys)
+  store.reconcile([], new Set(), keys, keys)
+  expect(store.list()[0]).toMatchObject({ id: original.id, unavailable: true, readAt: expect.any(String) })
+  expect(store.list()[0].resolvedAt).toBeUndefined()
+  store.reconcile([{ ...source, message: { ...source.message!, severity: 'danger' } }], new Set(), keys, keys)
+  expect(store.list()[0].readAt).toBeUndefined()
+  store.reconcile([], new Set(), keys)
+  expect(store.list()[0]).toMatchObject({ id: original.id, resolvedAt: expect.any(String) })
+  expect(store.list()[0].unavailable).toBeUndefined()
+})
+
+it('rejects unreadable database versions instead of resetting history', () => {
+  const store = new NotificationStore(dir, events)
+  store.reconcile([source])
+  fs.writeFileSync(path.join(dir, 'notifications/state.json'), JSON.stringify({ version: 9, items: [], sources: {} }))
+  expect(() => store.list()).toThrow('Cannot read the notification database')
+})
+
+it('keeps retirement idempotent and ignores supplied sources outside the scope', () => {
+  const store = new NotificationStore(dir, events)
+  store.retire('shop')
+  events.publish.mockClear()
+  store.retire('shop')
+  store.reconcile([source], new Set(), new Set(['test-review:shop']))
+  expect(store.list()).toEqual([])
+  expect(events.publish).not.toHaveBeenCalled()
+})
+
+it('surfaces an unreadable inbox file instead of replacing it', () => {
+  const store = new NotificationStore(dir, events)
+  fs.mkdirSync(path.join(dir, 'notifications/state.json'), { recursive: true })
+  expect(() => store.list()).toThrow()
+  expect(fs.statSync(path.join(dir, 'notifications/state.json')).isDirectory()).toBe(true)
+})
