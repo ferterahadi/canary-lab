@@ -24,10 +24,9 @@ import {
 // Single React-side store for everything runs-related: the index list, the
 // per-run details, and the in-flight transient flags ("aborting" /
 // "deleting" / etc.). Sourced from `/ws/runs` push frames so the browser
-// never polls. HTTP is reserved for one-shot mutations (start / abort /
-// delete) — and even those just trigger the server to push the resulting
-// state through the WS. The pure reducer + frame-mapper live in
-// `runs-state.ts` so they're testable without jsdom.
+// uses push as its fast path. The existing active-detail recovery read also
+// reconciles the index, keeping sidebar badges and detail evidence together
+// when an update is missed. The reducer + frame-mapper live in `runs-state.ts`.
 
 export type { ConnectionState } from './runs-state'
 
@@ -87,11 +86,12 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
   // closure isn't stale across re-renders. Same trick as react-redux'.
   const dispatchRef = useRef(dispatch)
   dispatchRef.current = dispatch
-  const detailLoadsRef = useRef<Set<string>>(new Set())
+  const detailLoadsRef = useRef(new Map<string, symbol>())
 
   // ── WebSocket lifecycle ───────────────────────────────────────────
   useEffect(() => {
     const url = wsUrl ?? defaultWsUrl()
+    const detailLoads = detailLoadsRef.current
     const connection = connectReconnectingSocket({
       url,
       WebSocketImpl,
@@ -117,11 +117,24 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
           return
         }
         const action = frameToAction(frame)
-        if (action) dispatchRef.current(action)
+        if (action) {
+          // A later stream observation supersedes reads already in flight.
+          // Invalidate their tokens so a late response cannot undo a stop or
+          // resurrect a removed run, and a new observation can read again.
+          if (action.type === 'update' || action.type === 'removed') {
+            detailLoads.delete(action.runId)
+          } else {
+            detailLoads.clear()
+          }
+          dispatchRef.current(action)
+        }
       },
     })
 
-    return () => connection.close()
+    return () => {
+      detailLoads.clear()
+      connection.close()
+    }
   }, [wsUrl, WebSocketImpl])
 
   // ── HTTP fallback ─────────────────────────────────────────────────
@@ -187,15 +200,18 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
 
   const loadRunDetail = useCallback(async (runId: string): Promise<void> => {
     if (detailLoadsRef.current.has(runId)) return
-    detailLoadsRef.current.add(runId)
+    const token = Symbol(runId)
+    detailLoadsRef.current.set(runId, token)
     try {
       const detail = await api.getRunDetail(runId)
-      dispatch({ type: 'http-detail', runId, detail })
+      if (detailLoadsRef.current.get(runId) === token) {
+        dispatch({ type: 'http-detail', runId, detail })
+      }
     } catch {
       // Missing detail is non-fatal for the global run store. The list row
       // remains usable, and a future WS update can still hydrate the detail.
     } finally {
-      detailLoadsRef.current.delete(runId)
+      if (detailLoadsRef.current.get(runId) === token) detailLoadsRef.current.delete(runId)
     }
   }, [])
 

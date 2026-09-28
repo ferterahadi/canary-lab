@@ -55,6 +55,7 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
   switch (action.type) {
     case 'snapshot':
       return { ...state, runs: action.runs, details: action.details }
+    case 'http-detail':
     case 'update': {
       // Update both list and details. The list entry is derived from the
       // manifest so the badge stays in sync without a separate poll. It MUST
@@ -120,8 +121,6 @@ export function runsReducer(state: RunsState, action: RunsAction): RunsState {
     }
     case 'http-list':
       return { ...state, runs: action.runs }
-    case 'http-detail':
-      return { ...state, details: { ...state.details, [action.runId]: action.detail } }
   }
 }
 

@@ -139,7 +139,8 @@ function Probe({
   captured.run = useRun(runId)
   captured.actions = useRunActions(runId ?? 'missing')
   captured.active = useGlobalActiveRun()
-  return null
+  const { count } = useActiveBootSessions()
+  return <span>{count ? `Services up: ${count}` : 'No active services'}</span>
 }
 
 function entry(overrides: Partial<RunIndexEntry> = {}): RunIndexEntry {
@@ -179,6 +180,108 @@ function deferred<T>() {
 }
 
 describe('RunsProvider', () => {
+  it.each(['update', 'removed', 'snapshot', 'list-changed'] as const)('ignores an old detail response after a newer %s frame', async (type) => {
+    vi.useFakeTimers()
+    const pending = deferred<RunDetail>()
+    vi.mocked(api.getRunDetail).mockReturnValue(pending.promise)
+    const captured = renderProbe()
+    const socket = FakeWebSocket.instances[0]
+    act(() => {
+      socket.onmessage?.({ data: JSON.stringify({ type: 'snapshot',
+        runs: [entry({ executionType: 'boot' })], details: { r1: detail({ executionType: 'boot' }) },
+      }) })
+    })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    const frames = {
+      update: { type, runId: 'r1', detail: detail({ executionType: 'boot', status: 'aborted' }) },
+      removed: { type, runId: 'r1' },
+      snapshot: { type, runs: [], details: {} },
+      'list-changed': { type, runs: [] },
+    }
+    act(() => { socket.onmessage?.({ data: JSON.stringify(frames[type]) }) })
+    await act(async () => { pending.resolve(detail({ executionType: 'boot' })); await pending.promise })
+    expect(container.textContent).toBe('No active services')
+    expect(captured.active?.entry).toBeNull()
+    expect(captured.runs?.runs.some((run) => run.status === 'running')).toBe(false)
+    if (type === 'update') expect(captured.run?.status).toBe('aborted')
+    if (type === 'removed' || type === 'snapshot') expect(captured.run?.detail).toBeUndefined()
+  })
+
+  it('does not discard recovery because an unrelated run changed', async () => {
+    vi.useFakeTimers()
+    const pending = deferred<RunDetail>()
+    vi.mocked(api.getRunDetail).mockReturnValue(pending.promise)
+    const captured = renderProbe()
+    const socket = FakeWebSocket.instances[0]
+    act(() => { socket.onmessage?.({ data: JSON.stringify({ type: 'snapshot', runs: [entry()], details: { r1: detail() } }) }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    act(() => { socket.onmessage?.({ data: JSON.stringify({ type: 'update', runId: 'other', detail: detail({ runId: 'other', status: 'passed' }) }) }) })
+    await act(async () => { pending.resolve(detail({ status: 'aborted' })); await pending.promise })
+    expect(captured.run?.status).toBe('aborted')
+    expect(captured.runs?.runs.map((run) => run.status)).toEqual(['aborted', 'passed'])
+  })
+
+  it('keeps the newer load guard when a superseded request finishes', async () => {
+    vi.useFakeTimers()
+    const old = deferred<RunDetail>()
+    const current = deferred<RunDetail>()
+    vi.mocked(api.getRunDetail).mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
+    const captured = renderProbe()
+    const socket = FakeWebSocket.instances[0]
+    act(() => { socket.onmessage?.({ data: JSON.stringify({ type: 'snapshot', runs: [entry()], details: { r1: detail() } }) }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    act(() => { socket.onmessage?.({ data: JSON.stringify({ type: 'update', runId: 'r1', detail: detail({ status: 'healing' }) }) }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    await act(async () => { old.resolve(detail()); await old.promise })
+    expect(captured.run?.status).toBe('healing')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(api.getRunDetail).toHaveBeenCalledTimes(2)
+    await act(async () => { current.resolve(detail({ status: 'passed' })); await current.promise })
+    expect(captured.run?.status).toBe('passed')
+    expect(captured.runs?.runs[0].status).toBe('passed')
+  })
+
+  it('releases recovery work on unmount, including an outstanding read', async () => {
+    vi.useFakeTimers()
+    const pending = deferred<RunDetail>()
+    vi.mocked(api.getRunDetail).mockReturnValue(pending.promise)
+    const captured = renderProbe()
+    act(() => { FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: 'snapshot', runs: [entry()], details: { r1: detail() } }) }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    act(() => { root.unmount() })
+    await act(async () => { pending.resolve(detail({ status: 'passed' })); await pending.promise; await vi.advanceTimersByTimeAsync(5000) })
+    expect(captured.run?.status).toBe('running')
+    expect(api.getRunDetail).toHaveBeenCalledTimes(1)
+    expect(FakeWebSocket.instances[0].closed).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('settles the sidebar and active-run consumers when a stop event is lost', async () => {
+    vi.useFakeTimers()
+    vi.mocked(api.getRunDetail).mockRejectedValueOnce(new Error('temporary read failure'))
+      .mockResolvedValue(detail({ executionType: 'boot', status: 'aborted' }))
+    const captured = renderProbe()
+    act(() => {
+      FakeWebSocket.instances[0].onopen?.()
+      FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({
+        type: 'snapshot', runs: [entry({ executionType: 'boot' })],
+        details: { r1: detail({ executionType: 'boot' }) },
+      }) })
+    })
+    expect(container.textContent).toBe('Services up: 1')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(container.textContent).toBe('Services up: 1')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(captured.run?.status).toBe('aborted')
+    expect(captured.runs?.runs[0]).toMatchObject({ status: 'aborted', executionType: 'boot' })
+    expect(captured.active?.entry).toBeNull()
+    expect(container.textContent).toBe('No active services')
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(api.getRunDetail).toHaveBeenCalledTimes(2)
+    expect(api.listRuns).not.toHaveBeenCalled()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
   it('loads missing run details once and clears the in-flight guard after completion', async () => {
     const first = deferred<RunDetail>()
     vi.mocked(api.getRunDetail).mockReturnValueOnce(first.promise)

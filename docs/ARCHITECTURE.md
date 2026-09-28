@@ -253,6 +253,14 @@ snapshot. A completed checkout still announces its change if the subsequent
 status read fails; the response reports that read failure. Read failures before
 checkout prevent the mutation and produce no change event.
 
+Run detail recovery uses the existing one-second active-detail reads in
+`apps/web/src/features/runs/state/RunsContext.tsx`. HTTP recovery and stream
+updates share the reducer's index derivation, so a recovered terminal result
+also settles the sidebar's Services badge and active-run consumers. Recovery
+stops once the detail settles; no additional index poll is introduced. Later
+stream observations and provider cleanup invalidate outstanding detail reads,
+preventing late responses from reverting newer state or restoring removed runs.
+
 Flight detail reads are coordinated by
 `apps/web/src/features/flights/state/use-flight-record.ts`. Recent pushed records
 avoid duplicate REST work; a quiet channel is reconciled after 30 seconds. A
