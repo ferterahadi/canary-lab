@@ -84,7 +84,8 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   }
   const specs = selected ? filesFor(selected) : []
   const assessedFiles = selected ? specsFor(selected, detail) : []
-  const spec = specs.find((item) => selected?.name === picked?.feature && item.file === picked?.file) ?? specs[0]
+  const spec = specs.find((item) => selected?.name === picked?.feature && item.file === picked?.file)
+    ?? specs.find((item) => assessedFiles.some((dirty) => dirty.file === item.file)) ?? specs[0]
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const testChanges = useInvalidationKey('tests')
@@ -133,7 +134,8 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   // will settle. Otherwise a cold pending-review link can show Git changes
   // while Accept & commit targets a different run-scoped file set.
   const useRunBaseline = !!comparisonRunId && !missingSnapshot && (againstRun || !selected?.feature || pendingRunReview)
-  const featureReview = useLiveResource<FeatureTestReview>('tests', !run && selected?.feature ? selected.name : null, api.getFeatureTestReview, {
+  const suiteReviewAvailable = !run || (focus?.baseline !== 'run' && (missingSnapshot || (runReview.confirmed && !pendingRunReview)))
+  const featureReview = useLiveResource<FeatureTestReview>('tests', suiteReviewAvailable && selected?.feature ? selected.name : null, api.getFeatureTestReview, {
     reconcileMs: 5000,
     leaseMs: 15000,
   })
@@ -148,7 +150,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
       .some((action) => action === 'adopt-and-rerun' || action === 'approve-new-run' || action === 'restore')
     ? run : undefined
   const reviewRevision = reviewRun ? runReview.value?.review_revision : undefined
-  const featureReviewRevision = !reviewRun && featureReview.value?.files.length ? featureReview.value.review_revision : undefined
+  const featureReviewRevision = suiteReviewAvailable && !reviewRun && featureReview.value?.files.length ? featureReview.value.review_revision : undefined
   const displayedRunRevision = useRef<string | undefined>(undefined)
   const displayedFeatureReview = useRef(false)
   if (reviewRevision) displayedRunRevision.current = reviewRevision
@@ -158,8 +160,8 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     if (revision && detail?.manifest.specEdits?.reviewDecisions?.some((decision) => decision.revision === revision && decision.receipt)) onClose()
   }, [detail?.manifest.specEdits?.reviewDecisions, onClose])
   useEffect(() => {
-    if (!run && featureReview.confirmed && displayedFeatureReview.current && featureReview.value?.files.length === 0) onClose()
-  }, [featureReview.confirmed, featureReview.value?.files.length, onClose, run])
+    if (suiteReviewAvailable && featureReview.confirmed && displayedFeatureReview.current && featureReview.value?.files.length === 0) onClose()
+  }, [featureReview.confirmed, featureReview.value?.files.length, onClose, suiteReviewAvailable])
   const reviewKey = JSON.stringify([selected?.name, spec?.file])
   const comparisonFeature = selected?.name
   useEffect(() => {
@@ -270,7 +272,7 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
             </>}
           </div>
           {run && !suiteUnavailable && !missingSnapshot && runReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this run’s review state. {runReview.error}</p>}
-          {!run && !suiteUnavailable && featureReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this suite’s review state. {featureReview.error}</p>}
+          {suiteReviewAvailable && !suiteUnavailable && featureReview.error && <p role="alert" className="cl-review-action-message text-danger">Could not confirm this suite’s review state. {featureReview.error}</p>}
           {error && <p role="alert" className="cl-review-action-message text-danger">{error}</p>}
         </div>}
       >

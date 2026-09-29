@@ -20,7 +20,7 @@ describe('presentRunStatus', () => {
   it('qualifies a healing run that waits for review or an agent', () => {
     for (const waiting of [
       { kind: 'test-review' as const, label: 'Awaiting test review', detail: 'Review edits.' },
-      { kind: 'agent' as const, label: 'Waiting for agent', detail: 'Resume agent.' },
+      { kind: 'agent' as const, label: 'Awaiting Agent', detail: 'Resume agent.' },
     ]) {
       expect(presentRunStatus({ status: 'healing', waiting })).toMatchObject({
         label: waiting.label, tone: 'var(--warning)', dot: 'warning', pulse: false,

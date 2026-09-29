@@ -280,17 +280,17 @@ describe('trailer model (R14–R18)', () => {
     expect(rail?.querySelector('.animate-pulse')).toBeNull()
   })
 
-  it('shows Waiting for agent across the header, Test run step, and detail', async () => {
+  it('shows Awaiting Agent across the header, Test run step, and detail', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       currentStage: 'run',
       stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'run' ? 'running' as const : 'pending' as const })),
     }))
     await render('fl_1', { activity: new Map([['checkout', { kind: 'healing', runId: 'run-1', waiting: {
-      kind: 'agent', label: 'Waiting for agent', detail: 'Resume the repair agent.',
+      kind: 'agent', label: 'Awaiting Agent', detail: 'Resume the repair agent.',
     } }]]) })
-    expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toBe('Waiting for agent')
-    expect(container.querySelector('[data-testid="stage-rail-run"]')?.textContent).toContain('Waiting for agent')
-    expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toBe('Waiting for agent')
+    expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toBe('Awaiting Agent')
+    expect(container.querySelector('[data-testid="stage-rail-run"]')?.textContent).toContain('Awaiting Agent')
+    expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toBe('Awaiting Agent')
   })
 
   it('updates the header, Test run step, and detail when one open run changes state', async () => {

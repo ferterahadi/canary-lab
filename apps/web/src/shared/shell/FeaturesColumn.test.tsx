@@ -184,7 +184,7 @@ describe('FeaturesColumn active-run highlight', () => {
   it('keeps a waiting heal visible with a steady row cue and compact label', () => {
     const waiting = {
       kind: 'agent' as const,
-      label: 'Waiting for agent',
+      label: 'Awaiting Agent',
       detail: 'Resume the external repair session.',
     }
     act(() => {
@@ -206,9 +206,9 @@ describe('FeaturesColumn active-run highlight', () => {
     expect(beta.classList.contains('cl-list-row-healing')).toBe(false)
     expect(beta.style.color).toBe('var(--text-primary)')
     expect(featureRow('alpha').classList.contains('cl-list-row-waiting')).toBe(false)
-    expect(beta.querySelector('[data-testid="run-waiting-beta"]')?.textContent).toBe('Waiting for agent')
+    expect(beta.querySelector('[data-testid="run-waiting-beta"]')?.textContent).toBe('Awaiting Agent')
     expect(beta.querySelector<HTMLElement>('[data-testid="run-waiting-beta"]')?.style.width).toBe('120px')
-    expect(beta.querySelector('[aria-label="Waiting for agent"]')).toBeTruthy()
+    expect(beta.querySelector('[aria-label="Awaiting Agent"]')).toBeTruthy()
 
     // The run detail stream updates this prop in place. The open Suites column
     // must return to the animated healing cue without a remount or refresh.

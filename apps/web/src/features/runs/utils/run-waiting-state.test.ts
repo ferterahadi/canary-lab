@@ -34,11 +34,11 @@ describe('runWaitingState', () => {
     expect(runWaitingState(detail({ externalHealSession: { ...session, status: 'healing' } }))).toBeUndefined()
     expect(runWaitingState(detail({ externalHealSession: undefined, lifecycle: { phase: 'agent-healing', headline: 'Repairing', updatedAt: '' } }))).toBeUndefined()
     for (const status of ['waiting', 'disconnected'] as const) {
-      expect(runWaitingState(detail({ specEdits: undefined, externalHealSession: { ...session, status } }))?.label).toBe('Waiting for agent')
+      expect(runWaitingState(detail({ specEdits: undefined, externalHealSession: { ...session, status } }))?.label).toBe('Awaiting Agent')
     }
     expect(runWaitingState(detail({ specEdits: undefined, externalHealSession: undefined }))).toBeUndefined()
     expect(runWaitingState(detail({ specEdits: undefined, healMode: 'external', externalHealSession: undefined, lifecycle: {
       phase: 'waiting-for-signal', headline: 'Waiting for heal signal', updatedAt: '',
-    } }))?.label).toBe('Waiting for agent')
+    } }))?.label).toBe('Awaiting Agent')
   })
 })

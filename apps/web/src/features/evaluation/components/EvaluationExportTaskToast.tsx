@@ -100,7 +100,7 @@ export function evaluationOutputPanel(
   }
   return {
     heading: 'Agent output',
-    text: displayLog || 'Waiting for agent output...',
+    text: displayLog || 'Awaiting agent output...',
   }
 }
 

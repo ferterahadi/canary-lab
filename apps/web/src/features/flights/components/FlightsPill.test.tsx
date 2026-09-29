@@ -211,17 +211,17 @@ describe('FlightsPill', () => {
     expect(run.style.background).toContain('var(--text-muted)')
   })
 
-  it('shows Waiting for agent in the picker chip and Test run mini rail', () => {
+  it('shows Awaiting Agent in the picker chip and Test run mini rail', () => {
     const activity = new Map<string, FeatureActivity>([['checkout', {
       kind: 'healing', runId: 'run-1',
-      waiting: { kind: 'agent', label: 'Waiting for agent', detail: 'Resume the repair agent.' },
+      waiting: { kind: 'agent', label: 'Awaiting Agent', detail: 'Resume the repair agent.' },
     }]])
     act(() => root.render(<FlightsPill flights={[flight({ currentStage: 'run' })]} activity={activity} onOpenFlight={vi.fn()} open />))
     const chip = document.body.querySelector<HTMLElement>('[data-testid="flight-status-chip"]')
-    expect(chip?.textContent).toBe('Waiting for agent')
+    expect(chip?.textContent).toBe('Awaiting Agent')
     expect(chip?.style.width).toBe('120px')
     expect(chip?.style.color).toContain('var(--warning)')
-    expect(document.body.querySelector('[data-testid="stage-mini-cell-run"]')?.getAttribute('aria-label')).toBe('Test run — Waiting for agent')
+    expect(document.body.querySelector('[data-testid="stage-mini-cell-run"]')?.getAttribute('aria-label')).toBe('Test run — Awaiting Agent')
   })
 
   // R26 — the pill is the one live indicator for the absorbed surfaces.

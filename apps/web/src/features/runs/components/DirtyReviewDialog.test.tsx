@@ -355,9 +355,29 @@ it.each([
   { ...run, status: 'queued' as const },
   { ...run, status: 'passed' as const },
 ])('does not offer run actions for a non-active run: %o', async (pending) => {
-  await render({ pendingRuns: [pending] })
+  await render({ features: [{ ...feature(), dirty: undefined }], pendingRuns: [pending] })
   expect(button('Accept & commit')).toBeUndefined()
   expect(button('Restore recorded files')).toBeUndefined()
+  expect(api.acceptRunTestReview).not.toHaveBeenCalled()
+})
+it('opens the flagged file and offers the suite commit when a selected historical run matches current tests', async () => {
+  const dirtyFile = 'e2e/20-tenancy-invariants.spec.ts'
+  const terminal = { ...run, status: 'aborted' as const, pendingSpecEdits: 0 }
+  const historical = { ...detail, manifest: { ...detail.manifest, status: 'aborted' as const,
+    specEdits: { checkedAt: 'now', adopted: [], pending: [] } } }
+  vi.mocked(api.getRunTestReview).mockResolvedValue(settledRunReview())
+  vi.mocked(api.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: ['e2e/00-inventory.spec.ts', dirtyFile],
+    differences: [], changes: { added: [], changed: [], removed: [] } })
+  vi.mocked(api.getFeatureTestReview).mockResolvedValue({ feature: 'alpha', baseline: 'head', review_revision: reviewRevision,
+    files: [{ file: dirtyFile, change: 'added' }] })
+  vi.mocked(api.getTestFileReview).mockImplementation(async (_feature, file) => ({ ...testFileReview(), file }))
+  await render({ features: [feature('alpha', [dirtyFile])], pendingRuns: [terminal], focusFeature: 'alpha',
+    focusRunId: 'run-1', focusRunDetail: historical })
+  expect(document.querySelector('.cl-review-file[aria-pressed="true"]')?.getAttribute('title')).toBe(dirtyFile)
+  expect(api.getTestFileReview).toHaveBeenCalledWith('alpha', dirtyFile, undefined)
+  expect(button('Accept & commit')).not.toBeUndefined()
+  await click('Accept & commit')
+  expect(api.acceptFeatureTestReview).toHaveBeenCalledExactlyOnceWith('alpha', reviewRevision)
   expect(api.acceptRunTestReview).not.toHaveBeenCalled()
 })
 it('uses the same exact-revision acceptance label for a terminal run', async () => {

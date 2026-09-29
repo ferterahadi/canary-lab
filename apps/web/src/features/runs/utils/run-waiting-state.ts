@@ -8,7 +8,7 @@ export interface RunWaitingState {
 
 export const AGENT_WAITING_STATE: RunWaitingState = {
   kind: 'agent',
-  label: 'Waiting for agent',
+  label: 'Awaiting Agent',
   detail: 'The external repair session is waiting or disconnected. Resume the agent to continue, or stop the heal.',
 }
 
