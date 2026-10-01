@@ -9,9 +9,11 @@ import { diagnosisPolicy, DIAGNOSIS_POLICIES } from '../../../../../../../shared
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }) })
 
-it('keeps the per-failure production default and rejects unsupported experiment policies', () => {
-  expect(diagnosisPolicy(undefined)).toBe('per-failure')
-  expect(renderDiagnosisPolicy()).toContain('sub-agent per failure')
+it('defaults to parent-only, keeps per-failure selectable and rejects unsupported policies', () => {
+  expect(diagnosisPolicy(undefined)).toBe('parent-only')
+  expect(renderDiagnosisPolicy()).toBe(renderDiagnosisPolicy('parent-only'))
+  expect(renderDiagnosisPolicy()).not.toContain('sub-agent per failure')
+  expect(renderDiagnosisPolicy('per-failure')).toContain('sub-agent per failure')
   expect(() => diagnosisPolicy('automatic')).toThrow('Unsupported')
   expect(renderDiagnosisPolicy('parent-only')).toContain('do not spawn diagnosis children')
   expect(renderDiagnosisPolicy('adaptive')).toContain('at most two concurrent children')

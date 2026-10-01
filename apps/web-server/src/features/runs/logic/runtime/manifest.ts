@@ -184,7 +184,7 @@ export interface ExternalHealSession extends ExternalSessionMeta {
 }
 
 export interface RunManifest {
-  /** Frozen experimental policy; absent means the production per-failure default. */
+  /** Frozen explicit policy; absent means the production default (`DEFAULT_DIAGNOSIS_POLICY`). */
   diagnosisPolicy?: DiagnosisPolicy
   runId: string
   executionType?: ExecutionType
