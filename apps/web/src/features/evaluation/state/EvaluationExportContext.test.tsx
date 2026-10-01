@@ -456,11 +456,12 @@ describe('EvaluationExportProvider', () => {
   })
 
   it('does not resubscribe known completed tasks during startup reconciliation', async () => {
+    vi.useFakeTimers()
     let resolveTasks: (tasks: EvaluationExportTask[]) => void = () => {}
     const known = task({ taskId: 'known-completed', runId: 'run-known', status: 'completed' })
     vi.mocked(api.listEvaluationExportTasks).mockReturnValueOnce(
       new Promise<EvaluationExportTask[]>((resolve) => { resolveTasks = resolve }),
-    )
+    ).mockResolvedValue([known])
     vi.mocked(api.startEvaluationExport).mockResolvedValueOnce(task({ ...known, status: 'running' }))
     const captured = renderProbe()
 
@@ -474,6 +475,10 @@ describe('EvaluationExportProvider', () => {
       await Promise.resolve()
     })
 
+    // The startup read predates startExport. Only the follow-up read can
+    // authoritatively complete the newly observed running task.
+    expect(captured.value?.tasks[0]?.status).toBe('running')
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
     expect(captured.value?.tasks[0]?.status).toBe('completed')
     expect(exportSockets()).toHaveLength(1)
   })

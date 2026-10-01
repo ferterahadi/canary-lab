@@ -1,3 +1,4 @@
+import { runIndexEntry } from '../../../../../../../shared/run-index'
 import fs from 'fs'
 import path from 'path'
 import {
@@ -168,23 +169,7 @@ function indexEntryFromManifest(
   status: RunManifest['status'],
   endedAt?: string,
 ): RunIndexEntry {
-  return {
-    runId: manifest.runId,
-    ...(manifest.executionType ? { executionType: manifest.executionType } : {}),
-    feature: manifest.feature,
-    ...(manifest.env ? { env: manifest.env } : {}),
-    startedAt: manifest.startedAt,
-    status,
-    ...(endedAt ? { endedAt } : {}),
-    ...(manifest.healCycles ? { healCycles: manifest.healCycles } : {}),
-    ...(manifest.healMode ? { healMode: manifest.healMode } : {}),
-    ...(manifest.healEnd?.reason === 'new-run-required' ? { newRunRequired: true as const } : {}),
-    ...(manifest.verification?.configName ? { verificationConfigName: manifest.verification.configName } : {}),
-    ...(manifest.verification?.playwrightEnvsetId ? { verificationPlaywrightEnvsetId: manifest.verification.playwrightEnvsetId } : {}),
-    ...(manifest.verification?.targetUrls ? { verificationTargetUrls: manifest.verification.targetUrls } : {}),
-    ...(manifest.specEdits?.pending.length ? { pendingSpecEdits: manifest.specEdits.pending.length } : {}),
-    ...(manifest.integrity?.hints.length ? { integrityHints: manifest.integrity.hints.length } : {}),
-  }
+  return runIndexEntry({ ...manifest, status, endedAt })
 }
 
 function clearRunningFromSummary(summaryPath: string): void {

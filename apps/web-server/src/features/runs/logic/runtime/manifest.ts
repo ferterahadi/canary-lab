@@ -1,3 +1,4 @@
+import type { RunIndexEntry } from '../../../../../../../shared/run-index'
 import { normalizeFixCaptureNames } from '../fix-capture-names'
 import fs from 'fs'
 import type { DiagnosisPolicy } from '../../../../../../../shared/diagnosis-policy'
@@ -357,43 +358,7 @@ export function updateAllServicesStatus(
 // runs/index.json — array of {runId, feature, startedAt, status, endedAt?}.
 // Atomically rewritten on every change. Tiny file, dozens of entries max.
 
-export interface RunIndexEntry {
-  runId: string
-  executionType?: ExecutionType
-  feature: string
-  /** The envset this run used, mirrored from the manifest. Spec selection is
-   *  constant across envsets, so two runs of one suite declare the SAME roster
-   *  and differ only in which tests the environment let execute — 41 passed / 4
-   *  skipped under one envset, 4 passed / 41 skipped under another. Without the
-   *  envset on the row those read as one run having gone badly. Carried on the
-   *  index so the runs list needs no manifest read per row; absent on entries
-   *  written before the field existed (backfilled read-time) and on runs that
-   *  named no envset. */
-  env?: string
-  startedAt: string
-  status: RunStatus
-  endedAt?: string
-  /** Repair cycles this run consumed. Mirrored from the manifest on every
-   *  index write so a feature's repair total reads off the index alone,
-   *  without opening one manifest per run. Absent on pre-existing entries and
-   *  on runs that never healed. */
-  healCycles?: number
-  /** The compact index also carries who owns repair work. Flight Activity
-   *  cold-loads terminal runs from this index, while full manifests are sent
-   *  only for active runs. */
-  healMode?: RunManifest['healMode']
-  /** Terminal single-attempt run whose repair still needs a fresh run. */
-  newRunRequired?: true
-  verificationConfigName?: string
-  verificationPlaywrightEnvsetId?: string
-  verificationTargetUrls?: Record<string, string>
-  /** Live spec edits still pending against this run's suite copy, and the
-   *  integrity hints on them — counts only, so `list_runs` can flag a run
-   *  without a manifest read. Mirrored on every status write; absent when
-   *  zero, and on entries written before the fields existed. */
-  pendingSpecEdits?: number
-  integrityHints?: number
-}
+export type { RunIndexEntry } from '../../../../../../../shared/run-index'
 
 export function readRunsIndex(logsDir: string): RunIndexEntry[] {
   try {

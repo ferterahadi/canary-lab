@@ -79,6 +79,23 @@ describe('WizardDraftProvider', () => {
     expect(captured.value?.records.map((item) => item.draftId)).toEqual(['accepted-c', 'planning-a', 'ready-b'])
   })
 
+  it('recovers missed creation, completion and deletion on a server handshake', async () => {
+    vi.mocked(api.listDrafts).mockResolvedValueOnce([
+      draft({ draftId: 'finished', status: 'generating' }),
+      draft({ draftId: 'deleted', status: 'planning' }),
+    ]).mockResolvedValue([
+      draft({ draftId: 'finished', status: 'accepted' }),
+      draft({ draftId: 'created', status: 'spec-ready' }),
+    ])
+    const captured = renderProbe()
+    await settle()
+    act(() => workspaceSocket().fire({ type: 'connected' }))
+    await settle()
+    expect(captured.value?.drafts.map(item => item.draftId)).toEqual(['created'])
+    expect(captured.value?.records.map(item => item.draftId)).toEqual(['finished', 'created'])
+    expect(captured.value?.sync.stale).toBe(false)
+  })
+
   it('discovers drafts created outside this page session', async () => {
     const captured = renderProbe()
     await settle()

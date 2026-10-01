@@ -260,6 +260,20 @@ also settles the sidebar's Services badge and active-run consumers. Recovery
 stops once the detail settles; no additional index poll is introduced. Later
 stream observations and provider cleanup invalidate outstanding detail reads,
 preventing late responses from reverting newer state or restoring removed runs.
+Runs, Portify, and Benchmark share that per-record request guard in
+`apps/web/src/shared/state/observed-reads.ts`; feature reducers and actions remain
+separate. The server writer and browser reducer derive compact run rows through
+`shared/run-index.ts`, including repair ownership, cycles, and review counts.
+
+Drafts and evaluation exports share collection recovery in
+`apps/web/src/shared/state/use-workspace-records.ts`. It subscribes before the
+first list read, reconciles on workspace handshakes, and ignores superseded
+reads. Per-record revisions preserve events and deletion tombstones observed
+during a list request; unaffected rows still reconcile. Failures retain records.
+Failures and overlapping changes schedule a follow-up after 2.5 seconds, while
+visible pages reconcile every 30 seconds and immediately after becoming visible.
+The global status bar identifies stale activity. Export log attachment remains
+feature-owned and does not replay historical completed tasks during reconciliation.
 
 Flight detail reads are coordinated by
 `apps/web/src/features/flights/state/use-flight-record.ts`. Recent pushed records

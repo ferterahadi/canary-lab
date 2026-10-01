@@ -9,6 +9,7 @@ import { ModelLaunchGate } from './features/config'
 import { ResizablePanels, type PanelConfig } from './shared/ui/ResizablePanels'
 import { VerticalSplit } from './shared/ui/VerticalSplit'
 import { GlobalStatusBar } from './shared/shell/GlobalStatusBar'
+import { WorkspaceRecordSyncStatus } from './shared/shell/WorkspaceRecordSyncStatus'
 import { CollisionConfirmDialog } from './features/runs/components/CollisionConfirmDialog'
 import { RunStartErrorDialog } from './features/runs/components/RunStartErrorDialog'
 import { PendingRunStartNotice } from './features/runs/components/PendingRunStartNotice'
@@ -348,6 +349,7 @@ export function App() {
   return (
     <div className="flex h-full w-full flex-col">
       <GlobalStatusBar
+        recordSyncControl={<WorkspaceRecordSyncStatus />}
         activeRunDetail={activeRunDetail}
         onRunLatestTests={(feature) => { void handleStartRun(undefined, 'test', feature) }}
         runStartPending={pendingStarts.length > 0 || !!modelsPrompt || !!collisionPrompt}

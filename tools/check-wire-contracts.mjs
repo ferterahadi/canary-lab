@@ -31,7 +31,6 @@ const WEB_API = 'apps/web/src/shared/api'
 // when the mirror was given a different name — a rename across the seam hides
 // the pairing from every grep, so it is recorded here rather than discovered.
 const PAIRS = [
-  { name: 'RunIndexEntry', server: 'apps/web-server/src/features/runs/logic/runtime/manifest.ts' },
   { name: 'ServiceManifestEntry', server: 'apps/web-server/src/features/runs/logic/runtime/manifest.ts' },
   { name: 'RunManifest', server: 'apps/web-server/src/features/runs/logic/runtime/manifest.ts' },
   { name: 'RepoBranchSnapshot', server: 'apps/web-server/src/features/runs/logic/runtime/manifest.ts' },
@@ -72,6 +71,18 @@ const PAIRS = [
 // and use the root declaration, otherwise matching field names can conceal a
 // different nested shape from the mirrored-interface check above.
 const SHARED_TYPES = [
+  {
+    name: 'RunIndexEntry',
+    declaration: 'shared/run-index.ts',
+    reexports: [
+      { file: 'apps/web-server/src/features/runs/logic/runtime/manifest.ts', from: '../../../../../../../shared/run-index' },
+      { file: 'apps/web/src/shared/api/types-runs.ts', from: '@shared/run-index' },
+    ],
+    consumers: [
+      { file: 'apps/web-server/src/features/runs/logic/runtime/run-state-sink.ts', importFrom: '../../../../../../../shared/run-index', importName: 'runIndexEntry', usage: 'return runIndexEntry(' },
+      { file: 'apps/web/src/features/runs/state/runs-state.ts', importFrom: '@shared/run-index', importName: 'runIndexEntry', usage: 'const entry = runIndexEntry(' },
+    ],
+  },
   {
     name: 'ReadableTest',
     declaration: 'shared/readable-tests/types.ts',
@@ -284,7 +295,7 @@ for (const sharedType of SHARED_TYPES) {
   for (const consumer of sharedType.consumers) {
     const source = read(consumer.file)
     const importPattern = new RegExp(
-      `import(?:\\s+type)?\\s*\\{[^}]*\\b${sharedType.name}\\b[^}]*\\}` +
+      `import(?:\\s+type)?\\s*\\{[^}]*\\b${consumer.importName ?? sharedType.name}\\b[^}]*\\}` +
       `\\s*from\\s*['\"]${escapeRegExp(consumer.importFrom)}['\"]`,
       's',
     )
@@ -297,6 +308,13 @@ for (const sharedType of SHARED_TYPES) {
       problems.push(
         `${sharedType.name}: ${consumer.file} must use it as \`${consumer.usage}\``,
       )
+    }
+  }
+  for (const consumer of sharedType.reexports ?? []) {
+    const source = read(consumer.file)
+    const expected = `export type { ${sharedType.name} } from '${consumer.from}'`
+    if (!source.includes(expected) || new RegExp(`(?:interface|type)\\s+${sharedType.name}\\b`).test(source)) {
+      problems.push(`${sharedType.name}: ${consumer.file} must re-export the canonical declaration without a local mirror`)
     }
   }
 }

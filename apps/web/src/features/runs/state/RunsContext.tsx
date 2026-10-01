@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react'
 import * as api from '@/shared/api/client'
+import { createObservedReads } from '@/shared/state/observed-reads'
 import type { StageModelChoice } from '@/shared/api/client'
 import type {
   DisplayStatus,
@@ -86,7 +87,7 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
   // closure isn't stale across re-renders. Same trick as react-redux'.
   const dispatchRef = useRef(dispatch)
   dispatchRef.current = dispatch
-  const detailLoadsRef = useRef(new Map<string, symbol>())
+  const detailLoadsRef = useRef(createObservedReads())
 
   // ── WebSocket lifecycle ───────────────────────────────────────────
   useEffect(() => {
@@ -122,7 +123,7 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
           // Invalidate their tokens so a late response cannot undo a stop or
           // resurrect a removed run, and a new observation can read again.
           if (action.type === 'update' || action.type === 'removed') {
-            detailLoads.delete(action.runId)
+            detailLoads.invalidate(action.runId)
           } else {
             detailLoads.clear()
           }
@@ -199,19 +200,19 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
   }, [refresh, state.connection])
 
   const loadRunDetail = useCallback(async (runId: string): Promise<void> => {
-    if (detailLoadsRef.current.has(runId)) return
-    const token = Symbol(runId)
-    detailLoadsRef.current.set(runId, token)
+    const reads = detailLoadsRef.current
+    const token = reads.begin(runId)
+    if (!token) return
     try {
       const detail = await api.getRunDetail(runId)
-      if (detailLoadsRef.current.get(runId) === token) {
+      if (reads.current(runId, token)) {
         dispatch({ type: 'http-detail', runId, detail })
       }
     } catch {
       // Missing detail is non-fatal for the global run store. The list row
       // remains usable, and a future WS update can still hydrate the detail.
     } finally {
-      if (detailLoadsRef.current.get(runId) === token) detailLoadsRef.current.delete(runId)
+      reads.finish(runId, token)
     }
   }, [])
 

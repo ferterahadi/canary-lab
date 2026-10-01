@@ -36,6 +36,7 @@ interface ReviewControl {
 interface Props {
   activeRunDetail: RunDetail | null
   notificationControl?: React.ReactNode
+  recordSyncControl?: React.ReactNode
   onRunLatestTests?: (feature: string) => void
   runStartPending?: boolean
   onOpenCleanup?: () => void
@@ -71,6 +72,7 @@ const EMPTY_FLIGHT_PILL: FlightsPillProps = { flights: [], onOpenFlight: () => {
 // features column / config editor).
 export function GlobalStatusBar({
   notificationControl,
+  recordSyncControl,
   review,
   activeRunDetail,
   onRunLatestTests,
@@ -184,6 +186,7 @@ export function GlobalStatusBar({
       </span>
         <ConnectionBadge state={connection} />
       <McpHealthBadge />
+      {recordSyncControl}
       {services.length > 0 && (
         <div className="shrink-0">
           <StatusChip

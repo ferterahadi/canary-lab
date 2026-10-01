@@ -43,6 +43,7 @@ export interface ConnectWorkspaceEventsOptions {
   // socket was down is lost — consumers MUST refetch their state here to close
   // the gap (see cl_live-state-sync). Not fired on the initial connect.
   onReconnect?: () => void
+  onDisconnect?: () => void
 }
 
 export interface WorkspaceEventsConnection {
@@ -61,6 +62,7 @@ export function connectWorkspaceEvents(opts: ConnectWorkspaceEventsOptions): Wor
     maxReconnects: Infinity,
     reconnectDelayMs: 1500,
     onError: opts.onError ? () => opts.onError?.('unknown error') : undefined,
+    onReconnect: () => opts.onDisconnect?.(),
     onOpen: () => {
       if (opened) opts.onReconnect?.()
       opened = true

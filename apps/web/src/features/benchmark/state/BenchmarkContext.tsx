@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import * as api from '@/shared/api/client'
+import { createObservedReads } from '@/shared/state/observed-reads'
 import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
 import type { BenchmarkManifest, SabotageLevel } from '../api/benchmark-types'
 import {
@@ -56,8 +57,10 @@ export function BenchmarkProvider({
   const [state, dispatch] = useReducer(benchmarkReducer, initialBenchmarkState)
   const dispatchRef = useRef(dispatch)
   dispatchRef.current = dispatch
+  const readsRef = useRef(createObservedReads())
 
   useEffect(() => {
+    const reads = readsRef.current
     const url = wsUrl ?? defaultWsUrl()
     const connection = connectReconnectingSocket({
       url,
@@ -83,10 +86,14 @@ export function BenchmarkProvider({
           return
         }
         const action = frameToAction(frame)
-        if (action) dispatchRef.current(action)
+        if (action) {
+          if (action.type === 'update' || action.type === 'removed') reads.invalidate(action.benchmarkId)
+          else reads.clear()
+          dispatchRef.current(action)
+        }
       },
     })
-    return () => connection.close()
+    return () => { reads.clear(); connection.close() }
   }, [wsUrl, WebSocketImpl])
 
   const startBenchmark = useCallback(
@@ -102,11 +109,16 @@ export function BenchmarkProvider({
   }, [])
 
   const loadBenchmark = useCallback(async (id: string) => {
+    const reads = readsRef.current
+    const token = reads.begin(id)
+    if (!token) return
     try {
       const manifest = await api.getBenchmark(id)
-      if (manifest) dispatchRef.current({ type: 'update', benchmarkId: id, manifest })
+      if (manifest && reads.current(id, token)) dispatchRef.current({ type: 'update', benchmarkId: id, manifest })
     } catch {
       /* leave it unhydrated — the caller shows a loading/empty state */
+    } finally {
+      reads.finish(id, token)
     }
   }, [])
 
