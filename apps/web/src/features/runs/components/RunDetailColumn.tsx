@@ -3,7 +3,6 @@ import type { RunStatus } from '@/shared/api/types'
 import type { RunArrivalTab } from '@/shared/lib/workspace-view-state'
 import { branchForService } from '../utils/run-detail-playback'
 import { useRun } from '../state/RunsContext'
-import { useInvalidationKey } from '@/shared/state/invalidation'
 import { deriveRunViewModel } from '../utils/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
@@ -71,9 +70,6 @@ export function RunDetailColumn({
   bootFailureOpen?: boolean
   onBootFailureOpenChange?: (open: boolean) => void
 }) {
-  // The journal refetches on `journal-changed` for THIS run (scoped so a bump
-  // for another run doesn't reload it).
-  const journalRefreshKey = useInvalidationKey('journal', runId ?? undefined)
   // Arriving with a focused failure means the Playwright tab IS the destination —
   // opening on Overview would hide the thing that was clicked. A named arrival
   // tab is the same contract for a link that points at a pane rather than a test.
@@ -340,7 +336,7 @@ export function RunDetailColumn({
           />
         )}
         {!isVerify && tab === 'journal' && (
-          <JournalTab feature={m.feature} runId={m.runId} refreshKey={journalRefreshKey} healCycles={m.healCycles} />
+          <JournalTab feature={m.feature} runId={m.runId} healCycles={m.healCycles} />
         )}
       </div>
       {/* Mounted here, not in the Overview tab, so switching tabs can't strand

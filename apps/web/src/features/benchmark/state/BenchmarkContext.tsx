@@ -10,7 +10,8 @@ import {
 } from 'react'
 import * as api from '@/shared/api/client'
 import { createObservedReads } from '@/shared/state/observed-reads'
-import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
+import { defaultWsBase } from '@/shared/api/reconnecting-socket'
+import { connectRecordStream } from '@/shared/state/record-stream'
 import type { BenchmarkManifest, SabotageLevel } from '../api/benchmark-types'
 import {
   benchmarkReducer,
@@ -42,9 +43,6 @@ interface BenchmarkContextValue {
 
 const BenchmarkContext = createContext<BenchmarkContextValue | null>(null)
 
-const RECONNECT_INITIAL_MS = 500
-const RECONNECT_MAX_MS = 10_000
-
 export function BenchmarkProvider({
   children,
   wsUrl,
@@ -60,40 +58,16 @@ export function BenchmarkProvider({
   const readsRef = useRef(createObservedReads())
 
   useEffect(() => {
-    const reads = readsRef.current
-    const url = wsUrl ?? defaultWsUrl()
-    const connection = connectReconnectingSocket({
-      url,
+    const connection = connectRecordStream({
+      url: wsUrl ?? defaultWsUrl(),
       WebSocketImpl,
-      maxReconnects: Infinity,
-      reconnectDelayMs: (attempt) => Math.min(RECONNECT_INITIAL_MS * 2 ** (attempt - 1), RECONNECT_MAX_MS),
-      coerceMessageData: true,
-      onOpen: () => {
-        dispatchRef.current({ type: 'connection', status: 'live' })
-      },
-      onReconnect: (_attempt, reason) => {
-        if (reason === 'close') dispatchRef.current({ type: 'connection', status: 'reconnecting' })
-      },
-      onReconnectAttempt: (_attempt, delayMs) => {
-        // Keep the existing label timing: the capped wait must elapse first.
-        if (delayMs >= RECONNECT_MAX_MS) dispatchRef.current({ type: 'connection', status: 'disconnected' })
-      },
-      onMessage: (data) => {
-        let frame: BenchmarkStreamFrame
-        try {
-          frame = JSON.parse(data)
-        } catch {
-          return
-        }
-        const action = frameToAction(frame)
-        if (action) {
-          if (action.type === 'update' || action.type === 'removed') reads.invalidate(action.benchmarkId)
-          else reads.clear()
-          dispatchRef.current(action)
-        }
-      },
+      reads: readsRef.current,
+      decode: (frame) => frameToAction(frame as BenchmarkStreamFrame),
+      recordId: (action) => action.type === 'update' || action.type === 'removed' ? action.benchmarkId : null,
+      dispatch: (action) => dispatchRef.current(action),
+      onConnection: (status) => dispatchRef.current({ type: 'connection', status }),
     })
-    return () => { reads.clear(); connection.close() }
+    return () => connection.close()
   }, [wsUrl, WebSocketImpl])
 
   const startBenchmark = useCallback(

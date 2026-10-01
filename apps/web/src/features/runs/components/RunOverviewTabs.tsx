@@ -1,7 +1,8 @@
 import { pinnedPlanSummary } from '@shared/agent-models'
-import { useEffect, useMemo, useState } from 'react'
-import type { AuditEntry, RepoBranchSnapshot, ServiceManifestEntry, RunManifest, RunStatus, RunSummary } from '@/shared/api/types'
-import { getRunAudit } from '@/shared/api/client'
+import { useMemo } from 'react'
+import type { RepoBranchSnapshot, ServiceManifestEntry, RunManifest, RunStatus, RunSummary } from '@/shared/api/types'
+import { useExternalAudit } from '../state/use-external-audit'
+export { useExternalAudit } from '../state/use-external-audit'
 import { openRunLog } from '../utils/open-run-log'
 import { BootEvidenceRows, bootEvidenceLabel } from '@/shared/ui/BootEvidence'
 import { formatDuration, durationBetween } from '@/shared/lib/format'
@@ -16,7 +17,7 @@ import { ReviewEvaluationMenu } from './ReviewEvaluationMenu'
 import { RunPane } from './RunPane'
 import { SectionHeader } from './RunPlaybackPanels'
 import { ServiceCard } from './RunServicePanels'
-import { isAssertionExportable, isTerminalRunStatus } from './run-export-links'
+import { isAssertionExportable } from './run-export-links'
 
 export function canRestartHeal(status: string): boolean {
   return isRestartableRunStatus(status)
@@ -361,35 +362,4 @@ export function RunLogsTab({
       )}
     </RunPane>
   )
-}
-
-// External MCP commands are appended to `<runDir>/external-commands.jsonl`. Tail
-// it via /api/runs/:runId/audit so the heal-loop story interleaves with the
-// orchestrator's own lifecycle events. Poll every 2s while the run is active;
-// for terminal runs the log is final, so one read suffices. Best-effort: a
-// fetch error just means no external rows, never a broken Run Logs pane.
-export function useExternalAudit(runId: string, runStatus: RunStatus): AuditEntry[] {
-  const [entries, setEntries] = useState<AuditEntry[]>([])
-  const terminal = isTerminalRunStatus(runStatus)
-
-  useEffect(() => {
-    let cancelled = false
-    const fetchAudit = async (): Promise<void> => {
-      try {
-        const res = await getRunAudit(runId)
-        if (!cancelled) setEntries(res.entries)
-      } catch {
-        // Audit is best-effort; leave prior entries in place on a transient error.
-      }
-    }
-    void fetchAudit()
-    if (terminal) return () => { cancelled = true }
-    const id = window.setInterval(() => { void fetchAudit() }, 2000)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-  }, [runId, terminal])
-
-  return entries
 }

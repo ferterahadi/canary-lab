@@ -10,7 +10,8 @@ import {
 } from 'react'
 import * as api from '@/shared/api/client'
 import { createObservedReads } from '@/shared/state/observed-reads'
-import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
+import { defaultWsBase } from '@/shared/api/reconnecting-socket'
+import { connectRecordStream } from '@/shared/state/record-stream'
 import type { PortifyManifest, PortifyIndexEntry } from '@/shared/api/client'
 import {
   portifyReducer,
@@ -38,9 +39,6 @@ interface PortifyContextValue {
 
 const PortifyContext = createContext<PortifyContextValue | null>(null)
 
-const RECONNECT_INITIAL_MS = 500
-const RECONNECT_MAX_MS = 10_000
-
 export function PortifyProvider({
   children,
   wsUrl,
@@ -56,40 +54,16 @@ export function PortifyProvider({
   const readsRef = useRef(createObservedReads())
 
   useEffect(() => {
-    const reads = readsRef.current
-    const url = wsUrl ?? defaultWsUrl()
-    const connection = connectReconnectingSocket({
-      url,
+    const connection = connectRecordStream({
+      url: wsUrl ?? defaultWsUrl(),
       WebSocketImpl,
-      maxReconnects: Infinity,
-      reconnectDelayMs: (attempt) => Math.min(RECONNECT_INITIAL_MS * 2 ** (attempt - 1), RECONNECT_MAX_MS),
-      coerceMessageData: true,
-      onOpen: () => {
-        dispatchRef.current({ type: 'connection', status: 'live' })
-      },
-      onReconnect: (_attempt, reason) => {
-        if (reason === 'close') dispatchRef.current({ type: 'connection', status: 'reconnecting' })
-      },
-      onReconnectAttempt: (_attempt, delayMs) => {
-        // Keep the existing label timing: the capped wait must elapse first.
-        if (delayMs >= RECONNECT_MAX_MS) dispatchRef.current({ type: 'connection', status: 'disconnected' })
-      },
-      onMessage: (data) => {
-        let frame: PortifyStreamFrame
-        try {
-          frame = JSON.parse(data)
-        } catch {
-          return
-        }
-        const action = frameToAction(frame)
-        if (action) {
-          if (action.type === 'update' || action.type === 'removed') reads.invalidate(action.workflowId)
-          else reads.clear()
-          dispatchRef.current(action)
-        }
-      },
+      reads: readsRef.current,
+      decode: (frame) => frameToAction(frame as PortifyStreamFrame),
+      recordId: (action) => action.type === 'update' || action.type === 'removed' ? action.workflowId : null,
+      dispatch: (action) => dispatchRef.current(action),
+      onConnection: (status) => dispatchRef.current({ type: 'connection', status }),
     })
-    return () => { reads.clear(); connection.close() }
+    return () => connection.close()
   }, [wsUrl, WebSocketImpl])
 
   const startPortify = useCallback(

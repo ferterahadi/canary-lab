@@ -10,6 +10,7 @@ import type { RunIndexEntry } from '@/shared/api/types'
 import type { FlightEntryOptions, FlightIndexEntry, FlightStageKey } from '@shared/flights/types'
 import { isTerminalRunStatus, isUnsettledRunStatus } from '@shared/run-state'
 import { useInvalidationKey } from '@/shared/state/invalidation'
+import { useLiveResource } from '@/shared/state/use-live-resource'
 
 // The Getting Started launcher: one guided path plus the specialized workflows
 // and exact fixture actions that still exist in this workspace.
@@ -271,34 +272,14 @@ export interface DemoLauncher extends DemoAvailability {
  * gap when an external agent starts from another client.
  */
 export function useDemoLauncher(runs: RunIndexEntry[], flights: FlightIndexEntry[]): DemoLauncher {
-  const [samples, setSamples] = useState<OnboardingSamples | null>(null)
+  const { value: samples } = useLiveResource('onboarding', 'workspace',
+    () => api.getOnboardingSamples(), { reconcileMs: 5000 })
   const [seen, setSeen] = useState<boolean>(() => readDemoSeen())
   const [showDemo, setShowDemoState] = useState<boolean | null>(null)
-  // Bumped by workspace events, so external-agent starts and terminal evidence
-  // appear while the dialog is open. A gentle poll backs the best-effort push.
-  const onboardingKey = useInvalidationKey('onboarding')
   // Bumped by the `project-config-changed` WorkspaceEvent, so a `showDemo` flip
   // made anywhere — this tab's chooser, another browser, an edit to the file —
   // reaches the pill without a reload.
   const configKey = useInvalidationKey('project-config')
-
-  useEffect(() => {
-    let alive = true
-    api.getOnboardingSamples()
-      .then((s) => { if (alive) setSamples(s) })
-      .catch(() => { /* an older server has no such route — the launcher stays silent */ })
-    return () => { alive = false }
-  }, [onboardingKey])
-
-  useEffect(() => {
-    // The workspace broadcast is a fast hint, not a guarantee. Poll this tiny
-    // file-backed record so an external start is still discovered if its one
-    // getting-started-changed frame was dropped.
-    const id = window.setInterval(() => {
-      api.getOnboardingSamples().then(setSamples).catch(() => {})
-    }, 5000)
-    return () => window.clearInterval(id)
-  }, [])
 
   useEffect(() => {
     let alive = true

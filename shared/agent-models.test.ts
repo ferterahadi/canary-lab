@@ -8,6 +8,36 @@ describe('KNOWN_MODELS', () => {
 })
 
 describe('RECOMMENDED_BY_STAGE', () => {
+  it('prefers GPT-6.1 Sol over older Sol models regardless of catalog order', () => {
+    const models = [
+      { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' },
+      { value: 'gpt-6-sol', label: 'GPT-6-Sol' },
+      { value: 'gpt-6.1-sol', label: 'GPT-6.1-Sol' },
+    ]
+    for (const catalog of [models, [...models].reverse()]) {
+      for (const stage of MODEL_STAGE_KEYS) {
+        expect(recommendedChoice('codex', stage, catalog)).toEqual({
+          model: 'gpt-6.1-sol',
+          effort: stage === 'commit' ? 'medium' : 'high',
+        })
+      }
+    }
+  })
+
+  it('keeps balanced stages on visible GPT-6 Terra while deep stages use GPT-6.1 Sol', () => {
+    const available = [
+      { value: 'gpt-6-sol', label: 'GPT-6-Sol' },
+      { value: 'gpt-6.1-sol', label: 'GPT-6.1-Sol' },
+      { value: 'gpt-6-terra', label: 'GPT-6-Terra' },
+    ]
+    for (const stage of ['scout', 'docs', 'portify', 'report', 'commit'] as const) {
+      expect(recommendedChoice('codex', stage, available).model).toBe('gpt-6-terra')
+    }
+    for (const stage of ['prd', 'gen', 'mapping', 'heal'] as const) {
+      expect(recommendedChoice('codex', stage, available)).toEqual({ model: 'gpt-6.1-sol', effort: 'high' })
+    }
+  })
+
   it('uses GPT-6 Sol for every Codex stage while GPT-6 Terra is unavailable', () => {
     const available = [
       { value: 'gpt-5.6-sol', label: 'GPT-5.6-Sol' },

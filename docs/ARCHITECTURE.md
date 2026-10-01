@@ -262,7 +262,10 @@ stream observations and provider cleanup invalidate outstanding detail reads,
 preventing late responses from reverting newer state or restoring removed runs.
 Runs, Portify, and Benchmark share that per-record request guard in
 `apps/web/src/shared/state/observed-reads.ts`; feature reducers and actions remain
-separate. The server writer and browser reducer derive compact run rows through
+separate. Portify and Benchmark compose these guards with the reconnecting socket
+through `apps/web/src/shared/state/record-stream.ts`, which owns connection labels,
+backoff, frame observation, and teardown. Their reducers and HTTP actions remain
+feature-owned. The server writer and browser reducer derive compact run rows through
 `shared/run-index.ts`, including repair ownership, cycles, and review counts.
 Portify uses `shared/portify-index.ts` for the same boundary: snapshots and
 browser updates retain the server's branch, producer, and terminal timestamp.
@@ -282,6 +285,16 @@ cache and a 1.5-second cadence. Creation responses seed only unread task keys;
 an authoritative 404 stops polling and disables task actions, while transient
 failures retain the accepted task. Proposal edits and navigation guards belong
 to the task identity, so reconnects cannot overwrite edits or navigate twice.
+
+Getting Started also uses `useLiveResource`, with the `onboarding` topic and
+continuous five-second reconciliation while mounted, including after an empty
+catalog. Journal readers subscribe directly to their run-scoped `journal` topic;
+unknown or pending journals poll every two seconds, stopping on accepted empty or
+settled entries. External audit uses an explicit null topic because its writer
+does not emit invalidations. It polls unknown/active runs every two seconds and
+refreshes on terminal transitions and Runs connection changes. Journal and audit
+use separate identity-bound caches, retain accepted data through failures, and
+ignore superseded reads. Settled audit logs do not continuously reconcile.
 
 Agent-session viewers and socket adapters share the eight source identities in
 `apps/web/src/shared/api/agent-session-source.ts`. Identity includes the flight

@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
-import * as api from '@/shared/api/client'
+import { useState } from 'react'
+import { useRunJournal } from '../state/use-run-journal'
 import type { JournalEntry } from '@/shared/api/types'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import { RunPane } from './RunPane'
 import {
   classifyOutcome,
-  newestFirst,
   outcomeBadgeClass,
   outcomeLabel,
   parseBodyFields,
@@ -24,33 +23,7 @@ interface Props {
 }
 
 export function JournalTab({ feature, runId, refreshKey = 0, healCycles = 0 }: Props) {
-  const [entries, setEntries] = useState<JournalEntry[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  const refresh = useCallback((isCancelled: () => boolean = () => false) => {
-    api.listJournal({ feature, run: runId })
-      .then((data) => {
-        if (isCancelled()) return
-        setEntries(newestFirst(data))
-        setError(null)
-      })
-      .catch((err: unknown) => {
-        if (isCancelled()) return
-        setError(err instanceof Error ? err.message : String(err))
-      })
-  }, [feature, runId])
-
-  useEffect(() => {
-    let cancelled = false
-    refresh(() => cancelled)
-    return () => { cancelled = true }
-  }, [refresh, refreshKey])
-
-  useEffect(() => {
-    if (!entries?.some((entry) => classifyOutcome(entry.outcome) === 'pending')) return
-    const id = window.setInterval(() => refresh(), 2000)
-    return () => window.clearInterval(id)
-  }, [entries, refresh])
+  const { value: entries, error } = useRunJournal(feature, runId, refreshKey)
 
   return (
     <RunPane padded>

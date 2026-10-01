@@ -236,6 +236,40 @@ describe('ModelMatrixDialog', () => {
     } })
   })
 
+  it('offers GPT-6.1 Sol without replacing saved pins until reset, then saves the new recommendation', async () => {
+    vi.mocked(api.getAgentProbe).mockResolvedValue({
+      ...SNAPSHOT,
+      codex: OK_PROBE('codex', { models: [
+        ...CODEX_MODELS,
+        { value: 'gpt-6-sol', label: 'GPT-6-Sol' },
+        { value: 'gpt-6.1-sol', label: 'GPT-6.1-Sol' },
+      ] }),
+    })
+    await mount({
+      agent: 'codex',
+      agentModels: { claude: {}, codex: { heal: { model: 'gpt-6-sol', effort: 'high' } } },
+    })
+    expect(select('Auto-repair model').value).toBe('gpt-6-sol')
+    expect(document.querySelector('[data-testid="model-row-heal"]')?.textContent).toContain('custom')
+    expect(api.putProjectConfig).not.toHaveBeenCalled()
+
+    await act(async () => {
+      [...document.querySelectorAll('button')].find((b) => b.textContent === 'Reset all to recommended')!.click()
+    })
+    expect(select('Repo scan model').value).toBe('gpt-6.1-sol')
+    expect(select('Auto-repair model').value).toBe('gpt-6.1-sol')
+    expect(select('Auto-repair reasoning effort').value).toBe('high')
+    expect(select('Commit message reasoning effort').value).toBe('medium')
+    await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="model-matrix-save"]')!.click() })
+    expect(api.putProjectConfig).toHaveBeenCalledWith({ agentModels: {
+      claude: {},
+      codex: expect.objectContaining({
+        heal: { model: 'gpt-6.1-sol', effort: 'high' },
+        commit: { model: 'gpt-6.1-sol', effort: 'medium' },
+      }),
+    } })
+  })
+
   it('an auth-failed probe warns with the remedy and Retry re-probes fresh — nothing is disabled', async () => {
     vi.mocked(api.getAgentProbe).mockResolvedValue({
       ...SNAPSHOT,

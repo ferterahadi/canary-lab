@@ -105,8 +105,8 @@ export const KNOWN_MODELS: Record<ModelAgentKind, readonly string[]> = {
 // The tier is explanatory UI copy; the actual provider knobs are explicit per
 // stage below because equal-capability models can need different effort levels.
 // Claude's stable aliases resolve to the latest family member. Codex prefers
-// GPT-6 Terra for balanced work once available, GPT-6 Sol until then, and an
-// older Sol when the current CLI exposes neither GPT-6 choice.
+// GPT-6 Terra for balanced work once available, GPT-6.1 Sol until then, and
+// GPT-6 Sol or an older Sol when the current CLI lacks the newer choices.
 export type ModelTier = 'frontier' | 'agentic' | 'balanced'
 
 export const STAGE_TIERS: Record<ModelStageKey, ModelTier> = {
@@ -182,11 +182,13 @@ export function recommendedChoice(
 ): StageModelChoice {
   if (agent === 'claude') return RECOMMENDED_BY_STAGE.claude[stage]
 
-  // Prefer GPT-6 regardless of catalog order. The balanced stages use Sol
+  // Prefer GPT-6.1 Sol regardless of catalog order. The balanced stages use Sol
   // until Terra joins that lineup; older CLIs can still use an installed Sol.
   // Without a matching model, keep the safe effort-only recommendation.
   const recommendation = RECOMMENDED_BY_STAGE.codex[stage]
-  const preferredIds = recommendation.model === 'terra' ? ['gpt-6-terra', 'gpt-6-sol'] : ['gpt-6-sol']
+  const preferredIds = recommendation.model === 'terra'
+    ? ['gpt-6-terra', 'gpt-6.1-sol', 'gpt-6-sol']
+    : ['gpt-6.1-sol', 'gpt-6-sol']
   for (const id of preferredIds) {
     const preferred = availableModels.find(({ value }) => value.toLowerCase() === id)
     if (preferred) return { model: preferred.value, effort: recommendation.effort }

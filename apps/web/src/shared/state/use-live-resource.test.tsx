@@ -380,3 +380,29 @@ it('uses a custom active polling cadence and cleans it up without changing the d
   expect(custom).toHaveBeenCalledTimes(2)
   expect(standard).toHaveBeenCalledTimes(2)
 })
+
+describe('polling without an invalidation topic', () => {
+  it('ignores bus changes but supports explicit refresh, polling, and cleanup', async () => {
+    vi.useFakeTimers()
+    const fetcher = vi.fn(async () => 'accepted')
+    let live!: LiveResource<string>
+    let bump!: () => void
+    function Reader() {
+      const bus = useInvalidation()
+      bump = () => { bus.invalidate('journal', 'run'); bus.invalidate('coverage') }
+      live = useLiveResource(null, 'no-topic', fetcher, { pollIntervalMs: 2000, pollWhile: () => true })
+      return <span>{live.value}</span>
+    }
+    await act(async () => root.render(<InvalidationProvider><Reader /></InvalidationProvider>))
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    await act(async () => bump())
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    await act(async () => live.refresh())
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    await act(async () => vi.advanceTimersByTimeAsync(2000))
+    expect(fetcher).toHaveBeenCalledTimes(3)
+    await act(async () => root.render(null))
+    await act(async () => vi.advanceTimersByTimeAsync(6000))
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+})

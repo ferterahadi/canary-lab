@@ -16,8 +16,8 @@ import type { InvalidationTopic } from './invalidation-bus'
 //
 // Nothing about that effect looks wrong in review, which is why the fix is a
 // shape rather than a rule: here the topic that refreshes the value is a
-// REQUIRED argument, so a fetch with no live trigger is not something you can
-// write by accident. The topic is bumped by the workspace-event handler
+// REQUIRED argument; polling-only readers must explicitly pass null, so a
+// fetch with no live trigger is not something you can write by accident. The topic is bumped by the workspace-event handler
 // (use-workspace-data.ts) when the server says that surface changed.
 //
 // This is the read-side half of the same idea the server applies to writes: the
@@ -46,7 +46,8 @@ export interface LiveResource<T> {
 
 /**
  * Fetch `key`'s value and refetch it whenever `topic` (optionally scoped) is
- * invalidated.
+ * invalidated. A null topic explicitly opts out of bus invalidation for a
+ * polling/manual-refresh reader.
  *
  * `key` identifies the resource — a feature name, a run id — and doubles as the
  * gate: pass `null` when there is nothing to fetch yet and the hook stays idle
@@ -65,7 +66,7 @@ export interface LiveResource<T> {
 const lastResolved = new Map<string, unknown>()
 
 export function useLiveResource<T>(
-  topic: InvalidationTopic,
+  topic: InvalidationTopic | null,
   key: string | null,
   fetcher: (key: string, opts?: { readRevision: string }) => Promise<T | null>,
   opts: {
