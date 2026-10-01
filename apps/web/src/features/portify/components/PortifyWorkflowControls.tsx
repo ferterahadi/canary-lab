@@ -80,11 +80,9 @@ export function PortifyWorkflowControls({
         <ReviewScreen
           m={manifest}
           busy={busy}
-          saved={false}
           canRequestChanges={manifest.producer !== 'external'}
           onSave={() => { void save() }}
           onRequestChanges={() => setFeedbackOpen(true)}
-          onDone={onChanged}
         />
         {error && <div role="alert" className="mt-3 cl-type-meta text-danger">{error}</div>}
         {feedbackOpen && (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useInvalidationKey } from './invalidation'
 import type { InvalidationTopic } from './invalidation-bus'
 
@@ -42,6 +42,9 @@ export interface LiveResource<T> {
   /** A current successful read, not a remount cache or an expired lease. */
   confirmed: boolean
   refresh: () => void
+  /** Accept an authoritative observation and supersede outstanding reads.
+   * Captured callbacks expire on identity replacement or unmount, not refresh. */
+  accept: (next: T | null | ((current: T | null) => T | null)) => boolean
 }
 
 /**
@@ -122,6 +125,18 @@ export function useLiveResource<T>(
   const readKey = JSON.stringify([key, version, refreshKey, refreshVersion])
   const [confirmedReadKey, setConfirmedReadKey] = useState<string | null>(null)
   const [valueKey, setValueKey] = useState(key)
+  const lifetime = useMemo(() => ({ key, active: false }), [key])
+  const renderedLifetime = useRef(lifetime)
+  renderedLifetime.current = lifetime
+  const observer = useRef<{ lifetime: typeof lifetime; accept: LiveResource<T>['accept'] } | null>(null)
+  useEffect(() => {
+    lifetime.active = true
+    return () => { lifetime.active = false }
+  }, [lifetime])
+  const accept = useCallback<LiveResource<T>['accept']>((next) => {
+    if (!lifetime.active || renderedLifetime.current !== lifetime || observer.current?.lifetime !== lifetime) return false
+    return observer.current.accept(next)
+  }, [lifetime])
   useEffect(() => {
     setValueKey(key)
     if (key === null) {
@@ -142,6 +157,25 @@ export function useLiveResource<T>(
     setError(null)
     let requested = 0
     let lease: ReturnType<typeof setTimeout> | undefined
+    const publish = (next: T | null) => {
+      acceptedKeys.current.add(key)
+      current = next
+      retained.current = { key, value: current }
+      if (cacheTag !== undefined) lastResolved.set(`${cacheTag}:${key}`, current)
+      setValue(current)
+      setError(null)
+      setConfirmed(true)
+      setConfirmedReadKey(readKey)
+      clearTimeout(lease)
+      if (leaseMs) lease = setTimeout(() => { if (alive) setConfirmed(false) }, leaseMs)
+    }
+    observer.current = { lifetime, accept: (next) => {
+      if (!alive) return false
+      requested++
+      publish(typeof next === 'function' ? (next as (current: T | null) => T | null)(current) : next)
+      setLoading(false)
+      return true
+    } }
     const fetch = (event?: Event) => {
       if (pauseWhenHidden && document.visibilityState === 'hidden') return
       const request = ++requested
@@ -151,16 +185,7 @@ export function useLiveResource<T>(
       Promise.resolve().then(() => reconcileMs ? fetcherRef.current(key, { readRevision }) : fetcherRef.current(key))
         .then((next) => {
           if (!alive || request !== requested) return
-          acceptedKeys.current.add(key)
-          current = next ?? null
-          retained.current = { key, value: current }
-          if (cacheTag !== undefined) lastResolved.set(`${cacheTag}:${key}`, next ?? null)
-          setValue(current)
-          setError(null)
-          setConfirmed(true)
-          setConfirmedReadKey(readKey)
-          clearTimeout(lease)
-          if (leaseMs) lease = setTimeout(() => { if (alive) setConfirmed(false) }, leaseMs)
+          publish(next ?? null)
         })
         .catch((error: unknown) => {
           // A failed task read is not evidence that the task disappeared.
@@ -197,9 +222,9 @@ export function useLiveResource<T>(
     }
     // `cacheTag` is constant per call site (a literal), so it needs no dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, version, polling, reconcileMs, leaseMs, refreshKey, refreshVersion, pauseWhenHidden, pollIntervalMs])
+  }, [key, version, polling, reconcileMs, leaseMs, refreshKey, refreshVersion, pauseWhenHidden, pollIntervalMs, lifetime])
 
   // Withdraw trust during the render receiving an invalidation/key change,
   // not one paint later when its replacement request starts.
-  return { value: valueKey === key ? value : null, loading, error, confirmed: confirmed && confirmedReadKey === readKey, refresh }
+  return { value: valueKey === key ? value : null, loading, error, confirmed: confirmed && confirmedReadKey === readKey, refresh, accept }
 }

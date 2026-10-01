@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import type { DirtySpecSummary, Feature, RunDetail, RunIndexEntry } from '@/shared/api/types'
 import type { FeatureTestReview, RunTestReview, TestReviewReceipt } from '@shared/test-review'
 import * as api from '@/shared/api/client'
-import { ApiError } from '@/shared/api/internal'
+import { useTestSourceComparison } from '@/shared/state/use-test-source-comparison'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { shortRunRef } from '@/shared/lib/format'
-import { TEST_CHANGE_KINDS, type TestChangeKind, type TestVersionChanges, type VersionTest } from '@/shared/lib/test-versions'
+import { TEST_CHANGE_KINDS, type TestChangeKind, type VersionTest } from '@/shared/lib/test-versions'
 import { ChevronLeftIcon, ChevronRightIcon, Modal, StatusDot } from '@/shared/ui/atoms'
 import { TEST_CHANGE_MARKS, TestChangeMark } from '@/shared/ui/TestChangeMark'
 import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
@@ -51,7 +51,6 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   useEffect(() => { setFocus(routedFocus) }, [routedFocus])
   const updateFocus = (next: ReviewFocus): void => { setFocus(next); onFocus?.(next) }
   const [navigationTarget, setNavigationTarget] = useState<HTMLDivElement | null>(null)
-  const [runFiles, setRunFiles] = useState<{ feature: string; runId: string; revision: number; rootsKey: string; files: string[]; changedFiles: string[]; changes?: TestVersionChanges; error?: string; missingSuite?: boolean; missingSnapshot?: boolean } | null>(null)
   const pendingByFeature = new Map<string, RunIndexEntry>()
   for (const run of pendingRuns) {
     if (!pendingByFeature.has(run.feature) || run.runId === focusRunId) pendingByFeature.set(run.feature, run)
@@ -72,20 +71,6 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
   const { detail: loadedDetail, error: runError } = useRun(selected?.run?.runId ?? null)
   const detail = loadedDetail ?? focusRunDetail
   const linkedSpec: DirtySpecSummary | undefined = focus?.file ? { file: focus.file, affectedTests: [] } : undefined
-  // A completed-run comparison can have a linked file without pending edits.
-  // The sidebar and comparison must resolve that file from the same list.
-  const filesFor = (card: ReviewSuite): DirtySpecSummary[] => {
-    const files = specsFor(card, card === selected ? detail : focusRunDetail)
-    if (linkedSpec && card.name === linkedFeature && !files.some((file) => file.file === linkedSpec.file)) files.push(linkedSpec)
-    if (runFiles?.feature === card.name && runFiles.runId === (card.name === focusFeature && focus?.baseline === 'run' ? focusRunId : card.run?.runId)) {
-      for (const file of runFiles.files) if (!files.some((item) => item.file === file)) files.push({ file, affectedTests: [] })
-    }
-    return files.sort((a, b) => a.file.localeCompare(b.file))
-  }
-  const specs = selected ? filesFor(selected) : []
-  const assessedFiles = selected ? specsFor(selected, detail) : []
-  const spec = specs.find((item) => selected?.name === picked?.feature && item.file === picked?.file)
-    ?? specs.find((item) => assessedFiles.some((dirty) => dirty.file === item.file)) ?? specs[0]
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const testChanges = useInvalidationKey('tests')
@@ -105,7 +90,6 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     setError(null)
     updateFocus({ file, mode: focus?.mode, ...(useRunBaseline ? { baseline: 'run' } : {}) })
   }
-  const tone = spec ? specTone(spec) : selected?.feature ? featureTone(selected.feature) : null
   const run = selected?.run
   const comparisonRunId = againstRun && selected && selected.name === focusFeature && focusRunId && (!focusRunDetail || focusRunDetail.manifest.feature === selected.name) ? focusRunId
     : run?.runId ?? (focusRunDetail?.manifest.feature === selected?.name ? focusRunId ?? undefined : undefined)
@@ -113,8 +97,34 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     : detail?.manifest.runId === comparisonRunId ? detail?.manifest : undefined
   const comparisonDir = comparisonManifest?.featureDir
   const snapshotDir = comparisonManifest?.suiteSnapshot?.kind === 'taken' ? comparisonManifest.suiteSnapshot.dir : undefined
-  const rootsKey = JSON.stringify([comparisonDir, snapshotDir])
-  const currentRunFiles = runFiles && runFiles.feature === selected?.name && runFiles.runId === comparisonRunId && runFiles.revision === testChanges && runFiles.rootsKey === rootsKey ? runFiles : null
+  const sourceComparison = useTestSourceComparison({
+    feature: selected?.name, runId: comparisonRunId, featureDir: comparisonDir, snapshotDir, refreshKey: testChanges,
+  })
+  const comparison = sourceComparison.comparison
+  const runFiles = selected && comparisonRunId && snapshotDir ? {
+    feature: selected.name, runId: comparisonRunId, files: comparison.files,
+    changedFiles: comparison.differences.map((item) => item.file),
+    changes: comparison.state === 'ready' ? comparison.changes : undefined,
+    error: sourceComparison.error,
+    missingSuite: sourceComparison.missingSuite,
+    missingSnapshot: sourceComparison.missingSnapshot,
+  } : null
+  const currentRunFiles = runFiles
+  // A completed-run comparison can have a linked file without pending edits.
+  // The sidebar and comparison must resolve that file from the same list.
+  const filesFor = (card: ReviewSuite): DirtySpecSummary[] => {
+    const files = specsFor(card, card === selected ? detail : focusRunDetail)
+    if (linkedSpec && card.name === linkedFeature && !files.some((file) => file.file === linkedSpec.file)) files.push(linkedSpec)
+    if (runFiles?.feature === card.name && runFiles.runId === (card.name === focusFeature && focus?.baseline === 'run' ? focusRunId : card.run?.runId)) {
+      for (const file of runFiles.files) if (!files.some((item) => item.file === file)) files.push({ file, affectedTests: [] })
+    }
+    return files.sort((a, b) => a.file.localeCompare(b.file))
+  }
+  const specs = selected ? filesFor(selected) : []
+  const assessedFiles = selected ? specsFor(selected, detail) : []
+  const spec = specs.find((item) => selected?.name === picked?.feature && item.file === picked?.file)
+    ?? specs.find((item) => assessedFiles.some((dirty) => dirty.file === item.file)) ?? specs[0]
+  const tone = spec ? specTone(spec) : selected?.feature ? featureTone(selected.feature) : null
   const missingSnapshot = !!comparisonRunId && ((!!comparisonManifest && !snapshotDir) || !!currentRunFiles?.missingSnapshot)
   // RunStore decisions arrive through the run WebSocket as a new manifest.
   // Use that pushed revision to refetch the REST-only review immediately;
@@ -149,8 +159,9 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     && (runReview.value.allowedActions ?? (runReview.value.canAdopt ? ['adopt-and-rerun', 'restore'] : []))
       .some((action) => action === 'adopt-and-rerun' || action === 'approve-new-run' || action === 'restore')
     ? run : undefined
-  const reviewRevision = reviewRun ? runReview.value?.review_revision : undefined
-  const featureReviewRevision = suiteReviewAvailable && !reviewRun && featureReview.value?.files.length ? featureReview.value.review_revision : undefined
+  const comparisonAllowsAction = !comparisonRunId || !snapshotDir || sourceComparison.confirmed
+  const reviewRevision = comparisonAllowsAction && runReview.confirmed && reviewRun ? runReview.value?.review_revision : undefined
+  const featureReviewRevision = comparisonAllowsAction && featureReview.confirmed && suiteReviewAvailable && !reviewRun && featureReview.value?.files.length ? featureReview.value.review_revision : undefined
   const displayedRunRevision = useRef<string | undefined>(undefined)
   const displayedFeatureReview = useRef(false)
   if (reviewRevision) displayedRunRevision.current = reviewRevision
@@ -163,37 +174,6 @@ export function DirtyReviewDialog({ features, pendingRuns = [], focusFeature, fo
     if (suiteReviewAvailable && featureReview.confirmed && displayedFeatureReview.current && featureReview.value?.files.length === 0) onClose()
   }, [featureReview.confirmed, featureReview.value?.files.length, onClose, suiteReviewAvailable])
   const reviewKey = JSON.stringify([selected?.name, spec?.file])
-  const comparisonFeature = selected?.name
-  useEffect(() => {
-    if (!comparisonFeature || !comparisonRunId || !snapshotDir) return
-    let cancelled = false
-    let requested = 0
-    const load = (): void => {
-      const request = ++requested
-      api.getTestSourceComparison(comparisonFeature, comparisonRunId).then((comparison) => {
-        if (cancelled || request !== requested) return
-        setRunFiles({ feature: comparisonFeature, runId: comparisonRunId, revision: testChanges, rootsKey,
-          files: comparison.files, changedFiles: comparison.differences.map((item) => item.file),
-          ...(comparison.state === 'ready' ? { changes: comparison.changes }
-            : { error: 'Test change counts are unavailable because source or snapshot information is incomplete.' }),
-        })
-      }).catch((err: unknown) => {
-        if (cancelled || request !== requested) return
-        setRunFiles({ feature: comparisonFeature, runId: comparisonRunId, revision: testChanges, rootsKey, files: [], changedFiles: [],
-          ...(err instanceof ApiError && err.status === 404 && err.message === 'Suite not found'
-            ? { missingSuite: true }
-            : err instanceof ApiError && err.status === 409 && /snapshot/i.test(err.message)
-              ? { missingSnapshot: true }
-              : { error: 'Could not list all comparison files. Showing the available files.' }),
-        })
-      })
-    }
-    load()
-    // Direct Git or filesystem deletion may not deliver a feature event. An
-    // open comparison still needs to notice that its live side disappeared.
-    const interval = setInterval(load, 10_000)
-    return () => { cancelled = true; clearInterval(interval) }
-  }, [comparisonFeature, comparisonRunId, comparisonDir, snapshotDir, rootsKey, testChanges])
   const suiteUnavailable = !!currentRunFiles?.missingSuite
   const changedFiles = new Set(useRunBaseline
     ? currentRunFiles?.changedFiles ?? []

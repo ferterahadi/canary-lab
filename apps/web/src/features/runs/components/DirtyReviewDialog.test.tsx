@@ -780,3 +780,19 @@ it('never highlights a different test if the source changes after the declaratio
   expect(document.body.textContent).toContain('matching declaration is unavailable in this source snapshot')
   expect(document.querySelectorAll('tr[data-selected="true"]')).toHaveLength(0)
 })
+
+it('reconciles comparison files without events and withdraws actions on transient failure', async () => {
+  vi.useFakeTimers()
+  try {
+    await render({ pendingRuns: [run], focusFeature: 'alpha', focusRunId: run.runId, focusRunDetail: detail, focus: { file: 'e2e/a.spec.ts', baseline: 'run' } })
+    expect(button('Accept & commit')).toBeDefined()
+    vi.mocked(api.getTestSourceComparison).mockRejectedValueOnce(new Error('offline'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(button('Accept & commit')).toBeUndefined()
+    expect(document.body.textContent).toContain('Could not list all comparison files')
+    vi.mocked(api.getTestSourceComparison).mockResolvedValue({ state: 'ready', files: ['e2e/a.spec.ts'], differences: [], changes: { added: [], changed: [], removed: [] } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(button('Accept & commit')).toBeDefined()
+    expect(document.body.textContent).not.toContain('Could not list all comparison files')
+  } finally { vi.useRealTimers() }
+})

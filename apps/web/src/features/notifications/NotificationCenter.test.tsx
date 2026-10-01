@@ -300,3 +300,63 @@ it('shows unavailable source truth and does not navigate after failed action val
   expect(close).not.toHaveBeenCalled()
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Could not verify')
 })
+
+it('accepts action validation after refresh and rejects the delayed list', async () => {
+  let state!: ReturnType<typeof useNotifications>
+  function Probe() { state = useNotifications(); return null }
+  await act(async () => root.render(<Probe />))
+  let resolveAction!: (value: Awaited<ReturnType<typeof api.resolveNotificationAction>>) => void
+  api.resolveNotificationAction.mockImplementationOnce(() => new Promise((resolve) => { resolveAction = resolve }))
+  let action!: ReturnType<typeof state.resolveAction>
+  await act(async () => { action = state.resolveAction('n1') })
+  let stale!: (items: WorkspaceNotification[]) => void
+  api.getNotifications.mockImplementationOnce(() => new Promise((resolve) => { stale = resolve }))
+  await act(async () => state.refresh())
+  const current = [{ ...rows[0], title: 'New truth' }]
+  await act(async () => { resolveAction({ status: 'current', items: current, target }); await action })
+  await act(async () => stale(rows))
+  expect(state.items).toEqual(current)
+  expect(state.busy).toBe(false)
+})
+it('deletes from the latest accepted list and suppresses concurrent actions', async () => {
+  let state!: ReturnType<typeof useNotifications>
+  function Probe() { state = useNotifications(); return null }
+  await act(async () => root.render(<Probe />))
+  let deleted!: () => void
+  api.deleteNotification.mockImplementationOnce(() => new Promise<void>((resolve) => { deleted = resolve }))
+  let removal!: Promise<boolean>
+  await act(async () => { removal = state.remove('n1'); expect(await state.resolveAction('n1')).toBeUndefined() })
+  rows = [...rows, { ...rows[0], id: 'new' }]
+  await act(async () => state.refresh())
+  await act(async () => { deleted(); await removal })
+  expect(state.items.map((item) => item.id)).toEqual(['new'])
+  expect(api.resolveNotificationAction).not.toHaveBeenCalled()
+})
+it('does not navigate after an action completes following teardown', async () => {
+  let resolveAction!: (value: Awaited<ReturnType<typeof api.resolveNotificationAction>>) => void
+  api.resolveNotificationAction.mockImplementationOnce(() => new Promise((resolve) => { resolveAction = resolve }))
+  const navigate = vi.fn()
+  await act(async () => root.render(<NotificationCenter open onOpenChange={vi.fn()} onNavigate={navigate} />))
+  await act(async () => labelled('Review test changes').click())
+  await act(async () => root.render(null))
+  await act(async () => resolveAction({ status: 'current', items: rows, target }))
+  expect(navigate).not.toHaveBeenCalled()
+})
+it('recovers a failed then hung initial list and retains accepted rows on later failures', async () => {
+  vi.useFakeTimers()
+  try {
+    api.getNotifications.mockRejectedValueOnce(new Error('offline')).mockImplementationOnce(() => new Promise(() => {}))
+    let state!: ReturnType<typeof useNotifications>
+    function Probe() { state = useNotifications(); return null }
+    await act(async () => root.render(<Probe />))
+    expect(state.error).toContain('offline')
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+    expect(state.items).toEqual(rows)
+    api.getNotifications.mockRejectedValueOnce(new Error('offline'))
+    await act(async () => state.refresh())
+    expect(state.items).toEqual(rows)
+    expect(state.error).toContain('offline')
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(state.error).toBeNull()
+  } finally { vi.useRealTimers() }
+})

@@ -1,6 +1,6 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent, type JSX } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type ComponentProps, type DragEvent, type JSX } from 'react'
 import * as api from '@/shared/api/client'
-import type { FeatureDocsListing } from '@/shared/api/types'
+import type { FeatureDoc, FeatureDocsListing } from '@/shared/api/types'
 import { DocPill, EmptyDropzone } from './DocPill'
 import { useDocRelink } from './DocRelink'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
@@ -224,6 +224,35 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   const sourceCount = listing?.sourceDocCount ?? 0
   const dirPrefix = `features/${feature}/docs/`
 
+  // The generated summary is distilled from the source docs, so once it exists
+  // they nest under it as a collapsible group. Before that the docs are still
+  // being edited and stay a flat list. A broken source stays visible — its
+  // Relink affordance must never hide behind a collapsed caret.
+  const sourceDocs = listing?.docs.filter((d) => !d.generated) ?? []
+  const nestSources = !summaryAbsent && sourceDocs.length > 0
+  const [summaryDoc, ...otherGeneratedDocs] = nestSources ? listing?.docs.filter((d) => d.generated) ?? [] : []
+  const [sourcesOpen, setSourcesOpen] = useState(false)
+  const sourcesExpanded = sourcesOpen || sourceDocs.some((d) => d.broken)
+
+  const renderPill = (d: FeatureDoc, disclosure?: ComponentProps<typeof DocPill>['disclosure']) => (
+    <DocPill
+      key={d.relPath}
+      relPath={d.relPath}
+      dirPrefix={dirPrefix}
+      generated={d.generated}
+      sizeBytes={d.sizeBytes}
+      linked={d.linked}
+      linkTarget={d.linkTarget}
+      broken={d.broken}
+      onRelink={(targetPath) => relinkDoc(d.relPath, targetPath)}
+      busy={locked}
+      onOpen={() => openDoc(d.absPath)}
+      onRemove={docsReadOnly ? undefined : () => removeDoc(d.relPath)}
+      removeTitle="Remove source doc"
+      disclosure={disclosure}
+    />
+  )
+
   // ── Collapsed: a thin full-height strip that toggles open ──────────────────
   if (!open) {
     return (
@@ -309,7 +338,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
       </div>
 
       {/* Scrollable body */}
-      <div className="min-h-0 flex-1 overflow-auto" style={{ padding: '12px 14px' }}>
+      <div className="min-h-0 flex-1 overflow-auto" style={{ padding: '12px 14px', scrollbarGutter: 'stable' }}>
         {/* Status line */}
         {summaryAbsent && (
           <div
@@ -357,23 +386,23 @@ export function CoverageDocsRail(props: Props): JSX.Element {
             <EmptyDropzone onPick={() => fileInputRef.current?.click()} dragging={dragging} busy={locked} />
           ) : (
             <div className="flex flex-col" style={{ gap: 8 }}>
-              {listing.docs.map((d) => (
-                <DocPill
-                  key={d.relPath}
-                  relPath={d.relPath}
-                  dirPrefix={dirPrefix}
-                  generated={d.generated}
-                  sizeBytes={d.sizeBytes}
-                  linked={d.linked}
-                  linkTarget={d.linkTarget}
-                  broken={d.broken}
-                  onRelink={(targetPath) => relinkDoc(d.relPath, targetPath)}
-                  busy={locked}
-                  onOpen={() => openDoc(d.absPath)}
-                  onRemove={docsReadOnly ? undefined : () => removeDoc(d.relPath)}
-                  removeTitle="Remove source doc"
-                />
-              ))}
+              {summaryDoc ? (
+                <>
+                  {renderPill(summaryDoc, { expanded: sourcesExpanded, onToggle: () => setSourcesOpen(!sourcesExpanded), sourceCount: sourceDocs.length })}
+                  {sourcesExpanded && (
+                    <div
+                      data-testid="summary-source-docs"
+                      className="flex flex-col"
+                      style={{ gap: 8, marginLeft: 13, paddingLeft: 10, borderLeft: '1px solid var(--border-default)' }}
+                    >
+                      {sourceDocs.map((d) => renderPill(d))}
+                    </div>
+                  )}
+                  {otherGeneratedDocs.map((d) => renderPill(d))}
+                </>
+              ) : (
+                listing.docs.map((d) => renderPill(d))
+              )}
               {!docsReadOnly && (
                 <AddDocsTile onPick={() => fileInputRef.current?.click()} disabled={locked} />
               )}

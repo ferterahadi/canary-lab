@@ -228,7 +228,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
         skipped={recordedStatuses.filter((status) => status === 'skipped').length}
         running={recordedStatus === 'running'}
         runId={baselineRunId}
-        comparison={versions.comparison}
+        comparison={versions.comparisonForHeader}
         onReviewTest={onReviewTest}
         fallback={<>
           {currentTests && <span className="shrink-0 text-[10px] text-secondary">Current source</span>}

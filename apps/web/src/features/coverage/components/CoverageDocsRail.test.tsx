@@ -96,6 +96,10 @@ async function flushUntil(predicate: () => boolean, max = 50): Promise<void> {
   }
 }
 
+function expandSources(): void {
+  act(() => { container.querySelector<HTMLButtonElement>('[data-testid^="doc-disclosure-"]')!.click() })
+}
+
 describe('CoverageDocsRail', () => {
   it('offers relinking for a broken source even when a summary freezes the document set', async () => {
     const listing = structuredClone(LISTING)
@@ -145,8 +149,42 @@ describe('CoverageDocsRail', () => {
   it('lists docs when open', async () => {
     await mount({ open: true })
     expect(api.listFeatureDocs).toHaveBeenCalledWith('checkout')
-    expect(container.querySelector('[data-testid="doc-pill-prd.md"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="doc-pill-_prd-summary.json"]')).toBeTruthy()
+    expandSources()
+    expect(container.querySelector('[data-testid="doc-pill-prd.md"]')).toBeTruthy()
+  })
+
+  it('nests the source docs under a collapsed summary pill that the caret toggles', async () => {
+    await mount({ open: true })
+    const summary = container.querySelector<HTMLElement>('[data-testid="doc-pill-_prd-summary.json"]')!
+    expect(summary.textContent).toContain('Generated from 1 doc · 800 B')
+    expect(container.querySelector('[data-testid="summary-source-docs"]')).toBeNull()
+
+    const caret = container.querySelector<HTMLButtonElement>('[data-testid="doc-disclosure-_prd-summary.json"]')!
+    expect(caret.getAttribute('aria-expanded')).toBe('false')
+    act(() => { caret.click() })
+    expect(caret.getAttribute('aria-expanded')).toBe('true')
+    expect(api.openEditor).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-testid="summary-source-docs"] [data-testid="doc-pill-prd.md"]')).toBeTruthy()
+
+    act(() => { summary.click() })
+    expect(api.openEditor).toHaveBeenCalledWith({ file: '/repo/features/checkout/docs/_prd-summary.json' })
+    act(() => { caret.click() })
+    expect(container.querySelector('[data-testid="summary-source-docs"]')).toBeNull()
+  })
+
+  it('keeps the flat list before a summary is generated', async () => {
+    vi.mocked(api.listFeatureDocs).mockResolvedValue({ ...structuredClone(LISTING), docs: [LISTING.docs[0]], hasPrdSummary: false })
+    await mount({ open: true, summaryAbsent: true })
+    expect(container.querySelector('[data-testid^="doc-disclosure-"]')).toBeNull()
+    expect(container.querySelector('[data-testid="doc-pill-prd.md"]')).toBeTruthy()
+  })
+
+  it('shows a generated doc flat when no source docs remain to nest', async () => {
+    vi.mocked(api.listFeatureDocs).mockResolvedValue({ ...structuredClone(LISTING), docs: [LISTING.docs[1]], sourceDocCount: 0 })
+    await mount({ open: true })
+    expect(container.querySelector('[data-testid^="doc-disclosure-"]')).toBeNull()
+    expect(container.querySelector('[data-testid="doc-pill-_prd-summary.json"]')?.textContent).toContain('Generated PRD artifact')
   })
 
   it('explains a linked doc only on icon hover and opens its project entry path', async () => {
@@ -154,6 +192,7 @@ describe('CoverageDocsRail', () => {
     listing.docs[0] = { ...listing.docs[0], linked: true, linkTarget: '/original/prd.md' }
     vi.mocked(api.listFeatureDocs).mockResolvedValue(listing)
     await mount()
+    expandSources()
     const card = container.querySelector<HTMLElement>('[data-testid="doc-pill-prd.md"]')!
     const icon = card.querySelector<HTMLElement>('[data-testid="doc-linked-prd.md"]')!
     expect(icon.querySelector('svg')).toBeTruthy()
@@ -281,6 +320,7 @@ describe('CoverageDocsRail', () => {
 
   it('clicking a doc pill opens it in the configured editor', async () => {
     await mount({ open: true, summaryAbsent: false })
+    expandSources()
     act(() => { container.querySelector<HTMLElement>('[data-testid="doc-pill-prd.md"]')?.click() })
     expect(api.openEditor).toHaveBeenCalledWith({ file: '/repo/features/checkout/docs/prd.md' })
   })

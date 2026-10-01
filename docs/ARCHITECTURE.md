@@ -286,6 +286,19 @@ an authoritative 404 stops polling and disables task actions, while transient
 failures retain the accepted task. Proposal edits and navigation guards belong
 to the task identity, so reconnects cannot overwrite edits or navigate twice.
 
+Test-source comparisons in the Tests column and review dialog share
+`apps/web/src/shared/state/use-test-source-comparison.ts`. Both reconcile every
+10 seconds while mounted, retain evidence through transient failures, and clear
+it on authoritative missing-suite or missing-snapshot responses. Comparison
+freshness does not grant review permission; review actions still require a
+confirmed review revision.
+
+Notification lists use the same live reader with ten-second reconciliation.
+Its synchronous `accept` operation applies mutation observations to the current
+value and invalidates older reads. Acceptance callbacks survive refreshes but
+expire on resource replacement or unmount; domain actions and navigation remain
+owned by the notification hook.
+
 Getting Started also uses `useLiveResource`, with the `onboarding` topic and
 continuous five-second reconciliation while mounted, including after an empty
 catalog. Journal readers subscribe directly to their run-scoped `journal` topic;

@@ -8,7 +8,7 @@ export function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen, onRemove, removeTitle, linked, linkTarget, broken, onRelink }: {
+export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen, onRemove, removeTitle, linked, linkTarget, broken, onRelink, disclosure }: {
   relPath: string
   dirPrefix: string
   generated: boolean
@@ -24,6 +24,9 @@ export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen
   /** Dangling symlink (its target moved) — dangerous tint, still deletable. */
   broken?: boolean
   onRelink?: (targetPath: string) => Promise<void>
+  /** Turns the pill into a disclosure over the docs it was generated from: the
+   *  caret toggles them, the rest of the pill still opens the file. */
+  disclosure?: { expanded: boolean; onToggle: () => void; sourceCount: number }
 }) {
   const [hover, setHover] = useState(false)
   return (
@@ -48,6 +51,23 @@ export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen
           transition: 'background 120ms, border-color 120ms',
         }}
       >
+        {disclosure && (
+          <button
+            type="button"
+            data-testid={`doc-disclosure-${relPath}`}
+            onClick={(e) => { e.stopPropagation(); disclosure.onToggle() }}
+            aria-expanded={disclosure.expanded}
+            aria-label={`${disclosure.expanded ? 'Hide' : 'Show'} the docs ${relPath} was generated from`}
+            title={disclosure.expanded ? 'Hide source docs' : 'Show source docs'}
+            className="cl-icon-button -mr-1 h-6 w-5 shrink-0"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              style={{ transform: disclosure.expanded ? 'rotate(90deg)' : undefined, transition: 'transform 120ms' }}>
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </button>
+        )}
         <span
           aria-hidden="true"
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded"
@@ -66,7 +86,11 @@ export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen
             <span style={{ color: broken ? 'var(--danger)' : 'var(--text-primary)', fontWeight: 600 }}>{relPath}</span>
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
-            {broken ? 'Broken link' : generated ? 'Generated PRD artifact' : 'Source doc'} · {formatBytes(sizeBytes)}
+            {broken
+              ? 'Broken link'
+              : disclosure
+                ? `Generated from ${disclosure.sourceCount} ${disclosure.sourceCount === 1 ? 'doc' : 'docs'}`
+                : generated ? 'Generated PRD artifact' : 'Source doc'} · {formatBytes(sizeBytes)}
           </div>
         </div>
         {(linked || onRemove) && (
