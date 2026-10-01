@@ -1,12 +1,14 @@
 # Benchmark: Repairs With and Without Canary Lab
 
-**On the bundled storefront demo, Claude Code and Codex fixed the same bugs in a median 74 seconds instead of 128, with 64% fewer output tokens, when Canary Lab ran the repair loop.** Both workflows fixed all 20 of their attempts. Canary Lab was faster in 19 of the 20 pairs.
+**On the bundled storefront demo, median repair time was 74 seconds with Canary Lab and 128 seconds without it. Median output-token use was 64% lower.** Both workflows passed the independent evaluator in all 20 of their attempts. Canary Lab was faster in 19 of the 20 pairs.
 
-The study ran on 2026-10-01 with Canary Lab 2.3.2. It is a controlled sample on Canary Lab's own demo, not proof that Canary Lab is faster on every app. Read [Limits](#limits) before quoting it.
+The study ran on 2026-10-01 with Canary Lab 2.3.2, using Claude Code and Codex on two scenarios with seeded bugs. These results apply to this demo and configuration; see [Limits](#limits) for scope and uncertainty.
 
 ## Results
 
-Each group is five paired attempts on the same bug. *Time* runs from starting the agent to a separate evaluator's verdict, so it includes starting services and every test run.
+Each group contains five paired attempts on the same scenario. *Time* runs from starting the agent to a separate evaluator's verdict, so it includes starting services and every test run.
+
+Paired values in this table and the appendix list Canary Lab first, then the workflow without it. Token counts measure usage; dollar cost was not measured.
 
 | Agent and bug | Median time: Canary → plain | Time saved (95% range) | Median output tokens | Median test runs |
 | --- | --- | --- | --- | --- |
@@ -16,15 +18,15 @@ Each group is five paired attempts on the same bug. *Time* runs from starting th
 | Claude, three-service bug | 77s → 123s | 25% (−8 to 49%) | 4.7k → 8.5k | 2 → 6 |
 | **All 20 pairs** | **74s → 128s** | | **2.4k → 6.6k** | **2 → 4** |
 
-- **Correctness was equal.** Every attempt in both workflows passed the independent check. Canary Lab's gain is speed and cost, not fixing bugs an agent otherwise could not.
+- **Both workflows passed every attempt.** The evaluator found no difference in pass rate in this sample. The observed gains were lower elapsed time and token use.
 - **Totals across all 40 attempts:** 1,441 seconds with Canary Lab against 3,158 without (−54%), and 8.1 million tokens processed against 13.2 million (−38%).
 - **The Claude three-service result could be a tie.** Its 95% range crosses zero.
 
-## Why Canary Lab Is Faster and Cheaper
+## Where the Time and Token Savings Came From
 
-Almost all of the saving comes from one place. Without Canary Lab, the agent starts the services, runs the tests and reads their output itself, and it repeats that after every change. With Canary Lab, the harness does that work and hands the agent the failure evidence. The thinking work, reading and fixing application code, costs about the same in both workflows.
+The largest difference in the activity breakdown is service and test management. Without Canary Lab, the agent starts services, runs tests, reads their output, and manages subsequent runs. With Canary Lab, the harness starts services and runs tests, then provides failure evidence to the agent. In both workflows, the agent reads and edits application code.
 
-The table shows the average attempt, split by what the agent was doing at each step:
+The table shows the average attempt, split by activity. Token counts here are output tokens:
 
 | What the agent was doing | Claude: plain | Claude: Canary | Codex: plain | Codex: Canary |
 | --- | --- | --- | --- | --- |
@@ -38,32 +40,32 @@ The table shows the average attempt, split by what the agent was doing at each s
 | Canary's own service boot and test runs | — | about 6s | — | about 7s |
 | **Average attempt** | **117s · 7.6k** | **61s · 3.5k** | **201s · 4.9k** | **85s · 2.6k** |
 
-A *step* is one tool call, and the time is the model's response plus the tool's execution. Steps are classified from their commands, so a step that mixes activities is counted once under its main activity.
+A *step* is one tool call, and the time is the model's response plus the tool's execution. Steps are classified from their commands, so a step that mixes activities is counted once under its main activity. This breakdown attributes the observed difference to activities; it does not isolate each activity's causal effect.
 
 What the breakdown shows:
 
-- **Managing services and tests explains about 95% of the time saved.**
+- **Service and test management accounts for about 95% of the time difference in this breakdown.**
   - **Claude:** 67s without Canary against 8s plus Canary's own 6s, which covers 53s of the 56s gap.
   - **Codex:** 132s against 14s plus 7s, which covers 111s of the 116s gap.
-- **The same work explains most of the output-token saving.** Each extra service or test step is another model response.
-- **Total tokens follow the number of steps.** Every step resends the whole conversation, mostly from the prompt cache. Without Canary Lab, attempts averaged 13–18 steps; with it, they averaged 8–10.
-- **Canary Lab adds a little work of its own.**
-  - The agent reads the handed-over evidence and asks for a rerun, which costs 11–24 seconds per attempt.
+- **The same activities account for most of the output-token difference.** Each extra service or test step adds another model response.
+- **More steps also mean more context processed.** Each step includes conversation context, much of it served from the prompt cache. Without Canary Lab, attempts averaged 13–18 steps; with it, they averaged 8–10.
+- **Canary Lab adds evidence review and rerun requests.**
+  - The agent reads the failure evidence and asks for a rerun, which takes 11–24 seconds per attempt.
   - The harness boots services and runs tests, which takes about 6–7 seconds.
-- **The gain shrinks when the fix itself dominates.** The three-service bug needs more reading and editing, so the fixed service-and-test saving is a smaller share of the attempt.
+- **The relative gain was smaller on the three-service bug.** More time went into reading and editing code, leaving service and test management as a smaller share of the attempt.
 
 ## What Affects the Numbers
 
-- **Network and model provider speed dominate.** Model requests were 83–86% of Claude's wall time in both workflows; this comes from Claude's request telemetry. Codex's telemetry does not record comparable request timing. A slower connection or a busier provider makes every step slower, which affects the plain workflow more because it takes more steps.
+- **Model request time was the largest component for Claude.** Requests were 83–86% of Claude's wall time in both workflows, according to its request telemetry. Codex's telemetry does not record comparable request timing. Slower requests would be expected to affect the plain workflow more because it takes more steps; the study did not vary network or provider conditions separately.
 - **Machine speed** changes how long services take to boot and Playwright takes to run, in both workflows.
-- **Canary Lab's fixed overhead** is about 4 seconds per attempt. A scripted replay with no model measured 6.5 seconds with Canary Lab against 2.4 without. On a bug an agent fixes in one step, that overhead can cancel the gain.
-- **Bug difficulty** sets how much of an attempt is service and test management. The one-service bug saved 67–72% of the time; the three-service bug saved 25–48%.
-- **Prompt-cache hits** change total tokens much more than output tokens. Output tokens are the more stable cost signal.
+- **Harness overhead** was about 4 seconds in a scripted replay with no model: 6.5 seconds with Canary Lab against 2.4 without. For a repair requiring very few agent steps, that overhead could offset the time saved.
+- **Repair complexity** changes the share of time spent managing services and tests. Estimated time savings were 67–72% for the one-service bug and 25–48% for the three-service bug; the latter range includes the Claude group whose uncertainty interval crosses zero.
+- **Token counts measure usage.** Total tokens include context the model reread, mostly from the prompt cache; output tokens count what it generated. The study reports both and does not measure dollar cost.
 - **Models, effort and command-line client versions** were pinned. Other versions can behave differently.
 
-## The Demo We Measure On
+## The Demo Used in the Study
 
-The study uses the storefront that every new workspace ships with, `templates/project/demo-app`.
+The study used the storefront bundled with new workspaces, `templates/project/demo-app`.
 
 - **The app:** a catalog service, an inventory service and a checkout service, which together make up one customer purchase flow.
 - **The tests:** the `templates/project/features/storefront-journey` suite has seven Playwright journeys.
@@ -75,7 +77,7 @@ The study uses the storefront that every new workspace ships with, `templates/pr
 
 Both workflows used the same agent, model, reasoning effort, bug and repair rules. Each was told to fix application code, never to weaken or skip tests, and a separate evaluator decided the result.
 
-- **With Canary Lab:** the real repair loop. Canary Lab started the services, ran the suite, handed the failures to the agent, and reran the tests when the agent asked. Diagnosis used the 2.3.2 default, in which the main agent diagnoses failures without delegating to sub-agents.
+- **With Canary Lab:** the standard repair loop. Canary Lab started the services, ran the suite, provided failure evidence to the agent, and reran the tests when the agent asked. Diagnosis used the 2.3.2 default, in which the main agent diagnoses failures without delegating to sub-agents.
 - **Without Canary Lab:** the agent received `tools/benchmark-study/plain-prompt.md` and a generated runbook listing service commands, ports, logs and the test command. It started the services, ran Playwright and managed restarts itself.
 - **Neither workflow had a browser tool,** and both ran in each command-line client's native sandbox.
 
@@ -84,7 +86,7 @@ Both workflows used the same agent, model, reasoning effort, bug and repair rule
 - **Time:** from starting the agent to the independent evaluator's verdict.
 - **Tokens:** read from each client's own session logs. *Output tokens* are what the model generated. *Total tokens* also include context the model reread, mostly from the prompt cache.
 - **Test runs:** counted by a hook that records every Playwright start.
-- **Correctness:** a separate evaluator reruns the suite on the final code. The agent's own report does not count.
+- **Correctness:** a separate evaluator reruns the suite on the final code and determines pass or fail from that run.
 - **Design:**
   - Attempts run in pairs, one per workflow, in a shuffled order fixed by a seed.
   - Each workflow goes first equally often.
@@ -103,11 +105,11 @@ Both workflows used the same agent, model, reasoning effort, bug and repair rule
 
 ## Limits
 
-- **Home ground.** The storefront is Canary Lab's own demo, and its bugs are seeded. Results on an unfamiliar repository can differ.
+- **Bundled demo.** The storefront is Canary Lab's own demo, and its bugs are seeded. Results on an unfamiliar repository can differ.
 - **Small sample.** Each group has five pairs. The Claude three-service group cannot rule out a tie.
-- **One loss.** In Claude three-service attempt 1, Canary Lab took 137 seconds against 97.
+- **One slower attempt.** In Claude three-service attempt 1, Canary Lab took 137 seconds against 97.
 - **Extra fixes are not scored.** In all five one-service attempts without Canary Lab, Claude also changed how the catalog assigns product IDs. The evaluator does not reward or penalise that.
-- **Not measured:** dollar cost, the value of Flight onboarding or coverage work, and repairs that need a browser tool.
+- **Unmeasured:** dollar cost, the value of Flight onboarding or coverage work, and repairs that need a browser tool.
 
 ## Reproduce It
 
