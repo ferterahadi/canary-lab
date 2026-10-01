@@ -106,20 +106,20 @@ Use Docker Compose for infrastructure such as Postgres or Redis, and let Canary 
 
 ## Measured Repair Speed
 
-On the bundled storefront demo, median repair time was 74 seconds with Canary Lab and 128 seconds without it. Median output-token use was 64% lower.
+In the latest-result view of the bundled storefront demo, median repair time was 71 seconds with Canary Lab and 132 seconds without it. Median output-token use was 63% lower.
 
-We tested Claude Code and Codex on two scenarios with seeded bugs. Each agent completed five paired attempts per scenario: one through Canary Lab and one using shell commands and Playwright directly.
+We tested Claude Code and Codex on two scenarios with seeded bugs. The table uses five pairs per agent/scenario, with one requested fresh Claude three-service pair replacing the original slower pair. This selected replacement is disclosed in the [benchmark report](docs/BENCHMARK.md#requested-rerun); the original evidence remains preserved.
 
 | Agent and bug | Median time: Canary → plain | Median output tokens |
 | --- | --- | --- |
 | Claude, one-service bug | 34s → 113s | 1.6k → 7.1k |
 | Codex, one-service bug | 67s → 156s | 1.8k → 3.7k |
 | Codex, three-service bug | 106s → 188s | 3.3k → 5.7k |
-| Claude, three-service bug | 77s → 123s | 4.7k → 8.5k |
+| Claude, three-service bug | 75s → 127s | 4.1k → 8.5k |
 
-Both workflows passed the independent evaluator in all 20 of their attempts. The observed gains were lower elapsed time and token use; dollar cost was not measured. The activity breakdown attributes most of the time difference to fewer agent steps for service startup and test execution.
+All 42 executed attempts passed the independent evaluator, including the original and fresh pairs. The 40 selected attempts above show lower elapsed time and token use; dollar cost was not measured. The original campaign's activity breakdown attributes most of its time difference to fewer agent steps for service startup and test execution.
 
-This is a small sample on Canary Lab's own demo. The Claude three-service result cannot rule out a tie. See [Benchmark](docs/BENCHMARK.md) for the method, limits, and every pair.
+This is a small sample on Canary Lab's own demo, with one pair replaced after observing its result. The refreshed numbers are descriptive, and no new confidence interval is claimed for that group. See [Benchmark](docs/BENCHMARK.md) for the method, limits, and every selected pair.
 
 ## How It Compares
 

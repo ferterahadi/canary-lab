@@ -7,6 +7,7 @@ import { connectWorkspaceEvents } from '@/shared/api/workspace-socket'
 import { useFlightsStream } from '@/features/flights'
 import type { InvalidationTopic } from './invalidation-bus'
 import { useWorkspaceFeatures } from './use-workspace-features'
+import { useLiveResource } from './use-live-resource'
 
 // Owns the workspace's server-sourced data — the features list, the flights +
 // pre-flights indexes, the version status — plus the refresh helpers, the
@@ -72,7 +73,15 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
     setRestFlights((rows) => rows.filter((row) => row.flightId !== id))
   }, [forgetStreamFlight])
   const flights = flightsStream.hydrated ? flightsStream.flights : restFlights
-  const [preFlights, setPreFlights] = useState<PlanFeaturesTask[]>([])
+  const { value: planningTasks, refresh: refreshPreFlights } = useLiveResource<PlanFeaturesTask[]>(
+    'pre-flights', 'workspace', async () => (await api.listPlanFeatures()).tasks,
+    {
+      cache: 'pre-flight-plans',
+      // Unknown initial reads must recover too, including a hung first request.
+      pollWhile: (tasks) => tasks === null || tasks.some((task) => task.status === 'running'),
+    },
+  )
+  const preFlights = planningTasks ?? []
   const [versionStatus, setVersionStatus] = useState<VersionStatus | null>(null)
 
   const flightsRef = useRef(flights)
@@ -84,24 +93,9 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   const refreshFlights = useCallback((): void => {
     api.listFlights().then(setRestFlights).catch(() => {})
   }, [])
-  const refreshPreFlights = useCallback((): void => {
-    api.listPlanFeatures().then((r) => setPreFlights(r.tasks)).catch(() => {})
-  }, [])
-
-  // Initial flights / pre-flights / version loads (feed the pill + footer before
-  // any event fires).
+  // Initial flights / version loads; useLiveResource owns the planning list.
   useEffect(() => { refreshFlights() }, [refreshFlights])
-  useEffect(() => { refreshPreFlights() }, [refreshPreFlights])
   useEffect(() => { refreshVersion() }, [refreshVersion])
-
-  // A running pre-flight settles via `pre-flight-changed`, but that push is
-  // best-effort — back a running plan with a gentle poll (cl_live-state-sync).
-  const anyPreFlightRunning = preFlights.some((t) => t.status === 'running')
-  useEffect(() => {
-    if (!anyPreFlightRunning) return
-    const id = setInterval(refreshPreFlights, 2500)
-    return () => clearInterval(id)
-  }, [anyPreFlightRunning, refreshPreFlights])
 
   // /ws/workspace events → refetch the feature-derived surfaces + publish topic
   // invalidations for the fetch-owning leaves. On reconnect (e.g. across a server
@@ -120,7 +114,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
       refreshVersion()
       refreshFlights()
       invalidate('flights')
-      refreshPreFlights()
+      invalidate('pre-flights')
       invalidate('project-config')
       invalidate('onboarding')
       invalidate('notifications')
@@ -192,7 +186,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
           // reads), which is what the `flights` topic invalidates.
           if (event.type === 'flights-changed') invalidate('flights')
           if (event.type === 'notifications-changed') invalidate('notifications')
-          if (event.type === 'pre-flight-changed') refreshPreFlights()
+          if (event.type === 'pre-flight-changed') invalidate('pre-flights')
           // canary-lab.config.json changed — in this tab or another client.
           // The demo launcher reads `showDemo` from it, so the status-bar pill
           // appears/disappears live instead of on the next reload.
@@ -204,7 +198,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
       // Initial REST load and direct UI callbacks still keep the page usable.
     }
     return () => conn?.close()
-  }, [refreshFeatures, refreshVersion, refreshFlights, refreshPreFlights, invalidate, selectedFeatureRef, selectedRunIdRef])
+  }, [refreshFeatures, refreshVersion, refreshFlights, invalidate, selectedFeatureRef, selectedRunIdRef])
 
   return { features, flights, forgetFlight, flightsHydrated: flightsStream.hydrated, flightDetails: flightsStream.details, flightsRef, preFlights, versionStatus, refreshFeatures, refreshFlights, refreshPreFlights, refreshVersion }
 }

@@ -1,6 +1,10 @@
+import type { PortifyStatus } from '../../../../../../../shared/portify-index'
 import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import type { StageModelChoice } from '../../../agent-sessions/logic/agent-models'
 import type { ClientKind, ExternalSessionMeta, RunProducer } from '../../../../../../../shared/run-mode'
+
+export type { PortifyStatus } from '../../../../../../../shared/portify-index'
+export type { PortifyIndexEntry } from '../../../../../../../shared/portify-index'
 
 // Port-ification workflow: rewrite a feature's apps so their listen ports are
 // injectable (read from an env var, declared as `ports` slots in the config),
@@ -11,15 +15,6 @@ import type { ClientKind, ExternalSessionMeta, RunProducer } from '../../../../.
 // Ephemeral-overlay model: the workflow parks at `ready-to-save` and ends at
 // `saved` (the captured patch is written to features/<feature>/portify/, never
 // committed/merged).
-export type PortifyStatus =
-  | 'planning'
-  | 'editing'
-  | 'verifying'
-  | 'ready-to-save'
-  | 'saved'
-  | 'failed'
-  | 'aborted'
-
 /** A workflow the user or a Flight can still follow or act on. */
 export function isActivePortifyStatus(status: PortifyStatus): boolean {
   return status === 'planning' || status === 'editing' || status === 'verifying'
@@ -113,22 +108,6 @@ export interface PortifyManifest {
   diff?: string
   verification?: PortifyVerification
   error?: string
-}
-
-export interface PortifyIndexEntry {
-  workflowId: string
-  feature: string
-  status: PortifyStatus
-  /** Ephemeral scratch-branch name — surfaced in the history list. Optional:
-   *  index entries persisted before this field existed deserialize without it. */
-  branch?: string
-  startedAt: string
-  endedAt?: string
-  /** Mirrored from the manifest so the activity map can tell an external
-   *  (MCP-client-driven) workflow from a spawned one off the index alone.
-   *  Absent on entries written before the mirror existed — those all predate
-   *  external portify, so absent = internal. */
-  producer?: PortifyProducer
 }
 
 export interface StartPortifyInput {

@@ -84,6 +84,28 @@ const SHARED_TYPES = [
     ],
   },
   {
+    name: 'PortifyIndexEntry',
+    declaration: 'shared/portify-index.ts',
+    reexports: [
+      { file: 'apps/web-server/src/features/portify/logic/runtime/types.ts', from: '../../../../../../../shared/portify-index' },
+      { file: 'apps/web/src/shared/api/portify.ts', from: '@shared/portify-index' },
+    ],
+    consumers: [
+      { file: 'apps/web-server/src/features/portify/logic/runtime/store.ts', importFrom: '../../../../../../../shared/portify-index', importName: 'portifyIndexEntry', usage: '...portifyIndexEntry(' },
+      { file: 'apps/web/src/features/portify/state/portify-state.ts', importFrom: '@shared/portify-index', importName: 'portifyIndexEntry', usage: 'const entry = portifyIndexEntry(' },
+    ],
+  },
+  {
+    name: 'PortifyStatus',
+    declaration: 'shared/portify-index.ts',
+    declarationKind: 'type',
+    reexports: [
+      { file: 'apps/web-server/src/features/portify/logic/runtime/types.ts', from: '../../../../../../../shared/portify-index' },
+      { file: 'apps/web/src/shared/api/portify.ts', from: '@shared/portify-index' },
+    ],
+    consumers: [],
+  },
+  {
     name: 'ReadableTest',
     declaration: 'shared/readable-tests/types.ts',
     consumers: [
@@ -285,7 +307,7 @@ for (const [name] of BASELINE) {
 
 for (const sharedType of SHARED_TYPES) {
   const declaration = read(sharedType.declaration)
-  if (!new RegExp(`export interface ${sharedType.name}\\b`).test(declaration)) {
+  if (!new RegExp(`export ${sharedType.declarationKind ?? 'interface'} ${sharedType.name}\\b`).test(declaration)) {
     problems.push(
       `${sharedType.name}: not declared in ${sharedType.declaration} — the shared-contract registry is stale`,
     )

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, useRef } from 'react'
+import { act, useCallback, useRef } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Feature, RunIndexEntry } from '../api/types'
@@ -44,7 +44,8 @@ const stream = { flights: [] as FlightIndexEntry[], details: {} as Record<string
 vi.mock('@/features/flights', () => ({ useFlightsStream: () => stream }))
 
 vi.mock('@/features/runs', () => ({ useRun: () => ({ detail: undefined }) }))
-const { useWorkspaceData } = await import('./use-workspace-data')
+let { useWorkspaceData } = await import('./use-workspace-data')
+let { InvalidationProvider, useInvalidation } = await import('./invalidation')
 const { useWorkspaceSelection } = await import('./use-workspace-selection')
 
 function feature(name: string): Feature {
@@ -89,6 +90,11 @@ interface HarnessConfig extends Partial<WorkspaceDataDeps> {
 }
 
 function Probe({ config }: { config: HarnessConfig }) {
+  const { invalidate: publish } = useInvalidation()
+  const invalidateAndRecord = useCallback((topic: InvalidationTopic, scope?: string) => {
+    invalidate(topic, scope)
+    publish(topic, scope)
+  }, [publish])
   const featureRef = useRef<string | null>(config.initialSelectedFeature ?? harness.featureRef.current)
   const runIdRef = useRef<string | null>(harness.runIdRef.current)
   const pendingRef = useRef<string | null>(harness.pendingRef.current)
@@ -106,7 +112,7 @@ function Probe({ config }: { config: HarnessConfig }) {
     pendingRunSelectionRef: pendingRef,
   })
   harness.data = useWorkspaceData({
-    invalidate,
+    invalidate: invalidateAndRecord,
     onInitialFeatures: selection.onInitialFeatures,
     onFeaturesRefreshed: selection.onFeaturesRefreshed,
     selectedFeatureRef: featureRef,
@@ -118,14 +124,18 @@ function Probe({ config }: { config: HarnessConfig }) {
 }
 
 async function mount(config: HarnessConfig = {}): Promise<void> {
-  await act(async () => { root.render(<Probe config={config} />) })
+  await act(async () => { root.render(<InvalidationProvider><Probe config={config} /></InvalidationProvider>) })
 }
 
 async function fire(event: WorkspaceEvent): Promise<void> {
   await act(async () => { socket.opts?.onEvent(event) })
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  // Each test starts with an unknown planning value, not another test's cache.
+  vi.resetModules()
+  ;({ useWorkspaceData } = await import('./use-workspace-data'))
+  ;({ InvalidationProvider, useInvalidation } = await import('./invalidation'))
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -356,7 +366,7 @@ describe('useWorkspaceData — running pre-flight poll', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
     expect(api.listPlanFeatures.mock.calls.length).toBe(afterMount + 1)
 
-    // Settling the plan must clear the interval, not merely stop reading it.
+    // Settled plans stop periodic HTTP reads.
     api.listPlanFeatures.mockResolvedValue({ tasks: [{ taskId: 't1', status: 'done' } as PlanFeaturesTask] })
     await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
     const afterSettle = api.listPlanFeatures.mock.calls.length
@@ -580,7 +590,7 @@ describe('useWorkspaceData — server reconnect resync', () => {
 
     expect(harness.invalidated).toEqual([
       ['repos', undefined], ['configuration', undefined], ['tests', undefined], ['coverage', undefined],
-      ['verification', undefined], ['journal', 'r1'], ['flights', undefined],
+      ['verification', undefined], ['journal', 'r1'], ['flights', undefined], ['pre-flights', undefined],
       ['project-config', undefined], ['onboarding', undefined], ['notifications', undefined],
     ])
     expect(api.listFlights.mock.calls.length).toBe(2)
@@ -641,4 +651,84 @@ it('routes repository watch hints to exact consumers without fetching features o
   expect(harness.invalidated).toEqual([['repos', JSON.stringify(['repo', 'checkout', 'service'])], ['repos', JSON.stringify(['flight', 'flight'])]])
   expect(api.listFeatures).toHaveBeenCalledTimes(listCalls)
   expect(socket.opts).toBe(connection); expect(socket.closes).toBe(0)
+})
+
+function pendingPlans() {
+  let resolve!: (value: { tasks: PlanFeaturesTask[] }) => void
+  const promise = new Promise<{ tasks: PlanFeaturesTask[] }>((done) => { resolve = done })
+  return { promise, resolve }
+}
+const runningPlan = { taskId: 'plan-ordering', status: 'running' } as PlanFeaturesTask
+
+describe('pre-flight observation ordering and recovery', () => {
+  it.each(['completion', 'deletion'] as const)('ignores a delayed running response after %s', async (outcome) => {
+    const older = pendingPlans()
+    api.listPlanFeatures.mockReturnValueOnce(older.promise)
+    await mount()
+    const tasks = outcome === 'deletion' ? [] : [{ ...runningPlan, status: 'done' as const }]
+    api.listPlanFeatures.mockResolvedValue({ tasks })
+    await fire({ type: 'pre-flight-changed' })
+    expect(harness.data.preFlights).toEqual(tasks)
+    await act(async () => { older.resolve({ tasks: [runningPlan] }) })
+    expect(harness.data.preFlights).toEqual(tasks)
+  })
+
+  it('retains accepted rows through overlapping refreshes and failure, then recovers', async () => {
+    vi.useFakeTimers()
+    api.listPlanFeatures.mockResolvedValue({ tasks: [runningPlan] })
+    await mount()
+    const older = pendingPlans()
+    api.listPlanFeatures.mockReturnValueOnce(older.promise)
+    await act(async () => { harness.data.refreshPreFlights() })
+    expect(harness.data.preFlights).toEqual([runningPlan])
+    api.listPlanFeatures.mockRejectedValueOnce(new Error('offline'))
+    await act(async () => { harness.data.refreshPreFlights() })
+    expect(harness.data.preFlights).toEqual([runningPlan])
+    const done = { ...runningPlan, status: 'done' as const }
+    api.listPlanFeatures.mockResolvedValue({ tasks: [done] })
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
+    await act(async () => { older.resolve({ tasks: [runningPlan] }) })
+    expect(harness.data.preFlights).toEqual([done])
+  })
+
+  it.each(['failed', 'hung'] as const)('recovers a %s initial read without a workspace event', async (mode) => {
+    vi.useFakeTimers()
+    const initial = pendingPlans()
+    if (mode === 'failed') api.listPlanFeatures.mockRejectedValueOnce(new Error('offline'))
+    else api.listPlanFeatures.mockReturnValueOnce(initial.promise)
+    await mount()
+    api.listPlanFeatures.mockResolvedValue({ tasks: [runningPlan] })
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
+    expect(harness.data.preFlights).toEqual([runningPlan])
+    await act(async () => { initial.resolve({ tasks: [] }) })
+    expect(harness.data.preFlights).toEqual([runningPlan])
+  })
+
+  it('refreshes settled plans on each server handshake and stops reads after deletion', async () => {
+    vi.useFakeTimers()
+    await mount()
+    api.listPlanFeatures.mockResolvedValue({ tasks: [runningPlan] })
+    await fire({ type: 'connected' })
+    expect(harness.data.preFlights).toEqual([runningPlan])
+    api.listPlanFeatures.mockResolvedValue({ tasks: [] })
+    await fire({ type: 'connected' })
+    expect(harness.data.preFlights).toEqual([])
+    const calls = api.listPlanFeatures.mock.calls.length
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(api.listPlanFeatures).toHaveBeenCalledTimes(calls)
+  })
+
+  it('cleans up polling and prevents a late unmounted read from poisoning the cache', async () => {
+    vi.useFakeTimers()
+    const older = pendingPlans()
+    api.listPlanFeatures.mockReturnValueOnce(older.promise)
+    await mount()
+    await act(async () => { root.render(null) })
+    await act(async () => { older.resolve({ tasks: [runningPlan] }); await vi.advanceTimersByTimeAsync(10_000) })
+    expect(api.listPlanFeatures).toHaveBeenCalledTimes(1)
+    expect(socket.closes).toBe(1)
+    api.listPlanFeatures.mockReturnValueOnce(new Promise(() => {}))
+    await mount()
+    expect(harness.data.preFlights).toEqual([])
+  })
 })

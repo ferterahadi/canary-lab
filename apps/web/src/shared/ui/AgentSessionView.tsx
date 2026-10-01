@@ -1,3 +1,4 @@
+import { sourceIdentityKey, sourceCacheKey, type AgentSessionIdentity } from '@/shared/api/agent-session-source'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import { isAgentSessionAbsence } from '@/shared/api/client'
@@ -27,15 +28,7 @@ export type { SystemGroup } from './AgentSessionRows'
 // The pre-existing `pollUntilFound` mode is gone; the live WS handles
 // "session not yet on disk" by retrying internally on the server.
 
-export type AgentSessionSource =
-  | { kind: 'discovery-repair'; taskId: string; live?: boolean }
-  | { kind: 'run'; runId: string; live?: boolean }
-  | { kind: 'benchmark'; benchmarkId: string; live?: boolean }
-  | { kind: 'portify'; workflowId: string; live?: boolean }
-  | { kind: 'coverage'; jobId: string; live?: boolean }
-  | { kind: 'evaluation'; taskId: string; live?: boolean }
-  | { kind: 'flight'; flightId: string; stage: string; live?: boolean }
-  | { kind: 'flight-plan'; taskId: string; live?: boolean }
+export type AgentSessionSource = AgentSessionIdentity & { live?: boolean }
 
 export interface ExternalSessionActivity {
   clientKind: ExternalClientKind
@@ -304,14 +297,16 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
     }
 
     const fetchSnapshot = async (): Promise<AgentSessionResponse | AgentSessionAbsence | null> => {
-      if (source.kind === 'discovery-repair') return api.getDiscoveryRepairAgentSession(source.taskId)
-      if (source.kind === 'run') return api.getAgentSession(source.runId)
-      if (source.kind === 'benchmark') return api.getBenchmarkAgentSession(source.benchmarkId)
-      if (source.kind === 'portify') return api.getPortifyAgentSession(source.workflowId)
-      if (source.kind === 'coverage') return api.getCoverageAgentSession(source.jobId)
-      if (source.kind === 'evaluation') return api.getEvaluationAgentSession(source.taskId)
-      if (source.kind === 'flight') return api.getFlightAgentSession(source.flightId, source.stage)
-      return api.getFlightPlanAgentSession(source.taskId)
+      switch (source.kind) {
+        case 'discovery-repair': return api.getDiscoveryRepairAgentSession(source.taskId)
+        case 'run': return api.getAgentSession(source.runId)
+        case 'benchmark': return api.getBenchmarkAgentSession(source.benchmarkId)
+        case 'portify': return api.getPortifyAgentSession(source.workflowId)
+        case 'coverage': return api.getCoverageAgentSession(source.jobId)
+        case 'evaluation': return api.getEvaluationAgentSession(source.taskId)
+        case 'flight': return api.getFlightAgentSession(source.flightId, source.stage)
+        case 'flight-plan': return api.getFlightPlanAgentSession(source.taskId)
+      }
     }
 
     // A run whose status has just gone terminal can beat the agent CLI's final
@@ -359,21 +354,7 @@ function SingleAgentSessionView({ source, systemRows, externalSessions = [], emp
         let snapshotLen = snapshot && !isAgentSessionAbsence(snapshot) ? snapshot.events.length : 0
         let seenFromWs = 0
         conn = connectAgentSessionStream({
-          source: source.kind === 'discovery-repair'
-            ? { kind: 'discovery-repair', taskId: source.taskId }
-            : source.kind === 'run'
-            ? { kind: 'run', runId: source.runId }
-            : source.kind === 'benchmark'
-              ? { kind: 'benchmark', benchmarkId: source.benchmarkId }
-              : source.kind === 'portify'
-                ? { kind: 'portify', workflowId: source.workflowId }
-                : source.kind === 'coverage'
-                  ? { kind: 'coverage', jobId: source.jobId }
-                  : source.kind === 'evaluation'
-                    ? { kind: 'evaluation', taskId: source.taskId }
-                    : source.kind === 'flight'
-                      ? { kind: 'flight', flightId: source.flightId, stage: source.stage }
-                      : { kind: 'flight-plan', taskId: source.taskId },
+          source,
           onSession: (session) => {
             if (cancelled) return
             setState((prev) => prev
@@ -771,26 +752,4 @@ function LiveTail({ label, since }: { label: string; since?: string }) {
       {elapsed && <span className="agentts-worktime" data-testid="agent-session-live-elapsed">{elapsed}</span>}
     </li>
   )
-}
-
-function sourceCacheKey(source: AgentSessionSource): string {
-  if (source.kind === 'discovery-repair') return `discovery-repair:${source.taskId}:${source.live ? '1' : '0'}`
-  if (source.kind === 'run') return `run:${source.runId}:${source.live ? '1' : '0'}`
-  if (source.kind === 'benchmark') return `benchmark:${source.benchmarkId}:${source.live ? '1' : '0'}`
-  if (source.kind === 'portify') return `portify:${source.workflowId}:${source.live ? '1' : '0'}`
-  if (source.kind === 'coverage') return `coverage:${source.jobId}:${source.live ? '1' : '0'}`
-  if (source.kind === 'evaluation') return `evaluation:${source.taskId}:${source.live ? '1' : '0'}`
-  if (source.kind === 'flight') return `flight:${source.flightId}:${source.stage}:${source.live ? '1' : '0'}`
-  return `flight-plan:${source.taskId}:${source.live ? '1' : '0'}`
-}
-
-function sourceIdentityKey(source: AgentSessionSource): string {
-  if (source.kind === 'discovery-repair') return `discovery-repair:${source.taskId}`
-  if (source.kind === 'run') return `run:${source.runId}`
-  if (source.kind === 'benchmark') return `benchmark:${source.benchmarkId}`
-  if (source.kind === 'portify') return `portify:${source.workflowId}`
-  if (source.kind === 'coverage') return `coverage:${source.jobId}`
-  if (source.kind === 'evaluation') return `evaluation:${source.taskId}`
-  if (source.kind === 'flight') return `flight:${source.flightId}:${source.stage}`
-  return `flight-plan:${source.taskId}`
 }

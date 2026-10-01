@@ -1,3 +1,4 @@
+import { portifyIndexEntry } from '@shared/portify-index'
 import type { PortifyManifest, PortifyIndexEntry } from '@/shared/api/client'
 
 // Pure reducer driving PortifyContext. Mirrors benchmark-state.ts so it
@@ -38,17 +39,6 @@ export type PortifyAction =
   | { type: 'removed'; workflowId: string }
   | { type: 'connection'; status: ConnectionState }
 
-function indexEntryFromManifest(m: PortifyManifest): PortifyIndexEntry {
-  return {
-    workflowId: m.workflowId,
-    feature: m.feature,
-    status: m.status,
-    startedAt: m.startedAt,
-    ...(m.endedAt ? { endedAt: m.endedAt } : {}),
-    ...(m.producer ? { producer: m.producer } : {}),
-  }
-}
-
 function byStartedDesc(a: PortifyIndexEntry, b: PortifyIndexEntry): number {
   return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0
 }
@@ -58,7 +48,7 @@ export function portifyReducer(state: PortifyState, action: PortifyAction): Port
     case 'snapshot':
       return { ...state, workflows: action.workflows, details: action.details }
     case 'update': {
-      const entry = indexEntryFromManifest(action.manifest)
+      const entry = portifyIndexEntry(action.manifest)
       const others = state.workflows.filter((w) => w.workflowId !== action.workflowId)
       return {
         ...state,

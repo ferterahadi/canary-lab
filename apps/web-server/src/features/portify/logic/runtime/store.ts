@@ -1,3 +1,4 @@
+import { portifyIndexEntry } from '../../../../../../../shared/portify-index'
 import type { PortifyManifest, PortifyIndexEntry } from './types'
 import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../../shared/lib/file-backed-task-store'
 
@@ -28,13 +29,7 @@ function indexEntryFromManifest(m: PortifyManifest) {
   return {
     id: m.workflowId,
     createdAt: m.startedAt,
-    workflowId: m.workflowId,
-    feature: m.feature,
-    status: m.status,
-    branch: m.branch,
-    startedAt: m.startedAt,
-    ...(m.endedAt ? { endedAt: m.endedAt } : {}),
-    ...(m.producer ? { producer: m.producer } : {}),
+    ...portifyIndexEntry(m),
   }
 }
 

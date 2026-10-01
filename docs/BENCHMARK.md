@@ -1,28 +1,48 @@
 # Benchmark: Repairs With and Without Canary Lab
 
-**On the bundled storefront demo, median repair time was 74 seconds with Canary Lab and 128 seconds without it. Median output-token use was 64% lower.** Both workflows passed the independent evaluator in all 20 of their attempts. Canary Lab was faster in 19 of the 20 pairs.
+**In the latest-result view of the bundled storefront demo, median repair time was 71 seconds with Canary Lab and 132 seconds without it. Median output-token use was 63% lower.** Each workflow passed the independent evaluator in its 20 selected attempts, and Canary Lab was faster in all 20 selected pairs.
+
+This view replaces the original Claude three-service repeat 1 with one requested fresh pair, selected after inspecting the original slower result. The replacement was accepted regardless of its outcome. The original campaign remains intact; this is a descriptive update, not an untouched randomized sample. See [Requested rerun](#requested-rerun) for both measurements.
 
 The study ran on 2026-10-01 with Canary Lab 2.3.2, using Claude Code and Codex on two scenarios with seeded bugs. These results apply to this demo and configuration; see [Limits](#limits) for scope and uncertainty.
 
 ## Results
 
-Each group contains five paired attempts on the same scenario. *Time* runs from starting the agent to a separate evaluator's verdict, so it includes starting services and every test run.
+Each group contains five selected paired attempts on the same scenario. *Time* uses the recorded dispatch-to-independent-verdict duration, including attempt setup, agent work, service starts and every test run. This update also makes the timing field consistent across medians, totals and individual rows; the earlier publication mixed repair-only and end-to-end values.
 
-Paired values in this table and the appendix list Canary Lab first, then the workflow without it. Token counts measure usage; dollar cost was not measured.
+Paired values in this table and the appendix list Canary Lab first, then the workflow without it. Total tokens now consistently include output as well as input and cached traffic; the earlier appendix omitted output from that column. Token counts measure usage; dollar cost was not measured.
 
 | Agent and bug | Median time: Canary → plain | Time saved (95% range) | Median output tokens | Median test runs |
 | --- | --- | --- | --- | --- |
-| Claude, one-service bug | 34s → 113s | 72% (70 to 74%) | 1.6k → 7.1k | 2 → 9 |
-| Codex, one-service bug | 67s → 156s | 67% (41 to 80%) | 1.8k → 3.7k | 2 → 4 |
-| Codex, three-service bug | 106s → 188s | 48% (28 to 62%) | 3.3k → 5.7k | 3 → 4 |
-| Claude, three-service bug | 77s → 123s | 25% (−8 to 49%) | 4.7k → 8.5k | 2 → 6 |
-| **All 20 pairs** | **74s → 128s** | | **2.4k → 6.6k** | **2 → 4** |
+| Claude, one-service bug | 34s → 113s | 71% (70 to 74%) | 1.6k → 7.1k | 2 → 9 |
+| Codex, one-service bug | 67s → 156s | 67% (40 to 80%) | 1.8k → 3.7k | 2 → 4 |
+| Codex, three-service bug | 106s → 188s | 47% (28 to 62%) | 3.3k → 5.7k | 3 → 4 |
+| Claude, three-service bug | 75s → 127s | 42%; no interval after selected replacement | 4.1k → 8.5k | 2 → 7 |
+| **All 20 selected pairs** | **71s → 132s** | | **2.4k → 6.7k** | **2 → 4.5** |
 
-- **Both workflows passed every attempt.** The evaluator found no difference in pass rate in this sample. The observed gains were lower elapsed time and token use.
-- **Totals across all 40 attempts:** 1,441 seconds with Canary Lab against 3,158 without (−54%), and 8.1 million tokens processed against 13.2 million (−38%).
-- **The Claude three-service result could be a tie.** Its 95% range crosses zero.
+- **Both workflows passed every executed attempt:** 40 original attempts plus two rerun attempts. The evaluator found no difference in pass rate in this sample. The observed gains were lower elapsed time and token use.
+- **Totals across the 40 selected attempts:** 1,390 seconds with Canary Lab against 3,228 without (−57%), and 7.7 million tokens processed against 13.3 million (−43%). These totals exclude the superseded original pair; its evidence remains preserved.
+- **The replacement was selected after observing the result.** No confidence interval is reported for the refreshed Claude three-service group. The original group's published 95% range crossed zero (−8 to 49%).
+
+## Requested Rerun
+
+On 2026-10-01, the user requested one fresh comparison for Claude's three-service repeat 1. Both workflows started from the same frozen broken application, with the original source fingerprint, dependencies, model, effort and CLI versions verified identical. Canary ran first, matching the original pair's order. There was one fresh pair, with no retry based on its result.
+
+| Measurement: Canary → plain | Original pair | Fresh pair used above |
+| --- | --- | --- |
+| Time to independent verdict | 137.7s → 97.1s | 68.4s → 149.3s |
+| Output tokens | 8,217 → 6,506 | 3,557 → 8,310 |
+| Total tokens including cache | 857,754 → 501,120 | 372,381 → 671,142 |
+| Observed test runs | 2 → 4 | 2 → 7 |
+| Independent evaluator | Both: 7/7 plus extra checks | Both: 7/7 plus extra checks |
+
+The original table displayed 137s → 97s; the values here use the explicit end-to-end receipt. The fresh pair is stored under `claude-cross-service-rerun-20261001/` in the campaign evidence directory. Its first randomized pair is internally named `claude-cross-service-2-{canary,plain}` and is mapped to original repeat 1 only in this published latest-result view. The harness prepared four slots and stopped after the requested two; the other two slots were not run.
+
+The original report is preserved as `published-before-rerun.md`, and `latest-result-analysis.json` records the replacement mapping and recalculated statistics. All original transcripts and receipts remain under `live-r5/`.
 
 ## Where the Time and Token Savings Came From
+
+**Historical activity analysis:** this section describes the original 40-attempt campaign, before the selected rerun. Its activity classifications and averages are retained separately from the latest-result tables above.
 
 The largest difference in the activity breakdown is service and test management. Without Canary Lab, the agent starts services, runs tests, reads their output, and manages subsequent runs. With Canary Lab, the harness starts services and runs tests, then provides failure evidence to the agent. In both workflows, the agent reads and edits application code.
 
@@ -31,7 +51,7 @@ The table shows the average attempt, split by activity. Token counts here are ou
 | What the agent was doing | Claude: plain | Claude: Canary | Codex: plain | Codex: Canary |
 | --- | --- | --- | --- | --- |
 | **Starting, stopping and checking services** | 4.1 steps · 30s · 2.1k tokens | 1.3 · 8s · 0.5k | 7.2 · 78s · 1.7k | 1.4 · 11s · 0.4k |
-| **Running tests and reading results** | 4.6 · 37s · 2.2k | none: Canary runs them | 5.9 · 54s · 1.3k | 0.4 · 3s · 0.1k |
+| **Running tests and reading results** | 4.6 · 37s · 2.2k | 0 direct test runs; executed by Canary | 5.9 · 54s · 1.3k | 0.4 · 3s · 0.1k |
 | Reading the failure evidence Canary handed over | — | 1.0 · 5s · 0.1k | — | 2.1 · 15s · 0.4k |
 | Getting oriented: instructions, requirements, test files | 2.9 · 18s · 1.0k | 2.6 · 14s · 0.9k | 1.5 · 11s · 0.3k | 2.7 · 16s · 0.5k |
 | Reading and editing application code | 1.6 · 16s · 1.4k | 2.6 · 19s · 1.6k | 3.1 · 40s · 1.2k | 2.4 · 22s · 0.8k |
@@ -40,7 +60,7 @@ The table shows the average attempt, split by activity. Token counts here are ou
 | Canary's own service boot and test runs | — | about 6s | — | about 7s |
 | **Average attempt** | **117s · 7.6k** | **61s · 3.5k** | **201s · 4.9k** | **85s · 2.6k** |
 
-A *step* is one tool call, and the time is the model's response plus the tool's execution. Steps are classified from their commands, so a step that mixes activities is counted once under its main activity. This breakdown attributes the observed difference to activities; it does not isolate each activity's causal effect.
+A *step* is one tool call, and the time is the model's response plus the tool's execution. Steps are classified from their commands, so a step that mixes activities is counted once under its main activity. Zero direct test runs does not mean zero tests or zero execution time: Canary's runs appear in the harness row, and the agent still reads failure evidence. This breakdown attributes the observed difference to activities; it does not isolate each activity's causal effect.
 
 What the breakdown shows:
 
@@ -56,10 +76,10 @@ What the breakdown shows:
 
 ## What Affects the Numbers
 
-- **Model request time was the largest component for Claude.** Requests were 83–86% of Claude's wall time in both workflows, according to its request telemetry. Codex's telemetry does not record comparable request timing. Slower requests would be expected to affect the plain workflow more because it takes more steps; the study did not vary network or provider conditions separately.
+- **Model request time was the largest component for Claude in the original campaign.** Requests were 83–86% of Claude's wall time in both workflows, according to its request telemetry. Codex's telemetry does not record comparable request timing. Slower requests would be expected to affect the plain workflow more because it takes more steps; the study did not vary network or provider conditions separately.
 - **Machine speed** changes how long services take to boot and Playwright takes to run, in both workflows.
 - **Harness overhead** was about 4 seconds in a scripted replay with no model: 6.5 seconds with Canary Lab against 2.4 without. For a repair requiring very few agent steps, that overhead could offset the time saved.
-- **Repair complexity** changes the share of time spent managing services and tests. Estimated time savings were 67–72% for the one-service bug and 25–48% for the three-service bug; the latter range includes the Claude group whose uncertainty interval crosses zero.
+- **Repair complexity** changes the share of time spent managing services and tests. In the original published campaign, estimated time savings were 67–72% for the one-service bug and 25–48% for the three-service bug; the latter included the Claude group whose uncertainty interval crossed zero. The selected rerun does not establish a new causal estimate.
 - **Token counts measure usage.** Total tokens include context the model reread, mostly from the prompt cache; output tokens count what it generated. The study reports both and does not measure dollar cost.
 - **Models, effort and command-line client versions** were pinned. Other versions can behave differently.
 
@@ -83,21 +103,21 @@ Both workflows used the same agent, model, reasoning effort, bug and repair rule
 
 ## How We Measure
 
-- **Time:** from starting the agent to the independent evaluator's verdict.
+- **Time:** the controller's recorded `timing.independentVerdictMs`, from dispatch to the independent evaluator's verdict.
 - **Tokens:** read from each client's own session logs. *Output tokens* are what the model generated. *Total tokens* also include context the model reread, mostly from the prompt cache.
 - **Test runs:** counted by a hook that records every Playwright start.
 - **Correctness:** a separate evaluator reruns the suite on the final code and determines pass or fail from that run.
 - **Design:**
   - Attempts run in pairs, one per workflow, in a shuffled order fixed by a seed.
   - Each workflow goes first equally often.
-  - Each agent repeats each bug five times.
-  - The 95% ranges come from 5,000 paired resamples.
+  - Each agent repeated each bug five times in the original campaign. The latest-result view replaces one pair with the explicitly requested follow-up.
+  - The 95% ranges for unchanged groups come from 5,000 paired resamples. The group with a selected replacement has no new interval.
 - **Pinned for this run:**
 
 | Item | Value |
 | --- | --- |
 | Date | 2026-10-01 |
-| Canary Lab source | `25b4b9a5`, plus a receipt-label fix later committed as `bdaea8cd` |
+| Canary Lab source | Original: `25b4b9a5` plus the receipt-label fix committed as `bdaea8cd`; rerun: `bdaea8cd`, identical source fingerprint |
 | Claude | `claude-opus-5-5`, high effort, Claude Code 2.1.284 |
 | Codex | `gpt-6-sol`, high effort, codex-cli 0.158.0 |
 | Machine | One macOS machine, attempts run one at a time |
@@ -106,8 +126,8 @@ Both workflows used the same agent, model, reasoning effort, bug and repair rule
 ## Limits
 
 - **Bundled demo.** The storefront is Canary Lab's own demo, and its bugs are seeded. Results on an unfamiliar repository can differ.
-- **Small sample.** Each group has five pairs. The Claude three-service group cannot rule out a tie.
-- **One slower attempt.** In Claude three-service attempt 1, Canary Lab took 137 seconds against 97.
+- **Small sample and selected replacement.** Each displayed group has five pairs. Repeating the one observed slower pair and replacing it changes the sampling procedure; the updated values are descriptive and must not be treated as fresh randomized evidence of significance.
+- **Original slower attempt preserved.** Claude three-service repeat 1 originally took 137.7 seconds with Canary against 97.1 plain. The requested fresh pair took 68.4 against 149.3. Both remain in the evidence; only the fresh pair contributes to the latest-result tables.
 - **Extra fixes are not scored.** In all five one-service attempts without Canary Lab, Claude also changed how the catalog assigns product IDs. The evaluator does not reward or penalise that.
 - **Unmeasured:** dollar cost, the value of Flight onboarding or coverage work, and repairs that need a browser tool.
 
@@ -123,7 +143,7 @@ npm run benchmark:study -- run --study <new-study>
 npm run benchmark:study -- report --study <new-study>
 ```
 
-The campaign's full evidence stays in the workspace that ran it (`<workspace>/benchmark-evidence/with-without-20261001/`). That includes every transcript, test log, cycle prompt and the generated report.
+The campaign's full evidence stays in the workspace that ran it (`<workspace>/benchmark-evidence/with-without-20261001/`). That includes every transcript, test log, cycle prompt and the generated report. Original evidence is under `live-r5/`; the requested pair and latest-result analysis are under `claude-cross-service-rerun-20261001/`.
 
 ## Related
 
@@ -131,25 +151,27 @@ The campaign's full evidence stays in the workspace that ran it (`<workspace>/be
 
 ## Appendix: Every Pair
 
+These are the 20 selected pairs used in the current results. Claude three-service repeat 1 is the fresh pair described above. All times use the same dispatch-to-independent-verdict field.
+
 | Agent | Bug | Repeat | Time: Canary → plain | Output tokens | Total tokens | Test runs |
 | --- | --- | --- | --- | --- | --- | --- |
-| Claude | three-service | 1 | 137s → 97s | 8.2k → 6.5k | 850k → 495k | 2 → 4 |
-| Claude | three-service | 2 | 75s → 104s | 4.1k → 8.5k | 449k → 626k | 2 → 7 |
-| Claude | three-service | 3 | 53s → 139s | 3.6k → 9.0k | 432k → 623k | 2 → 7 |
-| Claude | three-service | 4 | 100s → 123s | 6.1k → 8.9k | 540k → 783k | 2 → 6 |
-| Claude | three-service | 5 | 77s → 127s | 4.7k → 7.9k | 322k → 649k | 2 → 5 |
-| Claude | one-service | 1 | 34s → 112s | 2.0k → 7.1k | 295k → 613k | 2 → 7 |
-| Claude | one-service | 2 | 29s → 119s | 1.4k → 6.7k | 303k → 420k | 2 → 8 |
-| Claude | one-service | 3 | 34s → 113s | 1.6k → 6.6k | 304k → 613k | 2 → 10 |
-| Claude | one-service | 4 | 30s → 111s | 1.3k → 7.8k | 244k → 650k | 2 → 10 |
-| Claude | one-service | 5 | 36s → 121s | 1.9k → 7.3k | 244k → 526k | 2 → 9 |
-| Codex | three-service | 1 | 80s → 272s | 2.8k → 5.7k | 336k → 758k | 2 → 4 |
-| Codex | three-service | 2 | 110s → 166s | 3.1k → 6.2k | 385k → 649k | 2 → 4 |
-| Codex | three-service | 3 | 95s → 188s | 3.3k → 4.7k | 585k → 793k | 3 → 3 |
-| Codex | three-service | 4 | 114s → 135s | 3.6k → 4.1k | 696k → 683k | 3 → 4 |
-| Codex | three-service | 5 | 106s → 201s | 3.5k → 7.8k | 693k → 784k | 3 → 4 |
-| Codex | one-service | 1 | 86s → 100s | 1.8k → 3.0k | 279k → 728k | 2 → 4 |
-| Codex | one-service | 2 | 55s → 353s | 1.7k → 3.7k | 294k → 580k | 2 → 4 |
-| Codex | one-service | 3 | 59s → 128s | 1.7k → 3.7k | 234k → 713k | 2 → 4 |
-| Codex | one-service | 4 | 67s → 301s | 1.9k → 5.4k | 325k → 769k | 2 → 4 |
-| Codex | one-service | 5 | 73s → 155s | 2.1k → 4.9k | 279k → 595k | 2 → 4 |
+| Claude | three-service | 1 (rerun) | 68s → 149s | 3.6k → 8.3k | 372k → 671k | 2 → 7 |
+| Claude | three-service | 2 | 75s → 105s | 4.1k → 8.5k | 453k → 634k | 2 → 7 |
+| Claude | three-service | 3 | 53s → 140s | 3.6k → 9.0k | 435k → 631k | 2 → 7 |
+| Claude | three-service | 4 | 101s → 123s | 6.1k → 8.9k | 546k → 792k | 2 → 6 |
+| Claude | three-service | 5 | 77s → 127s | 4.7k → 7.9k | 327k → 657k | 2 → 5 |
+| Claude | one-service | 1 | 35s → 113s | 2.0k → 7.1k | 297k → 620k | 2 → 7 |
+| Claude | one-service | 2 | 30s → 119s | 1.4k → 6.7k | 304k → 427k | 2 → 8 |
+| Claude | one-service | 3 | 34s → 113s | 1.6k → 6.6k | 305k → 619k | 2 → 10 |
+| Claude | one-service | 4 | 31s → 111s | 1.3k → 7.8k | 245k → 658k | 2 → 10 |
+| Claude | one-service | 5 | 36s → 122s | 1.9k → 7.3k | 246k → 533k | 2 → 9 |
+| Codex | three-service | 1 | 80s → 273s | 2.8k → 5.7k | 338k → 764k | 2 → 4 |
+| Codex | three-service | 2 | 110s → 166s | 3.1k → 6.2k | 389k → 655k | 2 → 4 |
+| Codex | three-service | 3 | 96s → 188s | 3.3k → 4.7k | 588k → 798k | 3 → 3 |
+| Codex | three-service | 4 | 115s → 136s | 3.6k → 4.1k | 699k → 687k | 3 → 4 |
+| Codex | three-service | 5 | 106s → 202s | 3.5k → 7.8k | 697k → 792k | 3 → 4 |
+| Codex | one-service | 1 | 86s → 100s | 1.8k → 3.0k | 280k → 731k | 2 → 4 |
+| Codex | one-service | 2 | 55s → 353s | 1.7k → 3.7k | 295k → 584k | 2 → 4 |
+| Codex | one-service | 3 | 60s → 129s | 1.7k → 3.7k | 235k → 716k | 2 → 4 |
+| Codex | one-service | 4 | 67s → 302s | 1.9k → 5.4k | 327k → 774k | 2 → 4 |
+| Codex | one-service | 5 | 74s → 156s | 2.1k → 4.9k | 281k → 599k | 2 → 4 |

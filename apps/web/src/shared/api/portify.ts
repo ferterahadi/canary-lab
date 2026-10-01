@@ -1,3 +1,4 @@
+import type { PortifyStatus } from '@shared/portify-index'
 // Port-ification workflows: start, review, save, revise, remove.
 // Split out of client.ts; see that barrel for the shared surface.
 
@@ -5,9 +6,8 @@ import type { ClientKind, RunProducer } from '@shared/run-mode'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
 import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
-export type PortifyStatus =
-  | 'planning' | 'editing' | 'verifying' | 'ready-to-save' | 'saved'
-  | 'failed' | 'aborted'
+export type { PortifyStatus } from '@shared/portify-index'
+export type { PortifyIndexEntry } from '@shared/portify-index'
 
 export interface PortifyBootInstance {
   ports: Record<string, number>
@@ -21,18 +21,6 @@ export interface PortifyRepoState {
   path: string
   worktreePath?: string
   baseSha?: string
-}
-
-export interface PortifyIndexEntry {
-  workflowId: string
-  feature: string
-  status: PortifyStatus
-  branch?: string
-  startedAt: string
-  endedAt?: string
-  /** Mirrored from the manifest; absent on entries written before the mirror
-   *  existed, which all predate external portify — absent = internal. */
-  producer?: PortifyProducer
 }
 
 export type PortifyProducer = RunProducer

@@ -264,6 +264,20 @@ Runs, Portify, and Benchmark share that per-record request guard in
 `apps/web/src/shared/state/observed-reads.ts`; feature reducers and actions remain
 separate. The server writer and browser reducer derive compact run rows through
 `shared/run-index.ts`, including repair ownership, cycles, and review counts.
+Portify uses `shared/portify-index.ts` for the same boundary: snapshots and
+browser updates retain the server's branch, producer, and terminal timestamp.
+The wire-contract gate requires canonical re-exports and both converter calls.
+
+Pre-flight planning lists use `useLiveResource` with a dedicated cache and the
+`pre-flights` invalidation topic. Workspace changes and connected handshakes
+refresh the list; superseded reads cannot restore an older status or deletion.
+Unknown and running lists reconcile every 2.5 seconds; accepted empty or settled
+lists stop periodic reads. Refreshes and failures retain accepted records.
+
+Agent-session viewers and socket adapters share the eight source identities in
+`apps/web/src/shared/api/agent-session-source.ts`. Identity includes the flight
+stage; cache keys append the live/history flag. REST and WebSocket routing stay
+transport-specific and exhaustive over that union.
 
 Drafts and evaluation exports share collection recovery in
 `apps/web/src/shared/state/use-workspace-records.ts`. It subscribes before the

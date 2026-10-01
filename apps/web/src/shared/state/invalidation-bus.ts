@@ -24,6 +24,7 @@ export type InvalidationTopic =
   | 'verification'
   | 'tests'
   | 'flights'
+  | 'pre-flights'
   | 'notifications'
   | 'journal'
   | 'project-config'
