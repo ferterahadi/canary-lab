@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { isElicitationReview, checkpointInputToken } from '@/shared/lib/workspace-view-state'
 import * as flightsApi from '@/shared/api/flights'
 import type { FlightCheckpoint, FlightManifest, FlightStage } from '@shared/flights/types'
-import { evaluationArchiveFilename } from '@/shared/lib/format'
+import { evaluationTaskFilename } from '@shared/evaluation-archive-naming'
 import { DiffView } from '@/shared/ui/DiffView'
 import { panelCardClass, panelCardStyle } from '@/shared/ui/PanelCard'
 import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExportContext'
@@ -40,7 +40,7 @@ export function DownloadEvaluationAction({
   // stays absent rather than clicking into a silent no-op.
   const task = taskId ? taskById(taskId) : null
   if (!taskId || !task?.downloadReady) return null
-  const filename = evaluationArchiveFilename(task.feature, task.runId)
+  const filename = evaluationTaskFilename(task)
   const title = failed ? 'Download failed — click to retry' : `Download ${filename}`
   const download = () => {
     setFailed(false)

@@ -16,7 +16,8 @@ import { PanelCard } from '@/shared/ui/PanelCard'
 import { CoverageFreshnessIndicator, coverageWarning } from '@/shared/ui/CoverageFreshnessIndicator'
 import { SkeletonBar, SkeletonBead, SkeletonPanel, type AwaitingState } from '@/shared/ui/Skeleton'
 import { StatusDot } from '@/shared/ui/atoms'
-import { evaluationArchiveFilename, formatBytes, formatDuration, shortRunRef, timeAgo } from '@/shared/lib/format'
+import { formatBytes, formatDuration, shortRunRef, timeAgo } from '@/shared/lib/format'
+import { evaluationTaskFilename } from '@shared/evaluation-archive-naming'
 import { StageColumn } from './stage-meta'
 import { plural } from '@shared/lib/plural'
 import { CONFIG_GROUP, groupOverlayFiles, overlayDiffStat, serviceReadyMs, splitFilePath } from './stage-metrics'
@@ -461,7 +462,7 @@ export function EvaluationDeliverablePanel({ task, awaiting, probed }: {
   if (!task) {
     return awaiting ? <StageColumn><SkeletonPanel kicker={kicker} awaiting={awaiting} testId="evaluation-deliverable-skeleton" rows={2} /></StageColumn> : null
   }
-  const filename = evaluationArchiveFilename(task.feature, task.runId)
+  const filename = evaluationTaskFilename(task)
   return (
     <StageColumn>
       <PanelCard kicker={kicker} testId="evaluation-deliverable">
@@ -572,7 +573,7 @@ export function AllReportsPanel({
 function ArchiveDownloadButton({ task, label }: { task: EvaluationExportTaskView; label?: string }) {
   const { downloadTask } = useEvaluationExports()
   const [failed, setFailed] = useState(false)
-  const filename = evaluationArchiveFilename(task.feature, task.runId)
+  const filename = evaluationTaskFilename(task)
   const title = failed ? 'Download failed — click to retry' : `Download ${filename}`
   const download = (): void => {
     setFailed(false)

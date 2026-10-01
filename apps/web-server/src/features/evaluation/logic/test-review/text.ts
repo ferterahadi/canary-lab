@@ -75,10 +75,6 @@ export function titleCaseFeatureName(input: string): string {
     .replace(/\b[a-zA-Z]/g, (char) => char.toUpperCase())
 }
 
-export function slugFromTitle(title: string): string {
-  return `test-case-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`
-}
-
 export function formatMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`
   return `${(ms / 1000).toFixed(1)}s`

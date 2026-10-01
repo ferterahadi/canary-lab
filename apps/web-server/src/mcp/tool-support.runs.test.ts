@@ -2,16 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type { RunDetail } from '../../../../shared/run-detail'
 import type { RunIndexEntry } from '../../../../shared/run-index'
 import type { CanaryLabMcpDeps } from './tool-schemas'
-import {
-  activeRunPriority,
-  claimRun,
-  ensureExternalClaimForMcpCall,
-  findContinuingRunForFeature,
-  mcpVerificationStatus,
-  resolveRunRef,
-  runCandidate,
-  verificationResult,
-} from './tool-support'
+import { claimRun, ensureExternalClaimForMcpCall, findContinuingRunForFeature, mcpVerificationStatus, resolveRunRef, runCandidate, verificationResult } from './tool-support'
+import { activeRunPriority } from '../features/runs/logic/active-run-order'
 
 // The run-selection and heal-claim layer behind start_run / get_verification_result:
 // which run an external client is handed, whether it owns that run's heal loop, and

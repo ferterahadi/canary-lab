@@ -1,10 +1,8 @@
+import { compareActiveRuns } from '../logic/active-run-order'
 import path from 'path'
 import type { RunDetail } from '../../../../../../shared/run-detail'
 import type { RunStore } from '../logic/run-store'
-import { loadFeatures } from '../../../shared/feature-loader'
 import type { ClientKind } from '../../../../../../shared/run-mode'
-import { getGitRoot } from '../../../shared/git-repo'
-import { resolveRepoPath } from '../../../shared/repo-identity'
 
 export interface ExternalHealAgentRequest {
   kind: 'external'
@@ -17,21 +15,6 @@ export interface ExternalHealAgentRequest {
    *  External-client heal mode (external origin), but gets no externalHealSession
    *  and no broker claim — it waits for a Desktop/UI drive instead. */
   claimable?: boolean
-}
-
-// Distinct git toplevels for every repo declared by a feature — the source
-// repos whose `git worktree list` we scan for canary-lab worktrees.
-export async function featureRepoRoots(featuresDir: string): Promise<string[]> {
-  const roots = new Set<string>()
-  for (const feature of loadFeatures(featuresDir)) {
-    for (const repo of feature.repos ?? []) {
-      try {
-        const root = await getGitRoot(resolveRepoPath(repo.localPath))
-        if (root) roots.add(root)
-      } catch { /* skip repos that aren't resolvable */ }
-    }
-  }
-  return [...roots]
 }
 
 export function contentTypeFor(filePath: string): string {
@@ -102,23 +85,4 @@ export function findActiveRunForFeature(
   }
   candidates.sort(compareActiveRuns)
   return candidates[0]?.detail ?? null
-}
-
-/** Orders active-run candidates: lower `activeRunPriority` first, then newest
- *  `startedAt` first. Exported for direct unit testing — in the route the input
- *  always arrives pre-sorted newest-first, so the `startedAt > 0` arm is only
- *  reachable by feeding an unsorted list here. */
-export function compareActiveRuns(
-  a: { detail: RunDetail; startedAt: string },
-  b: { detail: RunDetail; startedAt: string },
-): number {
-  const priorityDiff = activeRunPriority(a.detail) - activeRunPriority(b.detail)
-  if (priorityDiff !== 0) return priorityDiff
-  return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0
-}
-
-export function activeRunPriority(detail: RunDetail): number {
-  if (detail.manifest.lifecycle?.phase === 'waiting-for-signal') return 0
-  if (detail.manifest.status === 'healing') return 1
-  return 2
 }

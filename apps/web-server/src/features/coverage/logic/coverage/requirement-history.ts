@@ -6,7 +6,7 @@ import type { DirtySpec } from '../../../../../../../shared/run-manifest'
 import { DirtySpecStore } from '../../../runs/logic/dirty-specs/store'
 import { readManifest, readRunsIndex } from '../../../runs/logic/runtime/manifest'
 import { runDirFor } from '../../../runs/logic/runtime/run-paths'
-import { slugify } from '../../../runs/logic/runtime/summary-types'
+import { summaryEntryName } from '../../../../../../../shared/test-names'
 import type { RequirementHistory } from './enforcement'
 import { isAuxiliaryExecution } from '../../../../../../../shared/verification'
 
@@ -123,7 +123,7 @@ export function historyForTests(
 
   let provenAt: RequirementHistory['provenAt']
   if (names.length > 0) {
-    const slugs = names.map((n) => `test-case-${slugify(n)}`)
+    const slugs = names.map((n) => summaryEntryName(n))
     const run = history.runs.find((r) => slugs.every((s) => r.passed.has(s)))
     if (run) provenAt = { runId: run.runId, at: run.at }
   }

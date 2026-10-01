@@ -1,3 +1,4 @@
+import { useDismissOnOutsideMousedown } from '@/shared/ui/Overlays'
 // RunsColumn's state: the four pending-confirmation slots, the menu/popover and
 // compact-layout observers, the restart tracker, and the confirm handlers.
 // Lifted out of the component verbatim so the column file is its markup; every
@@ -104,29 +105,8 @@ export function useRunsColumn({ runs, selectedRunId, onSelectRun, verifyOpen, on
     return () => obs.disconnect()
   }, [])
 
-  // Close the popover on any outside click.
-  useEffect(() => {
-    if (!openMenuRunId) return
-    const onDocClick = (e: MouseEvent): void => {
-      const target = e.target as HTMLElement | null
-      if (target && target.closest('[data-run-menu]')) return
-      setOpenMenuRunId(null)
-    }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [openMenuRunId])
-
-  // Same outside-click handler for the run-action popover (compact header).
-  useEffect(() => {
-    if (!runPopoverOpen) return
-    const onDocClick = (e: MouseEvent): void => {
-      const target = e.target as HTMLElement | null
-      if (target && target.closest('[data-run-launch-menu]')) return
-      setRunPopoverOpen(false)
-    }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [runPopoverOpen])
+  useDismissOnOutsideMousedown(() => setOpenMenuRunId(null), Boolean(openMenuRunId), [], (target) => isMenuTarget(target, '[data-run-menu]'))
+  useDismissOnOutsideMousedown(() => setRunPopoverOpen(false), runPopoverOpen, [], (target) => isMenuTarget(target, '[data-run-launch-menu]'))
 
   // Close the popover automatically when leaving compact mode.
   useEffect(() => {
@@ -173,4 +153,8 @@ export function useRunsColumn({ runs, selectedRunId, onSelectRun, verifyOpen, on
   }
 
   return { verificationRefreshKey, pendingPause, setPendingPause, pendingStop, setPendingStop, pendingDelete, setPendingDelete, pendingCancelHeal, setPendingCancelHeal, openMenuRunId, setOpenMenuRunId, runPopoverOpen, setRunPopoverOpen, verifyDialogOpen, setVerifyDialogOpen, compact, containerRef, gatePromo, transients, errors, abort, pauseHeal, cancelHeal, clearError, restartingIds, restartErrors, onRestartRequest, clearRestartError, confirmPause, confirmStop, confirmCancelHeal, confirmDelete }
+}
+
+function isMenuTarget(target: EventTarget | null, selector: string): boolean {
+  return target instanceof Element && Boolean(target.closest(selector))
 }

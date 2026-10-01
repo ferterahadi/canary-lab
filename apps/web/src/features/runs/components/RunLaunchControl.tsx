@@ -1,6 +1,6 @@
 import { type ReactNode, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useAnchoredPosition } from './RunActionsKebab'
+import { useRunMenuPosition } from './use-run-menu-position'
 
 // Inline SVG icons (no new dependency). Sizes are tuned to align with the
 // 10 px text on the action buttons.
@@ -86,7 +86,7 @@ export function RunLaunchControl({
   // this width, which would make the reserved note box taller than the rows.
   const POPOVER_WIDTH = 260
   const buttonRef = useRef<HTMLButtonElement>(null)
-  const pos = useAnchoredPosition(buttonRef, open, POPOVER_WIDTH)
+  const pos = useRunMenuPosition(buttonRef, open, POPOVER_WIDTH)
   const title = runDisabled && disabledReason ? disabledReason : 'Run'
   // One launch control, three modes. Test/Boot pick an envset inline; Verify
   // opens its own config dialog. `mode` is sticky within the session. Test runs

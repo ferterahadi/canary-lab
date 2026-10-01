@@ -409,6 +409,7 @@ describe('EvaluationExportProvider', () => {
   it('discovers externally created export tasks without a refresh', async () => {
     const external = task({
       taskId: 'external-task',
+      archiveBase: 'historical-export-name',
       runId: 'run-external',
       producer: 'external',
       status: 'running',
@@ -428,6 +429,7 @@ describe('EvaluationExportProvider', () => {
 
     expect(evaluationApi.listEvaluationExportTasks).toHaveBeenCalledTimes(1)
     expect(captured.value?.tasks[0]?.taskId).toBe('external-task')
+    expect(captured.value?.tasks[0]?.archiveBase).toBe('historical-export-name')
     expect(captured.value?.taskForRun('run-external')?.taskId).toBe('external-task')
     expect(FakeWebSocket.instances.map((socket) => socket.url)).toContain('ws://test/ws/evaluation-exports/external-task')
   })
@@ -543,7 +545,7 @@ describe('EvaluationExportProvider', () => {
 
   it('re-lists on a workspace reconnect, since the bus has no replay', async () => {
     vi.useFakeTimers()
-    const created = task({ taskId: 'missed-task', runId: 'run-missed', status: 'completed' })
+    const created = task({ taskId: 'missed-task', runId: 'run-missed', status: 'completed', archiveBase: 'missed-historical-name' })
     vi.mocked(evaluationApi.listEvaluationExportTasks)
       .mockResolvedValueOnce([])
       .mockResolvedValue([created])
@@ -568,6 +570,7 @@ describe('EvaluationExportProvider', () => {
     })
 
     expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['missed-task'])
+    expect(captured.value?.tasks[0]?.archiveBase).toBe('missed-historical-name')
   })
 
   it('survives a re-list that fails on reconnect', async () => {

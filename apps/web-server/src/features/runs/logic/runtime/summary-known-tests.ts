@@ -2,7 +2,7 @@ import fs from 'fs'
 import type { TestCase } from '@playwright/test/reporter'
 import type { SummaryForJournalOutcome } from './heal-journal'
 import { getSummaryPath } from './paths'
-import { slugify } from './summary-types'
+import { summaryEntryName } from '../../../../../../../shared/test-names'
 
 export interface KnownTestEntry {
   id: string
@@ -68,7 +68,7 @@ export function knownTestFromTest(test: TestCase): KnownTestEntry {
       ...(titlePath && titlePath.length > 0 ? { titlePath } : {}),
       ...(location ? { location } : {}),
     }),
-    name: `test-case-${slugify(test.title)}`,
+    name: summaryEntryName(test.title),
     title: test.title,
     ...(titlePath && titlePath.length > 0 ? { titlePath } : {}),
     ...(listLine ? { listLine } : {}),

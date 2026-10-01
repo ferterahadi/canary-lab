@@ -6,7 +6,8 @@ import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { runsRoutes } from './runs'
-import { compareActiveRuns, type ExternalHealAgentRequest } from './runs-route-support'
+import { type ExternalHealAgentRequest } from './runs-route-support'
+import { compareActiveRuns } from '../logic/active-run-order'
 import { RunStore } from '../logic/run-store'
 import {
   createRegistry,

@@ -1,3 +1,4 @@
+import { compareActiveRuns } from '../features/runs/logic/active-run-order'
 // Shared surface for the MCP tool groups: input schemas, profile arrays, the
 // dependency interface, and the result/format helpers every group calls.
 //
@@ -109,18 +110,8 @@ export function findContinuingRunForFeature(
     if (env && detail.manifest.env !== env) continue
     candidates.push({ detail, startedAt: entry.startedAt })
   }
-  candidates.sort((a, b) => {
-    const priorityDiff = activeRunPriority(a.detail) - activeRunPriority(b.detail)
-    if (priorityDiff !== 0) return priorityDiff
-    return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0
-  })
+  candidates.sort(compareActiveRuns)
   return candidates[0]?.detail ?? null
-}
-
-export function activeRunPriority(detail: RunDetail): number {
-  if (detail.manifest.lifecycle?.phase === 'waiting-for-signal') return 0
-  if (detail.manifest.status === 'healing') return 1
-  return 2
 }
 
 export type RunRefResolution =

@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { readRunsIndex } from './manifest'
 import { runDirFor } from './run-paths'
-import { slugify } from './summary-types'
+import { summaryEntryName } from '../../../../../../../shared/test-names'
 import { isAuxiliaryExecution } from '../../../../../../../shared/verification'
 
 // Per-test outcomes of a feature's LATEST recorded run — the join source for
@@ -77,7 +77,7 @@ export function readLatestRunOutcomes(logsDir: string, feature: string): LatestR
 /**
  * Outcome of one spec test in that run, joined by title. Coverage tests are
  * keyed by the AST test title; the summary keys tests as
- * `test-case-${slugify(title)}` (the log-marker convention). Returns
+ * summaryEntryName(title) (the log-marker convention). Returns
  * undefined when the test didn't run (new, renamed, or skipped) — unknown,
  * not failed.
  */
@@ -85,7 +85,7 @@ export function lastRunOutcomeForTitle(
   outcomes: LatestRunOutcomes,
   title: string,
 ): { runId: string; passed: boolean; retried?: boolean } | undefined {
-  const slug = `test-case-${slugify(title)}`
+  const slug = summaryEntryName(title)
   if (outcomes.passed.has(slug)) {
     return {
       runId: outcomes.runId,

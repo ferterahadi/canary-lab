@@ -1,5 +1,5 @@
 import type { PlaywrightArtifactGroup } from '@shared/run-detail'
-import { evaluationArchiveFilename } from '@/shared/lib/format'
+import { evaluationArchiveFilename } from '@shared/evaluation-archive-naming'
 import { isTerminalRunStatus as isSharedTerminalRunStatus } from '@shared/run-state'
 
 // Run has reached a terminal state — the agent pty is gone, so the live

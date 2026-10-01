@@ -99,6 +99,36 @@ function startEnvlessRun(container: HTMLDivElement): void {
 }
 
 describe('run launch controls', () => {
+  it('keeps launch-menu trigger and portal clicks inside, dismisses outside, and closes when leaving compact mode', () => {
+    let resize: ResizeObserverCallback = () => {}
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { resize = callback }
+      observe() {}
+      disconnect() {}
+    })
+    try {
+      act(() => root.render(<RunsColumn feature="alpha" envs={['local']} runs={[]}
+        selectedRunId={null} onSelectRun={() => {}} onStartRun={() => {}} onStartVerification={async () => {}} />))
+      const setWidth = (width: number) => act(() => resize(
+        [{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver,
+      ))
+      setWidth(300)
+      const trigger = container.querySelector<HTMLButtonElement>('button[data-run-launch-menu]')!
+      act(() => trigger.click())
+      const menu = () => document.querySelector('[role="menu"][data-run-launch-menu]')
+      expect(menu()).not.toBeNull()
+      act(() => trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
+      act(() => menu()!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
+      expect(menu()).not.toBeNull()
+      act(() => document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
+      expect(menu()).toBeNull()
+      act(() => trigger.click())
+      expect(menu()).not.toBeNull()
+      setWidth(500)
+      expect(menu()).toBeNull()
+    } finally { vi.unstubAllGlobals() }
+  })
+
   it('keeps the Run action available while this suite is healing', () => {
     const onStartRun = vi.fn()
     const healing: RunIndexEntry = {

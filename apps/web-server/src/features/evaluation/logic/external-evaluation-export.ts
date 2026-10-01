@@ -1,3 +1,4 @@
+import { evaluationArchiveBase } from '../../../../../../shared/evaluation-archive-naming'
 import type { ClientKind } from '../../../../../../shared/run-mode'
 import type { RunDetail } from '../../../../../../shared/run-detail'
 import {
@@ -19,14 +20,6 @@ import type { EvaluationRewrite } from './test-review/types'
 
 export function newEvaluationTaskId(): string {
   return `eval-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-export function safeFilename(input: string): string {
-  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'export'
-}
-
-export function evaluationArchiveBase(feature: string, runId: string): string {
-  return `canary-lab-evaluation-${safeFilename(feature)}-${safeFilename(runId)}`
 }
 
 export interface CreateExternalEvaluationTaskArgs {

@@ -1,3 +1,4 @@
+import { resolvePackageAsset } from './package-assets'
 import fs from 'fs'
 import path from 'path'
 import { getProjectRoot } from '../../shared/runtime/project-root'
@@ -59,21 +60,6 @@ const DEPRECATED_AGENT_DOCS: string[] = [
 const LEGACY_SIGNATURES: Record<string, string> = {
   'CLAUDE.md': '# Canary Lab Project Notes',
   'AGENTS.md': '# Canary Lab Agent Guide',
-}
-
-function resolveFirstExisting(pathsToTry: string[]): string {
-  const match = pathsToTry.find((candidate) => fs.existsSync(candidate))
-  if (!match) {
-    throw new Error(`Could not resolve any expected path: ${pathsToTry.join(', ')}`)
-  }
-  return match
-}
-
-function getTemplateRoot(): string {
-  return resolveFirstExisting([
-    path.resolve(__dirname, '../../templates/project'),
-    path.resolve(__dirname, '../../../templates/project'),
-  ])
 }
 
 /**
@@ -228,7 +214,7 @@ export async function main(
     return
   }
 
-  const templateRoot = getTemplateRoot()
+  const templateRoot = resolvePackageAsset('templates/project')
   let updated = 0
 
   // The user-level workspace registry is owned solely by `canary-lab init`

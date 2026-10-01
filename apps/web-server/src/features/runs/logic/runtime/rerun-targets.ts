@@ -10,7 +10,7 @@
 import fs from 'fs'
 import path from 'path'
 import type { RunLifecycleTargetedRerun } from '../../../../../../../shared/run-state'
-import { slugify } from './summary-types'
+import { summaryEntryName } from '../../../../../../../shared/test-names'
 import { listSpecFiles } from '../../../../shared/feature-loader'
 import { extractTestsFromSource } from '../../../../shared/ast-extractor'
 import { SummaryShape, VerificationPlan, computedTotal, countPassed, extractFailedSlugs } from './run-verdict'
@@ -102,7 +102,7 @@ export function computeRerunTargetsOrdered(
     for (const t of result.tests) {
       allTests.push({
         location: `${file}:${t.line}`,
-        slug: `test-case-${slugify(t.name)}`,
+        slug: summaryEntryName(t.name),
       })
     }
   }
@@ -192,7 +192,7 @@ export function computeNonPassedTargets(
     for (const t of result.tests) {
       allTests.push({
         location: `${file}:${t.line}`,
-        slug: `test-case-${slugify(t.name)}`,
+        slug: summaryEntryName(t.name),
       })
     }
   }

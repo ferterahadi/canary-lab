@@ -1,3 +1,4 @@
+import { resolveFirstExisting } from './package-assets'
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import fs from 'fs'
 import path from 'path'
@@ -8,7 +9,7 @@ const setupProject = vi.fn()
 vi.mock('child_process', () => ({ execFileSync }))
 vi.mock('./setup', () => ({ setup: setupProject }))
 
-const { main, parseArgs, copyDir, resolveFirstExisting, buildPackageJson } = await import(
+const { main, parseArgs, copyDir, buildPackageJson } = await import(
   './init-project'
 )
 

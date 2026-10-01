@@ -1,3 +1,4 @@
+import { resolvePackageAsset } from './package-assets'
 import fs from 'fs'
 import path from 'path'
 import { execFileSync } from 'child_process'
@@ -19,30 +20,6 @@ export function resolveLocalHealAgent(): 'claude' | 'codex' | null {
   } catch {
     return null
   }
-}
-
-export function resolveFirstExisting(pathsToTry: string[]): string {
-  const match = pathsToTry.find((candidate) => fs.existsSync(candidate))
-  if (!match) {
-    throw new Error(`Could not resolve any expected path: ${pathsToTry.join(', ')}`)
-  }
-  return match
-}
-
-function getPackageJsonPath(): string {
-  // apps/cli/ → repo root in source; dist/apps/cli/ → the installed package root
-  // (node_modules/canary-lab/) once compiled, which is one level further.
-  return resolveFirstExisting([
-    path.resolve(__dirname, '../../package.json'),
-    path.resolve(__dirname, '../../../package.json'),
-  ])
-}
-
-function getTemplateRoot(): string {
-  return resolveFirstExisting([
-    path.resolve(__dirname, '../../templates/project'),
-    path.resolve(__dirname, '../../../templates/project'),
-  ])
 }
 
 /** The shipped storefront suite's recorded history, seeded into the new
@@ -225,7 +202,7 @@ export function copyDir(sourceDir: string, targetDir: string): void {
 }
 
 function readPackageVersion(): string {
-  const pkgPath = getPackageJsonPath()
+  const pkgPath = resolvePackageAsset('package.json')
   return JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).version
 }
 
@@ -340,7 +317,7 @@ export async function main(
     fs.mkdirSync(targetDir, { recursive: true })
   }
 
-  copyDir(getTemplateRoot(), targetDir)
+  copyDir(resolvePackageAsset('templates/project'), targetDir)
 
   const bootRecord = getBootRecordRoot()
   if (bootRecord) {

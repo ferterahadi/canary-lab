@@ -27,7 +27,7 @@ vi.mock('./trace-enrichment', () => ({
   extractTraceSummary: traceMocks.extractTraceSummary,
 }))
 
-const { slugify } = await import('./summary-types')
+const { slugify } = await import('../../../../../../../shared/test-names')
 const { testIdFor } = await import('./summary-known-tests')
 const { default: SummaryReporter } = await import('./summary-reporter')
 const { listLineFromTitlePath, knownTestFromTest, knownTestsFromExistingSummary } =

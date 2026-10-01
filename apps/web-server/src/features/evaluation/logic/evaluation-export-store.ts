@@ -255,6 +255,7 @@ export function evaluationExportTaskView(record: EvaluationExportTaskRecord): Ev
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     downloadReady: record.downloadReady,
+    archiveBase: record.archiveBase,
     ...(record.clientKind ? { clientKind: record.clientKind } : {}),
     ...(record.sessionId ? { sessionId: record.sessionId } : {}),
     ...(record.conversationName ? { conversationName: record.conversationName } : {}),

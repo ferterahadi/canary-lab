@@ -3,7 +3,7 @@ import { suiteDirForReading } from '../../../runs/logic/runtime/manifest'
 import { missingAssertionReason, unknownAssertion } from './assertions'
 import { sourceKey, specFileOf } from './ast'
 import { loadSourceTests } from './source-analysis'
-import { slugFromTitle } from './text'
+import { summaryEntryName } from '../../../../../../../shared/test-names'
 import { NOT_RUN_STATUS, RosterEntry, RunVerdicts, SourceTest, TestReviewCase, TestReviewPacket, TestStatusCounts } from './types'
 
 /** The roster the report built before it enumerated declared tests: executed
@@ -12,7 +12,7 @@ export function legacyCaseOrder(detail: RunDetail): string[] {
   const out = playbackTests(detail.playbackEvents ?? []).map(rosterKey)
   const titles = new Set(playbackTests(detail.playbackEvents ?? []).map((test) => test.title))
   for (const passedName of detail.summary?.passedNames ?? []) {
-    if ([...titles].some((title) => slugFromTitle(title) === passedName || title === passedName)) continue
+    if ([...titles].some((title) => summaryEntryName(title) === passedName || title === passedName)) continue
     titles.add(passedName)
     out.push(rosterKey({ name: passedName }))
   }
@@ -123,7 +123,7 @@ export function declaredRoster(detail: RunDetail, attempts: PlaybackAttempt[], s
     // Match on name first: a roster entry and a `passedNames` entry are the same
     // test when the names agree, even though the roster's title may carry
     // annotations that no longer slugify back to it.
-    if (out.some(({ entry }) => entry.name === passedName || slugFromTitle(entry.title) === passedName || entry.title === passedName)) continue
+    if (out.some(({ entry }) => entry.name === passedName || summaryEntryName(entry.title) === passedName || entry.title === passedName)) continue
     add({ name: passedName, title: passedName }, false)
   }
   return out
@@ -148,7 +148,7 @@ function caseForAttempt(attempt: PlaybackAttempt, cases: RosterCase[], sourceTes
  *  the file the attempt ran from. */
 function sourceDeclarations(test: { name: string; title: string }, file: string, sourceTests: Map<string, SourceTest>): SourceTest[] {
   return [...sourceTests.values()].filter((source) => (
-    source.file === file && (source.title === test.title || slugFromTitle(source.title) === test.name)
+    source.file === file && (source.title === test.title || summaryEntryName(source.title) === test.name)
   ))
 }
 
@@ -163,7 +163,7 @@ function sourceFor(entry: RosterEntry & { location: string }, sourceTests: Map<s
   return byTitle.length === 1 ? byTitle[0] : undefined
 }
 
-/** Name is `test-case-${slugify(title)}`, so two tests can share one only by
+/** Name is summaryEntryName(title), so two tests can share one only by
  *  sharing a title — the location disambiguates them. Matches `playbackTests`. */
 export function rosterKey(entry: { name: string; location?: string }): string {
   return `${entry.name}@${entry.location ? sourceKey(entry.location) : ''}`
@@ -230,7 +230,7 @@ export function playbackTests(events: PlaywrightPlaybackEvent[]): PlaybackAttemp
   // One entry per (name, location). Retries and same-line reruns share both and
   // fold into the latest test-end; `declaredRoster` then folds attempts at
   // different lines of the same test. Two distinct tests that share a title
-  // (and therefore a name, since name = `test-case-${slugify(title)}`) but
+  // (and therefore a name, since name = summaryEntryName(title)) but
   // live at different locations stay separate — the HTML export disambiguates
   // them via positional anchor IDs. Map preserves first-seen insertion order.
   const latest = new Map<string, PlaybackAttempt>()

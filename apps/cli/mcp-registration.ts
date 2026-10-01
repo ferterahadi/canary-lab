@@ -1,3 +1,4 @@
+import { commandAvailable } from './command-available'
 import { execFileSync } from 'child_process'
 import path from 'path'
 import { claudeGlobalConfigFile } from '../web-server/src/features/agent-sessions/logic/agent-workspace-trust'
@@ -271,16 +272,6 @@ export function savedMcpMatches(entry: SavedMcpEntry, desired: ResolvedMcpInvoca
 
 function sortedEnv(env: Record<string, string> = {}): [string, string][] {
   return Object.entries(env).sort(([a], [b]) => a.localeCompare(b))
-}
-
-function commandAvailable(command: string): boolean {
-  const lookup = process.platform === 'win32' ? 'where' : 'which'
-  try {
-    execFileSync(lookup, [command], { stdio: 'ignore' })
-    return true
-  } catch {
-    return false
-  }
 }
 
 function addArgsFor(target: McpRegistrationTarget, invocation: ResolvedMcpInvocation): string[] {

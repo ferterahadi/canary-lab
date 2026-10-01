@@ -1,13 +1,6 @@
 import path from 'path'
 import type { EnvironmentExclusion } from '../../../../../../../shared/run-applicability'
 
-export function slugify(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-}
-
 export interface TestEntry {
   environmentExclusion?: EnvironmentExclusion
   id?: string

@@ -371,6 +371,7 @@ test('records checkout', async ({ page }) => {
     const task = await waitForEvaluationTask(app, started.json().taskId)
     expect(task.status).toBe('completed')
     expect(task.downloadReady).toBe(true)
+    expect(task.archiveBase).toBe('canary-lab-evaluation-checkout-r-task-raw')
     expect(generateEvaluationRewrite).not.toHaveBeenCalled()
 
     const download = await app.inject({

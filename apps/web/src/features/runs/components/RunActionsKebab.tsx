@@ -1,41 +1,9 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useRunMenuPosition } from './use-run-menu-position'
+import { useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { ExecutionType } from '@shared/verification'
 import { type RunViewModel } from '../utils/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
-
-// Returns viewport-relative coords for a popover anchored to the right edge
-// of the given element. Recomputes on scroll/resize while the popover is
-// open, so the menu stays attached as the user scrolls within column 3.
-export function useAnchoredPosition(
-  anchorRef: React.RefObject<HTMLElement | null>,
-  open: boolean,
-  width: number,
-): { top: number; left: number } | null {
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
-  useLayoutEffect(() => {
-    if (!open) { setPos(null); return }
-    const compute = (): void => {
-      const el = anchorRef.current
-      if (!el) return
-      const r = el.getBoundingClientRect()
-      // Right-align: align the popover's right edge with the anchor's right edge.
-      let left = r.right - width
-      if (left < 8) left = 8
-      const maxLeft = window.innerWidth - width - 8
-      if (left > maxLeft) left = maxLeft
-      setPos({ top: r.bottom + 6, left })
-    }
-    compute()
-    window.addEventListener('scroll', compute, true)
-    window.addEventListener('resize', compute)
-    return () => {
-      window.removeEventListener('scroll', compute, true)
-      window.removeEventListener('resize', compute)
-    }
-  }, [open, anchorRef, width])
-  return pos
-}
 
 export function RunActionsKebab({
   view,
@@ -74,7 +42,7 @@ export function RunActionsKebab({
   const hasActions = stopAvailable || pauseAvailable || cancelHealAvailable
   const POPOVER_WIDTH = 180
   const buttonRef = useRef<HTMLButtonElement>(null)
-  const pos = useAnchoredPosition(buttonRef, open && hasActions, POPOVER_WIDTH)
+  const pos = useRunMenuPosition(buttonRef, open && hasActions, POPOVER_WIDTH)
   return (
     <div className="shrink-0" data-run-menu>
       <div className="flex items-center gap-1.5">

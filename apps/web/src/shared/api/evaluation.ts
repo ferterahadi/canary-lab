@@ -6,7 +6,7 @@ import type {
   EvaluationExportTaskView,
 } from '@shared/evaluation-export-types'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
-import { evaluationArchiveFilename } from '@/shared/lib/format'
+import { evaluationTaskFilename } from '@shared/evaluation-archive-naming'
 
 export function startEvaluationExport(
   runId: string,
@@ -81,7 +81,7 @@ export async function downloadEvaluationExportTask(
   const link = documentRef.createElement('a')
   try {
     link.href = href
-    link.download = evaluationArchiveFilename(task.feature, task.runId)
+    link.download = evaluationTaskFilename(task)
     link.style.display = 'none'
     documentRef.body.appendChild(link)
     link.click()

@@ -168,7 +168,7 @@ describe('evaluation-export-store', () => {
     expect(patchedWithUpdated?.updatedAt).toBe('2026-02-02T00:00:00.000Z')
 
     const view = evaluationExportTaskView(patched!)
-    expect(view).toMatchObject({ taskId: ID, status: 'completed', downloadReady: true })
+    expect(view).toMatchObject({ taskId: ID, status: 'completed', downloadReady: true, archiveBase: patched!.archiveBase })
     expect(view.error).toBeUndefined()
     const failed = evaluationExportTaskView(makeRecord({
       status: 'failed',

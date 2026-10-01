@@ -2,13 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import {
-  completeExternalEvaluationExport,
-  createExternalEvaluationExportTask,
-  evaluationArchiveBase,
-  newEvaluationTaskId,
-  safeFilename,
-} from './external-evaluation-export'
+import { completeExternalEvaluationExport, createExternalEvaluationExportTask, newEvaluationTaskId } from './external-evaluation-export'
+import { evaluationArchiveBase, safeFilename } from '../../../../../../shared/evaluation-archive-naming'
 import { readEvaluationExportCertificate, readEvaluationExportTask } from './evaluation-export-store'
 import { detail } from './__fixtures__/test-review-fixtures'
 
@@ -32,7 +27,7 @@ afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
 describe('safeFilename / archive base', () => {
   it('collapses unsafe characters and never yields an empty name', () => {
     expect(safeFilename('my feature!')).toBe('my-feature')
-    expect(safeFilename('***')).toBe('export')
+    expect(safeFilename('***')).toBe('run')
     expect(evaluationArchiveBase('checkout flow', 'run/1')).toBe('canary-lab-evaluation-checkout-flow-run-1')
   })
 

@@ -1,3 +1,4 @@
+import { featureRepoRoots } from '../../../shared/feature-repo-roots'
 import fs from 'fs'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
@@ -8,10 +9,8 @@ import type { SabotageLevel } from '../../../../../../shared/benchmark-index'
 import { benchmarkDir } from '../logic/runtime/paths'
 import { addWorktree, removeWorktree } from '../../runs/logic/runtime/repo-worktree'
 import { listWorktrees } from '../../runs/logic/runtime/worktree-inventory'
-import { findFeature, loadFeatures } from '../../../shared/feature-loader'
+import { findFeature } from '../../../shared/feature-loader'
 import { computePortPreflight } from '../../runs/logic/runtime/port-preflight'
-import { getGitRoot } from '../../../shared/git-repo'
-import { resolveRepoPath } from '../../../shared/repo-identity'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/launcher/project-config'
 import { notFound } from '../../../shared/http-error'
@@ -247,22 +246,6 @@ export async function benchmarkRoutes(
       return { error: err instanceof Error ? err.message : String(err) }
     }
   })
-}
-
-// Git toplevels of every configured feature repo — the source roots that
-// `git worktree remove` / `listWorktrees` operate against. Mirrors the helper
-// in routes/runs.ts (kept local to avoid a route→route import).
-async function featureRepoRoots(featuresDir: string): Promise<string[]> {
-  const roots = new Set<string>()
-  for (const feature of loadFeatures(featuresDir)) {
-    for (const repo of feature.repos ?? []) {
-      try {
-        const root = await getGitRoot(resolveRepoPath(repo.localPath))
-        if (root) roots.add(root)
-      } catch { /* skip repos that aren't resolvable */ }
-    }
-  }
-  return [...roots]
 }
 
 // Lazily ensure a pristine checkout at the sabotage SHA under the benchmark's

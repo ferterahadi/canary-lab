@@ -7,17 +7,8 @@ import { useInvalidationKey } from '../state/invalidation'
 import type { DirtySpecSummary, FeatureSpecFile } from '../api/types'
 import type { ExtractedTest } from '@shared/extracted-test'
 import type { RunStatus } from '@shared/run-state'
-import {
-  colorClassForStatus,
-  executionLineHighlightForTest,
-  runningTestForTest,
-  sameSourceFile,
-  statusForTest,
-  type StepStatus,
-  type TestExecutionLineHighlight,
-  type TestStatusIdentity,
-  summaryEntryName,
-} from '@/features/runs/utils/test-step-status'
+import { colorClassForStatus, executionLineHighlightForTest, runningTestForTest, sameSourceFile, statusForTest, type StepStatus, type TestExecutionLineHighlight, type TestStatusIdentity } from '@/features/runs/utils/test-step-status'
+import { summaryEntryName } from '@shared/test-names'
 import { sourceLineForBodyLine } from '@/features/runs/utils/editor-location'
 import type { RunManifest } from '@shared/run-manifest'
 import type { RunSummary, RunSummaryRunningStep } from '@shared/run-detail'

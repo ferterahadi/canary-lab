@@ -1,9 +1,9 @@
 #!/usr/bin/env node
+import { commandAvailable } from './command-available'
 
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { execFileSync } from 'child_process'
 import { installOrRefresh, type AgentInstallTarget } from './agent'
 import {
   isTempInstallPath,
@@ -270,16 +270,6 @@ export function detectAgents(homeDir: string = os.homedir()): DetectedAgent[] {
     agents.push('claude')
   }
   return agents
-}
-
-function commandAvailable(command: string): boolean {
-  const lookup = process.platform === 'win32' ? 'where' : 'which'
-  try {
-    execFileSync(lookup, [command], { stdio: 'ignore' })
-    return true
-  } catch {
-    return false
-  }
 }
 
 function isSetupAgentTarget(value: unknown): value is SetupAgentTarget {

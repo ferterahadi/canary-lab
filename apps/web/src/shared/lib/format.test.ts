@@ -1,18 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import {
-  shortRunRef,
-  formatCount,
-  formatDuration,
-  formatElapsedSeconds,
-  durationBetween,
-  shortTime,
-  shortDateTime,
-  formatBytes,
-  timeAgo,
-  evaluationArchiveFilename,
-  safeFilename,
-  capitalizeFirst,
-} from './format'
+import { shortRunRef, formatCount, formatDuration, formatElapsedSeconds, durationBetween, shortTime, shortDateTime, formatBytes, timeAgo, capitalizeFirst } from './format'
+import { evaluationArchiveFilename, safeFilename } from '@shared/evaluation-archive-naming'
 
 describe('capitalizeFirst', () => {
   it('raises only the first character, leaving later words alone', () => {

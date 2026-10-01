@@ -1,3 +1,4 @@
+import { evaluationArchiveBase, evaluationTaskFilename } from '../../../../../../shared/evaluation-archive-naming'
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import fs from 'fs'
 import path from 'path'
@@ -116,7 +117,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     const { archiveBase, zip } = await buildEvaluationZip(detail, 'localized')
     reply
       .type('application/zip')
-      .header('content-disposition', `attachment; filename="${archiveBase}.zip"`)
+      .header('content-disposition', `attachment; filename="${evaluationTaskFilename({ archiveBase, feature: detail.manifest.feature, runId: detail.runId })}"`)
     return reply.send(zip)
   }
 
@@ -150,7 +151,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
       createdAt: now,
       updatedAt: now,
       downloadReady: false,
-      archiveBase: `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`,
+      archiveBase: evaluationArchiveBase(detail.manifest.feature, detail.runId),
     }
     const active: ActiveEvaluationExportTask = {
       broker: new PaneBroker(),
@@ -274,7 +275,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     }
     reply
       .type('application/zip')
-      .header('content-disposition', `attachment; filename="${task.archiveBase}.zip"`)
+      .header('content-disposition', `attachment; filename="${evaluationTaskFilename(task)}"`)
     return reply.send(zip)
   })
 
@@ -347,10 +348,6 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     const unsub = active.broker.subscribe('export', sub, { replay: false })
     socket.on('close', () => unsub())
   })
-}
-
-function safeFilename(input: string): string {
-  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'run'
 }
 
 async function loadEvaluationRewrite(

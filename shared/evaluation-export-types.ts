@@ -54,6 +54,8 @@ export interface EvaluationExportTaskView {
   createdAt: string
   updatedAt: string
   downloadReady: boolean
+  /** Persisted archive name; older servers omit it. */
+  archiveBase?: string
   clientKind?: ClientKind
   sessionId?: string
   conversationName?: string

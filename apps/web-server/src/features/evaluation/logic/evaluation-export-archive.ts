@@ -1,3 +1,4 @@
+import { safeFilename, evaluationArchiveBase } from '../../../../../../shared/evaluation-archive-naming'
 import fs from 'fs'
 import path from 'path'
 import type { PlaywrightArtifact } from '../../../../../../shared/run-detail'
@@ -57,7 +58,7 @@ export async function buildEvaluationExportArchive(
     ...videoEntries,
   ])
   return {
-    archiveBase: `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`,
+    archiveBase: evaluationArchiveBase(detail.manifest.feature, detail.runId),
     zip,
     contents: { bytes: zip.length, videos: videoEntries.length, assets: exported.assets.length },
     certificate,
@@ -109,8 +110,4 @@ function extensionForContentType(contentType: string | undefined): string | unde
   if (contentType === 'video/mp4') return '.mp4'
   if (contentType === 'video/webm') return '.webm'
   return undefined
-}
-
-function safeFilename(input: string): string {
-  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'run'
 }

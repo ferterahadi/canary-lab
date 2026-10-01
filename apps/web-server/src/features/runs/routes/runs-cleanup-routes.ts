@@ -10,7 +10,8 @@ import { removeWorktree } from '../logic/runtime/repo-worktree'
 import { listWorktrees, isUnder } from '../logic/runtime/worktree-inventory'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { loadProjectConfig } from '../logic/runtime/launcher/project-config'
-import { ExternalHealAgentRequest, featureRepoRoots } from './runs-route-support'
+import { ExternalHealAgentRequest } from './runs-route-support'
+import { featureRepoRoots } from '../../../shared/feature-repo-roots'
 import { notFound } from '../../../shared/http-error'
 
 export async function registerRunCleanupRoutes(app: FastifyInstance, deps: RunsRouteDeps): Promise<void> {
