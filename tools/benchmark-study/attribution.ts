@@ -10,13 +10,32 @@ export interface SessionInput {
   parentToolId?: string
 }
 
-function records(raw: string) {
+export function nativeSessionRecords(raw: string) {
   return raw.split('\n').flatMap((line) => {
     try {
       const row = JSON.parse(line)
       return row && typeof row === 'object' && !Array.isArray(row) ? [row] : []
     } catch { return [] }
   })
+}
+
+// Code-mode invocations emit completed collaboration events rather than a
+// top-level function_call. Use native call IDs so both surfaces deduplicate.
+export function nativeChildMessageCalls(raw: string) {
+  const calls = new Map<string, { call_id: string; name: string; arguments?: string; prompt?: string;
+    model?: string; reasoning_effort?: string; childId?: string; rejected?: boolean }>()
+  for (const row of nativeSessionRecords(raw)) {
+    const item = row.payload
+    if (row.type === 'response_item' && item?.type === 'function_call' &&
+        /(?:^|\.)(?:spawn_agent|send_message|followup_task|send_input)$/.test(item.name ?? '')) calls.set(item.call_id, item)
+    const nested = item?.item
+    if (row.type === 'event_msg' && item?.type === 'item_completed' && nested?.type === 'CollabAgentToolCall' &&
+        ['spawn_agent', 'send_message', 'followup_task', 'send_input'].includes(nested.tool) && !calls.has(nested.id)) {
+      calls.set(nested.id, { call_id: nested.id, name: nested.tool, prompt: nested.prompt, model: nested.model,
+        reasoning_effort: nested.reasoning_effort, childId: nested.receiver_thread_ids?.[0], rejected: nested.status === 'failed' })
+    }
+  }
+  return [...calls.values()]
 }
 
 export function sumUsage(agent: Agent, raws: string[]): Usage | null {
@@ -32,21 +51,21 @@ export function attributeUsage(agent: Agent, inputs: SessionInput[]): UsageAttri
   const issues: string[] = []
   const unique = new Map<string, SessionInput>()
   for (const input of inputs) {
-    const rows = records(input.raw ?? '')
+    const rows = nativeSessionRecords(input.raw ?? '')
     const meta = rows.find((row) => row.type === 'session_meta')?.payload
     const native = agent === 'codex' ? meta?.id ?? meta?.session_id : rows.find((row) => row.agentId)?.agentId
     const id = native ? String(native).replace(/^agent-/, '') : input.sessionId.replace(/^agent-/, '')
     const previous = unique.get(id)
     // A session can be copied twice (primary convenience copy + archive). Sort
     // updates by native timestamp so input directory order cannot pick its total.
-    const raw = previous?.raw && input.raw ? [...records(previous.raw), ...rows]
+    const raw = previous?.raw && input.raw ? [...nativeSessionRecords(previous.raw), ...rows]
       .sort((a, b) => String(a.timestamp ?? '').localeCompare(String(b.timestamp ?? ''))).map((row) => JSON.stringify(row)).join('\n') : input.raw ?? previous?.raw ?? null
     unique.set(id, { ...previous, ...input, sessionId: id, raw })
   }
   const sessions: AttributedSession[] = []
   const launches: Array<{ parent: string; call: string; child: string | null; rejected: boolean }> = []
   for (const input of unique.values()) {
-    const rows = records(input.raw ?? '')
+    const rows = nativeSessionRecords(input.raw ?? '')
     const meta = rows.find((row) => row.type === 'session_meta')?.payload
     const childMeta = meta?.source?.subagent?.thread_spawn
     const claudeChild = rows.find((row) => row.isSidechain === true && row.agentId)
@@ -64,7 +83,8 @@ export function attributeUsage(agent: Agent, inputs: SessionInput[]): UsageAttri
     sessions.push({ sessionId: input.sessionId, parentSessionId: parent, role, usage, evidence: input.evidence,
       startedAt: timestamps[0] ?? null, endedAt: timestamps.at(-1) ?? null })
     if (role === 'approval-review') continue
-    const calls = new Map<string, { child: string | null; rejected: boolean }>()
+    const calls = new Map(nativeChildMessageCalls(input.raw ?? '').filter((call) => call.name.endsWith('spawn_agent'))
+      .map((call) => [call.call_id, { child: call.childId ?? null, rejected: call.rejected ?? false }]))
     for (const row of rows) {
       const payload = row.payload
       if (row.type === 'response_item' && payload?.type === 'function_call' && /(?:^|\.)spawn_agent$/.test(payload.name ?? '')) calls.set(payload.call_id, { child: null, rejected: false })

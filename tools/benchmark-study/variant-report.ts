@@ -7,7 +7,7 @@ export function summarizeVariants(manifest: StudyManifest) {
   if (!variants) return []
   const arms = variants.map((variant) => variant.id)
   const control = variants.find((variant) => variant.diagnosisPolicy === 'per-failure')!.id
-  return (['codex', 'claude'] as const).flatMap((agent) => (['single-service', 'cross-service'] as const).flatMap((scenario) => {
+  return (['codex', 'claude'] as const).flatMap((agent) => [...new Set(manifest.attempts.map((attempt) => attempt.scenario))].flatMap((scenario) => {
     const planned = manifest.attempts.filter((attempt) => attempt.agent === agent && attempt.scenario === scenario)
     if (!planned.length) return []
     const results = manifest.results.filter((row) => row.agent === agent && row.scenario === scenario)

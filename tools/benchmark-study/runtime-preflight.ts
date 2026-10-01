@@ -10,14 +10,14 @@ import { scenarios } from './scenarios'
 import { releasePorts } from '../../apps/web-server/src/features/runs/logic/runtime/port-allocator'
 import { buildClaudeAgenticArgs, runAgentProcess } from '../../apps/web-server/src/features/agent-sessions/logic/agent-process'
 import { loadPromptTemplate } from '../../apps/web-server/src/shared/prompts'
-import { claudeSessionLogPath } from '../../apps/web-server/src/features/agent-sessions/logic/agent-session-log'
 import { listCodexSessionLogs } from '../../apps/web-server/src/features/agent-sessions/logic/agent-session-paths'
 import { agentModelArgs } from '../../apps/web-server/src/features/agent-sessions/logic/agent-models'
-import { sessionEvidence } from './agents'
+import { sessionEvidence, pinnedClaudeSessionRef } from './agents'
 import { signalProcessTree } from '../../apps/web-server/src/shared/process-tree'
 import { stopAttemptServices } from './cleanup'
 import type { StudyManifest } from './types'
 import { interactivePreflight } from './interactive-preflight'
+import { claudePermissionArgs } from './claude-permissions'
 
 // Exercise the documented shell commands in each native sandbox. Direct Node
 // probes missed the blocked PATH entries and IPC socket in the old npm runbook.
@@ -56,7 +56,7 @@ export async function runtimePreflight(manifest: StudyManifest): Promise<void> {
       write(path.join(work, 'prompt.md'), prompt)
       const args = agent === 'claude'
         ? [...buildClaudeAgenticArgs(prompt, { ...pin, sessionId }).filter((arg) => arg !== '--dangerously-skip-permissions'),
-          '--permission-mode', 'auto', '--setting-sources', '', '--settings', native.claudeSettings, '--tools', 'Bash', '--max-turns', '2']
+          ...claudePermissionArgs(['Bash(/bin/bash ./runtime-preflight.sh)']), '--setting-sources', '', '--settings', native.claudeSettings, '--tools', 'Bash', '--max-turns', '2']
         : ['-a', 'never', 'exec', '--json', '--skip-git-repo-check', ...agentModelArgs('codex', pin), ...(manifest.codexToolArgs ?? []), ...native.codexArgs, prompt]
       const handle = runAgentProcess({ command: agent, args, cwd: work, idleMs: 120_000,
         resolveBinary: () => pin.executable ?? null,
@@ -67,7 +67,7 @@ export async function runtimePreflight(manifest: StudyManifest): Promise<void> {
       process.once('SIGINT', stop); process.once('SIGTERM', stop)
       try {
         const result = await handle.done
-        const ref = agent === 'claude' ? { agent, sessionId, logPath: claudeSessionLogPath(work, sessionId) } : listCodexSessionLogs(work, startedAt)[0] ?? null
+        const ref = agent === 'claude' ? pinnedClaudeSessionRef(work, sessionId) : listCodexSessionLogs(work, startedAt)[0] ?? null
         json(path.join(work, 'usage.json'), sessionEvidence(ref, work, pin))
         const rows = result.stdout.split('\n').flatMap((line) => { try { return [JSON.parse(line)] } catch { return [] } })
         const runtimePassed = rows.some((row) => agent === 'codex'

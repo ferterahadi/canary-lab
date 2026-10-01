@@ -6,6 +6,7 @@ import { loadPromptTemplate, promptPath } from '../../apps/web-server/src/shared
 import { readJson, sha } from './files'
 import { totalTokens } from './usage'
 import type { Agent, StudyManifest, Usage } from './types'
+import { repositoryPromptDigests } from './repository/prompts'
 
 export function preflightTokens(manifest: StudyManifest): number | null {
   const preflight = manifest.preparation.nativeRuntime as { evidence: Array<{ agent: Agent; evidence: string }> } | undefined
@@ -20,7 +21,8 @@ export function preflightTokens(manifest: StudyManifest): number | null {
   return total
 }
 
-export function policyDigests(manifest: Pick<StudyManifest, 'design'>): Record<string, string> {
+export function policyDigests(manifest: Pick<StudyManifest, 'design' | 'repository'>): Record<string, string> {
+  if (manifest.repository) return repositoryPromptDigests(manifest)
   const template = loadPromptTemplate(promptPath('heal-agent.md')).replace('{{playwrightMcpHint}}', '')
   return Object.fromEntries((manifest.design?.variants ?? []).map((variant) => [variant.id,
     sha(template.replace('{{diagnosisPolicyGuidance}}', renderDiagnosisPolicy(diagnosisPolicy(variant.diagnosisPolicy))))]))
@@ -30,11 +32,11 @@ export function configurationDigest(manifest: StudyManifest): string {
   return sha(JSON.stringify({ design: manifest.design, selection: manifest.selection, attempts: manifest.attempts,
     sourceDigest: manifest.sourceDigest, dependencyDigest: manifest.dependencyDigest, dependencyVersions: manifest.dependencyVersions,
     snapshots: manifest.snapshots, frozenDigest: manifest.frozenDigest, pins: manifest.pins, codexToolArgs: manifest.codexToolArgs,
-    budgetMs: manifest.budgetMs, maxTokens: manifest.experiment?.maxTokens, promptDigests: manifest.experiment?.promptDigests }))
+    budgetMs: manifest.budgetMs, repository: manifest.repository, maxTokens: manifest.experiment?.maxTokens, promptDigests: manifest.experiment?.promptDigests }))
 }
 
 export function assertExperiment(manifest: StudyManifest, checkPrompts = false): void {
-  if (!manifest.design?.variants) {
+  if (!manifest.design?.variants && !manifest.repository) {
     if (manifest.experiment) throw new Error('Experiment metadata requires an explicit variant design')
     return
   }

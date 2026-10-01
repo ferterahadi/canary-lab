@@ -2,8 +2,13 @@ import type { DiagnosisPolicy } from '../../shared/diagnosis-policy'
 
 export type Agent = 'codex' | 'claude'
 export type Workflow = 'canary' | 'plain'
-export type ScenarioId = 'single-service' | 'cross-service'
-export interface StudySelection { agent: Agent; scenario?: ScenarioId }
+export type StorefrontScenarioId = 'single-service' | 'cross-service'
+export type ScenarioId = StorefrontScenarioId | 'overlap' | 'independent'
+export interface StudySelection {
+  agent: Agent
+  scenario?: ScenarioId
+  continuation?: { sourceStudy: string; sourceManifestSha256: string; recordedAttemptIds: string[] }
+}
 export interface StudyVariant { id: string; diagnosisPolicy: DiagnosisPolicy }
 export interface StudyDesign { mode: 'live' | 'replay'; repetitions: number; seed: number; variants?: StudyVariant[] }
 export interface Telemetry {
@@ -64,7 +69,7 @@ export interface StudyManifest {
   budgetMs: number
   preparationMs: number
   preparation: Record<string, unknown>
-  snapshots: Record<ScenarioId, string>
+  snapshots: Partial<Record<ScenarioId, string>>
   frozenDigest: string
   attempts: Attempt[]
   selection?: StudySelection
@@ -73,6 +78,21 @@ export interface StudyManifest {
   stopReason?: string
   results: AttemptResult[]
   active: { attempt: Attempt; startedAt: string } | null
+  revision?: number
+  repository?: {
+    kind: 'unfamiliar-repository-campaign'
+    localManifestDigest: string
+    sourceCommit: string
+    fixtureRoot: string
+    sourceCheckout: string
+    yarnCacheFolder: string
+    yarnCacheDigest: string
+    yarnCacheEntries: string[]
+    expectedRoster: string[]
+    maxChecks: number
+    authorizationRequired: true
+    childAudit?: import('./repository/child-audit').ChildAuditIdentity
+  }
 }
 export interface ExecutionResult {
   status: 'finished' | 'timeout' | 'interrupted' | 'infrastructure-error'

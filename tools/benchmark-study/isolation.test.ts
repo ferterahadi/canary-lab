@@ -22,7 +22,7 @@ it('retains native sandbox enforcement and protects control files in both CLI po
   if (process.platform !== 'darwin') { await expect(prepareNativeIsolation(root, attempt, 'plain', 'claude')).rejects.toThrow('requires macOS'); return }
   const native = await prepareNativeIsolation(root, attempt, 'plain', 'claude')
   const settings = JSON.parse(fs.readFileSync(native.claudeSettings, 'utf8'))
-  expect(settings.sandbox).toMatchObject({ enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false })
+  expect(settings.sandbox).toMatchObject({ enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false })
   expect(settings.permissions).toMatchObject({ blockReadsOutsideWorkingDirectories: false, additionalDirectories: [attempt] })
   expect(settings.sandbox.filesystem.denyRead).not.toContain(root)
   expect(settings.sandbox.filesystem.denyRead).toContain(path.join(root, 'study.json'))

@@ -162,6 +162,44 @@ describe('campaign persistence and independent verdicts', () => {
     expect(timing.evaluatorCompletedAt).not.toBeNull()
   })
 
+  it('pauses a 20-attempt campaign after a cumulative verified pair and resumes at the next attempt', async () => {
+    const manifest = experimentalFixture(1000)
+    manifest.design!.repetitions = 5
+    manifest.attempts = schedule(manifest.selection, manifest.design)
+    manifest.experiment!.configurationDigest = configurationDigest(manifest)
+    json(path.join(manifest.root, 'study.json'), manifest)
+    const execute = vi.fn().mockResolvedValue({ status: 'finished', reason: 'Finished',
+      usage: { input: 10, output: 1, cacheRead: 0, cacheWrite: 0 }, testExecutions: 1 })
+    const verify = vi.fn().mockResolvedValue({ code: 0, roster: Array(7).fill('journey'),
+      passed: Array(7).fill('journey'), extras: true })
+    const first = await runStudy(manifest.root, { execute, verify, stopAfter: 2, checkFingerprints: false })
+    expect(first.attempts).toHaveLength(20)
+    expect(first.results).toHaveLength(2)
+    expect(first.results.every((row) => row.outcome === 'success')).toBe(true)
+    expect(first.results.map((row) => row.variant?.id).sort()).toEqual(['control', 'parent'])
+    expect(first.stopReason).toContain('checkpoint')
+    expect(first.active).toBeNull()
+    expect(verify).toHaveBeenCalledTimes(2)
+    expect(fs.existsSync(path.join(manifest.root, 'attempts', first.attempts[2].id))).toBe(false)
+
+    const repeated = await runStudy(manifest.root, { execute, verify, resume: true, stopAfter: 2, checkFingerprints: false })
+    expect(repeated.results).toHaveLength(2)
+    expect(execute).toHaveBeenCalledTimes(2)
+    const resumed = await runStudy(manifest.root, { execute, verify, resume: true, stopAfter: 3, checkFingerprints: false })
+    expect(resumed.results).toHaveLength(3)
+    expect(resumed.results[2].id).toBe(first.attempts[2].id)
+    expect(execute).toHaveBeenCalledTimes(3)
+    expect(verify).toHaveBeenCalledTimes(3)
+  })
+
+  it('rejects invalid checkpoints before acquiring the study lock', async () => {
+    const manifest = experimentalFixture()
+    for (const stopAfter of [0, 1.5, manifest.attempts.length + 1, NaN]) {
+      await expect(runStudy(manifest.root, { stopAfter, checkFingerprints: false })).rejects.toThrow('stopAfter')
+      expect(fs.existsSync(path.join(manifest.root, 'study.lock'))).toBe(false)
+    }
+  })
+
   it('runs a selected agent/scenario as four fresh counterbalanced attempts and rejects an incomplete schedule', async () => {
     const manifest = fixture()
     manifest.selection = { agent: 'claude', scenario: 'cross-service' }

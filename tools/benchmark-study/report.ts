@@ -11,7 +11,7 @@ export { totalTokens } from './usage'
 const escape = (text: string): string => text.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!)
 export function summarize(manifest: StudyManifest) {
   if (manifest.design?.variants) return []
-  return (['codex', 'claude'] as const).flatMap((agent) => (['single-service', 'cross-service'] as const).map((scenario) => {
+  return (['codex', 'claude'] as const).flatMap((agent) => [...new Set(manifest.attempts.map((attempt) => attempt.scenario))].map((scenario) => {
     const rows = manifest.results.filter((row) => row.agent === agent && row.scenario === scenario)
     const workflows = (['canary', 'plain'] as const).map((workflow) => {
       const attempts = rows.filter((row) => row.workflow === workflow)
@@ -42,7 +42,7 @@ const seconds = (ms: number | null | undefined): string => ms === null || ms ===
 export function report(manifest: StudyManifest): void {
   const summary = summarize(manifest)
   const replay = manifest.design?.mode === 'replay'
-  const experiment = replay ? 'Scripted local overhead replay (no cloud model)' : 'Live repair study'
+  const experiment = replay ? 'Scripted local overhead replay (no cloud model)' : manifest.repository ? 'Repository repair study (trusted container checks)' : 'Live repair study'
   const preamble = `${experiment}: ${manifest.results.length}/${manifest.attempts.length} attempts recorded. ${manifest.design?.repetitions ?? 2} repetitions per agent/scenario; ${manifest.design ? `balanced randomized ${manifest.design.variants ? 'variant blocks' : 'pairs'}, seed ${manifest.design.seed}` : 'legacy alternating order'}; no general superiority claim. Preparation: ${(manifest.preparationMs / 1000).toFixed(1)} seconds. Missing usage and test-execution counts are unknown, not zero. Dollar cost and onboarding value are unmeasured. Human intervention is zero for unattended attempts; interruptions are reported separately.`
   const rows = manifest.attempts.map((attempt) => {
     const result = manifest.results.find((row) => row.id === attempt.id)
@@ -60,7 +60,7 @@ export function report(manifest: StudyManifest): void {
       result?.attribution ? result.attribution.sessions.map((session) => `${session.role}:${session.sessionId}`).join(', ') : 'unknown',
       result?.reason ?? 'Not attempted']
   })
-  const headings = ['Agent', 'Scenario', 'Repeat', 'Workflow', 'Outcome', 'Repair seconds', 'Verify seconds', 'Observed test launches', 'Input/output tokens', 'Cache read/write tokens', 'Observed request events', 'Observed retry-marked events', 'Observed request errors', 'Request duration sum (s)', 'Stream duration sum (s)', 'Tool duration sum (s)', 'Telemetry status', 'Time to independent verdict (s)', 'Policy adherence', 'Session roles', 'Evidence / reason']
+  const headings = ['Agent', 'Scenario', 'Repeat', 'Workflow', 'Outcome', 'Repair seconds', 'Verify seconds', manifest.repository ? 'Completed trusted checks' : 'Observed test launches', 'Input/output tokens', 'Cache read/write tokens', 'Observed request events', 'Observed retry-marked events', 'Observed request errors', 'Request duration sum (s)', 'Stream duration sum (s)', 'Tool duration sum (s)', 'Telemetry status', 'Time to independent verdict (s)', 'Policy adherence', 'Session roles', 'Evidence / reason']
   const artifacts = manifest.attempts.map((attempt) => [
     ['Receipt', `receipts/${attempt.id}.json`], ['Patch', `receipts/${attempt.id}.patch`],
     ['Transcript', `attempts/${attempt.id}/session-events.json`], ['Attempt', `attempts/${attempt.id}/`],

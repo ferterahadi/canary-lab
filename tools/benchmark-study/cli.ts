@@ -6,6 +6,7 @@ import { report } from './report'
 import type { StudySelection, StudyDesign } from './types'
 import { diagnosisPolicy } from '../../shared/diagnosis-policy'
 import { auditStudy } from './audit'
+import { studyStatus } from './study-status'
 
 export async function main(argv: string[]): Promise<void> {
   const [operation, ...args] = argv
@@ -15,7 +16,7 @@ export async function main(argv: string[]): Promise<void> {
     return args[index + 1]
   }
   if (!operation || args.includes('--help') || operation === '--help') {
-    process.stdout.write('benchmark:study prepare --workspace <demo-project> --out <new-directory> --codex-model <id> --codex-effort <level> --claude-model <id> --claude-effort <level> [--mode <live|replay>] [--repetitions <2–100>] [--seed <uint32>] [--agent <codex|claude> [--scenario <single-service|cross-service>]] [--diagnosis-policies per-failure,parent-only,adaptive --max-tokens <dispatch-ceiling>]\nbenchmark:study run --study <directory> [--resume]\nbenchmark:study report --study <directory>\nbenchmark:study audit --study <historical-directory> --out <new-audit-directory>\n')
+    process.stdout.write('benchmark:study prepare --workspace <demo-project> --out <new-directory> --codex-model <id> --codex-effort <level> --claude-model <id> --claude-effort <level> [--mode <live|replay>] [--repetitions <2–100>] [--seed <uint32>] [--agent <codex|claude> [--scenario <single-service|cross-service>]] [--diagnosis-policies per-failure,parent-only,adaptive --max-tokens <dispatch-ceiling>]\nbenchmark:study run --study <directory> [--resume] [--stop-after <recorded-attempt-count>]\nbenchmark:study status --study <directory> [--after-revision <cursor>] [--wait-ms <0–60000>]\nbenchmark:study report --study <directory>\nbenchmark:study audit --study <historical-directory> --out <new-audit-directory>\n')
     return
   }
   if (operation === 'prepare') {
@@ -34,8 +35,13 @@ export async function main(argv: string[]): Promise<void> {
     const controller = new AbortController()
     const stop = (): void => controller.abort()
     process.once('SIGINT', stop); process.once('SIGTERM', stop)
-    try { await runStudy(fs.realpathSync(value('--study')), { resume: args.includes('--resume'), signal: controller.signal }) }
+    try { await runStudy(fs.realpathSync(value('--study')), { resume: args.includes('--resume'), signal: controller.signal,
+      ...(args.includes('--stop-after') ? { stopAfter: Number(value('--stop-after')) } : {}) }) }
     finally { process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop) }
+  } else if (operation === 'status') {
+    const status = await studyStatus(value('--study'), { afterRevision: args.includes('--after-revision') ? Number(value('--after-revision')) : undefined,
+      waitMs: args.includes('--wait-ms') ? Number(value('--wait-ms')) : 0 })
+    process.stdout.write(`${JSON.stringify(status)}\n`)
   } else if (operation === 'audit') {
     auditStudy(value('--study'), value('--out'))
   } else if (operation === 'report') {

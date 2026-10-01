@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { spawn, type SpawnOptions } from 'node:child_process'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../apps/web-server/src/features/agent-sessions/logic/agent-process'
 import { agentModelArgs } from '../../apps/web-server/src/features/agent-sessions/logic/agent-models'
-import { claudeSessionLogPath, locateMostRecentAgentSessionRef, loadAgentSession, loadSubagentThreads, type AgentSessionRef } from '../../apps/web-server/src/features/agent-sessions/logic/agent-session-log'
+import { claudeSessionLogPath, locateClaudeSessionLog, resolveWorkflowAgentRef, loadAgentSession, loadSubagentThreads, type AgentSessionRef } from '../../apps/web-server/src/features/agent-sessions/logic/agent-session-log'
 import { listCodexSessionLogs } from '../../apps/web-server/src/features/agent-sessions/logic/agent-session-paths'
 import { signalProcessTree } from '../../apps/web-server/src/shared/process-tree'
 import { services, testEnvironment, ports } from './evaluator'
@@ -19,6 +19,7 @@ import { stopAttemptServices } from './cleanup'
 import { stageIntervals, type StageBoundary } from './telemetry'
 import { parseUsage, sessionRole } from './usage'
 import { attributeUsage, assessPolicy, type SessionInput } from './attribution'
+import { claudePermissionArgs, claudeStudyCommand, REPAIR_ALLOWED_TOOLS } from './claude-permissions'
 export { parseUsage, sessionRole, groupUsage } from './usage'
 
 export function freezeToolConfig(command: string, agent: 'claude' | 'codex', args: AgentSpawnArgs, codexToolArgs: string[] = []): string {
@@ -27,6 +28,11 @@ export function freezeToolConfig(command: string, agent: 'claude' | 'codex', arg
   const head = suffix ? command.slice(0, -suffix.length) : command
   if (agent === 'codex' && !codexToolArgs.length) throw new Error('Missing frozen Codex tool policy')
   return `${head} ${agent === 'claude' ? '--strict-mcp-config' : codexToolArgs.map(quote).join(' ')}${suffix}`
+}
+
+// Resolve by our pinned ID after spawn; Claude may shorten its private cwd slug.
+export function pinnedClaudeSessionRef(cwd: string, sessionId: string): AgentSessionRef {
+  return { agent: 'claude', sessionId, logPath: locateClaudeSessionLog(cwd, sessionId) ?? claudeSessionLogPath(cwd, sessionId) }
 }
 
 export function sessionEvidence(ref: AgentSessionRef | null, output: string, pin?: { model: string; effort: string }): Usage | null {
@@ -64,7 +70,10 @@ export function captureAttemptSessions(agent: 'codex' | 'claude', cwd: string, s
   return attribution.total
 }
 
-function captureExecutionEvidence(manifest: StudyManifest, attempt: Attempt, cwd: string, startedAt: string, root: string, ref: AgentSessionRef | null) {
+// Canary pins its session in a sidecar; Claude can shorten long cwd slugs, so
+// newest-by-cwd discovery can miss a transcript that the pinned ref resolves.
+export function captureExecutionEvidence(manifest: StudyManifest, attempt: Attempt, cwd: string, startedAt: string, root: string,
+  ref: AgentSessionRef | null = attempt.agent === 'claude' ? resolveWorkflowAgentRef(cwd) : null) {
   const usage = captureAttemptSessions(attempt.agent, cwd, startedAt, root, manifest.pins[attempt.agent], ref)
   const attribution = readJson<UsageAttribution>(path.join(root, 'usage-breakdown.json'))
   const adherence = attempt.variant ? assessPolicy(attempt.variant.diagnosisPolicy, attribution) : undefined
@@ -85,13 +94,13 @@ export async function runPlain(manifest: StudyManifest, attempt: Attempt, root: 
   const prompt = fs.readFileSync(path.join(__dirname, 'plain-prompt.md'), 'utf8')
   write(path.join(root, 'prompt.md'), prompt)
   const args = attempt.agent === 'claude'
-    ? [...buildClaudeAgenticArgs(prompt, { ...pin, sessionId }).filter((arg) => arg !== '--dangerously-skip-permissions'), '--permission-mode', 'auto', '--setting-sources', '', ...(native ? ['--settings', native.claudeSettings] : [])]
+    ? [...buildClaudeAgenticArgs(prompt, { ...pin, sessionId }).filter((arg) => arg !== '--dangerously-skip-permissions'), ...claudePermissionArgs(REPAIR_ALLOWED_TOOLS), '--setting-sources', '', ...(native ? ['--settings', native.claudeSettings] : [])]
     : ['-a', 'never', 'exec', '--json', '--skip-git-repo-check', ...agentModelArgs('codex', pin), ...(manifest.codexToolArgs ?? []), ...(native?.codexArgs ?? []), prompt]
   const stream = path.join(root, 'agent-output.jsonl')
   const handle = runAgentProcess({
     command: scriptedAgent?.command ?? attempt.agent, args: scriptedAgent?.args ?? args, cwd: root, idleMs: manifest.budgetMs, captureStdout: false,
     resolveBinary: () => pin.executable ?? null,
-    activityPath: attempt.agent === 'claude' ? claudeSessionLogPath(root, sessionId) : stream,
+    activityPath: stream,
     onChunk: (chunk) => fs.appendFileSync(stream, chunk),
     spawnImpl: ((cmd: string, argv: readonly string[], options: SpawnOptions) =>
       isolation ? spawn('/usr/bin/sandbox-exec', ['-f', isolation, cmd, ...argv], options) : spawn(cmd, argv, { ...options, env: { ...options.env, ...runtimeEnvironment(root) } })) as typeof spawn,
@@ -101,7 +110,7 @@ export async function runPlain(manifest: StudyManifest, attempt: Attempt, root: 
   if (signal.aborted) stop()
   try {
     const result = await handle.done
-    const ref = attempt.agent === 'claude' ? { agent: attempt.agent, sessionId, logPath: claudeSessionLogPath(root, sessionId) } : null
+    const ref = attempt.agent === 'claude' ? pinnedClaudeSessionRef(root, sessionId) : null
     const observedTests = path.join(root, 'test-executions.jsonl')
     return { status: signal.aborted ? 'interrupted' : result.code === 0 ? 'finished' : 'infrastructure-error',
       reason: `Agent exit: ${result.code}; signal: ${result.signal}`, ...(scriptedAgent ? { usage: null } : captureExecutionEvidence(manifest, attempt, root, startedAt, root, ref)),
@@ -180,8 +189,9 @@ export async function runCanary(manifest: StudyManifest, attempt: Attempt, root:
         const built = buildSpawn({ ...args, binaryPath: pin.executable, workspaceRoot: runDir, mcpOutputDir: undefined, isolationSettingsFile: native!.claudeSettings })
         // Native profiles replace the legacy --sandbox option; keeping both
         // would make Codex silently ignore the study's read-deny profile.
-        return freezeToolConfig(attempt.agent === 'codex' ? built.replace(' --sandbox workspace-write', '') : built,
+        const frozen = freezeToolConfig(attempt.agent === 'codex' ? built.replace(' --sandbox workspace-write', '') : built,
           attempt.agent, args, [...(manifest.codexToolArgs ?? []), ...native!.codexArgs])
+        return attempt.agent === 'claude' ? claudeStudyCommand(frozen, REPAIR_ALLOWED_TOOLS) : frozen
       } },
   })
   for (const name of ['service-started', 'health-check', 'playwright-started', 'playwright-exit', 'heal-cycle-started', 'agent-started', 'agent-exit', 'signal-accepted', 'run-complete'] as const) {
@@ -196,7 +206,7 @@ export async function runCanary(manifest: StudyManifest, attempt: Attempt, root:
     const status = await orchestrator.runFullCycle()
     await orchestrator.stop(status)
     return { status: signal.aborted ? 'interrupted' : 'finished', reason: `Canary terminal status: ${status}`,
-      testExecutions, ...(scriptedAgent ? { usage: null } : captureExecutionEvidence(manifest, attempt, runDir, startedAt, root, attempt.agent === 'claude' ? locateMostRecentAgentSessionRef(runDir) : null)) }
+      testExecutions, ...(scriptedAgent ? { usage: null } : captureExecutionEvidence(manifest, attempt, runDir, startedAt, root)) }
   } finally {
     signal.removeEventListener('abort', stop)
     await orchestrator.stop('aborted')

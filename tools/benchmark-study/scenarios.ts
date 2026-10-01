@@ -1,25 +1,25 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { Attempt, ScenarioId, StudySelection, StudyDesign, Workflow, Agent } from './types'
+import type { Attempt, ScenarioId, StorefrontScenarioId, StudySelection, StudyDesign, Workflow, Agent } from './types'
 import { balancedOrders, random, shuffle, validateDesign } from './design'
 import { changed, copy, hashes, write } from './files'
 // The smoke gate and study must derive fixes from the same authoritative recipes.
 // @ts-expect-error The contributor repair recipes are an existing JavaScript module.
 import { repairSteps } from '../storefront-repairs.mjs'
 
-export const scenarios: Record<ScenarioId, { omitted: number[]; failedJourneys: string[] }> = {
+export const scenarios: Record<StorefrontScenarioId, { omitted: number[]; failedJourneys: string[] }> = {
   'single-service': { omitted: [2], failedJourneys: ['J2', 'J4', 'J5'] },
   'cross-service': { omitted: [0, 1, 2], failedJourneys: ['J1', 'J2', 'J4', 'J5'] },
 }
-export function schedule(selection?: StudySelection, design?: StudyDesign): Attempt[] {
-  if (selection && (!['codex', 'claude'].includes(selection.agent) || (selection.scenario !== undefined && !Object.hasOwn(scenarios, selection.scenario)))) throw new Error('Invalid study agent/scenario selection')
+export function schedule(selection?: StudySelection, design?: StudyDesign, scenarioIds: ScenarioId[] = Object.keys(scenarios) as StorefrontScenarioId[]): Attempt[] {
+  if (selection && (!['codex', 'claude'].includes(selection.agent) || (selection.scenario !== undefined && !scenarioIds.includes(selection.scenario)))) throw new Error('Invalid study agent/scenario selection')
   if (design) {
     validateDesign(design)
     const next = random(design.seed)
     const pairs: Attempt[][] = []
     // Replay uses one structural agent slot; reports label it scripted, not Codex.
     const agents: Agent[] = design.mode === 'replay' ? [selection?.agent ?? 'codex'] : ['codex', 'claude']
-    for (const agent of agents) for (const scenario of Object.keys(scenarios) as ScenarioId[]) {
+    for (const agent of agents) for (const scenario of scenarioIds) {
       if (selection && (selection.agent !== agent || (selection.scenario !== undefined && selection.scenario !== scenario))) continue
       if (design.variants) {
         balancedOrders(design.variants, design.repetitions, next).forEach((order, index) => pairs.push(order.map((variant) => ({
@@ -32,10 +32,19 @@ export function schedule(selection?: StudySelection, design?: StudyDesign): Atte
         id: `${agent}-${scenario}-${index + 1}-${arm}`, agent, scenario, repetition: index + 1, workflow: arm as Workflow,
       }))))
     }
-    return shuffle(pairs, next).flat()
+    const attempts = shuffle(pairs, next).flat()
+    const continuation = selection?.continuation
+    if (!continuation) return attempts
+    if (!path.isAbsolute(continuation.sourceStudy) || !/^[a-f0-9]{64}$/.test(continuation.sourceManifestSha256) ||
+        !continuation.recordedAttemptIds.length || new Set(continuation.recordedAttemptIds).size !== continuation.recordedAttemptIds.length ||
+        continuation.recordedAttemptIds.some((id, index) => attempts[index]?.id !== id)) {
+      throw new Error('Continuation must preserve a recorded prefix of the original schedule')
+    }
+    return attempts.slice(continuation.recordedAttemptIds.length)
   }
+  if (selection?.continuation) throw new Error('Continuation requires an explicit study design')
   return (['codex', 'claude'] as const).flatMap((agent) =>
-    (Object.keys(scenarios) as ScenarioId[]).flatMap((scenario) => [1, 2].flatMap((repetition) =>
+    scenarioIds.flatMap((scenario) => [1, 2].flatMap((repetition) =>
       (repetition === 1 ? ['canary', 'plain'] as const : ['plain', 'canary'] as const).map((workflow) => ({
         id: `${agent}-${scenario}-${repetition}-${workflow}`, agent, scenario, repetition, workflow,
       })),

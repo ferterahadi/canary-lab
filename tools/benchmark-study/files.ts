@@ -44,16 +44,20 @@ export function changed(before: Record<string, string>, after: Record<string, st
   return [...new Set([...Object.keys(before), ...Object.keys(after)])].filter((name) => before[name] !== after[name]).sort()
 }
 
-export interface CommandResult { code: number | null; stdout: string; stderr: string; timedOut: boolean }
+export interface CommandResult { code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string; timedOut: boolean }
 export function prefixedCommand(executable: string, args: string[], prefix: string[] = []): { command: string; args: string[] } {
   const invocation = [...prefix, executable, ...args]
   return { command: invocation[0], args: invocation.slice(1) }
 }
 export function command(executable: string, args: string[], options: {
-  cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; log?: string; signal?: AbortSignal
+  cwd: string; env?: NodeJS.ProcessEnv; inheritEnv?: boolean; timeoutMs?: number; log?: string; signal?: AbortSignal;
+  killGroupOnClose?: boolean
+  parentLease?: boolean
 }): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, { cwd: options.cwd, env: { ...process.env, ...options.env }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(executable, args, { cwd: options.cwd,
+      env: options.inheritEnv === false ? options.env ?? {} : { ...process.env, ...options.env },
+      detached: true, stdio: options.parentLease ? ['ignore', 'pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'] })
     let stdout = ''; let stderr = ''; let timedOut = false
     let stopping = false
     let killTimer: ReturnType<typeof setTimeout> | undefined
@@ -73,14 +77,17 @@ export function command(executable: string, args: string[], options: {
       else stderr += value
       if (options.log) { fs.mkdirSync(path.dirname(options.log), { recursive: true }); fs.appendFileSync(options.log, value) }
     }
-    child.stdout.on('data', (chunk: Buffer) => capture(chunk, 'stdout'))
-    child.stderr.on('data', (chunk: Buffer) => capture(chunk, 'stderr'))
+    child.stdout!.on('data', (chunk: Buffer) => capture(chunk, 'stdout'))
+    child.stderr!.on('data', (chunk: Buffer) => capture(chunk, 'stderr'))
     const cleanup = (): void => {
       clearTimeout(timer); clearTimeout(killTimer); options.signal?.removeEventListener('abort', stop)
       process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop)
     }
     child.once('error', (error) => { cleanup(); reject(error) })
-    child.once('close', (code) => { cleanup(); resolve({ code, stdout, stderr, timedOut }) })
+    child.once('close', (code, signal) => {
+      if (options.killGroupOnClose) signalProcessTree(child, 'SIGKILL', { detachedProcessGroup: true })
+      cleanup(); resolve({ code, signal, stdout, stderr, timedOut })
+    })
   })
 }
 export async function checked(executable: string, args: string[], cwd: string): Promise<string> {

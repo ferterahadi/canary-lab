@@ -5,7 +5,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { allocatePorts, releasePorts } from '../../apps/web-server/src/features/runs/logic/runtime/port-allocator'
 import { signalProcessTree } from '../../apps/web-server/src/shared/process-tree'
 import { command, copy, json, prefixedCommand } from './files'
-import { services, serviceInvocation } from './runtime'
+import { services, serviceInvocation, playwrightOutputArgs } from './runtime'
 
 export { services } from './runtime'
 export async function ports(): Promise<Record<string, number>> {
@@ -85,7 +85,7 @@ export function parseResults(raw: unknown, code: number | null): TestEvidence {
 export async function runTests(root: string, allocated: Record<string, number>, list = false, prefix: string[] = []): Promise<TestEvidence> {
   const resultFile = path.join(root, list ? 'roster.json' : 'playwright.json')
   const invocation = prefixedCommand(process.execPath, [path.join(root, 'node_modules/@playwright/test/cli.js'), 'test',
-    '--config', path.join(root, 'suite/playwright.config.ts'), '--reporter=json', '--max-failures=0', ...(list ? ['--list'] : [])], prefix)
+    '--config', path.join(root, 'suite/playwright.config.ts'), ...playwrightOutputArgs(root), '--reporter=json', '--max-failures=0', ...(list ? ['--list'] : [])], prefix)
   const result = await command(invocation.command, invocation.args, {
     cwd: root, timeoutMs: 180_000, log: path.join(root, 'playwright.log'),
     env: { ...testEnvironment(root, allocated), PLAYWRIGHT_JSON_OUTPUT_NAME: resultFile },

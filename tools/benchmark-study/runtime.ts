@@ -22,14 +22,17 @@ export function serviceCommand(name: string): string {
   const invocation = serviceInvocation(name)
   return [invocation.command, ...invocation.args].map(quote).join(' ')
 }
-export const playwrightCommand = (): string => `${quote(process.execPath)} node_modules/@playwright/test/cli.js test --config suite/playwright.config.ts`
+// Without an explicit output, Playwright can select an ancestor package root
+// outside the attempt sandbox when the copied suite has no package.json.
+export const playwrightOutputArgs = (root: string): string[] => ['--output', path.join(root, 'test-results')]
+export const playwrightCommand = (root: string): string => `${quote(process.execPath)} node_modules/@playwright/test/cli.js test --config suite/playwright.config.ts ${playwrightOutputArgs(root).map(quote).join(' ')}`
 
 export function writeRunbook(root: string, allocated: Record<string, number>, environment: NodeJS.ProcessEnv): { start: string; test: string } {
   json(path.join(root, 'runtime.json'), { allocated, environment: { ...runtimeEnvironment(root), ...environment } })
   const exports = Object.entries({ ...runtimeEnvironment(root), ...environment }).map(([key, value]) => `export ${key}=${quote(value!)}`).join('\n')
   write(path.join(root, 'environment.sh'), `${exports}\n`)
   const start = services.map((name) => `(cd app && PORT=${allocated[name]} ${serviceCommand(name)}) > ${name}.log 2>&1 &`).join('\n')
-  const test = playwrightCommand()
+  const test = playwrightCommand(root)
   write(path.join(root, 'RUNBOOK.md'), `# Local storefront\n\nThe three services are initially stopped. Run from this directory. These commands use the installed TypeScript loader directly and avoid the tsx CLI's IPC socket.\n\n\`\`\`sh\nsource ./environment.sh\n${start}\n\`\`\`\n\nWait for HTTP 200 at each service's root URL: ${services.map((name) => `http://127.0.0.1:${allocated[name]}/`).join(', ')}. Raw output is in the corresponding service log. Stop/restart your own service processes after application edits.\n\nRun tests: \`${test}\`. Inspect Playwright traces under test-results. Requirements are in app/REQUIREMENTS.md. Application changes belong under app/. The suite and configuration are fixed.\n`)
   return { start, test }
 }

@@ -69,3 +69,13 @@ it('audits and copies historical native evidence without rewriting receipts or r
   expect(fs.existsSync(path.join(out, result.attempts[0].attribution.sessions[0].evidence))).toBe(true)
   expect(() => auditStudy(study, out)).toThrow('new directory')
 })
+
+it('counts code-mode child launches by native receiver ID and flags uncaptured children', () => {
+  const nested = line({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CollabAgentToolCall', tool: 'spawn_agent', id: 'exec-launch',
+    receiver_thread_ids: ['child'], status: 'completed', prompt: 'synthetic task', model: 'synthetic-model', reasoning_effort: 'high' } } })
+  const parent = input('parent', [meta('parent'), nested, tokens(100)].join('\n'))
+  expect(attributeUsage('codex', [parent]).missingSessions).toContain('child')
+  const child = input('child', [meta('child', 'parent'), tokens(50)].join('\n'))
+  expect(attributeUsage('codex', [parent, child]).total?.input).toBe(150)
+  expect(attributeUsage('codex', [parent, child]).missingSessions).toEqual([])
+})

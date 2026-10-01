@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { checked, copy, digest, files, inside, json, readJson, sha, sourceRoot } from './files'
 import { evaluate } from './evaluator'
 import { buildScenario, plainSuite, replayPatch, scenarios, schedule } from './scenarios'
-import type { Agent, ModelPin, ScenarioId, StudyManifest, StudySelection, StudyDesign } from './types'
+import type { Agent, ModelPin, StorefrontScenarioId, StudyManifest, StudySelection, StudyDesign } from './types'
 import { EFFORT_LEVELS, KNOWN_MODEL_OPTIONS } from '../../shared/agent-models'
 import { resolveCodexToolArgs } from './tool-policy'
 import { resolveAgentBinary } from '../../apps/web-server/src/features/agent-sessions/logic/agent-binary'
@@ -14,7 +14,7 @@ export function sourceFingerprint(): string {
   const study = path.join(sourceRoot, 'tools/benchmark-study')
   const implementation = fs.readdirSync(study).sort().filter((name) => fs.statSync(path.join(study, name)).isFile())
     .map((name) => `${name}:${sha(fs.readFileSync(path.join(study, name)))}`).join('\n')
-  return sha(implementation + ['apps/web-server/src', 'apps/web-server/prompts', 'shared'].map((directory) => digest(path.join(sourceRoot, directory))).join('\n') +
+  return sha(implementation + digest(path.join(study, 'repository')) + ['apps/web-server/src', 'apps/web-server/prompts', 'shared'].map((directory) => digest(path.join(sourceRoot, directory))).join('\n') +
     ['tools/storefront-repairs.mjs', 'package.json', 'package-lock.json'].map((file) => sha(fs.readFileSync(path.join(sourceRoot, file)))).join('\n'))
 }
 export function dependencyFingerprint(root: string): string {
@@ -88,7 +88,7 @@ export async function prepare(options: { workspace: string; output: string; pins
   }
   json(path.join(root, 'study.json'), manifest)
   buildScenario(app, path.join(root, 'reference'), [])
-  for (const scenario of Object.keys(scenarios) as ScenarioId[]) {
+  for (const scenario of Object.keys(scenarios) as StorefrontScenarioId[]) {
     const output = path.join(frozen, scenario)
     buildScenario(app, output, scenarios[scenario].omitted)
     manifest.snapshots[scenario] = digest(output)
@@ -103,7 +103,7 @@ export async function prepare(options: { workspace: string; output: string; pins
       if (scenario === 'reference') {
         if (evidence.code !== 0 || evidence.passed.length !== 7 || evidence.extras !== true) throw new Error(`Repaired reference failed: ${mode}`)
       } else {
-        const expected = scenarios[scenario as ScenarioId].failedJourneys
+        const expected = scenarios[scenario as StorefrontScenarioId].failedJourneys
         const actual = evidence.failed.map((title) => title.split(' ')[0]).sort()
         if (evidence.code !== 1 || JSON.stringify(actual) !== JSON.stringify([...expected].sort()) || evidence.skipped.length) {
           throw new Error(`Scenario drift ${scenario}/${mode}: expected ${expected}, got ${actual}`)
