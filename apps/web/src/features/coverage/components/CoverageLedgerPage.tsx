@@ -1,6 +1,7 @@
+import { useFeatureTestRoster } from '@/shared/state/use-feature-test-roster'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { CoverageJobIndexEntry, CoverageJobKind, CoverageLedger, FeatureTests, GapType, TestCoverage, TestStrength } from '@/shared/api/types'
+import type { CoverageJobIndexEntry, CoverageJobKind, CoverageLedger, GapType, TestCoverage, TestStrength } from '@/shared/api/types'
 import type { AgentModelsConfig, AgentStagePlans, FlightStageKey, FlightStageStatus, ModelAgentKind, ModelStageKey } from '@/shared/api/client'
 import { EMPTY_AGENT_MODELS } from '@shared/agent-models'
 import { ModelLaunchGate } from '@/features/config'
@@ -139,25 +140,14 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
   // Lazily fetch the feature's spec bodies the FIRST time any test card is
   // expanded — most sessions never expand one, so we don't pay the parse cost up
   // front. One fetch, cached; cards read the result via the lookup below.
-  const [specSource, setSpecSource] = useState<FeatureTests | null>(null)
-  const [specSourceLoading, setSpecSourceLoading] = useState(false)
-  const [specSourceError, setSpecSourceError] = useState<string | null>(null)
   const [specSourceRequested, setSpecSourceRequested] = useState(false)
   const ensureSpecSource = useCallback(() => setSpecSourceRequested(true), [])
-  useEffect(() => {
-    if (!specSourceRequested) return
-    let cancelled = false
-    setSpecSource(null)
-    setSpecSourceLoading(true)
-    setSpecSourceError(null)
-    api.getFeatureTests(feature)
-      .then((result) => { if (!cancelled) setSpecSource(result) })
-      .catch((error: unknown) => {
-        if (!cancelled) setSpecSourceError(error instanceof Error ? error.message : 'Failed to load test source')
-      })
-      .finally(() => { if (!cancelled) setSpecSourceLoading(false) })
-    return () => { cancelled = true }
-  }, [feature, specSourceRequested, testsRefreshKey, coverageRefreshKey, ledger?.freshness?.revision])
+  const sourceRoster = useFeatureTestRoster({ feature, enabled: specSourceRequested,
+    refreshKey: JSON.stringify([testsRefreshKey, coverageRefreshKey, ledger?.freshness?.revision]),
+  })
+  const specSource = sourceRoster.source
+  const specSourceLoading = sourceRoster.loading
+  const specSourceError = sourceRoster.error
 
   // Generated titles need discovery before expansion; literal titles keep the
   // existing lazy source load. Never substitute a guessed loop value.

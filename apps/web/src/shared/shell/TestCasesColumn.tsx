@@ -1,8 +1,8 @@
 import { discoveryRepairActive } from '@shared/discovery-repair'
 import { useDiscoveryRepair } from './use-discovery-repair'
 import { DiscoveryRepairActivity } from './DiscoveryRepairActivity'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '../api/client'
+import { useEffect, useMemo, useState } from 'react'
+import { useFeatureTestRoster } from '../state/use-feature-test-roster'
 import { useInvalidationKey } from '../state/invalidation'
 import type { DirtySpecSummary, ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
 import {
@@ -32,7 +32,6 @@ import { EmptyState } from '@/shared/ui/EmptyState'
 import { TestListUnavailableCard } from './TestListUnavailableCard'
 
 type TestCardExecutionHighlight = TestExecutionLineHighlight & { sourceLine: number }
-type TestLoadFailure = { kind: 'discovery' | 'config' | 'removed' | 'request'; message: string }
 
 type TestRunEvidence = {
   manifest?: Pick<RunManifest, 'featureDir' | 'suiteSnapshot' | 'specEdits' | 'runId'>
@@ -78,14 +77,6 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
   const latestRepair = repairState.repairs[0]
   const activeRepair = runId ? undefined : repairState.repairs.find(discoveryRepairActive)
   const repairCompletion = latestRepair && !discoveryRepairActive(latestRepair) ? latestRepair.id + latestRepair.updatedAt : ''
-  const [loaded, setLoaded] = useState<{ sourceKey: string; specs: FeatureSpecFile[]; revision?: string } | null>(null)
-  const [loadFailure, setLoadFailure] = useState<{ sourceKey: string; error: TestLoadFailure } | null>(null)
-  const loadError = loadFailure?.sourceKey === sourceKey ? loadFailure.error : null
-  const previousLists = useRef(new Map<string, FeatureSpecFile[]>())
-  const resolvedSpecs = loadError?.kind === 'removed' ? null
-    : loaded?.sourceKey === sourceKey ? loaded.specs : previousLists.current.get(sourceKey) ?? null
-  const specs = resolvedSpecs
-  const [discovery, setDiscovery] = useState<{ feature: string; specs: FeatureSpecFile[] } | null>(null)
   const [retryKey, setRetryKey] = useState(0)
   const [manualRetryAfter, setManualRetryAfter] = useState('')
   const loadRevision = `${refreshKey}:${retryKey}`
@@ -93,74 +84,22 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
   const [expandedBySource, setExpandedBySource] = useState<Map<string, string | null>>(() => new Map())
   const expandedKey = expandedBySource.get(sourceKey) ?? null
 
+  const roster = useFeatureTestRoster({ feature, runId, recover: true,
+    refreshKey: JSON.stringify([retryKey, recordedRosterKey, workspaceAuthoring]),
+  })
+  const loadError = roster.failure
+  const resolvedSpecs = roster.specs
+  const specs = resolvedSpecs
   useEffect(() => {
-    if (!feature) {
-      setLoaded(null)
-      setLoadFailure(null)
-      return
-    }
-    let cancelled = false
-    let retryTimer: ReturnType<typeof setTimeout> | undefined
-    let attempts = 0
-    setLoadFailure(null)
-    setDiscovery(null)
-    setLoaded(previousLists.current.has(sourceKey) ? { sourceKey, specs: previousLists.current.get(sourceKey)! } : null)
-    const failed = (failure: TestLoadFailure): void => {
-      if (cancelled) return
-      setLoadFailure({ sourceKey, error: failure })
-      if (failure.kind === 'removed') {
-        previousLists.current.delete(sourceKey)
-        setLoaded(null)
-        setDiscovery(null)
-      }
-      // A file-save event can arrive while the author is still writing the
-      // suite. Retry briefly, keeping the last resolved list visible.
-      if (failure.kind !== 'removed' && attempts < 3) retryTimer = setTimeout(load, 1000)
-    }
-    const load = (): void => {
-      attempts += 1
-      api.getFeatureTests(feature, undefined, runId)
-        .then((data) => {
-          if (cancelled) return
-          const discoveryError = data.find((spec) => spec.discoveryError)?.discoveryError
-          if (discoveryError) { setDiscovery({ feature, specs: data }); failed({ kind: 'discovery', message: discoveryError }); return }
-          const availableKeys = new Set(
-            data.flatMap((spec) => spec.tests.map((test) => workspaceTestKey(spec.file, test))),
-          )
-          previousLists.current.set(sourceKey, data)
-          setDiscovery(null)
-          setLoaded({ sourceKey, specs: data, revision: loadRevision })
-          setLoadFailure(null)
-          setExpandedBySource((current) => {
-            const selected = current.has(sourceKey) ? current.get(sourceKey)! : availableKeys.values().next().value ?? null
-            const next = new Map(current)
-            next.set(sourceKey, selected !== null && !availableKeys.has(selected) ? null : selected)
-            return next
-          })
-        })
-        .catch((err) => failed(classifyLoadError(err)))
-    }
-    load()
-    return () => { cancelled = true; clearTimeout(retryTimer) }
-  }, [feature, sourceKey, runId, recordedRosterKey, refreshKey, retryKey, workspaceAuthoring])
-
-  useEffect(() => {
-    if (!feature || runId || (loadError?.kind !== 'removed' && loadError?.kind !== 'config')) return
-    let checking = false
-    let cancelled = false
-    const timer = setInterval(() => {
-      if (checking) return
-      checking = true
-      api.getFeatureTests(feature).then(() => {
-        if (!cancelled) setRetryKey((key) => key + 1)
-      }).catch((error) => {
-        if (cancelled) return
-        const next = classifyLoadError(error)
-        if (next.kind !== loadError.kind || next.message !== loadError.message) setRetryKey((key) => key + 1)
-      }).finally(() => { checking = false })
-    }, 10_000)
-    return () => { cancelled = true; clearInterval(timer) }
-  }, [feature, runId, loadError?.kind, loadError?.message])
+    if (!roster.confirmed || !specs) return
+    const availableKeys = new Set(specs.flatMap((spec) => spec.tests.map((test) => workspaceTestKey(spec.file, test))))
+    setExpandedBySource((current) => {
+      const selected = current.has(sourceKey) ? current.get(sourceKey)! : availableKeys.values().next().value ?? null
+      const next = new Map(current)
+      next.set(sourceKey, selected !== null && !availableKeys.has(selected) ? null : selected)
+      return next
+    })
+  }, [roster.confirmed, specs, sourceKey])
 
   const dirtyRevision = JSON.stringify(dirtySpecs)
 
@@ -170,8 +109,8 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
   const versions = useTestVersions({
     feature, baseline: baselineRun, displayed: specs, recordedView: Boolean(runId),
     revision: `${loadRevision}:${workspaceAuthoring}:${dirtyRevision}:${JSON.stringify(baselineRunSummary?.knownTests ?? [])}`,
-    ready: loaded?.revision === loadRevision && !loadError && !discovery && !workspaceAuthoring,
-    displayFailed: Boolean(loadError || discovery),
+    ready: roster.confirmed && !workspaceAuthoring,
+    displayFailed: Boolean(loadError),
   })
   const runDifferences = versions.comparison.differences
 
@@ -196,7 +135,7 @@ export function TestCasesColumn({ feature, isAuthoringTests = false, runEvidence
   }
 
   const displaySpecs = specs
-  const incompleteSpecs = discovery?.feature === feature ? discovery.specs : []
+  const incompleteSpecs = roster.incomplete
   const repairFailure = !runId && latestRepair?.status === 'failed' && manualRetryAfter !== repairCompletion ? latestRepair.diagnostic : null
   const discoveryError = loadError?.message || repairFailure
   // What the card shows as the failure itself: Playwright's own diagnostics
@@ -447,30 +386,6 @@ function summaryIdentityForWorkspaceTest(
   return summary?.knownTests?.length || (recorded && !hasExplicitLegacyResult)
     ? { name, allowNameFallback: false }
     : { name }
-}
-
-function formatLoadError(err: unknown): string {
-  if (err instanceof api.ApiError) {
-    const context = `Unable to load tests for this suite. Server returned HTTP ${err.status}.`
-    if (err.body && typeof err.body === 'object') {
-      const body = err.body as { message?: unknown; error?: unknown }
-      const message = typeof body.message === 'string' ? body.message : body.error
-      if (typeof message === 'string') return `${context} ${message}`
-    }
-    return context
-  }
-  return 'Unable to load tests for this suite.'
-}
-
-function classifyLoadError(err: unknown): TestLoadFailure {
-  const body = err instanceof api.ApiError && err.body && typeof err.body === 'object'
-    ? err.body as { code?: unknown; error?: unknown } : undefined
-  const code = body?.code
-  return {
-    kind: code === 'suite-removed' ? 'removed' : code === 'discovery-failed' ? 'config' : 'request',
-    message: (code === 'suite-removed' || code === 'discovery-failed') && typeof body?.error === 'string'
-      ? body.error : formatLoadError(err),
-  }
 }
 
 /** The placeholder is the card it becomes — R83's rule from the flight stage

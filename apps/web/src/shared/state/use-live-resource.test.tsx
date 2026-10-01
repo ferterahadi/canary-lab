@@ -406,3 +406,47 @@ describe('polling without an invalidation topic', () => {
     expect(fetcher).toHaveBeenCalledTimes(3)
   })
 })
+
+it('cancels domain retries after accept, replacement, and teardown', async () => {
+  vi.useFakeTimers()
+  const fetcher = vi.fn().mockResolvedValue('retry')
+  let resource!: LiveResource<string>
+  function Retrying({ id }: { id: string }) {
+    resource = useLiveResource(null, id, fetcher, { retryDelayMs: (value) => value === 'retry' ? 1000 : undefined })
+    return null
+  }
+  await act(async () => root.render(<Retrying id="one" />))
+  await act(async () => resource.accept('accepted'))
+  await act(async () => vi.advanceTimersByTimeAsync(1000))
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  await act(async () => resource.refresh())
+  fetcher.mockResolvedValue('replacement')
+  await act(async () => root.render(<Retrying id="two" />))
+  await act(async () => vi.advanceTimersByTimeAsync(1000))
+  expect(fetcher).toHaveBeenCalledTimes(3)
+  expect(resource.value).toBe('replacement')
+  fetcher.mockResolvedValue('retry')
+  await act(async () => resource.refresh())
+  await act(async () => root.render(null))
+  await act(async () => vi.advanceTimersByTimeAsync(1000))
+  expect(fetcher).toHaveBeenCalledTimes(4)
+})
+
+it('allows a domain retry after rejection and supersedes it on manual refresh', async () => {
+  vi.useFakeTimers()
+  const fetcher = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue('ready')
+  let resource!: LiveResource<string>
+  function Retrying() {
+    resource = useLiveResource(null, 'one', fetcher, { retryDelayMs: (_, error) => error ? 1000 : undefined })
+    return null
+  }
+  await act(async () => root.render(<Retrying />))
+  await act(async () => vi.advanceTimersByTimeAsync(1000))
+  expect(resource.value).toBe('ready')
+  fetcher.mockRejectedValueOnce(new Error('offline'))
+  await act(async () => resource.refresh())
+  await act(async () => resource.refresh())
+  await act(async () => vi.advanceTimersByTimeAsync(2000))
+  expect(fetcher).toHaveBeenCalledTimes(4)
+  expect(resource.error).toBeNull()
+})

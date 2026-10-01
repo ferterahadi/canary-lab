@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import * as api from '../api/client'
+import { useFeatureTestRoster } from '../state/use-feature-test-roster'
 import type { FeatureSpecFile, RunManifest } from '../api/types'
 import { useTestSourceComparison } from '../state/use-test-source-comparison'
 
@@ -21,25 +21,13 @@ export function useTestVersions({ feature, baseline, displayed, recordedView, re
   type List = { specs?: FeatureSpecFile[]; failed?: boolean }
   const [lists, setLists] = useState<{ key: string; current?: List; recorded?: List } | null>(null)
   const visibleVersion = recordedView ? 'recorded' : 'current'
-  const otherVersion = recordedView ? 'current' : 'recorded'
   useEffect(() => {
     if (!ready || !displayed) return
     setLists((previous) => ({ ...(previous?.key === contextKey ? previous : {}), key: contextKey, [visibleVersion]: { specs: displayed } }))
   }, [ready, displayed, contextKey, visibleVersion])
-  useEffect(() => {
-    if (!feature || !baseline?.runId) return
-    let cancelled = false
-    const save = (list: List) => {
-      if (!cancelled) setLists((previous) => ({ ...(previous?.key === contextKey ? previous : {}), key: contextKey, [otherVersion]: list }))
-    }
-    api.getFeatureTests(feature, undefined, otherRunId).then((specs) => {
-      save({ specs, failed: specs.some((spec) => Boolean(spec.discoveryError)) })
-    }).catch(() => { save({ failed: true }) })
-    return () => { cancelled = true }
-  }, [feature, baseline?.runId, otherRunId, contextKey, otherVersion])
+  const other = useFeatureTestRoster({ feature, runId: otherRunId, enabled: Boolean(baseline?.runId), refreshKey: contextKey })
   const cached = lists?.key === contextKey ? lists : null
-  const other = cached?.[otherVersion]
-  const counterpart = !other?.failed ? other?.specs ?? null : null
+  const counterpart = !other.failure ? other.specs : null
   const visible = displayFailed ? null : ready ? displayed : cached?.[visibleVersion]?.specs ?? null
   const current = recordedView ? counterpart : visible
   const recorded = recordedView ? visible : counterpart

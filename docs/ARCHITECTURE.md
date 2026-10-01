@@ -303,6 +303,26 @@ it on authoritative missing-suite or missing-snapshot responses. Comparison
 freshness does not grant review permission; review actions still require a
 confirmed review revision.
 
+Test rosters share `apps/web/src/shared/state/use-feature-test-roster.ts`, with
+retention local to each mounted consumer and isolated by suite/run identity.
+The Tests column makes at most three attempts per refresh, one second apart,
+and checks missing/configuration failures in the workspace every ten seconds.
+Counterpart rosters remain event-driven; Coverage source remains lazy and has
+no periodic reads. The live reader owns retry cancellation along with response
+ordering, so refreshes and teardown also cancel scheduled retries.
+
+PR confirmation uses a no-topic live reader only while open, with explicit
+Refresh/Retry and no background probes. Each open session requires its own
+successful preflight. Closing expires callbacks but retains an outstanding
+submission lock until the server request settles; server eligibility checks
+remain authoritative.
+
+Token pickers use scoped configuration readers for the environment index, port
+names, and selected slot keys, reconciling every five seconds while mounted.
+Failed reads retain choices but disable insertion; authoritative deletion clears
+choices. Environment/slot replacement rejects older reads without changing
+already-entered tokens. Configuration is not kept in a module-global cache.
+
 Notification lists use the same live reader with ten-second reconciliation.
 Its synchronous `accept` operation applies mutation observations to the current
 value and invalidates older reads. Acceptance callbacks survive refreshes but

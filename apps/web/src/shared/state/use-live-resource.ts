@@ -75,6 +75,9 @@ export function useLiveResource<T>(
   opts: {
     /** Keep accepted data across manual refreshes and failures without polling. */
     retainOnError?: boolean
+    /** Domain retry policy; delays belong to the current read and are cancelled
+     * by a newer observation, refresh, identity change, or teardown. */
+    retryDelayMs?: (value: T | null, error?: unknown) => number | undefined
     scope?: string
     /** Opt IN to the stale-then-fresh remount cache with a tag naming WHAT is
      *  fetched (e.g. `'ledger'`). Explicit because the topic alone cannot key
@@ -120,6 +123,8 @@ export function useLiveResource<T>(
   const fetcherRef = useRef(fetcher)
   fetcherRef.current = fetcher
   const cacheTag = opts.cache
+  const retryRef = useRef(opts.retryDelayMs)
+  retryRef.current = opts.retryDelayMs
   const pollWhileRef = useRef(opts.pollWhile)
   pollWhileRef.current = opts.pollWhile
   const polling = opts.pollWhile !== undefined || opts.reconcileMs !== undefined
@@ -158,6 +163,7 @@ export function useLiveResource<T>(
     setConfirmed(false)
     setError(null)
     let requested = 0
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
     let lease: ReturnType<typeof setTimeout> | undefined
     const publish = (next: T | null) => {
       acceptedKeys.current.add(key)
@@ -174,13 +180,19 @@ export function useLiveResource<T>(
     observer.current = { lifetime, accept: (next) => {
       if (!alive) return false
       requested++
+      clearTimeout(retryTimer)
       publish(typeof next === 'function' ? (next as (current: T | null) => T | null)(current) : next)
       setLoading(false)
       return true
     } }
     const fetch = (event?: Event) => {
       if (pauseWhenHidden && document.visibilityState === 'hidden') return
+      clearTimeout(retryTimer)
       const request = ++requested
+      const retry = (next: T | null, error?: unknown) => {
+        const delay = retryRef.current?.(next, error)
+        if (delay !== undefined) retryTimer = setTimeout(() => { if (alive && request === requested) fetch() }, delay)
+      }
       // Join sibling readers, never a previous reconciliation round or a read
       // started before reconnect/focus. A hung HTTP request cannot stall recovery.
       const readRevision = JSON.stringify([readKey, reconcileMs ? Math.floor(Date.now() / reconcileMs) : 0, event?.type, event?.timeStamp])
@@ -188,6 +200,7 @@ export function useLiveResource<T>(
         .then((next) => {
           if (!alive || request !== requested) return
           publish(next ?? null)
+          retry(next ?? null)
         })
         .catch((error: unknown) => {
           // A failed task read is not evidence that the task disappeared.
@@ -195,6 +208,7 @@ export function useLiveResource<T>(
           if (!polling && !retainOnError) setValue(null)
           setConfirmed(false)
           setError(error instanceof Error ? error.message : String(error))
+          retry(current, error)
         })
         .finally(() => { if (alive && request === requested) setLoading(false) })
     }
@@ -216,6 +230,7 @@ export function useLiveResource<T>(
     return () => {
       alive = false
       clearInterval(timer)
+      clearTimeout(retryTimer)
       clearTimeout(lease)
       window.removeEventListener('focus', fetch)
       window.removeEventListener('online', fetch)
