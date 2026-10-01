@@ -1,3 +1,5 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
+import type { GettingStartedSessionState, GettingStartedTarget } from '../../../../../../shared/getting-started'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -11,9 +13,9 @@ import { PortifyRunStore } from '../../portify/logic/runtime/store'
 import { CoverageJobRunStore, bridgeCoverageJobEvents } from '../../coverage/logic/coverage/jobs/store'
 import { createDraft, readDraft, writeDraft, bridgeDraftEvents, deleteDraft } from '../../wizard/logic/draft-store'
 import { readEvaluationExportTask, writeEvaluationExportTask, bridgeEvaluationExportEvents } from '../../evaluation/logic/evaluation-export-store'
-import { WorkspaceEventBus, type WorkspaceEvent } from '../../../shared/workspace-events'
+import { WorkspaceEventBus } from '../../../shared/workspace-events'
 import { createGettingStartedRuntime } from './getting-started-runtime'
-import type { GettingStartedSessionState, GettingStartedTarget } from './getting-started-session'
+
 
 let logsDir: string
 let runs: RunStore

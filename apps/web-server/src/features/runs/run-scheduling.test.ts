@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -12,7 +13,7 @@ import type { RunIndexEntry } from '../../../../../shared/run-index'
 import { runDirFor } from './logic/runtime/run-paths'
 import type { PtyFactory } from './logic/runtime/pty-spawner'
 import type { ServerContext } from '../../server-context'
-import type { WorkspaceEvent } from '../../shared/workspace-events'
+
 import type { FeatureConfig } from '../../../../../shared/launcher/types'
 
 let tmpDir: string

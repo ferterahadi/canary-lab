@@ -1,3 +1,4 @@
+import { resolveConfigDocument, readConfigDocument } from './config-document'
 // Feature-config REST — the feature.config.{cjs,js,ts} document itself, the
 // portify-overlay reset, the per-repo git surface, and feature deletion.
 // Split out of feature-config.ts; handler bodies are unchanged.
@@ -21,24 +22,18 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
   // ─── feature.config.{cjs,js,ts} ───────────────────────────────────────
 
   app.get<{ Params: { name: string } }>('/api/features/:name/config-doc', async (req, reply) => {
-    const features = loadFeatures(deps.featuresDir)
-    const feature = features.find((f) => f.name === req.params.name)
-    if (!feature?.featureDir) return notFound(reply, 'feature')
-    const cfg = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
-    if (!cfg) return notFound(reply, 'config file')
-    const content = fs.readFileSync(cfg.path, 'utf-8')
-    const parsed = readFeatureConfig(content)
-    return { path: cfg.path, format: cfg.format, content, parsed }
+    const document = resolveConfigDocument(deps.featuresDir, req.params.name, FEATURE_CONFIG_NAMES, 'config file')
+    if (!document.ok) return notFound(reply, document.missing)
+    const { cfg } = document
+    return readConfigDocument(cfg, readFeatureConfig)
   })
 
   app.put<{ Params: { name: string }; Body: { value: ConfigValue } }>(
     '/api/features/:name/config-doc',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
-      if (!feature?.featureDir) return notFound(reply, 'feature')
-      const cfg = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
-      if (!cfg) return notFound(reply, 'config file')
+      const document = resolveConfigDocument(deps.featuresDir, req.params.name, FEATURE_CONFIG_NAMES, 'config file')
+      if (!document.ok) return notFound(reply, document.missing)
+      const { features, feature, cfg } = document
       const source = fs.readFileSync(cfg.path, 'utf-8')
       // Always sync `envs:` to match the actual envset folders on disk —
       // the General tab no longer edits this list (Envsets tab is the

@@ -1,56 +1,7 @@
+import type { GettingStartedWorkflow, GettingStartedOwner, GettingStartedTarget, GettingStartedActiveSession, GettingStartedSessionState } from '../../../../../../shared/getting-started'
 import fs from 'fs'
 import path from 'path'
 import { isUnsettledRunStatus } from '../../../../../../shared/run-state'
-
-/** One key per Getting Started card — the two starters plus the five "More
- *  workflows". Each demo claims under its own key so every card can show its
- *  own attempted/running/completed state. */
-export type GettingStartedWorkflow =
-  | 'run'
-  | 'flight'
-  | 'coverage'
-  | 'author'
-  | 'portify'
-  | 'heal'
-  // Retained only so an in-flight/pre-upgrade session.json remains readable.
-  | 'verify'
-  | 'export'
-export type GettingStartedOwner = 'internal' | 'external'
-/** What a claim is linked to. `run`/`flight` predate the widening and stay
- *  featureless (persisted session.json records exist in that shape); the newer
- *  kinds carry `feature` because their open-target navigation is feature-first
- *  (the coverage ledger, the suite's flight page pinned to a stage). Both
- *  normal-run cards, plus a legacy `verify` record, reuse kind 'run'. */
-export type GettingStartedTarget =
-  | { kind: 'run'; id: string }
-  | { kind: 'flight'; id: string }
-  | { kind: 'draft'; id: string; feature: string }
-  | { kind: 'coverage-job'; id: string; feature: string }
-  | { kind: 'portify'; id: string; feature: string }
-  | { kind: 'export'; id: string; feature: string }
-
-export interface GettingStartedActiveSession {
-  sessionId: string
-  workflow: GettingStartedWorkflow
-  owner: GettingStartedOwner
-  target: GettingStartedTarget | null
-  startedAt: string
-  updatedAt: string
-}
-
-export interface GettingStartedCompletion {
-  workflow: GettingStartedWorkflow
-  owner: GettingStartedOwner
-  target: GettingStartedTarget
-  status: string
-  startedAt: string
-  endedAt: string
-}
-
-export interface GettingStartedSessionState {
-  active: GettingStartedActiveSession | null
-  completed: Partial<Record<GettingStartedWorkflow, GettingStartedCompletion>>
-}
 
 /** Resolves a claim's linked record to its live status. One method pair over
  *  the target union (rather than one pair per kind) so adding a target kind is

@@ -1,3 +1,4 @@
+import type { GettingStartedOwner } from '../../../../../../shared/getting-started'
 import type { FastifyInstance } from 'fastify'
 import type { CoverageFreshnessMonitor } from '../logic/coverage/freshness-monitor'
 import { FeatureNotFoundError, computeFeatureCoverage, featureExists } from '../logic/coverage/service'
@@ -30,7 +31,7 @@ import {
 } from '../../agent-sessions/logic/agent-session-paths'
 import { buildAgentSessionResponse } from '../../agent-sessions/logic/agent-session-subagents'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
-import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
+import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 import { notFound } from '../../../shared/http-error'
 
 export interface CoverageRouteDeps {

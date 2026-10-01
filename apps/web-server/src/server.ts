@@ -1,3 +1,4 @@
+import { bridgeCleanupEvents } from './shared/cleanup-events'
 import { createRepositoryObserver } from './shared/repository-observer'
 import path from 'path'
 import fs from 'fs'
@@ -164,6 +165,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // process's session and are deliberately left alone.
   reconcileInterruptedDrafts(logsDir, () => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
+  bridgeCleanupEvents(runStore, workspaceEvents, ['runs', 'worktrees'])
+  bridgeCleanupEvents(benchmarkStore, workspaceEvents, ['worktrees'])
+  bridgeCleanupEvents(portifyStore, workspaceEvents, ['portify', 'worktrees'])
   const repositoryObserver = createRepositoryObserver({ events: workspaceEvents, log: (message, error) => app.log.warn({ err: error }, message) })
   app.addHook('onClose', async () => repositoryObserver.dispose())
   const coverageMonitor = new CoverageFreshnessMonitor({ featuresDir, logsDir }, workspaceEvents, (error) => app.log.warn({ error }, 'Coverage freshness reconciliation failed'))

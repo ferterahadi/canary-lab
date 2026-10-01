@@ -1,39 +1,30 @@
+import { resolveConfigDocument, readConfigDocument } from './config-document'
 // Feature-config REST — the playwright.config.{ts,js,cjs} document.
 // Split out of feature-config.ts; handler bodies are unchanged.
 import type { FastifyInstance } from 'fastify'
 import type { FeatureConfigRouteDeps } from './feature-config-deps'
 import fs from 'fs'
-import os from 'os'
-import path from 'path'
 import { readPlaywrightConfig, writePlaywrightConfig, type ConfigValue } from '../../../shared/config-ast'
-import { loadFeatures } from '../../../shared/feature-loader'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { PLAYWRIGHT_CONFIG_NAMES } from '../../../shared/playwright-config'
-import { findExistingConfig } from '../../../shared/config-file'
 import { notFound } from '../../../shared/http-error'
 
 export async function registerPlaywrightConfigRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
   // ─── playwright.config.{ts,js,cjs} ────────────────────────────────────
 
   app.get<{ Params: { name: string } }>('/api/features/:name/playwright', async (req, reply) => {
-    const features = loadFeatures(deps.featuresDir)
-    const feature = features.find((f) => f.name === req.params.name)
-    if (!feature?.featureDir) return notFound(reply, 'feature')
-    const cfg = findExistingConfig(feature.featureDir, PLAYWRIGHT_CONFIG_NAMES)
-    if (!cfg) return notFound(reply, 'playwright config')
-    const content = fs.readFileSync(cfg.path, 'utf-8')
-    const parsed = readPlaywrightConfig(content)
-    return { path: cfg.path, format: cfg.format, content, parsed }
+    const document = resolveConfigDocument(deps.featuresDir, req.params.name, PLAYWRIGHT_CONFIG_NAMES, 'playwright config')
+    if (!document.ok) return notFound(reply, document.missing)
+    const { cfg } = document
+    return readConfigDocument(cfg, readPlaywrightConfig)
   })
 
   app.put<{ Params: { name: string }; Body: { value: ConfigValue } }>(
     '/api/features/:name/playwright',
     async (req, reply) => {
-      const features = loadFeatures(deps.featuresDir)
-      const feature = features.find((f) => f.name === req.params.name)
-      if (!feature?.featureDir) return notFound(reply, 'feature')
-      const cfg = findExistingConfig(feature.featureDir, PLAYWRIGHT_CONFIG_NAMES)
-      if (!cfg) return notFound(reply, 'playwright config')
+      const document = resolveConfigDocument(deps.featuresDir, req.params.name, PLAYWRIGHT_CONFIG_NAMES, 'playwright config')
+      if (!document.ok) return notFound(reply, document.missing)
+      const { cfg } = document
       const source = fs.readFileSync(cfg.path, 'utf-8')
       let next: string
       try {

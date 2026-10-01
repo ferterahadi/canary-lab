@@ -106,6 +106,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
     let conn: { close(): void } | null = null
     const resyncWorkspace = (): void => {
       refreshFeatures(selectedFeatureRef.current)
+      for (const resource of ['runs', 'worktrees', 'portify']) invalidate('cleanup', resource)
       invalidate('repos')
       invalidate('configuration')
       invalidate('tests')
@@ -129,6 +130,10 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
           // client-local "has this socket opened before?" classification.
           if (event.type === 'connected') {
             resyncWorkspace()
+            return
+          }
+          if (event.type === 'cleanup-changed') {
+            invalidate('cleanup', event.resource)
             return
           }
           if (event.type === 'repos-changed') {

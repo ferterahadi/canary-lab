@@ -1,6 +1,7 @@
+import type { WorkspaceEvent } from '../../../../shared/workspace-events'
 import { describe, expect, it } from 'vitest'
 import { bridgeRecordEvents, bridgeStoreEvents, type StoreEventSource } from './store-event-bridge'
-import { WorkspaceEventBus, type WorkspaceEvent } from './workspace-events'
+import { WorkspaceEventBus } from './workspace-events'
 
 // A store stand-in: `emit` plays the part of a record being written.
 function fakeStore<E>(): StoreEventSource<E> & { emit(event: E): void } {

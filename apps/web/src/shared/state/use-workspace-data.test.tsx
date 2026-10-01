@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { WorkspaceStreamFrame as WorkspaceEvent } from '@shared/workspace-events'
 
 import { act, useCallback, useRef } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -6,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Feature } from '../api/types'
 import type { RunIndexEntry } from '@shared/run-index'
 import type { FlightIndexEntry, FlightManifest, PlanFeaturesTask } from '@shared/flights/types'
-import type { ConnectWorkspaceEventsOptions, WorkspaceEvent } from '../api/workspace-socket'
+import type { ConnectWorkspaceEventsOptions } from '../api/workspace-socket'
 import type { InvalidationTopic } from './invalidation-bus'
 import type { WorkspaceData, WorkspaceDataDeps } from './use-workspace-data'
 
@@ -603,6 +604,7 @@ describe('useWorkspaceData — server reconnect resync', () => {
     await fire({ type: 'connected' })
 
     expect(harness.invalidated).toEqual([
+      ['cleanup', 'runs'], ['cleanup', 'worktrees'], ['cleanup', 'portify'],
       ['repos', undefined], ['configuration', undefined], ['tests', undefined], ['coverage', undefined],
       ['verification', undefined], ['journal', 'r1'], ['flights', undefined], ['pre-flights', undefined],
       ['project-config', undefined], ['onboarding', undefined], ['notifications', undefined],
@@ -745,4 +747,11 @@ describe('pre-flight observation ordering and recovery', () => {
     await mount()
     expect(harness.data.preFlights).toEqual([])
   })
+})
+
+it('routes cleanup changes to the matching inventory only', async () => {
+  await mount()
+  harness.invalidated.length = 0
+  await fire({ type: 'cleanup-changed', resource: 'worktrees' })
+  expect(harness.invalidated).toEqual([['cleanup', 'worktrees']])
 })

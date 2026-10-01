@@ -1,3 +1,4 @@
+import type { GettingStartedOwner, GettingStartedWorkflow } from '../../../../../../shared/getting-started'
 // Flights REST — starting a flight and the plan-features task surface.
 // Split out of flights.ts; handler bodies are unchanged.
 import { resolveRepoIdentity } from '../../../shared/repo-identity'
@@ -18,7 +19,7 @@ import {
   type FlightStageKey,
 } from '../../../../../../shared/flights/types'
 import { parseFlightExternalAgentSession, reclaimGettingStartedFlight, resolveFlightModels } from './flight-route-support'
-import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedWorkflow } from '../../config/logic/getting-started-session'
+import { GettingStartedBusyError } from '../../config/logic/getting-started-session'
 
 /** The author/portify/export demos launch a flight pinned to their stage, so
  *  the flight-start claim must land under the DEMO's workflow key, not

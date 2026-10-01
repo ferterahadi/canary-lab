@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act } from 'react'
+import { act, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { InvalidationProvider, useInvalidation } from './invalidation'
@@ -46,6 +46,63 @@ async function render(props: { id: string | null; fetcher: (key: string) => Prom
 
 const read = (testId: string): string | undefined =>
   container.querySelector(`[data-testid="${testId}"]`)?.textContent ?? undefined
+
+it('expires a retained observation during a hung read and ignores refreshes while hidden', async () => {
+  vi.useFakeTimers()
+  let live!: LiveResource<string>
+  const fetcher = vi.fn<() => Promise<string>>().mockResolvedValueOnce('current').mockImplementation(() => new Promise(() => {}))
+  function Reader() {
+    live = useLiveResource(null, 'lease', fetcher, { reconcileMs: 5000, leaseMs: 15000, pauseWhenHidden: true })
+    return null
+  }
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+  try {
+    await act(async () => root.render(<Reader />))
+    expect(live.confirmed).toBe(true)
+    await act(async () => vi.advanceTimersByTimeAsync(15000))
+    expect(live.value).toBe('current')
+    expect(live.confirmed).toBe(false)
+    visibility.mockReturnValue('hidden')
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+    const reads = fetcher.mock.calls.length
+    await act(async () => live.refresh())
+    await act(async () => window.dispatchEvent(new Event('focus')))
+    expect(fetcher).toHaveBeenCalledTimes(reads)
+    expect(vi.getTimerCount()).toBe(0)
+  } finally { visibility.mockRestore() }
+})
+
+it('rejects an observation delivered by an effect being replaced during refresh', async () => {
+  let live!: LiveResource<string>
+  const accepted: boolean[] = []
+  function Reader({ revision }: { revision: number }) {
+    live = useLiveResource(null, 'replacement', async () => 'current', { refreshKey: revision })
+    useEffect(() => () => { accepted.push(live.accept('obsolete')) }, [revision])
+    return null
+  }
+  await act(async () => root.render(<Reader revision={0} />))
+  await act(async () => root.render(<Reader revision={1} />))
+  expect(accepted).toEqual([false])
+  expect(live.value).toBe('current')
+})
+
+it('ignores a domain retry already queued when its reader is closed', async () => {
+  vi.useFakeTimers()
+  const original = globalThis.setTimeout
+  let retry!: () => void
+  const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((handler: () => void, ms?: number) => {
+    if (ms === 1000) retry = handler
+    return original(handler, ms)
+  }) as typeof setTimeout)
+  const fetcher = vi.fn(async () => 'pending')
+  function Reader() { useLiveResource(null, 'retry-close', fetcher, { retryDelayMs: () => 1000 }); return null }
+  try {
+    await act(async () => root.render(<Reader />))
+    await act(async () => root.render(null))
+    await act(async () => retry())
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  } finally { timer.mockRestore() }
+})
 
 describe('useLiveResource', () => {
   it('coalesces mounted readers but starts new reads after an event or a missed-event recovery round', async () => {

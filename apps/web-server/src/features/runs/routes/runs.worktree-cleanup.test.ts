@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
@@ -17,7 +18,7 @@ import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../l
 import type { RunManifest } from '../../../../../../shared/run-manifest'
 import { runDirFor } from '../logic/runtime/run-paths'
 import { launchEditorDir } from '../../../shared/editor-launch'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 import { initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
@@ -248,13 +249,15 @@ describe('cleanup/worktrees routes (real git worktrees)', () => {
     it('200s, removes the worktree via git, and returns freedBytes', async () => {
       const { runWorktree } = setupWorktreeFixtures()
       fs.writeFileSync(path.join(runWorktree, 'data.bin'), Buffer.alloc(64))
-      const { app } = await build({ isWorktreeOwnerActive: () => false })
+      const events: WorkspaceEvent[] = []
+      const { app } = await build({ isWorktreeOwnerActive: () => false, events })
       const res = await app.inject({ method: 'DELETE', url: '/api/cleanup/worktrees', payload: { path: runWorktree } })
       expect(res.statusCode).toBe(200)
       const body = res.json() as { removed: boolean; freedBytes: number }
       expect(body.removed).toBe(true)
       expect(body.freedBytes).toBeGreaterThan(0)
       expect(fs.existsSync(runWorktree)).toBe(false)
+      expect(events).toContainEqual({ type: 'cleanup-changed', resource: 'worktrees' })
     })
 
     it('200s removing a worktree with no run/benchmark owner without consulting isWorktreeOwnerActive', async () => {

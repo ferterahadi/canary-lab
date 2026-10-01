@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
@@ -10,7 +11,7 @@ import { createRegistry, type OrchestratorLike } from '../logic/run-registry'
 import { assertNoPendingRunReview } from '../logic/runtime/run-review-gate'
 import type { RunsRouteDeps } from './runs-route-deps'
 import type { RunStartRequest, TestReviewRequiredInfo } from '../../../../../../shared/test-review'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 import { RunStartRequests } from '../logic/run-start-requests'
 
 const apps: FastifyInstance[] = []

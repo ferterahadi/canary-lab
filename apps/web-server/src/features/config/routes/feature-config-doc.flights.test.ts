@@ -1,10 +1,11 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { featureConfigRoutes } from './feature-config'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 
 // Deletion and rename are the two places a suite's IDENTITY moves, so both have
 // to carry its flight history with them. These are the arms where that handoff

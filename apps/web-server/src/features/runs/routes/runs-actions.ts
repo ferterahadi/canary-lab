@@ -1,3 +1,4 @@
+import type { GettingStartedOwner } from '../../../../../../shared/getting-started'
 // Runs REST — start/heal/lifecycle actions: start a run, pause/cancel heal, write
 // to the agent, restart, abort, delete. Split out of runs.ts; bodies unchanged.
 import type { FastifyInstance } from 'fastify'
@@ -12,7 +13,7 @@ import type { RepoUpdateRefusal } from '../logic/runtime/repo-upstream-update'
 import { type SpecSelectionViolation } from '../../../shared/playwright-config'
 import type { ExecutionType } from '../../../../../../shared/verification'
 import { ExternalHealAgentRequest, findActiveRunForFeature, parseExternalHealAgent } from './runs-route-support'
-import { GettingStartedBusyError, type GettingStartedOwner } from '../../config/logic/getting-started-session'
+import { GettingStartedBusyError } from '../../config/logic/getting-started-session'
 import type { GettingStartedRunWorkflow } from '../../config/routes/onboarding'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 import { restoreReviewedSuiteFiles } from '../logic/runtime/run-suite-snapshot'

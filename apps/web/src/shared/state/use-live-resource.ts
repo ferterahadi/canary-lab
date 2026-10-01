@@ -213,11 +213,22 @@ export function useLiveResource<T>(
         .finally(() => { if (alive && request === requested) setLoading(false) })
     }
     fetch()
-    const timer = polling ? setInterval(() => {
-      if (reconcileMs || pollWhileRef.current?.(current)) fetch()
-    }, reconcileMs ?? pollIntervalMs ?? 2500) : undefined
+    let timer: ReturnType<typeof setInterval> | undefined
+    const schedule = () => {
+      clearInterval(timer)
+      if (polling && !(pauseWhenHidden && document.visibilityState === 'hidden')) {
+        timer = setInterval(() => {
+          if (reconcileMs || pollWhileRef.current?.(current)) fetch()
+        }, reconcileMs ?? pollIntervalMs ?? 2500)
+      }
+    }
+    schedule()
     const offline = () => { requested++; setConfirmed(false); setError('Connection lost; freshness is unconfirmed.') }
     const visible = (event: Event) => {
+      if (pauseWhenHidden) {
+        schedule()
+        clearTimeout(retryTimer)
+      }
       if (document.visibilityState === 'visible') { setConfirmed(false); fetch(event) }
       else if (pauseWhenHidden) { requested++; setConfirmed(false) }
     }
@@ -225,8 +236,8 @@ export function useLiveResource<T>(
       window.addEventListener('focus', fetch)
       window.addEventListener('online', fetch)
       window.addEventListener('offline', offline)
-      document.addEventListener('visibilitychange', visible)
     }
+    if (reconcileMs || pauseWhenHidden) document.addEventListener('visibilitychange', visible)
     return () => {
       alive = false
       clearInterval(timer)

@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 
 import fs from 'fs'
@@ -19,7 +20,7 @@ import { writeManifest } from '../../runs/logic/runtime/manifest'
 
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
 
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 
 import { resolveManifestSessionRef, loadAgentSession } from '../../agent-sessions/logic/agent-session-log'
 

@@ -1,5 +1,6 @@
+import type { WorkspaceStreamFrame as WorkspaceEvent } from '@shared/workspace-events'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { connectWorkspaceEvents, type WorkspaceEvent } from '@/shared/api/workspace-socket'
+import { connectWorkspaceEvents } from '@/shared/api/workspace-socket'
 import { createObservedReads } from './observed-reads'
 
 export interface RecordSyncState {

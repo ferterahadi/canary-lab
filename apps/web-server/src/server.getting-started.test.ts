@@ -1,3 +1,4 @@
+import type { GettingStartedSessionState } from '../../../shared/getting-started'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -7,7 +8,7 @@ import { createServer } from './server'
 import type { PtyFactory } from './features/runs/logic/runtime/pty-spawner'
 import { runDirFor } from './features/runs/logic/runtime/run-paths'
 import { writeManifest, writeRunsIndex } from './features/runs/logic/runtime/manifest'
-import type { GettingStartedSessionState } from './features/config/logic/getting-started-session'
+
 
 const inertPty: PtyFactory = () => ({
   pid: 0, onData: () => ({ dispose() {} }), onExit: () => ({ dispose() {} }),

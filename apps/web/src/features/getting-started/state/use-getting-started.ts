@@ -1,13 +1,10 @@
+import type { GettingStartedTarget, OnboardingWorkflowAction, OnboardingWorkflowId } from '@shared/getting-started'
 import { useCallback, useEffect, useMemo } from 'react'
 import * as runsApi from '@/shared/api/runs'
 import * as flightsApi from '@/shared/api/flights'
 import * as coverageApi from '@/shared/api/coverage'
 import * as internalApi from '@/shared/api/internal'
-import type {
-  GettingStartedTarget,
-  OnboardingWorkflowAction,
-  OnboardingWorkflowId,
-} from '@/shared/api/config'
+
 import type { RunIndexEntry } from '@shared/run-index'
 import type { FlightIndexEntry, FlightStageKey } from '@shared/flights/types'
 import { isAuxiliaryExecution } from '@shared/verification'

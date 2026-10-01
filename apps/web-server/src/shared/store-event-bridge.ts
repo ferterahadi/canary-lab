@@ -1,4 +1,5 @@
-import { publishWorkspaceEvent, type WorkspaceEvent, type WorkspaceEventPublisher } from './workspace-events'
+import type { WorkspaceEvent } from '../../../../shared/workspace-events'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from './workspace-events'
 
 // One rule for the whole server: **the state owner emits**. A feature store is
 // the owner of its records, so a write to it — from a route, an MCP tool, a

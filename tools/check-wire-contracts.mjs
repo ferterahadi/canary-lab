@@ -7,13 +7,12 @@
 // the copies field by field, seven had already drifted, and every one compiled
 // clean on both sides because a mirror has no link to its original for `tsc`
 // to check. Sharing the declaration makes that drift a compile error, so this
-// gate now guards the three things `tsc` cannot see:
+// gate now guards the two things `tsc` cannot see:
 //
 //   1. A mirror creeping back: an app file declaring its own type under a
 //      shared wire type's name.
 //   2. A shared semantic type that a side bypasses — imports, but builds its
 //      own projection instead of calling the shared converter.
-//   3. The workspace WebSocket event union, which each side still declares.
 //
 // Run: node tools/check-wire-contracts.mjs
 
@@ -26,6 +25,8 @@ const REPO = path.resolve(import.meta.dirname, '..')
 // them is the one declaration of that name; an app file that declares the same
 // name is a mirror.
 const WIRE_HOMES = [
+  'shared/workspace-events.ts',
+  'shared/getting-started.ts',
   'shared/run-manifest.ts',
   'shared/run-detail.ts',
   'shared/run-index.ts',
@@ -99,16 +100,6 @@ const SHARED_TYPES = [
     ],
   },
 ]
-
-// The workspace WebSocket frame union, declared on both sides. Compared by
-// variant tag rather than by field, because that is what a client switches on.
-const UNION = {
-  server: { file: 'apps/web-server/src/shared/workspace-events.ts', name: 'WorkspaceEvent' },
-  web: { file: 'apps/web/src/shared/api/workspace-socket.ts', name: 'WorkspaceEvent' },
-  // The web union carries the socket's own lifecycle frame, which the server's
-  // event bus never emits — `workspace-stream.ts` adds it around the bus.
-  webOnly: ['connected'],
-}
 
 function read(rel) {
   return readFileSync(path.join(REPO, rel), 'utf8')
@@ -185,33 +176,13 @@ for (const sharedType of SHARED_TYPES) {
   }
 }
 
-// The workspace event union.
-const serverTags = unionTags(read(UNION.server.file), UNION.server.name)
-const webTags = unionTags(read(UNION.web.file), UNION.web.name)
-if (!serverTags || !webTags) {
-  problems.push(`WorkspaceEvent: could not read the union on ${!serverTags ? 'the server' : 'the web'} side`)
-} else {
-  const missingOnWeb = [...serverTags].filter((t) => !webTags.has(t)).sort()
-  const missingOnServer = [...webTags].filter((t) => !serverTags.has(t) && !UNION.webOnly.includes(t)).sort()
-  if (missingOnWeb.length) {
-    problems.push(
-      `WorkspaceEvent: the server emits ${missingOnWeb.join(', ')} but ${UNION.web.file} does not handle it —\n` +
-      '    a client that never learns the tag stays stale until the user reloads',
-    )
-  }
-  if (missingOnServer.length) {
-    problems.push(
-      `WorkspaceEvent: ${UNION.web.file} declares ${missingOnServer.join(', ')} but nothing emits it —\n` +
-      '    dead branch, or a server publisher was removed without its client',
-    )
-  }
-}
+const eventTags = unionTags(read('shared/workspace-events.ts'), 'WorkspaceEvent')
 
 if (problems.length === 0) {
   console.log(
     `✔ wire contracts clean — ${wireNames.size} shared wire types, ` +
     `${SHARED_TYPES.length} shared semantic type${SHARED_TYPES.length === 1 ? '' : 's'}, ` +
-    `${serverTags.size} event variants`,
+    `${eventTags.size} event variants`,
   )
   process.exit(0)
 }

@@ -1,12 +1,7 @@
+import type { GettingStartedSessionState, GettingStartedTarget, OnboardingWorkflow, OnboardingWorkflowAction, OnboardingWorkflowId } from '@shared/getting-started'
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import type {
-  GettingStartedSessionState,
-  GettingStartedTarget,
-  OnboardingWorkflow,
-  OnboardingWorkflowAction,
-  OnboardingWorkflowId,
-} from '@/shared/api/config'
+
 import { CopyField } from '@/shared/ui/CopyField'
 import { Tooltip } from '@/shared/ui/Tooltip'
 import { Section, StatusDot, type StatusDotState } from '@/shared/ui/atoms'

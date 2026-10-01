@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCleanupInventory } from '../state/use-cleanup-inventory'
+import { useCleanupSelection } from '../state/use-cleanup-selection'
+import { useCleanupAction } from '../state/use-cleanup-action'
+import { isActionablePortifyStatus } from '@shared/portify-index'
+import { useState } from 'react'
 import * as cleanupApi from '@/shared/api/cleanup'
 import * as portifyApi from '@/shared/api/portify'
 import type { PortifyCleanupEntry } from '@shared/cleanup-listing'
 import { formatBytes, timeAgo } from '@/shared/lib/format'
 import { ConfirmModal } from '@/shared/ui/Overlays'
-import { CleanupEmptyState, FolderGlyph, QuickSelectMenu, SpinnerGlyph, WarnGlyph } from './CleanupTableParts'
+import { CleanupActionBar, CleanupToolbar, CleanupRefreshError, CleanupEmptyState, FolderGlyph, SpinnerGlyph, WarnGlyph } from './CleanupTableParts'
 import { PORTIFY_STATUS_COLOR, SEVEN_DAYS_MS } from './cleanup-rows'
 
 // Self-contained port-ification record inventory: every workflow under
@@ -16,49 +20,18 @@ export function PortifySection({ now, onNavigateToPortify }: {
   now: number
   onNavigateToPortify?: (feature: string) => void
 }) {
-  const [workflows, setWorkflows] = useState<PortifyCleanupEntry[] | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [err, setErr] = useState<string | null>(null)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [bulkBusy, setBulkBusy] = useState(false)
+  const inventory = useCleanupInventory('portify', cleanupApi.cleanupPortify)
+  const workflows = inventory.value?.workflows ?? []
+  const { initialLoading: loading, error: err, refresh: load } = inventory
+  const { selected, clear, remove: removeSelection, toggle, selectPreset } = useCleanupSelection(workflows, (row) => row.workflowId, (row) => !isActionablePortifyStatus(row.status), inventory.confirmed)
+  const { busy: bulkBusy, error: actionError, execute } = useCleanupAction(load)
   // Every delete — per-row or bulk — routes through the confirm dialog (like
   // the runs tab), so the "record only, saved overlay untouched" note is seen
   // on each path, not just bulk.
   const [confirmTargets, setConfirmTargets] = useState<PortifyCleanupEntry[] | null>(null)
-  // In the page, above the table it is about — this was a `window.alert`, an OS
-  // sheet in the middle of a surface that draws all its own chrome.
-  const [actionError, setActionError] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setErr(null)
-    try {
-      const wfs = (await cleanupApi.cleanupPortify()).workflows
-      setWorkflows(wfs)
-      // Drop selections for records that no longer exist (removed elsewhere).
-      setSelected((prev) => new Set([...prev].filter((id) => wfs.some((w) => w.workflowId === id))))
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to load Portify records')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-  useEffect(() => { void load() }, [load])
-
-  const sorted = (workflows ?? []).slice().sort((a, b) => b.folderBytes - a.folderBytes)
+  const sorted = workflows.slice().sort((a, b) => b.folderBytes - a.folderBytes)
   const total = sorted.reduce((s, w) => s + w.folderBytes, 0)
 
-  const toggle = (id: string): void => {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-  const selectPreset = (predicate: (w: PortifyCleanupEntry) => boolean): void => {
-    setSelected(new Set(sorted.filter(predicate).map((w) => w.workflowId)))
-  }
   const presets: Array<{ label: string; predicate: (w: PortifyCleanupEntry) => boolean }> = [
     { label: 'Failed', predicate: (w) => w.status === 'failed' },
     { label: 'Cancelled', predicate: (w) => w.status === 'aborted' },
@@ -69,46 +42,28 @@ export function PortifySection({ now, onNavigateToPortify }: {
   const selectedBytes = selectedTargets.reduce((s, w) => s + w.folderBytes, 0)
 
   const doRemove = async (targets: PortifyCleanupEntry[]): Promise<void> => {
-    if (targets.length === 0) return
-    const n = targets.length
     setConfirmTargets(null)
-    setBulkBusy(true)
-    const results = await Promise.allSettled(targets.map((w) => portifyApi.removePortify(w.workflowId)))
-    const failures = results.filter((r) => r.status === 'rejected').length
-    // Drop only the removed ids — a per-row delete must not wipe an in-progress
-    // bulk selection elsewhere in the table.
-    setSelected((prev) => new Set([...prev].filter((id) => !targets.some((t) => t.workflowId === id))))
-    setBulkBusy(false)
-    await load()
-    setActionError(failures > 0 ? `${failures} of ${n} removals failed. Refreshed below.` : null)
+    const current = workflows.filter((row) => targets.some((target) => target.workflowId === row.workflowId) && !isActionablePortifyStatus(row.status))
+    await execute(current, (row) => portifyApi.removePortify(row.workflowId),
+      () => removeSelection(current.map((row) => row.workflowId)),
+      (failures, total) => `${failures} of ${total} removals failed. Refreshed below.`)
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Toolbar mirrors the runs/worktrees views. */}
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-5 py-2" style={{ borderColor: 'var(--border-default)' }}>
-        {sorted.length > 0 && <QuickSelectMenu presets={presets} onSelect={selectPreset} />}
-        {selected.size > 0 && (
-          <button type="button" onClick={() => setSelected(new Set())} className="cl-button px-2 py-0.5" style={{ fontSize: 11 }} disabled={bulkBusy}>
-            Clear selection
-          </button>
-        )}
-        <div className="ml-auto flex items-center gap-4" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {sorted.length > 0 && (
-            <>
-              <span>Records: <strong style={{ color: 'var(--text-primary)' }}>{sorted.length}</strong></span>
-              <span>Total on disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(total)}</strong></span>
-            </>
-          )}
-          <button type="button" onClick={() => void load()} className="cl-button px-2 py-1" disabled={loading || bulkBusy}>Refresh</button>
-        </div>
-      </div>
+      <CleanupToolbar presets={sorted.length > 0 ? presets : []} onSelect={selectPreset} selectedCount={selected.size} onClear={clear} busy={bulkBusy} loading={inventory.loading} onRefresh={load}>
+        {sorted.length > 0 && <>
+          <span>Records: <strong style={{ color: 'var(--text-primary)' }}>{sorted.length}</strong></span>
+          <span>Total on disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(total)}</strong></span>
+        </>}
+      </CleanupToolbar>
+      {inventory.value !== null && err && <CleanupRefreshError error={err} />}
       {actionError && (
         <div role="alert" data-testid="portify-action-error" className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>{actionError}</div>
       )}
       <div className="min-h-0 flex-1 overflow-auto px-5 py-2">
       {loading && <CleanupEmptyState icon={<SpinnerGlyph />} title="Loading Portify records…" />}
-      {!loading && err && (
+      {!loading && err && inventory.value === null && (
         <CleanupEmptyState icon={<WarnGlyph />} title="Couldn't load Portify records" hint={err} action={{ label: 'Retry', onClick: () => void load() }} />
       )}
       {!loading && !err && sorted.length === 0 && (
@@ -118,7 +73,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
           hint="Port-ification workflows show up here once you run Portify — prune saved/failed/cancelled records to reclaim disk. Open returns to Parallel setup in Flight."
         />
       )}
-      {!loading && !err && sorted.length > 0 && (
+      {sorted.length > 0 && (
         <table className="w-full" style={{ fontSize: 12, color: 'var(--text-secondary)', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
@@ -138,7 +93,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
                     type="checkbox"
                     style={{ accentColor: 'var(--accent)' }}
                     checked={selected.has(w.workflowId)}
-                    disabled={bulkBusy}
+                    disabled={bulkBusy || isActionablePortifyStatus(w.status)}
                     onChange={() => toggle(w.workflowId)}
                     aria-label={`Select ${w.feature}`}
                   />
@@ -154,7 +109,7 @@ export function PortifySection({ now, onNavigateToPortify }: {
                   <button
                     type="button"
                     onClick={() => setConfirmTargets([w])}
-                    disabled={bulkBusy}
+                    disabled={bulkBusy || isActionablePortifyStatus(w.status)}
                     className="cl-button ml-1 px-1.5 py-0.5"
                     style={{ fontSize: 11, color: 'var(--danger)' }}
                   >
@@ -168,16 +123,8 @@ export function PortifySection({ now, onNavigateToPortify }: {
       )}
       </div>
 
-      {/* Bottom action bar — identical to the runs/worktrees views'. */}
       {selected.size > 0 && (
-        <div
-          className="flex shrink-0 items-center gap-3 border-t px-5 py-3"
-          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}
-        >
-          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-            <strong style={{ color: 'var(--text-primary)' }}>{selected.size}</strong> selected
-          </span>
-          <div className="ml-auto flex items-center gap-2">
+        <CleanupActionBar selectedCount={selected.size}>
             <button
               type="button"
               onClick={() => setConfirmTargets(selectedTargets)}
@@ -186,10 +133,8 @@ export function PortifySection({ now, onNavigateToPortify }: {
             >
               {bulkBusy ? 'Removing…' : `Delete records (${selectedTargets.length} · ${formatBytes(selectedBytes)})`}
             </button>
-          </div>
-        </div>
+          </CleanupActionBar>
       )}
-
       {/* The shared confirmation, serving both the per-row Delete and the bulk
           action bar. */}
       <ConfirmModal

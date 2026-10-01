@@ -1,3 +1,4 @@
+import type { GettingStartedOwner } from '../../../../../../shared/getting-started'
 import type { FastifyInstance } from 'fastify'
 import { findFeature } from '../../../shared/feature-loader'
 import type { RunStore } from '../../runs/logic/run-store'
@@ -12,7 +13,7 @@ import {
 } from '../logic/verification'
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
-import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
+import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 import { notFound } from '../../../shared/http-error'
 
 export interface VerificationRouteDeps {

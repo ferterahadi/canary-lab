@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
@@ -5,7 +6,7 @@ import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { featureConfigRoutes } from './feature-config'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 import { writeOverlay, overlayExists } from '../../portify/logic/runtime/overlay'
 import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
 

@@ -1,6 +1,7 @@
+import type { GettingStartedSessionState, OnboardingSamples, OnboardingWorkflow } from '@shared/getting-started'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import * as configApi from '@/shared/api/config'
-import type { GettingStartedSessionState, OnboardingSamples, OnboardingWorkflow } from '@/shared/api/config'
+
 import type { StartFlightBody } from '@/shared/api/flights'
 import type { RunIndexEntry } from '@shared/run-index'
 import type { FlightEntryOptions, FlightIndexEntry, FlightStageKey } from '@shared/flights/types'

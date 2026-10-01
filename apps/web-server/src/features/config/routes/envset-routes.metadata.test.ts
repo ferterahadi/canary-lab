@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -7,7 +8,7 @@ import { registerEnvsetRoutes } from './envset-routes'
 import { registerFeatureEnvTools } from '../../../mcp/tool-groups/authoring-env'
 import { captureTools, type CapturedTools } from '../../../mcp/tool-groups/__fixtures__/tool-group-harness'
 import { readFeatureConfig } from '../../../shared/config-ast'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 
 let root: string
 let suite: string

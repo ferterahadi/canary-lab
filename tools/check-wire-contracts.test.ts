@@ -11,6 +11,10 @@ afterEach(() => { fs.rmSync(temp, { recursive: true, force: true }) })
 
 // Feed deliberate source drift to the actual checker without modifying the checkout.
 it.each([
+  ['apps/web/src/shared/api/workspace-socket.ts', "export type WorkspaceEvent = { type: 'changed' }", 'WorkspaceEvent'],
+  ['apps/web-server/src/shared/ws/workspace-stream.ts', "export type WorkspaceStreamFrame = { type: 'connected' }", 'WorkspaceStreamFrame'],
+  ['apps/web/src/shared/api/config.ts', 'export interface GettingStartedSessionState { active: null }', 'GettingStartedSessionState'],
+  ['apps/web-server/src/features/config/routes/onboarding.ts', "export type OnboardingWorkflowId = 'run'", 'OnboardingWorkflowId'],
   ['apps/web/src/features/benchmark/api/benchmark-types.ts', 'export interface BenchmarkIndexEntry { benchmarkId: string }', 'BenchmarkIndexEntry'],
   ['apps/web-server/src/features/benchmark/logic/runtime/types.ts', "export type BenchmarkStatus = 'done'", 'BenchmarkStatus'],
   ['apps/web/src/features/benchmark/api/benchmark-types.ts', "export type SabotageLevel = 'min'", 'SabotageLevel'],
@@ -40,4 +44,9 @@ it.each([
   expect(result.status).toBe(1)
   expect(result.stderr).toContain(typeName)
   expect(result.stderr).toContain(mutation === 'bypass' ? 'must use it' : 'declares its own copy')
+})
+
+it('accepts the canonical wire declarations', () => {
+  const result = spawnSync(process.execPath, [path.join(repo, 'tools/check-wire-contracts.mjs')], { encoding: 'utf8' })
+  expect(result.status).toBe(0)
 })

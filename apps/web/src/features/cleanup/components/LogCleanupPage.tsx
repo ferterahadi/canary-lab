@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCleanupInventory } from '../state/use-cleanup-inventory'
+import { useCleanupSelection } from '../state/use-cleanup-selection'
+import { useCleanupAction } from '../state/use-cleanup-action'
+import { useMemo, useState } from 'react'
 import * as cleanupApi from '@/shared/api/cleanup'
 import * as runsApi from '@/shared/api/runs'
-import type { CleanupListing } from '@shared/cleanup-listing'
 import { formatBytes, timeAgo } from '@/shared/lib/format'
 import { PageHeader } from '@/shared/ui/PageHeader'
 import { ConfirmModal, useEscapeToClose } from '@/shared/ui/Overlays'
-import { CleanupEmptyState, FolderGlyph, QuickSelectMenu, SortHeader, SpinnerGlyph, WarnGlyph } from './CleanupTableParts'
+import { CleanupActionBar, CleanupToolbar, CleanupRefreshError, CleanupEmptyState, FolderGlyph, SortHeader, SpinnerGlyph, WarnGlyph } from './CleanupTableParts'
 import { PortifySection } from './PortifySection'
 import { WorktreesSection } from './WorktreesSection'
 import { CLEANUP_TABS, CleanupTab, FOURTEEN_DAYS_MS, HUNDRED_MB, KIND_LABEL, NUMERIC_KEYS, Row, SEVEN_DAYS_MS, STATUS_COLOR, SortKey, THIRTY_DAYS_MS, THREE_DAYS_MS, listingToRows, sortValue } from './cleanup-rows'
@@ -20,30 +22,12 @@ interface Props {
 }
 
 export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }: Props) {
-  const [listing, setListing] = useState<CleanupListing | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [busy, setBusy] = useState(false)
-  const [actionError, setActionError] = useState<string | null>(null)
+  const [view, setView] = useState<CleanupTab>('runs')
+  const inventory = useCleanupInventory('runs', cleanupApi.cleanupRuns, view === 'runs')
+  const { value: listing, initialLoading: loading, error, refresh } = inventory
+  const { busy, error: actionError, execute } = useCleanupAction(refresh)
   const [confirm, setConfirm] = useState<{ action: 'trim' | 'delete'; ids: string[]; bytes: number } | null>(null)
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'folder', dir: 'desc' })
-  const [view, setView] = useState<CleanupTab>('runs')
-
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      setListing(await cleanupApi.cleanupRuns())
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load cleanup data')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void refresh() }, [refresh])
-
   // The shared layered stack, not a second document listener: `ConfirmModal`
   // pushes its own layer, so the innermost surface takes Escape and the page
   // beneath stays put. A private listener here raced that — the reason the
@@ -51,7 +35,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
   useEscapeToClose(onClose, !confirm)
 
   const rows = useMemo(() => (listing ? listingToRows(listing) : []), [listing])
-  const rowById = useMemo(() => new Map(rows.map((r) => [r.runId, r])), [rows])
+  const { selected, clear, toggle, selectPreset } = useCleanupSelection(rows, (row) => row.runId, (row) => !row.active, inventory.confirmed)
 
   const sortedRows = useMemo(() => {
     const dir = sort.dir === 'asc' ? 1 : -1
@@ -70,21 +54,6 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
         ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
         : { key, dir: NUMERIC_KEYS.has(key) ? 'desc' : 'asc' },
     )
-  }
-
-  const toggle = (runId: string): void => {
-    const row = rowById.get(runId)
-    if (!row || row.active) return
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(runId)) next.delete(runId)
-      else next.add(runId)
-      return next
-    })
-  }
-
-  const selectPreset = (predicate: (r: Row) => boolean): void => {
-    setSelected(new Set(rows.filter((r) => !r.active && predicate(r)).map((r) => r.runId)))
   }
 
   const now = Date.now()
@@ -109,18 +78,10 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
   const deleteBytes = selectedRows.reduce((s, r) => s + r.folderBytes, 0)
 
   const runAction = async (action: 'trim' | 'delete', ids: string[]): Promise<void> => {
-    setBusy(true)
-    setActionError(null)
-    const results = await Promise.allSettled(
-      ids.map((id) => (action === 'trim' ? cleanupApi.trimRun(id) : runsApi.deleteRun(id))),
-    )
-    const failures = results.filter((r) => r.status === 'rejected').length
-    if (failures > 0) {
-      setActionError(`${failures} of ${ids.length} ${action === 'trim' ? 'trims' : 'deletes'} failed (a run may have become active). Refreshed below.`)
-    }
-    setSelected(new Set())
-    setBusy(false)
-    await refresh()
+    const eligibleIds = rows.filter((row) => ids.includes(row.runId) && !row.active &&
+      (action === 'delete' || (!row.isOrphan && row.artifactBytes > 0))).map((row) => row.runId)
+    await execute(eligibleIds, (id) => action === 'trim' ? cleanupApi.trimRun(id) : runsApi.deleteRun(id), clear,
+      (failures, total) => `${failures} of ${total} ${action === 'trim' ? 'trims' : 'deletes'} failed (a run may have become active). Refreshed below.`)
   }
 
   const askTrim = (): void => {
@@ -158,26 +119,17 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
         </div>
       </PageHeader>
 
-      {/* Presets + totals (runs view only) */}
       {view === 'runs' && (
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-5 py-2" style={{ borderColor: 'var(--border-default)' }}>
-        <QuickSelectMenu presets={presets} onSelect={selectPreset} />
-        {selected.size > 0 && (
-          <button type="button" onClick={() => setSelected(new Set())} className="cl-button px-2 py-0.5" style={{ fontSize: 11 }}>
-            Clear selection
-          </button>
-        )}
-        {totals && (
-          <div className="ml-auto flex items-center gap-4" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+        <CleanupToolbar presets={presets} onSelect={selectPreset} selectedCount={selected.size} onClear={clear} busy={busy} loading={inventory.loading} onRefresh={refresh}>
+          {totals && <>
             <span>On disk: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.totalBytes)}</strong></span>
             <span>Trimmable: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableTrimBytes)}</strong></span>
             <span>Deletable: <strong style={{ color: 'var(--text-primary)' }}>{formatBytes(totals.reclaimableDeleteBytes)}</strong></span>
-            <button type="button" onClick={() => void refresh()} className="cl-button px-2 py-1" disabled={loading || busy}>Refresh</button>
-          </div>
-        )}
-      </div>
+          </>}
+        </CleanupToolbar>
       )}
 
+      {view === 'runs' && listing !== null && error && <CleanupRefreshError error={error} />}
       {view === 'runs' && actionError && (
         <div className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>{actionError}</div>
       )}
@@ -190,13 +142,13 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
       ) : (
         <div className="min-h-0 flex-1 overflow-auto px-5 py-2">
         {loading && <CleanupEmptyState icon={<SpinnerGlyph />} title="Computing folder sizes…" />}
-        {!loading && error && (
+        {!loading && error && listing === null && (
           <CleanupEmptyState icon={<WarnGlyph />} title="Couldn't load cleanup data" hint={error} action={{ label: 'Retry', onClick: () => void refresh() }} />
         )}
         {!loading && !error && rows.length === 0 && (
           <CleanupEmptyState icon={<FolderGlyph />} title="No runs on disk" hint="Test, verify, boot and benchmark runs show up here with their disk usage once you record them." />
         )}
-        {!loading && !error && rows.length > 0 && (
+        {rows.length > 0 && (
           <table className="w-full" style={{ fontSize: 12, color: 'var(--text-secondary)', borderCollapse: 'collapse' }}>
             <thead>
               {/* Column headers speak the system's rubric voice (mono caps). */}
@@ -281,16 +233,8 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
         </div>
       )}
 
-      {/* Action bar (runs view only) */}
       {view === 'runs' && selected.size > 0 && (
-        <div
-          className="flex shrink-0 items-center gap-3 border-t px-5 py-3"
-          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}
-        >
-          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-            <strong style={{ color: 'var(--text-primary)' }}>{selected.size}</strong> selected
-          </span>
-          <div className="ml-auto flex items-center gap-2">
+        <CleanupActionBar selectedCount={selected.size}>
             <button
               type="button"
               onClick={askTrim}
@@ -308,8 +252,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
             >
               Delete runs ({selected.size} · {formatBytes(deleteBytes)})
             </button>
-          </div>
-        </div>
+          </CleanupActionBar>
       )}
 
       {/* The shared confirmation, not a hand-built one: this page and the

@@ -1,3 +1,5 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
+import type { GettingStartedActiveSession } from '../../../../../../shared/getting-started'
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 import fs from 'fs'
@@ -32,11 +34,11 @@ vi.mock('../logic/coverage/annotate-engine', async (importActual) => {
 
 import { coverageRoutes, resolveCoverageJobModels } from './coverage'
 
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 
 import { CoverageJobRunStore, type CoverageJobStore, type CoverageJobStoreEvent } from '../logic/coverage/jobs/store'
 
-import { GettingStartedSessionStore, type GettingStartedActiveSession } from '../../config/logic/getting-started-session'
+import { GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
 let tmpDir: string
 

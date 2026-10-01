@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
+import type { OnboardingSamples } from '@shared/getting-started'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { OnboardingSamples } from '@/shared/api/config'
+
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 import { useDemoLauncher } from './demo-launcher'
 

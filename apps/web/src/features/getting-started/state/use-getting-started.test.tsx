@@ -1,8 +1,9 @@
+import type { OnboardingSamples, OnboardingWorkflow, OnboardingWorkflowAction } from '@shared/getting-started'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlightEntryOptions } from '@shared/flights/types'
-import type { OnboardingSamples, OnboardingWorkflow, OnboardingWorkflowAction } from '@/shared/api/config'
+
 import type { RunIndexEntry } from '@shared/run-index'
 import { ApiError } from '@/shared/api/internal'
 import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'

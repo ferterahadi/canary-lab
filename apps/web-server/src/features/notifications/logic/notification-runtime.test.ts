@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -8,7 +9,7 @@ import { createRegistry } from '../../runs/logic/run-registry'
 import { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
 import { FlightRunStore } from '../../flights/logic/store'
 import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../shared/flights/types'
-import { WorkspaceEventBus, type WorkspaceEvent } from '../../../shared/workspace-events'
+import { WorkspaceEventBus } from '../../../shared/workspace-events'
 
 let dir: string
 let runtime: ReturnType<typeof createNotificationRuntime>

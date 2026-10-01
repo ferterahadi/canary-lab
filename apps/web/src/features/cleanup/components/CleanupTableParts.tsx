@@ -158,3 +158,40 @@ export function SpinnerGlyph() {
     </svg>
   )
 }
+
+export function CleanupRefreshError({ error }: { error: string }) {
+  return <div role="alert" className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>Inventory may be outdated: {error}</div>
+}
+
+export function CleanupToolbar<T>({ presets, onSelect, selectedCount, onClear, busy, loading, onRefresh, children }: {
+  presets: Array<{ label: string; predicate: (row: T) => boolean }>
+  onSelect: (predicate: (row: T) => boolean) => void
+  selectedCount: number
+  onClear: () => void
+  busy: boolean
+  loading: boolean
+  onRefresh: () => void
+  children: ReactNode
+}) {
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-5 py-2" style={{ borderColor: 'var(--border-default)' }}>
+      {presets.length > 0 && <QuickSelectMenu presets={presets} onSelect={onSelect} />}
+      {selectedCount > 0 && (
+        <button type="button" onClick={onClear} className="cl-button px-2 py-0.5" style={{ fontSize: 11 }} disabled={busy}>Clear selection</button>
+      )}
+      <div className="ml-auto flex items-center gap-4" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+        {children}
+        <button type="button" onClick={onRefresh} className="cl-button px-2 py-1" disabled={loading || busy}>Refresh</button>
+      </div>
+    </div>
+  )
+}
+
+export function CleanupActionBar({ selectedCount, children }: { selectedCount: number; children: ReactNode }) {
+  return (
+    <div className="flex shrink-0 items-center gap-3 border-t px-5 py-3" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
+      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}><strong style={{ color: 'var(--text-primary)' }}>{selectedCount}</strong> selected</span>
+      <div className="ml-auto flex items-center gap-2">{children}</div>
+    </div>
+  )
+}

@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -6,7 +7,7 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import { featureConfigRoutes } from './feature-config'
 import * as gitRepo from '../../../shared/git-repo'
 import * as configAst from '../../../shared/config-ast'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 import { git, initGitRepo } from '../../../../../../tools/test-helpers/git-repo'
 
 let tmpDir: string

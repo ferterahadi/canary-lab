@@ -1,5 +1,6 @@
+import type { OnboardingSamples } from '@shared/getting-started'
 import { describe, it, expect, beforeEach } from 'vitest'
-import type { OnboardingSamples } from '@/shared/api/config'
+
 import type { RunIndexEntry } from '@shared/run-index'
 import type { FlightIndexEntry, FlightEntryOptions } from '@shared/flights/types'
 import {

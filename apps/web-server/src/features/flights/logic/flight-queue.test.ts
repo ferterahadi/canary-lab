@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -35,7 +36,7 @@ import {
   type FlightStageKey,
 } from '../../../../../../shared/flights/types'
 import { bridgeStoreEvents } from '../../../shared/store-event-bridge'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 
 let tmpDir: string
 

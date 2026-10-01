@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import path from 'path'
-import { spawn, spawnSync } from 'child_process'
-import { launchEditorDir } from '../../../shared/editor-launch'
+import { spawn } from 'child_process'
+import { launchEditor, launchEditorDir } from '../../../shared/editor-launch'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import {
   isValidPort,
@@ -224,7 +224,7 @@ export async function projectConfigRoutes(
     const configured = loadProjectConfig(deps.projectRoot).editor
     const editor = body.editor ?? configured
     try {
-      const openedBy = launchEditor({ editor, file: resolvedFile, line, column })
+      const openedBy = launchEditor(editor, { kind: 'file', path: resolvedFile, line, column })
       return { opened: true, editor: openedBy }
     } catch (err) {
       reply.code(500)
@@ -243,48 +243,4 @@ function normalizeIncomingPersonalWikiPath(value: unknown): string | null | unde
 
 function normalPositiveInt(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback
-}
-
-function launchEditor(input: {
-  editor: EditorChoice
-  file: string
-  line: number
-  column: number
-}): EditorChoice {
-  if (input.editor === 'auto') {
-    if (commandExists('cursor')) return launchCliEditor('cursor', input)
-    if (commandExists('code')) return launchCliEditor('code', input)
-    return launchSystem(input.file)
-  }
-  if (input.editor === 'cursor') return launchCliEditor('cursor', input)
-  if (input.editor === 'vscode') return launchCliEditor('code', input)
-  return launchSystem(input.file)
-}
-
-function commandExists(command: string): boolean {
-  const lookup = process.platform === 'win32' ? 'where' : 'which'
-  const result = spawnSync(lookup, [command], { stdio: 'ignore' })
-  return result.status === 0
-}
-
-function launchCliEditor(
-  command: 'code' | 'cursor',
-  input: { file: string; line: number; column: number },
-): EditorChoice {
-  spawn(command, ['-g', `${input.file}:${input.line}:${input.column}`], {
-    stdio: 'ignore',
-    detached: true,
-  }).unref()
-  return command === 'code' ? 'vscode' : 'cursor'
-}
-
-function launchSystem(file: string): 'system' {
-  if (process.platform === 'darwin') {
-    spawn('open', [file], { stdio: 'ignore', detached: true }).unref()
-  } else if (process.platform === 'win32') {
-    spawn('cmd', ['/c', 'start', '', file], { stdio: 'ignore', detached: true }).unref()
-  } else {
-    spawn('xdg-open', [file], { stdio: 'ignore', detached: true }).unref()
-  }
-  return 'system'
 }

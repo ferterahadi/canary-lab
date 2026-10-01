@@ -1,3 +1,4 @@
+import type { OnboardingSamples } from '@shared/getting-started'
 // Feature + project configuration: config docs, Playwright, envsets, ports.
 // Split out of client.ts; see that barrel for the shared surface.
 
@@ -336,81 +337,6 @@ export interface ProjectConfig {
    *  `!== false` so absent means on. */
   showDemo?: boolean
   port?: number
-}
-
-export type OnboardingWorkflowId = 'run' | 'flight' | 'coverage' | 'export' | 'author' | 'heal' | 'portify'
-
-export type OnboardingWorkflowAction =
-  | { kind: 'run'; feature: string }
-  | { kind: 'flight'; repoPath: string; description: string }
-  | { kind: 'coverage'; feature: string }
-  | { kind: 'export'; feature: string }
-  | { kind: 'author'; feature: string }
-  | { kind: 'heal'; feature: string }
-  | { kind: 'portify'; feature: string }
-
-export interface OnboardingWorkflow {
-  id: OnboardingWorkflowId
-  group: 'start' | 'more'
-  order: number
-  title: string
-  outcome: string
-  steps: string[]
-  skill: string
-  externalPrompt: string
-  internalAction: OnboardingWorkflowAction | null
-  unavailableReason: string | null
-}
-
-/** Mirrors the server union (config/logic/getting-started-session.ts). `verify`
- *  remains readable for session files written before that card became `heal`. */
-export type GettingStartedWorkflow = 'run' | 'flight' | 'coverage' | 'author' | 'portify' | 'heal' | 'export' | 'verify'
-export type GettingStartedOwner = 'internal' | 'external'
-/** run/flight are featureless (pre-widening persisted records); the newer
- *  kinds carry `feature` because their open-target navigation is feature-first. */
-export type GettingStartedTarget =
-  | { kind: 'run'; id: string }
-  | { kind: 'flight'; id: string }
-  | { kind: 'draft'; id: string; feature: string }
-  | { kind: 'coverage-job'; id: string; feature: string }
-  | { kind: 'portify'; id: string; feature: string }
-  | { kind: 'export'; id: string; feature: string }
-
-export interface GettingStartedActiveSession {
-  sessionId: string
-  workflow: GettingStartedWorkflow
-  owner: GettingStartedOwner
-  target: GettingStartedTarget | null
-  startedAt: string
-  updatedAt: string
-}
-
-export interface GettingStartedCompletion {
-  workflow: GettingStartedWorkflow
-  owner: GettingStartedOwner
-  target: GettingStartedTarget
-  status: string
-  startedAt: string
-  endedAt: string
-}
-
-export interface GettingStartedSessionState {
-  active: GettingStartedActiveSession | null
-  completed: Partial<Record<GettingStartedWorkflow, GettingStartedCompletion>>
-}
-
-/** Mirrors the server's `OnboardingSamples` (config/routes/onboarding.ts). */
-export interface OnboardingSamples {
-  /** The shipped worked suite, or null once it (or its product repo) is gone. */
-  sampleSuite: string | null
-  /** Absolute path to the bare repo a Flight can onboard, or null once deleted. */
-  sampleFlightRepo: string | null
-  /** Prefill for that Flight's "what should it test?" field. */
-  sampleFlightDescription: string | null
-  /** Ordered, executable workflows for the Getting Started guide. */
-  workflows: OnboardingWorkflow[]
-  /** Shared internal/external demo activity and latest evidence. */
-  session: GettingStartedSessionState
 }
 
 export interface PortChangeResult {

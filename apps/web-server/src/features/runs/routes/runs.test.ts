@@ -1,3 +1,4 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 import fs from 'fs'
@@ -26,7 +27,7 @@ import { runDirFor } from '../logic/runtime/run-paths'
 
 import { launchEditorDir } from '../../../shared/editor-launch'
 
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 

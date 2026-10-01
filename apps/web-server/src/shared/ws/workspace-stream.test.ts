@@ -1,6 +1,7 @@
+import type { WorkspaceStreamFrame } from '../../../../../shared/workspace-events'
 import { describe, it, expect, vi } from 'vitest'
 import type { FastifyInstance } from 'fastify'
-import { workspaceStreamRoutes, type WorkspaceStreamFrame } from './workspace-stream'
+import { workspaceStreamRoutes } from './workspace-stream'
 import { WorkspaceEventBus } from '../workspace-events'
 
 // Fastify is never booted here: the route body is the whole unit under test, so

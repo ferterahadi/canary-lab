@@ -1,10 +1,11 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { buildFlightRouteContext } from './flight-route-context'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 import type { PlanFeaturesTask, FlightManifest } from '../../../../../../shared/flights/types'
 
 // `buildFlightRouteContext` is where BOTH flight stores get attached to the

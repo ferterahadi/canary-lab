@@ -1,14 +1,11 @@
+import type { WorkspaceStreamFrame } from '../../../../../shared/workspace-events'
 import type { FastifyInstance } from 'fastify'
-import type { WorkspaceEvent, WorkspaceEventBus } from '../workspace-events'
+import type { WorkspaceEventBus } from '../workspace-events'
 import { sendFrame } from './record-stream'
 
 export interface WorkspaceStreamDeps {
   events: WorkspaceEventBus
 }
-
-export type WorkspaceStreamFrame =
-  | { type: 'connected' }
-  | WorkspaceEvent
 
 export async function workspaceStreamRoutes(
   app: FastifyInstance,

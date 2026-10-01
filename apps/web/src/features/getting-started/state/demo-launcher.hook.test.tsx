@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
+import type { OnboardingSamples } from '@shared/getting-started'
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { OnboardingSamples, ProjectConfig } from '@/shared/api/config'
+import type { ProjectConfig } from '@/shared/api/config'
 import type { DemoLauncher } from './demo-launcher'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true

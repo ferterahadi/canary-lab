@@ -1,8 +1,9 @@
+import type { GettingStartedSessionState, OnboardingWorkflowAction, OnboardingWorkflow, OnboardingSamples } from '../../../../../../shared/getting-started'
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import path from 'path'
 import { loadFeatures } from '../../../shared/feature-loader'
-import type { GettingStartedSessionState, GettingStartedSessionStore } from '../logic/getting-started-session'
+import type { GettingStartedSessionStore } from '../logic/getting-started-session'
 
 // What the scaffold's own demonstration still looks like in this workspace.
 //
@@ -70,54 +71,6 @@ export function isGettingStartedFlightStart(payload: Record<string, unknown> | u
  *  have to carry knowledge of what `flight-app` contains. */
 export const SAMPLE_FLIGHT_DESCRIPTION =
   'the library lending flow: borrow a copy, return it, and see it available again'
-
-export type OnboardingWorkflowId =
-  | 'run'
-  | 'flight'
-  | 'coverage'
-  | 'export'
-  | 'author'
-  | 'heal'
-  | 'portify'
-
-export type OnboardingWorkflowAction =
-  | { kind: 'run'; feature: string }
-  | { kind: 'flight'; repoPath: string; description: string }
-  | { kind: 'coverage'; feature: string }
-  | { kind: 'export'; feature: string }
-  | { kind: 'author'; feature: string }
-  | { kind: 'heal'; feature: string }
-  | { kind: 'portify'; feature: string }
-
-export interface OnboardingWorkflow {
-  id: OnboardingWorkflowId
-  group: 'start' | 'more'
-  order: number
-  title: string
-  outcome: string
-  steps: string[]
-  skill: string
-  externalPrompt: string
-  internalAction: OnboardingWorkflowAction | null
-  unavailableReason: string | null
-}
-
-export interface OnboardingSamples {
-  /** The shipped worked suite, when both it and its product repo are present.
-   *  Null once either is gone. */
-  sampleSuite: string | null
-  /** Absolute path to the bare repo a Flight can onboard, when still present. */
-  sampleFlightRepo: string | null
-  /** Prefill for that Flight's "what should it test?" field. Null whenever
-   *  `sampleFlightRepo` is. */
-  sampleFlightDescription: string | null
-  /** The executable Getting Started catalog. Server-owned because prompts need
-   *  this workspace's absolute paths and actions must reflect which disposable
-   *  fixtures still exist on disk. */
-  workflows: OnboardingWorkflow[]
-  /** Persisted shared state for the four core demos. */
-  session: GettingStartedSessionState
-}
 
 function isDir(p: string): boolean {
   try {

@@ -1,9 +1,10 @@
+import type { WorkspaceEvent } from '../../../../../../../../shared/workspace-events'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { CoverageJobRunStore, bridgeCoverageJobEvents } from './store'
-import type { WorkspaceEvent } from '../../../../../shared/workspace-events'
+
 import { coverageJobsIndexPath, coverageJobDir, buildCoverageJobPaths } from './paths'
 import type { CoverageJobManifest } from '../../../../../../../../shared/coverage/types'
 

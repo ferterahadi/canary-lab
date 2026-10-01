@@ -138,6 +138,15 @@ stores that back them, for nothing but symmetry. The web side is named after the
 surface it consumes so the two are greppable together. (In the UI this is the
 **Cleanup** pill, with three tabs — Runs, Worktrees, Portify.)
 
+Cleanup readers share selection, bulk actions and toolbar components. The visible tab
+uses `useLiveResource`: scoped `cleanup-changed` events from the owning run,
+benchmark and Portify stores trigger reads, coalesced over 2.5 seconds. Successful
+worktree deletion publishes directly. A 15-second reconciliation while visible
+recovers missed events and filesystem changes; reconnect/focus also refreshes.
+Background reads retain rows and valid selections, and expose read failures as
+unconfirmed inventory rather than hiding the table. Workspace bus events and the
+`connected` stream frame are declared once in `shared/workspace-events.ts`.
+
 **Suite deletion** is owned by
 `apps/web-server/src/features/config/logic/feature-deletion.ts`. REST and MCP
 delegate to `deleteSuite`, which resolves the suite, validates confirmation and
@@ -1653,7 +1662,7 @@ procedure.
 | Requirement-id stability | `reconcileRequirementIds` (`apps/web-server/src/features/coverage/logic/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
 | Readable Test compiler ↔ source links ↔ consumers | TypeScript 5.9.3 in `package.json` ↔ `controlled-english/compiler-context.ts` and syntax inventories ↔ `readable-tests/translator.ts` ↔ `ast-extractor.ts` ↔ `shared/readable-tests/types.ts` ↔ `TestPresentation` / `ReadableTestView` and the evaluation flowchart adapter. The story stays deterministic and source-linked; runner verdicts stay at test level. | controlled-English, readable-tests, extractor, presentation, and `npm run check:wire` tests | `cl_run-evidence-invariants` |
 | Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ generated `AGENTS.md` ↔ `docs/ARCHITECTURE.md` (mechanisms) ↔ `docs/PRD.md` (intent) ↔ `docs/GUIDE.md` / `docs/FEATURES.md` (user-facing operation) ↔ the skill index in `CLAUDE.md` | contributor-doc audit in `cl_verify-changes` | `cl_verify-changes` |
-| **Web↔server wire contract** | Server response types are declared once in root `shared/` (`run-manifest.ts`, `run-detail.ts`, `cleanup-listing.ts`, `draft-types.ts`, `evaluation-export-types.ts`, `extracted-test.ts`, …) and imported by both apps, so drift is a compile error ↔ the `WorkspaceEvent` union, which each side still declares. The gate rejects a copy of a shared wire type in either app, a side that bypasses a shared converter, and an event tag only one side knows. | `npm run check:wire` (`tools/check-wire-contracts.mjs`) | — |
+| **Web↔server wire contract** | Server response types are declared once in root `shared/` (`run-manifest.ts`, `run-detail.ts`, `cleanup-listing.ts`, `draft-types.ts`, `evaluation-export-types.ts`, `extracted-test.ts`, …) and imported by both apps, so drift is a compile error. Workspace events/stream frames and Getting Started contracts also have one declaration in root `shared/`. The gate rejects a copy of a shared wire type in either app and a side that bypasses a shared converter. | `npm run check:wire` (`tools/check-wire-contracts.mjs`) | — |
 | **Checkpoint option vocabulary** | `CHECKPOINT_OPTIONS` (`shared/flights/types.ts`) ↔ checkpoint emitters under `flights/logic/stages/` ↔ `respond_flight_checkpoint` ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`). Option keys are wire values. `prd-source` may offer a subset. `external-work` renders its normal `submit` / `run-internally` options visibly but disabled in the web viewer; the separate takeover control requests a safe release instead of posting either answer on the external client's behalf. | `stage-meta.checkpoints.test.ts` (every kind titled, every rendered option labelled, fallback intact) + `FlightPage.checkpoints.test.tsx` + `satisfies Record<FlightCheckpointKind, …>` | `cl_sync-agent-surfaces` |
 | **Behavior certificate sidecar** | `buildBehaviorCertificate` (`evaluation/logic/behavior-certificate.ts`) records run-start suite hashes, assertions, verdicts, and limits in a sidecar outside the downloadable ZIP. `get_evaluation_export` exposes a digest and `download_evaluation_export` may return the full sidecar through MCP. The ZIP contains `evaluation.html` and captured videos. | `behavior-certificate.test.ts` + `evaluation-export-archive.test.ts` + `authoring-export.test.ts` | `cl_run-evidence-invariants` |
 | **Import-cycle ceiling** | `tools/check-import-cycles.mjs` records ceilings for cycle count and largest cycle across `apps/**` and `shared/**`. Lower a ceiling when refactoring removes cycles; review any increase instead of accepting it silently. | `npm run check:cycles` | — |

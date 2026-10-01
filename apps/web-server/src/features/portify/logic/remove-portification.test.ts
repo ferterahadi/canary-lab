@@ -1,9 +1,10 @@
+import type { WorkspaceEvent } from '../../../../../../shared/workspace-events'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { readFeatureConfig } from '../../../shared/config-ast'
-import type { WorkspaceEvent } from '../../../shared/workspace-events'
+
 import { removeFeaturePortification } from './remove-portification'
 import { overlayDir, overlayExists, writeOverlay } from './runtime/overlay'
 

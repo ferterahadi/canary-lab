@@ -1,15 +1,10 @@
 // @vitest-environment happy-dom
+import type { GettingStartedSessionState, GettingStartedTarget, OnboardingWorkflow, OnboardingWorkflowAction, OnboardingWorkflowId } from '@shared/getting-started'
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type {
-  GettingStartedSessionState,
-  GettingStartedTarget,
-  OnboardingWorkflow,
-  OnboardingWorkflowAction,
-  OnboardingWorkflowId,
-} from '@/shared/api/config'
+
 import { DemoDialog } from './DemoDialog'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
