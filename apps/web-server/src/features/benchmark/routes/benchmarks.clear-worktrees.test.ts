@@ -102,6 +102,14 @@ describe('benchmarkRoutes', () => {
       await app.close()
     })
 
+    it('keeps invalid benchmarks ineligible even though their lifecycle is terminal', async () => {
+      const app = await buildApp({ store: fakeStore({ get: () => manifest({ status: 'invalid' }) }) })
+      const res = await app.inject(clear({ confirm: true }))
+      expect(res.statusCode).toBe(409)
+      expect(removeWorktree).not.toHaveBeenCalled()
+      await app.close()
+    })
+
     it('dry run (no confirm) reports the disk it would free without removing or saving', async () => {
       const saved: BenchmarkManifest[] = []
       vi.mocked(listWorktrees).mockResolvedValue([

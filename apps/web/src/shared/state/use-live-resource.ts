@@ -80,6 +80,11 @@ export function useLiveResource<T>(
     /** Reconcile an active task when a workspace event is missed. Failed reads
      *  retain the last snapshot and retry; terminal values stop the reads. */
     pollWhile?: (value: T | null) => boolean
+    /** Active-task cadence; unrelated reconciliation keeps its own interval. */
+    pollIntervalMs?: number
+    /** Creation response for this key, used only before an accepted read.
+     * Changing the seed alone does not refresh or overwrite the resource. */
+    seed?: { key: string; value: T }
     /** Event delivery is not durable. Accuracy-sensitive reads reconcile even
      * when settled, and stop certifying old values when the read lease expires. */
     reconcileMs?: number
@@ -90,9 +95,16 @@ export function useLiveResource<T>(
   } = {},
 ): LiveResource<T> {
   const cacheKey = opts.cache !== undefined && key !== null ? `${opts.cache}:${key}` : null
-  const [value, setValue] = useState<T | null>(() => (
-    cacheKey !== null ? (lastResolved.get(cacheKey) as T | undefined) ?? null : null
-  ))
+  const retained = useRef<{ key: string; value: T | null } | null>(null)
+  const acceptedKeys = useRef(new Set<string>())
+  const resourceSeed = opts.seed
+  const initialValue = (): T | null => {
+    if (key === null) return null
+    if ((opts.reconcileMs || resourceSeed) && retained.current?.key === key) return retained.current.value
+    if (cacheKey !== null && lastResolved.has(cacheKey)) return lastResolved.get(cacheKey) as T | null
+    return resourceSeed?.key === key && !acceptedKeys.current.has(key) ? resourceSeed.value : null
+  }
+  const [value, setValue] = useState<T | null>(initialValue)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmed, setConfirmed] = useState(false)
@@ -105,12 +117,10 @@ export function useLiveResource<T>(
   const pollWhileRef = useRef(opts.pollWhile)
   pollWhileRef.current = opts.pollWhile
   const polling = opts.pollWhile !== undefined || opts.reconcileMs !== undefined
-  const { reconcileMs, leaseMs, refreshKey, pauseWhenHidden } = opts
+  const { reconcileMs, leaseMs, refreshKey, pauseWhenHidden, pollIntervalMs } = opts
   const readKey = JSON.stringify([key, version, refreshKey, refreshVersion])
   const [confirmedReadKey, setConfirmedReadKey] = useState<string | null>(null)
   const [valueKey, setValueKey] = useState(key)
-  const retained = useRef<{ key: string; value: T | null } | null>(null)
-
   useEffect(() => {
     setValueKey(key)
     if (key === null) {
@@ -124,8 +134,7 @@ export function useLiveResource<T>(
     // A key CHANGE (not a remount) paints the new key's cached value — or
     // nothing — immediately, so the pane never shows one stage's figures under
     // another stage's labels while the fetch is in flight.
-    let current = reconcileMs && retained.current?.key === key ? retained.current.value
-      : cacheTag !== undefined ? (lastResolved.get(`${cacheTag}:${key}`) as T | undefined) ?? null : null
+    let current = initialValue()
     setValue(current)
     setLoading(true)
     setConfirmed(false)
@@ -141,6 +150,7 @@ export function useLiveResource<T>(
       Promise.resolve().then(() => reconcileMs ? fetcherRef.current(key, { readRevision }) : fetcherRef.current(key))
         .then((next) => {
           if (!alive || request !== requested) return
+          acceptedKeys.current.add(key)
           current = next ?? null
           retained.current = { key, value: current }
           if (cacheTag !== undefined) lastResolved.set(`${cacheTag}:${key}`, next ?? null)
@@ -163,7 +173,7 @@ export function useLiveResource<T>(
     fetch()
     const timer = polling ? setInterval(() => {
       if (reconcileMs || pollWhileRef.current?.(current)) fetch()
-    }, reconcileMs ?? 2500) : undefined
+    }, reconcileMs ?? pollIntervalMs ?? 2500) : undefined
     const offline = () => { requested++; setConfirmed(false); setError('Connection lost; freshness is unconfirmed.') }
     const visible = (event: Event) => {
       if (document.visibilityState === 'visible') { setConfirmed(false); fetch(event) }
@@ -186,7 +196,7 @@ export function useLiveResource<T>(
     }
     // `cacheTag` is constant per call site (a literal), so it needs no dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, version, polling, reconcileMs, leaseMs, refreshKey, refreshVersion, pauseWhenHidden])
+  }, [key, version, polling, reconcileMs, leaseMs, refreshKey, refreshVersion, pauseWhenHidden, pollIntervalMs])
 
   // Withdraw trust during the render receiving an invalidation/key change,
   // not one paint later when its replacement request starts.

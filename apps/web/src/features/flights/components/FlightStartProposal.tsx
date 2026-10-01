@@ -89,6 +89,7 @@ export function ProposalView({
   conflicts,
   sharedGroup,
   busy,
+  canConfirm,
   error,
   onChange,
   onGroupChange,
@@ -99,6 +100,7 @@ export function ProposalView({
   conflicts: string[]
   sharedGroup: string
   busy: boolean
+  canConfirm: boolean
   error: ReactNode
   onChange: (features: PlannedFeature[]) => void
   onGroupChange: (group: string) => void
@@ -272,7 +274,7 @@ export function ProposalView({
         <button
           type="button"
           data-testid="flight-proposal-confirm"
-          disabled={busy || proposal.some((f) => !f.name.trim() || !f.description.trim())}
+          disabled={!canConfirm || busy || proposal.some((f) => !f.name.trim() || !f.description.trim())}
           onClick={onConfirm}
           className="cl-button-primary px-3.5 py-1 text-xs"
         >

@@ -1,3 +1,4 @@
+import { benchmarkIndexEntry } from '@shared/benchmark-index'
 import type { BenchmarkManifest, BenchmarkIndexEntry } from '../api/benchmark-types'
 
 // Pure reducer driving BenchmarkContext. Mirrors runs-state.ts so it unit-tests
@@ -40,17 +41,6 @@ export type BenchmarkAction =
   | { type: 'removed'; benchmarkId: string }
   | { type: 'connection'; status: ConnectionState }
 
-function indexEntryFromManifest(m: BenchmarkManifest): BenchmarkIndexEntry {
-  return {
-    benchmarkId: m.benchmarkId,
-    feature: m.feature,
-    level: m.level,
-    status: m.status,
-    startedAt: m.startedAt,
-    ...(m.endedAt ? { endedAt: m.endedAt } : {}),
-  }
-}
-
 function byStartedDesc(a: BenchmarkIndexEntry, b: BenchmarkIndexEntry): number {
   return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0
 }
@@ -63,7 +53,7 @@ export function benchmarkReducer(
     case 'snapshot':
       return { ...state, benchmarks: action.benchmarks, details: action.details }
     case 'update': {
-      const entry = indexEntryFromManifest(action.manifest)
+      const entry = benchmarkIndexEntry(action.manifest)
       const others = state.benchmarks.filter((b) => b.benchmarkId !== action.benchmarkId)
       return {
         ...state,

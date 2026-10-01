@@ -106,6 +106,38 @@ const SHARED_TYPES = [
     consumers: [],
   },
   {
+    name: 'BenchmarkIndexEntry',
+    declaration: 'shared/benchmark-index.ts',
+    reexports: [
+      { file: 'apps/web-server/src/features/benchmark/logic/runtime/types.ts', from: '../../../../../../../shared/benchmark-index' },
+      { file: 'apps/web/src/features/benchmark/api/benchmark-types.ts', from: '@shared/benchmark-index' },
+    ],
+    consumers: [
+      { file: 'apps/web-server/src/features/benchmark/logic/runtime/store.ts', importFrom: '../../../../../../../shared/benchmark-index', importName: 'benchmarkIndexEntry', usage: '...benchmarkIndexEntry(' },
+      { file: 'apps/web/src/features/benchmark/state/benchmark-state.ts', importFrom: '@shared/benchmark-index', importName: 'benchmarkIndexEntry', usage: 'const entry = benchmarkIndexEntry(' },
+    ],
+  },
+  {
+    name: 'BenchmarkStatus',
+    declaration: 'shared/benchmark-index.ts',
+    declarationKind: 'type',
+    reexports: [
+      { file: 'apps/web-server/src/features/benchmark/logic/runtime/types.ts', from: '../../../../../../../shared/benchmark-index' },
+      { file: 'apps/web/src/features/benchmark/api/benchmark-types.ts', from: '@shared/benchmark-index' },
+    ],
+    consumers: [],
+  },
+  {
+    name: 'SabotageLevel',
+    declaration: 'shared/benchmark-index.ts',
+    declarationKind: 'type',
+    reexports: [
+      { file: 'apps/web-server/src/features/benchmark/logic/runtime/types.ts', from: '../../../../../../../shared/benchmark-index' },
+      { file: 'apps/web/src/features/benchmark/api/benchmark-types.ts', from: '@shared/benchmark-index' },
+    ],
+    consumers: [],
+  },
+  {
     name: 'ReadableTest',
     declaration: 'shared/readable-tests/types.ts',
     consumers: [

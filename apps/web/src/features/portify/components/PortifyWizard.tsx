@@ -1,3 +1,4 @@
+import { isExecutingPortifyStatus } from '@shared/portify-index'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { PortifyIndexEntry, PortifyManifest } from '@/shared/api/client'
@@ -222,7 +223,7 @@ export function PortifyWizard({
             />
           )}
           {/* Live, non-navigable states render straight from status. */}
-          {workflowId && m && !navigable && (status === 'planning' || status === 'editing' || status === 'verifying') && (
+          {workflowId && m && !navigable && (isExecutingPortifyStatus(status)) && (
             <ExerciseScreen m={m} live />
           )}
           {workflowId && m && !navigable && (status === 'failed' || status === 'aborted') && (

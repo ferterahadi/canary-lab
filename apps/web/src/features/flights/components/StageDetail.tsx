@@ -1,3 +1,4 @@
+import { isActionablePortifyStatus } from '@shared/portify-index'
 import { EMPTY_COPY } from '@/shared/ui/empty-state-copy'
 import type { ExternalWorkCheckpointData, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
 import type { CoverageJobIndexEntry } from '@/shared/api/types'
@@ -466,10 +467,7 @@ export function StageDetail({
   const flightOwnsPortify = portifyId != null
     && recordedPortifyId === portifyId
     && (flight.status === 'running' || checkpointStage?.checkpoint?.kind === 'portify-apply')
-  const standalonePortifyActionable = band.portify?.status === 'ready-to-save'
-    || band.portify?.status === 'planning'
-    || band.portify?.status === 'editing'
-    || band.portify?.status === 'verifying'
+  const standalonePortifyActionable = isActionablePortifyStatus(band.portify?.status)
   const evaluationLive = activityEvalTask?.status === 'running'
   const localActivitySource: AgentSessionSource | undefined =
     activityEvalTask?.sessionRef

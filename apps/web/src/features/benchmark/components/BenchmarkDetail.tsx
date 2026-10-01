@@ -1,3 +1,4 @@
+import { isActiveBenchmarkStatus, isTerminalBenchmarkStatus } from '@shared/benchmark-index'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
@@ -38,7 +39,7 @@ export function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: (
   }
 
   const sabotaging = m.status === 'sabotaging' || m.status === 'ready'
-  const terminal = m.status === 'done' || m.status === 'aborted' || m.status === 'error' || m.status === 'invalid'
+  const terminal = isTerminalBenchmarkStatus(m.status)
   // Worktrees are kept after a run so these stay usable; clearing is the user's
   // call (Report tab). Once cleared, the open actions are gone — show a receipt.
   const showFrozen = !!m.sabotageSha && !m.worktreesCleared && !sabotaging && m.status !== 'error'
@@ -215,7 +216,7 @@ export function ArmEmptyState({ arm, accent, status }: { arm: BenchmarkArm; acce
   const isHarness = arm === 'A'
   const label = isHarness ? 'Harness arm' : 'Baseline arm'
   const emoji = isHarness ? '🐤' : '⚙'
-  const waiting = status === 'running' || status === 'sabotaging' || status === 'ready'
+  const waiting = isActiveBenchmarkStatus(status)
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 11, padding: 24, textAlign: 'center' }}>
       <div style={{

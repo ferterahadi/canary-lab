@@ -322,7 +322,7 @@ describe('FeaturesColumn coverage action (R8)', () => {
     expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBeNull()
   })
 
-  it('hides Coverage while generation runs and keeps Flight as the progress destination', async () => {
+  it('keeps Coverage clickable while generation runs alongside Flight progress', async () => {
     listCoverageStates.mockResolvedValueOnce([{
       feature: 'alpha',
       headline: 'Generating',
@@ -353,16 +353,29 @@ describe('FeaturesColumn coverage action (R8)', () => {
       )
     })
 
-    expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBeNull()
+    const coverage = container.querySelector<HTMLButtonElement>('[data-testid="coverage-action-alpha"]')
+    expect(coverage).toBeTruthy()
+    expect(coverage?.style.color).toBe('var(--running)')
+    act(() => { coverage?.focus() })
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Coverage · updating')
+    act(() => { coverage?.click() })
+    expect(onOpenCoverage).toHaveBeenCalledWith('alpha')
     const flight = container.querySelector<HTMLButtonElement>('[data-testid="flight-shortcut-alpha"]')
     expect(flight).toBeTruthy()
     act(() => { flight?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(onOpenFlight).toHaveBeenCalledWith('fl_alpha')
-    expect(onOpenCoverage).not.toHaveBeenCalled()
+    expect(onOpenCoverage).toHaveBeenCalledTimes(1)
   })
 
-  it('restores the Coverage destination when the live job refresh reports completion', async () => {
+  it('keeps the same Coverage button through live generation and completion updates', async () => {
     listCoverageStates
+      .mockResolvedValueOnce([{
+        feature: 'alpha',
+        headline: 'Mapped 80%',
+        summary: 'fresh',
+        coverage: 'fresh',
+        coveragePct: 80,
+      }])
       .mockResolvedValueOnce([{
         feature: 'alpha',
         headline: 'Generating',
@@ -391,12 +404,24 @@ describe('FeaturesColumn coverage action (R8)', () => {
         </InvalidationProvider>,
       )
     })
-    expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBeNull()
+    const coverage = container.querySelector<HTMLButtonElement>('[data-testid="coverage-action-alpha"]')
+    expect(coverage?.style.color).toBe('var(--success)')
+    act(() => { coverage?.focus() })
 
     await act(async () => invalidateCoverage())
 
-    expect(listCoverageStates).toHaveBeenCalledTimes(2)
-    expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBe(coverage)
+    expect(coverage?.dataset.headline).toBe('Generating')
+    expect(coverage?.style.color).toBe('var(--running)')
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Coverage · updating')
+
+    await act(async () => invalidateCoverage())
+
+    expect(listCoverageStates).toHaveBeenCalledTimes(3)
+    expect(container.querySelector('[data-testid="coverage-action-alpha"]')).toBe(coverage)
+    expect(coverage?.dataset.headline).toBe('Mapped 80%')
+    expect(coverage?.style.color).toBe('var(--success)')
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Coverage')
   })
 })
 

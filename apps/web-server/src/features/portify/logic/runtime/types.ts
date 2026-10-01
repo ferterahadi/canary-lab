@@ -15,11 +15,7 @@ export type { PortifyIndexEntry } from '../../../../../../../shared/portify-inde
 // Ephemeral-overlay model: the workflow parks at `ready-to-save` and ends at
 // `saved` (the captured patch is written to features/<feature>/portify/, never
 // committed/merged).
-/** A workflow the user or a Flight can still follow or act on. */
-export function isActivePortifyStatus(status: PortifyStatus): boolean {
-  return status === 'planning' || status === 'editing' || status === 'verifying'
-    || status === 'ready-to-save'
-}
+export { isActivePortifyStatus } from '../../../../../../../shared/portify-index'
 
 export interface PortifyBootInstance {
   /** Slot name → port this boot was assigned. */

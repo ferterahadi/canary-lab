@@ -1,3 +1,4 @@
+import { isActiveBenchmarkStatus } from '@shared/benchmark-index'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useBenchmark, useBenchmarks } from '../state/BenchmarkContext'
 import { ConfigScreen } from './BenchmarkConfigScreen'
@@ -10,7 +11,7 @@ export function BenchmarkWindow({ onClose, onOpenPortify }: { onClose: () => voi
   // should start a fresh one, not resurface a finished/aborted run.
   // (benchmarks are sorted newest-first by the reducer.)
   const live = benchmarks.find(
-    (b) => b.status === 'sabotaging' || b.status === 'ready' || b.status === 'running',
+    (b) => isActiveBenchmarkStatus(b.status),
   )
   const [activeId, setActiveId] = useState<string | null>(live?.benchmarkId ?? null)
   const blocked = !!live

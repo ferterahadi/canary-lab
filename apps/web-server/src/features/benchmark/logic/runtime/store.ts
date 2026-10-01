@@ -1,3 +1,4 @@
+import { benchmarkIndexEntry, isActiveBenchmarkStatus } from '../../../../../../../shared/benchmark-index'
 import type { BenchmarkManifest, BenchmarkIndexEntry } from './types'
 import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../../shared/lib/file-backed-task-store'
 
@@ -31,12 +32,7 @@ function indexEntryFromManifest(m: BenchmarkManifest) {
   return {
     id: m.benchmarkId,
     createdAt: m.startedAt,
-    benchmarkId: m.benchmarkId,
-    feature: m.feature,
-    level: m.level,
-    status: m.status,
-    startedAt: m.startedAt,
-    ...(m.endedAt ? { endedAt: m.endedAt } : {}),
+    ...benchmarkIndexEntry(m),
   }
 }
 
@@ -60,7 +56,7 @@ export class BenchmarkRunStore implements BenchmarkStore {
       reconcile: {
         // A `sabotaging`/`ready`/`running` benchmark in the index belongs to a
         // dead process (its driver was killed on restart) and can never finish.
-        isInterrupted: (m) => m.status === 'sabotaging' || m.status === 'ready' || m.status === 'running',
+        isInterrupted: (m) => isActiveBenchmarkStatus(m.status),
         mark: (m, now) => ({
           ...m,
           status: 'aborted',

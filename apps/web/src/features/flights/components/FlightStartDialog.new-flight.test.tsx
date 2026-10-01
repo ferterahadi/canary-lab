@@ -40,8 +40,8 @@ vi.mock('@/shared/ui/AgentSessionView', () => ({
   ),
 }))
 
-import { ApiError } from '@/shared/api/client'
-import { FlightStartDialog, START_FRESH_LABEL } from './FlightStartDialog'
+let { ApiError } = await import('@/shared/api/client')
+let { FlightStartDialog, START_FRESH_LABEL } = await import('./FlightStartDialog')
 import { STAGE_BLURB, STAGE_LABEL } from './stage-meta'
 
 ;
@@ -52,8 +52,15 @@ let container: HTMLDivElement
 
 let root: Root
 
-beforeEach(() => {
+beforeEach(async () => {
+  // Each test represents a fresh workspace; do not reuse another task's cache.
+  vi.resetModules()
+  ;({ FlightStartDialog, START_FRESH_LABEL } = await import('./FlightStartDialog'))
+  ;({ ApiError } = await import('@/shared/api/client'))
   vi.clearAllMocks()
+  // Newly created tasks now reconcile immediately. Hold that read unless a
+  // scenario supplies its server response, preserving the creation snapshot.
+  mocks.getPlanFeaturesTask.mockReset().mockImplementation(() => new Promise(() => {}))
   mocks.getProjectConfig.mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
   container = document.createElement('div')
   document.body.appendChild(container)

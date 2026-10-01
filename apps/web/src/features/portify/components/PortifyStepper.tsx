@@ -1,3 +1,4 @@
+import { isExecutingPortifyStatus } from '@shared/portify-index'
 import type { PortifyStatus } from '@/shared/api/client'
 
 // Guided port-ification: an agent rewrites the feature's apps to use injectable
@@ -40,7 +41,7 @@ export const STATUS_LABEL: Record<PortifyStatus, string> = {
 
 /** Status reached a point where polling stops (parked for the user or terminal). */
 export function isTerminalOrParked(s: PortifyStatus): boolean {
-  return s === 'ready-to-save' || s === 'saved' || s === 'failed' || s === 'aborted'
+  return !isExecutingPortifyStatus(s)
 }
 
 /** The saved terminal state. */

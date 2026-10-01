@@ -1,3 +1,4 @@
+import { isExecutingPortifyStatus } from '@shared/portify-index'
 import { useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { PortifyManifest } from '@/shared/api/client'
@@ -98,7 +99,7 @@ export function PortifyWorkflowControls({
   }
 
   const cancellable = manifest.producer !== 'external'
-    && (manifest.status === 'planning' || manifest.status === 'editing' || manifest.status === 'verifying')
+    && (isExecutingPortifyStatus(manifest.status))
   if (!cancellable) return null
 
   return (

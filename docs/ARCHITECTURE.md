@@ -266,13 +266,22 @@ separate. The server writer and browser reducer derive compact run rows through
 `shared/run-index.ts`, including repair ownership, cycles, and review counts.
 Portify uses `shared/portify-index.ts` for the same boundary: snapshots and
 browser updates retain the server's branch, producer, and terminal timestamp.
-The wire-contract gate requires canonical re-exports and both converter calls.
+Benchmark uses `shared/benchmark-index.ts` for its compact rows and terminal
+timestamps. The wire-contract gate requires canonical re-exports and both
+converter calls for all three domains. Portify and Benchmark lifecycle
+predicates live beside their canonical statuses; operation-specific eligibility
+(such as Benchmark cleanup excluding `invalid`) remains with the operation.
 
 Pre-flight planning lists use `useLiveResource` with a dedicated cache and the
 `pre-flights` invalidation topic. Workspace changes and connected handshakes
 refresh the list; superseded reads cannot restore an older status or deletion.
 Unknown and running lists reconcile every 2.5 seconds; accepted empty or settled
 lists stop periodic reads. Refreshes and failures retain accepted records.
+The planning dialog uses the same reader and topic with a separate task-detail
+cache and a 1.5-second cadence. Creation responses seed only unread task keys;
+an authoritative 404 stops polling and disables task actions, while transient
+failures retain the accepted task. Proposal edits and navigation guards belong
+to the task identity, so reconnects cannot overwrite edits or navigate twice.
 
 Agent-session viewers and socket adapters share the eight source identities in
 `apps/web/src/shared/api/agent-session-source.ts`. Identity includes the flight

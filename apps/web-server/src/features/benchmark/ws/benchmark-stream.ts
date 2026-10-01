@@ -1,9 +1,9 @@
+import { isActiveBenchmarkStatus } from '../../../../../../shared/benchmark-index'
 import type { FastifyInstance } from 'fastify'
 import type { BenchmarkStore, BenchmarkStoreEvent } from '../logic/runtime/store'
 import type {
   BenchmarkIndexEntry,
   BenchmarkManifest,
-  BenchmarkStatus,
 } from '../logic/runtime/types'
 
 // `/ws/benchmark` — push channel for the benchmark window, mirroring
@@ -28,10 +28,6 @@ export type BenchmarkStreamFrame =
     }
   | { type: 'update'; benchmarkId: string; manifest: BenchmarkManifest }
   | { type: 'removed'; benchmarkId: string }
-
-function isActiveBenchmarkStatus(status: BenchmarkStatus): boolean {
-  return status === 'sabotaging' || status === 'ready' || status === 'running'
-}
 
 export async function benchmarkStreamRoutes(
   app: FastifyInstance,

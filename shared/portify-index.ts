@@ -38,3 +38,19 @@ export function portifyIndexEntry(manifest: PortifyIndexEntry): PortifyIndexEntr
     ...(manifest.producer ? { producer: manifest.producer } : {}),
   }
 }
+
+export function isExecutingPortifyStatus(status: string | undefined): boolean {
+  return status === 'planning' || status === 'editing' || status === 'verifying'
+}
+
+/** Actionable includes a verified workflow still awaiting the user's save. */
+export function isActionablePortifyStatus(status: string | undefined): boolean {
+  return isExecutingPortifyStatus(status) || status === 'ready-to-save'
+}
+
+export function isTerminalPortifyStatus(status: string | undefined): boolean {
+  return status === 'saved' || status === 'failed' || status === 'aborted'
+}
+
+// Existing consumers use “active” for this actionable lifecycle set.
+export { isActionablePortifyStatus as isActivePortifyStatus }

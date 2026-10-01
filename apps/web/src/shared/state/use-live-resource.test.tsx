@@ -328,3 +328,55 @@ describe('useLiveResource', () => {
     expect(seen.at(-1)).toBe(false)
   })
 })
+
+it('uses a key-bound creation seed, retains accepted reads, and preserves accepted absence', async () => {
+  let resource!: LiveResource<string>
+  const fetcher = vi.fn<() => Promise<string | null>>().mockImplementation(() => new Promise(() => {}))
+  function Seeded({ id, seedKey = id }: { id: string; seedKey?: string }) {
+    resource = useLiveResource('pre-flights', id, fetcher, {
+      seed: { key: seedKey, value: 'created' }, cache: 'seed-test', pollWhile: () => false,
+    })
+    return <span>{resource.value ?? 'unknown'}</span>
+  }
+  await act(async () => root.render(<Seeded id="seed-first" />))
+  expect(resource.value).toBe('created')
+  fetcher.mockResolvedValue('accepted')
+  await act(async () => resource.refresh())
+  expect(resource.value).toBe('accepted')
+  fetcher.mockRejectedValue(new Error('offline'))
+  await act(async () => resource.refresh())
+  expect(resource.value).toBe('accepted')
+  fetcher.mockResolvedValue(null)
+  await act(async () => resource.refresh())
+  fetcher.mockImplementation(() => new Promise(() => {}))
+  await act(async () => resource.refresh())
+  expect(resource.value).toBeNull()
+  await act(async () => root.render(<Seeded id="seed-second" seedKey="wrong-key" />))
+  expect(resource.value).toBeNull()
+  await act(async () => root.render(<Seeded id="seed-third" />))
+  expect(resource.value).toBe('created')
+  // Returning to a cached absence must never resurrect the creation seed.
+  await act(async () => root.render(<Seeded id="seed-first" />))
+  expect(resource.value).toBeNull()
+})
+
+it('uses a custom active polling cadence and cleans it up without changing the default', async () => {
+  vi.useFakeTimers()
+  const custom = vi.fn(async () => 'running')
+  const standard = vi.fn(async () => 'running')
+  function Tasks() {
+    useLiveResource('pre-flights', 'custom-cadence', custom, { pollWhile: () => true, pollIntervalMs: 1500 })
+    useLiveResource('pre-flights', 'default-cadence', standard, { pollWhile: () => true })
+    return null
+  }
+  await act(async () => root.render(<Tasks />))
+  await act(async () => vi.advanceTimersByTimeAsync(1500))
+  expect(custom).toHaveBeenCalledTimes(2)
+  expect(standard).toHaveBeenCalledTimes(1)
+  await act(async () => vi.advanceTimersByTimeAsync(1000))
+  expect(standard).toHaveBeenCalledTimes(2)
+  await act(async () => root.render(null))
+  await act(async () => vi.advanceTimersByTimeAsync(6000))
+  expect(custom).toHaveBeenCalledTimes(2)
+  expect(standard).toHaveBeenCalledTimes(2)
+})

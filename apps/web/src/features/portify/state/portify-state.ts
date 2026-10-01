@@ -83,11 +83,7 @@ export function frameToAction(frame: PortifyStreamFrame): PortifyAction | null {
   }
 }
 
-/** Active = a workflow the user can still act on (not saved/failed/aborted). */
-export function isActivePortify(status: PortifyIndexEntry['status']): boolean {
-  return status === 'planning' || status === 'editing' || status === 'verifying'
-    || status === 'ready-to-save'
-}
+export { isActivePortifyStatus as isActivePortify } from '@shared/portify-index'
 
 /**
  * The workflowId of a feature's most-recent SAVED port-ification — the one that

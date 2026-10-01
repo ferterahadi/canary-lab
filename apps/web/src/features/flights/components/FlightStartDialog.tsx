@@ -155,6 +155,7 @@ export function FlightStartDialog({
     agent,
     phase,
     planTask,
+    taskUnavailable,
     proposal,
     setProposal,
     sharedGroup,
@@ -425,6 +426,7 @@ export function FlightStartDialog({
             conflicts={conflicts}
             sharedGroup={sharedGroup}
             busy={busy}
+            canConfirm={!taskUnavailable}
             error={errorBlock}
             onChange={setProposal}
             onGroupChange={setSharedGroup}

@@ -1,4 +1,4 @@
-import { portifyIndexEntry } from '../../../../../../../shared/portify-index'
+import { portifyIndexEntry, isActionablePortifyStatus } from '../../../../../../../shared/portify-index'
 import type { PortifyManifest, PortifyIndexEntry } from './types'
 import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../../shared/lib/file-backed-task-store'
 
@@ -54,7 +54,7 @@ export class PortifyRunStore implements PortifyStore {
       reconcile: {
         // 'ready-to-save' is also non-terminal but awaits a user action; a dead
         // process can't hold that scratch worktree, so it too becomes aborted.
-        isInterrupted: (m) => m.status !== 'saved' && m.status !== 'failed' && m.status !== 'aborted',
+        isInterrupted: (m) => isActionablePortifyStatus(m.status),
         mark: (m, now) => ({
           ...m,
           status: 'aborted',

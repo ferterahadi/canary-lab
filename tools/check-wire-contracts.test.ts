@@ -11,6 +11,11 @@ afterEach(() => { fs.rmSync(temp, { recursive: true, force: true }) })
 
 // Feed deliberate source drift to the actual checker without modifying the checkout.
 it.each([
+  ['apps/web/src/features/benchmark/api/benchmark-types.ts', 'export interface BenchmarkIndexEntry { benchmarkId: string }', 'BenchmarkIndexEntry'],
+  ['apps/web-server/src/features/benchmark/logic/runtime/types.ts', "export type BenchmarkStatus = 'done'", 'BenchmarkStatus'],
+  ['apps/web/src/features/benchmark/api/benchmark-types.ts', "export type SabotageLevel = 'min'", 'SabotageLevel'],
+  ['apps/web/src/features/benchmark/state/benchmark-state.ts', 'bypass', 'BenchmarkIndexEntry'],
+  ['apps/web-server/src/features/benchmark/logic/runtime/store.ts', 'bypass', 'BenchmarkIndexEntry'],
   ['apps/web/src/shared/api/portify.ts', "export interface PortifyIndexEntry { workflowId: string }", 'PortifyIndexEntry'],
   ['apps/web-server/src/features/portify/logic/runtime/types.ts', "export type PortifyStatus = 'editing'", 'PortifyStatus'],
   ['apps/web/src/features/portify/state/portify-state.ts', 'bypass', 'PortifyIndexEntry'],
@@ -22,7 +27,7 @@ it.each([
       const source = readFileSync(path.join(REPO, rel), 'utf8')
       if (rel !== ${JSON.stringify(file)}) return source
       return ${mutation === 'bypass'
-        ? "source.replace(/portifyIndexEntry\\(/g, 'localProjection(')"
+        ? "source.replace(/(?:portify|benchmark)IndexEntry\\(/g, 'localProjection(')"
         : `source + ${JSON.stringify('\n' + mutation)}`}
     `)
   const script = path.join(temp, 'check.mjs')

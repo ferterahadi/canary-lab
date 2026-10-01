@@ -1,3 +1,4 @@
+import { isTerminalPortifyStatus } from '../../../../../../../shared/portify-index'
 import fs from 'fs'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
@@ -416,7 +417,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     const m = deps.store.get(workflowId)
     const status = m?.status ?? deps.store.list().find((e) => e.workflowId === workflowId)?.status
     if (!status) throw Object.assign(new Error('workflow not found'), { statusCode: 404 })
-    const terminal = status === 'saved' || status === 'failed' || status === 'aborted'
+    const terminal = isTerminalPortifyStatus(status)
     if (!terminal) {
       throw Object.assign(
         new Error(`cannot remove a workflow in status "${status}" — save or cancel it first`),
